@@ -25,6 +25,7 @@ import 'dialogo_pago.dart';
 import 'pago_diario.dart';
 import 'preview_cobro.dart';
 import 'suplementos.dart';
+import 'inscribir.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -70,7 +71,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
   bool _busco = false;
   String _filtro = 'todos'; // todos | aldia | vencidos | porvencer | sinfoto
   bool _enNotas = false; // v1.0.15: búsqueda avanzada en notas
-  String _rangoEdad = 'todas'; // v1.0.15: todas | 18-25 | 26-35 | 36-50 | 50+
+  String _rangoEdad = 'todas'; // todas | menores | 18-25 | 26-35 | 36-50 | 50+
   // Bloque 1: contadores por estado (siempre visibles), frescura
   // de la lista, deslizables configurables y salto por letra.
   Map<String, int> _conteos = {};
@@ -89,6 +90,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
   bool _mostrarAvanzada = false;
   bool _modoSeleccion = false;
   final Set<int> _seleccionados = {};
+  // 1.25 T116 (F1-55): ids con aviso de WhatsApp YA
+  // registrado hoy (el registro del día de la bandeja):
+  // la fila lo enseña y el flujo en lote los salta.
+  Set<int> _avisadosHoyIds = {};
 
   @override
   void initState() {
@@ -258,6 +263,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
         final edad = edadDeCarnet('${c['carnet'] ?? ''}');
         if (edad == null) return false;
         switch (_rangoEdad) {
+          // 1.25 T116 (F1-53): los menores existen como
+          // categoría (tarifa propia) y no se podían aislar:
+          // los rangos empezaban en 18.
+          case 'menores':
+            return edad < 18;
           case '18-25':
             return edad >= 18 && edad <= 25;
           case '26-35':
@@ -321,13 +331,87 @@ class _BuscarScreenState extends State<BuscarScreen> {
         }
       }
     }
+    // 1.25 T116 (F1-55): ids ya avisados hoy según el
+    // registro del día (SQLite de la bandeja).
+    final tocados =
+        await LocalDb.instance.avisosWaContactados(hoyHabanaIso());
+    final idsHoy = <int>{
+      for (final k in tocados)
+        if (int.tryParse(k.split('_').last) != null)
+          int.parse(k.split('_').last),
+    };
     if (mounted && gen == _gen) {
       setState(() {
         _res = r;
         _busco = true;
         _conteos = conteos;
+        _avisadosHoyIds = idsHoy;
       });
     }
+  }
+
+  /// 1.25 T116 (F1-52): el estado vacío según la causa —
+  /// antes todo vacío culpaba a la búsqueda («prueba con
+  /// otro nombre») aunque lo causara un filtro o un espejo
+  /// aún sin clientes, y no ofrecía salida.
+  Widget _vacioBuscar() {
+    final totalEspejo = _conteos['todos'] ?? 0;
+    final conFiltros = _filtro != 'todos' || _rangoEdad != 'todas';
+    if (_busco &&
+        totalEspejo == 0 &&
+        !conFiltros &&
+        _q.text.trim().isEmpty) {
+      return EstadoVacio(
+        icono: Icons.people_outline_rounded,
+        titulo: 'Aún no hay clientes en este teléfono',
+        subtitulo:
+            'Actualiza la lista o inscribe el primero.',
+        textoAccion: 'Inscribir cliente',
+        onAccion: () => Navigator.of(context)
+            .push(RutaIron(
+                builder: (_) => const InscribirScreen()))
+            .then((_) => _buscar()),
+      );
+    }
+    if (conFiltros) {
+      return EstadoVacio(
+        icono: Icons.filter_alt_off_rounded,
+        titulo: 'Nadie cumple este filtro',
+        subtitulo:
+            'Ningún cliente coincide con los filtros elegidos.',
+        textoAccion: 'Quitar filtros',
+        onAccion: () {
+          setState(() {
+            _filtro = 'todos';
+            _rangoEdad = 'todas';
+          });
+          _buscar();
+        },
+      );
+    }
+    return EstadoVacio(
+      icono: Icons.search_off_rounded,
+      titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
+      subtitulo: _busco
+          ? 'Prueba con otro nombre, carnet o teléfono'
+          : null,
+    );
+  }
+
+  /// 1.25 T116 (F1-51): el texto del aviso del gesto, desde
+  /// las acciones configuradas (vacío en una dirección =
+  /// esa dirección no hace nada y no se nombra).
+  String _textoAvisoSwipe() {
+    final partes = <String>[
+      if (_etiquetaSwipeAccion(_swipeDer).isNotEmpty)
+        _etiquetaSwipeAccion(_swipeDer),
+      if (_etiquetaSwipeAccion(_swipeIzq).isNotEmpty)
+        _etiquetaSwipeAccion(_swipeIzq),
+    ];
+    if (partes.isEmpty) {
+      return 'Desliza una fila para ver sus acciones';
+    }
+    return 'Desliza una fila → ${partes.join(' · ')}';
   }
 
   /// 1.24.2: aplica el orden elegido a la lista ya filtrada.
@@ -518,7 +602,12 @@ class _BuscarScreenState extends State<BuscarScreen> {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                  '${_res.length} cliente(s) · ${_textoActualizado()}',
+                  // 1.25 T116 (F1-56): la frescura vive en
+                  // el cartel de 24 h y en el banner de sync;
+                  // esta línea solo dice el tamaño de la
+                  // VISTA (antes mezclaba conteo filtrado con
+                  // «clientes» a secas y repetía el dato).
+                  '${_res.length} en esta vista',
                   style: AppTexto.metadato.copyWith(
                       color: AppColores.textoSecundario(context))),
             ),
@@ -611,6 +700,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                     spacing: 6,
                     children: [
                       _chipEdad('todas', 'Todas'),
+                      _chipEdad('menores', '<18 · Menores'),
                       _chipEdad('18-25', '18–25'),
                       _chipEdad('26-35', '26–35'),
                       _chipEdad('36-50', '36–50'),
@@ -656,13 +746,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
           const TarjetaDiagnosticoEspejo(),
           Expanded(
             child: _res.isEmpty
-                ? EstadoVacio(
-                    icono: Icons.search_off_rounded,
-                    titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
-                    subtitulo: _busco
-                        ? 'Prueba con otro nombre, carnet o teléfono'
-                        : null,
-                  )
+                // 1.25 T116 (F1-52): el vacío dice SU causa
+                // (espejo vacío, filtro o búsqueda) y da la
+                // salida de cada una.
+                ? _vacioBuscar()
                 : Column(
                     children: [
                       // B1 (estéticas 1.19): aviso único del gesto.
@@ -679,10 +766,16 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                     size: 18,
                                     color: AppColores.info),
                                 const SizedBox(width: 8),
-                                const Expanded(
+                                Expanded(
+                                  // 1.25 T116 (F1-51): el aviso
+                                  // compone las acciones
+                                  // CONFIGURADAS en Ajustes —
+                                  // el texto fijo prometía
+                                  // «cobrar, vender o editar»
+                                  // aunque el gesto hiciera
+                                  // otra cosa (o nada).
                                   child: Text(
-                                    'Desliza una fila → cobrar, '
-                                    'vender o editar',
+                                    _textoAvisoSwipe(),
                                     style: AppTexto.secundario,
                                   ),
                                 ),
@@ -737,6 +830,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                     cliente: c,
                                     origenHero: 'buscar',
                                     compacta: _compacta,
+                                    // 1.25 T116 (F1-55): rastro
+                                    // visible de quién ya fue
+                                    // avisado hoy.
+                                    avisoChip: !protegidoFila &&
+                                            cidFila != null &&
+                                            _avisadosHoyIds
+                                                .contains(cidFila)
+                                        ? 'Avisado hoy'
+                                        : null,
                                     // 1.25 T11: homónimos en los
                                     // resultados o búsqueda por
                                     // teléfono → la fila enseña su
@@ -861,19 +963,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
       ],
     ),
   );
-  }
-
-  /// Bloque 1: texto de frescura de la lista.
-  String _textoActualizado() {
-    final ts = _ultimoPull;
-    if (ts == null) return 'Sin registro de actualización';
-    final mins = ahoraHabana().difference(ts).inMinutes;
-    if (mins < 1) return 'Actualizado ahora mismo';
-    if (mins < 60) return 'Actualizado hace $mins min';
-    final horas = mins ~/ 60;
-    if (horas < 24) return 'Actualizado hace $horas h';
-    final dias = horas ~/ 24;
-    return 'Actualizado hace $dias día${dias == 1 ? '' : 's'}';
   }
 
   String _etiquetaSwipeAccion(String v) => switch (v) {
@@ -1128,24 +1217,67 @@ class _BuscarScreenState extends State<BuscarScreen> {
   /// de urgencia (sin fecha/vencido primero). Cada paso muestra
   /// el cliente y espera confirmación — abrir WhatsApp no cuenta
   /// como avisado hasta que el usuario dice «Ya avisé».
+  /// 1.25 T116 (F1-55): el tipo de aviso de la bandeja
+  /// según los días — la marca del lote cae en el MISMO
+  /// registro del día que usa la Bandeja WhatsApp.
+  String _tipoAvisoPorDias(int? d) =>
+      d == 0 ? 'vence_hoy' : (d != null && d > 0) ? 'por_vencer' : 'vencido';
+
   Future<void> _avisarSeleccionados() async {
-    final elegidos = _res
-        .where((c) =>
-            _seleccionados.contains((c['id'] as num?)?.toInt()) &&
-            !esVistaProtegida(c) &&
-            !esCuentaCasa(c))
-        .toList()
-      ..sort((a, b) => '${a['pagado_hasta'] ?? ''}'
-          .compareTo('${b['pagado_hasta'] ?? ''}'));
-    final conTel = elegidos
-        .where((c) =>
-            normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty)
-        .toList();
+    // 1.25 T116 (F1-54): la base es la SELECCIÓN, no la
+    // lista filtrada visible — un seleccionado que dejó de
+    // pasar el filtro actual desaparecía del flujo en
+    // silencio aunque la barra lo seguía contando. Y las
+    // exclusiones se CUENTAN Y SE NOMBRAN: antes todo
+    // terminaba en «sin teléfono válido», falso cuando la
+    // causa era ser Casa o protegido.
+    final todosL = await listaClientes('');
+    if (!mounted) return;
+    final hoy = hoyHabanaIso();
+    final tocados = await LocalDb.instance.avisosWaContactados(hoy);
+    var nProtegidos = 0, nCasa = 0, nSinTel = 0, nYaHoy = 0;
+    final conTel = <Map<String, dynamic>>[];
+    for (final c in todosL) {
+      final cid = (c['id'] as num?)?.toInt();
+      if (cid == null || !_seleccionados.contains(cid)) continue;
+      if (esVistaProtegida(c)) {
+        nProtegidos++;
+      } else if (esCuentaCasa(c)) {
+        nCasa++;
+      } else if (normalizarTelefonoWaMe('${c['telefono'] ?? ''}')
+          .isEmpty) {
+        nSinTel++;
+      } else if (tocados.contains(
+          '${_tipoAvisoPorDias(diasRestantes(c['pagado_hasta'] as String?))}_$cid')) {
+        // F1-55: ya avisado hoy (por aquí o por la bandeja):
+        // no se le escribe dos veces.
+        nYaHoy++;
+      } else {
+        conTel.add(c);
+      }
+    }
+    conTel.sort((a, b) => '${a['pagado_hasta'] ?? ''}'
+        .compareTo('${b['pagado_hasta'] ?? ''}'));
+    String causas() {
+      final p = <String>[
+        if (nSinTel > 0) '$nSinTel sin teléfono',
+        if (nCasa > 0) '$nCasa Cuenta a la Casa',
+        if (nProtegidos > 0) '$nProtegidos protegido(s)',
+        if (nYaHoy > 0) '$nYaHoy ya avisado(s) hoy',
+      ];
+      return p.join(' · ');
+    }
+
     if (conTel.isEmpty) {
       mostrarSnack(context,
-          'Ningún seleccionado tiene teléfono válido para avisar.',
+          'Sin avisos posibles: ${causas().isEmpty ? 'la selección quedó vacía' : causas()}',
           significado: SignificadoChip.alerta);
       return;
+    }
+    if (causas().isNotEmpty) {
+      mostrarSnack(context,
+          'Se avisará a ${conTel.length}; quedan fuera: ${causas()}',
+          significado: SignificadoChip.alerta);
     }
     var i = 0;
     var avisados = 0;
@@ -1218,7 +1350,21 @@ class _BuscarScreenState extends State<BuscarScreen> {
         // muestra otra vez para confirmar con «Ya avisé».
         continue;
       }
-      if (r == 'avise') avisados++;
+      if (r == 'avise') {
+        avisados++;
+        // 1.25 T116 (F1-55): el «Ya avisé» deja RASTRO en
+        // el registro del día — si el flujo se interrumpe,
+        // al reabrirlo esos clientes se saltan y su fila
+        // enseña «Avisado hoy».
+        final cidOk = (c['id'] as num?)?.toInt();
+        if (cidOk != null) {
+          await LocalDb.instance.marcarAvisoWaContactado(
+              cidOk, _tipoAvisoPorDias(d), hoy);
+          if (mounted) {
+            setState(() => _avisadosHoyIds.add(cidOk));
+          }
+        }
+      }
       if (r == 'avise' || r == 'saltar') {
         i++;
         continue;
@@ -1298,6 +1444,12 @@ class FilaCliente extends StatelessWidget {
   /// un protegido a un no-dueño.
   final bool desambiguar;
 
+  /// 1.25 T116 (F1-26): texto del chip «Avisado · 12/10»
+  /// cuando el llamador (Listas) sabe que la marca sigue
+  /// vigente; null = sin chip. La marca deja de decirse
+  /// solo con color y borde.
+  final String? avisoChip;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -1308,6 +1460,7 @@ class FilaCliente extends StatelessWidget {
       this.origenHero,
       this.compacta = false,
       this.desambiguar = false,
+      this.avisoChip,
       this.accionWhatsapp});
 
   @override
@@ -1321,6 +1474,7 @@ class FilaCliente extends StatelessWidget {
       origenHero: origenHero,
       compacta: compacta,
       desambiguar: desambiguar,
+      avisoChip: avisoChip,
       accionWhatsapp: accionWhatsapp);
 }
 
@@ -1333,6 +1487,7 @@ class _FilaCliente extends StatefulWidget {
   final String? origenHero;
   final bool compacta;
   final bool desambiguar;
+  final String? avisoChip;
   final VoidCallback? accionWhatsapp;
   const _FilaCliente(
       {super.key,
@@ -1344,6 +1499,7 @@ class _FilaCliente extends StatefulWidget {
       this.origenHero,
       this.compacta = false,
       this.desambiguar = false,
+      this.avisoChip,
       this.accionWhatsapp});
 
   @override
@@ -1504,16 +1660,20 @@ class _FilaClienteState extends State<_FilaCliente> {
             ),
           )
         : BadgeEstado.desdeDias(dias);
+    // 1.25 T116 (F1-21): la fecha EXACTA siempre acompaña
+    // al texto relativo — ordenar por «Vencimiento» era
+    // inverificable en pantalla (solo salía la fecha si
+    // vencía hoy).
     final textoDias = esCasa
         ? 'Cuenta a la Casa · sin vencimiento'
         : d == null
         ? 'Sin fecha'
         : dias < 0
-            ? 'Vencido hace ${dias.abs()} días'
+            ? 'Vencido hace ${dias.abs()} días · ${fmtFecha(ph)}'
             : dias == 0
                 // v1.2.1: el badge ya dice "VENCE HOY", no repetir.
                 ? 'Vence ${fmtFecha(ph)}'
-                : '$dias días restantes';
+                : '$dias días restantes · vence ${fmtFecha(ph)}';
     // 1.25 T11: línea de contacto para desambiguar homónimos
     // (teléfono si hay; si no, la cola del carnet).
     String? lineaContacto;
@@ -1583,6 +1743,34 @@ class _FilaClienteState extends State<_FilaCliente> {
                         style: AppTexto.secundario.copyWith(
                             color: AppColores.textoSecundario(
                                 context))),
+                  ],
+                  // 1.25 T116 (F1-26): el chip de avisado
+                  // en TEXTO, junto a los días.
+                  if (widget.avisoChip != null) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppEspacio.sm,
+                          vertical: AppEspacio.xs),
+                      decoration: BoxDecoration(
+                        color: AppColores.exito
+                            .withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(
+                            AppRadio.circular),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_rounded,
+                              size: 13, color: AppColores.exito),
+                          const SizedBox(width: 3),
+                          Text(widget.avisoChip!,
+                              style: AppTexto.etiqueta.copyWith(
+                                  color: AppColores.exito,
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
                   ],
                 ],
               ),

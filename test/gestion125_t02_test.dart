@@ -92,6 +92,27 @@ void main() {
     expect(await LocalDb.instance.idsAvisadosVigentes(), isEmpty);
   });
 
+  // 1.25 T116 (F1-26): la variante con fecha — misma
+  // vigencia, y la fecha es la del timestamp de la marca.
+  test('avisadosVigentesConFecha: fecha de la marca vigente',
+      () async {
+    final db = await LocalDb.instance.db;
+    await _cliente(db, id: 1, pagadoHasta: '2026-11-10');
+    await _cliente(db, id: 2, pagadoHasta: '2026-11-10');
+    await LocalDb.instance
+        .marcarAvisado(1, pagadoHasta: '2026-11-10');
+    await LocalDb.instance
+        .marcarAvisado(2, pagadoHasta: '2026-10-10');
+    final mapa = await LocalDb.instance.avisadosVigentesConFecha();
+    expect(mapa.keys, {1},
+        reason: 'la marca de 2 avisa de un vencimiento que ya no es el suyo');
+    // La fecha cae en el día en que se marcó (hoy del test).
+    final hoy = DateTime.now();
+    expect(mapa[1]!.year, hoy.year);
+    expect(mapa[1]!.month, hoy.month);
+    expect(mapa[1]!.day, hoy.day);
+  });
+
   test('sin pagado_hasta (nunca pagó): marca ligada a ese estado',
       () async {
     final db = await LocalDb.instance.db;

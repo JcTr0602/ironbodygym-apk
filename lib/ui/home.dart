@@ -114,6 +114,22 @@ class SenalAtencion {
   /// Total de personas esperando atención.
   int get total => _sano(solicitudes) + _sano(reportesPlus);
 
+  /// 1.25 T116 (F1-09): el desglose en palabras («2
+  /// inscripciones · 1 reporte Plus») para que la fila de
+  /// Home diga QUÉ espera dentro, no solo cuántos.
+  String get desglose {
+    final partes = <String>[];
+    final s = _sano(solicitudes);
+    final p = _sano(reportesPlus);
+    if (s > 0) {
+      partes.add(s == 1 ? '1 inscripción' : '$s inscripciones');
+    }
+    if (p > 0) {
+      partes.add(p == 1 ? '1 reporte Plus' : '$p reportes Plus');
+    }
+    return partes.join(' · ');
+  }
+
   /// La señal solo se pinta si hay alguien esperando.
   bool get visible => total > 0;
 }
@@ -156,7 +172,6 @@ class _HomeScreenState extends State<HomeScreen>
   double _cobradoHoyTr = 0;
   int _noLeidas = 0;
   double _cobradoHoy = 0;
-  int _pendientesSync = 0; // v1.3.3: badge de sincronización
   int _cumpleHoy = 0; // v1.3.3: chip de cumpleaños
   int _incidenciasAbiertas = 0; // v1.3.3: chip de incidencias
   int _avisosPendientes = 0; // v1.3.6 (Argón, diseño): contador del botón
@@ -621,7 +636,12 @@ class _HomeScreenState extends State<HomeScreen>
         _contarIncidenciasAbiertas(), // 14
         // v1.3.6 (Argón, diseño): contador del botón de WhatsApp.
         _auth.isOwner
-            ? avisosWhatsappHoy().then((l) => l.length)
+            ? avisosWhatsappHoy().then((l) => l
+                // 1.25 T116 (F1-08): el contador promete
+                // «avisos de hoy»: fuera los recibos de pagos
+                // ya cobrados, que la lista también trae.
+                .where((a) => a['tipo'] != 'recibo')
+                .length)
             : Future.value(0), // 15
         // v1.4.0: Estadísticas Rápidas — clientes que pagaron el mes
         // (misma definición que la nómina: NominaCalc) y tarifa vigente.
@@ -738,7 +758,6 @@ class _HomeScreenState extends State<HomeScreen>
           }
           _noLeidas = noLeidas;
           _cobradoHoy = cobradoHoy;
-          _pendientesSync = porSubir;
           _cumpleHoy = cumple.length;
           _incidenciasAbiertas = incidAbiertas;
           _avisosPendientes = res[15] as int;
@@ -752,13 +771,12 @@ class _HomeScreenState extends State<HomeScreen>
           _turnoActual = turnoAct;
           _turnosPendientes = turnosPend;
         });
-        // v1.8.0 (bug de campo): el badge de arriba ya trae las
-        // pendientes reales desde la BD (_pendientesSync), pero la
-        // SyncPill se re-suscribe al volver a Home y el stream del
-        // motor no tiene replay: nacía en «Al día» hasta el próximo
-        // _emit. Re-emitir el estado recomputado (sin await, con
-        // unawaited como el resto de llamadas del sitio) para que
-        // píldora y badge nunca discrepen tras un refresco.
+        // v1.8.0 (bug de campo): la SyncPill se re-suscribe al
+        // volver a Home y el stream del motor no tiene replay:
+        // nacía en «Al día» hasta el próximo _emit. Re-emitir el
+        // estado recomputado (sin await, con unawaited como el
+        // resto de llamadas del sitio) para que la píldora nunca
+        // nazca desfasada tras un refresco.
         unawaited(SyncEngine.instance.reemitirEstado());
         // v1.4.0: calentar la caché de nómina tras cargar el home
         // (asegurar() no hace nada si la huella sigue fresca; el
@@ -1039,10 +1057,15 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 Icon(icono, size: 18, color: colorTexto),
                 const SizedBox(width: 6),
-                Text(texto,
-                    style: AppTexto.secundario.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: colorTexto)),
+                // 1.25 T116 (F1-12): con letra grande, el
+                // texto cede y no desborda el segmento.
+                Flexible(
+                  child: Text(texto,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.secundario.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: colorTexto)),
+                ),
                 if (contador > 0) ...[
                   const SizedBox(width: 6),
                   Container(
@@ -1277,14 +1300,17 @@ class _HomeScreenState extends State<HomeScreen>
               children: [
                 Icon(icono, size: 20),
                 const SizedBox(height: 2),
-                // FittedBox para que "Pago diario" no se trunque
-                // en móviles estrechos o con texto ampliado.
+                // 1.25 T116 (F1-13): la etiqueta ya NO se
+                // encoge por debajo del tamaño del usuario
+                // (FittedBox anulaba su letra grande): crece
+                // a 2 líneas centradas y solo recorta si ni
+                // así cabe.
                 Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(texto,
-                        style: AppTexto.etiqueta),
-                  ),
+                  child: Text(texto,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.etiqueta),
                 ),
               ],
             ),
@@ -1401,7 +1427,10 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
               ),
-              _iconoSync(),
+              // 1.25 T116 (F1-06): el icono de sync con badge
+              // salió de la cabecera — la SyncPill de debajo ya
+              // dice «N por subir» / «Al día · hace X» y lleva
+              // a la misma Cola. Dos señales podían discrepar.
               _campana(),
               // v1.3.6 (Jc): la lupa salió del banner; Buscar cliente vive
               // en el Mostrador Rápido (rediseño Argón, zona 2).
@@ -1486,35 +1515,24 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Icono de sincronización con badge de pendientes -> ColaScreen.
-  Widget _iconoSync() {
-    return Stack(
-      children: [
-        IconButton(
-          tooltip: 'Sincronización',
-          color: Colors.white70,
-          icon: const Icon(Icons.sync_rounded),
-          onPressed: () => _ir(const ColaScreen()),
-        ),
-        if (_pendientesSync > 0)
-          Positioned(
-            right: 8,
-            top: 8,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              decoration: const BoxDecoration(
-                color: AppColores.alerta,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '${_pendientesSync > 9 ? '9+' : _pendientesSync}',
-                style: AppTexto.minuscula.copyWith(
-                    color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-      ],
-    );
+  /// 1.25 T116 (F1-11): metadato discreto de frescura —
+  /// «Datos del espejo · actualizado a las 07:42» según el
+  /// último sync confirmado que conoce el motor; sin sync
+  /// previo, lo dice tal cual.
+  Widget _lineaFrescuraEspejo() {
+    final s = SyncEngine.instance.currentStatus;
+    final ultimo = s.ultimoSincronizado ?? s.lastOk;
+    if (ultimo == null) {
+      return Text('Datos del espejo · sin sincronizar todavía',
+          style: AppTexto.metadato.copyWith(
+              color: AppColores.textoSecundario(context)));
+    }
+    final h = aHabana(ultimo);
+    final hh = '${h.hour}'.padLeft(2, '0');
+    final mm = '${h.minute}'.padLeft(2, '0');
+    return Text('Datos del espejo · actualizado a las $hh:$mm',
+        style: AppTexto.metadato.copyWith(
+            color: AppColores.textoSecundario(context)));
   }
 
   /// Campana de notificaciones con contador (item 3 del Home).
@@ -1616,20 +1634,27 @@ class _HomeScreenState extends State<HomeScreen>
               ],
             ),
             const SizedBox(height: AppEspacio.sm),
+            // 1.25 T116 (F1-11): también aquí, la frescura
+            // del espejo del que salen las cifras.
+            _lineaFrescuraEspejo(),
+            const SizedBox(height: AppEspacio.sm),
             Row(
               children: [
+                // 1.25 T116 (F1-15): estas dos celdas ya no
+                // son tocables por separado — llevaban al
+                // mismo sitio que la cabecera de la tarjeta
+                // (que conserva su chevron) y cada una pintaba
+                // su propia flecha como si fuera otro destino.
                 Expanded(
-                    child: _datoFinancieroTappable(
+                    child: _datoFinanciero(
                         'Cobrado hoy',
                         fmtMonto(_cobradoHoy),
-                        AppColores.exito,
-                        () => _ir(const MiTurnoScreen()))),
+                        AppColores.exito)),
                 Expanded(
-                    child: _datoFinancieroTappable(
+                    child: _datoFinanciero(
                         'A entregar',
                         fmtMonto(_pendiente),
                         AppColores.alerta,
-                        () => _ir(const MiTurnoScreen()),
                         detalle: _pendienteUsd > 0
                             ? '+ ${fmtMonto(_pendienteUsd)} USD'
                             : null)),
@@ -1667,7 +1692,9 @@ class _HomeScreenState extends State<HomeScreen>
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.account_balance_wallet_rounded,
                       size: 18),
-                  label: const Text('Mi nómina (vista previa)'),
+                  // 1.25 T116 (F1-14): el destino se llama
+                  // igual haya o no acción de turno al lado.
+                  label: const Text('Mi nómina'),
                   onPressed: () => _ir(const MiNominaScreen()),
                 ),
               )
@@ -1725,6 +1752,9 @@ class _HomeScreenState extends State<HomeScreen>
                   style: AppTexto.subtitulo),
             ],
           ),
+          // 1.25 T116 (F1-11): las cifras dicen de cuándo
+          // son — salen del espejo local, no del servidor.
+          _lineaFrescuraEspejo(),
           const SizedBox(height: AppEspacio.sm),
           Row(
             children: [
@@ -2262,20 +2292,33 @@ class _HomeScreenState extends State<HomeScreen>
     // de la tira, al final del Nivel 1 — el segundo pase solo
     // la añade aquí, nunca sobre zonas interactivas.
     if (_atencion.visible) {
+      // 1.25 T116 (F1-09): la fila dice el desglose ya
+      // cargado, no solo el total.
       filas.add((icono: Icons.person_add_rounded,
-          texto: 'Esperando atención', conteo: _atencion.total,
+          texto: _atencion.desglose.isEmpty
+              ? 'Esperando atención'
+              : 'Esperando atención · ${_atencion.desglose}',
+          conteo: _atencion.total,
           color: AppColores.naranja,
           ir: () => _ir(const AdminScreen())));
     }
     if (_vencen > 0) {
       filas.add((icono: Icons.event_available_rounded,
-          texto: 'Vencen hoy', conteo: _vencen, color: AppColores.error,
+          texto: 'Vencen hoy', conteo: _vencen,
+          // 1.25 T116 (F1-10): mismo color que la pestaña
+          // «Hoy» de Listas (ámbar; el rojo es de Atrasados).
+          color: AppColores.alerta,
           ir: () => _ir(const ListasScreen(inicial: 0))));
     }
     if (_atras > 0) {
+      // 1.25 T116 (F1-10): destino y color por la MISMA
+      // urgencia que usa el módulo de Vencimientos — antes
+      // la tira abría siempre «-30d» aunque todo fuera +30d.
+      final urg = urgenciaVencimientos(
+          atrasLeve: _atras - _atras30, atras30: _atras30);
       filas.add((icono: Icons.schedule_rounded,
-          texto: 'Atrasados', conteo: _atras, color: AppColores.alerta,
-          ir: () => _ir(const ListasScreen(inicial: 2))));
+          texto: 'Atrasados', conteo: _atras, color: urg.color,
+          ir: () => _ir(ListasScreen(inicial: urg.tabInicial))));
     }
     if (_cumpleHoy > 0) {
       filas.add((icono: Icons.cake_rounded,

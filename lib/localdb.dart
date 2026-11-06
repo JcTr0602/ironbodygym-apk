@@ -7696,7 +7696,15 @@ class LocalDb {
   /// como caducadas — ante la duda se vuelve a avisar, no
   /// se oculta un aviso debido — y los clientes que ya no
   /// existen tampoco cuentan.
-  Future<Set<int>> idsAvisadosVigentes() async {
+  Future<Set<int>> idsAvisadosVigentes() async =>
+      (await avisadosVigentesConFecha()).keys.toSet();
+
+  /// Como [idsAvisadosVigentes] pero con el CUÁNDO de cada
+  /// marca (1.25 T116, F1-26): la fila de Listas enseña
+  /// «Avisado · 12/10» en texto, no solo el borde verde —
+  /// la marca deja de comunicarse solo por color. La fecha
+  /// sale del timestamp guardado en la propia marca.
+  Future<Map<int, DateTime>> avisadosVigentesConFecha() async {
     final ids = await idsAvisados();
     if (ids.isEmpty) return const {};
     final clientes = await allMirror('clientes');
@@ -7705,14 +7713,19 @@ class LocalDb {
         if (c['id'] != null)
           (c['id'] as num).toInt(): c['pagado_hasta'] as String?,
     };
-    final vigentes = <int>{};
+    final vigentes = <int, DateTime>{};
     for (final id in ids) {
       if (!hastaPorId.containsKey(id)) continue;
       final crudo = await getMeta('avisado_$id');
       final corte = crudo?.indexOf('|') ?? -1;
       if (corte < 0) continue; // marca vieja: caducada
       final avisado = crudo!.substring(0, corte);
-      if (avisado == (hastaPorId[id] ?? '')) vigentes.add(id);
+      if (avisado != (hastaPorId[id] ?? '')) continue;
+      final cuando = DateTime.tryParse(crudo.substring(corte + 1));
+      // DateTime.parse con offset devuelve el instante en
+      // UTC: sin pasar por aHabana, un aviso de las 22:57
+      // de La Habana saldría fechado el día SIGUIENTE.
+      if (cuando != null) vigentes[id] = aHabana(cuando);
     }
     return vigentes;
   }

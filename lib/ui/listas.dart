@@ -75,6 +75,13 @@ class _ListasScreenState extends State<ListasScreen>
   List<Map<String, dynamic>> _visPorVencer = [];
   List<Map<String, dynamic>> _visAlDia = [];
   Set<int> _avisados = {};
+  // 1.25 T116 (F1-26): cuándo se avisó a cada vigente,
+  // para el chip de texto de la fila.
+  Map<int, DateTime> _avisadoEl = {};
+  // 1.25 T116 (F1-24): hasta que el usuario elija orden a
+  // mano, cada pestaña usa SU defecto (urgencia en las de
+  // trabajo, nombre en «Al día»).
+  bool _ordenManual = false;
 
   void _recalcularVisibles() {
     _visHoy = _visibles(_hoy);
@@ -103,6 +110,22 @@ class _ListasScreenState extends State<ListasScreen>
     FadeEntrada.reiniciarVentana(); // T3: ventana de cascada
     _tab = TabController(
         length: 5, vsync: this, initialIndex: widget.inicial);
+    // 1.25 T116 (F1-24): el defecto de orden depende de la
+    // pestaña — en las de deuda manda la urgencia («Días
+    // restantes»: el más atrasado primero); «Nombre» solo
+    // es el defecto de «Al día». Si el usuario elige otro
+    // orden en el desplegable, su elección manda en todas.
+    _orden = widget.inicial == 4 ? 'nombre' : 'dias';
+    _tab.addListener(() {
+      if (_ordenManual || !mounted) return;
+      final nuevo = _tab.index == 4 ? 'nombre' : 'dias';
+      if (nuevo != _orden) {
+        setState(() {
+          _orden = nuevo;
+          _recalcularVisibles();
+        });
+      }
+    });
     _cargar();
   }
 
@@ -134,7 +157,8 @@ class _ListasScreenState extends State<ListasScreen>
     // 1.25 T02: solo las marcas del vencimiento ACTUAL —
     // una marca de un vencimiento anterior no esconde al
     // cliente de la lista de por avisar.
-    final avisados = await LocalDb.instance.idsAvisadosVigentes();
+    final avisados =
+        await LocalDb.instance.avisadosVigentesConFecha();
     if (mounted) {
       setState(() {
         _hoy = sinProtegidos(h);
@@ -143,7 +167,8 @@ class _ListasScreenState extends State<ListasScreen>
         _mas30 = sinProtegidos(p30);
         _porVencer = sinProtegidos(pv);
         _alDia = sinProtegidos(ad);
-        _avisados = avisados;
+        _avisadoEl = avisados;
+        _avisados = avisados.keys.toSet();
         _recalcularVisibles();
       });
     }
@@ -247,7 +272,11 @@ class _ListasScreenState extends State<ListasScreen>
                       fontWeight: FontWeight.w600)),
             ),
             Tab(
-              child: Text('Por vencer (${_visPorVencer.length})',
+              // 1.25 T116 (F1-22): la pestaña dice su
+              // ventana — el semáforo del avatar se pone
+              // ámbar a los 7 días y sin el rótulo parecía
+              // que faltaban clientes de 4-7 días.
+              child: Text('Por vencer · 3 días (${_visPorVencer.length})',
                   style: const TextStyle(
                       color: AppColores.alerta,
                       fontWeight: FontWeight.w600)),
@@ -298,6 +327,9 @@ class _ListasScreenState extends State<ListasScreen>
                         child: Text('Días restantes')),
                   ],
                   onChanged: (v) => setState(() {
+                        // F1-24: la elección manual manda
+                        // sobre el defecto por pestaña.
+                        _ordenManual = true;
                         _orden = v ?? 'nombre';
                         _recalcularVisibles();
                       }),
@@ -344,17 +376,25 @@ class _ListasScreenState extends State<ListasScreen>
               children: [
                 _lista(_visHoy, Icons.celebration_rounded,
                     'Nadie vence hoy', 'Todo al día.'),
+                // 1.25 T116 (F1-25): fuera la celebración
+                // en pestañas de deuda y en «Por vencer»:
+                // icono tranquilo y, en atrasados, el paso
+                // siguiente (ir a «Al día»).
                 _lista(_visPorVencer,
-                    Icons.celebration_rounded, 'Nadie por vencer',
+                    Icons.check_circle_rounded, 'Nadie por vencer',
                     'Nada en los próximos 3 días.'),
                 _lista(_visMenos30,
-                    Icons.celebration_rounded, 'Sin atrasados',
+                    Icons.check_circle_rounded, 'Sin atrasados',
                     'Nada de menos de un mes.',
                     cola: _visSinFecha,
-                    tituloCola: 'Sin fecha de vencimiento'),
+                    tituloCola: 'Sin fecha de vencimiento',
+                    textoAccionVacio: 'Ver «Al día»',
+                    onAccionVacio: () => _tab.animateTo(4)),
                 _lista(_visMas30,
-                    Icons.celebration_rounded, 'Sin atrasados',
-                    'Nada de más de un mes.'),
+                    Icons.check_circle_rounded, 'Sin atrasados',
+                    'Nada de más de un mes.',
+                    textoAccionVacio: 'Ver «Al día»',
+                    onAccionVacio: () => _tab.animateTo(4)),
                 _lista(_visAlDia, // v1.2.1
                     Icons.check_circle_rounded, 'Nadie al día',
                     'Todos los activos están vencidos.'),
@@ -450,7 +490,11 @@ class _ListasScreenState extends State<ListasScreen>
     if (!mounted) return;
     // D-08: el conjunto en memoria refleja la marca al momento
     // (la búsqueda del siguiente no relee la BD por candidato).
-    setState(() => _avisados.add(id));
+    // F1-26: también la fecha, para que el chip salga ya.
+    setState(() {
+      _avisados.add(id);
+      _avisadoEl[id] = ahoraHabana();
+    });
     Map<String, dynamic>? siguiente;
     var idxSiguiente = -1;
     if (via == 'whatsapp') {
@@ -486,7 +530,12 @@ class _ListasScreenState extends State<ListasScreen>
 
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
       String tituloVacio, String subtituloVacio,
-      {List<Map<String, dynamic>>? cola, String? tituloCola}) {
+      {List<Map<String, dynamic>>? cola,
+      String? tituloCola,
+      // 1.25 T116 (F1-25): acción del vacío (p. ej. ir a
+      // «Al día» desde un «Sin atrasados»).
+      String? textoAccionVacio,
+      VoidCallback? onAccionVacio}) {
     // 1.25 T09: grupo final separado (los sin fecha en
     // «Atrasados -30d»): cabecera propia y posición fija
     // tras la lista principal, con sus mismas filas.
@@ -513,7 +562,9 @@ class _ListasScreenState extends State<ListasScreen>
       return EstadoVacio(
           icono: iconoVacio,
           titulo: tituloVacio,
-          subtitulo: subtituloVacio);
+          subtitulo: subtituloVacio,
+          textoAccion: textoAccionVacio,
+          onAccion: onAccionVacio);
     }
     return RefreshIndicator(
       onRefresh: _cargar,
@@ -560,6 +611,11 @@ class _ListasScreenState extends State<ListasScreen>
                     : null,
                 child: FilaCliente(
             cliente: c,
+            // 1.25 T116 (F1-26): chip de texto con el día
+            // del aviso, junto al borde verde de siempre.
+            avisoChip: avisado && _avisadoEl[id] != null
+                ? 'Avisado · ${_avisadoEl[id]!.day.toString().padLeft(2, '0')}/${_avisadoEl[id]!.month.toString().padLeft(2, '0')}'
+                : null,
             origenHero: 'listas',
             onTap: () => Navigator.of(context)
                 .push(RutaIron(
@@ -597,24 +653,30 @@ class _ListasScreenState extends State<ListasScreen>
                       },
                     ),
                 // Botón cobro rápido (naranja circular)
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    gradient:
-                        AppColores.gradienteNaranja,
-                    shape: BoxShape.circle,
-                    boxShadow:
-                        AppSombra.botonPrimario,
-                  ),
-                  child: InkWell(
-                    customBorder:
-                        const CircleBorder(),
-                    onTap: () => _pagoRapido(c),
-                    child: const Icon(
-                        Icons.payments_rounded,
-                        color: Colors.white,
-                        size: 22),
+                // 1.25 T116 (F1-23): con Tooltip — era la
+                // acción principal de la pantalla y la única
+                // sin nombre (el botón de avisar sí lo tenía).
+                Tooltip(
+                  message: 'Cobrar',
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient:
+                          AppColores.gradienteNaranja,
+                      shape: BoxShape.circle,
+                      boxShadow:
+                          AppSombra.botonPrimario,
+                    ),
+                    child: InkWell(
+                      customBorder:
+                          const CircleBorder(),
+                      onTap: () => _pagoRapido(c),
+                      child: const Icon(
+                          Icons.payments_rounded,
+                          color: Colors.white,
+                          size: 22),
+                    ),
                   ),
                 ),
               ],
