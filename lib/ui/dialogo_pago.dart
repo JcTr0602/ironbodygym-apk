@@ -222,8 +222,33 @@ String _etiquetaPeriodo(PeriodoSel s) {
 
 /// Muestra el diálogo de pago para [cliente].
 /// Devuelve el payload listo para encolar, o null si se canceló.
+/// 1.25 Panel 18: la selección para REPETIR el último
+/// cobro de un cliente — su tipo de pago y su método.
+/// El MONTO no se repite nunca: lo recalcula el motor
+/// con los precios y la tarifa especial de HOY (repetir
+/// el monto viejo cobraría mal si algo cambió). Los
+/// períodos sin tipo repetible (personalizado) y los
+/// métodos que no son cobro (promo, cortesía) no se
+/// repiten.
+({String? tipoId, String? metodo}) seleccionRepetirCobro(
+    Map<String, dynamic>? ultimoPago) {
+  if (ultimoPago == null) return (tipoId: null, metodo: null);
+  final periodo = '${ultimoPago['periodo'] ?? ''}';
+  final String? tipoId = switch (periodo) {
+    'mensual' || 'semanal' || 'quincenal' => periodo,
+    _ => null,
+  };
+  final metodoPago = '${ultimoPago['metodo'] ?? ''}';
+  final String? metodo = switch (metodoPago) {
+    'efectivo' || 'transferencia' => metodoPago,
+    _ => null,
+  };
+  return (tipoId: tipoId, metodo: metodo);
+}
+
 Future<Map<String, dynamic>?> pagoDialogo(
-    BuildContext context, Map<String, dynamic> cliente) async {
+    BuildContext context, Map<String, dynamic> cliente,
+    {String? tipoIdInicial, String? metodoInicial}) async {
   final aj = await LocalDb.instance.getAjustes();
   final transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
   // 1.14 (D9): respetar los métodos aceptados en Ajustes (H1).
@@ -302,15 +327,32 @@ Future<Map<String, dynamic>?> pagoDialogo(
     }
     return null;
   }
-  TipoPago tipoSel =
-      tiposDisp.firstWhere((t) => t.id == (menor ? 'menores' : 'mensual'),
-          orElse: () => tiposDisp.first);
+  TipoPago? tipoPorId(String? id) {
+    for (final t in tiposDisp) {
+      if (t.id == id) return t;
+    }
+    return null;
+  }
+
+  // 1.25 Panel 18: si el llamador pide repetir el último
+  // cobro, el diálogo abre con ESE tipo (si sigue
+  // disponible); el defecto de siempre si no.
+  TipoPago tipoSel = tipoPorId(tipoIdInicial) ??
+      tipoPorId(menor ? 'menores' : 'mensual') ??
+      tiposDisp.first;
   // El valor inicial de abajo ya es el definitivo para menores
   // desde la 1.24 (Jc 2026-11-04): tipoInicialPago abre siempre
   // en 'menores'. (Antes regía el «MIN» del 2026-10-25: la
   // opción de 30 días más barata por defecto, derogado.)
   int meses = 1;
   String metodo = aceptaEfectivo ? 'efectivo' : 'transferencia';
+  // Panel 18: repetir también preselecciona el método del
+  // último cobro, si el gym lo sigue aceptando.
+  if (metodoInicial == 'efectivo' && aceptaEfectivo) {
+    metodo = 'efectivo';
+  } else if (metodoInicial == 'transferencia' && aceptaTransfer) {
+    metodo = 'transferencia';
+  }
   // F1 (1.20): foto del comprobante (solo transferencia). Es una
   // ruta LOCAL: viaja en el resultado con clave '_comprobante_ruta'
   // y la pantalla de confirmación la convierte en

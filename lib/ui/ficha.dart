@@ -783,7 +783,7 @@ class _FichaScreenState extends State<FichaScreen> {
     return null;
   }
 
-  Future<void> _pagar() async {
+  Future<void> _pagar({bool repetir = false}) async {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: permiso operativo al tocar.
@@ -799,7 +799,14 @@ class _FichaScreenState extends State<FichaScreen> {
     // del dueño.
     if (await mostrarBloqueoCasa(context, c)) return;
     if (!mounted) return;
-    final payload = await pagoDialogo(context, c);
+    // 1.25 Panel 18: repetir = el diálogo abre con el tipo
+    // y el método del último cobro (el monto lo recalcula
+    // el motor de hoy; el Preview sigue siendo obligatorio).
+    final selRepetir =
+        repetir ? seleccionRepetirCobro(_ultimoPagoReal) : null;
+    final payload = await pagoDialogo(context, c,
+        tipoIdInicial: selRepetir?.tipoId,
+        metodoInicial: selRepetir?.metodo);
     if (payload == null || !mounted) return;
     // 1.23 (Delta Argón 5ª#1): la marca 'entregado': 1 del dueño
     // ya nace dentro de pagoDialogo; no se repite aquí.
@@ -2302,6 +2309,21 @@ class _FichaScreenState extends State<FichaScreen> {
                               onPressed: _pagar,
                             ),
                           ),
+                          // 1.25 Panel 18: repetir el último
+                          // cobro en 1 toque — el botón dice
+                          // qué repite (tipo · método); el
+                          // monto se recalcula hoy y el
+                          // Preview sigue confirmando.
+                          if (_ultimoPagoReal != null)
+                            TextButton.icon(
+                              onPressed: () => _pagar(repetir: true),
+                              icon: const Icon(Icons.replay_rounded,
+                                  size: 18),
+                              label: Text(
+                                  'Repetir último cobro · '
+                                  '${_ultimoPagoReal!['periodo'] ?? 'mensual'}'
+                                  ' · ${_ultimoPagoReal!['metodo'] ?? ''}'),
+                            ),
                         ],
                       ),
               ),

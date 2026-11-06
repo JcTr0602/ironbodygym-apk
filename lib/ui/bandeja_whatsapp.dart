@@ -399,7 +399,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   }
 
   Future<void> _abrirWhatsapp(Map<String, dynamic> a,
-      {bool enLote = false}) async {
+      {bool enLote = false, bool directo = false}) async {
     final waNum = normalizarTelefonoWaMe('${a['telefono'] ?? ''}');
     if (waNum.isEmpty) {
       if (mounted) {
@@ -411,7 +411,11 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     // puede ajustar para ESTE envío antes de abrir WhatsApp
     // (no cambia la plantilla ni el aviso guardado). Un
     // texto vaciado vuelve al mensaje original.
-    final editado = await _editarAntesDeEnviar(a);
+    // 1.25 Panel 18: con [directo] (toque largo en el botón
+    // verde) la PLANTILLA se envía tal cual, sin editor:
+    // el recordatorio en 1 toque.
+    final editado =
+        directo ? '${a['mensaje']}' : await _editarAntesDeEnviar(a);
     if (editado == null || !mounted) return;
     // Pasada 2 de Argón (1.20): al abrir otro aviso, cualquier
     // SnackBar de confirmación anterior muere (su acción ya no
@@ -607,6 +611,14 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                         label: const Text('Resultado por partes'),
                       ),
                     ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Text(
+                      'Mantén pulsado el botón verde de un aviso '
+                      'para enviar su plantilla sin editar.',
+                      style: AppTexto.minuscula,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -866,6 +878,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
               InkWell(
                 borderRadius: BorderRadius.circular(AppRadio.xl),
                 onTap: tieneTelefono ? () => _abrirWhatsapp(a) : null,
+                // Panel 18: toque largo = plantilla directa.
+                onLongPress: tieneTelefono
+                    ? () => _abrirWhatsapp(a, directo: true)
+                    : null,
                 child: Container(
                   width: 48,
                   height: 48,
