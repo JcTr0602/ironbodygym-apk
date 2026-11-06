@@ -596,20 +596,76 @@ class _BuscarScreenState extends State<BuscarScreen> {
               ],
             ),
           ),
+          // 1.25 T51: cabecera protagonista — una sola
+          // franja con el degradado de la casa, el conteo
+          // grande de clientes y los estados como pastillas.
+          // La línea «en esta vista» vive dentro de la
+          // franja; la frescura accionable sigue siendo el
+          // cartel de 24 h de abajo (no se dice tres veces).
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppEspacio.md),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                  // 1.25 T116 (F1-56): la frescura vive en
-                  // el cartel de 24 h y en el banner de sync;
-                  // esta línea solo dice el tamaño de la
-                  // VISTA (antes mezclaba conteo filtrado con
-                  // «clientes» a secas y repetía el dato).
-                  '${_res.length} en esta vista',
-                  style: AppTexto.metadato.copyWith(
-                      color: AppColores.textoSecundario(context))),
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                gradient: AppColores.gradienteCarbon,
+                borderRadius: BorderRadius.circular(AppRadio.lg),
+              ),
+              padding: const EdgeInsets.fromLTRB(AppEspacio.md,
+                  AppEspacio.md, AppEspacio.md, AppEspacio.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('${_conteos['todos'] ?? 0}',
+                          style: AppTexto.displayPequeno
+                              .copyWith(color: Colors.white)),
+                      const SizedBox(width: 6),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 3),
+                        child: Text('clientes',
+                            style: TextStyle(color: Colors.white70)),
+                      ),
+                      const Spacer(),
+                      Text('${_res.length} en esta vista',
+                          style: AppTexto.metadato
+                              .copyWith(color: Colors.white70)),
+                    ],
+                  ),
+                  const SizedBox(height: AppEspacio.sm),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _chipFiltro('todos',
+                            'Todos (${_conteos['todos'] ?? 0})',
+                            sobreOscuro: true),
+                        const SizedBox(width: 8),
+                        _chipFiltro('aldia',
+                            'Al día (${_conteos['aldia'] ?? 0})',
+                            punto: AppColores.exito,
+                            sobreOscuro: true),
+                        const SizedBox(width: 8),
+                        _chipFiltro('porvencer',
+                            'Por vencer (${_conteos['porvencer'] ?? 0})',
+                            punto: AppColores.alerta,
+                            sobreOscuro: true),
+                        const SizedBox(width: 8),
+                        _chipFiltro('vencidos',
+                            'Vencidos (${_conteos['vencidos'] ?? 0})',
+                            punto: AppColores.error,
+                            sobreOscuro: true),
+                        const SizedBox(width: 8),
+                        _chipFiltro('sinfoto',
+                            'Sin foto (${_conteos['sinfoto'] ?? 0})',
+                            sobreOscuro: true),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           // Bloque 1: cartel de lista vieja a las 24 h sin bajar
@@ -645,33 +701,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 ),
               ),
             ),
-          // v1.0.15: filtros rápidos
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding:
-                const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.xs),
-            child: Row(
-              children: [
-                _chipFiltro('todos',
-                    'Todos (${_conteos['todos'] ?? 0})'),
-                const SizedBox(width: 8),
-                _chipFiltro('aldia',
-                    'Al día (${_conteos['aldia'] ?? 0})',
-                    punto: AppColores.exito),
-                const SizedBox(width: 8),
-                _chipFiltro('porvencer',
-                    'Por vencer (${_conteos['porvencer'] ?? 0})',
-                    punto: AppColores.alerta),
-                const SizedBox(width: 8),
-                _chipFiltro('vencidos',
-                    'Vencidos (${_conteos['vencidos'] ?? 0})',
-                    punto: AppColores.error),
-                const SizedBox(width: 8),
-                _chipFiltro('sinfoto',
-                    'Sin foto (${_conteos['sinfoto'] ?? 0})'),
-              ],
-            ),
-          ),
           // v1.0.15: búsqueda avanzada (notas + rango de edad).
           // 1.24.2: vive tras el botón de embudo de la cabecera
           // (antes un ExpansionTile siempre visible que comía
@@ -870,6 +899,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                     // en vencidos y por vencer (con
                                     // teléfono válido y sin ser Casa:
                                     // la Casa no vence).
+                                    // 1.25 T52: próxima acción
+                                    // según el estado (la fila
+                                    // protegida o en selección
+                                    // no la lleva).
+                                    accionPrincipal: _accionFilaBuscar(
+                                        c,
+                                        dias: diasFila,
+                                        protegido: protegidoFila),
                                     accionWhatsapp: (!_modoSeleccion &&
                                             !protegidoFila &&
                                             !esCuentaCasa(c) &&
@@ -1385,15 +1422,85 @@ class _BuscarScreenState extends State<BuscarScreen> {
             avisados > 0 ? SignificadoChip.exito : SignificadoChip.alerta);
   }
 
+  /// 1.25 T52: la acción fantasma de una fila de Buscar,
+  /// ya resuelta a botón (o null). La decisión (qué acción
+  /// toca) vive en la función pura accionPrincipalBuscar.
+  ({String texto, IconData icono, VoidCallback alTocar})?
+      _accionFilaBuscar(Map<String, dynamic> c,
+          {required int? dias, required bool protegido}) {
+    final cual = accionPrincipalBuscar(
+      dias: dias,
+      esCasa: esCuentaCasa(c),
+      protegido: protegido,
+      seleccion: _modoSeleccion,
+      tieneTelefonoWa:
+          normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty,
+    );
+    return switch (cual) {
+      'cobrar' => (
+          texto: 'Cobrar',
+          icono: Icons.payments_rounded,
+          alTocar: () => _cobrarDesdeBuscar(c)
+        ),
+      'avisar' => (
+          texto: 'Avisar',
+          icono: Icons.chat_rounded,
+          alTocar: () => _abrirWhatsapp(c)
+        ),
+      _ => null,
+    };
+  }
+
+  bool _pagoEnCursoBuscar = false;
+
+  /// 1.25 T52: cobrar desde la fila de Buscar — el MISMO
+  /// flujo que el cobro rápido de Listas (permiso con
+  /// refresco, bloqueo de Casa, diálogo, Preview con
+  /// Recibo y Deshacer). Nada de un segundo camino.
+  Future<void> _cobrarDesdeBuscar(Map<String, dynamic> c) async {
+    if (_pagoEnCursoBuscar) return;
+    _pagoEnCursoBuscar = true;
+    try {
+      if (!await permisoOperativoOkConRefresco(context,
+          () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+        return;
+      }
+      if (await mostrarBloqueoCasa(context, c)) return;
+      if (!mounted) return;
+      final payload = await pagoDialogo(context, c);
+      if (payload == null || !mounted) return;
+      final r = await cobrarConPreviewYRecibo(
+        context: context,
+        nombreCliente: '${c['nombre'] ?? ''}',
+        payload: payload,
+      );
+      if (!mounted) return;
+      if (r == ResultadoCobro.deshecho) {
+        mostrarSnack(context, 'Cobro deshecho',
+            significado: SignificadoChip.exito);
+      }
+      _buscar();
+      SyncEngine.instance.push();
+    } finally {
+      _pagoEnCursoBuscar = false;
+    }
+  }
+
   Widget _chipFiltro(String valor, String etiqueta,
-      {Color? punto}) {
+      {Color? punto, bool sobreOscuro = false}) {
     final activo = _filtro == valor;
     return ChoiceChip(
-      label: Text(etiqueta, style: AppTexto.metadato),
+      label: Text(etiqueta,
+          style: AppTexto.metadato.copyWith(
+              color: sobreOscuro && !activo ? Colors.white : null)),
       avatar: punto == null
           ? null
           : Icon(Icons.circle_rounded, size: 10, color: punto),
       selected: activo,
+      backgroundColor: sobreOscuro
+          ? Colors.white.withValues(alpha: 0.14)
+          : null,
+      side: sobreOscuro ? BorderSide.none : null,
       visualDensity: VisualDensity.compact,
       onSelected: (_) {
         setState(() => _filtro = valor);
@@ -1455,6 +1562,13 @@ class FilaCliente extends StatelessWidget {
   /// atrasados de Listas). Null = sin barra.
   final int? diasAtraso;
 
+  /// 1.25 T52: la «próxima acción» probable de la fila,
+  /// como botón fantasma bajo el chip de estado (Buscar la
+  /// calcula por estado: cobrar si vencido, avisar si por
+  /// vencer). Null = sin botón.
+  final ({String texto, IconData icono, VoidCallback alTocar})?
+      accionPrincipal;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -1467,6 +1581,7 @@ class FilaCliente extends StatelessWidget {
       this.desambiguar = false,
       this.avisoChip,
       this.diasAtraso,
+      this.accionPrincipal,
       this.accionWhatsapp});
 
   @override
@@ -1482,6 +1597,7 @@ class FilaCliente extends StatelessWidget {
       desambiguar: desambiguar,
       avisoChip: avisoChip,
       diasAtraso: diasAtraso,
+      accionPrincipal: accionPrincipal,
       accionWhatsapp: accionWhatsapp);
 }
 
@@ -1496,6 +1612,8 @@ class _FilaCliente extends StatefulWidget {
   final bool desambiguar;
   final String? avisoChip;
   final int? diasAtraso;
+  final ({String texto, IconData icono, VoidCallback alTocar})?
+      accionPrincipal;
   final VoidCallback? accionWhatsapp;
   const _FilaCliente(
       {super.key,
@@ -1509,6 +1627,7 @@ class _FilaCliente extends StatefulWidget {
       this.desambiguar = false,
       this.avisoChip,
       this.diasAtraso,
+      this.accionPrincipal,
       this.accionWhatsapp});
 
   @override
@@ -1751,6 +1870,31 @@ class _FilaClienteState extends State<_FilaCliente> {
                             color: AppColores.textoSecundario(
                                 context))),
                   ],
+                  // 1.25 T52: la próxima acción probable,
+                  // como botón fantasma bajo el estado — la
+                  // lista trabaja como cola, no como
+                  // directorio. No sustituye al WhatsApp del
+                  // trailing ni al gesto: es el atajo visible.
+                  if (widget.accionPrincipal != null) ...[
+                    const SizedBox(height: 2),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        icon: Icon(widget.accionPrincipal!.icono,
+                            size: 16),
+                        label: Text(widget.accionPrincipal!.texto),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppEspacio.sm),
+                          minimumSize: Size.zero,
+                          tapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          foregroundColor: AppColores.naranja,
+                        ),
+                        onPressed: widget.accionPrincipal!.alTocar,
+                      ),
+                    ),
+                  ],
                   // 1.25 T116 (F1-26): el chip de avisado
                   // en TEXTO, junto a los días.
                   if (widget.avisoChip != null) ...[
@@ -1881,4 +2025,23 @@ double fraccionBarraAtraso(int dias) =>
     );
   }
   return (estado: EstadoMembresia.alDia, texto: 'Al día · vence $fecha');
+}
+
+/// 1.25 T52: la «próxima acción» probable de una fila de
+/// Buscar según su estado. Vencido o sin fecha → cobrar;
+/// por vencer (≤7 días, hoy incluido) con teléfono →
+/// avisar; al día → ninguna (el toque ya abre la ficha).
+/// Casa, protegidos y el modo selección nunca llevan
+/// acción.
+String? accionPrincipalBuscar({
+  required int? dias,
+  required bool esCasa,
+  required bool protegido,
+  required bool seleccion,
+  required bool tieneTelefonoWa,
+}) {
+  if (protegido || seleccion || esCasa) return null;
+  if (dias == null || dias < 0) return 'cobrar';
+  if (dias <= 7) return tieneTelefonoWa ? 'avisar' : null;
+  return null;
 }
