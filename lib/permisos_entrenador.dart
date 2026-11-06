@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth.dart';
+import 'tiempo.dart';
 
 /// Helper global de permisos granulares (v1.3.9 Sprint 1).
 /// Lee el mapa cacheado; el dueño siempre retorna true.
@@ -55,6 +56,16 @@ class PermisosEntrenador {
   // (fail-closed): su primera carga con red siembra la foto.
   bool _cargaIntentada = false;
   String _ultimoUsername = '';
+  // 1.25 Bloque 2: cuándo la RPC refrescó la foto por última
+  // vez CON ÉXITO en esta sesión. Distingue «denegado con
+  // foto fresca» (denegación real) de «denegado con foto
+  // vieja o sin foto» (puede ser un fallo de red: el caso
+  // Duany, «no autorizado» con todo correcto en el servidor).
+  DateTime? _ultimoRefrescoOk;
+
+  /// Último refresco de permisos confirmado por la red
+  /// (null si en esta sesión la RPC nunca respondió).
+  DateTime? get ultimoRefrescoOk => _ultimoRefrescoOk;
 
   PermisosEntrenador._internal() {
     // Al perder la sesión (signOut en cualquier ruta), la
@@ -79,11 +90,17 @@ class PermisosEntrenador {
     _cargado = false;
     _cargaIntentada = false;
     _ultimoUsername = '';
+    _ultimoRefrescoOk = null;
   }
 
   /// Carga los permisos desde Supabase (llamar en login/sync).
   /// Primero levanta caché local (offline), luego refresca desde Supabase.
-  Future<void> cargar() async {
+  ///
+  /// Devuelve true si la RPC respondió (foto fresca) y
+  /// false si se quedó la foto de la caché (sin red o con
+  /// la conexión colgada): quien deniega una acción usa
+  /// ese dato para avisar con honestidad (1.25 Bloque 2).
+  Future<bool> cargar() async {
     final prefs = await SharedPreferences.getInstance();
 
     // Argón Acceso #1: si cambió el usuario desde la última
@@ -171,12 +188,15 @@ class PermisosEntrenador {
         }
       }
       _cargado = true;
+      _ultimoRefrescoOk = ahoraHabana();
       await prefs.setBool(_kPrefsActivo, _activo);
       await prefs.setBool(_kPrefsHabilitado, _habilitado);
       await prefs.setString(
           _kPrefsPermisos, jsonEncode(_permisos));
+      return true;
     } catch (_) {
       // Offline: ya quedó cargado el caché de SharedPreferences del paso 1
+      return false;
     }
   }
 

@@ -181,8 +181,8 @@ class _ListasScreenState extends State<ListasScreen>
 
   Future<void> _pagoRapidoFlujo(Map<String, dynamic> c) async {
     // 1.24 Bloque 3: permiso operativo al tocar.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
       return;
     }
     // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y el

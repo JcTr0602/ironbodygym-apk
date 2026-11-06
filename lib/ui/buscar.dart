@@ -904,8 +904,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
     switch (accion) {
       case 'cobrar':
         // 1.24 Bloque 3: permiso operativo al tocar.
-        if (!permisoOperativoOk(context,
-            PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+        if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
           return;
         }
         if (await mostrarBloqueoCasa(context, c)) return;

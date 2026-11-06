@@ -1,26 +1,61 @@
 import 'package:flutter/material.dart';
 
+import '../permisos_entrenador.dart';
 import 'componentes.dart';
 
-/// 1.24 Bloque 3 — permisos OPERATIVOS (regla de Argón para la
-/// 1.24): el botón se VE siempre; sin la clave, al tocar se
-/// avisa y la acción no ocurre. Nunca se corta «solo al
-/// guardar» en silencio, y nunca se finge un guardado que el
+/// Permisos OPERATIVOS (regla de Argón, 1.24 Bloque 3): el
+/// botón se VE siempre; sin la clave, al tocar se avisa y
+/// la acción no ocurre. Nunca se corta «solo al guardar»
+/// en silencio, y nunca se finge un guardado que el
 /// servidor rebotará con PERMISO_DENEGADO (la falsa
 /// confirmación en el mostrador que cazó la auditoría de
 /// permisos: el cliente ya se fue y el pago nunca entró).
+/// El cinturón final sigue donde siempre estuvo: el
+/// servidor (permisos_ops, modo estricto) y la reversión
+/// del optimista cuando una op rebota.
 ///
-/// Devuelve true si la acción puede continuar. [permitido] es
-/// el getter ya resuelto de PermisosEntrenador (el dueño
-/// siempre pasa; sin foto de permisos el getter es false —
-/// fail-closed, coherente con que sin foto el entrenador ni
-/// siquiera entra a Home). El cinturón final sigue donde
-/// siempre estuvo: el servidor (permisos_ops, modo estricto)
-/// y la reversión del optimista cuando una op rebota.
-bool permisoOperativoOk(
-    BuildContext context, bool permitido, String accion) {
-  if (permitido) return true;
-  mostrarSnack(context, 'No tienes permiso para $accion',
-      significado: SignificadoChip.error);
+/// 1.25 Bloque 2 — la compuerta de ACCIÓN: refresca ANTES
+/// de denegar. (La versión síncrona de la 1.24 se retiró:
+/// denegaba desde la foto cacheada sin preguntar a la red,
+/// el fallo Duany; ya no queda ningún llamador.)
+///
+/// El caso Duany (2026-11-05): su foto de permisos quedó
+/// vacía tras reinstalar y la compuerta síncrona le dijo
+/// «no autorizado» al cerrar su turno con todo correcto en
+/// el servidor: la foto vieja denegaba sin preguntar a la
+/// red. Ahora, si la foto dice «no», se intenta UN refresco
+/// (la RPC con su timeout de 12 s) y solo entonces se
+/// deniega, con el cartel que corresponde:
+///
+/// - Refresco OK y sigue «no»: denegación REAL —
+///   «No tienes permiso para X. Pídeselo a Jc.»
+/// - Sin red (la RPC no respondió): denegación por foto
+///   vieja — se avisa de que no se pudo comprobar y de que
+///   la foto puede estar desactualizada. El candado NO se
+///   abre (fail-closed: el cinturón del servidor tampoco
+///   dejaría pasar la op), pero nadie queda bloqueado por
+///   un fantasma sin explicación.
+///
+/// [permiso] es el getter como función, para re-leerlo
+/// DESPUÉS del refresco.
+Future<bool> permisoOperativoOkConRefresco(BuildContext context,
+    bool Function() permiso, String accion) async {
+  if (permiso()) return true;
+  final refrescoOk = await PermisosEntrenador().cargar();
+  if (permiso()) return true;
+  if (!context.mounted) return false;
+  if (refrescoOk) {
+    mostrarSnack(
+        context, 'No tienes permiso para $accion. Pídeselo a Jc.',
+        significado: SignificadoChip.error);
+  } else {
+    mostrarSnack(
+        context,
+        'No pude comprobar tus permisos (sin conexión): se está '
+        'usando la última foto guardada y puede estar vieja. Si '
+        'Jc ya te dio el permiso para $accion, conéctate y '
+        'vuelve a intentarlo.',
+        significado: SignificadoChip.error);
+  }
   return false;
 }

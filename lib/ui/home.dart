@@ -926,12 +926,11 @@ class _HomeScreenState extends State<HomeScreen>
       floatingActionButton: _FabAccionesRapidas(
         onCobrar: () => _ir(const PagoScreen()),
         onPagoDiario: () => _ir(const PagoDiarioScreen()),
-        onInscribir: () {
+        onInscribir: () async {
           // 1.24 Bloque 3: permiso operativo al tocar.
-          if (permisoOperativoOk(
-              context,
-              PermisosEntrenador().canInscribirClientes,
-              'inscribir clientes')) {
+          // 1.25 Bloque 2: con refresco antes de denegar.
+          if (await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canInscribirClientes, 'inscribir clientes')) {
             _ir(const InscribirScreen());
           }
         },
@@ -1280,12 +1279,11 @@ class _HomeScreenState extends State<HomeScreen>
         accion(Icons.today_rounded, 'Pago diario',
             () => _ir(const PagoDiarioScreen())),
         const SizedBox(width: AppEspacio.sm),
-        accion(Icons.person_add_alt_1_rounded, 'Inscribir', () {
+        accion(Icons.person_add_alt_1_rounded, 'Inscribir', () async {
           // 1.24 Bloque 3: permiso operativo al tocar.
-          if (permisoOperativoOk(
-              context,
-              PermisosEntrenador().canInscribirClientes,
-              'inscribir clientes')) {
+          // 1.25 Bloque 2: con refresco antes de denegar.
+          if (await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canInscribirClientes, 'inscribir clientes')) {
             _ir(const InscribirScreen());
           }
         }),
@@ -1993,8 +1991,8 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _abrirTurno() async {
     if (_procesandoTurno) return;
     // 1.24 Bloque 3: abrir turno cuelga de can_gestionar_turnos.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
       return;
     }
     setState(() => _procesandoTurno = true);

@@ -380,8 +380,8 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   /// confirmación explícita del riesgo.
   Future<void> _cierreTurno() async {
     // 1.24 Bloque 3: cerrar turno cuelga de can_gestionar_turnos.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
       return;
     }
     final nOps = _historial.isNotEmpty

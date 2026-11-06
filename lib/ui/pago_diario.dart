@@ -246,8 +246,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // 1.24 Bloque 3: el pago diario cuelga de can_cobrar_pagos
     // en el servidor; sin la clave, aviso al tocar y no se
     // encola una op condenada a rebotar.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
       return;
     }
     setState(() => _guardando = true);

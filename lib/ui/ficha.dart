@@ -668,8 +668,8 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: permiso operativo al tocar.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
       return;
     }
     // Bloque 1 (Argón AMARILLO, 2026-10-24): una Cuenta a la Casa NO
@@ -981,8 +981,8 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: editar la ficha cuelga de can_editar_fichas.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
       return;
     }
     // Ronda 3-9 #1 (CRÍTICO, defensa en profundidad): aunque se
@@ -1342,8 +1342,8 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: las notas viajan como editar_cliente.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
       return;
     }
     final ctrl =
@@ -1477,8 +1477,8 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Elimina la foto del cliente (v1.0.15).
   Future<void> _eliminarFoto() async {
     // 1.24 Bloque 3: eliminar_foto cuelga de can_editar_fichas.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
       return;
     }
     final ok = await showDialog<bool>(
@@ -1528,8 +1528,8 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Cambia la foto del cliente: cámara, galería o eliminar (v1.0.15).
   Future<void> _cambiarFoto() async {
     // 1.24 Bloque 3: la foto de ficha cuelga de can_editar_fichas.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canEditarFichas, 'editar fichas')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
       return;
     }
     final tieneFoto = await _tieneFoto();
@@ -1618,8 +1618,8 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: permiso operativo al tocar.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
       return;
     }
     // Panel 1.9 (Luna BLOQUEANTE): la renovación rápida NO puede
@@ -1764,8 +1764,8 @@ class _FichaScreenState extends State<FichaScreen> {
     if (pagoId == null) return;
     // 1.24 Bloque 3: editar/anular pagos cuelga de
     // can_cobrar_pagos en el servidor.
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canCobrarPagos, 'corregir pagos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'corregir pagos')) {
       return;
     }
     final accion = await showDialog<String>(

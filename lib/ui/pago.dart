@@ -359,8 +359,8 @@ class _PagoScreenState extends State<PagoScreen> {
   Future<void> _pagarFlujo(Map<String, dynamic> c) async {
     // 1.24 Bloque 3: permiso operativo al tocar (aviso, sin
     // abrir el diálogo para un cobro que el servidor rebotará).
-    if (!permisoOperativoOk(context,
-        PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
       return;
     }
     // Bloque 1 (Argón AMARILLO): Casa no paga mensualidad, y todo

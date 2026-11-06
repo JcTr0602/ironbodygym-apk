@@ -334,8 +334,8 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   // no se muestra el preview ni se encola nada — el aviso sale
   // al tocar y el servidor deja de recibir ops condenadas a
   // rebotar con PERMISO_DENEGADO.
-  if (!permisoOperativoOk(context,
-      PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+  if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
     return ResultadoCobro.cancelado;
   }
   final monto = (payload['monto'] as num?) ?? 0;

@@ -280,10 +280,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // 1.24 Bloque 3: sin can_inscribir_clientes, aviso al tocar
     // y no se abre el flujo de guardado (el servidor rebotaría
     // la op con PERMISO_DENEGADO tras inscribir «de mentira»).
-    if (!permisoOperativoOk(
-        context,
-        PermisosEntrenador().canInscribirClientes,
-        'inscribir clientes')) {
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canInscribirClientes, 'inscribir clientes')) {
       return;
     }
     // Argón lote 4 BLOQUEANTE: la bandera se activaba DESPUÉS de los
