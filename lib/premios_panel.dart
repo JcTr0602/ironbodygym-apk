@@ -17,6 +17,10 @@ class ValePendiente {
   final int diasAlReclamar;
   final String creadoEn;
 
+  /// 1.27 (S4): el motivo con el que el dueño creó el
+  /// vale (solo vales manuales; '' en los de logro).
+  final String creadoNota;
+
   const ValePendiente({
     required this.id,
     required this.clienteId,
@@ -27,7 +31,10 @@ class ValePendiente {
     required this.premioDias,
     required this.diasAlReclamar,
     required this.creadoEn,
+    this.creadoNota = '',
   });
+
+  bool get esManual => logroId == 'manual';
 }
 
 /// Un vale ya resuelto (contexto reciente de la bandeja).
@@ -36,9 +43,12 @@ class ValeReciente {
   final int clienteId;
   final String nombre;
   final int premioDias;
-  final String estado; // 'canjeado' | 'rechazado'
+  final String estado; // 'canjeado' | 'rechazado' | 'anulado'
   final String resueltoEn;
   final String resueltoNota;
+
+  /// 1.27 (S4): motivo de creación (vales manuales).
+  final String creadoNota;
 
   const ValeReciente({
     required this.id,
@@ -48,6 +58,7 @@ class ValeReciente {
     required this.estado,
     required this.resueltoEn,
     required this.resueltoNota,
+    this.creadoNota = '',
   });
 
   bool get canjeado => estado == 'canjeado';
@@ -91,6 +102,7 @@ BandejaPremios parseBandejaPremios(Object? json) {
         premioDias: _entero(e['premio_dias']),
         diasAlReclamar: _entero(e['dias_al_reclamar']),
         creadoEn: _texto(e['creado_en']),
+        creadoNota: _texto(e['creado_nota']),
       ));
     }
   }
@@ -107,6 +119,7 @@ BandejaPremios parseBandejaPremios(Object? json) {
         estado: _texto(e['estado']),
         resueltoEn: _texto(e['resuelto_en']),
         resueltoNota: _texto(e['resuelto_nota']),
+        creadoNota: _texto(e['creado_nota']),
       ));
     }
   }
@@ -120,6 +133,8 @@ String tituloLogroPremio(String logroId) {
   switch (logroId) {
     case 'constancia_real':
       return 'Constancia real';
+    case 'manual':
+      return 'Vale manual';
     default:
       return logroId;
   }
@@ -200,6 +215,159 @@ class EntradaCatalogoPremio {
     if (premioDias > 0) return 'Apagado: $metaDias días → $premioDias gratis';
     return 'Sin premio';
   }
+}
+
+/// Un vale del historial COMPLETO de un cliente (S3):
+/// cualquier estado, con sus dos notas y el pago.
+class ValeHistorial {
+  final int id;
+  final String logroId;
+  final int premioDias;
+  final int diasAlReclamar;
+  final String estado; // reclamado|canjeado|rechazado|anulado
+  final String creadoEn;
+  final String creadoNota;
+  final String? resueltoEn;
+  final String resueltoNota;
+  final String? pagoUuid;
+
+  const ValeHistorial({
+    required this.id,
+    required this.logroId,
+    required this.premioDias,
+    required this.diasAlReclamar,
+    required this.estado,
+    required this.creadoEn,
+    required this.creadoNota,
+    required this.resueltoEn,
+    required this.resueltoNota,
+    required this.pagoUuid,
+  });
+
+  bool get canjeado => estado == 'canjeado';
+  bool get reclamado => estado == 'reclamado';
+}
+
+/// El detalle de Premios de un cliente (S3) para la
+/// pestaña Clientes (G3).
+class DetallePremiosCliente {
+  final String nombre;
+  final String? logroBarraId;
+  final int metaDias;
+  final int premioDias;
+  final int dias;
+  final int faltan;
+  final String? cicloDesde;
+  final List<String> sesionesQueSumaron;
+  final List<ValeHistorial> vales;
+  final Map<String, String> sello; // logroId -> fecha ISO
+  final String? selloActualizadoEn;
+  final List<({String desde, String nota})> marcas;
+
+  const DetallePremiosCliente({
+    required this.nombre,
+    required this.logroBarraId,
+    required this.metaDias,
+    required this.premioDias,
+    required this.dias,
+    required this.faltan,
+    required this.cicloDesde,
+    required this.sesionesQueSumaron,
+    required this.vales,
+    required this.sello,
+    required this.selloActualizadoEn,
+    required this.marcas,
+  });
+
+  static const vacio = DetallePremiosCliente(
+    nombre: '',
+    logroBarraId: null,
+    metaDias: 0,
+    premioDias: 0,
+    dias: 0,
+    faltan: 0,
+    cicloDesde: null,
+    sesionesQueSumaron: [],
+    vales: [],
+    sello: {},
+    selloActualizadoEn: null,
+    marcas: [],
+  );
+
+  /// Fracción de la barra de progreso (0..1).
+  double get fraccionBarra =>
+      metaDias <= 0 ? 0 : (dias / metaDias).clamp(0.0, 1.0);
+}
+
+/// Interpreta el jsonb de admin_premios_cliente (S3).
+/// Tolerante como el resto de parsers de este archivo.
+DetallePremiosCliente parseDetallePremiosCliente(Object? json) {
+  if (json is! Map || json['ok'] != true) {
+    return DetallePremiosCliente.vacio;
+  }
+  final prog = json['progreso'];
+  final progMap = prog is Map ? prog : const {};
+  final vales = <ValeHistorial>[];
+  final crudosV = json['vales'];
+  if (crudosV is List) {
+    for (final e in crudosV) {
+      if (e is! Map) continue;
+      vales.add(ValeHistorial(
+        id: _entero(e['id']),
+        logroId: _texto(e['logro_id']),
+        premioDias: _entero(e['premio_dias']),
+        diasAlReclamar: _entero(e['dias_al_reclamar']),
+        estado: _texto(e['estado']),
+        creadoEn: _texto(e['creado_en']),
+        creadoNota: _texto(e['creado_nota']),
+        resueltoEn: e['resuelto_en']?.toString(),
+        resueltoNota: _texto(e['resuelto_nota']),
+        pagoUuid: e['pago_uuid']?.toString(),
+      ));
+    }
+  }
+  final sesiones = <String>[];
+  final crudosS = json['sesiones_que_sumaron'];
+  if (crudosS is List) {
+    for (final s in crudosS) {
+      if (s != null) sesiones.add('$s');
+    }
+  }
+  final sello = <String, String>{};
+  String? selloAct;
+  final selloJson = json['sello'];
+  if (selloJson is Map) {
+    final mapa = selloJson['sello'];
+    if (mapa is Map) {
+      mapa.forEach((k, v) {
+        if (v != null) sello['$k'] = '$v';
+      });
+    }
+    selloAct = selloJson['actualizado_en']?.toString();
+  }
+  final marcas = <({String desde, String nota})>[];
+  final crudosM = json['marcas'];
+  if (crudosM is List) {
+    for (final e in crudosM) {
+      if (e is! Map) continue;
+      marcas.add(
+          (desde: _texto(e['desde']), nota: _texto(e['nota'])));
+    }
+  }
+  return DetallePremiosCliente(
+    nombre: _texto(json['nombre']),
+    logroBarraId: progMap['logro_id']?.toString(),
+    metaDias: _entero(progMap['meta_dias']),
+    premioDias: _entero(progMap['premio_dias']),
+    dias: _entero(progMap['dias']),
+    faltan: _entero(progMap['faltan']),
+    cicloDesde: progMap['ciclo_desde']?.toString(),
+    sesionesQueSumaron: sesiones,
+    vales: vales,
+    sello: sello,
+    selloActualizadoEn: selloAct,
+    marcas: marcas,
+  );
 }
 
 /// Interpreta el jsonb de admin_premios_catalogo (S2).

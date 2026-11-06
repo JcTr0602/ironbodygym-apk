@@ -4,13 +4,14 @@ import '../auth.dart';
 import 'app_bar.dart';
 import 'panel_premios.dart';
 import 'panel_premios_catalogo.dart';
+import 'panel_premios_clientes.dart';
 
 /// Premios (1.27): el hub de Premios del Panel, con
 /// pestañas. La Bandeja es la pantalla de la 1.26
 /// (embebida, sin su AppBar); el Catálogo (S2/G2) deja
 /// editar meta/premio/interruptor de cada logro sin
-/// tocar SQL. La pestaña Clientes (G3) llega con su
-/// pieza (S3/S4).
+/// tocar SQL; Clientes (S3/G3) da el detalle por
+/// cliente con conceder vale, anular y reiniciar.
 class PremiosHubScreen extends StatelessWidget {
   const PremiosHubScreen({super.key});
 
@@ -24,7 +25,7 @@ class PremiosHubScreen extends StatelessWidget {
       );
     }
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: appBarIron(
           context,
@@ -33,6 +34,7 @@ class PremiosHubScreen extends StatelessWidget {
             tabs: [
               Tab(text: 'Bandeja'),
               Tab(text: 'Catálogo'),
+              Tab(text: 'Clientes'),
             ],
           ),
         ),
@@ -40,6 +42,7 @@ class PremiosHubScreen extends StatelessWidget {
           children: [
             PremiosPanelScreen(embebida: true),
             PremiosCatalogoTab(),
+            PremiosClientesTab(),
           ],
         ),
       ),

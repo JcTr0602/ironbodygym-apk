@@ -160,13 +160,21 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('🏆 Aprobar premio'),
         content: Text(
-          '${v.nombre} reclamó el logro '
-          '«${tituloLogroPremio(v.logroId)}» con '
-          '${v.diasAlReclamar} días entrenados verificados '
-          'por el servidor.\n\n'
-          'Premio: ${v.premioDias} días de mensualidad '
-          'gratis.\n'
-          'Su vencimiento pasaría a ${fmtFecha(nuevoHasta)}.',
+          v.esManual
+              ? 'Vale manual creado por ti para ${v.nombre}'
+                  '${v.creadoNota.isNotEmpty ? ' («${v.creadoNota}»)' : ''}. '
+                  'Al concederlo tenía ${v.diasAlReclamar} días '
+                  'entrenados verificados por el servidor.\n\n'
+                  'Premio: ${v.premioDias} días de mensualidad '
+                  'gratis.\n'
+                  'Su vencimiento pasaría a ${fmtFecha(nuevoHasta)}.'
+              : '${v.nombre} reclamó el logro '
+                  '«${tituloLogroPremio(v.logroId)}» con '
+                  '${v.diasAlReclamar} días entrenados verificados '
+                  'por el servidor.\n\n'
+                  'Premio: ${v.premioDias} días de mensualidad '
+                  'gratis.\n'
+                  'Su vencimiento pasaría a ${fmtFecha(nuevoHasta)}.',
         ),
         actions: [
           TextButton(
@@ -365,10 +373,15 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Logro «${tituloLogroPremio(v.logroId)}» · '
-            '${v.diasAlReclamar} días verificados',
+            v.esManual
+                ? 'Vale manual creado por ti · '
+                    '${v.diasAlReclamar} días verificados al concederlo'
+                : 'Logro «${tituloLogroPremio(v.logroId)}» · '
+                    '${v.diasAlReclamar} días verificados',
             style: AppTexto.cuerpo,
           ),
+          if (v.creadoNota.isNotEmpty)
+            Text('📝 ${v.creadoNota}', style: AppTexto.cuerpo),
           Text(
             'Premio: ${v.premioDias} días de mensualidad gratis',
             style: AppTexto.cuerpo,
