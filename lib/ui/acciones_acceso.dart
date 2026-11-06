@@ -434,6 +434,13 @@ Future<void> mostrarMenuAccionesAcceso(
                 clienteId: a.clienteId,
                 rpc: 'desbloquear_acceso_cliente',
                 mensajeOk: '${a.nombre} desbloqueado.',
+                // 1.25 T88: desbloquear pide la MISMA
+                // confirmacion en las tres puertas (lista,
+                // menu y ficha); era la unica accion del
+                // menu que entraba sin preguntar.
+                confirmarAntes: true,
+                titulo: 'Desbloquear acceso',
+                texto: '¿Desbloquear el acceso de ${a.nombre}?',
                 alTerminar: alTerminar,
               ),
             ),

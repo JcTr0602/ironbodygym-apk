@@ -218,6 +218,17 @@ class _HorarioGymState extends State<HorarioGym> {
   bool _guardando = false;
   List<DiaHorario> _dias = [];
 
+  // 1.25 T89: firma del horario tal como se cargó (y
+  // tras cada guardado): salir con la firma distinta
+  // pide confirmación, como en el editor del patrón.
+  String _firmaCargada = '';
+
+  String get _firmaActual =>
+      jsonEncode(_dias.map((d) => d.toJson()).toList());
+
+  bool get _hayCambios =>
+      _dias.length == 7 && _firmaActual != _firmaCargada;
+
   static const _nombres = [
     '',
     'Lunes',
@@ -254,6 +265,7 @@ class _HorarioGymState extends State<HorarioGym> {
         if (mounted && lista.length == 7) {
           setState(() {
             _dias = lista;
+            _firmaCargada = _firmaActual;
             _cargando = false;
           });
         }
@@ -281,6 +293,7 @@ class _HorarioGymState extends State<HorarioGym> {
       if (lista.length == 7 && mounted) {
         setState(() {
           _dias = lista;
+          _firmaCargada = _firmaActual;
           _cargando = false;
         });
         // Guardar caché
@@ -359,6 +372,7 @@ class _HorarioGymState extends State<HorarioGym> {
           await SharedPreferences.getInstance();
       await prefs.setString(
           _kCacheKey, jsonEncode(payload));
+      _firmaCargada = _firmaActual;
       // 1.25 T30: el horario recién guardado mueve las
       // franjas de turno al instante en este teléfono.
       aplicarHorarioAFranjas(_dias);
@@ -436,7 +450,28 @@ class _HorarioGymState extends State<HorarioGym> {
         ),
       );
     }
-    return Scaffold(
+    // 1.25 T89: salir con cambios sin guardar pide
+    // confirmación (mismo patrón que el editor del
+    // patrón semanal, F3-11).
+    return PopScope(
+      canPop: !_hayCambios,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final salir = await DialogoApp.confirmar(
+          context,
+          titulo: 'Cambios sin guardar',
+          mensaje:
+              'Tienes cambios en el horario del gym que aún no se han guardado.',
+          aceptar: 'Salir sin guardar',
+          cancelar: 'Seguir editando',
+          icono: Icons.warning_amber_rounded,
+          peligro: true,
+        );
+        if (salir && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: appBarIron(
         context,
         'Horario del Gym',
@@ -491,6 +526,7 @@ class _HorarioGymState extends State<HorarioGym> {
                 ),
               ],
             ),
+      ),
     );
   }
 
@@ -574,8 +610,7 @@ class _HorarioGymState extends State<HorarioGym> {
                           dia.apertura2 = null;
                           dia.cierre2 = null;
                         });
-                        mostrarSnack(context,
-                            'Turno 2 eliminado (mantén para borrar)',
+                        mostrarSnack(context, 'Turno 2 eliminado',
                             duracion:
                                 const Duration(seconds: 1));
                       },

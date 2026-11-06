@@ -3075,15 +3075,49 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
     }
   }
 
+  /// 1.25 T89: ¿hay texto tecleado sin guardar? Mismo
+  /// cálculo que _guardar (con su normalización de
+  /// teléfonos), para que salir no lo pierda en
+  /// silencio — el tercer editor con el mismo aviso
+  /// (patrón semanal F3-11 y Horario del Gym T89).
+  bool get _hayCambiosInfo {
+    for (final c in clavesInfoPublica) {
+      if (c.clave == 'horario_texto') continue;
+      final v =
+          valorAGuardarInfoPublica(c.clave, _ctrls[c.clave]!.text);
+      if (v != (_originales[c.clave] ?? '')) return true;
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: appBarIron(context, 'Información pública'),
-      body: Column(
-        children: [
-          const SyncBanner(compact: true),
-          Expanded(child: _cuerpo()),
-        ],
+    return PopScope(
+      canPop: !_hayCambiosInfo || _guardando,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final salir = await DialogoApp.confirmar(
+          context,
+          titulo: 'Cambios sin guardar',
+          mensaje:
+              'Tienes cambios en la información pública que aún no se han guardado.',
+          aceptar: 'Salir sin guardar',
+          cancelar: 'Seguir editando',
+          icono: Icons.warning_amber_rounded,
+          peligro: true,
+        );
+        if (salir && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: appBarIron(context, 'Información pública'),
+        body: Column(
+          children: [
+            const SyncBanner(compact: true),
+            Expanded(child: _cuerpo()),
+          ],
+        ),
       ),
     );
   }

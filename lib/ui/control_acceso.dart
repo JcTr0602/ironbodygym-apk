@@ -426,8 +426,15 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                   Icons.lock_rounded, AppColores.alertaOscuro),
               _tarjetaFiltro('revocados', 'Revocados', '$revocados',
                   Icons.block_rounded, Colors.grey.shade700),
+              // 1.25 T88: si la consulta de sin-acceso
+              // FALLO, el contador dice «sin consultar» —
+              // nunca un 0 falso (la lista ya lo distingue
+              // con _sinAccesoFallo; la tarjeta no).
               _tarjetaFiltro('sinacceso', 'Sin acceso',
-                  '${_sinAcceso.length}', Icons.person_add_rounded,
+                  _sinAccesoFallo
+                      ? 'sin consultar'
+                      : '${_sinAcceso.length}',
+                  Icons.person_add_rounded,
                   AppColores.naranjaOscuro),
             ],
           ),

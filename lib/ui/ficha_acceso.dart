@@ -301,6 +301,13 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                               clienteId: widget.clienteId,
                               rpc: 'desbloquear_acceso_cliente',
                               mensajeOk: 'Acceso desbloqueado.',
+                              // 1.25 T88: la misma
+                              // confirmacion que en la
+                              // lista y en el menu.
+                              confirmarAntes: true,
+                              titulo: 'Desbloquear acceso',
+                              texto:
+                                  '¿Desbloquear el acceso de este cliente?',
                               alTerminar: _refrescarTodo,
                             )),
                   ),
