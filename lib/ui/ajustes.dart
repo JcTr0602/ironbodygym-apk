@@ -32,9 +32,80 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'avisos.dart';
 import 'componentes.dart';
+import 'panel_buscador.dart';
 import 'diseno.dart';
 import 'importar_respaldo.dart';
 import 'widgets.dart';
+
+/// 1.25 T113: el índice de ajustes por sección — la
+/// reagrupación fijada (Vibración y Alto contraste en
+/// Apariencia; «Sincronizar al abrir» en Datos; la
+/// bitácora en Diagnóstico) y la fuente del buscador
+/// de ajustes: una sección se enseña si alguno de sus
+/// títulos coincide con la búsqueda.
+const titulosPorSeccionAjustes = <String, List<String>>{
+  'Perfil': ['Nombre visible', 'Cuenta', 'Rol', 'Móvil', 'Carnet'],
+  'Apariencia': [
+    'Tema',
+    'Tamaño de letra',
+    'Vibración',
+    'Alto contraste',
+  ],
+  'Buscar cliente': ['Deslizar a la derecha', 'Deslizar a la izquierda'],
+  'Notificaciones': [
+    'Mis avisos',
+    'Avisar si llevo sin sincronizar',
+    'Cada cuánto avisar',
+    'Avisar si falla la sincronización',
+  ],
+  'Seguridad': [
+    'Cambiar contraseña',
+    'Vincular a este dispositivo',
+    'PIN rápido',
+    'Bloqueo automático',
+  ],
+  'Datos': [
+    'Sincronizar al abrir la app',
+    'Subida en segundo plano',
+    'Exportar respaldo',
+    'Importar respaldo',
+    'Espacio usado',
+    'Limpiar caché de fotos',
+    'Resincronizar fotos de clientes',
+    'Resincronizar fotos de suplementos',
+  ],
+  'Diagnóstico': [
+    'Exportar bitácora',
+    'Exportar novedades de la bitácora',
+    'Exportar y reiniciar bitácora',
+    'Reiniciar bitácora',
+  ],
+  'Acerca de': [
+    'Versión',
+    'Lo nuevo',
+    'Reportar problema',
+    'Restablecer ajustes',
+  ],
+};
+
+/// ¿El [titulo] de un ajuste coincide con la
+/// [consulta] del buscador? Sin búsqueda, todo
+/// coincide. Todos los tokens deben estar en el
+/// título (normalizado, como el buscador del Panel).
+bool coincideBusquedaAjuste(String titulo, String consulta) {
+  final q = normalizarTextoPanel(consulta);
+  if (q.isEmpty) return true;
+  final t = normalizarTextoPanel(titulo);
+  return q.split(' ').every((tok) => tok.isEmpty || t.contains(tok));
+}
+
+/// ¿La [seccion] tiene algún ajuste visible con la
+/// [consulta]? Sin búsqueda, todas se enseñan.
+bool seccionVisibleAjustes(String seccion, String consulta) {
+  if (normalizarTextoPanel(consulta).isEmpty) return true;
+  final titulos = titulosPorSeccionAjustes[seccion] ?? const <String>[];
+  return titulos.any((t) => coincideBusquedaAjuste(t, consulta));
+}
 
 class AjustesScreen extends StatefulWidget {
   const AjustesScreen({super.key});
@@ -75,6 +146,16 @@ class _AjustesScreenState extends State<AjustesScreen> {
     super.initState();
     _cargar();
     _refrescarExencionBateria();
+  }
+
+  // 1.25 T113: buscador de ajustes.
+  String _busquedaAjustes = '';
+  final _busquedaAjustesCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _busquedaAjustesCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _refrescarExencionBateria() async {
@@ -1516,6 +1597,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
   // ---------- UI ----------
 
   Widget _seccion(String titulo) {
+    // 1.25 T113: con búsqueda, la sección solo se
+    // enseña si algún ajuste suyo coincide.
+    if (!seccionVisibleAjustes(titulo, _busquedaAjustes)) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 16, 4, 4),
       child: Text(titulo,
@@ -1531,6 +1617,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     VoidCallback? onTap,
     Color? colorTitulo,
   }) {
+    // 1.25 T113: filtro del buscador de ajustes.
+    if (!coincideBusquedaAjuste(titulo, _busquedaAjustes)) {
+      return const SizedBox.shrink();
+    }
     return ListTile(
       leading: Icon(icono, size: 24),
       title: Text(titulo,
@@ -1558,6 +1648,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     required bool valor,
     required ValueChanged<bool> onChanged,
   }) {
+    // 1.25 T113: filtro del buscador de ajustes.
+    if (!coincideBusquedaAjuste(titulo, _busquedaAjustes)) {
+      return const SizedBox.shrink();
+    }
     return SwitchListTile(
       secondary: Icon(icono, size: 24),
       title: Text(titulo),
@@ -1583,12 +1677,49 @@ class _AjustesScreenState extends State<AjustesScreen> {
       body: Column(
         children: [
           const SyncBanner(),
+          // 1.25 T113: buscador de ajustes en la cabecera.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: CampoTexto(
+                    controller: _busquedaAjustesCtrl,
+                    hint: 'Buscar un ajuste…',
+                    icono: Icons.search_rounded,
+                    onChanged: (v) =>
+                        setState(() => _busquedaAjustes = v),
+                  ),
+                ),
+                if (_busquedaAjustes.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.clear_rounded),
+                    tooltip: 'Limpiar búsqueda',
+                    onPressed: () {
+                      _busquedaAjustesCtrl.clear();
+                      setState(() => _busquedaAjustes = '');
+                    },
+                  ),
+              ],
+            ),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                if (_busquedaAjustes.isNotEmpty &&
+                    !titulosPorSeccionAjustes.keys
+                        .any((sec) => seccionVisibleAjustes(sec, _busquedaAjustes)))
+                  const EstadoVacio(
+                    icono: Icons.search_off_rounded,
+                    titulo: 'Ningún ajuste coincide',
+                    subtitulo:
+                        'Prueba con otra palabra: tema, pin, respaldo, bitácora…',
+                  ),
                 // ----- PERFIL -----
                 _seccion('Perfil'),
+                if (_busquedaAjustes.isEmpty)
                 Center(
                   child: GestureDetector(
                     onTap: _cambiarAvatar,
@@ -1680,6 +1811,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   subtitulo: _temaEtiqueta(_tema),
                   onTap: _elegirTema,
                 ),
+                // 1.25 T113: también pasa por el buscador.
+                if (coincideBusquedaAjuste('Tamaño de letra', _busquedaAjustes))
                 Padding(
                   padding: const EdgeInsets.only(top: AppEspacio.xs),
                   child: Tarjeta(
@@ -1712,6 +1845,34 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   ),
                 ),
 
+                // v1.2.5 (3.2): vibración háptica tras confirmaciones.
+                _switch(
+                  icono: Icons.vibration_rounded,
+                  titulo: 'Vibración',
+                  subtitulo:
+                      'Vibra suave al confirmar una acción',
+                  valor: _vibracion,
+                  onChanged: (v) async {
+                    await _perfil.setVibracion(v);
+                    if (mounted) {
+                      setState(() => _vibracion = v);
+                    }
+                  },
+                ),
+                // v1.2.5 (3.4): alto contraste.
+                _switch(
+                  icono: Icons.contrast_rounded,
+                  titulo: 'Alto contraste',
+                  subtitulo:
+                      'Texto y bordes más marcados',
+                  valor: _altoContraste,
+                  onChanged: (v) async {
+                    await ThemeController.setAltoContraste(v);
+                    if (mounted) {
+                      setState(() => _altoContraste = v);
+                    }
+                  },
+                ),
                 // Bloque 1: acciones al deslizar en Buscar.
                 _seccion('Buscar cliente'),
                 _opcion(
@@ -1772,47 +1933,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     }
                   },
                 ),
-                _switch(
-                  icono: Icons.cloud_upload_rounded,
-                  titulo: 'Sincronizar al abrir la app',
-                  subtitulo:
-                      'Sube lo pendiente en segundo plano',
-                  valor: _autoSync,
-                  onChanged: (v) async {
-                    await _perfil.setAutoSync(v);
-                    if (mounted) {
-                      setState(() => _autoSync = v);
-                    }
-                  },
-                ),
-                // v1.2.5 (3.2): vibración háptica tras confirmaciones.
-                _switch(
-                  icono: Icons.vibration_rounded,
-                  titulo: 'Vibración',
-                  subtitulo:
-                      'Vibra suave al confirmar una acción',
-                  valor: _vibracion,
-                  onChanged: (v) async {
-                    await _perfil.setVibracion(v);
-                    if (mounted) {
-                      setState(() => _vibracion = v);
-                    }
-                  },
-                ),
-                // v1.2.5 (3.4): alto contraste.
-                _switch(
-                  icono: Icons.contrast_rounded,
-                  titulo: 'Alto contraste',
-                  subtitulo:
-                      'Texto y bordes más marcados',
-                  valor: _altoContraste,
-                  onChanged: (v) async {
-                    await ThemeController.setAltoContraste(v);
-                    if (mounted) {
-                      setState(() => _altoContraste = v);
-                    }
-                  },
-                ),
                 // ----- SEGURIDAD -----
                 _seccion('Seguridad'),
                 _opcion(
@@ -1861,6 +1981,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
                 // ----- DATOS -----
                 _seccion('Datos'),
+                _switch(
+                  icono: Icons.cloud_upload_rounded,
+                  titulo: 'Sincronizar al abrir la app',
+                  subtitulo:
+                      'Sube lo pendiente en segundo plano',
+                  valor: _autoSync,
+                  onChanged: (v) async {
+                    await _perfil.setAutoSync(v);
+                    if (mounted) {
+                      setState(() => _autoSync = v);
+                    }
+                  },
+                ),
                 // 1.23 (sync en 2º plano, sello de Argón): la
                 // exención de batería es por PAQUETE y se pide
                 // a mano aquí — nunca tras el login (el diálogo
@@ -1937,6 +2070,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
                         'Re-sube fotos que no se sincronizaron',
                     onTap: () => _resincronizarFotos('suplementos'),
                   ),
+                // ----- DIAGNÓSTICO (solo dueño) -----
+                if (AuthService().isOwner) _seccion('Diagnóstico'),
                 // v1.2.9+46 (AppLog): exportar bitácora para diagnóstico.
                 if (AuthService().isOwner)
                   _opcion(
