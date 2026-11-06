@@ -410,6 +410,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     var metodo =
         primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
     var cantidad = 1;
+    // 1.25 T34: tope SILENCIOSO del selector de cantidad de
+    // dosis = saldo del pomo a la vista (el entrenador no ve
+    // el número — regla de la casa — pero el selector no le
+    // deja pasarse; el agua ya enseñaba el suyo). Sin pomo o
+    // sin saldo conocido, 1: los guardas de registro mandan.
+    var topeCantidad = 1;
+    if (tipo != 'agua_suelta' && _pomoActual != null) {
+      final saldo = await saldoPomoLocal(
+          (_pomoActual!['id'] as num).toInt());
+      if (saldo > 1) topeCantidad = saldo;
+    }
     // Ítem 8 (solo el dueño los usa): roles de la venta. Precarga de
     // Argón: la venta nace «a nombre de» el titular del pomo (para el
     // entrenador y para el agua, de sí mismo) y el responsable del
@@ -458,8 +469,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 Text(
                   esCasa
                       ? 'Cuenta a la Casa — sin cobro'
-                      : '${fmtMonto(precioUnit)} CUP'
-                          '${tipo == 'agua_suelta' ? ' por pomo' : ''}',
+                      : cantidad > 1
+                          ? '${fmtMonto(precioUnit)} CUP × '
+                              '$cantidad = '
+                              '${fmtMonto(precioUnit * cantidad)} CUP'
+                          : '${fmtMonto(precioUnit)} CUP'
+                              '${tipo == 'agua_suelta' ? ' por pomo' : ''}',
                   style: AppTexto.titulo,
                 ),
                 // v1.8.1 (pedido de Jc 2026-10-23): el diálogo de agua
@@ -649,28 +664,35 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       ),
                   ],
                 ],
-                if (tipo == 'agua_suelta') ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text('Pomos:'),
-                      IconButton(
-                        onPressed: cantidad > 1
-                            ? () => setD(() => cantidad--)
-                            : null,
-                        icon: const Icon(Icons.remove_circle_outline_rounded),
-                      ),
-                      Text('$cantidad',
-                          style: AppTexto.titulo),
-                      IconButton(
-                        onPressed: cantidad < _agua.saldo
-                            ? () => setD(() => cantidad++)
-                            : null,
-                        icon: const Icon(Icons.add_circle_outline_rounded),
-                      ),
-                    ],
-                  ),
-                ],
+                // 1.25 T34: el selector de cantidad ya no es
+                // solo del agua: vender 3 dosis al mismo
+                // cliente dejaba de exigir 3 diálogos. El
+                // tope del agua es su inventario (visible);
+                // el de la dosis, el saldo del pomo SIN
+                // enseñarlo (topeCantidad).
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text(tipo == 'agua_suelta' ? 'Pomos:' : 'Dosis:'),
+                    IconButton(
+                      onPressed: cantidad > 1
+                          ? () => setD(() => cantidad--)
+                          : null,
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
+                    ),
+                    Text('$cantidad',
+                        style: AppTexto.titulo),
+                    IconButton(
+                      onPressed: cantidad <
+                              (tipo == 'agua_suelta'
+                                  ? _agua.saldo
+                                  : topeCantidad)
+                          ? () => setD(() => cantidad++)
+                          : null,
+                      icon: const Icon(Icons.add_circle_outline_rounded),
+                    ),
+                  ],
+                ),
               ],
             ),
             acciones: [
