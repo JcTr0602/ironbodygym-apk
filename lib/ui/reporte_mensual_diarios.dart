@@ -254,6 +254,31 @@ class _ReporteMensualDiariosScreenState
                       ),
                     ),
                 const SizedBox(height: 16),
+                // 1.25 T27: los diarios por día dejan de vivir
+                // solo en la lista plegada del final: el gráfico
+                // de barras de la casa se ve al entrar (la forma
+                // del mes de un vistazo); la lista con la cifra
+                // exacta de cada día queda debajo, desplegable.
+                if (diasConRegistro.isNotEmpty) ...[
+                  const Text('Diarios por día',
+                      style: AppTexto.subtitulo),
+                  const SizedBox(height: 8),
+                  Tarjeta(
+                    child: GraficoBarrasDiarias(
+                      datos: [
+                        for (final d in diasConRegistro)
+                          {
+                            'fecha': d,
+                            'total':
+                                (porDia[d] as num?)?.toDouble() ??
+                                    0,
+                          }
+                      ],
+                      altura: 96,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 // Por día (colapsado)
                 if (diasConRegistro.isNotEmpty)
                   Tarjeta(
