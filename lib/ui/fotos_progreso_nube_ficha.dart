@@ -175,6 +175,10 @@ class _SeccionFotosProgresoNubeState
 
   Future<void> _verGrande(Map<String, dynamic> foto) async {
     final fotoId = foto['id']?.toString() ?? '';
+    // O-01 (delta 1.27): si esta foto ya se está eliminando,
+    // ni siquiera abrir el visor — blinda también una futura
+    // entrada directa que no pase por el onTap de la rejilla.
+    if (_eliminandoIds.contains(fotoId)) return;
     final bytes = await _miniatura(fotoId);
     if (!mounted) return;
     if (bytes == null) {
@@ -182,8 +186,8 @@ class _SeccionFotosProgresoNubeState
       // se cacheó por otra vía — el próximo toque
       // reintenta la descarga.
       _miniaturas.remove(fotoId);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No se pudo descargar la foto.')));
+      mostrarSnack(context, 'No se pudo descargar la foto.',
+          significado: SignificadoChip.error);
       return;
     }
     final borrada = await showDialog<bool>(
@@ -246,9 +250,9 @@ class _SeccionFotosProgresoNubeState
                       }
                     },
                     icon: const Icon(Icons.delete_outline,
-                        color: Colors.red),
+                        color: AppColores.error),
                     label: const Text('Eliminar de la nube',
-                        style: TextStyle(color: Colors.red)),
+                        style: TextStyle(color: AppColores.error)),
                   ),
                 ],
               ),
@@ -280,9 +284,9 @@ class _SeccionFotosProgresoNubeState
         _miniaturas.remove(fotoId);
       });
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'El servidor no eliminó la foto. Inténtalo de nuevo.')));
+      mostrarSnack(
+          context, 'El servidor no eliminó la foto. Inténtalo de nuevo.',
+          significado: SignificadoChip.error);
     }
   }
 

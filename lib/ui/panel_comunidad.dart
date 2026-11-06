@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth.dart';
 import '../comunidad_panel.dart';
 import 'app_bar.dart';
 
@@ -40,7 +41,9 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
   @override
   void initState() {
     super.initState();
-    _cargar();
+    // Sin sesión de dueño ni siquiera se dispara la
+    // RPC de administración (ver la guarda en build).
+    if (AuthService().isOwner) _cargar();
   }
 
   Future<Map<String, dynamic>> _cargarReal() async {
@@ -120,6 +123,19 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Delta Argón 1.27 (#5): guarda defensiva de
+    // dueño, el mismo patrón de PremiosHubScreen. La
+    // tarjeta solo vive en el Panel del dueño y la
+    // RPC valida es_admin en el servidor (el cinturón
+    // final), pero la pantalla tampoco se pinta para
+    // un entrenador que llegara a abrirla.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Comunidad'),
+        body: const Center(
+            child: Text('Solo el dueño administra la comunidad.')),
+      );
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Comunidad'),
       body: _cargando

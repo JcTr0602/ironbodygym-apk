@@ -78,6 +78,14 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
   final _conceptoCtrl = TextEditingController();
   final _montoCtrl = TextEditingController();
 
+  // Delta Argón 1.27 (#2): un doble toque en
+  // «Guardar» no debe disparar dos Navigator.pop: el
+  // segundo cerraría la pantalla que abrió el
+  // diálogo. La bandera se toma síncrona al entrar
+  // (antes de cualquier rebuild) y el botón queda
+  // deshabilitado tras el primer toque válido.
+  bool _guardando = false;
+
   @override
   void dispose() {
     _conceptoCtrl.dispose();
@@ -86,6 +94,7 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
   }
 
   void _guardar() {
+    if (_guardando) return;
     final concepto = _conceptoCtrl.text.trim();
     final monto =
         double.tryParse(_montoCtrl.text.trim().replaceAll(',', '.'));
@@ -99,6 +108,7 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
           significado: SignificadoChip.alerta);
       return;
     }
+    setState(() => _guardando = true);
     Navigator.pop(context, (concepto: concepto, monto: monto));
   }
 
@@ -126,7 +136,7 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-          onPressed: _guardar,
+          onPressed: _guardando ? null : _guardar,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColores.naranja,
             foregroundColor: Colors.white,

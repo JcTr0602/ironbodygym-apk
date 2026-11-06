@@ -190,6 +190,14 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     // recargue con la foto vieja del servidor.
     if (await _enCursoReal(vale.id)) return;
     final opUuid = const Uuid().v4();
+    // Nota (Argón, delta 1.27): en modo «completo»
+    // el espejo resta premioDias lineal, aunque parte
+    // del vale ya se hubiera consumido; el servidor
+    // recalcula el vencimiento desde el último pago
+    // real, así que la foto local puede diferir unos
+    // días hasta que el pull inmediato la confirme.
+    // Lo que manda es la op: k viaja en el payload y
+    // el servidor lo verifica contra su propio cálculo.
     final k = modo == 'completo' ? vale.premioDias : diasQuitables;
     await LocalDb.instance.queueOp(
       opUuid: opUuid,

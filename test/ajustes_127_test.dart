@@ -31,6 +31,7 @@ import 'package:ironbody_gym/auth.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
+import 'package:ironbody_gym/premios_panel.dart';
 import 'package:ironbody_gym/ui/dialogo_gasto.dart';
 import 'package:ironbody_gym/ui/gastos.dart';
 import 'package:ironbody_gym/ui/panel_premios.dart';
@@ -175,6 +176,36 @@ void main() {
         expect(local.day, 6);
       }
     });
+
+    // Delta Argón 1.27 (#1): la fórmula S7 completa
+    // (diasQuitablesVale, la que alimenta el diálogo
+    // y la op) también cruza ambos cambios de hora
+    // sin recortar ni regalar un día.
+    test('diasQuitablesVale cruza el adelanto de '
+        'marzo y el retroceso de noviembre exacto', () {
+      // Canje el 5-mar por 7 días: ventana al 12-mar.
+      // Hoy 10-mar: quedan 2 días exactos; la resta
+      // local cruzando el 8-mar (día de 23 h) daba 1.
+      expect(
+          diasQuitablesVale(
+            pagadoHasta: '2026-03-12',
+            resueltoEn: '2026-03-05T11:00:00Z',
+            premioDias: 7,
+            hoy: DateTime(2026, 3, 10),
+          ),
+          2);
+      // Canje el 29-oct por 7 días: ventana al 5-nov.
+      // Hoy 3-nov: 2 días exactos cruzando el 1-nov
+      // (día de 25 h).
+      expect(
+          diasQuitablesVale(
+            pagadoHasta: '2026-11-05',
+            resueltoEn: '2026-10-29T11:00:00Z',
+            premioDias: 7,
+            hoy: DateTime(2026, 11, 3),
+          ),
+          2);
+    });
   });
 
   testWidgets('H-04: el buscador de Premios no devuelve '
@@ -275,6 +306,190 @@ void main() {
     expect(ops.where((o) => o['tipo'] == 'gasto'), hasLength(1));
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 400)));
+  });
+
+  // Delta Argón 1.27 (#2): el camino REAL de anular
+  // (_anularReal, sin inyectar anularVale) respeta la
+  // marca meta premio_vale_anulado_<id>: con la marca
+  // puesta NO encola otra op (segunda capa, por si el
+  // detalle llegó con la foto vieja); sin la marca
+  // encola exactamente una y deja la marca puesta.
+  group('Delta #2 · _anularReal y la marca meta', () {
+    Map<String, dynamic> detalleConVale() {
+      String iso(DateTime d) =>
+          '${d.year.toString().padLeft(4, '0')}-'
+          '${d.month.toString().padLeft(2, '0')}-'
+          '${d.day.toString().padLeft(2, '0')}';
+      final hoy = DateTime.now();
+      return {
+        'ok': true,
+        'cliente_id': 7,
+        'nombre': 'Ana Prueba',
+        'progreso': {
+          'logro_id': 'constancia_real',
+          'meta_dias': 90,
+          'premio_dias': 15,
+          'dias': 45,
+          'faltan': 45,
+          'ciclo_desde': null,
+        },
+        'sesiones_que_sumaron': <String>[],
+        'vales': [
+          {
+            'id': 3,
+            'logro_id': 'manual',
+            'premio_dias': 7,
+            'dias_al_reclamar': 40,
+            'estado': 'canjeado',
+            'creado_en': '2026-11-01T10:00:00Z',
+            'creado_nota': 'Cortesía especial',
+            'resuelto_en':
+                '${iso(hoy.subtract(const Duration(days: 5)))}T11:00:00Z',
+            'resuelto_nota': null,
+            'pago_uuid': 'uuid-pago-3',
+          },
+        ],
+        'sello': {'sello': <String, String>{}, 'actualizado_en': null},
+        'marcas': <dynamic>[],
+      };
+    }
+
+    Future<void> conducirAnulacion(WidgetTester tester) async {
+      String iso(DateTime d) =>
+          '${d.year.toString().padLeft(4, '0')}-'
+          '${d.month.toString().padLeft(2, '0')}-'
+          '${d.day.toString().padLeft(2, '0')}';
+      final hastaFutura =
+          iso(DateTime.now().add(const Duration(days: 25)));
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: PremiosClientesTab(
+            buscarClientes: () async => [
+              (id: 7, nombre: 'Ana Prueba', telefono: '55551234'),
+            ],
+            cargarDetalle: (_) async => detalleConVale(),
+            cargarCatalogo: () async => const [],
+            concederVale: (_, __, ___, ____) async => {'ok': true},
+            reiniciarCiclo: (_, __) async => {'ok': true},
+            pagadoHastaDe: (_) async => hastaFutura,
+            // La foto del detalle NO vio la marca (foto
+            // vieja): la capa 1 deja abrir el diálogo y
+            // es _anularReal quien debe frenar.
+            anulacionEnCursoDe: (_) async => false,
+            // anularVale SIN inyectar a propósito: el
+            // camino real contra LocalDb.
+          ),
+        ),
+      ));
+      await _esperarTexto(tester, 'Ana Prueba');
+      await tester.tap(find.text('Ana Prueba'));
+      await _esperarTexto(tester, 'Anular vale');
+      await tester.scrollUntilVisible(find.text('Anular vale'), 200);
+      await tester.tap(find.text('Anular vale'));
+      await _esperarTexto(tester, 'Nota (obligatoria)');
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Nota (obligatoria)'),
+          'Se arrepintió');
+      await tester.tap(
+          find.widgetWithText(ElevatedButton, 'Anular vale'));
+      // El _enviar atraviesa FFI real en _anularReal:
+      // se espera a que el diálogo se cierre de verdad.
+      for (var i = 0; i < 15; i++) {
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 200)));
+        await tester.pump();
+        if (find.text('Nota (obligatoria)').evaluate().isEmpty) {
+          break;
+        }
+      }
+      expect(find.text('Nota (obligatoria)'), findsNothing);
+    }
+
+    testWidgets('con la marca puesta no encola otra op',
+        (tester) async {
+      await _prepararDb(tester);
+      await tester.runAsync(() async {
+        await LocalDb.instance.upsertMirror('clientes', 7, {
+          'nombre': 'Ana Prueba',
+          'pagado_hasta': '2026-12-01',
+        }, 1);
+        await LocalDb.instance
+            .setMeta('premio_vale_anulado_3', 'uuid-previo');
+      });
+      await conducirAnulacion(tester);
+      final ops = await LocalDb.instance.pendingOps();
+      expect(
+          ops.where((o) => o['tipo'] == 'anular_vale_premio'),
+          isEmpty);
+    });
+
+    testWidgets('sin la marca encola una sola op y la '
+        'deja puesta', (tester) async {
+      await _prepararDb(tester);
+      await tester.runAsync(() async {
+        await LocalDb.instance.upsertMirror('clientes', 7, {
+          'nombre': 'Ana Prueba',
+          'pagado_hasta': '2026-12-01',
+        }, 1);
+      });
+      await conducirAnulacion(tester);
+      final ops = await LocalDb.instance.pendingOps();
+      final anulaciones =
+          ops.where((o) => o['tipo'] == 'anular_vale_premio');
+      expect(anulaciones, hasLength(1));
+      final payload = jsonDecode(anulaciones.single['payload'] as String)
+          as Map<String, dynamic>;
+      expect(payload['vale_id'], 3);
+      expect(
+          await LocalDb.instance.getMeta('premio_vale_anulado_3'),
+          isNotNull);
+    });
+  });
+
+  // Delta Argón 1.27 (#2): doble toque en el
+  // «Guardar» del propio diálogo de gasto: un solo
+  // resultado y la pantalla anfitriona intacta (el
+  // segundo Navigator.pop no se la lleva por delante).
+  testWidgets('Delta #2: doble «Guardar» en el diálogo '
+      'de gasto entrega un solo resultado', (tester) async {
+    final resultados = <({String concepto, double monto})>[];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (ctx) => Center(
+            child: ElevatedButton(
+              onPressed: () async {
+                final r =
+                    await showDialog<({String concepto, double monto})>(
+                  context: ctx,
+                  builder: (_) => const DialogoAgregarGasto(),
+                );
+                if (r != null) resultados.add(r);
+              },
+              child: const Text('Abrir diálogo'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Abrir diálogo'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Concepto (ej: pago de la luz)'),
+        'Pago de la luz');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Monto (CUP)'), '1500');
+    final centro = tester.getCenter(find.text('Guardar'));
+    final gesto = await tester.createGesture();
+    await gesto.down(centro);
+    await gesto.up();
+    await gesto.down(centro);
+    await gesto.up();
+    await tester.pumpAndSettle();
+    expect(resultados, hasLength(1));
+    expect(resultados.single.concepto, 'Pago de la luz');
+    expect(resultados.single.monto, 1500);
+    expect(find.text('Abrir diálogo'), findsOneWidget);
   });
 
   // H-05 al final a propósito: entra con la sesión
