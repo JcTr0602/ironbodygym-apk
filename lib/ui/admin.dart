@@ -35,6 +35,7 @@ import 'diseno.dart';
 import 'config_precios_bancarios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
+import 'bandeja_whatsapp.dart';
 import 'actividad.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
@@ -130,6 +131,8 @@ class _AdminScreenState extends State<AdminScreen> {
   List<String> _sinReporteAyer = [];
   List<String> _sinReporteHoy = [];
   int _incidenciasPend = 0;
+  // 1.25 T97: nombres de los que vencen hoy (bandeja única).
+  List<String> _vencenHoyNombres = [];
   // Solicitudes de inscripción de invitados por atender (del
   // servicio de Invitados). 1.23 (B3): estado SWR — la RPC no
   // bloquea el pintado (panel 1.6.0) y un fallo ya NO vacía la
@@ -251,6 +254,8 @@ class _AdminScreenState extends State<AdminScreen> {
     final sinHoy = await turnosSinReporte(isoDia(hoyH));
     final sinAyer = await turnosSinReporte(
         isoDia(hoyH.subtract(const Duration(days: 1))));
+    // 1.25 T97: los que vencen hoy, para la bandeja única.
+    final vencen = await vencenHoy();
     final incidencias = await incidenciasSyncPendientes();
     // v1.7.0: contador de Cuentas a la Casa (consulta local).
     final casa = await LocalDb.instance.conteoCuentasCasa();
@@ -293,6 +298,9 @@ class _AdminScreenState extends State<AdminScreen> {
         _stockCritico = criticos;
         _sinReporteAyer = sinAyer;
         _sinReporteHoy = sinHoy;
+        _vencenHoyNombres = [
+          for (final c in vencen) '${c['nombre'] ?? ''}',
+        ];
         _incidenciasPend = incidencias.length;
         // B3 (SWR): las bandejas RPC NO se vacían al recargar —
         // conservan su último payload bueno hasta que el
@@ -438,6 +446,8 @@ class _AdminScreenState extends State<AdminScreen> {
     final sinHoy = await turnosSinReporte(isoDia(hoyH));
     final sinAyer = await turnosSinReporte(
         isoDia(hoyH.subtract(const Duration(days: 1))));
+    // 1.25 T97: los que vencen hoy, para la bandeja única.
+    final vencen = await vencenHoy();
     final incidencias = await incidenciasSyncPendientes();
     final casa = await LocalDb.instance.conteoCuentasCasa();
     if (!mounted) return;
@@ -452,6 +462,9 @@ class _AdminScreenState extends State<AdminScreen> {
       _stockCritico = fotoRS.criticos;
       _sinReporteAyer = sinAyer;
       _sinReporteHoy = sinHoy;
+      _vencenHoyNombres = [
+        for (final c in vencen) '${c['nombre'] ?? ''}',
+      ];
       _incidenciasPend = incidencias.length;
       _cuentasCasa = casa;
     });
@@ -499,6 +512,8 @@ class _AdminScreenState extends State<AdminScreen> {
         unawaited(_cargarReportesPlus());
       case DestinoAtencion.arqueo:
         _ir(const ArqueoScreen());
+      case DestinoAtencion.vencimientos:
+        _ir(const BandejaWhatsappScreen());
       case DestinoAtencion.cierre:
         _ir(_pantallaCierre());
       case DestinoAtencion.incidencias:
@@ -1513,6 +1528,7 @@ class _AdminScreenState extends State<AdminScreen> {
         incidenciasPend: _incidenciasPend,
         syncError: _syncDet.error,
         stockCritico: _stockCritico,
+        vencenHoyNombres: _vencenHoyNombres,
       )))
         _PendientePanel(
           icono: d.icono,

@@ -28,6 +28,7 @@ enum DestinoAtencion {
   reportes,
   reintentarReportes,
   arqueo,
+  vencimientos,
   cierre,
   incidencias,
   diagnostico,
@@ -45,11 +46,13 @@ class PendienteAtencionDato {
   final String boton;
   final bool primario;
 
-  /// 1.25 T35: gravedad para ordenar la bandeja — 0 =
-  /// bloqueante (sync roto o bandeja sin cargar: nada de lo
-  /// demás se puede dar por bueno), 1 = decisión/dinero,
-  /// 2 = aviso suave. Antes el orden era el de construcción
-  /// y un error de sync quedaba tras el «+N más» sin señal.
+  /// Gravedad para ordenar la bandeja (1.25 T35; escala
+  /// completa de T97): 0 = bloqueante (sync roto o bandeja
+  /// sin cargar: nada de lo demás se puede dar por bueno),
+  /// 1 = dinero detenido / decisión, 2 = vence hoy,
+  /// 3 = informativo. Antes de T35 el orden era el de
+  /// construcción y un error de sync quedaba tras el
+  /// «+N más» sin señal.
   final int gravedad;
 
   const PendienteAtencionDato({
@@ -89,6 +92,10 @@ class FotoAtencion {
   final String? syncError;
   final List<Map<String, dynamic>> stockCritico;
 
+  /// 1.25 T97: nombres de los clientes que vencen HOY
+  /// (sin Casa): la fila «vence hoy» de la bandeja única.
+  final List<String> vencenHoyNombres;
+
   const FotoAtencion({
     required this.solicitudes,
     required this.reportes,
@@ -100,6 +107,7 @@ class FotoAtencion {
     required this.incidenciasPend,
     required this.syncError,
     required this.stockCritico,
+    this.vencenHoyNombres = const [],
   });
 }
 
@@ -168,7 +176,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: f.solicitudes.notaSinRed,
       boton: 'Reintentar',
       primario: false,
-      gravedad: 2,
+      gravedad: 3,
     ));
   }
 
@@ -246,7 +254,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: f.reportes.notaSinRed,
       boton: 'Reintentar',
       primario: false,
-      gravedad: 2,
+      gravedad: 3,
     ));
   }
 
@@ -267,6 +275,26 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       detalle: detalle,
       boton: 'Arqueo',
       primario: false,
+    ));
+  }
+
+  // 1.25 T97: clientes que vencen HOY — la bandeja única
+  // los enseña en su nivel propio (2), entre el dinero
+  // detenido y lo informativo; el destino es la bandeja
+  // de avisos, donde se les escribe o se les cobra.
+  if (f.vencenHoyNombres.isNotEmpty) {
+    final n = f.vencenHoyNombres.length;
+    pendientes.add(PendienteAtencionDato(
+      destino: DestinoAtencion.vencimientos,
+      icono: Icons.event_busy_rounded,
+      tinte: AppColores.alerta,
+      titulo: n == 1 ? '1 cliente vence hoy' : '$n clientes vencen hoy',
+      detalle: n == 1
+          ? f.vencenHoyNombres.first
+          : '${f.vencenHoyNombres.first} y ${n - 1} más',
+      boton: 'Avisar',
+      primario: false,
+      gravedad: 2,
     ));
   }
 
@@ -340,7 +368,7 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
               '${s['nombre']} queda $stock',
       boton: 'Ver',
       primario: false,
-      gravedad: 2,
+      gravedad: 3,
     ));
   }
 

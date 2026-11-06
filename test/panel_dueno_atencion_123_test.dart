@@ -178,7 +178,9 @@ void main() {
     expect(filas[7].titulo, 'Sin reporte de caja');
     expect(filas[0].titulo, '2 incidencias de sync por revisar');
     expect(filas[0].gravedad, 0);
-    expect(filas[8].gravedad, 2);
+    // 1.25 T97: la escala se completa (2 = vence hoy) y el
+    // stock crítico baja a informativo (3).
+    expect(filas[8].gravedad, 3);
   });
 
   test('T35: sin cargar (bloqueante) salta delante de solicitudes', () {
