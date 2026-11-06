@@ -298,10 +298,15 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         context,
         'Calendario de turnos',
         acciones: [
+          // F3-21: la navegación se limita a ±6 meses (las
+          // excepciones se podan a 180 días: más allá no hay
+          // nada que ver ni corregir).
           IconButton(
             icon: const Icon(Icons.chevron_left_rounded),
-            onPressed: () => setState(() =>
-                _mes = DateTime(_mes.year, _mes.month - 1)),
+            onPressed: _puedeRetrocederMes(hoy)
+                ? () => setState(() =>
+                    _mes = DateTime(_mes.year, _mes.month - 1))
+                : null,
           ),
           Center(
             child: Text(
@@ -310,8 +315,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.chevron_right_rounded),
-            onPressed: () => setState(() =>
-                _mes = DateTime(_mes.year, _mes.month + 1)),
+            onPressed: _puedeAvanzarMes(hoy)
+                ? () => setState(() =>
+                    _mes = DateTime(_mes.year, _mes.month + 1))
+                : null,
           ),
         ],
       ),
@@ -323,10 +330,38 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                 const Text(
                   'Cada día muestra quién está programado (patrón '
                   'con las excepciones de ese día). El punto '
-                  'naranja marca los días con excepción. Toca un '
+                  'ámbar marca los días con excepción. Toca un '
                   'día para corregirlo sin tocar el patrón.',
                   style: AppTexto.cuerpo,
                 ),
+                // F3-21: leyenda de colores por entrenador
+                // (antes había que adivinarlos celda a celda).
+                if (_nombresEnCalendario().isNotEmpty) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Wrap(
+                    spacing: AppEspacio.md,
+                    runSpacing: AppEspacio.xs,
+                    children: [
+                      for (final n in _nombresEnCalendario())
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 9,
+                              height: 9,
+                              decoration: BoxDecoration(
+                                color: colorChipEntrenador(n),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: AppEspacio.xs),
+                            Text(n.split(' ').first,
+                                style: AppTexto.metadato),
+                          ],
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: AppEspacio.md),
                 Row(
                   children: [
@@ -371,6 +406,31 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
     );
   }
 
+  /// F3-21: nombres con color en el calendario, desde el
+  /// patrón y las excepciones cargadas (para la leyenda).
+  List<String> _nombresEnCalendario() {
+    final nombres = <String>{};
+    for (final franjas in _patron.values) {
+      for (final n in franjas.values) {
+        if (n != null && n.trim().isNotEmpty) nombres.add(n.trim());
+      }
+    }
+    for (final franjas in _excepciones.values) {
+      for (final n in franjas.values) {
+        if (n != null && n.trim().isNotEmpty) nombres.add(n.trim());
+      }
+    }
+    return nombres.toList()..sort();
+  }
+
+  bool _puedeRetrocederMes(DateTime hoy) =>
+      DateTime(_mes.year, _mes.month - 1)
+          .isAfter(DateTime(hoy.year, hoy.month - 7));
+
+  bool _puedeAvanzarMes(DateTime hoy) =>
+      DateTime(_mes.year, _mes.month + 1)
+          .isBefore(DateTime(hoy.year, hoy.month + 7));
+
   /// T2 (estéticas 1.19): chip de franja — el color identifica al
   /// entrenador de un vistazo en todo el mes.
   Widget _chipTurno(String letra, String? nombre) {
@@ -409,7 +469,14 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
 
   Widget _celda(
       BuildContext context, int dia, int diasEnMes, DateTime hoy) {
-    if (dia < 1 || dia > diasEnMes) return const SizedBox(height: 64);
+    if (dia < 1 || dia > diasEnMes) {
+      // F3-21: alto MÍNIMO, no fijo (con el texto del sistema
+      // grande la celda de 64 px fijos desbordaba).
+      return ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 64),
+        child: const SizedBox.shrink(),
+      );
+    }
     final fecha = DateTime(_mes.year, _mes.month, dia);
     final esHoy = fecha.year == hoy.year &&
         fecha.month == hoy.month &&
@@ -443,7 +510,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
           borderRadius: BorderRadius.circular(AppRadio.md),
           onTap: domingo ? null : () => _editarDia(fecha),
           child: Container(
-            height: 64,
+            constraints: const BoxConstraints(minHeight: 64),
             padding: const EdgeInsets.all(AppEspacio.xs),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadio.md),

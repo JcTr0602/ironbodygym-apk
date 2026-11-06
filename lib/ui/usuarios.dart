@@ -11,6 +11,8 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../config.dart' show AppConfig;
+import '../tiempo.dart' show ahoraHabana, aHabana;
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
@@ -70,6 +72,20 @@ Map<String, dynamic> payloadCambiarFotoUsuario(
 class _UsuariosScreenState extends State<UsuariosScreen> {
   List<Map<String, dynamic>> _usuarios = [];
   bool _cargando = true;
+  // 1.25 T119 (F3-22): buscador (como el de Invitados) y marca
+  // de frescura cuando el pull falla y la lista sale de la
+  // caché: antes un fallo de red dejaba la lista vieja en
+  // pantalla sin ningún aviso.
+  final _busquedaCtrl = TextEditingController();
+  String _filtro = '';
+  bool _pullFallo = false;
+  DateTime? _ultimoPull;
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -79,10 +95,17 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    // Refrescar desde el servidor y leer caché local
+    // Refrescar desde el servidor y leer caché local.
+    // F3-22: el fallo del pull ya no se traga en silencio: se
+    // anota para avisar de que la lista es la guardada.
+    var pullFallo = false;
     try {
       await SyncEngine.instance.pull();
-    } catch (_) {}
+    } catch (_) {
+      pullFallo = true;
+    }
+    final tsPull = await LocalDb.instance.getMeta('ultimo_pull_ts');
+    final ultimoPull = tsPull == null ? null : DateTime.tryParse(tsPull);
     final raw = await LocalDb.instance.getMeta('usuarios_apk');
     final lista = <Map<String, dynamic>>[];
     if (raw != null && raw.isNotEmpty) {
@@ -97,8 +120,37 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       setState(() {
         _usuarios = lista;
         _cargando = false;
+        _pullFallo = pullFallo;
+        _ultimoPull = ultimoPull;
       });
     }
+  }
+
+  /// F3-22: la lista que se pinta, tras el filtro del buscador.
+  List<Map<String, dynamic>> get _visibles {
+    final f = _filtro.trim().toLowerCase();
+    if (f.isEmpty) return _usuarios;
+    return _usuarios
+        .where((u) =>
+            '${u['username'] ?? ''}'.toLowerCase().contains(f) ||
+            '${u['nombre'] ?? ''}'.toLowerCase().contains(f))
+        .toList();
+  }
+
+  /// F3-22: texto de frescura cuando la lista sale de la caché
+  /// tras un pull fallido (mismo formato que Mi Día).
+  String _textoFrescuraCache() {
+    final ts = _ultimoPull;
+    if (ts == null) return '📴 Sin conexión · datos guardados';
+    final diff = ahoraHabana().difference(aHabana(ts));
+    if (diff.inMinutes < 1) return '📴 Sin conexión · datos de ahora mismo';
+    if (diff.inMinutes < 60) {
+      return '📴 Sin conexión · datos de hace ${diff.inMinutes} min';
+    }
+    if (diff.inHours < 24) {
+      return '📴 Sin conexión · datos de hace ${diff.inHours} h';
+    }
+    return '📴 Sin conexión · datos de hace ${diff.inDays} días';
   }
 
   Future<void> _accion(
@@ -466,10 +518,51 @@ Hola $username, estas son tus credenciales para la app del gym:
       ),
       // 1.23 T7: cruce por tipo de estado (el vacío ya era el
       // compartido EstadoVacio).
-      body: CruceEstados(
+      // 1.25 T119 (F3-22): sobre el cruce van el buscador y,
+      // si el pull falló, la marca de frescura de la caché.
+      body: Column(
+        children: [
+          if (!_cargando && _usuarios.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                  AppEspacio.md, AppEspacio.lg, AppEspacio.xs),
+              child: TextField(
+                controller: _busquedaCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Buscar usuario…',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _filtro.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Quitar búsqueda',
+                          onPressed: () {
+                            _busquedaCtrl.clear();
+                            setState(() => _filtro = '');
+                          },
+                        ),
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (v) => setState(() => _filtro = v),
+              ),
+            ),
+            if (_pullFallo)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                    AppEspacio.xs, AppEspacio.lg, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(_textoFrescuraCache(),
+                      style: AppTexto.metadato),
+                ),
+              ),
+          ],
+          Expanded(
+            child: CruceEstados(
         estado: _cargando
             ? 'cargando'
-            : _usuarios.isEmpty
+            : (_usuarios.isEmpty || _visibles.isEmpty)
                 ? 'vacio'
                 : 'contenido',
         child: _cargando
@@ -482,13 +575,25 @@ Hola $username, estas son tus credenciales para la app del gym:
                   textoAccion: 'Actualizar',
                   onAccion: _cargar,
                 )
+                : _visibles.isEmpty
+                    ? EstadoVacio(
+                        icono: Icons.search_off_rounded,
+                        titulo: 'Nadie coincide',
+                        subtitulo:
+                            'Ningún usuario coincide con «$_filtro».',
+                        textoAccion: 'Quitar búsqueda',
+                        onAccion: () {
+                          _busquedaCtrl.clear();
+                          setState(() => _filtro = '');
+                        },
+                      )
               : RefreshIndicator(
                   onRefresh: _cargar,
                   child: ListView.separated(
-                    itemCount: _usuarios.length,
+                    itemCount: _visibles.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (ctx, i) {
-                      final u = _usuarios[i];
+                      final u = _visibles[i];
                       final username = '${u['username'] ?? '?'}';
                       final bloqueado = u['bloqueado'] == true;
                       // v1.0.14: tiempo relativo legible
@@ -500,7 +605,18 @@ Hola $username, estas son tus credenciales para la app del gym:
                       final appVersion = '${u['app_version'] ?? ''}';
                       final rol = '${u['rol'] ?? 'entrenador'}';
                       final esAdmin = rol == 'admin';
-                      final esDueno = username.toLowerCase() == 'jctr0602';
+                      // F3-22: el dueño se detecta por IDENTIDAD
+                      // (el uid de la fila contra el uid de la
+                      // sesión, vía AuthService), no por un
+                      // username escrito a mano en la UI. Sin uid
+                      // en la fila (cachés viejas), respaldo por
+                      // la lista de dueños de la configuración.
+                      final uidFila = '${u['id'] ?? ''}';
+                      final miUid = AuthService().userId ?? '';
+                      final esDueno = uidFila.isNotEmpty
+                          ? uidFila == miUid
+                          : AppConfig.ownerUsernames
+                              .contains(username.toLowerCase());
                       return ListTile(
                         leading: _avatar(username, bloqueado, esAdmin),
                         title: Row(
@@ -521,7 +637,11 @@ Hola $username, estas son tus credenciales para la app del gym:
                                     style: AppTexto.minuscula),
                                 visualDensity: VisualDensity.compact,
                               ),
-                            if (bloqueado && !esDueno)
+                            // F3-22: el chip se pinta también en
+                            // la fila del dueño — antes se
+                            // ocultaba justo ahí, y un bloqueo
+                            // del dueño en el servidor no se veía.
+                            if (bloqueado)
                               const Chip(
                                 label: Text('Bloqueado',
                                     style: AppTexto.minuscula),
@@ -623,7 +743,10 @@ Hola $username, estas son tus credenciales para la app del gym:
                     },
                   ),
                 ),
-        ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

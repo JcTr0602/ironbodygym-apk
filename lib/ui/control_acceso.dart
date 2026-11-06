@@ -1150,8 +1150,8 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
     setState(() => _cargando = true);
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
-      // tope, una conexión colgada dejaba «Cargando control de
-      // acceso…» eterno (un cuelgue no es un error).
+      // tope, una conexión colgada dejaba el «Cargando…» eterno
+      // (un cuelgue no es un error).
       final res = await Supabase.instance.client
           .rpc(
             'listar_auditoria_accesos',
@@ -1196,13 +1196,35 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando control de acceso…')
+          // 1.25 T119 (F3-23): texto de carga PROPIO de esta
+          // pantalla (antes decía «Cargando control de acceso…»,
+          // copiado de la pantalla madre).
+          ? const EstadoCargando(texto: 'Cargando auditoría de accesos…')
           : _items.isEmpty
               ? const Center(
                   child: Text('Sin acciones registradas todavía.',
                       style: AppTexto.secundario),
                 )
-              : ListView.builder(
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // F3-23: la consulta trae como máximo 100 y
+                    // la pantalla lo dice: con la lista llena son
+                    // los ÚLTIMOS 100, no todo el historial.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                          AppEspacio.md, AppEspacio.lg, AppEspacio.xs),
+                      child: Text(
+                        _items.length >= 100
+                            ? 'Últimos 100 movimientos'
+                            : _items.length == 1
+                                ? '1 movimiento'
+                                : '${_items.length} movimientos',
+                        style: AppTexto.metadato,
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
                   itemCount: _items.length,
                   itemBuilder: (ctx, i) {
                     final m = Map<String, dynamic>.from(_items[i] as Map);
@@ -1221,6 +1243,9 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
                       ),
                     );
                   },
+                      ),
+                    ),
+                  ],
                 ),
     );
   }

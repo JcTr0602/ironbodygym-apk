@@ -119,23 +119,57 @@ Future<void> resetearPinAcceso(
   required int clienteId,
   required String nombre,
   required String telefono,
-  required bool esReenvio,
+  required bool? esReenvio,
   required Future<void> Function() alTerminar,
   String? titulo,
 }) async {
   if (!_soloDueno(ctx)) return;
-  final ok = await confirmarAccionAcceso(
-    ctx,
-    titulo ??
-        (esReenvio ? 'Reenviar credenciales' : 'Resetear PIN'),
-    esReenvio
-        ? 'Se generará un PIN NUEVO para $nombre (el anterior dejará '
-            'de funcionar) y podrás enviárselo por WhatsApp.'
-        : 'Se generará un PIN nuevo para $nombre. El anterior dejará '
-            'de funcionar y su sesión se cerrará.',
-    boton: 'Generar PIN nuevo',
-  );
-  if (!ok) return;
+  // 1.25 T119 (F3-25): esReenvio == null = la confirmación misma
+  // ofrece las dos salidas (ver el PIN aquí o prepararlo para
+  // WhatsApp). Antes la ficha tenía DOS botones («Resetear PIN»
+  // y «Reenviar credenciales») que ejecutaban esta misma función
+  // cambiando solo el texto de este diálogo: la RPC y el
+  // resultado (el modal con el PIN, que ya deja compartirlo)
+  // eran idénticos.
+  if (esReenvio == null) {
+    if (!ctx.mounted) return;
+    final modo = await showDialog<bool>(
+      context: ctx,
+      builder: (dctx) => AlertDialog(
+        title: Text(titulo ?? 'Restablecer acceso'),
+        content: Text(
+          'Se generará un PIN NUEVO para $nombre. El anterior '
+          'dejará de funcionar y su sesión se cerrará. Al '
+          'terminar verás el PIN y podrás enviárselo por '
+          'WhatsApp desde la misma ventana.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text('Generar PIN nuevo'),
+          ),
+        ],
+      ),
+    );
+    if (modo != true) return;
+  } else {
+    final ok = await confirmarAccionAcceso(
+      ctx,
+      titulo ??
+          (esReenvio ? 'Reenviar credenciales' : 'Resetear PIN'),
+      esReenvio
+          ? 'Se generará un PIN NUEVO para $nombre (el anterior dejará '
+              'de funcionar) y podrás enviárselo por WhatsApp.'
+          : 'Se generará un PIN nuevo para $nombre. El anterior dejará '
+              'de funcionar y su sesión se cerrará.',
+      boton: 'Generar PIN nuevo',
+    );
+    if (!ok) return;
+  }
   // Guarda de ciclo de vida (panel R2): con el anfitrión desmontado,
   // la RPC invalidaría el PIN viejo sin poder mostrar el nuevo.
   if (!ctx.mounted) return;

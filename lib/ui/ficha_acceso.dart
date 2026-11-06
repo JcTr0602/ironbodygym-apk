@@ -117,9 +117,12 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     }
     final nombre = '${_acceso?['nombre'] ?? 'Acceso del cliente'}';
     return Scaffold(
-      appBar: AppBar(
-        title: Text(nombre, overflow: TextOverflow.ellipsis),
-        actions: [
+      // 1.25 T119 (F3-25): barra de la casa, no la de Material
+      // pelada (era la única pantalla de la zona sin appBarIron).
+      appBar: appBarIron(
+        context,
+        nombre,
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargando ? null : _cargar,
@@ -221,7 +224,9 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
             _dato('Sesión abierta', a['tiene_sesion'] == true
                 ? 'Sí · vence ${_fmtFecha(a['sesion_expira_en'])}'
                 : 'No'),
-            _dato('Versión de sesión', '${a['token_version'] ?? 1}'),
+            // F3-25: fuera «Versión de sesión» (el token_version
+            // crudo): jerga sin uso en la ficha — los cierres y
+            // reseteos ya se ven en el historial de abajo.
             const SizedBox(height: AppEspacio.sm),
             OutlinedButton.icon(
               icon: const Icon(Icons.person_rounded, size: 18),
@@ -258,28 +263,21 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
+                // F3-25: UN solo botón «Restablecer acceso» —
+                // «Resetear PIN» y «Reenviar credenciales» eran
+                // la misma RPC con distinto título de
+                // confirmación; la confirmación unificada vive
+                // en resetearPinAcceso (esReenvio: null).
                 FilledButton.icon(
                   icon: const Icon(Icons.pin_rounded, size: 18),
-                  label: const Text('Resetear PIN'),
+                  label: const Text('Restablecer acceso'),
                   onPressed: _ocupado || revocado
                       ? null
                       : () => _conOcupado(() => resetearPinAcceso(context,
                             clienteId: widget.clienteId,
                             nombre: '${a['nombre'] ?? 'el cliente'}',
                             telefono: '${a['telefono'] ?? ''}',
-                            esReenvio: false,
-                            alTerminar: _refrescarTodo)),
-                ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.chat_rounded, size: 18),
-                  label: const Text('Reenviar credenciales'),
-                  onPressed: _ocupado || revocado
-                      ? null
-                      : () => _conOcupado(() => resetearPinAcceso(context,
-                            clienteId: widget.clienteId,
-                            nombre: '${a['nombre'] ?? 'el cliente'}',
-                            telefono: '${a['telefono'] ?? ''}',
-                            esReenvio: true,
+                            esReenvio: null,
                             alTerminar: _refrescarTodo)),
                 ),
                 if (!revocado && !bloqueado)

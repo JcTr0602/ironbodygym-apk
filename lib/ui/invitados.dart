@@ -97,6 +97,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   // sobre lo cargado y se muestra «X de Y cargados»).
   final _busquedaCtrl = TextEditingController();
   final _scroll = ScrollController();
+  // 1.25 T119 (F3-30): el salto por letra estimaba 120 px por
+  // tarjeta que miden ~170 (el propio comentario lo decía):
+  // ahora el alto se MIDE de la primera tarjeta pintada.
+  final _primeraTarjetaKey = GlobalKey();
+  double _altoTarjeta = 170;
   String _busqueda = '';
   String _orden = 'servidor';
   // v1.12.0 (C5): reportes Plus por atender (best-effort; null si
@@ -262,64 +267,25 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     }
   }
 
-  /// Mini-conteos de cabecera (del servidor): tocar uno aplica
-  /// su chip. En offline se pintan pero no navegan (vista clavada
-  /// en «Todos», G1).
-  Widget _lineaConteos() {
-    final c = _conteos!;
-    Widget seg(String texto, String filtro) => InkWell(
-          onTap: _offline
-              ? null
-              : () {
-                  setState(() {
-                    _filtro = filtro;
-                    _seleccion.clear();
-                  });
-                  _cargar();
-                },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 6, vertical: AppEspacio.xs),
-            child: Text(texto,
-                style: AppTexto.secundario.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: _filtro == filtro
-                        ? AppColores.naranja
-                        : null)),
-          ),
-        );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
-      child: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          seg('${c.total} invitados', 'todos'),
-          const Text('·', style: AppTexto.secundario),
-          seg('${c.plus} Plus', 'plus'),
-          const Text('·', style: AppTexto.secundario),
-          seg('${c.solicitudes} solicitudes', 'solicitudes'),
-          const Text('·', style: AppTexto.secundario),
-          seg('${c.porExpirar} por expirar', 'por_expirar'),
-          if (c.plusPorVencer > 0) ...[
-            const Text('·', style: AppTexto.secundario),
-            seg('${c.plusPorVencer} Plus por vencer',
-                'plus_por_vencer'),
-          ],
-          // v1.12.0 (F4): caducados y convertidos con los mismos
-          // números que la lista (del servidor; si la oleada aún no
-          // los envía, no se pintan en vez de inventarlos).
-          if (c.caducados != null) ...[
-            const Text('·', style: AppTexto.secundario),
-            seg('${c.caducados} caducados', 'caducados'),
-          ],
-          if (c.convertidos != null) ...[
-            const Text('·', style: AppTexto.secundario),
-            seg('${c.convertidos} convertidos', 'convertidos'),
-          ],
-        ],
-      ),
-    );
+  /// 1.25 T119 (F3-19): etiqueta de un chip de filtro con su
+  /// conteo del servidor («Plus · 5»). Sin conteo conocido
+  /// (caducados/convertidos aún sin enviar por el servidor)
+  /// el chip va con su nombre a secas.
+  String _etiquetaChip(({String id, String etiqueta}) f) {
+    final c = _conteos;
+    if (c == null) return f.etiqueta;
+    final n = switch (f.id) {
+      'todos' => c.total,
+      'solicitudes' => c.solicitudes,
+      'nuevos' => c.nuevos,
+      'por_expirar' => c.porExpirar,
+      'caducados' => c.caducados,
+      'plus' => c.plus,
+      'plus_por_vencer' => c.plusPorVencer,
+      'convertidos' => c.convertidos,
+      _ => null,
+    };
+    return n == null ? f.etiqueta : '${f.etiqueta} · $n';
   }
 
   /// Barra inferior del modo selección: SOLO las tres acciones de
@@ -628,7 +594,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
               children: [
                 for (final f in _filtros) ...[
                   ChoiceChip(
-                    label: Text(f.etiqueta),
+                    // 1.25 T119 (F3-19): el chip lleva su
+                    // conteo dentro — la línea de conteos
+                    // tappable duplicaba esta misma
+                    // navegación y ocupaba otra fila.
+                    label: Text(_etiquetaChip(f)),
                     selected: _filtro == f.id,
                     onSelected: (_) {
                       setState(() {
@@ -654,7 +624,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                   child: TextField(
                     controller: _busquedaCtrl,
                     decoration: const InputDecoration(
-                      hintText: 'Buscar por nombre o teléfono',
+                      // F3-19: la búsqueda es sobre la página
+                      // cargada; el hint lo dice.
+                      hintText: 'Buscar en los cargados (nombre o teléfono)',
                       prefixIcon: Icon(Icons.search_rounded, size: 20),
                       border: OutlineInputBorder(),
                       isDense: true,
@@ -684,7 +656,6 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
               ],
             ),
           ),
-        if (_conteos != null) _lineaConteos(),
         // v1.12.0 (C5): enlace a los reportes Plus por atender (solo
         // si hay pendientes; sin red o sin pendientes no se pinta).
         if (!_offline &&
@@ -835,6 +806,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                 }
               });
           return Padding(
+            // F3-30: la primera tarjeta lleva la llave de
+            // medición del salto por letra.
+            key: i == 0 ? _primeraTarjetaKey : null,
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: GestureDetector(
               onLongPress: _offline ? null : alternar,
@@ -1022,14 +996,19 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       );
     }
 
-  /// Salta al primer invitado de la letra (alto estimado 170 por
-  /// tarjeta, aproximado: las tarjetas varían con los chips).
+  /// Salta al primer invitado de la letra. F3-30: el paso es
+  /// el alto MEDIDO de la primera tarjeta (con su margen); si
+  /// aún no se midió, el estimado de 170. Las tarjetas varían
+  /// con los chips: es una aproximación honesta, no exacta.
   void _saltarALetra(String letra) {
+    final ctx0 = _primeraTarjetaKey.currentContext;
+    final medida = ctx0?.size?.height;
+    if (medida != null && medida > 0) _altoTarjeta = medida;
     final idx = _indiceLetras[letra];
     if (idx == null || !_scroll.hasClients) return;
     final max = _scroll.position.maxScrollExtent;
     _scroll.animateTo(
-      (idx * 120.0).clamp(0.0, max),
+      (idx * _altoTarjeta).clamp(0.0, max),
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
     );
@@ -1358,6 +1337,15 @@ class InvitadoDetalleScreen extends StatefulWidget {
       _InvitadoDetalleScreenState();
 }
 
+/// F3-20: traducción del estado crudo del invitado a
+/// lenguaje llano para la tarjeta de Datos.
+String _estadoLegibleInvitado(String estado) => switch (estado) {
+      'activo' => 'Activo',
+      'en_conversion' => 'Convirtiéndose en cliente',
+      'convertido' => 'Ya es cliente',
+      _ => estado,
+    };
+
 class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   final _svc = InvitadosService();
   bool _cargando = true;
@@ -1649,6 +1637,52 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     }
   }
 
+  /// 1.25 T119 (F3-20): barra de acción fija del detalle —
+  /// las dos acciones que dan valor (escribir y convertir)
+  /// vivían enterradas tras 7-8 tarjetas de scroll. La de
+  /// convertir solo aparece en el mismo caso en que la
+  /// tarjeta de conversión muestra su botón (sin preparar ni
+  /// en curso), y llama al mismo método.
+  Widget? _barraAccionesDetalle() {
+    final d = _d;
+    if (d == null || _cargando) return null;
+    final hayWa = normalizarTelefonoWaMe(d.telefono).isNotEmpty;
+    final puedeConvertir = !d.convertido &&
+        !_offlineCache &&
+        reanudarPara(local: _local, enServidor: d.conversionPreparada) ==
+            ReanudarConversion.ninguna;
+    if (!hayWa && !puedeConvertir) return null;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+        child: Row(
+          children: [
+            if (hayWa)
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.chat_rounded, size: 18),
+                  label: const Text('WhatsApp'),
+                  onPressed: _whatsapp,
+                ),
+              ),
+            if (hayWa && puedeConvertir)
+              const SizedBox(width: AppEspacio.sm),
+            if (puedeConvertir)
+              Expanded(
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.person_add_alt_rounded,
+                      size: 18),
+                  label: const Text('Convertir en cliente'),
+                  onPressed: _actuando ? null : _convertir,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1660,6 +1694,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           Expanded(child: FadeEntrada(child: _cuerpo())),
         ],
       ),
+      bottomNavigationBar: _barraAccionesDetalle(),
     );
   }
 
@@ -1794,7 +1829,10 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               d.convertido
                   ? 'ya convertido'
                   : '${fechaAbsoluta(d.caducaEn)}${d.caducado ? ' (caducado)' : ''}'),
-          _linea('Estado', d.estado),
+          // F3-20: el estado se traduce a lenguaje llano
+          // (antes salía el crudo del servidor: «activo»,
+          // «en_conversion»…).
+          _linea('Estado', _estadoLegibleInvitado(d.estado)),
           if (d.telefonoYaCliente)
             const Padding(
               padding: EdgeInsets.only(top: AppEspacio.sm),

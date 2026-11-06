@@ -472,28 +472,54 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                         const Text('Hoy trabajan:',
                             style: AppTexto.cuerpo),
                         const SizedBox(width: 8),
-                        if (quienesHoy.isEmpty)
-                          Text('sin asignar',
-                              style: AppTexto.secundario)
-                        else
-                          for (final n in quienesHoy) ...[
-                            CircleAvatar(
-                              radius: 13,
-                              backgroundColor: colorChipEntrenador(n)
-                                  .withValues(alpha: 0.18),
-                              child: Text(
-                                n.trim().isEmpty
-                                    ? '?'
-                                    : n.trim()[0].toUpperCase(),
-                                style: AppTexto.etiqueta.copyWith(
-                                    color: colorChipEntrenador(n),
-                                    fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(n, style: AppTexto.cuerpo),
-                            const SizedBox(width: 10),
-                          ],
+                        // 1.25 T119 (F3-29): las personas van en
+                        // un Wrap dentro de Expanded — antes la
+                        // fila era un Row pelado y con varios
+                        // entrenadores o letra grande desbordaba.
+                        Expanded(
+                          child: quienesHoy.isEmpty
+                              ? Text('sin asignar',
+                                  style: AppTexto.secundario)
+                              : Wrap(
+                                  spacing: 10,
+                                  runSpacing: 4,
+                                  crossAxisAlignment:
+                                      WrapCrossAlignment.center,
+                                  children: [
+                                    for (final n in quienesHoy)
+                                      Row(
+                                        mainAxisSize:
+                                            MainAxisSize.min,
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 13,
+                                            backgroundColor:
+                                                colorChipEntrenador(n)
+                                                    .withValues(
+                                                        alpha: 0.18),
+                                            child: Text(
+                                              n.trim().isEmpty
+                                                  ? '?'
+                                                  : n.trim()[0]
+                                                      .toUpperCase(),
+                                              style: AppTexto.etiqueta
+                                                  .copyWith(
+                                                      color:
+                                                          colorChipEntrenador(
+                                                              n),
+                                                      fontWeight:
+                                                          FontWeight
+                                                              .bold),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(n,
+                                              style: AppTexto.cuerpo),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                        ),
                       ],
                     ),
                   ),
