@@ -28,6 +28,32 @@ import 'suplementos.dart';
 import 'widgets.dart';
 import 'detalle_pendiente.dart';
 
+/// La fila de utilidad del balance (1.25 T06).
+///
+/// Con la nómina proyectada calculada, la «Utilidad neta
+/// real» la descuenta: antes la fila titular era
+/// ingresos − gastos aunque la nómina saliera dos líneas
+/// encima, y hacía falta una segunda fila «estimada tras
+/// nómina» para la cifra verdadera. Sin nómina calculada
+/// (el cálculo falló o aún no llegó), la fila se etiqueta
+/// con honestidad «Utilidad antes de nómina».
+({String etiqueta, double valor}) filaUtilidadBalance({
+  required double ingresos,
+  required double gastos,
+  required double? nominaProy,
+}) {
+  if (nominaProy != null) {
+    return (
+      etiqueta: 'Utilidad neta real',
+      valor: ingresos - gastos - nominaProy,
+    );
+  }
+  return (
+    etiqueta: 'Utilidad antes de nómina',
+    valor: ingresos - gastos,
+  );
+}
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -791,6 +817,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// neta real). El título de sección vive en el build
   /// (EncabezadoSeccion, H6); aquí ya no se repite.
   Widget _desgloses() {
+    // 1.25 T06: la utilidad y su etiqueta salen de la
+    // función única (con nómina, «real» la descuenta).
+    final utilidad = filaUtilidadBalance(
+        ingresos: _mes, gastos: _gastosMes, nominaProy: _nominaProy);
     final ef = _porMetodo['efectivo'] ?? 0;
     final tr = _porMetodo['transferencia'] ?? 0;
     final supM = _porMetodo['suplementos'] ?? 0;
@@ -830,15 +860,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ],
-            _filaDetalle('Utilidad neta real', _mes - _gastosMes,
+            // 1.25 T06: la utilidad REAL ya descuenta la
+            // nómina proyectada cuando está calculada (la
+            // fila «estimada tras nómina» sobra); sin ella,
+            // la etiqueta avisa: «Utilidad antes de nómina».
+            _filaDetalle(utilidad.etiqueta, utilidad.valor,
                 negrita: true),
-            // Argón Estadísticas #4: con la fila de nómina
-            // proyectada justo encima, la «utilidad» parecía
-            // ignorarla. Se añade la cifra tras nómina para
-            // que el dueño no la calcule de cabeza.
-            if (_nominaProy != null)
-              _filaDetalle('Utilidad estimada tras nómina',
-                  _mes - _gastosMes - _nominaProy!),
             // Q3 (Argón): la proyección es «Ritmo de cierre
             // estimado» y NO se muestra los días 1–2 del mes: con
             // 1 día de ingreso, actual/1*díasMes proyecta 30× el
