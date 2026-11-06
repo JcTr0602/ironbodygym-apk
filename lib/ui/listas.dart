@@ -107,7 +107,10 @@ class _ListasScreenState extends State<ListasScreen>
     List<Map<String, dynamic>> sinProtegidos(
         List<Map<String, dynamic>> l) =>
         l.where((c) => !esVistaProtegida(c)).toList();
-    final avisados = await LocalDb.instance.idsAvisados();
+    // 1.25 T02: solo las marcas del vencimiento ACTUAL —
+    // una marca de un vencimiento anterior no esconde al
+    // cliente de la lista de por avisar.
+    final avisados = await LocalDb.instance.idsAvisadosVigentes();
     if (mounted) {
       setState(() {
         _hoy = sinProtegidos(h);
@@ -414,7 +417,8 @@ class _ListasScreenState extends State<ListasScreen>
       final ok = await _abrirWhatsapp(c);
       if (!ok) return;
     }
-    await LocalDb.instance.marcarAvisado(id);
+    await LocalDb.instance
+        .marcarAvisado(id, pagadoHasta: c['pagado_hasta'] as String?);
     if (!mounted) return;
     // D-08: el conjunto en memoria refleja la marca al momento
     // (la búsqueda del siguiente no relee la BD por candidato).

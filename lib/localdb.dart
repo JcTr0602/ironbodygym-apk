@@ -7625,10 +7625,20 @@ class LocalDb {
     } catch (_) {}
   }
 
-  /// Marca un cliente como avisado (v1.0.8). Solo local, no sincroniza.
-  Future<void> marcarAvisado(int clienteId) async {
+  /// Marca un cliente como avisado DE UN VENCIMIENTO
+  /// concreto (v1.0.8; 1.25 T02). Solo local, no sincroniza.
+  ///
+  /// La marca guarda el pagado_hasta que se avisó
+  /// (`<pagado_hasta>|<timestamp>`). Antes se guardaba solo
+  /// el timestamp y la marca era eterna: el cliente avisado
+  /// por su vencimiento de octubre salía «avisado» también
+  /// en el de noviembre, aunque nadie le hubiera escrito.
+  /// Ahora, si renueva y su pagado_hasta cambia, la marca
+  /// deja de valer sola (ver [idsAvisadosVigentes]).
+  Future<void> marcarAvisado(int clienteId,
+      {required String? pagadoHasta}) async {
     final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
-    await setMeta('avisado_$clienteId', ahora);
+    await setMeta('avisado_$clienteId', '${pagadoHasta ?? ''}|$ahora');
   }
 
   /// Desmarca el aviso (v1.1). Permite deshacer si fue un error.
@@ -7677,6 +7687,34 @@ class LocalDb {
         if (int.tryParse(k.substring('avisado_'.length)) != null)
           int.parse(k.substring('avisado_'.length)),
     };
+  }
+
+  /// Los avisados cuya marca SIGUE vigente (1.25 T02): la
+  /// marca solo vale si el vencimiento avisado es el
+  /// pagado_hasta ACTUAL del cliente. Las marcas viejas
+  /// (solo timestamp, sin vencimiento guardado) cuentan
+  /// como caducadas — ante la duda se vuelve a avisar, no
+  /// se oculta un aviso debido — y los clientes que ya no
+  /// existen tampoco cuentan.
+  Future<Set<int>> idsAvisadosVigentes() async {
+    final ids = await idsAvisados();
+    if (ids.isEmpty) return const {};
+    final clientes = await allMirror('clientes');
+    final hastaPorId = <int, String?>{
+      for (final c in clientes)
+        if (c['id'] != null)
+          (c['id'] as num).toInt(): c['pagado_hasta'] as String?,
+    };
+    final vigentes = <int>{};
+    for (final id in ids) {
+      if (!hastaPorId.containsKey(id)) continue;
+      final crudo = await getMeta('avisado_$id');
+      final corte = crudo?.indexOf('|') ?? -1;
+      if (corte < 0) continue; // marca vieja: caducada
+      final avisado = crudo!.substring(0, corte);
+      if (avisado == (hastaPorId[id] ?? '')) vigentes.add(id);
+    }
+    return vigentes;
   }
 
   Future<int> getWatermark() async =>
