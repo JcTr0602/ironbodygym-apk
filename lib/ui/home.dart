@@ -144,6 +144,45 @@ int urgenciasHome({
 }) =>
     atras + incidencias + atencion;
 
+/// 1.25 Panel 19: la estación diaria personalizable — los
+/// bloques del nivel «Hoy» que cada quien puede mostrar u
+/// ocultar. Buscar y el selector de nivel NO son bloques:
+/// son la puerta y quedan siempre.
+const bloquesEstacionDiaria =
+    <({String id, String titulo, String ayuda})>[
+  (
+    id: 'mostrador',
+    titulo: 'Acciones rápidas del mostrador',
+    ayuda: 'Cobrar, pago diario, inscribir y turno en 1 toque',
+  ),
+  (
+    id: 'finanzas',
+    titulo: 'Tarjeta financiera',
+    ayuda: 'El dinero de hoy y del mes, según tu rol',
+  ),
+  (
+    id: 'bandeja',
+    titulo: 'Bandeja de WhatsApp',
+    ayuda: 'El botón de avisos del día (solo dueño)',
+  ),
+  (
+    id: 'alertas',
+    titulo: 'Tira de alertas',
+    ayuda: 'Los avisos urgentes bajo la tarjeta financiera',
+  ),
+];
+
+const kEstacionDiariaKey = 'home_estacion_bloques_v1';
+
+/// PURO (Panel 19): los bloques visibles desde lo
+/// guardado — sin guardado, todos; con guardado, solo
+/// los ids conocidos (uno de otra versión no rompe nada).
+Set<String> bloquesVisiblesEstacion(List<String>? guardados) {
+  final conocidos = {for (final b in bloquesEstacionDiaria) b.id};
+  if (guardados == null) return {...conocidos};
+  return guardados.where(conocidos.contains).toSet();
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -152,6 +191,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with WidgetsBindingObserver {
+  // 1.25 Panel 19: bloques visibles de la estación diaria.
+  Set<String> _bloquesHoy = bloquesVisiblesEstacion(null);
   int _vencen = 0;
   int _atras = 0;
   // H2 (estéticas 1.19): atrasados de más de 30 días, separados
@@ -398,6 +439,7 @@ class _HomeScreenState extends State<HomeScreen>
     // del horario del gym (sin red): editar el horario mueve
     // los turnos; sin siembra mandan las constantes.
     sembrarFranjasDesdeCacheHorario();
+    _cargarEstacion();
     _cargar();
     // v1.3.9 Sprint 1 (#14): cargar permisos y verificar suspensión
     _verificarPermisos();
@@ -1054,6 +1096,31 @@ class _HomeScreenState extends State<HomeScreen>
   /// Módulos, lo urgente nunca queda escondido. El segundo pase
   /// de _cargar solo muta ese contador — la barra no cambia de
   /// alto ni empuja nada (H-02).
+  Future<void> _cargarEstacion() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() => _bloquesHoy = bloquesVisiblesEstacion(
+          prefs.getStringList(kEstacionDiariaKey)));
+    } catch (_) {
+      // Sin preferencias, la estación enseña todo.
+    }
+  }
+
+  Future<void> _personalizarEstacion() async {
+    final elegidos = await showDialog<Set<String>>(
+      context: context,
+      builder: (_) => _DialogoEstacionDiaria(visibles: _bloquesHoy),
+    );
+    if (elegidos == null || !mounted) return;
+    setState(() => _bloquesHoy = elegidos);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+          kEstacionDiariaKey, elegidos.toList());
+    } catch (_) {}
+  }
+
   Widget _selectorNivel() {
     final urgencias = urgenciasHome(
         atras: _atras,
@@ -1131,6 +1198,14 @@ class _HomeScreenState extends State<HomeScreen>
             segmento(0, Icons.bolt_rounded, 'Hoy',
                 contador: urgencias),
             segmento(1, Icons.grid_view_rounded, 'Módulos'),
+            // 1.25 Panel 19: personalizar la estación
+            // diaria (solo en el nivel «Hoy»).
+            if (_nivelActivo == 0)
+              IconButton(
+                icon: const Icon(Icons.tune_rounded, size: 20),
+                tooltip: 'Personalizar mi día',
+                onPressed: _personalizarEstacion,
+              ),
           ],
         ),
       ),
@@ -1156,31 +1231,56 @@ class _HomeScreenState extends State<HomeScreen>
             child: Column(
               children: [
                 _botonBuscarCliente(),
-                const SizedBox(height: AppEspacio.sm),
-                _mostradorRapido(),
+                if (_bloquesHoy.contains('mostrador')) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  _mostradorRapido(),
+                ],
               ],
             ),
           ),
           // v1.3.3: tarjeta financiera por rol
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: _tarjetaFinanciera(esDueno),
-          ),
+          if (_bloquesHoy.contains('finanzas'))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: _tarjetaFinanciera(esDueno),
+            ),
           // Zona 4 — Atención hoy (rediseño Argón): la
           // bandeja del dueño sube aquí, sobre la tira de
           // alertas. SOLO del dueño (abre su WhatsApp y el
           // check vive en su teléfono; si un entrenador la
           // usara, el dueño re-escribiría al mismo cliente
           // sin saberlo).
-          if (_auth.isOwner)
+          if (_auth.isOwner && _bloquesHoy.contains('bandeja'))
             Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
               child: _botonBandejaWhatsapp(),
             ),
           // v1.3.3: tira de alertas (solo si hay algo)
-          _tiraAlertas(),
+          if (_bloquesHoy.contains('alertas')) _tiraAlertas(),
+          // Panel 19: si la estación quedó vacía por
+          // elección, se dice y se ofrece reabrir el editor.
+          if (_bloquesHoy.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
+              child: Center(
+                child: Column(
+                  children: [
+                    const Text('Tu día está vacío: ocultaste '
+                        'todos los bloques.',
+                        textAlign: TextAlign.center,
+                        style: AppTexto.secundario),
+                    TextButton.icon(
+                      onPressed: _personalizarEstacion,
+                      icon: const Icon(Icons.tune_rounded, size: 18),
+                      label: const Text('Personalizar mi día'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // Aire inferior para que el FAB no tape el final.
           const SizedBox(height: 96),
         ],
@@ -3277,4 +3377,64 @@ Color colorAcentoCabecera({
   if (atras30 > 0) return AppColores.error;
   if (vencenHoy > 0 || atrasLeve > 0) return AppColores.alerta;
   return AppColores.exito;
+}
+
+
+/// 1.25 Panel 19: editor de la estación diaria — un
+/// interruptor por bloque, con su ayuda de una línea
+/// (qué se pierde al ocultarlo). Devuelve el conjunto
+/// elegido o null si se cancela.
+class _DialogoEstacionDiaria extends StatefulWidget {
+  final Set<String> visibles;
+  const _DialogoEstacionDiaria({required this.visibles});
+
+  @override
+  State<_DialogoEstacionDiaria> createState() =>
+      _DialogoEstacionDiariaState();
+}
+
+class _DialogoEstacionDiariaState
+    extends State<_DialogoEstacionDiaria> {
+  late Set<String> _sel;
+
+  @override
+  void initState() {
+    super.initState();
+    _sel = {...widget.visibles};
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Personalizar mi día'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final b in bloquesEstacionDiaria)
+              SwitchListTile(
+                title: Text(b.titulo),
+                subtitle: Text(b.ayuda),
+                value: _sel.contains(b.id),
+                onChanged: (v) => setState(() {
+                  if (v) {
+                    _sel.add(b.id);
+                  } else {
+                    _sel.remove(b.id);
+                  }
+                }),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, _sel),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
 }
