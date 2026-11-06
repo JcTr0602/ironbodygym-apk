@@ -966,10 +966,44 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 title: Text(
                     '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : _nombrePersona((l['titular_telegram_id'] as num?)?.toInt())} '
                     '· ${_nombreSup((l['suplemento_id'] as num?)?.toInt())}'),
-                subtitle: Text(
-                  'Saldo: ${l['saldo_local'] ?? '—'} dosis · '
-                  'Asignadas: ${l['dosis_asignadas'] ?? '—'}'
-                  '${(l['es_principal'] as num?)?.toInt() == 1 ? ' · Repartidas: ${l['dosis_repartidas'] ?? 0}' : ''}',
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Saldo: ${l['saldo_local'] ?? '—'} dosis · '
+                      'Asignadas: ${l['dosis_asignadas'] ?? '—'}'
+                      '${(l['es_principal'] as num?)?.toInt() == 1 ? ' · Repartidas: ${l['dosis_repartidas'] ?? 0}' : ''}',
+                    ),
+                    // 1.25 T95: el medidor del pomo para el
+                    // dueño (saldo sobre asignadas, con el
+                    // color semáforo de T120): un pomo a
+                    // punto de agotarse ya no se ve igual
+                    // que uno lleno.
+                    if ((l['saldo_local'] as num?) != null &&
+                        (l['dosis_asignadas'] as num?) != null)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(top: AppEspacio.xs),
+                        child: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.sm),
+                          child: LinearProgressIndicator(
+                            value: fraccionSaldoPomo(
+                              saldo: (l['saldo_local'] as num?)
+                                  ?.toInt(),
+                              asignadas:
+                                  (l['dosis_asignadas'] as num?)
+                                      ?.toInt(),
+                            ),
+                            minHeight: 6,
+                            color: _colorSaldoPomo(l['saldo_local']) ??
+                                AppColores.naranja,
+                            backgroundColor: AppColores.naranja
+                                .withValues(alpha: 0.12),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,

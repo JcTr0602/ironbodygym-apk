@@ -819,6 +819,18 @@ Future<int> saldoPomoLocal(int pomoId, {DatabaseExecutor? txn}) async {
   );
 }
 
+/// 1.25 T95, PURO: fracción del medidor de un pomo =
+/// saldo sobre asignadas. Sin asignadas conocidas o
+/// sin saldo, medidor vacío (no se inventa el total).
+double fraccionSaldoPomo({int? saldo, int? asignadas}) {
+  if (saldo == null || asignadas == null || asignadas <= 0) {
+    return 0;
+  }
+  final f = saldo / asignadas;
+  if (f.isNaN || f < 0) return 0;
+  return f > 1 ? 1 : f;
+}
+
 /// Pomos activos con su saldo local, del titular indicado
 /// (o todos si [titularId] es null). El principal viaja con
 /// es_principal = 1; los de entrenador, con su titular_telegram_id.

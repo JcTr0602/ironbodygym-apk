@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
 import '../etiqueta_producto.dart';
+import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart'
     show edadDeCarnet, fmtMonto, kUmbralStockPomosAgua;
@@ -62,6 +64,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   bool _dialogoInicialAbierto = false;
   ({int saldo, double cpp}) _agua = (saldo: 0, cpp: 0);
   List<Map<String, dynamic>> _misPomos = [];
+  // 1.25 T95: suplemento por id para la foto del pomo.
+  Map<int, Map<String, dynamic>> _supPorId = {};
   int? _pomoSel;
   Map<String, dynamic> _cuadre = const {};
   // 9/25: cuadre del gym (solo dueño) + vista seleccionada.
@@ -128,11 +132,18 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if ((l['suplemento_id'] as num?) != null)
           (l['suplemento_id'] as num).toInt(),
     };
+    final filasSup = await LocalDb.instance
+        .mirrorPorIds('suplementos', supIds.toList());
     final nombreSup = <int, String>{
-      for (final s in await LocalDb.instance
-          .mirrorPorIds('suplementos', supIds.toList()))
+      for (final s in filasSup)
         if ((s['id'] as num?) != null)
           (s['id'] as num).toInt(): etiquetaDeSuplemento(s, cats),
+    };
+    // 1.25 T95: la fila del suplemento de cada pomo,
+    // para la foto de la tarjeta (solo presentación).
+    _supPorId = {
+      for (final s in filasSup)
+        if ((s['id'] as num?) != null) (s['id'] as num).toInt(): s,
     };
     // 10/25: titulares sin nombre en la meta → consulta indexada
     // por telegram_id (sin escanear `pagos`).
@@ -1776,7 +1787,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           else
             Row(
               children: [
-                IconoModuloBadge.naranja(Icons.local_drink_rounded),
+                // 1.25 T95: el pomo con cara — la foto
+                // del producto manda; sin foto conocida,
+                // la insignia de siempre.
+                if (pomo != null &&
+                    _supPorId[
+                            (pomo['suplemento_id'] as num?)
+                                ?.toInt()] !=
+                        null)
+                  _FotoPomoServicios(
+                      sup: _supPorId[
+                          (pomo['suplemento_id'] as num?)
+                              ?.toInt()]!)
+                else
+                  IconoModuloBadge.naranja(
+                      Icons.local_drink_rounded),
                 const SizedBox(width: AppEspacio.sm),
                 Expanded(
                   child: Column(
@@ -1816,6 +1841,27 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               children: [
                 Text('${pomo['saldo_local']} dosis',
                     style: AppTexto.metrica),
+                // 1.25 T95: el medidor del pomo (saldo
+                // sobre asignadas), SOLO para el dueño:
+                // el entrenador sigue sin ver su cifra
+                // (pomo ciego intacto).
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.sm),
+                  child: LinearProgressIndicator(
+                    value: fraccionSaldoPomo(
+                      saldo: (pomo['saldo_local'] as num?)?.toInt(),
+                      asignadas:
+                          (pomo['dosis_asignadas'] as num?)
+                              ?.toInt(),
+                    ),
+                    minHeight: 8,
+                    color: AppColores.naranja,
+                    backgroundColor:
+                        AppColores.naranja.withValues(alpha: 0.12),
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Text('Agua común: ${_agua.saldo} pomos',
                     style: AppTexto.secundario),
@@ -2533,6 +2579,63 @@ class _DialogoClienteState extends State<_DialogoCliente> {
           child: const Text('Cancelar'),
         ),
       ],
+    );
+  }
+}
+
+
+/// 1.25 T95: foto del producto en la tarjeta del pomo
+/// de Servicios (mismo resolver que el catálogo; el
+/// futuro vive en el State, nunca en el build).
+class _FotoPomoServicios extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  const _FotoPomoServicios({required this.sup});
+
+  @override
+  State<_FotoPomoServicios> createState() =>
+      _FotoPomoServiciosState();
+}
+
+class _FotoPomoServiciosState extends State<_FotoPomoServicios> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = resolverFotoSuplemento(widget.sup);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FotoPomoServicios oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sup['id'] != widget.sup['id'] ||
+        oldWidget.sup['foto_local'] != widget.sup['foto_local'] ||
+        oldWidget.sup['foto_storage'] !=
+            widget.sup['foto_storage']) {
+      _futura = resolverFotoSuplemento(widget.sup);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f == null) {
+          return IconoModuloBadge.naranja(
+              Icons.local_drink_rounded);
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.md),
+          child: Image(
+            image: providerFotoAcotada(FileImage(f), ancho: 200),
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+          ),
+        );
+      },
     );
   }
 }
