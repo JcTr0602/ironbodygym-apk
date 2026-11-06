@@ -83,13 +83,19 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   // faltaba: salir descartaba los cambios en silencio.
   String _firmaCargada = '';
 
+  // La firma se calcula sobre la forma NORMALIZADA (la
+  // misma que arma el guardado): una fila vacía, una
+  // clave con espacios o una clave repetida no cuentan
+  // como cambio, porque guardar no cambiaría nada
+  // (autoauditoría 1.26: la firma cruda daba falsos
+  // «cambios sin guardar»).
   String get _firmaActual => jsonEncode({
         'e': _metEfectivo,
         't': _metTransferencia,
-        'textos': [
+        'textos': textosBaseDesdeFilas([
           for (final f in _filasTextos)
-            [f.claveCtrl.text, f.textoCtrl.text]
-        ],
+            (f.claveCtrl.text, f.textoCtrl.text)
+        ]),
       });
 
   bool get _hayCambios =>

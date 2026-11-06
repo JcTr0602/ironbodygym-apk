@@ -68,7 +68,12 @@ class _SyncBannerState extends State<SyncBanner>
         : SyncEngine.instance.run().then((_) {});
     final cb = widget.alTerminarSync;
     if (cb != null) {
-      unawaited(ciclo.whenComplete(cb));
+      // El aviso corre igual si el ciclo falló (la
+      // pantalla recarga y muestra lo que haya), y el
+      // error del ciclo no queda flotando como error
+      // asíncrono no manejado (autoauditoría 1.26).
+      unawaited(ciclo.then((_) => cb(),
+          onError: (Object _) => cb()));
     }
   }
 
