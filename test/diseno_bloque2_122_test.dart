@@ -65,7 +65,10 @@ void main() {
       home: Scaffold(
         body: CabeceraFicha(
           nombre: 'Luis Gómez',
-          foto: null,
+          // 1.25 T117 (F1-47): CON foto el botón dice
+          // «Cambiar foto»; SIN foto dice «Añadir foto»
+          // (contrato nuevo; este test probaba el viejo).
+          foto: File('/sin-foto-real.png'),
           colorMarco: Colors.green,
           esCasa: false,
           dias: 12,
@@ -79,6 +82,26 @@ void main() {
     expect(find.text('Cambiar foto'), findsOneWidget);
     await t.tap(find.text('Cambiar foto'));
     expect(cambioFoto, isTrue);
+  });
+
+  testWidgets('B1 (F1-47): sin foto, el botón dice '
+      '«Añadir foto»', (t) async {
+    await t.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: CabeceraFicha(
+          nombre: 'Luis Gómez',
+          foto: null,
+          colorMarco: Colors.green,
+          esCasa: false,
+          dias: 12,
+          heroTag: null,
+          onFotoTap: null,
+          onCambiarFoto: _vacio,
+        ),
+      ),
+    ));
+    expect(find.text('Añadir foto'), findsOneWidget);
+    expect(find.text('Cambiar foto'), findsNothing);
   });
 
   testWidgets('B1: CabeceraFicha de Casa pinta el dorado '
