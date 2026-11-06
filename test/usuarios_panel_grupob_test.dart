@@ -1,9 +1,10 @@
 /// Tests de cobertura del panel Grupo B 1.15 para Usuarios APK
 /// (widget tests: los guards viven dentro de _crear/_accion).
 ///
-/// - P2: sin dueño, el FAB 'Crear' NO abre el diálogo ni encola
-///   nada: solo el aviso 'Solo el dueño puede gestionar usuarios.'
-///   (el guard real, no solo el botón).
+/// - P2: sin dueño no hay ni pantalla: la guarda de VISTA de la
+///   1.25 (T29, patrón PanelPermisos) enseña solo «Solo el dueño
+///   puede ver los usuarios.» — sin FAB ni lista — y no se
+///   encola nada.
 /// - P6: como dueño, _crear encola Y comparte LA MISMA contraseña
 ///   recortada: con '  abcdef  ' tecleada, la op encolada lleva
 ///   'abcdef' y el diálogo 'Compartir credenciales' muestra
@@ -151,16 +152,15 @@ void main() {
   });
 
   group('UsuariosScreen (panel Grupo B P2/P6/P3)', () {
-    testWidgets('P2: sin dueño, Crear no dialoga ni encola',
-        (tester) async {
+    testWidgets('P2: sin dueño, la guarda de vista no deja ni '
+        'ver la pantalla', (tester) async {
       expect(AuthService().isOwner, isFalse);
       await tester.pumpWidget(
           const MaterialApp(home: UsuariosScreen()));
       await _pumps(tester);
-      await tester.tap(find.text('Crear'));
-      await _pumps(tester, 2);
-      expect(find.text('Solo el dueño puede gestionar usuarios.'),
+      expect(find.text('Solo el dueño puede ver los usuarios.'),
           findsOneWidget);
+      expect(find.text('Crear'), findsNothing);
       expect(find.text('Crear usuario APK'), findsNothing);
       final db = await LocalDb.instance.db;
       final ops = await db.query('ops_queue',
