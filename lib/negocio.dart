@@ -329,14 +329,39 @@ int _levenshtein(String a, String b) {
 
 /// Clientes al día: activos con pagado_hasta >= hoy (no vencidos).
 /// v1.2.1: para el filtro "Al día" del resumen.
-Future<List<Map<String, dynamic>>> clientesAlDia() async {
+/// Es el PREDICADO DE ACCESO (>= hoy; la Casa siempre): no
+/// confundir con la pestaña de listas, que usa
+/// [clientesAlDiaPestana] para no duplicar clientes.
+Future<List<Map<String, dynamic>>> clientesAlDia(
+    {List<Map<String, dynamic>>? activosPre}) async {
   final hoy = _hoyIso();
-  final rows = await _activos();
+  final rows = activosPre ?? await _activos();
   // v1.7.0: predicado compuesto (UI de estado): la Cuenta a la
   // Casa está siempre al día, aunque su pagado_hasta sea NULL.
   final res = rows.where((c) => accesoEfectivoVigente(c, hoy)).toList();
   res.sort(compararPorNombre);
   return res;
+}
+
+/// «Al día» de la PESTAÑA de listas (1.25 T03): los al día
+/// que NO vencen hoy ni en los próximos 3 días. Antes la
+/// pestaña pintaba el predicado de acceso entero y el
+/// mismo cliente salía a la vez en «Hoy», en «Por vencer»
+/// y en «Al día», con los conteos sumando de más. Cada
+/// cliente sale en UNA sola pestaña; la Casa (que nunca
+/// vence) queda en «Al día», como manda el predicado.
+Future<List<Map<String, dynamic>>> clientesAlDiaPestana() async {
+  final rows = await _activos();
+  final alDia = await clientesAlDia(activosPre: rows);
+  final excluidos = <int>{
+    for (final c in await vencenHoy(activosPre: rows))
+      if (c['id'] != null) (c['id'] as num).toInt(),
+    for (final c in await porVencer(dias: 3, activosPre: rows))
+      if (c['id'] != null) (c['id'] as num).toInt(),
+  };
+  return alDia
+      .where((c) => !excluidos.contains((c['id'] as num?)?.toInt()))
+      .toList();
 }
 
 /// Vencen exactamente hoy.

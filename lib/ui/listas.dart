@@ -100,7 +100,10 @@ class _ListasScreenState extends State<ListasScreen>
     final m30 = await atrasados(masDe30: false);
     final p30 = await atrasados(masDe30: true);
     final pv = await porVencer(dias: 3);
-    final ad = await clientesAlDia(); // v1.2.1
+    // 1.25 T03: la pestaña usa la variante SIN los de hoy
+    // ni los por vencer (clientesAlDia a secas es el
+    // predicado de acceso y los incluye: duplicaba).
+    final ad = await clientesAlDiaPestana();
     // Cliente protegido (2026-10-26, Protegido 2 H6): estas listas
     // muestran teléfono y botón de WhatsApp; un no-dueño no ve
     // protegidos en ninguna.
