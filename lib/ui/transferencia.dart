@@ -53,7 +53,11 @@ List<({String titulo, List<Map<String, dynamic>> envios})>
     if (ts.length >= 7) {
       final mes = int.tryParse(ts.substring(5, 7));
       if (mes != null && mes >= 1 && mes <= 12) {
-        clave = '${ts.substring(0, 4)}-$mes';
+        // Autoauditoría 1.25 ronda 2: el mes va con
+        // cero ('2026-09'), si no el orden de texto
+        // pone septiembre por encima de oct-dic.
+        clave = '${ts.substring(0, 4)}-'
+            '${mes.toString().padLeft(2, '0')}';
       }
     }
     if (!grupos.containsKey(clave)) {

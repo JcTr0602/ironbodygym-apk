@@ -41,6 +41,18 @@ void main() {
     expect(grupos[2].titulo, 'Sin fecha');
   });
 
+  test('T77: septiembre NO salta por encima de octubre', () {
+    // Autoauditoría ronda 2: con la clave sin cero,
+    // '2026-9' ordenaba por encima de '2026-10'.
+    final grupos = gruposEnviosPorMes([
+      {'enviada_ts': '2026-09-15T10:00:00'},
+      {'enviada_ts': '2026-10-03T10:00:00'},
+      {'enviada_ts': '2026-12-01T10:00:00'},
+    ]);
+    expect(grupos.map((g) => g.titulo).toList(),
+        ['Diciembre 2026', 'Octubre 2026', 'Septiembre 2026']);
+  });
+
   test('T79: totales de mis ventas del mes por tipo', () {
     final t = totalesVentasMesPorTipo([
       {'origen': 'servicio', 'fecha': '2026-11-03', 'monto': 600},

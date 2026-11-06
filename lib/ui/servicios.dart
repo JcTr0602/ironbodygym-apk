@@ -1790,7 +1790,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 // 1.25 T95: el pomo con cara — la foto
                 // del producto manda; sin foto conocida,
                 // la insignia de siempre.
-                if (pomo != null &&
+                // Autoauditoría 1.25 ronda 2: la foto
+                // del pomo es SOLO del dueño (diseño
+                // T95), igual que el medidor.
+                if (_esDueno &&
+                    pomo != null &&
                     _supPorId[
                             (pomo['suplemento_id'] as num?)
                                 ?.toInt()] !=
