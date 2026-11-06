@@ -44,6 +44,7 @@ import 'estado_cuenta.dart';
 import 'diseno.dart';
 import 'ficha_secciones.dart';
 import 'foto_personal_ficha.dart';
+import 'fotos_progreso_nube_ficha.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
 import 'medidas_cliente.dart';
@@ -2616,6 +2617,13 @@ class _FichaScreenState extends State<FichaScreen> {
                           onVerFotoGestion:
                               _foto != null ? _verFotoGrande : null,
                         ),
+                        // 1.27 (Fotos en la nube, Pieza G):
+                        // las fotos de progreso que el
+                        // cliente guardó en la nube; sin
+                        // fotos, el widget no ocupa espacio.
+                        const SizedBox(height: AppEspacio.md),
+                        SeccionFotosProgresoNube(
+                            clienteId: widget.clienteId),
                       ],
                       const SizedBox(
                           height: AppEspacio.md),
