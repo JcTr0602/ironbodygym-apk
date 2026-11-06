@@ -25,6 +25,7 @@ import '../localdb.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'dialogo_telefono.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -624,7 +625,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
             ),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando bandeja…')
+                // 1.25 T114: esqueleto con la forma de la lista.
+                ? const Padding(
+                    padding: EdgeInsets.all(AppEspacio.lg),
+                    child: SkeletonLista(items: 4))
                 : !AuthService().isOwner
                     // v1.3.6 (auditoría Argón, Fix 1a): solo el dueño.
                     ? Center(

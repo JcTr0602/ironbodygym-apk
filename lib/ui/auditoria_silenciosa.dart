@@ -11,6 +11,7 @@ import 'app_bar.dart';
 import 'auditoria.dart' show descripcionOp;
 import 'cola.dart' show etiquetaEstadoOp;
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 
 /// v1.3.7 (Fase A, 6.3): auditoría silenciosa de anomalías (solo dueño).
@@ -275,7 +276,10 @@ class _AuditoriaSilenciosaScreenState
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando auditoría…')
+          // 1.25 T114: esqueleto con la forma de la lista.
+          ? const Padding(
+              padding: EdgeInsets.all(AppEspacio.lg),
+              child: SkeletonLista(items: 3))
           : _casos.isEmpty
               ? const EstadoVacio(
                   icono: Icons.verified_rounded,

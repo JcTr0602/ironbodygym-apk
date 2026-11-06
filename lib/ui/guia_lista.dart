@@ -22,6 +22,7 @@ import 'diseno.dart';
 import 'guia_editor.dart';
 import 'guia_equipos.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 
 /// 1.22 GY-05 (PURO): esenciales que quedarían tras publicar
 /// [candidatosDoc], fusionando POR SLUG sobre [publicadas]:
@@ -574,7 +575,11 @@ class _GuiaScreenState extends State<GuiaScreen> {
           child: Text('Solo el dueño administra la Biblioteca.'));
     }
     if (_cargando) {
-      return const EstadoCargando(texto: 'Cargando guía…');
+      // 1.25 T114: esqueleto con la forma de la lista.
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+        children: const [SkeletonLista(items: 4)],
+      );
     }
     final esenciales = _publicadas.where((p) => p['esencial'] == true).length;
     final publicadasFiltradas = _publicadas.where((p) {

@@ -22,6 +22,7 @@ import '../turnos_resolucion.dart';
 import 'app_bar.dart';
 import 'auditoria.dart' show descripcionOp, payloadDeOp, tiposOpSensibles;
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 
 class AuditoriaPersonaScreen extends StatefulWidget {
@@ -248,7 +249,10 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando auditoría…')
+          // 1.25 T114: esqueleto con la forma de la lista.
+          ? const Padding(
+              padding: EdgeInsets.all(AppEspacio.md),
+              child: SkeletonLista(items: 3))
           : _persona == null
               ? const Center(
                   child: Padding(

@@ -20,6 +20,7 @@ import 'auditoria_persona.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 
 /// v1.6.0 (pedido de Jc): filtro de la Auditoría. La pantalla ABRE
@@ -680,7 +681,10 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             ),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando auditoría…')
+                // 1.25 T114: esqueleto con la forma de la lista.
+                ? const Padding(
+                    padding: EdgeInsets.all(AppEspacio.lg),
+                    child: SkeletonLista(items: 4))
                 : _ops.isEmpty
                     ? EstadoVacio(
                         icono: Icons.fact_check_rounded,

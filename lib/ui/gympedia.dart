@@ -12,6 +12,7 @@ import '../localdb.dart';
 import '../sync.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 import 'gympedia_editor.dart';
 
@@ -263,7 +264,13 @@ class _GympediaScreenState extends State<GympediaScreen> {
   /// Cuerpo de la lista (compartido entre la pantalla propia y la
   /// pestaña embebida en Biblioteca).
   Widget _cuerpo() {
-    if (_cargando) return const EstadoCargando(texto: 'Cargando biblioteca…');
+    // 1.25 T114: esqueleto con la forma de la lista.
+    if (_cargando) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+        children: const [SkeletonLista(items: 4)],
+      );
+    }
     return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [

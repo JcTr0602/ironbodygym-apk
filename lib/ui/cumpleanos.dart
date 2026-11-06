@@ -27,6 +27,7 @@ import 'ficha.dart';
 import 'widgets.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'dialogo_telefono.dart';
 
 class CumpleanosScreen extends StatefulWidget {
@@ -400,7 +401,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
           const SyncBanner(),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando cumpleaños…')
+                // 1.25 T114: esqueleto con la forma de la lista.
+                ? const Padding(
+                    padding: EdgeInsets.all(AppEspacio.lg),
+                    child: SkeletonLista(items: 3))
                 : TabBarView(
                     controller: _tabs,
                     children: [

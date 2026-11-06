@@ -24,6 +24,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 
 /// Una serie prescrita (0.15 Bloque 3, Parte B): la forma
@@ -285,7 +286,10 @@ class _EditorRutinasGymScreenState extends State<EditorRutinasGymScreen> {
         label: const Text('Nueva rutina'),
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando rutinas…')
+          // 1.25 T114: esqueleto con la forma de la lista.
+          ? const Padding(
+              padding: EdgeInsets.all(AppEspacio.lg),
+              child: SkeletonLista(items: 3))
           : _error
               ? EstadoError(
                   titulo: 'No se pudieron cargar las rutinas',

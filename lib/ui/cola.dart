@@ -24,6 +24,7 @@ import '../tipos_operacion.dart';
 import 'app_bar.dart';
 import 'auditoria.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 
 
@@ -2585,7 +2586,10 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
         esSubidos ? 'Detalle de subidos' : 'Detalle de bajados',
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando cola de sync…')
+          // 1.25 T114: esqueleto con la forma de la lista.
+          ? const Padding(
+              padding: EdgeInsets.all(AppEspacio.lg),
+              child: SkeletonLista(items: 4))
           : esSubidos
               ? _buildSubidos()
               : _buildBajados(),
