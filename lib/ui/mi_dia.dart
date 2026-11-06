@@ -448,15 +448,31 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
           Tarjeta(
             color: AppColores.naranja,
             padding: const EdgeInsets.all(AppEspacio.lg),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            // 1.25 T31: esta cifra cuenta SOLO los pagos
+            // diarios (resumenMensualDiarios) y se dice en la
+            // propia tarjeta: el «Cobrado hoy» de la otra
+            // vista cuenta TODOS los cobros, y sin la
+            // etiqueta el mes parecía menor que la suma de
+            // sus días justo en la pantalla de cuadrar caja.
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Total del mes',
-                    style: AppTexto.secundario.copyWith(
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total del mes',
+                        style: AppTexto.secundario.copyWith(
+                            color: Colors.white
+                                .withValues(alpha: 0.85))),
+                    Text('${fmtMonto(_totalMes)} CUP',
+                        style: AppTexto.tituloPagina.copyWith(color: Colors.white)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('Solo pagos diarios de este mes',
+                    style: AppTexto.minuscula.copyWith(
                         color: Colors.white
                             .withValues(alpha: 0.85))),
-                Text('${fmtMonto(_totalMes)} CUP',
-                    style: AppTexto.tituloPagina.copyWith(color: Colors.white)),
               ],
             ),
           ),
@@ -676,6 +692,16 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                             '${_cobrados.length} cobros · '
                             '${fmtMonto(_efectivo)} · '
                             '${fmtMonto(_transferencia)}',
+                            style: AppTexto.minuscula.copyWith(
+                                color: Colors.white.withValues(
+                                    alpha: 0.85))),
+                        // 1.25 T31: el hoy cuenta TODOS los
+                        // cobros (no solo los diarios): se
+                        // dice aquí, espejo de la etiqueta del
+                        // «Total del mes».
+                        Text(
+                            'Todos los cobros de hoy, '
+                            'no solo los diarios',
                             style: AppTexto.minuscula.copyWith(
                                 color: Colors.white.withValues(
                                     alpha: 0.85))),
