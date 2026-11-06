@@ -403,7 +403,34 @@ class AdelantosService {
     required String metodo,
     required String origen,
     int? descuentaA,
-  }) {
+  }) async {
+    // 1.27 (resguardo del caso del puente 2026-10-26): si
+    // la foto de usuarios llegó sin el id del entrenador,
+    // la op nacía con entrenador='' y el servidor la
+    // rechazaba («entrenador requerido») mientras la UI
+    // anunciaba «Adelanto registrado». Se corta ANTES de
+    // encolar, con el motivo en claro: nada de falsos
+    // registrados.
+    if (entrenadorId.trim().isEmpty) {
+      throw StateError(
+          'Falta el identificador de $entrenadorNombre: '
+          'sincroniza la app y vuelve a intentarlo. '
+          'El adelanto NO se registró.');
+    }
+    // Espejo de la regla del servidor (Terra 1.8.0): un
+    // adelanto en efectivo desde la caja del turno SIN
+    // gaveta quedaría huérfano (en_pendiente=1 que
+    // ninguna consulta ve) y la op se rechaza; mejor
+    // avisar aquí que encolarla muerta.
+    if (origen == 'caja_turno' &&
+        metodo == 'efectivo' &&
+        (descuentaA == null || descuentaA <= 0)) {
+      throw StateError(
+          'Falta la gaveta del turno: sin el identificador '
+          'del entrenador de turno no se puede registrar '
+          'un adelanto en efectivo desde la caja. '
+          'El adelanto NO se registró.');
+    }
     final f = '${fecha.year.toString().padLeft(4, '0')}-'
         '${fecha.month.toString().padLeft(2, '0')}-'
         '${fecha.day.toString().padLeft(2, '0')}';

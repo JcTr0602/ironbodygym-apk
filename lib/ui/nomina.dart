@@ -1286,6 +1286,20 @@ class _NominaScreenState extends State<NominaScreen> {
     _operando = true;
     try {
       final persona = _personasAdelantos[ent]!;
+      // 1.27: sin identificador sincronizado ni se abre
+      // el diálogo — la op nacería con entrenador='' y
+      // el servidor la rechazaría tras anunciar
+      // «registrado» en falso (caso del puente
+      // 2026-10-26). El servicio trae la misma guarda
+      // como última palabra (registrar()).
+      if (persona.id.trim().isEmpty) {
+        mostrarSnack(context,
+            'Aún no se sincronizó el identificador de '
+            '${persona.nombre}: sincroniza y vuelve a '
+            'intentarlo.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
       // 1.25 T118 (F2-23): el diálogo es un StatefulWidget
       // propio con DialogoApp (antes AlertDialog +
       // StatefulBuilder en línea); posee y dispone sus
@@ -1318,17 +1332,30 @@ class _NominaScreenState extends State<NominaScreen> {
       );
       if (datos == null) return;
       final gavetaPersona = _personasAdelantos[datos.gaveta];
-      await AdelantosService.instance.registrar(
-        entrenadorId: persona.id,
-        entrenadorNombre: persona.nombre,
-        entrenadorTelegramId: persona.telegramId,
-        monto: datos.monto,
-        fecha: datos.fecha,
-        nota: datos.nota,
-        metodo: datos.metodo,
-        origen: datos.origen,
-        descuentaA: gavetaPersona?.telegramId,
-      );
+      // 1.27: si el servicio corta el registro (sin id o
+      // sin gaveta para el efectivo de caja), se muestra
+      // SU motivo y jamás el «registrado» de éxito.
+      try {
+        await AdelantosService.instance.registrar(
+          entrenadorId: persona.id,
+          entrenadorNombre: persona.nombre,
+          entrenadorTelegramId: persona.telegramId,
+          monto: datos.monto,
+          fecha: datos.fecha,
+          nota: datos.nota,
+          metodo: datos.metodo,
+          origen: datos.origen,
+          descuentaA: gavetaPersona?.telegramId,
+        );
+      } catch (err) {
+        if (mounted) {
+          mostrarSnack(
+              context,
+              err is StateError ? err.message : '$err',
+              significado: SignificadoChip.error);
+        }
+        return;
+      }
       if (mounted) {
         mostrarSnack(context, 'Adelanto registrado (se sincronizará)', significado: SignificadoChip.exito);
         _cargar();
