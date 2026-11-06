@@ -359,10 +359,21 @@ class _ComparativaMensualState
                 ),
               ],
             ),
+            // 1.25 T24: la cifra «Ant» es la del MISMO
+            // corte que el % (antes era el mes anterior
+            // COMPLETO junto a un % calculado al corte: se
+            // veía «+32 %» con un «anterior» mayor que el
+            // actual). El mes completo queda como dato
+            // secundario, rotulado como tal.
             Text(
-              'Ant: ${fmt(m.anteriorTotal)}',
+              'Ant. al mismo corte: ${fmt(m.anteriorMTD)}',
               style: AppTexto.minuscula.copyWith(color: Colors.grey),
             ),
+            if (m.anteriorTotal != m.anteriorMTD)
+              Text(
+                'Mes anterior completo: ${fmt(m.anteriorTotal)}',
+                style: AppTexto.minuscula.copyWith(color: Colors.grey),
+              ),
           ],
         ),
       ),
