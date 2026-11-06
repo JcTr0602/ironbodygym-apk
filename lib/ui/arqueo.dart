@@ -70,7 +70,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: appBarIron(context, 'Arqueo de caja'),
+        appBar: appBarIron(context, 'Arqueo del día'),
         body: const Center(
             child: Text('Solo el dueño puede ver el arqueo de caja.')),
       );
@@ -78,7 +78,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
     return Scaffold(
       appBar: appBarIron(
         context,
-        'Arqueo de caja',
+        'Arqueo del día',
         acciones: [
           IconButton(
             tooltip: 'Sincronizar arqueo',

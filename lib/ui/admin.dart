@@ -17,6 +17,7 @@ import 'package:uuid/uuid.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../config.dart' show AppConfig;
 import '../bloque2_resto.dart';
 import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
@@ -41,6 +42,10 @@ import 'cola.dart';
 import 'arqueo.dart';
 import 'guia.dart';
 import 'auditoria.dart';
+import 'auditoria_persona.dart';
+import 'categorias_suplemento.dart';
+import 'cuentas_por_cobrar.dart';
+import 'historial_ventas.dart';
 import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
 import 'horario_gym.dart';
@@ -1359,12 +1364,15 @@ class _AdminScreenState extends State<AdminScreen> {
                         _lineaNomina(),
                         _tituloSeccion('MÓDULOS'),
                         _tarjetasModulos(),
+                        // 1.25 T121 (F5-26): fuera la nota
+                        // sobre el propio diseño (no ayuda a
+                        // operar nada); en su lugar, la versión
+                        // instalada, que sí sirve al diagnosticar.
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
                           child: Text(
-                            'Diseño propio de esta sección: directo y con '
-                            'lo urgente primero. Los entrenadores no ven '
-                            'este panel.',
+                            'Gestión v${AppConfig.appVersion} · Solo el '
+                            'dueño ve este panel.',
                             textAlign: TextAlign.center,
                             style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                           ),
@@ -1955,6 +1963,18 @@ class _AdminScreenState extends State<AdminScreen> {
   /// Bloque 2 viven ahora aquí (auditoría 1:1: ninguna función
   /// se pierde y ninguna pantalla cambia por dentro).
   Widget _tarjetasModulos() {
+    // 1.25 T121 (F5-10): UNA sola semántica para los badges —
+    // número de DECISIONES pendientes de ese dominio (sin
+    // pendientes, sin badge). Antes solo Clientes (solicitudes
+    // de invitados) y Suplementos (reservas) tenían badge, con
+    // significados distintos, y la ausencia en Caja o Control
+    // se leía como «todo bien» aunque hubiera efectivo por
+    // liquidar o incidencias de sync esperando.
+    final pendCaja = _pend
+        .where((e) => (e['total'] as double? ?? 0) > 0)
+        .length;
+    final pendClientes = _swrSolicitudes.datos.length +
+        _swrReportes.datos.length;
     final modulos =
         <({IconData icono, Color tinte, String titulo, String resumen, int? badge, List<Widget> Function() tarjetas})>[
       (
@@ -1962,7 +1982,7 @@ class _AdminScreenState extends State<AdminScreen> {
         tinte: AppColores.exito,
         titulo: 'Caja, Cobros y Nómina',
         resumen: 'Arqueo · Cierre · Nómina · Adelantos',
-        badge: null,
+        badge: pendCaja == 0 ? null : pendCaja,
         tarjetas: _tarjetasModuloCaja,
       ),
       (
@@ -1970,9 +1990,7 @@ class _AdminScreenState extends State<AdminScreen> {
         tinte: AppColores.info,
         titulo: 'Clientes, Invitados y Comunicación',
         resumen: 'Clientes · Invitados · Plantillas · Avisos',
-        badge: _swrSolicitudes.datos.isEmpty
-            ? null
-            : _swrSolicitudes.datos.length,
+        badge: pendClientes == 0 ? null : pendClientes,
         tarjetas: _tarjetasModuloClientes,
       ),
       (
@@ -2005,7 +2023,7 @@ class _AdminScreenState extends State<AdminScreen> {
         tinte: const Color(0xFF14B8A6),
         titulo: 'Control, Auditoría y Sistema',
         resumen: 'Estadísticas · Auditoría · Sync · Sistema',
-        badge: null,
+        badge: _incidenciasPend == 0 ? null : _incidenciasPend,
         tarjetas: _tarjetasModuloControl,
       ),
     ];
@@ -2118,7 +2136,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _subModulo('COBROS Y CAJA'),
       _tarjetaFlujo(
         Icons.account_balance_wallet_rounded,
-        'Arqueo de caja',
+        'Arqueo del día',
         pendTotal > 0
             ? '${fmtMonto(pendTotal)} CUP por liquidar'
             : 'Todo cuadrado',
@@ -2132,8 +2150,8 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       _tarjetaFlujo(
         Icons.handshake_rounded,
-        'Arqueo de entrega de efectivo',
-        'Liquidar por delta, nunca pendiente = 0',
+        'Liquidar efectivo de entrenadores',
+        'Cuadra lo entregado por cada entrenador',
         () => _ir(const ArqueoEntregaScreen()),
       ),
       _tarjetaFlujo(
@@ -2244,7 +2262,9 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.delete_outline_rounded,
         'Papelera',
-        'Clientes eliminados (recuperables)',
+        // 1.25 T121 (F5-25): la pantalla trata de INACTIVOS
+        // recuperables, no de eliminados: el título lo dice.
+        'Inactivos y papelera',
         () => _ir(const PapeleraScreen()),
       ),
       _tarjetaFlujo(
@@ -2373,19 +2393,34 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Widget> _tarjetasModuloSuplementos() {
     return [
       _subModulo('SUPLEMENTOS'),
-      _tarjetaFlujo(
-        Icons.inventory_2_rounded,
-        'Suplementos',
-        'Catálogo, categorías y ventas',
-        () => _ir(SeccionSuplementosScreen(
-          onIr: _irYRecargar,
-        )),
-      ),
+      // 1.25 T121 (F5-23): fuera la puerta intermedia
+      // «Suplementos» (SeccionSuplementosScreen): una pila de
+      // botones hacia destinos que ahora son tarjetas directas
+      // de este módulo (Categorías, Historial de ventas y
+      // Fiados se sumaron aquí; el resto ya estaba).
       _tarjetaFlujo(
         Icons.fitness_center_rounded,
         'Catálogo de suplementos',
         'Con foto, precio y margen',
         () => _ir(const SuplementosScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.category_rounded,
+        'Categorías',
+        'Organiza el catálogo por tipo de producto',
+        () => _ir(const CategoriasSuplementoScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.receipt_long_rounded,
+        'Historial de ventas',
+        'Ventas de suplementos con filtros y totales',
+        () => _ir(const HistorialVentasScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.account_balance_wallet_rounded,
+        'Fiados por cobrar',
+        'Ventas de suplementos a crédito por cobrar',
+        () => _ir(const CuentasPorCobrarScreen()),
       ),
       _tarjetaFlujo(
         Icons.warning_amber_rounded,
@@ -2580,11 +2615,14 @@ class _AdminScreenState extends State<AdminScreen> {
         'Quién hizo qué y cuándo',
         () => _ir(const AuditoriaScreen()),
       ),
+      // F5-23: fuera la intermedia «Auditoría detallada»
+      // (dos enlaces, uno a la propia Auditoría): la vista
+      // por persona es tarjeta directa de este módulo.
       _tarjetaFlujo(
-        Icons.history_rounded,
-        'Auditoría detallada',
-        'General y por persona, con filtros',
-        () => _ir(const AuditoriaPanelScreen()),
+        Icons.person_search_rounded,
+        'Auditoría por persona',
+        'Día, semana, mes o rango de una persona',
+        () => _ir(const AuditoriaPersonaScreen()),
       ),
       _tarjetaFlujo(
         Icons.radar_rounded,

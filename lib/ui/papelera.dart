@@ -551,9 +551,15 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              TextButton(
-                                child: const Icon(
-                                    Icons.restore_from_trash_rounded),
+                              // F5-25: la acción de recuperar
+                              // era el único botón de la fila
+                              // sin texto ni tooltip: ahora se
+                              // lee «Recuperar».
+                              TextButton.icon(
+                                icon: const Icon(
+                                    Icons.restore_from_trash_rounded,
+                                    size: 18),
+                                label: const Text('Recuperar'),
                                 onPressed: () =>
                                     _recuperar(c),
                               ),

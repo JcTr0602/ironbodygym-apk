@@ -1,9 +1,9 @@
-/// 1.23 (backlog de campo): TODA la administración de
-/// suplementos a mano en la sección.
+/// 1.23 (backlog de campo) / 1.25 T121 (F5-23):
 ///
-/// - SeccionSuplementosScreen (Panel del dueño) enlaza también
-///   Dosis y botes, Reservas, Fiados por cobrar y Sin foto o sin
-///   precio — antes solo se llegaba saltando a otras zonas.
+/// - La pantalla intermedia SeccionSuplementosScreen se
+///   eliminó en la 1.25: sus destinos son tarjetas directas
+///   del módulo Suplementos del Panel (el caso que la montaba
+///   se retiró con ella).
 /// - El menú ⋮ de SuplementosScreen ofrece «Administrar dosis y
 ///   botes» SOLO al dueño: sin sesión de dueño (la sesión de
 ///   dueño no es fingible localmente: isOwner sale del email del
@@ -19,10 +19,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
-import 'package:ironbody_gym/ui/admin_secciones.dart';
-import 'package:ironbody_gym/ui/panel_bloque2.dart';
-import 'package:ironbody_gym/ui/reservas.dart';
-import 'package:ironbody_gym/ui/servicios_admin.dart';
 import 'package:ironbody_gym/ui/suplementos.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,40 +58,6 @@ void main() {
             const MethodChannel('com.llfbandit.app_links/messages'),
             (call) async => null);
     await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
-  });
-
-  testWidgets(
-      'Sección Suplementos del Panel: enlaces de administración '
-      'completos y navegando a su pantalla', (tester) async {
-    Widget? destino;
-    Future<void> ir(Widget w) async => destino = w;
-    await tester.pumpWidget(MaterialApp(
-      home: SeccionSuplementosScreen(onIr: ir),
-    ));
-    await tester.pumpAndSettle();
-
-    // Lo que ya había.
-    expect(find.text('Gestionar catálogo'), findsOneWidget);
-    expect(find.text('Categorías'), findsOneWidget);
-    expect(find.text('Historial de ventas'), findsOneWidget);
-    // Lo nuevo de la 1.23.
-    expect(find.text('Dosis y botes'), findsOneWidget);
-    expect(find.text('Reservas'), findsOneWidget);
-    expect(find.text('Fiados por cobrar'), findsOneWidget);
-    expect(find.text('Sin foto o sin precio'), findsOneWidget);
-
-    // Flujo básico: cada botón nuevo abre SU pantalla.
-    await tester.ensureVisible(find.text('Dosis y botes'));
-    await tester.tap(find.text('Dosis y botes'));
-    expect(destino, isA<ServiciosAdminScreen>());
-
-    await tester.ensureVisible(find.text('Reservas'));
-    await tester.tap(find.text('Reservas'));
-    expect(destino, isA<ReservasScreen>());
-
-    await tester.ensureVisible(find.text('Sin foto o sin precio'));
-    await tester.tap(find.text('Sin foto o sin precio'));
-    expect(destino, isA<SinFotoPrecioScreen>());
   });
 
   testWidgets(

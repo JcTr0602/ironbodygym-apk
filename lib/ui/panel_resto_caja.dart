@@ -328,12 +328,12 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-          appBar: appBarIron(context, 'Arqueo de entrega'),
+          appBar: appBarIron(context, 'Liquidar efectivo'),
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: appBarIron(context, 'Arqueo de entrega'),
+      appBar: appBarIron(context, 'Liquidar efectivo'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando caja…')
           : ListView(

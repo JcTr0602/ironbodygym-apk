@@ -342,19 +342,40 @@ class _VencimientosProximosScreenState
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
-                const Text('Ya vencidos', style: AppTexto.titulo),
-                const SizedBox(height: 8),
-                if (_vencidos.isEmpty)
-                  const Text('Nadie vencido.',
-                      style: AppTexto.secundario),
-                for (final c in _vencidos) _filaCliente(c, true),
-                const SizedBox(height: 24),
-                const Text('Próximos 7 días', style: AppTexto.titulo),
-                const SizedBox(height: 8),
-                if (_proximos.isEmpty)
-                  const Text('Nadie vence en los próximos 7 días.',
-                      style: AppTexto.secundario),
-                for (final c in _proximos) _filaCliente(c, false),
+                // 1.25 T121 (F5-27): antes se pintaban AMBOS
+                // encabezados aunque una lista estuviera vacía
+                // («Ya vencidos / Nadie vencido.» ocupando
+                // media pantalla). Ahora: resumen con conteos
+                // arriba y cada sección solo si tiene filas;
+                // si no hay nadie en ninguna, un solo vacío.
+                Text(
+                  '${_vencidos.length} vencido(s) · '
+                  '${_proximos.length} por vencer en 7 días',
+                  style: AppTexto.secundario,
+                ),
+                if (_vencidos.isEmpty && _proximos.isEmpty) ...[
+                  const SizedBox(height: 24),
+                  const EstadoVacio(
+                    icono: Icons.check_circle_rounded,
+                    titulo: 'Nadie vencido ni por vencer',
+                    subtitulo: 'Ningún cliente está vencido ni vence '
+                        'en los próximos 7 días.',
+                  ),
+                ],
+                if (_vencidos.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Ya vencidos (${_vencidos.length})',
+                      style: AppTexto.titulo),
+                  const SizedBox(height: 8),
+                  for (final c in _vencidos) _filaCliente(c, true),
+                ],
+                if (_proximos.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Text('Próximos 7 días (${_proximos.length})',
+                      style: AppTexto.titulo),
+                  const SizedBox(height: 8),
+                  for (final c in _proximos) _filaCliente(c, false),
+                ],
               ],
             ),
     );

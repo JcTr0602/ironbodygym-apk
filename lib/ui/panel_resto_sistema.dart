@@ -20,17 +20,19 @@
 ///   auditoría local.
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../negocio.dart' show clientePorId, fmtFecha, tiempoRelativo;
+import '../tiempo.dart' show aHabana;
 import '../bloque2_resto.dart';
 import '../errores_sync.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tipos_operacion.dart';
 import 'app_bar.dart';
-import 'auditoria.dart';
-import 'auditoria_persona.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -66,77 +68,9 @@ Future<bool> _confirmar(BuildContext context, String titulo, String texto) async
 }
 
 // ---------------------------------------------------------------------------
-// F1
-// ---------------------------------------------------------------------------
-
-class AuditoriaPanelScreen extends StatelessWidget {
-  const AuditoriaPanelScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    if (!AuthService().isOwner) {
-      return Scaffold(
-        appBar: appBarIron(context, 'Auditoría (F1)'),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(AppEspacio.xl),
-            child: Text(
-              'Por defecto, el entrenador no ve la auditoría. Solo el '
-              'dueño la ve completa. Si el dueño lo autoriza, un '
-              'entrenador vería únicamente su propia actividad, nunca '
-              'la de otros.',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      );
-    }
-    void ir(Widget p) => Navigator.push(
-        context, RutaIron(builder: (_) => p));
-    return Scaffold(
-      appBar: appBarIron(context, 'Auditoría (F1)'),
-      body: ListView(
-        padding: const EdgeInsets.all(AppEspacio.lg),
-        children: [
-          const Text(
-            'La misma auditoría de 1.8.0, con sus filtros (persona, '
-            'fecha, tipo de acción). No se reescribe: se enlaza.',
-            style: AppTexto.secundario,
-          ),
-          const SizedBox(height: 12),
-          Tarjeta(
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.history_rounded, color: AppColores.textoSecundario(context)),
-              title: const Text('Auditoría general',
-                  style: AppTexto.cuerpo),
-              subtitle: const Text('Ops, filtros y alertas',
-                  style: AppTexto.secundario),
-              trailing: const Icon(Icons.chevron_right_rounded, size: 18),
-              onTap: () => ir(const AuditoriaScreen()),
-            ),
-          ),
-          Tarjeta(
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.person_search_rounded,
-                  color: AppColores.textoSecundario(context)),
-              title: const Text('Auditoría por persona',
-                  style: AppTexto.cuerpo),
-              subtitle: const Text('Día, semana, mes o rango',
-                  style: AppTexto.secundario),
-              trailing: const Icon(Icons.chevron_right_rounded, size: 18),
-              onTap: () => ir(const AuditoriaPersonaScreen()),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// F3
+// F1: la auditoría enlaza DIRECTO desde el módulo Control del
+// Panel desde la 1.25 (T121/F5-23): la intermedia
+// AuditoriaPanelScreen (dos enlaces) se eliminó.
 // ---------------------------------------------------------------------------
 
 class ErroresSyncPanelScreen extends StatefulWidget {
@@ -150,6 +84,9 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _ops = [];
   List<Map<String, dynamic>> _huerfanas = [];
+  // 1.25 T121 (F5-22): nombres de los clientes afectados por
+  // las ops con error, precargados en lote.
+  Map<int, String> _nombresClientes = {};
 
   @override
   void initState() {
@@ -161,10 +98,24 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
     try {
       final ops = await opsConError();
       final huerfanas = await fotosHuerfanasDeOpsRechazadas();
+      // F5-22: resolver los nombres de los clientes afectados
+      // (cliente_id del payload) para identificar cada op.
+      final nombres = <int, String>{};
+      final ids = <int>{};
+      for (final op in ops) {
+        final cid = _clienteIdDeOp(op);
+        if (cid != null) ids.add(cid);
+      }
+      for (final id in ids) {
+        final c = await clientePorId(id);
+        final n = '${c?['nombre'] ?? ''}'.trim();
+        if (n.isNotEmpty) nombres[id] = n;
+      }
       if (mounted) {
         setState(() {
           _ops = ops;
           _huerfanas = huerfanas;
+          _nombresClientes = nombres;
           _cargando = false;
         });
       }
@@ -173,11 +124,59 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
     }
   }
 
+  /// F5-22: cliente_id del payload de una op (si lo trae).
+  int? _clienteIdDeOp(Map<String, dynamic> op) {
+    try {
+      final p = jsonDecode('${op['payload'] ?? ''}');
+      if (p is Map) {
+        final v = p['cliente_id'];
+        if (v is num) return v.toInt();
+        if (v is String) return int.tryParse(v);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// F5-22: línea de contexto de una op con error — fecha y
+  /// antigüedad, cliente afectado y estado en lenguaje llano
+  /// (antes la fila era solo tipo + error + «estado: error»
+  /// crudo: con dos errores del mismo tipo no había forma de
+  /// saber cuál era cuál ni cuánto llevaba atascado).
+  String _contextoOp(Map<String, dynamic> op) {
+    final partes = <String>[];
+    final creada = '${op['creada_ts'] ?? ''}';
+    final f = DateTime.tryParse(creada);
+    if (f != null) {
+      final h = aHabana(f);
+      final hh = '${h.hour}'.padLeft(2, '0');
+      final mm = '${h.minute}'.padLeft(2, '0');
+      partes.add('${fmtFecha(h.toIso8601String())} $hh:$mm');
+      final rel = tiempoRelativo(creada);
+      if (rel.isNotEmpty) partes.add(rel);
+    }
+    final cid = _clienteIdDeOp(op);
+    if (cid != null) {
+      partes.add('Cliente: ${_nombresClientes[cid] ?? '#$cid'}');
+    } else {
+      // Inscripciones: el payload trae el nombre del cliente
+      // nuevo (aún sin id en este teléfono).
+      try {
+        final p = jsonDecode('${op['payload'] ?? ''}');
+        final n = p is Map ? "${p['nombre'] ?? ''}".trim() : '';
+        if (n.isNotEmpty) partes.add('Cliente: $n');
+      } catch (_) {}
+    }
+    partes.add(op['estado'] == 'rechazada'
+        ? 'Rechazada por el servidor'
+        : 'Error al subir');
+    return partes.join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final soyDueno = AuthService().isOwner;
     return Scaffold(
-      appBar: appBarIron(context, 'Errores de sync (F3)'),
+      appBar: appBarIron(context, 'Errores de sincronización'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando sistema…')
           : ListView(
@@ -193,8 +192,17 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                 ),
                 const SizedBox(height: 12),
                 if (_ops.isEmpty && _huerfanas.isEmpty)
-                  const Text('Sin errores pendientes.',
-                      style: AppTexto.secundario)
+                  // F5-22: vacío con el componente compartido
+                  // y acción de revisar de nuevo.
+                  EstadoVacio(
+                    icono: Icons.sync_rounded,
+                    titulo: 'Sin errores pendientes',
+                    subtitulo:
+                        'La sincronización no tiene operaciones '
+                        'atascadas en este teléfono.',
+                    textoAccion: 'Revisar de nuevo',
+                    onAccion: _cargar,
+                  )
                 else ...[
                   for (final op in _ops)
                     Tarjeta(
@@ -206,7 +214,7 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                             style: AppTexto.cuerpo),
                         subtitle: Text(
                             '${resumenErrorDiagnostico('${op['error'] ?? ''}')}'
-                            ' · estado: ${op['estado']}',
+                            '\n${_contextoOp(op)}',
                             style: AppTexto.secundario),
                         trailing: op['estado'] == 'error'
                             ? TextButton(
@@ -277,6 +285,22 @@ const _kTablasEspejoF5 = [
   'suplementos',
 ];
 
+/// F5-14: etiquetas humanas de las tablas del espejo — el
+/// selector de re-descarga mostraba nombres de base de datos
+/// (pagos_diarios, servicio_ventas…), lenguaje del equipo de
+/// desarrollo, no del negocio. El VALOR sigue siendo el nombre
+/// técnico (lo usa la meta forzar_redescarga_<tabla>).
+const _etiquetasTablaF5 = {
+  'clientes': 'Clientes',
+  'pagos': 'Pagos',
+  'pagos_diarios': 'Pagos diarios',
+  'ventas_suplementos': 'Ventas de suplementos',
+  'servicio_ventas': 'Dosis y servicios',
+  'suplementos': 'Suplementos (catálogo)',
+};
+
+String _etiquetaTablaF5(String t) => _etiquetasTablaF5[t] ?? t;
+
 class MantenimientoScreen extends StatefulWidget {
   const MantenimientoScreen({super.key});
   @override
@@ -316,20 +340,21 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
-      return _soloDueno('Mantenimiento (F5)');
+      return _soloDueno('Mantenimiento');
     }
     void irSnack(String m) =>
         mostrarSnack(context, m, significado: SignificadoChip.exito);
     return Scaffold(
-      appBar: appBarIron(context, 'Mantenimiento (F5)'),
+      appBar: appBarIron(context, 'Mantenimiento'),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
+          // 1.25 T121 (F5-14): la política de prohibiciones
+          // vive en el CÓDIGO (lista cerrada de herramientas),
+          // no como párrafo para el dueño.
           const Text(
-            'Lista cerrada, nada fuera de esto. PROHIBIDO: borrar datos '
-            'a mano, VACUUM, podar applied_ops, tocar watermarks o '
-            'secuencias. Cada herramienta pide confirmación y queda '
-            'registrada en la auditoría local.',
+            'Herramientas seguras: cada una pide confirmación '
+            'y queda registrada en la auditoría local.',
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 12),
@@ -433,7 +458,8 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                   isExpanded: true,
                   items: [
                     for (final t in _kTablasEspejoF5)
-                      DropdownMenuItem(value: t, child: Text(t))
+                      DropdownMenuItem(
+                          value: t, child: Text(_etiquetaTablaF5(t)))
                   ],
                   onChanged: (v) => setState(() => _tabla = v ?? 'clientes'),
                 ),
@@ -443,7 +469,7 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                     onPressed: puedeRedescargarEspejo(_pendientes)
                         ? () async {
                             if (!await _confirmar(context,
-                                'Re-descargar $_tabla',
+                                'Re-descargar ${_etiquetaTablaF5(_tabla)}',
                                 'El espejo bajado del servidor reemplazará la tabla local. Sin cola pendiente, no hay cobros que perder.')) {
                               return;
                             }
@@ -453,7 +479,8 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                             await registrarAccionMantenimiento(
                                 'f5_redescargar_espejo', {'tabla': _tabla});
                             await _cargar();
-                            irSnack('Tabla $_tabla re-descargada');
+                            irSnack(
+                                '${_etiquetaTablaF5(_tabla)}: tabla re-descargada');
                           }
                         : null,
                     child: const Text('Ejecutar'),
@@ -470,15 +497,16 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
               title: const Text('Descartar fotos huérfanas',
                   style: AppTexto.cuerpo),
               subtitle: const Text(
-                  'Solo huérfanas de ops rechazadas (regla G5). Abre la '
-                  'pantalla F3 para descartarlas una a una.',
+                  'Solo huérfanas de operaciones rechazadas. Ábrelos '
+                  'en Errores de sincronización para descartarlas '
+                  'una a una.',
                   style: AppTexto.secundario),
               trailing: TextButton(
                 onPressed: () => Navigator.push(
                     context,
                     RutaIron(
                         builder: (_) => const ErroresSyncPanelScreen())),
-                child: const Text('Abrir F3'),
+                child: const Text('Abrir errores'),
               ),
             ),
           ),
