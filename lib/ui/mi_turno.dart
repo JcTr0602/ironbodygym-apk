@@ -61,6 +61,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   double _cobradoAyer = 0;
   double _semanaAnt = 0;
   bool _cerrado = false; // v1.1.1: turno actual ya cerrado
+  // 1.26 (auditoría de botones, MEDIA 1): guardas
+  // anti-doble-toque del cierre. Sin ellas, un doble toque
+  // abría dos diálogos de cierre y, en el camino legado,
+  // encolaba DOS ops cierre_turno con UUID distinto.
+  bool _cierreEnCurso = false;
+  bool _confirmandoCierre = false;
   // 1.25 T84: la primera carga pinta un estado de carga,
   // no la pantalla en ceros; y el chip de cabecera sale
   // del turno REAL de hoy (turnoVisible), no del reloj.
@@ -434,6 +440,20 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   /// "sincronizar ahora". Permite cerrar con pendientes bajo
   /// confirmación explícita del riesgo.
   Future<void> _cierreTurno() async {
+    // 1.26 (MEDIA 1): check-and-set SÍNCRONO antes del
+    // primer await: un segundo toque mientras se verifica
+    // el permiso o se cargan los pendientes no abre otro
+    // diálogo. La guarda vive hasta que el diálogo cierra.
+    if (_cierreEnCurso) return;
+    _cierreEnCurso = true;
+    try {
+      await _cierreTurnoInterno();
+    } finally {
+      _cierreEnCurso = false;
+    }
+  }
+
+  Future<void> _cierreTurnoInterno() async {
     // 1.24 Bloque 3: cerrar turno cuelga de can_gestionar_turnos.
     if (!await permisoOperativoOkConRefresco(
         context, () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
@@ -466,7 +486,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final montoPendiente =
         await montoEfectivoOps([...pendientes, ...bloqueadas]);
     if (!mounted) return;
-    showDialog(
+    await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Cierre de turno'),
@@ -586,96 +606,105 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   ? 'Cerrar de todos modos'
                   : 'Confirmar cierre'),
               onPressed: () async {
-                // v1.2.5 (2.4): confirmación explícita del riesgo.
-                if ((pendientes.isNotEmpty ||
-                        bloqueadas.isNotEmpty) &&
-                    ctx.mounted) {
-                  final confirma = await showDialog<bool>(
-                    context: ctx,
-                    builder: (c2) => AlertDialog(
-                      title: const Text('¿Cerrar con pendientes?'),
-                      content: Text(
-                          '${pendientes.length + bloqueadas.length} '
-                          'cambio${pendientes.length + bloqueadas.length == 1 ? '' : 's'} '
-                          'aún no se sincronizaron'
-                          '${montoPendiente > 0 ? ' (${fmtMonto(montoPendiente)} CUP en efectivo)' : ''}. '
-                          'Quedarán guardados '
-                          'en este teléfono.'),
-                      actions: [
-                        TextButton(
-                            onPressed: () =>
-                                Navigator.pop(c2, false),
-                            child: const Text('Volver')),
-                        FilledButton(
-                            onPressed: () =>
-                                Navigator.pop(c2, true),
-                            child:
-                                const Text('Sí, cerrar')),
-                      ],
-                    ),
-                  );
-                  if (confirma != true) return;
-                }
-                // Argón P1#10: delegar en TurnoService cuando hay un
-                // turno abierto: confirmarCierre() ya encola el mismo
-                // registrarCierreTurno (reporte a admin preservado)
-                // y marca el turno cerrado en la tabla `turnos`.
-                // Sin turno abierto no hay nada que delegar: se
-                // conserva el camino legado para no perder el reporte.
-                final turnoAbierto =
-                    await TurnoService.instance.turnoActual();
-                if (turnoAbierto != null) {
-                  // 1.25 T84: la ejecución del cierre es
-                  // LA compartida (cierre_turno.dart); esta
-                  // hoja solo aporta su forzado y sus
-                  // avisos. T-08: si la ejecución falla, se
-                  // muestra el motivo y NO se cae al camino
-                  // legado (antes se «cerraba de mentira»).
-                  final r = await ejecutarCierreTurno(
-                    forzado: pendientes.isNotEmpty ||
-                        bloqueadas.isNotEmpty,
-                  );
-                  if (!r.ok) {
+                // 1.26 (MEDIA 1): guarda síncrona — un
+                // segundo toque mientras corre el cierre
+                // no vuelve a encolar la op (camino legado).
+                if (_confirmandoCierre) return;
+                _confirmandoCierre = true;
+                try {
+                  // v1.2.5 (2.4): confirmación explícita del riesgo.
+                  if ((pendientes.isNotEmpty ||
+                          bloqueadas.isNotEmpty) &&
+                      ctx.mounted) {
+                    final confirma = await showDialog<bool>(
+                      context: ctx,
+                      builder: (c2) => AlertDialog(
+                        title: const Text('¿Cerrar con pendientes?'),
+                        content: Text(
+                            '${pendientes.length + bloqueadas.length} '
+                            'cambio${pendientes.length + bloqueadas.length == 1 ? '' : 's'} '
+                            'aún no se sincronizaron'
+                            '${montoPendiente > 0 ? ' (${fmtMonto(montoPendiente)} CUP en efectivo)' : ''}. '
+                            'Quedarán guardados '
+                            'en este teléfono.'),
+                        actions: [
+                          TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(c2, false),
+                              child: const Text('Volver')),
+                          FilledButton(
+                              onPressed: () =>
+                                  Navigator.pop(c2, true),
+                              child:
+                                  const Text('Sí, cerrar')),
+                        ],
+                      ),
+                    );
+                    if (confirma != true) return;
+                  }
+                  // Argón P1#10: delegar en TurnoService cuando hay un
+                  // turno abierto: confirmarCierre() ya encola el mismo
+                  // registrarCierreTurno (reporte a admin preservado)
+                  // y marca el turno cerrado en la tabla `turnos`.
+                  // Sin turno abierto no hay nada que delegar: se
+                  // conserva el camino legado para no perder el reporte.
+                  final turnoAbierto =
+                      await TurnoService.instance.turnoActual();
+                  if (turnoAbierto != null) {
+                    // 1.25 T84: la ejecución del cierre es
+                    // LA compartida (cierre_turno.dart); esta
+                    // hoja solo aporta su forzado y sus
+                    // avisos. T-08: si la ejecución falla, se
+                    // muestra el motivo y NO se cae al camino
+                    // legado (antes se «cerraba de mentira»).
+                    final r = await ejecutarCierreTurno(
+                      forzado: pendientes.isNotEmpty ||
+                          bloqueadas.isNotEmpty,
+                    );
+                    if (!r.ok) {
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                      if (mounted) {
+                        mostrarSnack(
+                            context, motivoErrorCierre(r.error),
+                            significado: SignificadoChip.error);
+                      }
+                      return;
+                    }
+                    await vibrarConfirmacion();
                     if (ctx.mounted) Navigator.of(ctx).pop();
                     if (mounted) {
-                      mostrarSnack(
-                          context, motivoErrorCierre(r.error),
-                          significado: SignificadoChip.error);
+                      setState(() => _cerrado = true);
+                      mostrarSnack(context,
+                          'Turno cerrado. ¡Buen trabajo!',
+                          significado: SignificadoChip.exito);
                     }
                     return;
                   }
+                  await LocalDb.instance.setMeta(
+                      _claveCierre(),
+                      isoHabana(ahoraHabana()));
+                  // v1.2.5-rev5 (Gemini): encolar el cierre para sincronizar.
+                  // El admin ve el historial de todos los entrenadores.
+                  // v1.2.5-rev6: pagos_count = operaciones de pago reales de
+                  // hoy (el número que muestra este diálogo), no la longitud
+                  // de la cola sin sincronizar.
+                  try {
+                    await SyncEngine.instance.registrarCierreTurno(
+                      fecha: _hoy(),
+                      turno: _turnoId(),
+                      totalCobrado: _cobrado,
+                      pagosCount: nOps,
+                    );
+                  } catch (_) {}
+                  // v1.2.5 (3.2): vibra TRAS la confirmación real.
                   await vibrarConfirmacion();
                   if (ctx.mounted) Navigator.of(ctx).pop();
                   if (mounted) {
                     setState(() => _cerrado = true);
-                    mostrarSnack(context,
-                        'Turno cerrado. ¡Buen trabajo!',
-                        significado: SignificadoChip.exito);
+                    mostrarSnack(context, 'Turno cerrado. ¡Buen trabajo!', significado: SignificadoChip.exito);
                   }
-                  return;
-                }
-                await LocalDb.instance.setMeta(
-                    _claveCierre(),
-                    isoHabana(ahoraHabana()));
-                // v1.2.5-rev5 (Gemini): encolar el cierre para sincronizar.
-                // El admin ve el historial de todos los entrenadores.
-                // v1.2.5-rev6: pagos_count = operaciones de pago reales de
-                // hoy (el número que muestra este diálogo), no la longitud
-                // de la cola sin sincronizar.
-                try {
-                  await SyncEngine.instance.registrarCierreTurno(
-                    fecha: _hoy(),
-                    turno: _turnoId(),
-                    totalCobrado: _cobrado,
-                    pagosCount: nOps,
-                  );
-                } catch (_) {}
-                // v1.2.5 (3.2): vibra TRAS la confirmación real.
-                await vibrarConfirmacion();
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                if (mounted) {
-                  setState(() => _cerrado = true);
-                  mostrarSnack(context, 'Turno cerrado. ¡Buen trabajo!', significado: SignificadoChip.exito);
+                } finally {
+                  _confirmandoCierre = false;
                 }
               },
             ),
