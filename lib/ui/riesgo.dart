@@ -7,6 +7,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
 import '../cliente_protegido.dart';
@@ -15,6 +16,7 @@ import '../negocio.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'ficha.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
@@ -73,7 +75,16 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
       if (haceDias <= 60) continue;
       final total = hp.fold<double>(
           0, (t, p) => t + ((p['monto'] as num?)?.toDouble() ?? 0));
+      // 1.25 T39: la fila conserva el id y el teléfono wa.me
+      // (antes se leían del espejo y se tiraban: la lista de
+      // trabajo no dejaba trabajar — ni ficha, ni escribir).
+      var wa = normalizarTelefonoWaMe('${c['movil'] ?? ''}');
+      if (wa.isEmpty) {
+        wa = normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+      }
       res.add({
+        'id': cid,
+        'wa': wa,
         'nombre': '${c['nombre'] ?? '—'}',
         'ultimo_pago': ultimoStr.substring(0, 10),
         'hace_dias': haceDias,
@@ -145,6 +156,39 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                                           color: Colors.white,
                                           size: 22),
                                     ),
+                                    // 1.25 T39: tocar abre la
+                                    // ficha (desde ahí se cobra
+                                    // y se escribe); el botón
+                                    // wa.me va directo a
+                                    // recuperar al cliente.
+                                    onTap: () {
+                                      final cid = r['id'] as int?;
+                                      if (cid == null) return;
+                                      Navigator.of(context).push(
+                                          RutaIron(
+                                              builder: (_) =>
+                                                  FichaScreen(
+                                                      clienteId:
+                                                          cid)));
+                                    },
+                                    trailing:
+                                        (r['wa'] as String? ?? '')
+                                                .isEmpty
+                                            ? null
+                                            : IconButton(
+                                                icon: const Icon(
+                                                    Icons
+                                                        .chat_rounded),
+                                                tooltip:
+                                                    'Escribir por WhatsApp',
+                                                onPressed: () async {
+                                                  final url = Uri.parse(
+                                                      'https://wa.me/${r['wa']}');
+                                                  await launchUrl(url,
+                                                      mode: LaunchMode
+                                                          .externalApplication);
+                                                },
+                                              ),
                                     title: Text(
                                       '${r['nombre']}',
                                       style: AppTexto.subtitulo,
