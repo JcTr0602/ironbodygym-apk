@@ -348,7 +348,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
           const SizedBox(height: 4),
           for (final a in filas)
             Padding(
-              padding: const EdgeInsets.only(left: 24, bottom: 2),
+              padding: const EdgeInsets.only(left: AppEspacio.xl, bottom: 2),
               child: Text(
                   '${a['nombre'] ?? 'Sin nombre'} · '
                   '${rotuloTipoAvisoLote('${a['tipo'] ?? ''}')}',
