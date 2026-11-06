@@ -23,6 +23,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
 import '../sync.dart';
+import '../tiempo.dart';
 import 'aviso_duplicado.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -98,6 +99,11 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   int _cantidad = 1;
   final _precio = TextEditingController();
   final _notaPrecio = TextEditingController();
+  // 1.25 T91: la venta rápida converge con la completa:
+  // nota libre y fiado (la función de negocio ya los
+  // soportaba; solo la completa los ofrecía).
+  final _nota = TextEditingController();
+  bool _esFiado = false;
   final _busqueda = TextEditingController();
   final _permisos = Permisos();
 
@@ -198,32 +204,27 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   void dispose() {
     _precio.dispose();
     _notaPrecio.dispose();
+    _nota.dispose();
     _busqueda.dispose();
     super.dispose();
   }
 
   Future<void> _confirmar() async {
     if (!_puedeConfirmar || _guardando || _confirmandoPrecio) return;
-    // Lote 1 Argón: la venta rápida ejecutaba directo aunque el precio
-    // difiriera del oficial (la pantalla de venta exige vista previa).
-    // Con precio distinto, confirmación explícita con ambos precios.
-    if (_precioDifiere) {
-      _confirmandoPrecio = true;
-      bool? ok;
-      try {
-        ok = await DialogoApp.confirmar(context,
-            titulo: 'Confirma la venta',
-            mensaje: 'Vas a vender a '
-                '${_precioVenta!.toStringAsFixed(2)} $_monedaSup '
-                '(oficial: ${_precioOficial.toStringAsFixed(2)} '
-                '$_monedaSup).',
-            aceptar: 'Confirmar venta',
-            cancelar: 'Cancelar');
-      } finally {
-        _confirmandoPrecio = false;
-      }
-      if (ok != true || !mounted) return;
+    // 1.25 T91: la confirmación ES la vista previa del
+    // comprobante, como en la venta completa (v1.8.1):
+    // el mismo texto que recibirá el cliente, con el
+    // aviso de precio distinto dentro si lo hay. Antes
+    // la rápida solo confirmaba aparte cuando el precio
+    // difería, y sin comprobante.
+    _confirmandoPrecio = true;
+    bool ok;
+    try {
+      ok = await _confirmarConVistaPrevia();
+    } finally {
+      _confirmandoPrecio = false;
     }
+    if (!ok || !mounted) return;
     // T16 (1.20, FIN-16 de Argón): la venta rápida también pasa
     // por el detector de duplicados, con la misma huella que la
     // venta completa (suplemento + cantidad + precio unitario).
@@ -262,9 +263,17 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
         clienteId: _clienteId,
         compradorNombre:
             _conCliente ? _clienteNombre : 'Cliente externo',
-        nota: 'venta rápida',
+        // T91: la nota del vendedor viaja con la marca
+        // del camino (la trazabilidad del extracto no
+        // cambia); sin nota, la marca a secas.
+        nota: _nota.text.trim().isEmpty
+            ? 'venta rápida'
+            : 'venta rápida · ${_nota.text.trim()}',
         notaPrecio:
             _precioDifiere && notaPrecio.isNotEmpty ? notaPrecio : null,
+        // T91: fiado como en la completa (solo con
+        // cliente; la función de negocio lo exige).
+        esFiado: _esFiado && _conCliente,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -274,6 +283,98 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
+  }
+
+  /// 1.25 T91: ventana de revisión con el comprobante
+  /// tal y como lo recibirá el cliente (la misma
+  /// función pura y la misma burbuja que la venta
+  /// completa, v1.8.1). Devuelve true solo si el
+  /// vendedor confirma.
+  Future<bool> _confirmarConVistaPrevia() async {
+    final precio = _precioVenta!;
+    final total = precio * _cantidad;
+    final esFiado = _esFiado && _conCliente;
+    final conPromo = conPromoVentaSuplemento(
+      promoActiva: _promoActiva,
+      tipoComprador: _conCliente ? 'cliente' : 'externo',
+      esFiado: esFiado,
+    );
+    String? nuevoVencimiento;
+    if (conPromo) {
+      final cli = _clientes.cast<Map<String, dynamic>?>()
+          .firstWhere(
+            (c) => (c?['id'] as num?)?.toInt() == _clienteId,
+            orElse: () => null,
+          );
+      final hasta = '${cli?['pagado_hasta'] ?? ''}'.trim();
+      nuevoVencimiento =
+          previewHasta(hasta.isEmpty ? null : hasta, 1);
+    }
+    final texto = textoComprobanteCompra(
+      nombreProducto: '${widget.sup['nombre'] ?? ''}',
+      cantidad: _cantidad,
+      precio: precio,
+      moneda: _monedaSup,
+      total: total,
+      nombreComprador:
+          _conCliente ? _clienteNombre : 'Cliente externo',
+      fechaIso: hoyHabanaIso(),
+      conPromo: conPromo,
+      nuevoVencimientoIso: nuevoVencimiento,
+      esFiado: esFiado,
+      vendedor: AuthService().displayName,
+    );
+    if (!mounted) return false;
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Confirma la venta',
+        iconoTitulo: Icons.point_of_sale_rounded,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Revisa el comprobante tal y como lo recibirá el cliente:',
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppEspacio.md),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE7F6EC),
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              ),
+              child: Text(texto.replaceAll('*', '')),
+            ),
+            if (_precioDifiere) ...[
+              const SizedBox(height: 12),
+              Text(
+                '⚠️ Precio distinto al oficial '
+                '(${_precioOficial.toStringAsFixed(2)} $_monedaSup).',
+                style: AppTexto.cuerpo
+                    .copyWith(color: AppColores.error),
+              ),
+            ],
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          BotonPrimario(
+            texto: 'Confirmar venta',
+            onPressed: () => Navigator.pop(ctx, true),
+            expandido: false,
+          ),
+        ],
+      ),
+    );
+    return r == true;
   }
 
   @override
@@ -362,6 +463,32 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
               _infoPromo()
             else if (!_conCliente)
               _advertenciaSinPromo(),
+            // 1.25 T91: fiado y nota, como en la venta
+            // completa (el fiado exige cliente y apaga
+            // la promo, misma regla de negocio).
+            if (_conCliente) ...[
+              const SizedBox(height: AppEspacio.sm),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Fiado (se cobra después)'),
+                subtitle: const Text(
+                    'No cuenta como cobrado hasta saldarse y no aplica la promo.'),
+                value: _esFiado,
+                onChanged: _guardando
+                    ? null
+                    : (v) => setState(() => _esFiado = v),
+              ),
+            ],
+            const SizedBox(height: AppEspacio.sm),
+            CampoTexto(
+              controller: _nota,
+              etiqueta: 'Nota (opcional)',
+              hint: 'Ej: lo recoge el viernes',
+              icono: Icons.sticky_note_2_rounded,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            _barraTotal(),
           ],
         ),
       ),
@@ -379,6 +506,36 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
           child: Text(_guardando ? 'Registrando…' : 'Confirmar venta'),
         ),
       ],
+    );
+  }
+
+  /// 1.25 T91: el total SIEMPRE visible y en vivo
+  /// (cantidad × precio), como pide el diseño de la
+  /// venta única: antes la rápida no mostraba ningún
+  /// total hasta registrar.
+  Widget _barraTotal() {
+    final p = _precioVenta;
+    return Tarjeta(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+      child: Row(
+        children: [
+          const Text('Total', style: AppTexto.subtitulo),
+          const Spacer(),
+          if (p != null)
+            Text(
+              '$_cantidad × ${p.toStringAsFixed(2)} = ',
+              style: AppTexto.secundario,
+            ),
+          Text(
+            p == null
+                ? '—'
+                : '${(p * _cantidad).toStringAsFixed(2)} $_monedaSup',
+            style: AppTexto.subtitulo
+                .copyWith(color: AppColores.naranja),
+          ),
+        ],
+      ),
     );
   }
 
@@ -465,6 +622,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                       _clienteId = null;
                       _clienteNombre = '';
                       _aceptaSinPromo = false;
+                      _esFiado = false;
                     }),
           ),
         ],
