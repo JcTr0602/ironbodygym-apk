@@ -140,6 +140,17 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             esError ? SignificadoChip.error : SignificadoChip.exito);
   }
 
+  /// Recarga silenciosa para el aviso del banner: un
+  /// fallo de lectura del espejo aquí no debe quedar
+  /// como error asíncrono no manejado (la pantalla
+  /// conserva lo que tenga; el gesto de actualizar sí
+  /// reporta). Autoauditoría 1.26.
+  Future<void> _recargarTrasBanner() async {
+    try {
+      await _cargar();
+    } catch (_) {}
+  }
+
   Future<void> _cargar() async {
     final items = await LocalDb.instance.allMirror('suplementos');
     final cats =
@@ -548,7 +559,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           SyncBanner(
               compact: true,
               alcance: 'suplementos',
-              alTerminarSync: _cargar),
+              alTerminarSync: _recargarTrasBanner),
           // v1.2.1: la promo la ven todos (el interruptor solo
           // el dueño). Rediseño 1.20: banda compacta; Servicios
           // vive ahora en el menú ⋮ del app bar.
