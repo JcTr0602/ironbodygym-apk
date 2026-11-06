@@ -38,6 +38,12 @@ class HubTurnosScreen extends StatefulWidget {
 class _HubTurnosScreenState extends State<HubTurnosScreen> {
   bool _cargando = true;
   bool _procesando = false;
+  // 1.25 T01: la carga fallida se DICE. Antes el catch
+  // apagaba el spinner y la pantalla pintaba sus listas
+  // vacías («Nada pendiente.») como si fueran el dato:
+  // un fallo disfrazado de "todo bien".
+  bool _errorCarga = false;
+  bool _errorPendientes = false;
   // Panel Terra B1 (bloqueante): _hoy nace inicializado. Antes era
   // `late` y solo se asignaba en el setState de éxito de _cargar:
   // si una lectura fallaba antes, el catch apagaba el spinner y el
@@ -62,7 +68,11 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _errorCarga = false;
+      _errorPendientes = false;
+    });
     try {
       final hoy = ahoraHabana();
       final hoyIso = isoFechaTurno(hoy);
@@ -110,6 +120,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
       // solo el suyo.
       final pendientes =
           <({String nombre, int tid, double cup, double usd})>[];
+      var pendientesParcial = false;
       if (_soyDueno) {
         final yo = AuthService().telegramId;
         try {
@@ -132,7 +143,11 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
               ));
             }
           }
-        } catch (_) {}
+        } catch (_) {
+          // T01: la lista puede quedar incompleta; se
+          // avisa en su sección en vez de callarlo.
+          pendientesParcial = true;
+        }
       } else {
         final tid = AuthService().telegramId;
         if (tid != null) {
@@ -154,10 +169,16 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
         _cierres = cierres;
         _miTurnoVisible = miVisible;
         _pendientes = pendientes;
+        _errorPendientes = pendientesParcial;
         _cargando = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _errorCarga = true;
+        });
+      }
     }
   }
 
@@ -419,6 +440,27 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   style: AppTexto.subtitulo,
                 ),
                 const SizedBox(height: 12),
+                if (_errorCarga) ...[
+                  Tarjeta(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '⚠️ No se pudo cargar la información '
+                          'de turnos. Lo que se ve abajo puede '
+                          'estar incompleto o desactualizado.',
+                          style: AppTexto.cuerpo,
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          onPressed: _cargar,
+                          child: const Text('Reintentar'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 // T1 (estéticas 1.19): quién trabaja hoy.
                 if (_hoy.weekday != 7) ...[
                   Tarjeta(
@@ -586,7 +628,14 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 const Text('Pendiente a entregar',
                     style: AppTexto.subtitulo),
                 const SizedBox(height: 8),
-                if (_pendientes.isEmpty)
+                if (_errorCarga)
+                  const Tarjeta(
+                    child: Text(
+                        'Sin datos: la carga falló, no es que '
+                        'no haya pendientes.',
+                        style: AppTexto.cuerpo),
+                  )
+                else if (_pendientes.isEmpty && !_errorPendientes)
                   const Tarjeta(
                     child: Text('Nada pendiente.',
                         style: AppTexto.cuerpo),
@@ -622,6 +671,17 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                         ),
                       ),
                     ),
+                if (_errorPendientes && !_errorCarga) ...[
+                  const Tarjeta(
+                    child: Text(
+                        '⚠️ No se pudieron calcular todos los '
+                        'pendientes: la lista puede estar '
+                        'incompleta. Actualiza con el botón '
+                        'de arriba.',
+                        style: AppTexto.cuerpo),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 const SizedBox(height: 12),
                 if (_soyDueno)
                   Tarjeta(
