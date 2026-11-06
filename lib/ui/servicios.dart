@@ -316,6 +316,45 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return _misPomos.isEmpty ? null : _misPomos.first;
   }
 
+  /// 1.25 Bloque 2: el pomo para vender, con UNA oportunidad
+  /// de refresco antes de concluir que no hay pomo.
+  ///
+  /// El espejo local puede estar viejo: a Duany su app le
+  /// dijo «Sin pomo activo» con su pomo ACTIVO en el
+  /// servidor (espejo desfasado). Antes de denegar la venta
+  /// se sincroniza el alcance de servicios y se relee; solo
+  /// si tras un refresco confirmado sigue sin haber pomo se
+  /// da el aviso definitivo. Si el refresco no se pudo
+  /// confirmar (sin conexión o ciclo en curso), el aviso lo
+  /// dice: no se finge una comprobación que no ocurrió.
+  Future<Map<String, dynamic>?> _pomoParaVender() async {
+    final actual = _pomoActual;
+    if (actual != null) return actual;
+    var confirmado = false;
+    try {
+      final r = await SyncEngine.instance
+          .sincronizarScopeDetallado('servicios');
+      confirmado = r.corrio && !r.error;
+    } catch (_) {}
+    if (!confirmado) {
+      _aviso(
+          'No aparece un pomo activo y no pude sincronizar '
+          'para comprobarlo. Conéctate y vuelve a intentarlo.',
+          error: true);
+      return null;
+    }
+    await _cargar();
+    if (!mounted) return null;
+    final tras = _pomoActual;
+    if (tras != null) return tras;
+    _aviso(
+        _esDueno
+            ? 'Primero abre un bote en Administración para tener principal'
+            : 'No tienes un pomo activo: pide uno al dueño',
+        error: true);
+    return null;
+  }
+
   /// 1.23 S-1 (Argón H-01): el pomo PROPIO del dueño (él es el
   /// titular) del mismo suplemento que [pomo], o null si no
   /// tiene. Cuando el dueño vende «a nombre de: Yo» parado en
@@ -359,12 +398,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _vender(String tipo) async {
-    if (tipo != 'agua_suelta' && _pomoActual == null) {
-      _aviso(
-          _esDueno
-              ? 'Primero abre un bote en Administración para tener principal'
-              : 'No tienes un pomo activo: pide uno al dueño',
-          error: true);
+    // 1.25 Bloque 2: sin pomo a la vista, primero refrescar
+    // el espejo (ver _pomoParaVender); el aviso sale de ahí.
+    if (tipo != 'agua_suelta' && await _pomoParaVender() == null) {
       return;
     }
     Map<String, dynamic>? cliente;
@@ -857,11 +893,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   /// El dueño tiene tope local (saldo del pomo); el entrenador es
   /// ciego al pomo y no tiene tope local (el servidor aplica).
   Future<void> _ventaMultiple() async {
-    final pomo = _pomoActual;
-    if (pomo == null) {
-      _aviso('No tienes un pomo activo', error: true);
-      return;
-    }
+    final pomo = await _pomoParaVender();
+    if (pomo == null) return;
     final topeDosis =
         _esDueno ? ((pomo['saldo_local'] as num?)?.toInt() ?? 0) : 999999;
     if (_esDueno && topeDosis < 2) {
@@ -1313,11 +1346,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // (Sin tope a la venta múltiple: el pomo ciego usa 999999 por
     // diseño; un tope revelaría el saldo al entrenador.)
     if (!AuthService().isOwner) return;
-    final pomo = _pomoActual;
-    if (pomo == null) {
-      _aviso('No tienes un pomo activo', error: true);
-      return;
-    }
+    final pomo = await _pomoParaVender();
+    if (pomo == null) return;
     var motivo = 'merma';
     final dosisCtrl = TextEditingController(text: '1');
     final notaCtrl = TextEditingController();
