@@ -3320,13 +3320,13 @@ class _FichaScreenState extends State<FichaScreen> {
     }
   }
 
-  /// Genera (o regenera) el PIN vía RPC y muestra el modal.
   // 1.26 (auditoría de botones, BAJA): guarda del PIN —
   // un doble toque lanzaba dos RPC y el segundo PIN
   // invalidaba al primero, pudiendo compartirse el
   // inválido, con dos modales apilados.
   bool _generandoPin = false;
 
+  /// Genera (o regenera) el PIN vía RPC y muestra el modal.
   Future<void> _generarPin({required bool esRegeneracion}) async {
     if (_generandoPin) return;
     _generandoPin = true;
