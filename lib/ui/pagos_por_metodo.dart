@@ -54,6 +54,11 @@ class _PagosPorMetodoState
   double _mixto = 0;
   double _efectivoUsd = 0;
   double _transferenciaUsd = 0;
+  // 1.25 T118 (F2-08): operaciones por método (CUP): el monto
+  // solo no distingue «muchos pagos chicos» de «pocos grandes».
+  int _nEfectivo = 0;
+  int _nTransferencia = 0;
+  int _nMixto = 0;
 
   static const _periodos = [
     'hoy',
@@ -76,6 +81,9 @@ class _PagosPorMetodoState
       double mixto = 0;
       double efectivoUsd = 0;
       double transferenciaUsd = 0;
+      int nEfectivo = 0;
+      int nTransferencia = 0;
+      int nMixto = 0;
 
       if (periodo == 'mes_anterior') {
         // Rango del mes anterior completo
@@ -116,10 +124,13 @@ class _PagosPorMetodoState
               '${p['metodo'] ?? 'efectivo'}'.toLowerCase();
           if (metodo.contains('transfer')) {
             transferencia += monto;
+            nTransferencia++;
           } else if (metodo.contains('mixto')) {
             mixto += monto;
+            nMixto++;
           } else {
             efectivo += monto;
+            nEfectivo++;
           }
         }
         // Diarios (igual que pagosDelPeriodo: columna `total`).
@@ -128,8 +139,10 @@ class _PagosPorMetodoState
             .mirrorPorFecha('pagos_diarios', 'fecha', desde, hasta)) {
           if (esPagoDiarioEfectivo(d)) {
             efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+            nEfectivo++;
           } else {
             transferencia += (d['total'] as num?)?.toDouble() ?? 0;
+            nTransferencia++;
           }
         }
         // Suplementos en CUP, por su método real (#6).
@@ -141,8 +154,10 @@ class _PagosPorMetodoState
                 dia.compareTo(hasta) <= 0) {
               if ('${v['metodo'] ?? 'efectivo'}' == 'transferencia') {
                 transferencia += totalVentaCup(v);
+                nTransferencia++;
               } else {
                 efectivo += totalVentaCup(v);
+                nEfectivo++;
               }
             }
           }
@@ -173,8 +188,10 @@ class _PagosPorMetodoState
                       ((v['cantidad'] as num?)?.toInt() ?? 0);
               if ('${v['metodo']}' == 'transferencia') {
                 transferencia += monto;
+                nTransferencia++;
               } else {
                 efectivo += monto;
+                nEfectivo++;
               }
             }
           }
@@ -218,10 +235,13 @@ class _PagosPorMetodoState
                   .toLowerCase();
           if (metodo.contains('transfer')) {
             transferencia += monto;
+            nTransferencia++;
           } else if (metodo.contains('mixto')) {
             mixto += monto;
+            nMixto++;
           } else {
             efectivo += monto;
+            nEfectivo++;
           }
         }
       }
@@ -233,6 +253,9 @@ class _PagosPorMetodoState
           _mixto = mixto;
           _efectivoUsd = efectivoUsd;
           _transferenciaUsd = transferenciaUsd;
+          _nEfectivo = nEfectivo;
+          _nTransferencia = nTransferencia;
+          _nMixto = nMixto;
           _cargando = false;
         });
       }
@@ -300,6 +323,7 @@ class _PagosPorMetodoState
                     total,
                     AppColores.exito,
                     Icons.money_rounded,
+                    operaciones: _nEfectivo,
                   ),
                   const SizedBox(height: 12),
                   _buildBarra(
@@ -308,6 +332,7 @@ class _PagosPorMetodoState
                     total,
                     AppColores.info,
                     Icons.credit_card_rounded,
+                    operaciones: _nTransferencia,
                   ),
                   if (_mixto > 0) ...[
                     const SizedBox(height: 12),
@@ -317,6 +342,7 @@ class _PagosPorMetodoState
                       total,
                       AppColores.naranja,
                       Icons.swap_horiz_rounded,
+                      operaciones: _nMixto,
                     ),
                   ],
                   const SizedBox(height: 24),
@@ -333,7 +359,7 @@ class _PagosPorMetodoState
                           style: AppTexto.titulo,
                         ),
                         Text(
-                          '\$${total.toStringAsFixed(0)} CUP',
+                          '${fmtMonto(total)} CUP',
                           style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w900),
                         ),
                       ],
@@ -352,6 +378,7 @@ class _PagosPorMetodoState
                       _efectivoUsd + _transferenciaUsd,
                       AppColores.exito,
                       Icons.money_rounded,
+                      moneda: 'USD',
                     ),
                     if (_transferenciaUsd > 0) ...[
                       const SizedBox(height: 12),
@@ -361,6 +388,7 @@ class _PagosPorMetodoState
                         _efectivoUsd + _transferenciaUsd,
                         AppColores.info,
                         Icons.credit_card_rounded,
+                        moneda: 'USD',
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -375,7 +403,7 @@ class _PagosPorMetodoState
                             style: AppTexto.titulo,
                           ),
                           Text(
-                            '\$${(_efectivoUsd + _transferenciaUsd).toStringAsFixed(2)} USD',
+                            '${fmtMonto(_efectivoUsd + _transferenciaUsd)} USD',
                             style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w900),
                           ),
                         ],
@@ -391,7 +419,8 @@ class _PagosPorMetodoState
   }
 
   Widget _buildBarra(String titulo, double monto,
-      double total, Color color, IconData icono) {
+      double total, Color color, IconData icono,
+      {String moneda = 'CUP', int? operaciones}) {
     final pct =
         total > 0 ? (monto / total * 100) : 0.0;
     // C1: Tarjeta del sistema (el Card crudo no adaptaba borde
@@ -410,7 +439,7 @@ class _PagosPorMetodoState
               ),
               const Spacer(),
               Text(
-                '\$${monto.toStringAsFixed(0)}',
+                '${fmtMonto(monto)} $moneda',
                 style: AppTexto.titulo.copyWith(color: color),
               ),
             ],
@@ -429,7 +458,12 @@ class _PagosPorMetodoState
           ),
           const SizedBox(height: 4),
           Text(
-            '${pct.toStringAsFixed(1)}%',
+            // F2-08: el % y, si se conoce, cuántas operaciones
+            // forman la cifra.
+            operaciones == null
+                ? '${pct.toStringAsFixed(1)}%'
+                : '${pct.toStringAsFixed(1)}% · $operaciones '
+                    'pago${operaciones == 1 ? '' : 's'}',
             style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
           ),
         ],

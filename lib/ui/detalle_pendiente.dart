@@ -107,7 +107,12 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
             e['tipo'] == 'servicio' && e['servicio_tipo'] == 'agua_suelta')
       ),
     ]..removeWhere((f) => f.$2 == 0);
-    if (filas.length < 2 && _adelantos <= 0) {
+    // 1.25 T118 (F2-09): el desglose se muestra SIEMPRE que
+    // haya algo que desglosar — antes desaparecía justo en el
+    // caso simple (una sola categoría sin adelantos), que es
+    // cuando más fácil era explicarlo. Solo se oculta si no
+    // hay filas ni adelantos (nada que desglosar).
+    if (filas.isEmpty && _adelantos <= 0) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -171,20 +176,28 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
         children: [
           const SyncBanner(),
           if (!_cargando)
+            // F2-09: cabecera héroe con la cifra autoritativa,
+            // como la tarjeta total de pendiente.dart (antes
+            // era una fila de texto suelta y las dos pantallas
+            // del mismo dinero se veían distintas).
             Padding(
               padding:
                   const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Row(
-                children: [
-                  Text('${_items.length} movimiento(s)',
-                      style: TextStyle(
-                          color: AppColores
-                              .textoSecundario(context))),
-                  const Spacer(),
-                  Text(
-                      '${fmtMonto(total)} CUP${totalUsd > 0 ? ' + ${fmtMonto(totalUsd)} USD' : ''}',
-                      style: AppTexto.titulo),
-                ],
+              child: Tarjeta(
+                padding: const EdgeInsets.all(AppEspacio.md),
+                child: Column(
+                  children: [
+                    Text(
+                        '${fmtMonto(total)} CUP${totalUsd > 0 ? ' + ${fmtMonto(totalUsd)} USD' : ''}',
+                        textAlign: TextAlign.center,
+                        style: AppTexto.tituloPagina.copyWith(
+                            color: AppColores.naranja)),
+                    Text(
+                        '${_items.length} movimiento${_items.length == 1 ? '' : 's'} '
+                        'pendiente${_items.length == 1 ? '' : 's'}',
+                        style: AppTexto.secundario),
+                  ],
+                ),
               ),
             ),
           if (!_cargando && _items.isNotEmpty) _resumenCategorias(context),
@@ -193,12 +206,12 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                 ? const Center(
                     child: CircularProgressIndicator())
                 : _items.isEmpty
-                    ? Center(
-                        child: Text(
-                            'Nada pendiente.',
-                            style: TextStyle(
-                                color: AppColores
-                                    .textoSecundario(context))))
+                    ? const EstadoVacio(
+                        icono: Icons.check_circle_rounded,
+                        titulo: 'Nada pendiente',
+                        subtitulo:
+                            'Todo lo cobrado ya se entregó.',
+                      )
                     : ListView.builder(
                         padding: const EdgeInsets.all(AppEspacio.md),
                         itemCount: _items.length,

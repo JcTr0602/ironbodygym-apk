@@ -1286,173 +1286,49 @@ class _NominaScreenState extends State<NominaScreen> {
     _operando = true;
     try {
       final persona = _personasAdelantos[ent]!;
-      final montoCtrl = TextEditingController();
-      final notaCtrl = TextEditingController();
-      var fecha = ahoraHabana();
-      var metodo = 'efectivo';
-      var origen = 'caja_turno';
-      var gaveta = ent; // username de cuya gaveta sale
-      // 1.23 B6 (H-03): la validación del monto va INLINE en
-      // el diálogo, no como SnackBar tras el velo.
-      String? errorMonto;
-      final guardado = await showDialog<bool>(
+      // 1.25 T118 (F2-23): el diálogo es un StatefulWidget
+      // propio con DialogoApp (antes AlertDialog +
+      // StatefulBuilder en línea); posee y dispone sus
+      // controladores y devuelve los datos en un record. Las
+      // gavetas salen de las personas conocidas de la foto
+      // (antes 'duany'/'gabriel' escritos a mano: tercer
+      // sitio de la misma lista, F2-14).
+      final gavetas = <({String username, String nombre})>[
+        for (final e in _personasAdelantos.entries)
+          (username: e.key, nombre: e.value.nombre),
+      ];
+      if (!gavetas.any((g) => g.username == ent)) {
+        gavetas.add((username: ent, nombre: persona.nombre));
+      }
+      final datos = await showDialog<
+          ({
+            int monto,
+            DateTime fecha,
+            String nota,
+            String metodo,
+            String origen,
+            String gaveta
+          })>(
         context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setLocal) => AlertDialog(
-            title: Text('Adelanto a ${persona.nombre}'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: montoCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                        labelText: 'Monto (CUP entero)'),
-                  ),
-                  if (errorMonto != null) ...[
-                    const SizedBox(height: 8),
-                    ErrorInline(errorMonto!),
-                  ],
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text('Fecha: '),
-                      TextButton(
-                        onPressed: () async {
-                          final f = await showDatePicker(
-                            context: ctx,
-                            initialDate: fecha,
-                            firstDate: DateTime(fecha.year - 1, 1, 1),
-                            lastDate: ahoraHabana(),
-                          );
-                          if (f != null) {
-                            setLocal(() => fecha = f);
-                          }
-                        },
-                        child: Text(
-                            '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}'),
-                      ),
-                    ],
-                  ),
-                  Text('Método',
-                      style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('Efectivo'),
-                        selected: metodo == 'efectivo',
-                        onSelected: (_) =>
-                            setLocal(() => metodo = 'efectivo'),
-                      ),
-                      ChoiceChip(
-                        label: const Text('Transferencia'),
-                        selected: metodo == 'transferencia',
-                        onSelected: (_) =>
-                            setLocal(() => metodo = 'transferencia'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text('¿De dónde sale?',
-                      style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('Caja del turno'),
-                        selected: origen == 'caja_turno',
-                        onSelected: (_) =>
-                            setLocal(() => origen = 'caja_turno'),
-                      ),
-                      ChoiceChip(
-                        label: const Text('Mi bolsillo'),
-                        selected: origen == 'fondo_dueno',
-                        onSelected: (_) =>
-                            setLocal(() => origen = 'fondo_dueno'),
-                      ),
-                    ],
-                  ),
-                  if (origen == 'caja_turno' &&
-                      metodo == 'efectivo') ...[
-                    const SizedBox(height: 8),
-                    const Text('Sale de la gaveta de:',
-                        style: AppTexto.metadato),
-                    DropdownButton<String>(
-                      value: gaveta,
-                      isExpanded: true,
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'duany', child: Text('Duany')),
-                        DropdownMenuItem(
-                            value: 'gabriel',
-                            child: Text('Gabriel')),
-                      ],
-                      onChanged: (v) =>
-                          setLocal(() => gaveta = v ?? ent),
-                    ),
-                    const Text(
-                      'Ese dinero ya no estará en su «pendiente a '
-                      'entregar»: cuadra con su arqueo.',
-                      style: AppTexto.metadato,
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: notaCtrl,
-                    maxLength: 80,
-                    decoration: const InputDecoration(
-                        labelText: 'Nota (opcional)'),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final monto = int.tryParse(montoCtrl.text.trim());
-                  if (monto == null || monto <= 0) {
-                    setLocal(() => errorMonto =
-                        'Monto inválido: entero mayor que 0');
-                    return;
-                  }
-                  Navigator.of(ctx).pop(true);
-                },
-                child: const Text('Registrar'),
-              ),
-            ],
-          ),
+        builder: (ctx) => _DialogoRegistrarAdelanto(
+          nombreEntrenador: persona.nombre,
+          gavetaInicial: ent,
+          gavetas: gavetas,
         ),
       );
-      // #7 (Argón nómina): al cancelar también se liberan los
-      // controladores del diálogo (antes solo se liberaban al
-      // guardar).
-      if (guardado != true) {
-        montoCtrl.dispose();
-        notaCtrl.dispose();
-        return;
-      }
-      final monto = int.tryParse(montoCtrl.text.trim()) ?? 0;
-      final gavetaPersona = _personasAdelantos[gaveta];
+      if (datos == null) return;
+      final gavetaPersona = _personasAdelantos[datos.gaveta];
       await AdelantosService.instance.registrar(
         entrenadorId: persona.id,
         entrenadorNombre: persona.nombre,
         entrenadorTelegramId: persona.telegramId,
-        monto: monto,
-        fecha: fecha,
-        nota: notaCtrl.text,
-        metodo: metodo,
-        origen: origen,
+        monto: datos.monto,
+        fecha: datos.fecha,
+        nota: datos.nota,
+        metodo: datos.metodo,
+        origen: datos.origen,
         descuentaA: gavetaPersona?.telegramId,
       );
-      montoCtrl.dispose();
-      notaCtrl.dispose();
       if (mounted) {
         mostrarSnack(context, 'Adelanto registrado (se sincronizará)', significado: SignificadoChip.exito);
         _cargar();
@@ -1497,6 +1373,182 @@ class TarjetaNominaEntrenador extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 1.25 T118 (F2-23): diálogo «Registrar adelanto» como
+/// StatefulWidget propio con DialogoApp: posee y dispone sus
+/// controladores, la validación del monto va inline (B6) y la
+/// fecha se muestra con fmtFecha. Devuelve los datos en un
+/// record o null si se cancela.
+class _DialogoRegistrarAdelanto extends StatefulWidget {
+  final String nombreEntrenador;
+  final String gavetaInicial;
+  final List<({String username, String nombre})> gavetas;
+  const _DialogoRegistrarAdelanto({
+    required this.nombreEntrenador,
+    required this.gavetaInicial,
+    required this.gavetas,
+  });
+
+  @override
+  State<_DialogoRegistrarAdelanto> createState() =>
+      _DialogoRegistrarAdelantoState();
+}
+
+class _DialogoRegistrarAdelantoState
+    extends State<_DialogoRegistrarAdelanto> {
+  final _montoCtrl = TextEditingController();
+  final _notaCtrl = TextEditingController();
+  late DateTime _fecha = ahoraHabana();
+  String _metodo = 'efectivo';
+  String _origen = 'caja_turno';
+  late String _gaveta = widget.gavetaInicial;
+  String? _errorMonto;
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Adelanto a ${widget.nombreEntrenador}',
+      iconoTitulo: Icons.payments_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _montoCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  labelText: 'Monto (CUP entero)'),
+            ),
+            if (_errorMonto != null) ...[
+              const SizedBox(height: 8),
+              ErrorInline(_errorMonto!),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text('Fecha: '),
+                TextButton(
+                  onPressed: () async {
+                    final f = await showDatePicker(
+                      context: context,
+                      initialDate: _fecha,
+                      firstDate: DateTime(_fecha.year - 1, 1, 1),
+                      lastDate: ahoraHabana(),
+                    );
+                    if (f != null) {
+                      setState(() => _fecha = f);
+                    }
+                  },
+                  child: Text(fmtFecha(_fecha.toIso8601String())),
+                ),
+              ],
+            ),
+            Text('Método',
+                style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Efectivo'),
+                  selected: _metodo == 'efectivo',
+                  onSelected: (_) =>
+                      setState(() => _metodo = 'efectivo'),
+                ),
+                ChoiceChip(
+                  label: const Text('Transferencia'),
+                  selected: _metodo == 'transferencia',
+                  onSelected: (_) =>
+                      setState(() => _metodo = 'transferencia'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text('¿De dónde sale?',
+                style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Caja del turno'),
+                  selected: _origen == 'caja_turno',
+                  onSelected: (_) =>
+                      setState(() => _origen = 'caja_turno'),
+                ),
+                ChoiceChip(
+                  label: const Text('Mi bolsillo'),
+                  selected: _origen == 'fondo_dueno',
+                  onSelected: (_) =>
+                      setState(() => _origen = 'fondo_dueno'),
+                ),
+              ],
+            ),
+            if (_origen == 'caja_turno' && _metodo == 'efectivo') ...[
+              const SizedBox(height: 8),
+              const Text('Sale de la gaveta de:',
+                  style: AppTexto.metadato),
+              DropdownButton<String>(
+                value: _gaveta,
+                isExpanded: true,
+                items: [
+                  for (final g in widget.gavetas)
+                    DropdownMenuItem(
+                        value: g.username, child: Text(g.nombre)),
+                ],
+                onChanged: (v) =>
+                    setState(() => _gaveta = v ?? widget.gavetaInicial),
+              ),
+              const Text(
+                'Ese dinero ya no estará en su «pendiente a '
+                'entregar»: cuadra con su arqueo.',
+                style: AppTexto.metadato,
+              ),
+            ],
+            const SizedBox(height: 12),
+            TextField(
+              controller: _notaCtrl,
+              maxLength: 80,
+              decoration: const InputDecoration(
+                  labelText: 'Nota (opcional)'),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final monto = int.tryParse(_montoCtrl.text.trim());
+            if (monto == null || monto <= 0) {
+              setState(() => _errorMonto =
+                  'Monto inválido: entero mayor que 0');
+              return;
+            }
+            Navigator.of(context).pop((
+              monto: monto,
+              fecha: _fecha,
+              nota: _notaCtrl.text,
+              metodo: _metodo,
+              origen: _origen,
+              gaveta: _gaveta,
+            ));
+          },
+          child: const Text('Registrar'),
+        ),
+      ],
     );
   }
 }

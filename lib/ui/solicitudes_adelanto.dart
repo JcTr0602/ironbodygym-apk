@@ -74,102 +74,18 @@ class _SolicitudesAdelantoScreenState
       _snack('Solo el dueño puede aprobar adelantos.');
       return;
     }
-    var destino = 'nomina';
-    var metodo = 'efectivo';
-    final ok = await showDialog<bool>(
+    // 1.25 T118 (F2-12): diálogo propio con DialogoApp y
+    // RadioGroup (antes AlertDialog crudo con la API de radios
+    // deprecada).
+    final eleccion = await showDialog<
+        ({String metodo, String destino})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('Aprobar adelanto'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${s.entrenadorNombre ?? s.entrenador ?? 'Entrenador'}'
-                ' · ${fmtMonto(s.monto)} CUP'
-                '${s.motivo.isNotEmpty ? ' · «${s.motivo}»' : ''}',
-                style: AppTexto.cuerpo,
-              ),
-              const SizedBox(height: AppEspacio.md),
-              const Text('¿Cómo se paga?',
-                  style: AppTexto.subtitulo),
-              RadioListTile<String>(
-                value: 'efectivo',
-                groupValue: metodo,
-                onChanged: (v) => setS(() => metodo = v ?? 'efectivo'),
-                title: const Text('Efectivo'),
-                subtitle: const Text(
-                  'Sale de la caja del turno.',
-                  style: AppTexto.secundario,
-                ),
-              ),
-              RadioListTile<String>(
-                value: 'transferencia',
-                groupValue: metodo,
-                onChanged: (v) => setS(() {
-                  metodo = v ?? 'efectivo';
-                  // B1: por transferencia no hay gaveta de donde
-                  // descontar: el destino vuelve a Nómina solo.
-                  if (metodo == 'transferencia') destino = 'nomina';
-                }),
-                title: const Text('Transferencia'),
-                subtitle: const Text(
-                  'Va directo a su cuenta; no descuenta del '
-                  'pendiente a entregar.',
-                  style: AppTexto.secundario,
-                ),
-              ),
-              const SizedBox(height: AppEspacio.md),
-              const Text('¿De dónde sale el dinero?',
-                  style: AppTexto.subtitulo),
-              RadioListTile<String>(
-                value: 'nomina',
-                groupValue: destino,
-                onChanged: (v) => setS(() => destino = v ?? 'nomina'),
-                title: const Text('Nómina'),
-                subtitle: const Text(
-                  'Solo descuenta de la nómina del mes.',
-                  style: AppTexto.secundario,
-                ),
-              ),
-              RadioListTile<String>(
-                value: 'pendiente',
-                groupValue: destino,
-                // B1: deshabilitado por transferencia (el destino
-                // efectivo sería Nómina de todos modos).
-                onChanged: metodo == 'transferencia'
-                    ? null
-                    : (v) => setS(() => destino = v ?? 'nomina'),
-                title: const Text('Pendiente a entregar'),
-                subtitle: const Text(
-                  'Descuenta del pendiente a entregar de su '
-                  'gaveta y además aparece en su libro de nómina.',
-                  style: AppTexto.secundario,
-                ),
-              ),
-              if (metodo == 'transferencia')
-                const Text(
-                  'Por transferencia el destino es Nómina: el '
-                  'pendiente a entregar es efectivo en mano.',
-                  style: AppTexto.secundario,
-                ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Aprobar'),
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) => _DialogoAprobarAdelanto(solicitud: s),
     );
-    if (ok != true || !mounted) return;
+    if (eleccion == null || !mounted) return;
+    final metodo = eleccion.metodo;
+    final destino = eleccion.destino;
+
     // B1: el destino efectivo (forzado) es el que se muestra.
     final destinoFinal =
         destinoEfectivoF3(metodo: metodo, destino: destino);
@@ -196,31 +112,11 @@ class _SolicitudesAdelantoScreenState
       _snack('Solo el dueño puede rechazar adelantos.');
       return;
     }
-    final motivoCtrl = TextEditingController();
+    // F2-12: diálogo propio (posee y dispone su controlador;
+    // antes quedaba sin disponer).
     final motivo = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rechazar solicitud'),
-        content: TextField(
-          controller: motivoCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Motivo del rechazo',
-            border: OutlineInputBorder(),
-          ),
-          maxLength: 120,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(ctx).pop(motivoCtrl.text.trim()),
-            child: const Text('Rechazar'),
-          ),
-        ],
-      ),
+      builder: (ctx) => const _DialogoRechazarAdelanto(),
     );
     if (motivo == null || motivo.isEmpty || !mounted) return;
     setState(() => _actuando = true);
@@ -279,8 +175,37 @@ class _SolicitudesAdelantoScreenState
         titulo: 'No hay solicitudes de adelanto.',
       );
     }
+    // 1.25 T118 (F2-12): cabecera con lo que espera decisión —
+    // antes el dueño aprobaba una a una sin ver el total.
+    final pendientes = _lista.where((s) => s.pendiente).toList();
+    final totalPendiente =
+        pendientes.fold<double>(0, (a, s) => a + s.monto);
     return FadeEntrada(
-      child: RefreshIndicator(
+      child: Column(
+        children: [
+          if (pendientes.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.lg, AppEspacio.lg, 0),
+              child: Tarjeta(
+                child: Row(
+                  children: [
+                    const Icon(Icons.pending_actions_rounded,
+                        color: AppColores.alerta),
+                    const SizedBox(width: AppEspacio.sm),
+                    Expanded(
+                      child: Text(
+                        '${pendientes.length} solicitud${pendientes.length == 1 ? '' : 'es'} '
+                        'por decidir · ${fmtMonto(totalPendiente)} CUP pedidos',
+                        style: AppTexto.cuerpo,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: RefreshIndicator(
         onRefresh: _cargar,
         child: ListView.builder(
           padding: const EdgeInsets.all(AppEspacio.lg),
@@ -313,7 +238,7 @@ class _SolicitudesAdelantoScreenState
                     if (s.motivo.isNotEmpty)
                       Text('«${s.motivo}»', style: AppTexto.cuerpo),
                     if (s.creadoEn != null)
-                      Text('Pedida el ${s.creadoEn!.substring(0, 10)}',
+                      Text('Pedida el ${fmtFecha(s.creadoEn)}',
                           style: AppTexto.secundario),
                     if (s.destinoEtiqueta != null)
                       Text('Destino: ${s.destinoEtiqueta}',
@@ -324,7 +249,7 @@ class _SolicitudesAdelantoScreenState
                           style: AppTexto.secundario),
                     if (s.resueltoEn != null)
                       Text(
-                        'Resuelta el ${s.resueltoEn!.substring(0, 10)}'
+                        'Resuelta el ${fmtFecha(s.resueltoEn)}'
                         '${(s.resueltoPorNombre ?? '').isNotEmpty ? ' por ${s.resueltoPorNombre}' : ''}',
                         style: AppTexto.secundario,
                       ),
@@ -356,6 +281,9 @@ class _SolicitudesAdelantoScreenState
             );
           },
         ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -380,6 +308,182 @@ class _SolicitudesAdelantoScreenState
         },
         style: AppTexto.minuscula.copyWith(color: color, fontWeight: FontWeight.w600),
       ),
+    );
+  }
+}
+
+/// 1.25 T118 (F2-12): diálogo de aprobación del adelanto como
+/// StatefulWidget propio, con DialogoApp y RadioGroup (la API
+/// vigente; RadioListTile con groupValue/onChanged quedó
+/// deprecada). Conserva el acoplamiento B1: por transferencia
+/// el destino es Nómina (el radio «Pendiente a entregar» se
+/// deshabilita y el destino vuelve a nómina al elegirla).
+/// Devuelve la elección o null si se cancela.
+class _DialogoAprobarAdelanto extends StatefulWidget {
+  final SolicitudAdelanto solicitud;
+  const _DialogoAprobarAdelanto({required this.solicitud});
+
+  @override
+  State<_DialogoAprobarAdelanto> createState() =>
+      _DialogoAprobarAdelantoState();
+}
+
+class _DialogoAprobarAdelantoState
+    extends State<_DialogoAprobarAdelanto> {
+  String _metodo = 'efectivo';
+  String _destino = 'nomina';
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.solicitud;
+    return DialogoApp(
+      titulo: 'Aprobar adelanto',
+      iconoTitulo: Icons.payments_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${s.entrenadorNombre ?? s.entrenador ?? 'Entrenador'}'
+              ' · ${fmtMonto(s.monto)} CUP'
+              '${s.motivo.isNotEmpty ? ' · «${s.motivo}»' : ''}',
+              style: AppTexto.cuerpo,
+            ),
+            const SizedBox(height: AppEspacio.md),
+            const Text('¿Cómo se paga?',
+                style: AppTexto.subtitulo),
+            RadioGroup<String>(
+              groupValue: _metodo,
+              onChanged: (v) => setState(() {
+                _metodo = v ?? 'efectivo';
+                // B1: por transferencia no hay gaveta de donde
+                // descontar: el destino vuelve a Nómina solo.
+                if (_metodo == 'transferencia') _destino = 'nomina';
+              }),
+              child: const Column(
+                children: [
+                  RadioListTile<String>(
+                    value: 'efectivo',
+                    title: Text('Efectivo'),
+                    subtitle: Text(
+                      'Sale de la caja del turno.',
+                      style: AppTexto.secundario,
+                    ),
+                  ),
+                  RadioListTile<String>(
+                    value: 'transferencia',
+                    title: Text('Transferencia'),
+                    subtitle: Text(
+                      'Va directo a su cuenta; no descuenta del '
+                      'pendiente a entregar.',
+                      style: AppTexto.secundario,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            const Text('¿De dónde sale el dinero?',
+                style: AppTexto.subtitulo),
+            RadioGroup<String>(
+              groupValue: _destino,
+              onChanged: (v) =>
+                  setState(() => _destino = v ?? 'nomina'),
+              child: Column(
+                children: [
+                  const RadioListTile<String>(
+                    value: 'nomina',
+                    title: Text('Nómina'),
+                    subtitle: Text(
+                      'Solo descuenta de la nómina del mes.',
+                      style: AppTexto.secundario,
+                    ),
+                  ),
+                  RadioListTile<String>(
+                    value: 'pendiente',
+                    // B1: deshabilitado por transferencia.
+                    enabled: _metodo != 'transferencia',
+                    title: const Text('Pendiente a entregar'),
+                    subtitle: const Text(
+                      'Descuenta del pendiente a entregar de su '
+                      'gaveta y además aparece en su libro de nómina.',
+                      style: AppTexto.secundario,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_metodo == 'transferencia')
+              const Text(
+                'Por transferencia el destino es Nómina: el '
+                'pendiente a entregar es efectivo en mano.',
+                style: AppTexto.secundario,
+              ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context)
+              .pop((metodo: _metodo, destino: _destino)),
+          child: const Text('Aprobar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// F2-12: diálogo de rechazo como StatefulWidget propio: posee
+/// y dispone el controlador del motivo (antes quedaba sin
+/// disponer). Devuelve el motivo (puede ir vacío: el llamador
+/// exige que no lo sea) o null si se cancela.
+class _DialogoRechazarAdelanto extends StatefulWidget {
+  const _DialogoRechazarAdelanto();
+
+  @override
+  State<_DialogoRechazarAdelanto> createState() =>
+      _DialogoRechazarAdelantoState();
+}
+
+class _DialogoRechazarAdelantoState
+    extends State<_DialogoRechazarAdelanto> {
+  final _motivoCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Rechazar solicitud',
+      iconoTitulo: Icons.block_rounded,
+      contenido: TextField(
+        controller: _motivoCtrl,
+        decoration: const InputDecoration(
+          labelText: 'Motivo del rechazo',
+          border: OutlineInputBorder(),
+        ),
+        maxLength: 120,
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_motivoCtrl.text.trim()),
+          child: const Text('Rechazar'),
+        ),
+      ],
     );
   }
 }

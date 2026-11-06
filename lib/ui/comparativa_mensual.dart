@@ -24,6 +24,10 @@ class _Metrica {
   final double anteriorMTD; // mismo corte de días
   final double anteriorTotal; // mes completo
   final IconData icono;
+  // 1.25 T118 (F2-15): si la métrica es dinero se dice en el
+  // dato, no comparando el título — que además mentía:
+  // «Clientes activos» contaba clientes CON PAGO en el rango.
+  final bool esMoneda;
 
   _Metrica({
     required this.titulo,
@@ -31,6 +35,7 @@ class _Metrica {
     required this.anteriorMTD,
     required this.anteriorTotal,
     required this.icono,
+    this.esMoneda = true,
   });
 
   double get deltaPct {
@@ -217,11 +222,12 @@ class _ComparativaMensualState
               icono: Icons.fitness_center_rounded,
             ),
             _Metrica(
-              titulo: 'Clientes activos',
+              titulo: 'Clientes que pagaron',
               actual: cliActual.toDouble(),
               anteriorMTD: cliAntMTD.toDouble(),
               anteriorTotal: cliAntMTD.toDouble(),
               icono: Icons.people_rounded,
+              esMoneda: false,
             ),
             _Metrica(
               titulo: 'Nuevos ingresos',
@@ -229,6 +235,7 @@ class _ComparativaMensualState
               anteriorMTD: nuevosAntMTD.toDouble(),
               anteriorTotal: nuevosAntTotal.toDouble(),
               icono: Icons.person_add_rounded,
+              esMoneda: false,
             ),
           ];
           _cargando = false;
@@ -271,24 +278,25 @@ class _ComparativaMensualState
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   child: Text(
                     '$_mesActual (al día ${ahoraHabana().day}) vs $_mesAnterior',
-                    style: AppTexto.cuerpo.copyWith(color: Colors.grey),
+                    style: AppTexto.cuerpo.copyWith(color: AppColores.textoSecundario(context)),
                   ),
                 ),
                 Expanded(
-                  child: GridView.builder(
+                  // F2-15: antes una rejilla 2×2 con
+                  // childAspectRatio fijo (1.1): con el texto
+                  // del sistema grande las tarjetas
+                  // desbordaban. Ahora tarjetas a ancho
+                  // completo con altura por contenido.
+                  child: ListView.builder(
                     padding:
                         const EdgeInsets.symmetric(
                             horizontal: AppEspacio.lg),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 1.1,
-                    ),
                     itemCount: _metricas.length,
-                    itemBuilder: (ctx, i) =>
-                        _buildTarjeta(_metricas[i]),
+                    itemBuilder: (ctx, i) => Padding(
+                      padding: const EdgeInsets.only(
+                          bottom: AppEspacio.md),
+                      child: _buildTarjeta(_metricas[i]),
+                    ),
                   ),
                 ),
               ],
@@ -299,11 +307,10 @@ class _ComparativaMensualState
   Widget _buildTarjeta(_Metrica m) {
     final delta = m.deltaPct;
     final esPositivo = delta >= 0;
-    final esMoneda = m.titulo != 'Clientes activos' &&
-        m.titulo != 'Nuevos ingresos';
-
-    String fmt(double v) => esMoneda
-        ? '\$${v.toStringAsFixed(0)}'
+    // F2-15: dinero con fmtMonto + «CUP» (antes '$' a mano
+    // sin moneda, fuera del formato único de la casa).
+    String fmt(double v) => m.esMoneda
+        ? '${fmtMonto(v)} CUP'
         : '${v.toInt()}';
 
     return Card(
@@ -313,7 +320,7 @@ class _ComparativaMensualState
           crossAxisAlignment:
               CrossAxisAlignment.start,
           mainAxisAlignment:
-              MainAxisAlignment.spaceBetween,
+              MainAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -324,7 +331,7 @@ class _ComparativaMensualState
                 Expanded(
                   child: Text(
                     m.titulo,
-                    style: AppTexto.metadato.copyWith(color: Colors.grey),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                     maxLines: 1,
                     overflow:
                         TextOverflow.ellipsis,
@@ -332,10 +339,12 @@ class _ComparativaMensualState
                 ),
               ],
             ),
+            const SizedBox(height: AppEspacio.xs),
             Text(
               fmt(m.actual),
               style: AppTexto.metrica.copyWith(fontWeight: FontWeight.w900),
             ),
+            const SizedBox(height: AppEspacio.xs),
             Row(
               children: [
                 Container(
@@ -345,16 +354,16 @@ class _ComparativaMensualState
                           vertical: 2),
                   decoration: BoxDecoration(
                     color: esPositivo
-                        ? Colors.green[50]
-                        : Colors.red[50],
+                        ? AppColores.exito.withValues(alpha: 0.12)
+                        : AppColores.error.withValues(alpha: 0.12),
                     borderRadius:
                         BorderRadius.circular(AppRadio.sm),
                   ),
                   child: Text(
                     '${esPositivo ? '+' : ''}${delta.toStringAsFixed(1)}%',
                     style: AppTexto.metadato.copyWith(color: esPositivo
-                          ? Colors.green[700]
-                          : Colors.red[700], fontWeight: FontWeight.bold),
+                          ? AppColores.exitoOscuro
+                          : AppColores.errorOscuro, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -367,12 +376,12 @@ class _ComparativaMensualState
             // secundario, rotulado como tal.
             Text(
               'Ant. al mismo corte: ${fmt(m.anteriorMTD)}',
-              style: AppTexto.minuscula.copyWith(color: Colors.grey),
+              style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context)),
             ),
             if (m.anteriorTotal != m.anteriorMTD)
               Text(
                 'Mes anterior completo: ${fmt(m.anteriorTotal)}',
-                style: AppTexto.minuscula.copyWith(color: Colors.grey),
+                style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context)),
               ),
           ],
         ),

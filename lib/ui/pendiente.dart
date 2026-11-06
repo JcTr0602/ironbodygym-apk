@@ -789,16 +789,20 @@ class _DiaTile extends StatefulWidget {
 class _DiaTileState extends State<_DiaTile> {
   bool _mostrarTodos = false;
 
+  // 1.25 T118 (F2-13): insignia con tokens semánticos del
+  // tema — antes colores Material fijos (red/amber.shade100,
+  // textos black87) que en modo oscuro quedaban como un
+  // parche claro sobre la tarjeta de tema.
   Color _badgeBg(int nivel) {
-    if (nivel == 2) return Colors.red.shade100;
-    if (nivel == 1) return Colors.amber.shade100;
-    return Colors.grey.shade200;
+    if (nivel == 2) return AppColores.error.withValues(alpha: 0.15);
+    if (nivel == 1) return AppColores.alerta.withValues(alpha: 0.18);
+    return AppColores.bannerGrisA.withValues(alpha: 0.18);
   }
 
-  Color _badgeFg(int nivel) {
-    if (nivel == 2) return Colors.red.shade900;
-    if (nivel == 1) return Colors.amber.shade900;
-    return Colors.black87;
+  Color _badgeFg(BuildContext context, int nivel) {
+    if (nivel == 2) return AppColores.errorOscuro;
+    if (nivel == 1) return AppColores.alertaOscuro;
+    return AppColores.textoSecundario(context);
   }
 
   /// v1.3.4 (C2d): chip ámbar cuando una venta de suplemento se cobró a
@@ -828,9 +832,9 @@ class _DiaTileState extends State<_DiaTile> {
         padding: const EdgeInsets.symmetric(
             horizontal: AppEspacio.sm, vertical: 5),
         decoration: BoxDecoration(
-          color: Colors.amber.shade100,
+          color: AppColores.alerta.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(AppRadio.sm),
-          border: Border.all(color: Colors.amber.shade800),
+          border: Border.all(color: AppColores.alertaOscuro),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -839,14 +843,14 @@ class _DiaTileState extends State<_DiaTile> {
               '⚠️ Precio modificado '
               '(Oficial: ${(oficialCent / 100).toStringAsFixed(2)} $mon → '
               'Cobrado: ${(cobradoCent / 100).toStringAsFixed(2)} $mon)',
-              style: AppTexto.metadato.copyWith(color: Colors.amber.shade900, fontWeight: FontWeight.w700),
+              style: AppTexto.metadato.copyWith(color: AppColores.alertaOscuro, fontWeight: FontWeight.w700),
             ),
             if (nota != null && nota.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
-                  '📝 $nota',
-                  style: AppTexto.metadato.copyWith(color: Colors.black87),
+                  nota,
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                 ),
               ),
           ],
@@ -862,15 +866,24 @@ class _DiaTileState extends State<_DiaTile> {
     final monedaDia =
         dia.pagos.isEmpty ? 'CUP' : dia.pagos.first.moneda;
     final total = dia.totalPorMoneda(monedaDia);
+    // 1.25 T118 (F2-22): si el día mezcla monedas, la cabecera
+    // muestra el subtotal de CADA una («100 CUP · 20 USD»);
+    // antes solo se veía la del primer pago y el resto exigía
+    // abrir el día fila a fila.
+    final monedasDia =
+        dia.pagos.map((p) => p.moneda).toSet().toList()..sort();
+    final totalTexto = monedasDia.length <= 1
+        ? '${fmtMonto(total)} $monedaDia'
+        : monedasDia
+            .map((m) => '${fmtMonto(dia.totalPorMoneda(m))} $m')
+            .join(' · ');
     final visibles = (_mostrarTodos ||
             dia.pagos.length <= 3)
         ? dia.pagos
         : dia.pagos.take(3).toList();
-    final icono = dia.nivelAlerta == 2
-        ? '🔴 '
-        : dia.nivelAlerta == 1
-            ? '⚠️ '
-            : '';
+    // F2-13: sin emoji de semáforo — la insignia ya dice la
+    // urgencia con su color y la etiqueta («HACE 4 DÍAS»);
+    // dos lenguajes a la vez sobraban.
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -904,15 +917,18 @@ class _DiaTileState extends State<_DiaTile> {
                       BorderRadius.circular(AppRadio.sm),
                 ),
                 child: Text(
-                  '$icono${dia.etiquetaFecha}',
+                  dia.etiquetaFecha,
                   style: AppTexto.metadato.copyWith(color: _badgeFg(
-                        dia.nivelAlerta), fontWeight: FontWeight.w700),
+                        context, dia.nivelAlerta), fontWeight: FontWeight.w700),
                 ),
               ),
               const Spacer(),
-              Text(
-                '${fmtMonto(total)} $monedaDia',
-                style: AppTexto.cuerpo.copyWith(color: Colors.black87, fontWeight: FontWeight.bold),
+              Flexible(
+                child: Text(
+                  totalTexto,
+                  textAlign: TextAlign.end,
+                  style: AppTexto.cuerpo.copyWith(color: AppColores.texto(context), fontWeight: FontWeight.bold),
+                ),
               ),
               IconButton(
                 visualDensity:
@@ -942,20 +958,20 @@ class _DiaTileState extends State<_DiaTile> {
                                 ? Icons.bolt_rounded
                                 : Icons.today_rounded,
                         size: 14,
-                        color: Colors.grey.shade600,
+                        color: AppColores.textoSecundario(context),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           '${p.descripcion} (${p.tipo})',
-                          style: AppTexto.metadato.copyWith(color: Colors.black54),
+                          style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                           overflow:
                               TextOverflow.ellipsis,
                         ),
                       ),
                       Text(
                         '${fmtMonto(p.monto)} ${p.moneda}',
-                        style: AppTexto.metadato.copyWith(color: Colors.black87, fontWeight: FontWeight.w600),
+                        style: AppTexto.metadato.copyWith(color: AppColores.texto(context), fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
