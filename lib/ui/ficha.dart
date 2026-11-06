@@ -1984,8 +1984,11 @@ class _FichaScreenState extends State<FichaScreen> {
   @override
   Widget build(BuildContext context) {
     final c = _c;
-    final dias =
-        diasRestantes(c?['pagado_hasta'] as String?) ?? 999999;
+    // 1.25 T04: SIN centinela. Antes, un pagado_hasta nulo
+    // (cliente que nunca pagó) se convertía en 999999 días
+    // y la ficha lo pintaba «AL DÍA» en verde. dias queda
+    // anulable y cada uso decide: null = sin pagos.
+    final dias = diasRestantes(c?['pagado_hasta'] as String?);
     // v1.7.0: Cuenta a la Casa (distintivo dorado; el predicado
     // vive en negocio.dart/LocalDb).
     final esCasa = c != null && esCuentaCasa(c);
@@ -1995,18 +1998,21 @@ class _FichaScreenState extends State<FichaScreen> {
     // sobre el chip dorado y activaba «Renovar 1 mes», que
     // rebotaba contra el bloqueo de Casa. Buscar ya lo hacía
     // bien (badge CASA); la ficha ahora coincide.
-    final vencido = c != null && !esCasa && dias < 0;
+    final vencido =
+        c != null && !esCasa && dias != null && dias < 0;
     // Cliente protegido (2026-10-26): marca del espejo local.
     final protegido = c != null && clienteEstaProtegido(c);
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
     // ámbar por vencer, rojo vencido, dorado Cuenta a la Casa.
     final colorMarco = esCasa
         ? AppColores.alerta
-        : dias < 0
-            ? AppColores.error
-            : dias <= 7
-                ? AppColores.alerta
-                : AppColores.exito;
+        : dias == null
+            ? AppColores.bannerGrisB // sin pagos: anillo neutro
+            : dias < 0
+                ? AppColores.error
+                : dias <= 7
+                    ? AppColores.alerta
+                    : AppColores.exito;
     final nombre = c == null ? '…' : '${c['nombre']}';
     // Cliente protegido (2026-10-26, diseño Argón): el entrenador
     // solo ve foto y nombre. Sin datos, sin botones, sin panel y

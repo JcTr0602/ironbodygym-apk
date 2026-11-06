@@ -533,7 +533,7 @@ class Tarjeta extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 /// Estado de membresía para badges.
-enum EstadoMembresia { alDia, porVencer, vencido }
+enum EstadoMembresia { alDia, porVencer, vencido, sinPagos }
 
 /// Badge con icono + texto. Nunca solo color.
 class BadgeEstado extends StatelessWidget {
@@ -566,6 +566,13 @@ class BadgeEstado extends StatelessWidget {
         fondo = AppColores.error.withValues(alpha: 0.15);
         frente = AppColores.errorOscuro;
         icono = Icons.warning_rounded;
+        break;
+      // 1.25 T04: nunca pagó — neutro, jamás el verde
+      // de «al día».
+      case EstadoMembresia.sinPagos:
+        fondo = AppColores.bannerGrisA.withValues(alpha: 0.18);
+        frente = AppColores.bannerGrisB;
+        icono = Icons.receipt_long_rounded;
         break;
     }
     // En modo oscuro aclarar el texto del badge.

@@ -37,7 +37,9 @@ class CabeceraFicha extends StatelessWidget {
   final bool esCasa;
 
   /// Días restantes (para la insignia; ignorado si esCasa).
-  final int dias;
+  /// null = el cliente nunca pagó (1.25 T04): la insignia
+  /// es «SIN PAGOS», nunca «AL DÍA».
+  final int? dias;
   final String? heroTag;
   final VoidCallback? onFotoTap;
   final VoidCallback onCambiarFoto;
@@ -95,8 +97,12 @@ class CabeceraFicha extends StatelessWidget {
                 const SizedBox(height: AppEspacio.sm),
                 // Argón Clientes #3: con Casa manda el chip
                 // dorado; la insignia de días no se pinta.
-                if (!esCasa)
-                  BadgeEstado.desdeDias(dias)
+                if (!esCasa && dias == null)
+                  const BadgeEstado(
+                      estado: EstadoMembresia.sinPagos,
+                      texto: 'SIN PAGOS')
+                else if (!esCasa)
+                  BadgeEstado.desdeDias(dias!)
                 else
                   Container(
                     padding: const EdgeInsets.symmetric(
