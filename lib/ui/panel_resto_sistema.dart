@@ -91,7 +91,16 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
   @override
   void initState() {
     super.initState();
-    _cargar();
+    // 1.26 (auditoría de botones, BAJA): guarda de dueño
+    // propia — la ruta vive tras el Panel, pero la
+    // pantalla lista ops con error CON nombres de
+    // clientes; defensa en profundidad como en Ajustes
+    // del gym: un no-dueño ni carga ni ve la lista.
+    if (AuthService().isOwner) {
+      _cargar();
+    } else {
+      _cargando = false;
+    }
   }
 
   Future<void> _cargar() async {
@@ -175,6 +184,13 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
   @override
   Widget build(BuildContext context) {
     final soyDueno = AuthService().isOwner;
+    // 1.26 (BAJA): guarda propia de dueño (ver initState).
+    if (!soyDueno) {
+      return Scaffold(
+          appBar: appBarIron(context, 'Errores de sincronización'),
+          body: const Center(
+              child: Text('Solo el dueño revisa los errores.')));
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Errores de sincronización'),
       body: _cargando

@@ -77,6 +77,26 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   bool _metTransferencia = true;
   final List<_FilaTextoBase> _filasTextos = [];
 
+  // 1.26 (auditoría de botones, BAJA): firma de lo cargado
+  // para avisar «cambios sin guardar» al salir — T89 lo
+  // puso en Horario del Gym e Información pública y aquí
+  // faltaba: salir descartaba los cambios en silencio.
+  String _firmaCargada = '';
+
+  String get _firmaActual => jsonEncode({
+        'e': _metEfectivo,
+        't': _metTransferencia,
+        'textos': [
+          for (final f in _filasTextos)
+            [f.claveCtrl.text, f.textoCtrl.text]
+        ],
+      });
+
+  bool get _hayCambios =>
+      !_cargando &&
+      _firmaCargada.isNotEmpty &&
+      _firmaActual != _firmaCargada;
+
   @override
   void dispose() {
     for (final f in _filasTextos) {
@@ -105,6 +125,7 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
             .add(_FilaTextoBase('${e.key}', '${e.value ?? ''}'));
       }
     }
+    _firmaCargada = _firmaActual;
     if (mounted) setState(() => _cargando = false);
   }
 
@@ -140,6 +161,9 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
         // VIEJO (sin filas = mapa vacío = limpio, como antes).
         'textos_base': textos,
       });
+      // 1.26: lo guardado es la nueva firma (salir ya no
+      // pregunta: no hay cambios sin guardar).
+      _firmaCargada = _firmaActual;
       if (mounted) {
         mostrarSnack(context, 'Ajustes guardados y sincronizados', significado: SignificadoChip.exito);
       }
@@ -160,7 +184,27 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
           body: const Center(
               child: Text('Solo el dueño cambia ajustes.')));
     }
-    return Scaffold(
+    // 1.26 (BAJA): atrás con cambios sin guardar pregunta,
+    // mismo patrón que T89 en Horario del Gym.
+    return PopScope(
+      canPop: !_hayCambios,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final salir = await DialogoApp.confirmar(
+          context,
+          titulo: 'Cambios sin guardar',
+          mensaje:
+              'Tienes cambios en los ajustes del gym que aún no se han guardado.',
+          aceptar: 'Salir sin guardar',
+          cancelar: 'Seguir editando',
+          icono: Icons.warning_amber_rounded,
+          peligro: true,
+        );
+        if (salir && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: appBarIron(context, 'Ajustes del gym'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ajustes…')
@@ -332,6 +376,7 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                 ),
               ],
             ),
+      ),
     );
   }
 }
