@@ -28,7 +28,10 @@ import 'servicios.dart';
 /// Muestra inscripciones, pagos y otras acciones de todos los entrenadores,
 /// agrupadas por día, con marcador de no leídas.
 class ActividadScreen extends StatefulWidget {
-  const ActividadScreen({super.key});
+  // 1.25 T112: embebida = pestaña del Centro de control
+  // (sin su propia barra; el patrón de GympediaScreen).
+  final bool embebida;
+  const ActividadScreen({super.key, this.embebida = false});
 
   @override
   State<ActividadScreen> createState() => _ActividadScreenState();
@@ -2142,7 +2145,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
         ? _agruparPorDia(filtrados)
         : _agruparPorEntrenador(filtrados);
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Actividad reciente',
         acciones: [

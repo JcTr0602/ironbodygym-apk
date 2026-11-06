@@ -335,6 +335,11 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       sinonimos: ['fallos de sincronización'],
       icono: Icons.error_outline_rounded),
   FuncionPanel(
+      id: 'centro_control',
+      titulo: 'Centro de control',
+      sinonimos: ['auditoría', 'qué pasó', 'registro', 'anomalías', 'por persona'],
+      icono: Icons.fact_check_rounded),
+  FuncionPanel(
       id: 'auditoria',
       titulo: 'Auditoría',
       sinonimos: ['quién hizo qué', 'historial de cambios'],

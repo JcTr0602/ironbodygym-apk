@@ -25,7 +25,9 @@ import 'componentes.dart';
 import 'diseno.dart';
 
 class AuditoriaPersonaScreen extends StatefulWidget {
-  const AuditoriaPersonaScreen({super.key});
+  // 1.25 T112: embebida = pestaña del Centro de control.
+  final bool embebida;
+  const AuditoriaPersonaScreen({super.key, this.embebida = false});
 
   @override
   State<AuditoriaPersonaScreen> createState() =>
@@ -235,7 +237,9 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Auditoría por persona',
         acciones: [

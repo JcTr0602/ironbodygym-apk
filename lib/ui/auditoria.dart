@@ -218,7 +218,9 @@ bool opVisibleEnAuditoria(Map<String, dynamic> op, FiltroAuditoria filtro,
 }
 
 class AuditoriaScreen extends StatefulWidget {
-  const AuditoriaScreen({super.key});
+  // 1.25 T112: embebida = pestaña del Centro de control.
+  final bool embebida;
+  const AuditoriaScreen({super.key, this.embebida = false});
 
   @override
   State<AuditoriaScreen> createState() => _AuditoriaScreenState();
@@ -496,7 +498,9 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     final dias = grupos.keys.toList(); // ya en orden DESC
 
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Auditoría',
         acciones: [

@@ -19,7 +19,9 @@ import 'diseno.dart';
 /// para que el dueño los revise en bloque. No acusa a nadie.
 /// Umbrales conservadores para evitar falsos positivos.
 class AuditoriaSilenciosaScreen extends StatefulWidget {
-  const AuditoriaSilenciosaScreen({super.key});
+  // 1.25 T112: embebida = pestaña del Centro de control.
+  final bool embebida;
+  const AuditoriaSilenciosaScreen({super.key, this.embebida = false});
 
   @override
   State<AuditoriaSilenciosaScreen> createState() =>
@@ -246,7 +248,9 @@ class _AuditoriaSilenciosaScreenState
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
       return Scaffold(
-        appBar: appBarIron(context, 'Auditoría'),
+        appBar: widget.embebida
+            ? null
+            : appBarIron(context, 'Auditoría'),
         body: const Center(
           child: Text('Solo el dueño puede ver la auditoría.'),
         ),
@@ -257,7 +261,9 @@ class _AuditoriaSilenciosaScreenState
       grupos.putIfAbsent(c.tipo, () => []).add(c);
     }
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Auditoría silenciosa',
         acciones: [

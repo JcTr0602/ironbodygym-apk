@@ -39,6 +39,7 @@ import 'bandeja_whatsapp.dart';
 import 'ficha.dart';
 import 'panel_buscador.dart';
 import 'hub_comunicacion.dart';
+import 'centro_control.dart';
 import 'actividad.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
@@ -641,6 +642,8 @@ class _AdminScreenState extends State<AdminScreen> {
       return;
     }
     switch (id) {
+      case 'centro_control':
+        _irSoloLectura(const CentroControlScreen());
       case 'comunicacion':
         _ir(const HubComunicacionScreen());
       case 'arqueo':
@@ -2973,26 +2976,17 @@ class _AdminScreenState extends State<AdminScreen> {
         () => _ir(const ErroresSyncPanelScreen()),
       ),
       _subModulo('AUDITORÍA'),
+      // 1.25 T112: UNA sola entrada «Centro de control»
+      // con las cuatro miradas en pestañas de nombres
+      // en sencillo (Qué pasó · Registro · Por persona ·
+      // Anomalías). Las tarjetas sueltas salen del
+      // módulo: viven en el centro. (F5-23 ya había
+      // quitado la intermedia «Auditoría detallada».)
       _tarjetaFlujo(
         Icons.fact_check_rounded,
-        'Auditoría',
-        'Quién hizo qué y cuándo',
-        () => _irSoloLectura(const AuditoriaScreen()),
-      ),
-      // F5-23: fuera la intermedia «Auditoría detallada»
-      // (dos enlaces, uno a la propia Auditoría): la vista
-      // por persona es tarjeta directa de este módulo.
-      _tarjetaFlujo(
-        Icons.person_search_rounded,
-        'Auditoría por persona',
-        'Día, semana, mes o rango de una persona',
-        () => _irSoloLectura(const AuditoriaPersonaScreen()),
-      ),
-      _tarjetaFlujo(
-        Icons.radar_rounded,
-        'Anomalías',
-        'Detección silenciosa (solo dueño)',
-        () => _irSoloLectura(const AuditoriaSilenciosaScreen()),
+        'Centro de control',
+        'Qué pasó, el registro, por persona y anomalías en un solo lugar',
+        () => _irSoloLectura(const CentroControlScreen()),
       ),
       _subModulo('SISTEMA'),
       _tarjetaFlujo(
