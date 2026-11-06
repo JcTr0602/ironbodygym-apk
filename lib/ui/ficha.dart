@@ -166,6 +166,11 @@ class _FichaScreenState extends State<FichaScreen> {
   List<Map<String, dynamic>> _entradasCache = [];
   ({int n, double total, String metodoTop}) _resumenPagos =
       (n: 0, total: 0, metodoTop: '');
+  // 1.25 T15: el último pago REAL (sin cortesía): de él
+  // salen la fila «Último pago», el «Tipo» y el arranque de
+  // la barra del período. Antes salían del movimiento más
+  // reciente y un regalo de cumpleaños (0 CUP) los tapaba.
+  Map<String, dynamic>? _ultimoPagoReal;
   // Bloque 1: ya se abrió Editar por editarAlAbrir (una sola vez).
   bool _editoAlAbrir = false;
 
@@ -179,6 +184,17 @@ class _FichaScreenState extends State<FichaScreen> {
     final gen = ++_cargaGen;
     final c = await clientePorId(widget.clienteId);
     final pagos = await pagosDe(widget.clienteId);
+    // 1.25 T14: totales de por vida (sin el recorte de 10).
+    final totalesVida = await totalesPagosCliente(widget.clienteId);
+    // 1.25 T15: último pago real (la lista viene ordenada
+    // por fecha descendente: el primero que no es cortesía).
+    Map<String, dynamic>? ultimoReal;
+    for (final p in pagos) {
+      if (p['metodo'] != 'cortesia') {
+        ultimoReal = p;
+        break;
+      }
+    }
     final suplementos = await _suplementosDe(widget.clienteId);
     final serviciosHist = await servicios_svc
         .historialServiciosCliente(widget.clienteId);
@@ -229,6 +245,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _accesoSinConexion = false;
         _c = c;
         _pagos = pagos;
+        _ultimoPagoReal = ultimoReal;
         _suplementos = suplementos;
         _serviciosHist = serviciosHist;
         _incidencias = incidencias;
@@ -247,12 +264,12 @@ class _FichaScreenState extends State<FichaScreen> {
           final m = (p['metodo'] as String?) ?? 'efectivo';
           metodos[m] = (metodos[m] ?? 0) + 1;
         }
+        // 1.25 T14: n y total son de POR VIDA (sin el
+        // recorte de los últimos 10); el método preferido
+        // sigue saliendo de la muestra reciente.
         _resumenPagos = (
-          n: pagosReales.length,
-          total: pagosReales.fold<double>(
-              0,
-              (s, p) =>
-                  s + ((p['monto'] as num?)?.toDouble() ?? 0)),
+          n: totalesVida.n,
+          total: totalesVida.total,
           metodoTop: metodos.entries.isEmpty
               ? ''
               : metodos.entries
@@ -2004,15 +2021,20 @@ class _FichaScreenState extends State<FichaScreen> {
     final protegido = c != null && clienteEstaProtegido(c);
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
     // ámbar por vencer, rojo vencido, dorado Cuenta a la Casa.
+    // 1.25 T13: congelado manda también en el anillo.
+    final congelado =
+        c != null && (c['estado'] as String?) == 'congelado';
     final colorMarco = esCasa
         ? AppColores.alerta
-        : dias == null
-            ? AppColores.bannerGrisB // sin pagos: anillo neutro
-            : dias < 0
-                ? AppColores.error
-                : dias <= 7
-                    ? AppColores.alerta
-                    : AppColores.exito;
+        : congelado
+            ? AppColores.info
+            : dias == null
+                ? AppColores.bannerGrisB // sin pagos: anillo neutro
+                : dias < 0
+                    ? AppColores.error
+                    : dias <= 7
+                        ? AppColores.alerta
+                        : AppColores.exito;
     final nombre = c == null ? '…' : '${c['nombre']}';
     // Cliente protegido (2026-10-26, diseño Argón): el entrenador
     // solo ve foto y nombre. Sin datos, sin botones, sin panel y
@@ -2119,6 +2141,7 @@ class _FichaScreenState extends State<FichaScreen> {
                         colorMarco: colorMarco,
                         esCasa: esCasa,
                         dias: dias,
+                        congelado: congelado,
                         heroTag: widget.origenHero == null
                             ? null
                             : tagHeroCliente(
@@ -2326,15 +2349,17 @@ class _FichaScreenState extends State<FichaScreen> {
                                         as String?)),
                             FilaInfoFicha(icono: Icons.event_rounded, etiqueta: 'Estado', valor: esCasa
                                     ? 'Cuenta a la Casa'
-                                    : textoEstado(c['pagado_hasta']
-                                        as String?)),
-                            FilaInfoFicha(icono: Icons.payments_rounded, etiqueta: 'Último pago', valor: _pagos.isEmpty
+                                    : congelado
+                                        ? 'Congelado ❄ · el vencimiento no corre'
+                                        : textoEstado(c['pagado_hasta']
+                                            as String?)),
+                            FilaInfoFicha(icono: Icons.payments_rounded, etiqueta: 'Último pago', valor: _ultimoPagoReal == null
                                     ? '—'
-                                    : fmtFecha(_pagos.first['fecha']
+                                    : fmtFecha(_ultimoPagoReal!['fecha']
                                         as String?)),
-                            FilaInfoFicha(icono: Icons.repeat_rounded, etiqueta: 'Tipo', valor: _pagos.isEmpty
+                            FilaInfoFicha(icono: Icons.repeat_rounded, etiqueta: 'Tipo', valor: _ultimoPagoReal == null
                                     ? '—'
-                                    : etiquetaPeriodo(_pagos.first)),
+                                    : etiquetaPeriodo(_ultimoPagoReal!)),
                             // v1.10.0 (Bloque 2, D6): la entidad
                             // manda. Legacy solo si NO existe ningún
                             // registro en tarifa_especial (ajuste 3:
@@ -2354,11 +2379,12 @@ class _FichaScreenState extends State<FichaScreen> {
                             // no hay vencimiento: no se muestra.
                             if (!esCasa)
                               BarraMesFicha(
-                                fechaInicioRaw: _pagos.isEmpty
+                                fechaInicioRaw: _ultimoPagoReal == null
                                     ? null
-                                    : '${_pagos.first['fecha'] ?? ''}',
+                                    : '${_ultimoPagoReal!['fecha'] ?? ''}',
                                 pagadoHastaRaw:
                                     '${_c?['pagado_hasta'] ?? ''}',
+                                pausada: congelado,
                               ),
                           ],
                         ),

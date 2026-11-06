@@ -458,6 +458,25 @@ Future<List<Map<String, dynamic>>> pagosDe(int clienteId,
   return res.take(limit).toList();
 }
 
+/// Totales de POR VIDA de los pagos reales de un cliente
+/// (1.25 T14): el «Resumen 360» de la ficha contaba solo
+/// los últimos 10 pagos que carga el historial y los
+/// presentaba como totales. Mismo universo que [pagosDe]
+/// (con su fallback de columna NULL), sin recorte y sin
+/// cortesías (la cortesía no es un pago).
+Future<({int n, double total})> totalesPagosCliente(
+    int clienteId) async {
+  final todos = await pagosDe(clienteId, limit: 100000);
+  var n = 0;
+  var total = 0.0;
+  for (final p in todos) {
+    if (p['metodo'] == 'cortesia') continue;
+    n++;
+    total += (p['monto'] as num?)?.toDouble() ?? 0;
+  }
+  return (n: n, total: total);
+}
+
 String fmtFecha(String? iso) {
   if (iso == null || iso.length < 10) return '—';
   final p = iso.substring(0, 10).split('-');

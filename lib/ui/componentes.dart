@@ -533,7 +533,7 @@ class Tarjeta extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 /// Estado de membresía para badges.
-enum EstadoMembresia { alDia, porVencer, vencido, sinPagos }
+enum EstadoMembresia { alDia, porVencer, vencido, sinPagos, congelado }
 
 /// Badge con icono + texto. Nunca solo color.
 class BadgeEstado extends StatelessWidget {
@@ -573,6 +573,13 @@ class BadgeEstado extends StatelessWidget {
         fondo = AppColores.bannerGrisA.withValues(alpha: 0.18);
         frente = AppColores.bannerGrisB;
         icono = Icons.receipt_long_rounded;
+        break;
+      // 1.25 T13: membresía congelada — el estado manda
+      // sobre los días (su vencimiento no está corriendo).
+      case EstadoMembresia.congelado:
+        fondo = AppColores.info.withValues(alpha: 0.15);
+        frente = AppColores.info;
+        icono = Icons.ac_unit_rounded;
         break;
     }
     // En modo oscuro aclarar el texto del badge.

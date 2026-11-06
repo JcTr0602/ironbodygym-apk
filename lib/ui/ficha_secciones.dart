@@ -40,6 +40,10 @@ class CabeceraFicha extends StatelessWidget {
   /// null = el cliente nunca pagó (1.25 T04): la insignia
   /// es «SIN PAGOS», nunca «AL DÍA».
   final int? dias;
+
+  /// 1.25 T13: membresía congelada — la insignia manda
+  /// («CONGELADO») sobre la de días.
+  final bool congelado;
   final String? heroTag;
   final VoidCallback? onFotoTap;
   final VoidCallback onCambiarFoto;
@@ -51,6 +55,7 @@ class CabeceraFicha extends StatelessWidget {
       required this.colorMarco,
       required this.esCasa,
       required this.dias,
+      this.congelado = false,
       required this.heroTag,
       required this.onFotoTap,
       required this.onCambiarFoto});
@@ -97,7 +102,11 @@ class CabeceraFicha extends StatelessWidget {
                 const SizedBox(height: AppEspacio.sm),
                 // Argón Clientes #3: con Casa manda el chip
                 // dorado; la insignia de días no se pinta.
-                if (!esCasa && dias == null)
+                if (!esCasa && congelado)
+                  const BadgeEstado(
+                      estado: EstadoMembresia.congelado,
+                      texto: 'CONGELADO')
+                else if (!esCasa && dias == null)
                   const BadgeEstado(
                       estado: EstadoMembresia.sinPagos,
                       texto: 'SIN PAGOS')
@@ -199,8 +208,16 @@ class BarraMesFicha extends StatelessWidget {
   /// pagado_hasta crudo del cliente.
   final String? pagadoHastaRaw;
 
+  /// 1.25 T13: membresía congelada — la barra se pinta en
+  /// pausa (gris) y el texto lo explica: el vencimiento no
+  /// está corriendo.
+  final bool pausada;
+
   const BarraMesFicha(
-      {super.key, this.fechaInicioRaw, this.pagadoHastaRaw});
+      {super.key,
+      this.fechaInicioRaw,
+      this.pagadoHastaRaw,
+      this.pausada = false});
 
   @override
   Widget build(BuildContext context) {
@@ -225,11 +242,13 @@ class BarraMesFicha extends StatelessWidget {
     if (usado > total) usado = total;
     final frac = total == 0 ? 1.0 : usado / total;
     final diasRest = fin.difference(hoyDia).inDays;
-    final color = diasRest < 0
-        ? AppColores.error
-        : diasRest <= 7
-            ? AppColores.alerta
-            : AppColores.exito;
+    final color = pausada
+        ? AppColores.bannerGrisB
+        : diasRest < 0
+            ? AppColores.error
+            : diasRest <= 7
+                ? AppColores.alerta
+                : AppColores.exito;
     return Padding(
       padding: const EdgeInsets.only(top: AppEspacio.sm),
       child: Column(
@@ -247,11 +266,14 @@ class BarraMesFicha extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            diasRest < 0
-                ? 'Vencido hace ${-diasRest} día${-diasRest == 1 ? '' : 's'}'
-                : diasRest == 0
-                    ? 'Vence hoy'
-                    : 'Quedan $diasRest días del mes pagado',
+            pausada
+                ? 'Período en pausa: membresía congelada '
+                    '(el vencimiento no corre)'
+                : diasRest < 0
+                    ? 'Vencido hace ${-diasRest} día${-diasRest == 1 ? '' : 's'}'
+                    : diasRest == 0
+                        ? 'Vence hoy'
+                        : 'Quedan $diasRest días del mes pagado',
             style: AppTexto.secundario,
           ),
         ],
