@@ -3321,7 +3321,15 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   /// Genera (o regenera) el PIN vía RPC y muestra el modal.
+  // 1.26 (auditoría de botones, BAJA): guarda del PIN —
+  // un doble toque lanzaba dos RPC y el segundo PIN
+  // invalidaba al primero, pudiendo compartirse el
+  // inválido, con dos modales apilados.
+  bool _generandoPin = false;
+
   Future<void> _generarPin({required bool esRegeneracion}) async {
+    if (_generandoPin) return;
+    _generandoPin = true;
     final nombre = '${_c?['nombre'] ?? 'Cliente'}';
     final telefono = '${_c?['telefono'] ?? ''}';
     try {
@@ -3345,6 +3353,8 @@ class _FichaScreenState extends State<FichaScreen> {
       if (mounted) {
         mostrarSnack(context, 'Error al generar PIN: $e', significado: SignificadoChip.error);
       }
+    } finally {
+      _generandoPin = false;
     }
   }
 

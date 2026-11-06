@@ -1044,6 +1044,19 @@ class _DialogoNombreVista extends StatefulWidget {
 class _DialogoNombreVistaState extends State<_DialogoNombreVista> {
   final _ctrl = TextEditingController();
 
+  // 1.26 (auditoría de botones, BAJA): error dentro del
+  // diálogo — antes «Guardar» con el nombre vacío cerraba
+  // sin guardar y sin avisar (parecía que había guardado).
+  String? _error;
+
+  void _guardar() {
+    if (_ctrl.text.trim().isEmpty) {
+      setState(() => _error = 'Ponle un nombre a la vista');
+      return;
+    }
+    Navigator.pop(context, _ctrl.text);
+  }
+
   @override
   void dispose() {
     _ctrl.dispose();
@@ -1058,18 +1071,22 @@ class _DialogoNombreVistaState extends State<_DialogoNombreVista> {
         controller: _ctrl,
         autofocus: true,
         maxLength: 30,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           hintText: 'Ej. Deudores del lunes',
           helperText: 'Guarda la pestaña, el orden y la búsqueda actuales',
+          errorText: _error,
         ),
-        onSubmitted: (v) => Navigator.pop(context, v),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
+        onSubmitted: (_) => _guardar(),
       ),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         TextButton(
-            onPressed: () => Navigator.pop(context, _ctrl.text),
+            onPressed: _guardar,
             child: const Text('Guardar')),
       ],
     );
