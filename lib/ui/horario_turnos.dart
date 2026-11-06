@@ -44,6 +44,22 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   bool _cargando = true;
   bool _guardando = false;
   List<String> _entrenadores = [];
+  // 1.25 T119 (F3-11): la carga de usuarios podía fallar en
+  // silencio y los selectores quedaban solo con «Sin asignar»
+  // como si no hubiera entrenadores; ahora se avisa. Y la
+  // foto inicial de las selecciones permite avisar al salir
+  // con cambios sin guardar.
+  bool _usuariosNoCargaron = false;
+  Map<int, Map<String, String?>> _inicial = {};
+
+  bool get _hayCambios {
+    for (final d in _sel.keys) {
+      for (final f in _sel[d]!.keys) {
+        if (_sel[d]![f] != _inicial[d]?[f]) return true;
+      }
+    }
+    return false;
+  }
 
   /// día ISO (1-6) -> franja -> entrenador asignado (null = sin asignar).
   /// El día 6 (sábado) NO tiene clave 'tarde': ni se carga ni se
@@ -96,11 +112,25 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
     String registrar(String bruto) =>
         canon.putIfAbsent(bruto.trim().toLowerCase(),
             () => _visible(bruto));
+    var usuariosOk = false;
     try {
       final raw = await LocalDb.instance.getMeta('usuarios_apk');
       if (raw != null && raw.isNotEmpty) {
+        usuariosOk = true;
         for (final u in jsonDecode(raw) as List) {
           final m = Map<String, dynamic>.from(u as Map);
+          // F3-11: el mismo filtro de asignables que las
+          // suplencias (turno_abrir): fuera dueño/admin y
+          // usuarios bloqueados — el patrón no debe poder
+          // asignar un turno al dueño ni a un bloqueado.
+          final rol = '${m['rol'] ?? ''}'.trim().toLowerCase();
+          if (rol == 'owner' ||
+              rol == 'dueno' ||
+              rol == 'dueño' ||
+              rol == 'admin') {
+            continue;
+          }
+          if (m['bloqueado'] == true) continue;
           final nom = (m['nombre'] as String?)?.trim();
           final base = (nom != null && nom.isNotEmpty)
               ? nom
@@ -119,6 +149,11 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
     if (mounted) {
       setState(() {
         _entrenadores = canon.values.toList();
+        _usuariosNoCargaron = !usuariosOk;
+        _inicial = {
+          for (final e in _sel.entries)
+            e.key: Map<String, String?>.from(e.value),
+        };
         _cargando = false;
       });
     }
@@ -146,6 +181,12 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
       final aj = await LocalDb.instance.getAjustes();
       aj['horario_turnos'] = mapa;
       await LocalDb.instance.setAjustes(aj);
+      // Lo guardado pasa a ser la foto inicial: el pop no
+      // debe disparar el aviso de cambios sin guardar.
+      _inicial = {
+        for (final e in _sel.entries)
+          e.key: Map<String, String?>.from(e.value),
+      };
       if (mounted) {
         mostrarSnack(context, 'Horario de turnos guardado (se sincronizará)', significado: SignificadoChip.exito);
         Navigator.of(context).pop();
@@ -169,7 +210,27 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         ),
       );
     }
-    return Scaffold(
+    // F3-11: salir con cambios sin guardar pide confirmación
+    // (antes se perdían en silencio).
+    return PopScope(
+      canPop: !_hayCambios,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final salir = await DialogoApp.confirmar(
+          context,
+          titulo: 'Cambios sin guardar',
+          mensaje:
+              'Tienes cambios en el patrón semanal que aún no se han guardado.',
+          aceptar: 'Salir sin guardar',
+          cancelar: 'Seguir editando',
+          icono: Icons.warning_amber_rounded,
+          peligro: true,
+        );
+        if (salir && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: appBarIron(
         context,
         'Entrenadores por turno',
@@ -198,26 +259,51 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
                   'Quién cubre cada turno según el plan semanal. La app '
                   'de clientes lo muestra solo cuando no hay un turno '
                   'abierto en vivo a esa hora; la apertura real manda.',
-                  style: AppTexto.secundario.copyWith(color: Colors.grey),
+                  style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context)),
                 ),
+                if (_usuariosNoCargaron) ...[
+                  const SizedBox(height: 12),
+                  Tarjeta(
+                    color: AppColores.alerta.withValues(alpha: 0.12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: AppColores.alertaOscuro),
+                        const SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          child: Text(
+                            'No se pudo cargar la lista de entrenadores: '
+                            'los selectores solo muestran las asignaciones '
+                            'ya guardadas. Sincroniza y vuelve a entrar.',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 for (var d = 1; d <= 6; d++) _tarjetaDia(d),
-                const Card(
+                // F3-30: componentes de la casa (antes Card
+                // de Material con Colors.red crudo).
+                const Tarjeta(
                   child: ListTile(
-                    leading: Icon(Icons.block_rounded, color: Colors.red),
+                    leading: Icon(Icons.block_rounded,
+                        color: AppColores.error),
                     title: Text('Domingo'),
                     subtitle: Text('Cerrado — sin turnos'),
                   ),
                 ),
               ],
             ),
+      ),
     );
   }
 
   Widget _tarjetaDia(int dia) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppEspacio.md),
-      child: Padding(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
+      child: Tarjeta(
         padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,7 +318,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
               Padding(
                 padding: EdgeInsets.only(top: AppEspacio.sm),
                 child: Text('Sin franja de tarde los sábados',
-                    style: AppTexto.metadato.copyWith(color: Colors.grey)),
+                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
               )
             else
               _selectorFranja(dia, 'tarde', 'Tarde'),
@@ -249,7 +335,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         SizedBox(
           width: 64,
           child: Text(etiqueta,
-              style: AppTexto.secundario.copyWith(color: Colors.grey)),
+              style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),
         ),
         Expanded(
           child: DropdownButton<String?>(

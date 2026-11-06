@@ -14,7 +14,6 @@ import '../tiempo.dart';
 import '../auth.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'widgets.dart';
 
 class MiDiaScreen extends StatefulWidget {
   const MiDiaScreen({super.key});
@@ -98,10 +97,19 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         'foto_storage': fotos[p['cliente_id'] as int?],
         // v1.3.2: quién cobró (viene del servidor en data).
         'registrado_por': '${p['registrado_por'] ?? '—'}',
+        // F3-28: hora de registro para ordenar y mostrar.
+        'creado_en': '${p['creado_en'] ?? ''}',
       });
     }
-    cobrados.sort((a, b) =>
-        (b['monto'] as double).compareTo(a['monto'] as double));
+    // F3-28: orden cronológico, el cobro más reciente
+    // primero (antes por monto: el orden cambiaba al cobrar
+    // y no decía cuándo pasó cada cosa). Sin hora registrada,
+    // desempata el monto como antes.
+    cobrados.sort((a, b) {
+      final c = '${b['creado_en']}'.compareTo('${a['creado_en']}');
+      if (c != 0) return c;
+      return (b['monto'] as double).compareTo(a['monto'] as double);
+    });
     // v1.3.2: agrupar por entrenador.
     final porEntrenador = <String, Map<String, dynamic>>{};
     for (final c in cobrados) {
@@ -550,7 +558,24 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
 
   /// v1.3.3: detalle de un día — desglose por turno explícito.
   Widget _vistaDiaDetalle() {
-    const turnos = ['mañana', 'tarde', 'noche'];
+    // 1.25 T119 (F3-18): el canon de franjas solo conoce
+    // mañana y tarde (franjaDeInstante): la «noche» era una
+    // tarjeta fija casi siempre vacía. Ahora las tarjetas
+    // salen de lo que el día TRAE: mañana y tarde siempre (son
+    // las franjas del gym), y cualquier otra clave guardada
+    // (p. ej. «noche» en datos viejos) solo si tiene pagos o
+    // cierre — nunca se esconde un dato, nunca se pinta una
+    // tarjeta fantasma.
+    final turnos = <String>[
+      'mañana',
+      'tarde',
+      for (final t in _diariosPorTurnoDet.keys)
+        if (t != 'mañana' &&
+            t != 'tarde' &&
+            ((_diariosPorTurnoDet[t] ?? []).isNotEmpty ||
+                _turnosCerrados.contains(t)))
+          t,
+    ];
     const nombres = {'mañana': 'Mañana', 'tarde': 'Tarde', 'noche': 'Noche'};
     return RefreshIndicator(
       onRefresh: () => _cargarDiaDetalle(_diaDetalle!),
@@ -585,7 +610,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                     ),
                     title: Row(
                       children: [
-                        Text(nombres[t]!,
+                        Text(nombres[t] ?? t,
                             style: const TextStyle(
                                 fontWeight: FontWeight.w600)),
                         const SizedBox(width: 8),
@@ -669,12 +694,24 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     );
   }
 
+  /// F3-28: « · 10:24» con la hora Habana del registro, o
+  /// vacío si el cobro no trae marca temporal.
+  String _horaCobro(Map<String, dynamic> c) {
+    final ts = DateTime.tryParse('${c['creado_en'] ?? ''}');
+    if (ts == null) return '';
+    final h = aHabana(ts);
+    final hh = h.hour.toString().padLeft(2, '0');
+    final mm = h.minute.toString().padLeft(2, '0');
+    return ' · $hh:$mm';
+  }
+
   Widget _contenidoHoy() {
     return ListView(
       padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
-                  const SyncBanner(),
-                  const SizedBox(height: 8),
+                  // F3-28: sin SyncBanner aquí — la pantalla ya
+                  // lleva su píldora de sync siempre visible;
+                  // dos indicadores a la vez sobraban.
                   Tarjeta(
                     color: AppColores.naranja,
                     padding: const EdgeInsets.all(AppEspacio.lg),
@@ -688,10 +725,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                             style: AppTexto.display.copyWith(
                                 color: Colors.white)),
                         const SizedBox(height: 4),
+                        // F3-18: los dos montos van
+                        // etiquetados (antes «$X · $Y» sin
+                        // decir cuál era efectivo).
                         Text(
                             '${_cobrados.length} cobros · '
-                            '${fmtMonto(_efectivo)} · '
-                            '${fmtMonto(_transferencia)}',
+                            'Ef. ${fmtMonto(_efectivo)} · '
+                            'Transf. ${fmtMonto(_transferencia)}',
                             style: AppTexto.minuscula.copyWith(
                                 color: Colors.white.withValues(
                                     alpha: 0.85))),
@@ -863,8 +903,15 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                               ),
                             ),
                             title: Text('${c['nombre']}'),
-                            subtitle:
-                                Text(etiquetaPeriodo(c)),
+                            subtitle: Text(
+                                // F3-28: período · método · hora
+                                // siempre en texto (antes el
+                                // método solo se veía en el icono
+                                // cuando la fila no tenía foto, y
+                                // la hora no se veía nunca).
+                                '${etiquetaPeriodo(c)} · '
+                                '${c['metodo'] == 'transferencia' ? 'Transferencia' : 'Efectivo'}'
+                                '${_horaCobro(c)}'),
                             trailing: Text(
                               '${fmtMonto(c['monto'])} CUP',
                               style: const TextStyle(

@@ -5,11 +5,12 @@
 /// 2. Incluye pagos diarios en los totales
 /// 3. Estado de entrega (entregado vs pendiente)
 /// 4. Inscripciones con nombre del cliente
-/// 5. Comparativa vs período anterior y vs otro entrenador
+/// 5. Comparativa vs período anterior (la de entrenadores
+///    entre sí vive en su pantalla: F3-16)
 /// 6. Días compactos (solo con actividad)
-/// 7. Tendencia acumulada del período
+/// 7. Actividad por día (barras contra el mejor día)
 /// 8. Promedio diario + mejor día
-/// 9. Filtros: semana / mes / trimestre
+/// 9. Filtros: semana / mes / últimos 90 días
 library;
 
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'comparativa_entrenadores.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
@@ -35,8 +37,12 @@ class DetalleEntrenadorScreen extends StatefulWidget {
 
 class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   bool _cargando = true;
-  // 0 = semana, 1 = mes, 2 = trimestre
+  // 0 = semana, 1 = mes, 2 = últimos 90 días (rodantes;
+  // F3-27: antes se llamaba «trimestre» y no lo era).
   int _filtro = 1;
+  // F3-27: los cobros se cortaban en 50 con un «…y N más»
+  // sin salida; ahora la lista se despliega entera.
+  bool _verTodosCobros = false;
 
   double _total = 0;
   int _nCobros = 0;
@@ -51,7 +57,6 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   List<Map<String, dynamic>> _inscripciones = [];
   List<Map<String, dynamic>> _diasActivos = [];
   // {nombre, total} de otros entrenadores en el mismo período
-  List<Map<String, dynamic>> _otros = [];
 
   @override
   void initState() {
@@ -79,7 +84,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
         inicioAnterior = inicio.subtract(const Duration(days: 7));
         finAnterior = inicio.subtract(const Duration(days: 1));
         break;
-      case 2: // trimestre (90 días)
+      case 2: // últimos 90 días rodantes
         inicio = ahora.subtract(const Duration(days: 90));
         inicioAnterior = inicio.subtract(const Duration(days: 90));
         finAnterior = inicio.subtract(const Duration(days: 1));
@@ -125,7 +130,6 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     _cobros = [];
     _inscripciones = [];
     final porDia = <String, double>{};
-    final porEntrenador = <String, double>{};
 
     for (final p in pagos) {
       final fecha = fechaCorta(p['fecha'] ?? '', 10);
@@ -134,11 +138,6 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
           : '${p['registrado_por_nombre']}'.trim();
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
       final mio = _esMio(nombre);
-      // Comparativa: todos los entrenadores en el período
-      if (enRango(fecha) && nombre.isNotEmpty) {
-        porEntrenador[nombre] =
-            (porEntrenador[nombre] ?? 0) + monto;
-      }
       if (enAnterior(fecha) && mio) _totalAnterior += monto;
       if (!mio || !enRango(fecha)) continue;
       _total += monto;
@@ -203,7 +202,9 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
       for (final f in diasOrdenados)
         {'fecha': f, 'monto': porDia[f]!}
     ];
-    // Promedio y mejor día (idea 8)
+    // Promedio y mejor día (idea 8). F3-15: el promedio es
+    // por día CON ACTIVIDAD (la etiqueta lo dice: dividir
+    // entre los días del período mezclaría días sin turno).
     final nDias = diasOrdenados.length;
     _promedioDia = nDias > 0 ? _total / nDias : 0;
     _mejorDia = '';
@@ -214,14 +215,6 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
         _mejorDia = f;
       }
     }
-    // Otros entrenadores (idea 5)
-    _otros = porEntrenador.entries
-        .where((e) => !_esMio(e.key))
-        .map((e) => {'nombre': e.key, 'total': e.value})
-        .toList()
-      ..sort((a, b) =>
-          (b['total'] as double).compareTo(a['total'] as double));
-
     if (mounted) setState(() => _cargando = false);
   }
 
@@ -259,7 +252,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                     value: 0, label: Text('Semana')),
                 ButtonSegment(value: 1, label: Text('Mes')),
                 ButtonSegment(
-                    value: 2, label: Text('Trimestre')),
+                    value: 2, label: Text('90 días')),
               ],
               selected: {_filtro},
               onSelectionChanged: (s) {
@@ -291,7 +284,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                             Expanded(
                               child: _tarjeta(
                                   'Promedio / mejor día',
-                                  '${fmtMonto(_promedioDia)} CUP/día',
+                                  '${fmtMonto(_promedioDia)} CUP/día activo',
                                   _mejorDia.isEmpty
                                       ? 'sin actividad'
                                       : '${fmtFecha(_mejorDia)}: ${fmtMonto(_mejorDiaMonto)} CUP'),
@@ -332,34 +325,34 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                               ),
                             ),
                         ]),
-                        // Comparativa (idea 5)
+                        // Comparativa (idea 5). F3-16: la
+                        // lista de «otros» que vivía aquí sumaba
+                        // SOLO pagos (sin diarios) mientras el
+                        // total propio incluía ambos: la
+                        // comparación salía desigual. La
+                        // comparativa entre entrenadores es la
+                        // de su pantalla (con ventas y dosis);
+                        // aquí queda la fila contra el período
+                        // anterior — consistente — y el enlace.
                         _seccion(Icons.bar_chart_rounded, 'Comparativa', [
                           _filaComparativa(
                               'Vs ${_nombreAnterior()}',
                               _totalAnterior,
                               _total),
                           const Divider(height: 12),
-                          if (_otros.isEmpty)
-                            Text(
-                                'Sin otros entrenadores con cobros en el período.',
-                                style: AppTexto.secundario.copyWith(color: AppColores
-                                        .textoSecundario(context))),
-                          for (final o in _otros.take(3))
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                  bottom: AppEspacio.xs),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                      child: Text(
-                                          '${o['nombre']}',
-                                          style: AppTexto.secundario)),
-                                  Text(
-                                      '${fmtMonto((o['total'] as num).toDouble())} CUP',
-                                      style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w500)),
-                                ],
-                              ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              icon: const Icon(
+                                  Icons.bar_chart_rounded, size: 18),
+                              label: const Text(
+                                  'Ver comparativa entre entrenadores'),
+                              onPressed: () => Navigator.of(context)
+                                  .push(RutaIron(
+                                      builder: (_) =>
+                                          const ComparativaEntrenadoresScreen())),
                             ),
+                          ),
                         ]),
                         // Actividad por día (ideas 6 y 7)
                         if (_diasActivos.isNotEmpty)
@@ -384,11 +377,16 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                     Expanded(
                                       flex: 5,
                                       child:
+                                          // F3-15: la barra se
+                                          // normaliza contra el
+                                          // MEJOR día, no contra el
+                                          // total del período (que
+                                          // las dejaba minúsculas).
                                           LinearProgressIndicator(
-                                        value: _total > 0
+                                        value: _mejorDiaMonto > 0
                                             ? ((d['monto']
                                                         as double) /
-                                                    _total)
+                                                    _mejorDiaMonto)
                                                 .clamp(
                                                     0.0, 1.0)
                                             : 0,
@@ -421,8 +419,9 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                     'Sin cobros en el período.',
                                     style: AppTexto.secundario.copyWith(color: AppColores
                                             .textoSecundario(context))),
-                              for (final c
-                                  in _cobros.take(50))
+                              for (final c in (_verTodosCobros
+                                  ? _cobros
+                                  : _cobros.take(50)))
                                 ListTile(
                                   dense: true,
                                   contentPadding:
@@ -454,10 +453,20 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                                   },
                                 ),
                               if (_cobros.length > 50)
-                                Text(
-                                    '…y ${_cobros.length - 50} más',
-                                    style: AppTexto.metadato.copyWith(color: AppColores
-                                            .textoSecundario(context))),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: TextButton.icon(
+                                    icon: Icon(_verTodosCobros
+                                        ? Icons.expand_less_rounded
+                                        : Icons.expand_more_rounded),
+                                    label: Text(_verTodosCobros
+                                        ? 'Ver menos'
+                                        : 'Ver todos (${_cobros.length})'),
+                                    onPressed: () => setState(() =>
+                                        _verTodosCobros =
+                                            !_verTodosCobros),
+                                  ),
+                                ),
                             ]),
                         // Inscripciones (idea 4)
                         _seccion(Icons.person_add_rounded, 'Inscripciones (${_inscripciones.length})',

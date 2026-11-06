@@ -6528,10 +6528,14 @@ Future<int> inscripcionesMes() async {
 
 /// Inscripciones del mes agrupadas por entrenador (v1.0.7).
 /// Devuelve lista de {nombre, cantidad}.
-Future<List<Map<String, dynamic>>> inscripcionesPorEntrenador() async {
+/// Inscripciones del mes [prefMes] ('AAAA-MM'; por defecto el
+/// mes en curso) agrupadas por entrenador.
+Future<List<Map<String, dynamic>>> inscripcionesPorEntrenador(
+    {String? prefMes}) async {
   final n = ahoraHabana();
-  final pref = '${n.year.toString().padLeft(4, '0')}-'
-      '${n.month.toString().padLeft(2, '0')}';
+  final pref = prefMes ??
+      '${n.year.toString().padLeft(4, '0')}-'
+          '${n.month.toString().padLeft(2, '0')}';
   final porEntrenador = <String, int>{};
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona

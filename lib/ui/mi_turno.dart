@@ -32,6 +32,9 @@ class MiTurnoScreen extends StatefulWidget {
 }
 
 class _MiTurnoScreenState extends State<MiTurnoScreen> {
+  // 1.25 T119 (F3-09): «Mis vencimientos» mostraba 10 y el
+  // resto era invisible; ahora se despliega la lista entera.
+  bool _verTodosVencimientos = false;
   double _cobrado = 0;
   double _efectivoHoy = 0;
   double _transferHoy = 0;
@@ -312,6 +315,19 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       'tarde' => 'Turno de tarde',
       _ => 'Fuera de franja de turno',
     };
+  }
+
+  /// 1.25 T119 (F3-10): etiqueta del chip de cabecera: la
+  /// franja del reloj Y el estado conocido del turno — antes
+  /// el chip decía «Turno de mañana» a secas aunque ese turno
+  /// ya estuviera cerrado. (El estado de apertura vive en el
+  /// flujo de cierre que unifica T84.)
+  String _etiquetaTurnoChip() {
+    final base = _turnoActual();
+    if (_cerrado && base != 'Fuera de franja de turno') {
+      return '$base · cerrado';
+    }
+    return base;
   }
 
   /// Icono según el turno actual.
@@ -769,7 +785,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             _iconoTurno(),
                             size: 18,
                             color: AppColores.textoSecundario(context)),
-                        label: Text(_turnoActual(),
+                        label: Text(_etiquetaTurnoChip(),
                             style: AppTexto.secundario),
                       ),
                     ),
@@ -917,8 +933,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             _filaTendencia('Hoy vs ayer',
                                 _cobradoAyer, _cobrado),
                             const SizedBox(height: 4),
+                            // F3-10: la ventana es de 7 días
+                            // RODANTES (no la semana natural
+                            // del historial): el rótulo lo dice.
                             _filaTendencia(
-                                'Esta semana vs anterior',
+                                'Últimos 7 días vs anteriores',
                                 _semanaAnt,
                                 _cobradoSemana()),
                           ],
@@ -952,8 +971,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                   'Nada por vencer en 7 días.',
                                   style: AppTexto.secundario.copyWith(color: AppColores
                                           .textoSecundario(context))),
-                            for (final v in _vencimientos
-                                .take(10))
+                            for (final v in (_verTodosVencimientos
+                                ? _vencimientos
+                                : _vencimientos.take(10)))
                               ListTile(
                                 dense: true,
                                 contentPadding:
@@ -985,6 +1005,21 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                                   clienteId:
                                                       cid)));
                                 },
+                              ),
+                            if (_vencimientos.length > 10)
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton.icon(
+                                  icon: Icon(_verTodosVencimientos
+                                      ? Icons.expand_less_rounded
+                                      : Icons.expand_more_rounded),
+                                  label: Text(_verTodosVencimientos
+                                      ? 'Ver menos'
+                                      : 'Ver todos (${_vencimientos.length})'),
+                                  onPressed: () => setState(() =>
+                                      _verTodosVencimientos =
+                                          !_verTodosVencimientos),
+                                ),
                               ),
                           ],
                         ),

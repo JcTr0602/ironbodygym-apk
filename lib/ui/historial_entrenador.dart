@@ -27,6 +27,34 @@ class _HistorialEntrenadorScreenState
     extends State<HistorialEntrenadorScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _datos = [];
+  // 1.25 T119 (F3-17): selector de mes (antes solo el mes
+  // actual, a diferencia de la Comparativa). El pendiente por
+  // entregar es una foto de HOY: solo se mezcla en el mes en
+  // curso.
+  late DateTime _mesSel = DateTime(
+      ahoraHabana().year, ahoraHabana().month);
+  // Cobros/inscripciones sin entrenador identificado: se
+  // cuentan como aviso de datos, no como una persona más.
+  int _sinIdentificarPagos = 0;
+  double _sinIdentificarMonto = 0;
+  int _sinIdentificarInsc = 0;
+
+  bool get _esMesActual {
+    final n = ahoraHabana();
+    return _mesSel.year == n.year && _mesSel.month == n.month;
+  }
+
+  String get _prefSel =>
+      '${_mesSel.year.toString().padLeft(4, '0')}-'
+      '${_mesSel.month.toString().padLeft(2, '0')}';
+
+  void _cambiarMes(int delta) {
+    setState(() {
+      _mesSel = DateTime(_mesSel.year, _mesSel.month + delta);
+      _cargando = true;
+    });
+    _cargar();
+  }
 
   @override
   void initState() {
@@ -35,9 +63,7 @@ class _HistorialEntrenadorScreenState
   }
 
   Future<void> _cargar() async {
-    final n = ahoraHabana();
-    final pref = '${n.year.toString().padLeft(4, '0')}-'
-        '${n.month.toString().padLeft(2, '0')}';
+    final pref = _prefSel;
 
     // Pagos del mes agrupados por entrenador (por nombre).
     final cobrado = <String, double>{};
@@ -53,16 +79,24 @@ class _HistorialEntrenadorScreenState
     }
 
     // Inscripciones del mes por entrenador.
-    final insc = await inscripcionesPorEntrenador();
+    final insc = await inscripcionesPorEntrenador(prefMes: pref);
     final inscMap = <String, int>{
       for (final e in insc) '${e['nombre']}': (e['cantidad'] as int)
     };
 
-    // Pendiente por entregar por entrenador.
-    final pend = await pendientePorEntrenador();
+    // Pendiente por entregar por entrenador: es la foto de
+    // HOY — solo tiene sentido en el mes en curso.
     final pendMap = <String, double>{
-      for (final e in pend) '${e['nombre']}': (e['total'] as double)
+      if (_esMesActual)
+        for (final e in await pendientePorEntrenador())
+          '${e['nombre']}': (e['total'] as double)
     };
+
+    // F3-17: «Desconocido» no es una persona: sus cobros e
+    // inscripciones se apartan y se cuentan como aviso.
+    final sinPagos = numPagos.remove('Desconocido') ?? 0;
+    final sinMonto = cobrado.remove('Desconocido') ?? 0.0;
+    final sinInsc = inscMap.remove('Desconocido') ?? 0;
 
     // Unir por nombre.
     final nombres = <String>{
@@ -85,6 +119,9 @@ class _HistorialEntrenadorScreenState
     if (mounted) {
       setState(() {
         _datos = datos;
+        _sinIdentificarPagos = sinPagos;
+        _sinIdentificarMonto = sinMonto;
+        _sinIdentificarInsc = sinInsc;
         _cargando = false;
       });
     }
@@ -101,7 +138,6 @@ class _HistorialEntrenadorScreenState
         ),
       );
     }
-    final n = ahoraHabana();
     const meses = [
       '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
@@ -128,24 +164,68 @@ class _HistorialEntrenadorScreenState
       body: Column(
         children: [
           const SyncBanner(),
+          // F3-17: selector de mes como el de la Comparativa.
           Padding(
             padding: const EdgeInsets.all(AppEspacio.md),
-            child: Text(
-              'Resumen de ${meses[n.month]} ${n.year}',
-              style: AppTexto.titulo,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  tooltip: 'Mes anterior',
+                  onPressed: () => _cambiarMes(-1),
+                ),
+                Expanded(
+                  child: Text(
+                    'Resumen de ${meses[_mesSel.month]} ${_mesSel.year}',
+                    style: AppTexto.titulo,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  tooltip: 'Mes siguiente',
+                  onPressed: _esMesActual ? null : () => _cambiarMes(1),
+                ),
+              ],
             ),
           ),
+          if (!_esMesActual)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.md, 0, AppEspacio.md, AppEspacio.sm),
+              child: Text(
+                'Mes pasado: el pendiente por entregar no se muestra '
+                '(es una foto de hoy).',
+                style: AppTexto.secundario,
+                textAlign: TextAlign.center,
+              ),
+            ),
           Expanded(
             child: _cargando
                 ? const EstadoCargando(texto: 'Cargando historial…')
-                : _datos.isEmpty
-                    ? const Center(
-                        child: Text('Sin actividad este mes'))
-                    : RefreshIndicator(
+                : _datos.isEmpty && _sinIdentificarPagos == 0 &&
+                        _sinIdentificarInsc == 0
+                    // F3-26: vacío del sistema (antes texto plano).
+                    ? const EstadoVacio(
+                        icono: Icons.people_rounded,
+                        titulo: 'Sin actividad',
+                        subtitulo:
+                            'Nadie cobró ni inscribió en este mes.')
+                    : _datos.isEmpty
+                        ? _notaSinIdentificar(context)
+                        : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
-                          itemCount: _datos.length,
+                          itemCount: _datos.length +
+                              ((_sinIdentificarPagos > 0 ||
+                                      _sinIdentificarInsc > 0)
+                                  ? 1
+                                  : 0),
                           itemBuilder: (ctx, i) {
+                            if (i == _datos.length) {
+                              return _notaSinIdentificar(context);
+                            }
                             final d = _datos[i];
                             return Padding(
                               padding: const EdgeInsets.symmetric(
@@ -176,7 +256,7 @@ class _HistorialEntrenadorScreenState
                                           MainAxisAlignment.spaceBetween,
                                       children: [
                                         _metrica('Cobrado',
-                                            '${(d['cobrado'] as double).toStringAsFixed(0)} CUP'),
+                                            '${fmtMonto(d['cobrado'] as double)} CUP'),
                                         _metrica('Pagos',
                                             '${d['pagos']}'),
                                         _metrica('Inscritos',
@@ -184,6 +264,7 @@ class _HistorialEntrenadorScreenState
                                       ],
                                     ),
                                     const SizedBox(height: 4),
+                                    if (_esMesActual)
                                     Row(
                                       children: [
                                         Text('Pendiente por entregar: ',
@@ -193,7 +274,7 @@ class _HistorialEntrenadorScreenState
                                                         .textoSecundario(
                                                             context))),
                                         Text(
-                                          '${(d['pendiente'] as double).toStringAsFixed(0)} CUP',
+                                          '${fmtMonto(d['pendiente'] as double)} CUP',
                                           style: AppTexto.metadato.copyWith(color: (d['pendiente']
                                                           as double) >
                                                       0
@@ -211,6 +292,40 @@ class _HistorialEntrenadorScreenState
                       ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// F3-17: aviso de datos sin entrenador identificado (antes
+  /// era una tarjeta-persona «Desconocido» que abría un
+  /// detalle vacío).
+  Widget _notaSinIdentificar(BuildContext context) {
+    final partes = <String>[
+      if (_sinIdentificarPagos > 0)
+        '$_sinIdentificarPagos cobro${_sinIdentificarPagos == 1 ? '' : 's'} '
+            'por ${fmtMonto(_sinIdentificarMonto)} CUP',
+      if (_sinIdentificarInsc > 0)
+        '$_sinIdentificarInsc inscripci${_sinIdentificarInsc == 1 ? 'ón' : 'ones'}',
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: 6),
+      child: Tarjeta(
+        color: AppColores.alerta.withValues(alpha: 0.10),
+        child: Row(
+          children: [
+            const Icon(Icons.help_outline_rounded,
+                color: AppColores.alertaOscuro),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(
+              child: Text(
+                'Sin entrenador identificado: ${partes.join(' · ')}. '
+                'Son registros sin «registrado por», no de una persona.',
+                style: AppTexto.secundario,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

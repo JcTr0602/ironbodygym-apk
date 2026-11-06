@@ -297,8 +297,53 @@ class _HorarioGymState extends State<HorarioGym> {
     }
   }
 
+  /// 1.25 T119 (F3-12): validación local de rangos antes de
+  /// guardar — antes un rango invertido o solapado viajaba al
+  /// servidor y volvía como error crudo. Devuelve el problema
+  /// en lenguaje llano o null si todo está bien.
+  String? _validarRangos() {
+    int? min(String? hhmm) {
+      if (hhmm == null || hhmm.length < 5) return null;
+      final h = int.tryParse(hhmm.substring(0, 2));
+      final m = int.tryParse(hhmm.substring(3, 5));
+      if (h == null || m == null) return null;
+      return h * 60 + m;
+    }
+
+    for (final d in _dias) {
+      if (!d.abierto) continue;
+      final a1 = min(d.apertura1), c1 = min(d.cierre1);
+      if (a1 == null || c1 == null) {
+        return '${d.nombre}: falta la hora de apertura o de cierre del Turno 1.';
+      }
+      if (a1 >= c1) {
+        return '${d.nombre}: la apertura del Turno 1 debe ser antes que su cierre.';
+      }
+      final hay2 = d.apertura2 != null || d.cierre2 != null;
+      if (hay2) {
+        final a2 = min(d.apertura2), c2 = min(d.cierre2);
+        if (a2 == null || c2 == null) {
+          return '${d.nombre}: el Turno 2 necesita apertura y cierre.';
+        }
+        if (a2 >= c2) {
+          return '${d.nombre}: la apertura del Turno 2 debe ser antes que su cierre.';
+        }
+        if (a2 < c1) {
+          return '${d.nombre}: el Turno 2 se solapa con el Turno 1.';
+        }
+      }
+    }
+    return null;
+  }
+
   Future<void> _guardar() async {
     if (!AuthService().isOwner) return;
+    // F3-12: validar en local antes de molestar al servidor.
+    final problema = _validarRangos();
+    if (problema != null) {
+      mostrarSnack(context, problema, significado: SignificadoChip.error);
+      return;
+    }
     setState(() => _guardando = true);
     try {
       final payload =
@@ -319,6 +364,9 @@ class _HorarioGymState extends State<HorarioGym> {
       aplicarHorarioAFranjas(_dias);
       if (mounted) {
         mostrarSnack(context, 'Horario guardado', significado: SignificadoChip.exito);
+        // F3-12: mismo comportamiento que el editor hermano
+        // (Entrenadores por turno): guardar y salir.
+        Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {
@@ -413,9 +461,19 @@ class _HorarioGymState extends State<HorarioGym> {
         ],
       ),
       body: _cargando
-          ? const Center(
-              child: CircularProgressIndicator())
-          : Column(
+          ? const EstadoCargando(texto: 'Cargando horario…')
+          // F3-12: sin caché y sin conexión el cuerpo quedaba
+          // en blanco (lista de 0 días) sin decir nada.
+          : _dias.isEmpty
+              ? EstadoVacio(
+                  icono: Icons.schedule_rounded,
+                  titulo: 'No se pudo cargar el horario',
+                  subtitulo:
+                      'Sin conexión y sin una copia guardada en este teléfono.',
+                  textoAccion: 'Reintentar',
+                  onAccion: _cargar,
+                )
+              : Column(
               children: [
                 // v1.6.0 (Jc): la entrada «Entrenadores por turno»
                 // que vivía aquí se retiró — los turnos tienen UNA
@@ -437,10 +495,11 @@ class _HorarioGymState extends State<HorarioGym> {
   }
 
   Widget _buildDiaCard(DiaHorario dia) {
-    return Card(
-      margin:
+    // F3-30: Tarjeta de la casa (antes Card de Material).
+    return Padding(
+      padding:
           const EdgeInsets.only(bottom: AppEspacio.md),
-      child: Padding(
+      child: Tarjeta(
         padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment:
@@ -466,15 +525,15 @@ class _HorarioGymState extends State<HorarioGym> {
                       ? 'Abierto'
                       : 'Cerrado',
                   style: AppTexto.metadato.copyWith(color: dia.abierto
-                        ? Colors.green[700]
-                        : Colors.red[700], fontWeight: FontWeight.w600),
+                        ? AppColores.exitoOscuro
+                        : AppColores.errorOscuro, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
             if (dia.abierto) ...[
               const Divider(),
               Text('Turno 1',
-                  style: AppTexto.metadato.copyWith(color: Colors.grey)),
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
               Row(
                 children: [
                   Expanded(
@@ -501,7 +560,7 @@ class _HorarioGymState extends State<HorarioGym> {
               ),
               const SizedBox(height: 8),
               Text('Turno 2 (opcional)',
-                  style: AppTexto.metadato.copyWith(color: Colors.grey)),
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
               Row(
                 children: [
                   Expanded(
@@ -544,6 +603,26 @@ class _HorarioGymState extends State<HorarioGym> {
                   ),
                 ],
               ),
+              // F3-12: borrar el Turno 2 con un botón visible
+              // (antes solo existía por presión larga, sin
+              // ninguna pista en pantalla).
+              if (dia.apertura2 != null || dia.cierre2 != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.delete_outline_rounded,
+                        size: 18),
+                    label: const Text('Quitar turno 2'),
+                    onPressed: () {
+                      setState(() {
+                        dia.apertura2 = null;
+                        dia.cierre2 = null;
+                      });
+                      mostrarSnack(context, 'Turno 2 eliminado',
+                          duracion: const Duration(seconds: 1));
+                    },
+                  ),
+                ),
             ],
           ],
         ),
@@ -562,14 +641,14 @@ class _HorarioGymState extends State<HorarioGym> {
             vertical: 10, horizontal: AppEspacio.md),
         decoration: BoxDecoration(
           border: Border.all(
-              color: Colors.grey[300]!),
+              color: AppColores.borde(context)),
           borderRadius:
               BorderRadius.circular(AppRadio.sm),
         ),
         child: Column(
           children: [
             Text(label,
-                style: AppTexto.minuscula.copyWith(color: Colors.grey)),
+                style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context))),
             Text(
               valor ?? '--:--',
               style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w600),
