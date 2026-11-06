@@ -36,7 +36,12 @@ import 'servicios_admin.dart';
 import 'widgets.dart';
 
 class SuplementosScreen extends StatefulWidget {
-  const SuplementosScreen({super.key});
+  // 1.25 T12: cliente preseleccionado (desde Buscar): la
+  // venta rápida nace con ese comprador elegido.
+  final int? clienteInicialId;
+  final String? clienteInicialNombre;
+  const SuplementosScreen(
+      {super.key, this.clienteInicialId, this.clienteInicialNombre});
 
   @override
   State<SuplementosScreen> createState() => _SuplementosScreenState();
@@ -225,7 +230,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   /// abre la VENTA RÁPIDA (diálogo de 1 unidad); la venta
   /// completa vive en el detalle del producto.
   void _irVender(Map<String, dynamic> s) {
-    ventaRapidaSuplemento(context, s, _tasaUsd).then((vendido) {
+    ventaRapidaSuplemento(context, s, _tasaUsd, widget.clienteInicialId,
+            widget.clienteInicialNombre)
+        .then((vendido) {
       // Sin recibo enganchado aquí (13/25): el historial ofrece
       // el recibo de cada venta; engancharlo duplicaría el
       // ofrecimiento tras cada venta.

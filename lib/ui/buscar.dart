@@ -49,6 +49,24 @@ class BuscarScreen extends StatefulWidget {
 class _BuscarScreenState extends State<BuscarScreen> {
   final _q = TextEditingController();
   List<Map<String, dynamic>> _res = [];
+
+  // 1.25 T11: conteo de nombres entre los resultados para
+  // desambiguar homónimos (memoizado por la lista vigente:
+  // _res se reasigna en cada búsqueda).
+  List<Map<String, dynamic>>? _resContados;
+  Map<String, int> _conteoNombres = {};
+  Map<String, int> get conteoNombres {
+    if (!identical(_resContados, _res)) {
+      _resContados = _res;
+      final m = <String, int>{};
+      for (final c in _res) {
+        final n = '${c['nombre'] ?? ''}'.trim().toLowerCase();
+        m[n] = (m[n] ?? 0) + 1;
+      }
+      _conteoNombres = m;
+    }
+    return _conteoNombres;
+  }
   bool _busco = false;
   String _filtro = 'todos'; // todos | aldia | vencidos | porvencer | sinfoto
   bool _enNotas = false; // v1.0.15: búsqueda avanzada en notas
@@ -719,6 +737,23 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                     cliente: c,
                                     origenHero: 'buscar',
                                     compacta: _compacta,
+                                    // 1.25 T11: homónimos en los
+                                    // resultados o búsqueda por
+                                    // teléfono → la fila enseña su
+                                    // contacto. Nunca en protegidos.
+                                    desambiguar: !protegidoFila &&
+                                        (_q.text
+                                                    .replaceAll(
+                                                        RegExp(
+                                                            r'[^0-9]'),
+                                                        '')
+                                                    .length >=
+                                                4 ||
+                                            (conteoNombres['${c['nombre'] ?? ''}'
+                                                    .trim()
+                                                    .toLowerCase()] ??
+                                                0) >
+                                                1),
                                     leading: (_modoSeleccion &&
                                             !protegidoFila &&
                                             cidFila != null)
@@ -843,7 +878,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
 
   String _etiquetaSwipeAccion(String v) => switch (v) {
         'cobrar' => 'Cobrar mes',
-        'diario' => 'Pago diario',
+        // 1.25 T12: el pago diario es ANÓNIMO por diseño (sin
+        // cliente): el gesto no promete actuar sobre la fila;
+        // dice «Ir a…». La venta SÍ preselecciona al cliente.
+        'diario' => 'Ir a Pago diario',
         'venta' => 'Venta',
         'editar' => 'Editar',
         _ => '',
@@ -932,9 +970,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
         return;
       case 'venta':
         if (!mounted) return;
-        await Navigator.of(context).push(
-            RutaIron(
-                builder: (_) => const SuplementosScreen()));
+        // 1.25 T12: la venta nace con ESTE cliente elegido
+        // en el selector de comprador (antes abría la tienda
+        // genérica y había que buscarlo otra vez, con riesgo
+        // de venderle a otro).
+        await Navigator.of(context).push(RutaIron(
+            builder: (_) => SuplementosScreen(
+                clienteInicialId: (c['id'] as num?)?.toInt(),
+                clienteInicialNombre: '${c['nombre'] ?? ''}')));
         if (mounted) await _buscar();
         return;
       case 'editar':
@@ -1019,7 +1062,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.today_rounded),
-              title: const Text('Pago diario'),
+              // 1.25 T12: el diario es anónimo; no promete
+              // registrarle el día a ESTE cliente.
+              title: const Text('Ir a Pago diario'),
               onTap: () => Navigator.pop(ctx, 'diario'),
             ),
             ListTile(
@@ -1247,6 +1292,12 @@ class FilaCliente extends StatelessWidget {
   /// chevron. Un [trailing] explícito sigue mandando.
   final VoidCallback? accionWhatsapp;
 
+  /// 1.25 T11: enseñar la línea de contacto (teléfono o cola
+  /// del carnet) para distinguir homónimos. El llamador la
+  /// apaga en filas protegidas: nunca filtra el contacto de
+  /// un protegido a un no-dueño.
+  final bool desambiguar;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -1256,6 +1307,7 @@ class FilaCliente extends StatelessWidget {
       this.leading,
       this.origenHero,
       this.compacta = false,
+      this.desambiguar = false,
       this.accionWhatsapp});
 
   @override
@@ -1268,6 +1320,7 @@ class FilaCliente extends StatelessWidget {
       leading: leading,
       origenHero: origenHero,
       compacta: compacta,
+      desambiguar: desambiguar,
       accionWhatsapp: accionWhatsapp);
 }
 
@@ -1279,6 +1332,7 @@ class _FilaCliente extends StatefulWidget {
   final Widget? leading;
   final String? origenHero;
   final bool compacta;
+  final bool desambiguar;
   final VoidCallback? accionWhatsapp;
   const _FilaCliente(
       {super.key,
@@ -1289,6 +1343,7 @@ class _FilaCliente extends StatefulWidget {
       this.leading,
       this.origenHero,
       this.compacta = false,
+      this.desambiguar = false,
       this.accionWhatsapp});
 
   @override
@@ -1459,6 +1514,23 @@ class _FilaClienteState extends State<_FilaCliente> {
                 // v1.2.1: el badge ya dice "VENCE HOY", no repetir.
                 ? 'Vence ${fmtFecha(ph)}'
                 : '$dias días restantes';
+    // 1.25 T11: línea de contacto para desambiguar homónimos
+    // (teléfono si hay; si no, la cola del carnet).
+    String? lineaContacto;
+    if (widget.desambiguar) {
+      final tel =
+          '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+      if (tel.length >= 8) {
+        lineaContacto = '📞 ${tel.substring(tel.length - 8)}';
+      } else {
+        final carnet =
+            '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
+        if (carnet.length >= 4) {
+          lineaContacto =
+              'Carnet ··${carnet.substring(carnet.length - 4)}';
+        }
+      }
+    }
     return InkWell(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
@@ -1505,6 +1577,13 @@ class _FilaClienteState extends State<_FilaCliente> {
                       style: AppTexto.secundario.copyWith(
                           color: AppColores.textoSecundario(
                               context))),
+                  if (lineaContacto != null) ...[
+                    const SizedBox(height: 2),
+                    Text(lineaContacto,
+                        style: AppTexto.secundario.copyWith(
+                            color: AppColores.textoSecundario(
+                                context))),
+                  ],
                 ],
               ),
             ),

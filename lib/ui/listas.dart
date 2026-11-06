@@ -66,6 +66,11 @@ class _ListasScreenState extends State<ListasScreen>
   // avisados precargados (antes un FutureBuilder por fila).
   List<Map<String, dynamic>> _visHoy = [];
   List<Map<String, dynamic>> _visMenos30 = [];
+  // 1.25 T09: los SIN FECHA (nunca pagaron) salen de
+  // «Atrasados -30d» a un grupo propio al final de la
+  // pestaña, con posición fija sea cual sea el orden.
+  List<Map<String, dynamic>> _sinFecha = [];
+  List<Map<String, dynamic>> _visSinFecha = [];
   List<Map<String, dynamic>> _visMas30 = [];
   List<Map<String, dynamic>> _visPorVencer = [];
   List<Map<String, dynamic>> _visAlDia = [];
@@ -74,6 +79,12 @@ class _ListasScreenState extends State<ListasScreen>
   void _recalcularVisibles() {
     _visHoy = _visibles(_hoy);
     _visMenos30 = _visibles(_menos30);
+    // T09: el grupo sin fecha NO pasa por _ordenar (su
+    // posición es fija: al final; dentro, por nombre) pero
+    // SÍ por la búsqueda (T10: lo que se ve es lo que hay).
+    _visSinFecha = _sinFecha
+        .where((c) => coincideBusquedaListas(c, _busqueda))
+        .toList();
     _visMas30 = _visibles(_mas30);
     _visPorVencer = _visibles(_porVencer);
     _visAlDia = _visibles(_alDia);
@@ -97,7 +108,17 @@ class _ListasScreenState extends State<ListasScreen>
 
   Future<void> _cargar() async {
     final h = await vencenHoy();
-    final m30 = await atrasados(masDe30: false);
+    final m30crudo = await atrasados(masDe30: false);
+    // 1.25 T09: atrasados(masDe30:false) incluye a los sin
+    // pagado_hasta (nunca pagaron); aquí se separan: no son
+    // «atrasados de hace X días», son otro grupo.
+    final m30 = m30crudo
+        .where((c) => c['pagado_hasta'] != null)
+        .toList();
+    final sinFecha = m30crudo
+        .where((c) => c['pagado_hasta'] == null)
+        .toList()
+      ..sort(compararPorNombre);
     final p30 = await atrasados(masDe30: true);
     final pv = await porVencer(dias: 3);
     // 1.25 T03: la pestaña usa la variante SIN los de hoy
@@ -118,6 +139,7 @@ class _ListasScreenState extends State<ListasScreen>
       setState(() {
         _hoy = sinProtegidos(h);
         _menos30 = sinProtegidos(m30);
+        _sinFecha = sinProtegidos(sinFecha);
         _mas30 = sinProtegidos(p30);
         _porVencer = sinProtegidos(pv);
         _alDia = sinProtegidos(ad);
@@ -219,31 +241,32 @@ class _ListasScreenState extends State<ListasScreen>
             // los dos Atrasados, verde para Al día — para ver la
             // urgencia sin leer el número.
             Tab(
-              child: Text('Hoy (${_hoy.length})',
+              child: Text('Hoy (${_visHoy.length})',
                   style: const TextStyle(
                       color: AppColores.alerta,
                       fontWeight: FontWeight.w600)),
             ),
             Tab(
-              child: Text('Por vencer (${_porVencer.length})',
+              child: Text('Por vencer (${_visPorVencer.length})',
                   style: const TextStyle(
                       color: AppColores.alerta,
                       fontWeight: FontWeight.w600)),
             ),
             Tab(
-              child: Text('Atrasados -30d (${_menos30.length})',
+              child: Text(
+                  'Atrasados -30d (${_visMenos30.length + _visSinFecha.length})',
                   style: const TextStyle(
                       color: AppColores.error,
                       fontWeight: FontWeight.w600)),
             ),
             Tab(
-              child: Text('Atrasados +30d (${_mas30.length})',
+              child: Text('Atrasados +30d (${_visMas30.length})',
                   style: const TextStyle(
                       color: AppColores.error,
                       fontWeight: FontWeight.w600)),
             ),
             Tab(
-              child: Text('Al día (${_alDia.length})',
+              child: Text('Al día (${_visAlDia.length})',
                   style: const TextStyle(
                       color: AppColores.exito,
                       fontWeight: FontWeight.w600)),
@@ -326,7 +349,9 @@ class _ListasScreenState extends State<ListasScreen>
                     'Nada en los próximos 3 días.'),
                 _lista(_visMenos30,
                     Icons.celebration_rounded, 'Sin atrasados',
-                    'Nada de menos de un mes.'),
+                    'Nada de menos de un mes.',
+                    cola: _visSinFecha,
+                    tituloCola: 'Sin fecha de vencimiento'),
                 _lista(_visMas30,
                     Icons.celebration_rounded, 'Sin atrasados',
                     'Nada de más de un mes.'),
@@ -460,8 +485,13 @@ class _ListasScreenState extends State<ListasScreen>
   }
 
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
-      String tituloVacio, String subtituloVacio) {
-    if (rows.isEmpty) {
+      String tituloVacio, String subtituloVacio,
+      {List<Map<String, dynamic>>? cola, String? tituloCola}) {
+    // 1.25 T09: grupo final separado (los sin fecha en
+    // «Atrasados -30d»): cabecera propia y posición fija
+    // tras la lista principal, con sus mismas filas.
+    final hayCola = cola != null && cola.isNotEmpty;
+    if (rows.isEmpty && !hayCola) {
       // 16/25: con búsqueda activa, el vacío es por la búsqueda
       // (no porque nadie venza) y ofrece limpiarla.
       if (_busqueda.isNotEmpty) {
@@ -488,13 +518,26 @@ class _ListasScreenState extends State<ListasScreen>
     return RefreshIndicator(
       onRefresh: _cargar,
       child: ListView.separated(
-        itemCount: rows.length,
+        itemCount: rows.length + (hayCola ? cola.length + 1 : 0),
         separatorBuilder: (_, __) => Divider(
             height: 1,
             indent: 84,
             color: AppColores.borde(context)),
         itemBuilder: (ctx, i) {
-          final c = rows[i];
+          if (hayCola && i == rows.length) {
+            return Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(16, 20, 16, 4),
+              child: Text(
+                  '${tituloCola ?? 'Sin fecha'} (${cola.length})',
+                  style: AppTexto.secundario.copyWith(
+                      fontWeight: FontWeight.bold)),
+            );
+          }
+          final enCola = hayCola && i > rows.length;
+          final c = enCola ? cola[i - rows.length - 1] : rows[i];
+          final listaCadena = enCola ? cola : rows;
+          final iCadena = enCola ? i - rows.length - 1 : i;
           final id = (c['id'] as int?) ?? 0;
           // L2 (estéticas 1.19): la fila avisada lleva acento
           // verde en el borde izquierdo.
@@ -549,7 +592,7 @@ class _ListasScreenState extends State<ListasScreen>
                             setState(() => _avisados.remove(id));
                           }
                         } else {
-                          await _avisarEnCadena(rows, i);
+                          await _avisarEnCadena(listaCadena, iCadena);
                         }
                       },
                     ),

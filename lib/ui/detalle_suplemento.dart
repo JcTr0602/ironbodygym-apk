@@ -45,7 +45,7 @@ import 'widgets.dart';
 /// `registrarVentaSuplemento` (transacción atómica: stock JSON + op).
 Future<bool> ventaRapidaSuplemento(
     BuildContext context, Map<String, dynamic> s,
-    [double? tasaUsd]) async {
+    [double? tasaUsd, int? clienteId, String? clienteNombre]) async {
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   if (stock <= 0) {
     mostrarSnack(context, 'Sin stock disponible para venta rápida', significado: SignificadoChip.alerta);
@@ -57,8 +57,12 @@ Future<bool> ventaRapidaSuplemento(
     // 1.23 AT-15: la tasa que los llamadores ya pasaban se
     // perdía aquí y la venta rápida en USD viajaba sin ella
     // (el servidor la exige para valorar la venta).
-    builder: (ctx) =>
-        _DialogoVentaRapida(sup: s, stock: stock, tasaUsd: tasaUsd),
+    builder: (ctx) => _DialogoVentaRapida(
+        sup: s,
+        stock: stock,
+        tasaUsd: tasaUsd,
+        clienteInicialId: clienteId,
+        clienteInicialNombre: clienteNombre),
   );
   return res == true;
 }
@@ -73,9 +77,17 @@ class _DialogoVentaRapida extends StatefulWidget {
   final int stock;
   // 1.23 AT-15: tasa del día para valorar la venta en USD.
   final double? tasaUsd;
+  // 1.25 T12: cliente preseleccionado (desde Buscar: el
+  // deslizable «Venta» actúa sobre ESE cliente).
+  final int? clienteInicialId;
+  final String? clienteInicialNombre;
 
   const _DialogoVentaRapida(
-      {required this.sup, required this.stock, this.tasaUsd});
+      {required this.sup,
+      required this.stock,
+      this.tasaUsd,
+      this.clienteInicialId,
+      this.clienteInicialNombre});
 
   @override
   State<_DialogoVentaRapida> createState() =>
@@ -160,6 +172,11 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
     // B3-Invariante: el precio propone SIEMPRE el oficial, jamás
     // ultimo_precio.
     _precio.text = _precioOficial.toStringAsFixed(2);
+    // 1.25 T12: si la venta viene de la fila de un cliente
+    // (Buscar), ese cliente nace elegido; cambiarlo sigue
+    // siendo posible en el selector de siempre.
+    _clienteId = widget.clienteInicialId;
+    _clienteNombre = widget.clienteInicialNombre ?? '';
     _cargar();
   }
 
