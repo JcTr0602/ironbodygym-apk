@@ -143,6 +143,18 @@ class _CuentasCobrarScreenState
                           style: AppTexto.minuscula.copyWith(
                               color: Colors.white70),
                         ),
+                        // 1.25 T28: la regla, dicha: cada
+                        // monto es UNA mensualidad (la tarifa
+                        // del cliente), no su deuda acumulada
+                        // — uno de hace 60 días no «debe» el
+                        // doble en esta pantalla.
+                        Text(
+                          'Una mensualidad por cliente '
+                          '(su tarifa), no la deuda acumulada',
+                          textAlign: TextAlign.center,
+                          style: AppTexto.minuscula.copyWith(
+                              color: Colors.white70),
+                        ),
                       ],
                     ),
                   ),
@@ -155,7 +167,32 @@ class _CuentasCobrarScreenState
                           'Todos los clientes activos están al día.',
                     )
                   else
-                    for (final c in _cuentas)
+                    // 1.25 T28: agrupado por antigüedad con
+                    // subtotal por grupo (antes una sola
+                    // lista por monto: el de 5 días y el de
+                    // 60 se veían iguales).
+                    for (final grupo in _gruposAntiguedad()) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            top: AppEspacio.sm,
+                            bottom: AppEspacio.xs),
+                        child: Row(
+                          mainAxisAlignment:
+                              MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(grupo.$1,
+                                style: AppTexto.subtitulo),
+                            Text(
+                              '${fmtMonto(grupo.$3)} CUP',
+                              style:
+                                  AppTexto.secundario.copyWith(
+                                      fontWeight:
+                                          FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                      for (final c in grupo.$2)
                       Padding(
                         padding: const EdgeInsets.only(
                             bottom: AppEspacio.sm),
@@ -170,18 +207,34 @@ class _CuentasCobrarScreenState
                             title:
                                 Text('${c['nombre']}'),
                             subtitle: Text(
-                              (c['dias'] as int) == 0
-                                  ? 'Vence hoy'
-                                  : 'Vencido hace ${c['dias']} días\n'
-                                      'Vence: ${fmtFecha(c['pagado_hasta'] as String?)}',
+                              (c['pagado_hasta'] as String).isEmpty
+                                  ? 'Sin fecha de vencimiento'
+                                  : (c['dias'] as int) == 0
+                                      ? 'Vence hoy'
+                                      : 'Vencido hace ${c['dias']} días\n'
+                                          'Venció: ${fmtFecha(c['pagado_hasta'] as String?)}',
                             ),
                             isThreeLine: true,
-                            trailing: Text(
-                              '${fmtMonto(c['monto'])} CUP',
-                              style:
-                                  AppTexto.subtitulo.copyWith(
-                                      color:
-                                          AppColores.naranja),
+                            trailing: Column(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '${fmtMonto(c['monto'])} CUP',
+                                  style: AppTexto.subtitulo
+                                      .copyWith(
+                                          color: AppColores
+                                              .naranja),
+                                ),
+                                Text('tarifa mensual',
+                                    style: AppTexto.minuscula
+                                        .copyWith(
+                                            color: AppColores
+                                                .textoSecundario(
+                                                    context))),
+                              ],
                             ),
                             // P2#5: tocar abre la ficha (desde donde
                             // se cobra); antes la fila no tenía onTap.
@@ -196,10 +249,42 @@ class _CuentasCobrarScreenState
                           ),
                         ),
                       ),
+                    ],
                 ],
               ),
             ),
     );
+  }
+
+  /// 1.25 T28: grupos por antigüedad del vencimiento, con
+  /// subtotal (cada monto sigue siendo UNA mensualidad).
+  /// Dentro de cada grupo se conserva el orden por monto
+  /// descendente de _cargar.
+  List<(String, List<Map<String, dynamic>>, double)>
+      _gruposAntiguedad() {
+    bool sinFecha(Map<String, dynamic> c) =>
+        (c['pagado_hasta'] as String).isEmpty;
+    final bandas =
+        <(String, bool Function(Map<String, dynamic>))>[
+      (
+        'De 1 a 30 días',
+        (c) => !sinFecha(c) && (c['dias'] as int) <= 30
+      ),
+      (
+        'Más de 30 días',
+        (c) => !sinFecha(c) && (c['dias'] as int) > 30
+      ),
+      ('Sin fecha de vencimiento', sinFecha),
+    ];
+    final res = <(String, List<Map<String, dynamic>>, double)>[];
+    for (final (titulo, test) in bandas) {
+      final filas = _cuentas.where(test).toList();
+      if (filas.isEmpty) continue;
+      final subtotal = filas.fold<double>(
+          0, (s, c) => s + ((c['monto'] as num?)?.toDouble() ?? 0));
+      res.add((titulo, filas, subtotal));
+    }
+    return res;
   }
 }
 
