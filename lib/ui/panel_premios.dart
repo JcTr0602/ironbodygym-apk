@@ -31,8 +31,16 @@ class PremiosPanelScreen extends StatefulWidget {
   final Future<Map<String, dynamic>> Function(
       int valeId, String nota)? rechazarVale;
 
+  /// 1.27: dentro del hub de Premios (pestañas) la
+  /// pantalla no pinta su propia AppBar: la pone el hub.
+  final bool embebida;
+
   const PremiosPanelScreen(
-      {super.key, this.cargarBandeja, this.aprobarVale, this.rechazarVale});
+      {super.key,
+      this.cargarBandeja,
+      this.aprobarVale,
+      this.rechazarVale,
+      this.embebida = false});
 
   @override
   State<PremiosPanelScreen> createState() => _PremiosPanelScreenState();
@@ -242,22 +250,26 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
+      const cuerpo = Center(
+          child: Text('Solo el dueño aprueba premios.'));
+      if (widget.embebida) return cuerpo;
       return Scaffold(
           appBar: appBarIron(context, 'Premios por aprobar'),
-          body: const Center(
-              child: Text('Solo el dueño aprueba premios.')));
+          body: cuerpo);
     }
+    final cuerpo = Column(
+      children: [
+        // Argón 1.26 MEDIA: al terminar el sync la
+        // bandeja se recarga (el aviso «terminando de
+        // sincronizarse» no queda congelado).
+        SyncBanner(alTerminarSync: _cargar),
+        Expanded(child: _cuerpo()),
+      ],
+    );
+    if (widget.embebida) return cuerpo;
     return Scaffold(
       appBar: appBarIron(context, 'Premios por aprobar'),
-      body: Column(
-        children: [
-          // Argón 1.26 MEDIA: al terminar el sync la
-          // bandeja se recarga (el aviso «terminando de
-          // sincronizarse» no queda congelado).
-          SyncBanner(alTerminarSync: _cargar),
-          Expanded(child: _cuerpo()),
-        ],
-      ),
+      body: cuerpo,
     );
   }
 

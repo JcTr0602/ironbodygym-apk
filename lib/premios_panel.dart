@@ -135,3 +135,112 @@ List<ValePendiente> valesVisibles(
   if (resueltosLocales.isEmpty) return vales;
   return vales.where((v) => !resueltosLocales.contains(v.id)).toList();
 }
+
+/// Orden del catálogo de logros tal como vive en la app
+/// de Clientes (core/logros.dart): la pestaña Catálogo
+/// (1.27, S2/G2) ordena por esta lista; lo desconocido
+/// (un logro futuro aún no sembrado aquí) va al final.
+const List<String> ordenCatalogoLogros = [
+  'primer_paso',
+  'semana_completa',
+  'imparable',
+  'leyenda',
+  'constancia_real',
+  'sesiones_hito',
+  'veterano',
+  'toneladas',
+  'mananero',
+  'dueno_tarde',
+  'madrugador',
+  'nocturno',
+  'primera_medicion',
+  'control_total',
+  'primera_marca',
+  'cinco_marcas',
+  'club100_press',
+  'club100_sentadilla',
+  'club100_muerto',
+  'diez_ejercicios',
+  'primera_rutina',
+  'arquitecto',
+  'alumno_gym',
+  'semana_planificada',
+  'secreto_alba',
+  'secreto_trasnochador',
+  'reto_del_mes',
+  'manual',
+];
+
+/// Una entrada del catálogo de premios (S2): la fila de
+/// premios_catalogo de un logro, con su último cambio
+/// auditado si lo hay.
+class EntradaCatalogoPremio {
+  final String logroId;
+  final String nombre;
+  final int metaDias;
+  final int premioDias;
+  final bool activo;
+  final String? ultimoCambioTexto;
+
+  const EntradaCatalogoPremio({
+    required this.logroId,
+    required this.nombre,
+    required this.metaDias,
+    required this.premioDias,
+    required this.activo,
+    required this.ultimoCambioTexto,
+  });
+
+  /// Sin premio configurado (apagado y 0 días).
+  bool get sinPremio => !activo && premioDias == 0;
+
+  /// Etiqueta de estado para la lista del catálogo.
+  String get estadoTexto {
+    if (activo) return 'Activo: $metaDias días → $premioDias gratis';
+    if (premioDias > 0) return 'Apagado: $metaDias días → $premioDias gratis';
+    return 'Sin premio';
+  }
+}
+
+/// Interpreta el jsonb de admin_premios_catalogo (S2).
+/// Tolerante como parseBandejaPremios y ordenado por
+/// [ordenCatalogoLogros].
+List<EntradaCatalogoPremio> parseCatalogoPremios(Object? json) {
+  if (json is! Map) return const [];
+  final crudos = json['items'];
+  if (crudos is! List) return const [];
+  final entradas = <EntradaCatalogoPremio>[];
+  for (final e in crudos) {
+    if (e is! Map) continue;
+    String? ultimo;
+    final uc = e['ultimo_cambio'];
+    if (uc is Map) {
+      final campo = _texto(uc['campo']);
+      final antes = _texto(uc['antes']);
+      final despues = _texto(uc['despues']);
+      final fecha = _texto(uc['creado_en']);
+      if (campo.isNotEmpty) {
+        ultimo = 'Último cambio: $campo $antes → $despues'
+            '${fecha.length >= 10 ? ' · ${fecha.substring(0, 10)}' : ''}';
+      }
+    }
+    entradas.add(EntradaCatalogoPremio(
+      logroId: _texto(e['logro_id']),
+      nombre: _texto(e['nombre']),
+      metaDias: _entero(e['meta_dias']),
+      premioDias: _entero(e['premio_dias']),
+      activo: e['activo'] == true,
+      ultimoCambioTexto: ultimo,
+    ));
+  }
+  int rango(EntradaCatalogoPremio e) {
+    final i = ordenCatalogoLogros.indexOf(e.logroId);
+    return i < 0 ? ordenCatalogoLogros.length : i;
+  }
+
+  entradas.sort((a, b) {
+    final r = rango(a).compareTo(rango(b));
+    return r != 0 ? r : a.logroId.compareTo(b.logroId);
+  });
+  return entradas;
+}
