@@ -249,6 +249,35 @@ class _HomeScreenState extends State<HomeScreen>
   /// sitio.
   int _nivelActivo = 0;
 
+  /// 1.26.1 (scroll, veredicto de Argón): el controlador de
+  /// scroll vive en el State — nunca se recrea en build — y
+  /// cada nivel recuerda su propio offset. Antes la Home era
+  /// un SingleChildScrollView ansioso: cada _cargar por sync
+  /// reconstruía la columna entera y mataba el impulso del
+  /// gesto a mitad de camino (el «a veces no me deja subir»
+  /// de Jc). Ahora la vista es un ListView.builder por
+  /// secciones con RepaintBoundary, espejo del arreglo de
+  /// Inicio en Clientes 0.16.
+  final ScrollController _scrollCtrl = ScrollController();
+  final Map<int, double> _offsetPorNivel = {0: 0, 1: 0};
+
+  /// Cambia de nivel guardando el offset del saliente y
+  /// restaurando el del entrante tras el frame (condición 1
+  /// de Argón: la posición nunca se reinicia por un rebuild).
+  void _irANivel(int nivel) {
+    if (nivel == _nivelActivo) return;
+    if (_scrollCtrl.hasClients) {
+      _offsetPorNivel[_nivelActivo] = _scrollCtrl.offset;
+    }
+    setState(() => _nivelActivo = nivel);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      final destino = _offsetPorNivel[nivel] ?? 0;
+      final max = _scrollCtrl.position.maxScrollExtent;
+      _scrollCtrl.jumpTo(destino.clamp(0.0, max).toDouble());
+    });
+  }
+
   /// Evita apilar el diálogo de suspendido (Argón).
   bool _mostrandoDialogoSuspendido = false;
 
@@ -506,6 +535,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -1013,6 +1043,38 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final esDueno = _auth.isOwner;
+    // 1.26.1 (scroll): las secciones de la Home como ítems
+    // de un ListView.builder — solo se construye lo visible
+    // y un rebuild por sync ya no reinicia la posición ni
+    // mata el impulso del gesto (condiciones 1 y 2 de
+    // Argón: controlador en el State, claves estables).
+    final items = <Widget>[
+      // v1.3.3: cabecera compacta
+      KeyedSubtree(
+          key: const ValueKey('home-cabecera'), child: _cabecera()),
+      // Rediseño Argón: un solo banner de sync (ver
+      // _bannerSync): si coexisten fallo y aviso, manda
+      // el fallo; al descartarlo reaparece el aviso.
+      KeyedSubtree(
+          key: const ValueKey('home-banner'), child: _bannerSync()),
+      // 1.23 (W1): diagnóstico de espejo vacío — solo
+      // pinta si el espejo de clientes está en cero
+      // habiendo tenido clientes tras una bajada buena.
+      const KeyedSubtree(
+          key: ValueKey('home-diagnostico'),
+          child: TarjetaDiagnosticoEspejo()),
+      // 1.23 (B2): selector de nivel bajo la cabecera y el
+      // banner — Hoy | Módulos, a un toque y sin empujar
+      // ninguna zona interactiva (H-02).
+      KeyedSubtree(
+          key: const ValueKey('home-selector'),
+          child: _selectorNivel()),
+      // v1.3.6: el dock fijo se reemplazó por el botón
+      // flotante de acciones rápidas (speed dial); el
+      // contenido del nivel va por secciones con ValueKey
+      // propia (nunca GlobalKey, H-03).
+      ..._seccionesNivel(esDueno),
+    ];
     return Scaffold(
       // v1.3.6 (Jc): el dock fijo de abajo se reemplaza por un botón
       // flotante de acciones rápidas (speed dial): al tocarlo despliega
@@ -1038,52 +1100,12 @@ class _HomeScreenState extends State<HomeScreen>
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () => _cargar(forceRefresh: true),
-          child: SingleChildScrollView(
+          child: ListView.builder(
+            controller: _scrollCtrl,
             physics: const AlwaysScrollableScrollPhysics(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // v1.3.3: cabecera compacta
-                _cabecera(),
-                // Rediseño Argón: un solo banner de sync (ver
-                // _bannerSync): si coexisten fallo y aviso, manda
-                // el fallo; al descartarlo reaparece el aviso.
-                _bannerSync(),
-                // 1.23 (W1): diagnóstico de espejo vacío — solo
-                // pinta si el espejo de clientes está en cero
-                // habiendo tenido clientes tras una bajada buena.
-                const TarjetaDiagnosticoEspejo(),
-                // 1.23 (B2): selector de nivel fijo bajo la
-                // cabecera y el banner — Hoy | Módulos, a un toque
-                // y sin empujar ninguna zona interactiva (H-02).
-                _selectorNivel(),
-                // v1.3.6: el dock fijo se reemplazó por el botón flotante de
-                // acciones rápidas (speed dial); se elimina del scroll para
-                // no duplicar las acciones.
-                // El contenido del nivel cruza con la gramática
-                // T7: ValueKey por nivel, nunca GlobalKey (H-03).
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  // 1.25 T48: fundido con un leve
-                  // deslizamiento vertical — los dos
-                  // niveles se perciben como dos pisos de
-                  // la misma casa, no como dos pantallas
-                  // que se reemplazan.
-                  transitionBuilder: (child, anim) =>
-                      FadeTransition(
-                    opacity: anim,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.03),
-                        end: Offset.zero,
-                      ).animate(anim),
-                      child: child,
-                    ),
-                  ),
-                  child: _contenidoNivel(esDueno),
-                ),
-              ],
-            ),
+            itemCount: items.length,
+            itemBuilder: (context, i) =>
+                RepaintBoundary(child: items[i]),
           ),
         ),
       ),
@@ -1135,7 +1157,7 @@ class _HomeScreenState extends State<HomeScreen>
       return Expanded(
         child: InkWell(
           borderRadius: BorderRadius.circular(AppRadio.circular),
-          onTap: () => setState(() => _nivelActivo = nivel),
+          onTap: () => _irANivel(nivel),
           child: Container(
             // 1.23 B11: alto mínimo cómodo de 48 (antes ~42:
             // icono 18 + padding vertical md×2).
@@ -1214,18 +1236,23 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// El contenido del nivel activo, con su ValueKey<int> para
   /// el AnimatedSwitcher del build (gramática T7 / H-03).
-  Widget _contenidoNivel(bool esDueno) {
+  /// 1.26.1 (scroll): las secciones del nivel activo como
+  /// ítems del ListView.builder de la Home, cada una con su
+  /// ValueKey estable para que Flutter reutilice los Element
+  /// en los rebuilds por sync (condición 2 de Argón). Antes
+  /// era _contenidoNivel: una Column ansiosa por nivel
+  /// dentro de un SingleChildScrollView.
+  List<Widget> _seccionesNivel(bool esDueno) {
     if (_nivelActivo == 0) {
       // Nivel 1 «Hoy»: operación inmediata — buscar, cobrar,
       // el dinero del día, la bandeja y la tira de alertas.
-      return Column(
-        key: const ValueKey(0),
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Zona 2 — Mostrador rápido (rediseño Argón):
-          // buscar + 4 acciones a 1 toque, antes de la
-          // tarjeta financiera.
-          Padding(
+      return [
+        // Zona 2 — Mostrador rápido (rediseño Argón):
+        // buscar + 4 acciones a 1 toque, antes de la
+        // tarjeta financiera.
+        KeyedSubtree(
+          key: const ValueKey('hoy-mostrador'),
+          child: Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
             child: Column(
@@ -1238,31 +1265,44 @@ class _HomeScreenState extends State<HomeScreen>
               ],
             ),
           ),
-          // v1.3.3: tarjeta financiera por rol
-          if (_bloquesHoy.contains('finanzas'))
-            Padding(
+        ),
+        // v1.3.3: tarjeta financiera por rol
+        if (_bloquesHoy.contains('finanzas'))
+          KeyedSubtree(
+            key: const ValueKey('hoy-finanzas'),
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
               child: _tarjetaFinanciera(esDueno),
             ),
-          // Zona 4 — Atención hoy (rediseño Argón): la
-          // bandeja del dueño sube aquí, sobre la tira de
-          // alertas. SOLO del dueño (abre su WhatsApp y el
-          // check vive en su teléfono; si un entrenador la
-          // usara, el dueño re-escribiría al mismo cliente
-          // sin saberlo).
-          if (_auth.isOwner && _bloquesHoy.contains('bandeja'))
-            Padding(
+          ),
+        // Zona 4 — Atención hoy (rediseño Argón): la
+        // bandeja del dueño sube aquí, sobre la tira de
+        // alertas. SOLO del dueño (abre su WhatsApp y el
+        // check vive en su teléfono; si un entrenador la
+        // usara, el dueño re-escribiría al mismo cliente
+        // sin saberlo).
+        if (_auth.isOwner && _bloquesHoy.contains('bandeja'))
+          KeyedSubtree(
+            key: const ValueKey('hoy-bandeja'),
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
               child: _botonBandejaWhatsapp(),
             ),
-          // v1.3.3: tira de alertas (solo si hay algo)
-          if (_bloquesHoy.contains('alertas')) _tiraAlertas(),
-          // Panel 19: si la estación quedó vacía por
-          // elección, se dice y se ofrece reabrir el editor.
-          if (_bloquesHoy.isEmpty)
-            Padding(
+          ),
+        // v1.3.3: tira de alertas (solo si hay algo)
+        if (_bloquesHoy.contains('alertas'))
+          KeyedSubtree(
+            key: const ValueKey('hoy-alertas'),
+            child: _tiraAlertas(),
+          ),
+        // Panel 19: si la estación quedó vacía por
+        // elección, se dice y se ofrece reabrir el editor.
+        if (_bloquesHoy.isEmpty)
+          KeyedSubtree(
+            key: const ValueKey('hoy-vacio'),
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
               child: Center(
@@ -1281,43 +1321,55 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
             ),
-          // Aire inferior para que el FAB no tape el final.
-          const SizedBox(height: 96),
-        ],
-      );
+          ),
+        // Aire inferior para que el FAB no tape el final.
+        const SizedBox(key: ValueKey('hoy-aire'), height: 96),
+      ];
     }
     // Nivel 2 «Módulos»: herramientas de gestión y consulta.
     // Sin tarjetas que abran en crudo Cobrar / Pago diario /
     // Inscribir (ya viven en el mostrador y en el FAB): el
     // grupo «Cobrar y clientes» es de gestión y auditoría.
-    return Column(
-      key: const ValueKey(1),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const EncabezadoSeccion(titulo: 'MÓDULOS'),
-        Padding(
+    return [
+      const EncabezadoSeccion(
+          key: ValueKey('mod-encabezado'), titulo: 'MÓDULOS'),
+      KeyedSubtree(
+        key: const ValueKey('mod-grid'),
+        child: Padding(
           padding: const EdgeInsets.symmetric(
               horizontal: AppEspacio.lg),
           child: _gridModulos(),
         ),
-        // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
-        const EncabezadoSeccion(titulo: 'MÁS'),
-        Padding(
+      ),
+      // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
+      const EncabezadoSeccion(
+          key: ValueKey('mas-encabezado'), titulo: 'MÁS'),
+      KeyedSubtree(
+        key: const ValueKey('mas-grid'),
+        child: Padding(
           padding: const EdgeInsets.symmetric(
               horizontal: AppEspacio.lg),
           child: _gridMas(),
         ),
-        const SizedBox(height: AppEspacio.lg),
-        Center(
-          child: Text('© Creado por JcTr0602',
-              style: AppTexto.minuscula.copyWith(
-                  color: Colors.grey, fontWeight: FontWeight.bold)),
+      ),
+      KeyedSubtree(
+        key: const ValueKey('mod-pie'),
+        child: Column(
+          children: [
+            const SizedBox(height: AppEspacio.lg),
+            Center(
+              child: Text('© Creado por JcTr0602',
+                  style: AppTexto.minuscula.copyWith(
+                      color: Colors.grey,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
-        // v1.3.6: aire inferior para que el FAB de acciones rápidas
-        // no tape el pie al llegar al final del scroll.
-        const SizedBox(height: 96),
-      ],
-    );
+      ),
+      // v1.3.6: aire inferior para que el FAB de acciones rápidas
+      // no tape el pie al llegar al final del scroll.
+      const SizedBox(key: ValueKey('mod-aire'), height: 96),
+    ];
   }
 
   /// Texto del rol sin emojis (v1.1: iconos Material).
