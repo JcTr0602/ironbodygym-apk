@@ -10,12 +10,22 @@ library;
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
+import '../permisos_entrenador.dart';
 import '../turno_service.dart';
 import 'componentes.dart';
+import 'permisos_ui.dart';
 
 /// 1.22 T-08: texto del motivo cuando hay turno abierto
 /// pero el cierre no se pudo ejecutar. PURO.
 String motivoErrorCierre(Object? error) {
+  // Autoauditoría 1.25 ronda 2: el turno que existía al
+  // preparar y ya no está al confirmar (reconciliación
+  // del turno_id entre ambos pasos).
+  if ('$error' == 'turno_no_existe') {
+    return 'El turno ya no aparece en este teléfono: '
+        'pudo cerrarse desde otro flujo. Actualiza la '
+        'pantalla e inténtalo de nuevo.';
+  }
   return '$error' == 'sin_turno_abierto'
       ? 'El turno ya no está abierto: pudo cerrarse '
           'desde otro flujo. Actualiza la pantalla e '
@@ -39,10 +49,18 @@ Future<({bool ok, String? error})> ejecutarCierreTurno(
   if (prep['ok'] != true) {
     return (ok: false, error: '${prep['error'] ?? 'preparacion'}');
   }
-  await TurnoService.instance.confirmarCierre(
+  // Autoauditoría 1.25 ronda 2: el resultado de
+  // confirmarCierre SE MIRA (antes se ignoraba y el
+  // flujo devolvía éxito siempre: un «cierre de
+  // mentira» si el turno se reconciliaba entre
+  // preparar y confirmar).
+  final conf = await TurnoService.instance.confirmarCierre(
     turnoId: '${prep['turnoId']}',
     forzado: forzado ?? prep['limpio'] != true,
   );
+  if (conf['ok'] != true) {
+    return (ok: false, error: '${conf['error'] ?? 'confirmacion'}');
+  }
   return (ok: true, error: null);
 }
 
@@ -51,6 +69,14 @@ Future<({bool ok, String? error})> ejecutarCierreTurno(
 /// mostrarSnack cuando no hay turno abierto. Devuelve
 /// true SOLO si el turno quedó cerrado.
 Future<bool> cerrarTurnoConDialogo(BuildContext context) async {
+  // 1.25 cierre (autoauditoría ronda 2): la compuerta
+  // de gestionar turnos vive TAMBIÉN aquí, para que
+  // todo llamador del diálogo la herede (el hub no la
+  // aplicaba; Mi Turno y Home aplican la suya).
+  if (!await permisoOperativoOkConRefresco(context,
+      () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+    return false;
+  }
   final prep = await TurnoService.instance.prepararCierre();
   if (prep['ok'] != true) {
     if (context.mounted) {
@@ -73,9 +99,18 @@ Future<bool> cerrarTurnoConDialogo(BuildContext context) async {
     icono: Icons.lock_outline_rounded,
   );
   if (!ok) return false;
-  await TurnoService.instance.confirmarCierre(
+  // Autoauditoría 1.25 ronda 2: éxito solo si el
+  // servicio confirma el cierre.
+  final conf = await TurnoService.instance.confirmarCierre(
     turnoId: '${prep['turnoId']}',
     forzado: !limpio,
   );
+  if (conf['ok'] != true) {
+    if (context.mounted) {
+      mostrarSnack(context, motivoErrorCierre(conf['error']),
+          significado: SignificadoChip.error);
+    }
+    return false;
+  }
   return true;
 }

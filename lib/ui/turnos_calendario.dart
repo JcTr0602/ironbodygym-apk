@@ -578,8 +578,9 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                                   : null, fontWeight: FontWeight.w800)),
                       const Spacer(),
                       // 1.25 T81: la marca de lo REAL en
-                      // los días pasados (verde: abrió el
-                      // programado; ámbar: abrió otro;
+                      // los días pasados (verde: abrieron
+                      // todos los programados; ámbar:
+                      // abrió otro o faltó un programado;
                       // rojo: nadie abrió).
                       if (pasado && !domingo)
                         Builder(builder: (context) {
@@ -597,6 +598,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                           final color = switch (marca) {
                             'abrio' => AppColores.exito,
                             'distinto' => AppColores.alerta,
+                            'parcial' => AppColores.alerta,
                             _ => AppColores.error,
                           };
                           return Container(

@@ -14,6 +14,10 @@ void main() {
       expect(horaMinutosLinea(360), '06:00');
       expect(horaMinutosLinea(725), '12:05');
       expect(horaMinutosLinea(1200), '20:00');
+      // Autoauditoría ronda 2: fuera de rango no pinta
+      // horas imposibles; da la vuelta al día.
+      expect(horaMinutosLinea(1500), '01:00');
+      expect(horaMinutosLinea(-30), '23:30');
     });
   });
 
@@ -46,6 +50,33 @@ void main() {
           programados: const {'Gabriel'},
           aperturasDia: const [
             {'entrenador_nombre': ' gabriel '},
+          ],
+        ),
+        'abrio',
+      );
+    });
+
+    test('dos programados y abre uno solo: parcial', () {
+      // Autoauditoría ronda 2: antes devolvía 'abrio'
+      // y la ausencia de la otra franja era invisible.
+      expect(
+        marcaRealDiaCalendario(
+          programados: const {'Gabriel', 'Duany'},
+          aperturasDia: const [
+            {'entrenador_nombre': 'Gabriel'},
+          ],
+        ),
+        'parcial',
+      );
+    });
+
+    test('dos programados y abren los dos: abrio', () {
+      expect(
+        marcaRealDiaCalendario(
+          programados: const {'Gabriel', 'Duany'},
+          aperturasDia: const [
+            {'entrenador_nombre': 'Gabriel'},
+            {'entrenador_nombre': 'Duany'},
           ],
         ),
         'abrio',

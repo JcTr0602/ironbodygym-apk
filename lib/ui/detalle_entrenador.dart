@@ -178,9 +178,19 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     // Pagos diarios del entrenador (idea 2)
     for (final d in diarios) {
       final fecha = fechaCorta(d['fecha'] ?? '', 10);
-      final nombre = '${d['registrado_por_nombre'] ?? ''}'.trim();
       final total = (d['total'] as num?)?.toDouble() ?? 0;
-      if (!_esMio(nombre)) continue;
+      // 1.25 cierre (autoauditoría ronda 2): los
+      // diarios se atribuyen por ID como los pagos
+      // (en pagos_diarios, registrado_por ES el
+      // telegram_id); por nombre, un tocayo mezclaba
+      // sus diarios en este total. El nombre queda de
+      // respaldo para filas sin ID, vía la misma pura.
+      final mio = filaEsDelEntrenador(
+        {...d, 'telegram_user_id': d['registrado_por']},
+        telegramId: _miTid,
+        nombre: widget.nombre,
+      );
+      if (!mio) continue;
       if (enAnterior(fecha)) _totalAnterior += total;
       if (!enRango(fecha)) continue;
       _total += total;

@@ -2235,6 +2235,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// _procesandoTurno bloquea la reentrada (auditoría ChatGPT #4).
   Future<void> _cierreRapido() async {
     if (_procesandoTurno) return;
+    // 1.25 cierre (autoauditoría ronda 2): el cierre
+    // rápido exige la misma compuerta que _abrirTurno
+    // (can_gestionar_turnos); antes entraba directo.
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+      return;
+    }
     setState(() => _procesandoTurno = true);
     // Seguridad del diálogo "Sincronizando": solo se cierra si somos
     // nosotros quienes lo abrimos (auditoría ChatGPT: otros riesgos).

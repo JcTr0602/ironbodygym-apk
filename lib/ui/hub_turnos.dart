@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import '../permisos_entrenador.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
@@ -27,6 +28,7 @@ import 'avatar_entrenador.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_turno.dart';
+import 'permisos_ui.dart';
 import 'horario_turnos.dart';
 import 'turnos_calendario.dart'
     show CalendarioTurnosScreen, colorChipEntrenador;
@@ -192,6 +194,14 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   }
 
   Future<void> _abrir() async {
+    // 1.25 cierre (autoauditoría ronda 2): abrir turno
+    // cuelga de can_gestionar_turnos, como en Home y
+    // Mi Turno (el hub no lo comprobaba). El cierre ya
+    // la trae dentro de cerrarTurnoConDialogo.
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
+      return;
+    }
     setState(() => _procesando = true);
     try {
       // F9: al abrir se puede marcar a quién se cubre.

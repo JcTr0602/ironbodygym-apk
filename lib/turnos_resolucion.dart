@@ -88,8 +88,12 @@ void restablecerVentanasFranja() {
 /// 1.25 T82: minutos desde medianoche como 'HH:MM'
 /// para los extremos de la línea de tiempo del día.
 String horaMinutosLinea(int minutos) {
-  final h = (minutos ~/ 60).toString().padLeft(2, '0');
-  final m = (minutos % 60).toString().padLeft(2, '0');
+  // Autoauditoría 1.25 ronda 2: normalizar al día
+  // (1500 -> '01:00', -30 -> '23:30'); sin la vuelta,
+  // un valor fuera de 0..1439 pintaba '25:00'.
+  final t = minutos % 1440;
+  final h = (t ~/ 60).toString().padLeft(2, '0');
+  final m = (t % 60).toString().padLeft(2, '0');
   return '$h:$m';
 }
 
@@ -307,7 +311,10 @@ List<AperturaTurno> aperturasHoyConViva({
 
 /// 1.25 T81, PURO: la marca de lo que PASÓ de verdad un
 /// día del calendario, contra lo programado:
-/// - 'abrio': abrió quien estaba programado.
+/// - 'abrio': abrieron TODOS los programados.
+/// - 'parcial': abrió algún programado pero faltó otro
+///   (cierre de autoauditoría 1.25: antes este caso se
+///   pintaba 'abrio' y la ausencia quedaba invisible).
 /// - 'distinto': abrió otro (cubriendo o fuera del plan).
 /// - 'no_abrio': había programado y nadie abrió.
 /// - null: sin programado ese día (nada que auditar).
@@ -325,8 +332,9 @@ String? marcaRealDiaCalendario({
   final normProg = {
     for (final n in programados) normalizarNombreTurno(n),
   };
-  if (abrieron.every(normProg.contains)) return 'abrio';
-  return 'distinto';
+  if (!abrieron.every(normProg.contains)) return 'distinto';
+  if (!normProg.every(abrieron.contains)) return 'parcial';
+  return 'abrio';
 }
 
 /// 24/25, PURO: estado de una franja para el hub.
