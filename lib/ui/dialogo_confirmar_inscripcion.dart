@@ -32,17 +32,29 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
   final String telefono;
   final String carnet;
   final String? fotoPath;
+  // 1.25 T117 (F1-78): modo Cuenta a la Casa — el mismo diálogo
+  // con «Sin cobro · Sin vencimiento» en vez del bloque de pago.
+  final bool esCasa;
+  final String sexo;
+  // 1.25 T117 (F1-80): desglose del monto («3 × 2 000 CUP») y
+  // línea «Desde hoy, …» junto a la vigencia.
+  final String? desgloseTxt;
+  final String? desdeTxt;
 
   const DialogoConfirmarInscripcion({
     super.key,
     required this.nombre,
-    required this.periodoEtiqueta,
-    required this.montoTxt,
-    required this.metodoPago,
-    required this.validoHastaTxt,
+    this.periodoEtiqueta = '',
+    this.montoTxt = '',
+    this.metodoPago = '',
+    this.validoHastaTxt = '',
     this.telefono = '',
     this.carnet = '',
     this.fotoPath,
+    this.esCasa = false,
+    this.sexo = '',
+    this.desgloseTxt,
+    this.desdeTxt,
   });
 
   /// Círculo naranja con check blanco (fallback sin foto).
@@ -75,19 +87,57 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
     );
   }
 
-  Widget _filaDato(BuildContext context, IconData icono, String valor) {
+  /// Fila de dato con micro-etiqueta (1.25 T117 F1-79): la
+  /// etiqueta dice qué es el valor; antes la fila era solo un
+  /// icono y había que adivinarlo.
+  Widget _filaDato(
+      BuildContext context, IconData icono, String etiqueta, String valor) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icono,
               size: 22, color: AppColores.textoSecundario(context)),
           const SizedBox(width: AppEspacio.md),
           Expanded(
-            child: Text(valor, style: AppTexto.cuerpo),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(etiqueta, style: AppTexto.metadato),
+                Text(valor, style: AppTexto.cuerpo),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  /// 1.25 T117 (F1-77): el método con su icono y su nombre
+  /// completo, con jerarquía propia (antes iba como un
+  /// paréntesis en crudo bajo el monto: «(efectivo)»).
+  Widget _filaMetodo() {
+    final esTransf = metodoPago == 'transferencia';
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+            esTransf
+                ? Icons.smartphone_rounded
+                : Icons.payments_rounded,
+            size: 18,
+            color: AppColores.naranja),
+        const SizedBox(width: AppEspacio.xs),
+        Text(
+          esTransf
+              ? 'Transferencia'
+              : metodoPago == 'efectivo'
+                  ? 'Efectivo'
+                  : metodoPago,
+          style: AppTexto.cuerpo,
+        ),
+      ],
     );
   }
 
@@ -97,7 +147,10 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadio.xl),
       ),
-      title: const Text('Confirmar inscripción',
+      title: Text(
+          esCasa
+              ? 'Confirmar Cuenta a la Casa'
+              : 'Confirmar inscripción',
           style: AppTexto.titulo, textAlign: TextAlign.center),
       content: SingleChildScrollView(
         child: Column(
@@ -105,54 +158,119 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
           children: [
             _cabecera(),
             const SizedBox(height: AppEspacio.md),
-            // Monto protagonista.
-            Text(
-              montoTxt,
-              textAlign: TextAlign.center,
-              style: AppTexto.display.copyWith(
-                color: AppColores.naranja,
+            if (esCasa) ...[
+              // F1-78: la Casa no cobra: su «monto» es la propia
+              // condición, en su color dorado de siempre.
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.md,
+                  vertical: AppEspacio.sm,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3CD),
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.lg),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.home_rounded,
+                        size: 20, color: Color(0xFFB8860B)),
+                    const SizedBox(width: AppEspacio.sm),
+                    Text(
+                      'Sin cobro · Sin vencimiento',
+                      style: AppTexto.cuerpo.copyWith(
+                        color: const Color(0xFF7A5A00),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Text(
-              '($metodoPago)',
-              style: AppTexto.secundario,
-            ),
+            ] else ...[
+              // Monto protagonista.
+              Text(
+                montoTxt,
+                textAlign: TextAlign.center,
+                style: AppTexto.display.copyWith(
+                  color: AppColores.naranja,
+                ),
+              ),
+              // F1-80: el desglose del monto, si lo hay.
+              if (desgloseTxt != null)
+                Text(
+                  desgloseTxt!,
+                  style: AppTexto.secundario,
+                ),
+              // F1-77: método con icono y nombre completo.
+              _filaMetodo(),
+            ],
             const SizedBox(height: AppEspacio.md),
             Divider(color: AppColores.borde(context), height: 1),
             const SizedBox(height: AppEspacio.sm),
-            _filaDato(context, Icons.person_rounded, nombre),
-            _filaDato(context, Icons.calendar_month_rounded, periodoEtiqueta),
+            _filaDato(context, Icons.person_rounded, 'Nombre', nombre),
+            if (!esCasa)
+              _filaDato(context, Icons.calendar_month_rounded,
+                  'Período', periodoEtiqueta),
             if (carnet.isNotEmpty)
-              _filaDato(context, Icons.badge_rounded, carnet),
+              _filaDato(context, Icons.badge_rounded, 'Carnet', carnet),
             if (telefono.isNotEmpty)
-              _filaDato(context, Icons.phone_rounded,
+              _filaDato(context, Icons.phone_rounded, 'Teléfono',
                   formatoTelefonoPresentacion(telefono)),
-            // Vigencia como pastilla.
+            if (esCasa && sexo.isNotEmpty)
+              _filaDato(context, Icons.person_rounded, 'Sexo', sexo),
+            // Vigencia como pastilla (la Casa no tiene).
+            if (!esCasa)
             Padding(
               padding:
                   const EdgeInsets.symmetric(vertical: AppEspacio.sm),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(Icons.check_circle_rounded,
                       size: 22,
                       color: AppColores.textoSecundario(context)),
                   const SizedBox(width: AppEspacio.md),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppEspacio.md,
-                      vertical: AppEspacio.xs,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColores.exito.withValues(alpha: 0.15),
-                      borderRadius:
-                          BorderRadius.circular(AppRadio.lg),
-                    ),
-                    child: Text(
-                      'Válido hasta $validoHastaTxt',
-                      style: AppTexto.cuerpo.copyWith(
-                        color: AppColores.exito,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Vigencia', style: AppTexto.metadato),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            // F1-80: la pastilla va en Flexible:
+                            // con letra grande ya no desborda.
+                            Flexible(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppEspacio.md,
+                                  vertical: AppEspacio.xs,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColores.exito
+                                      .withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(
+                                      AppRadio.lg),
+                                ),
+                                child: Text(
+                                  'Válido hasta $validoHastaTxt',
+                                  style: AppTexto.cuerpo.copyWith(
+                                    color: AppColores.exito,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        // F1-80: desde cuándo corre la vigencia.
+                        if (desdeTxt != null) ...[
+                          const SizedBox(height: 2),
+                          Text(desdeTxt!,
+                              style: AppTexto.secundario),
+                        ],
+                      ],
                     ),
                   ),
                 ],
@@ -187,13 +305,17 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
   static Future<bool> mostrar(
     BuildContext context, {
     required String nombre,
-    required String periodoEtiqueta,
-    required String montoTxt,
-    required String metodoPago,
-    required String validoHastaTxt,
+    String periodoEtiqueta = '',
+    String montoTxt = '',
+    String metodoPago = '',
+    String validoHastaTxt = '',
     String telefono = '',
     String carnet = '',
     String? fotoPath,
+    bool esCasa = false,
+    String sexo = '',
+    String? desgloseTxt,
+    String? desdeTxt,
   }) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -206,6 +328,10 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
         telefono: telefono,
         carnet: carnet,
         fotoPath: fotoPath,
+        esCasa: esCasa,
+        sexo: sexo,
+        desgloseTxt: desgloseTxt,
+        desdeTxt: desdeTxt,
       ),
     );
     return ok == true;

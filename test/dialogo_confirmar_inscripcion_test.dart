@@ -67,6 +67,75 @@ void main() {
       expect(find.byIcon(Icons.check_rounded), findsOneWidget);
     });
 
+    // 1.25 T117 (F1-77/79/80): método con nombre completo y
+    // sin paréntesis en crudo; micro-etiquetas en las filas;
+    // desglose y «Desde hoy» cuando vienen.
+    testWidgets('T117: método con nombre, etiquetas y desglose',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () => DialogoConfirmarInscripcion.mostrar(
+                ctx,
+                nombre: 'Alberto Prueba',
+                periodoEtiqueta: '3 meses',
+                montoTxt: '7 500 CUP',
+                desgloseTxt: '3 × 2 500 CUP',
+                metodoPago: 'transferencia',
+                validoHastaTxt: '05/02/2027',
+                desdeTxt: 'Desde hoy, 05/11/2026',
+                telefono: '58161619',
+                carnet: '150520',
+              ),
+              child: const Text('abrir'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      expect(find.text('Transferencia'), findsOneWidget);
+      expect(find.text('(transferencia)'), findsNothing);
+      expect(find.text('3 × 2 500 CUP'), findsOneWidget);
+      expect(find.text('Desde hoy, 05/11/2026'), findsOneWidget);
+      expect(find.text('Nombre'), findsOneWidget);
+      expect(find.text('Período'), findsOneWidget);
+      expect(find.text('Carnet'), findsOneWidget);
+      expect(find.text('Teléfono'), findsOneWidget);
+      expect(find.text('Vigencia'), findsOneWidget);
+    });
+
+    // 1.25 T117 (F1-78): el modo Casa muestra la condición sin
+    // cobro y los datos de la persona, sin bloque de pago.
+    testWidgets('T117: modo Casa sin bloque de pago',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () => DialogoConfirmarInscripcion.mostrar(
+                ctx,
+                nombre: 'Melany Prueba',
+                esCasa: true,
+                sexo: 'Femenino',
+                telefono: '58161619',
+                carnet: '150520',
+              ),
+              child: const Text('abrir'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      expect(find.text('Confirmar Cuenta a la Casa'), findsOneWidget);
+      expect(find.text('Sin cobro · Sin vencimiento'), findsOneWidget);
+      expect(find.text('Melany Prueba'), findsOneWidget);
+      expect(find.text('Femenino'), findsOneWidget);
+      expect(find.text('Válido hasta'), findsNothing);
+    });
+
     // Nota: el errorBuilder con foto corrupta no se prueba aquí porque
     // el decoder de imágenes se cuelga en el entorno de tests.
     // La defensa (errorBuilder → check naranja) queda verificada por

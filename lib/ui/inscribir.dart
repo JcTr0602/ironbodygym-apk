@@ -46,6 +46,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
   final _carnet = TextEditingController();
   final _dias = TextEditingController();
   final _monto = TextEditingController();
+  // 1.25 T117 (F1-66): notas opcionales de la inscripción; viajan
+  // en la op y quedan guardadas en la ficha del cliente.
+  final _notas = TextEditingController();
+  // 1.25 T117 (F1-61): el futuro de precios se crea UNA sola vez;
+  // antes se creaba dentro de build y el FutureBuilder se reiniciaba
+  // (con su parpadeo) en cada reconstrucción.
+  late final Future<Map<String, double>> _preciosFut;
   String _sexo = 'M';
   String _periodo = 'mensual';
   int _meses = 1;
@@ -103,6 +110,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
   @override
   void initState() {
     super.initState();
+    _preciosFut = _precios();
     _carnet.addListener(_actualizarEsMenor);
     // Q5 (cola 1.20): el aviso «parece teléfono» depende de
     // AMBOS campos: también se recalcula al teclear el
@@ -176,6 +184,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
     _carnet.dispose();
     _dias.dispose();
     _monto.dispose();
+    _notas.dispose();
     // Pasada 2 de Argón (1.20): foto tomada y nunca entregada
     // (se canceló el diálogo o se salió con Atrás) → borrar el
     // archivo.
@@ -466,14 +475,18 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // rechaza la op si el actor no es admin).
     if (_cuentaCasa) {
       if (!mounted) return;
-      final okCasa = await DialogoApp.confirmar(
+      // 1.25 T117 (F1-78): la Casa confirma con el MISMO
+      // diálogo de resumen que la inscripción normal (foto,
+      // carnet, teléfono, sexo), en su modo sin cobro — antes
+      // era un aviso genérico sin los datos de la persona.
+      final okCasa = await DialogoConfirmarInscripcion.mostrar(
         context,
-        titulo: 'Inscribir como Cuenta a la Casa',
-        mensaje: '$nombre tendrá acceso permanente sin pagar ni '
-            'vencer. No contará en nómina, vencimientos ni '
-            'ingresos.',
-        aceptar: 'Inscribir',
-        icono: Icons.home_rounded,
+        nombre: nombre,
+        esCasa: true,
+        sexo: _sexo == 'F' ? 'Femenino' : 'Masculino',
+        telefono: tel,
+        carnet: carnet,
+        fotoPath: _foto?.path,
       );
       if (okCasa != true || !mounted) return;
       setState(() => _guardando = true);
@@ -487,6 +500,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
           // Fecha de negocio en hora de La Habana (regla de la casa).
           'fecha': hoyHabanaIso(),
           if (_esMenor) 'es_menor': true,
+          if (_notas.text.trim().isNotEmpty)
+            'notas': _notas.text.trim(),
           'cuenta_casa': 1,
           if (_crearAccesoApp) 'crear_acceso_app': true,
         };
@@ -525,8 +540,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
       nombre: nombre,
       periodoEtiqueta: _etiquetaPeriodo(),
       montoTxt: '${fmtMonto(monto)} CUP',
+      // 1.25 T117 (F1-80): con varios meses, el desglose
+      // «N × unitario CUP» bajo el total.
+      desgloseTxt: (_periodo == 'mensual' && _meses > 1)
+          ? '$_meses × ${fmtMonto(monto / _meses)} CUP'
+          : null,
       metodoPago: _metodoPago,
       validoHastaTxt: fmtFecha(hasta),
+      desdeTxt: 'Desde hoy, ${fmtFecha(hoyHabanaIso())}',
       telefono: tel,
       carnet: carnet,
       fotoPath: _foto?.path,
@@ -565,6 +586,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
         // v1.4.0 Paso 2 (propuesta 11): el puente genera el acceso a
         // la app de clientes tras aplicar la inscripción.
         if (_crearAccesoApp) 'crear_acceso_app': true,
+        if (_notas.text.trim().isNotEmpty)
+          'notas': _notas.text.trim(),
         // v1.5.0 (Bloque G): conversión de invitado — el servidor
         // (Bloque B) verifica las medidas contra el detalle
         // autoritativo de ESTE invitado antes de importarlas.
@@ -659,11 +682,38 @@ class _InscribirScreenState extends State<InscribirScreen> {
                             color: AppColores.info),
                         const SizedBox(width: AppEspacio.sm),
                         Expanded(
-                          child: Text(
-                            'Estás convirtiendo a un invitado '
-                            'registrado desde la app de clientes.'
-                            '${widget.conversion!.medidas.isNotEmpty ? ' Al guardar, sus ${widget.conversion!.medidas.length} medida(s) sincronizadas (autodeclaradas) se enviarán al servidor para verificarlas: solo se importarán las que el servidor confirme como de este invitado, y el resultado se verá al confirmarse la conversión.' : ''}',
-                            style: AppTexto.secundario,
+                          // 1.25 T117 (F1-68): el aviso va en
+                          // viñetas cortas, no en un párrafo único.
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Estás convirtiendo a un invitado '
+                                'registrado desde la app de clientes.',
+                                style: AppTexto.secundario,
+                              ),
+                              const Text(
+                                '• Al guardar, pasa a ser cliente '
+                                'con los datos de este formulario.',
+                                style: AppTexto.secundario,
+                              ),
+                              if (widget
+                                  .conversion!.medidas.isNotEmpty)
+                                Text(
+                                  '• Trae ${widget.conversion!.medidas.length} '
+                                  'medida(s) autodeclaradas: el '
+                                  'servidor verifica cuáles son de '
+                                  'este invitado y solo importa las '
+                                  'confirmadas.',
+                                  style: AppTexto.secundario,
+                                ),
+                              const Text(
+                                '• El resultado de la verificación '
+                                'se ve al confirmarse la conversión.',
+                                style: AppTexto.secundario,
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -777,6 +827,31 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       // parece teléfono; tampoco bloquea.
                       if (_carnetPareceTelefono)
                         const AvisoCarnetTelefono(),
+                      // 1.25 T117 (F1-65): en cuanto el carnet dice
+                      // que es menor, su tarifa se anuncia aquí,
+                      // junto al dato que la decide (antes solo se
+                      // veía dentro del desplegable de meses).
+                      if (_esMenor) ...[
+                        const SizedBox(height: AppEspacio.sm),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: ChipEstado.semantico(
+                            texto: 'Menor de edad · tarifa '
+                                '${fmtMonto(_precioMenorVal)} CUP/mes',
+                            significado: SignificadoChip.info,
+                            icono: Icons.child_care_rounded,
+                          ),
+                        ),
+                      ],
+                      // 1.25 T117 (F1-66): notas opcionales de la
+                      // inscripción; viajan en la op y quedan en la
+                      // ficha del cliente.
+                      const SizedBox(height: AppEspacio.md),
+                      CampoTexto(
+                          controller: _notas,
+                          etiqueta: 'Notas (opcional)',
+                          icono: Icons.note_alt_rounded,
+                          maxLineas: 2),
                     ],
                   ),
                 ),
@@ -873,7 +948,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           height: AppEspacio.sm),
                       FutureBuilder<
                           Map<String, double>>(
-                        future: _precios(),
+                        future: _preciosFut,
                         builder: (ctx, snap) {
                           final pr = snap.data ??
                               {
@@ -944,7 +1019,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                         value:
                                             'tipo:${t.id}',
                                         child: Text(
-                                            '${t.nombre} (${fmtMonto(t.monto)} CUP)')),
+                                            // 1.25 T117 (F1-62): los días
+                                            // del tipo van en la etiqueta:
+                                            // dos ofertas con igual monto
+                                            // y distinta duración ya no se
+                                            // confunden.
+                                            '${t.nombre} · ${t.dias} días · ${fmtMonto(t.monto)} CUP')),
                                   const DropdownMenuItem(
                                       value:
                                           'personalizado',
@@ -1057,7 +1137,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                   () => _metodoPago = 'efectivo')),
                           const SizedBox(width: 8),
                           ChoiceChip(
-                              label: const Text('Transfer.'),
+                              label: const Text('Transferencia'),
                               avatar: const Icon(Icons.smartphone_rounded, size: 18),
                               selected: _metodoPago == 'transferencia',
                               onSelected: (_) => setState(
@@ -1154,6 +1234,20 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           ),
                         ],
                       ),
+                      // 1.25 T117 (F1-64): una foto equivocada se
+                      // puede quitar sin salir de la pantalla.
+                      if (_foto != null)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 18),
+                            label: const Text('Quitar foto'),
+                            onPressed: () =>
+                                setState(() => _foto = null),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1177,7 +1271,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       child: CircularProgressIndicator(
                           color: AppColores.naranja))
                   : BotonPrimario(
-                      texto: 'Guardar inscripción',
+                      // 1.25 T117 (F1-67): en modo conversión el
+                      // botón dice la acción real, no la genérica.
+                      texto: widget.conversion != null
+                          ? 'Convertir en cliente'
+                          : 'Guardar inscripción',
                       icono: Icons.check_rounded,
                       onPressed: _guardar,
                     ),
