@@ -16,6 +16,11 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.26.1', [
+    'Cobrar parcial en «Pendiente a recoger»: si recoges menos de lo que el entrenador debe, escribes la cantidad y listo — el resto queda visible como «Saldo de cobros parciales» y se cobra primero la próxima vez; los pagos se cubren del más viejo al más nuevo, sin partir ninguno',
+    'La pantalla de pendientes se lee mejor: las filas salen con contraste pleno (antes se veían atenuadas) y el cuadre a WhatsApp queda como acción discreta bajo los botones de cobro',
+    'Inicio más fluido: el scroll ya no se corta ni pierde el impulso cuando la sincronización refresca la pantalla en segundo plano, y cada pestaña (Hoy, Módulos, Más) recuerda dónde ibas',
+  ]),
   Novedad('1.26.0', [
     'Premios por aprobar: los vales que los clientes reclaman en su app al cumplir un logro llegan al Panel (módulo Clientes) y se aprueban con un toque: el premio se aplica como días de mensualidad gratis y queda registrado una sola vez',
     'Doble toque, doble problema — resuelto: cerrar turno, cobrar desde Buscar, vender en Servicios y generar el PIN ya no se duplican si se toca dos veces seguidas',

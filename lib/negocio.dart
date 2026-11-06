@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 
 import 'app_log.dart';
 import 'auth.dart';
+import 'cobro_parcial.dart';
 import 'cliente_protegido.dart';
 import 'entrenador_identidad.dart';
 import 'localdb.dart';
@@ -1965,6 +1966,176 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   // de Arqueo mostraba un "pendiente" negativo; el servidor ya
   // tenía max(0.0, ...) y rechazaba esperado < 0.
   return (cup: cup < 0 ? 0.0 : cup, usd: usd < 0 ? 0.0 : usd);
+}
+
+/// 1.26.1 (Cobrar Parcial): saldo de arrastre vivo CUP de
+/// un entrenador — lo que quedó debiendo de liquidaciones
+/// parciales anteriores sin estar atado a ningún pago
+/// concreto. Es la cabeza de la cola FIFO del compositor.
+Future<double> arrastreVivoCup(int telegramId) async {
+  var total = 0.0;
+  for (final l
+      in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    if (LocalDb.normalizarTelegramId(l['entrenador_telegram_id']) !=
+        telegramId) {
+      continue;
+    }
+    if ((l['estado'] as String?) != 'parcial') continue;
+    if ((l['moneda'] as String?) == 'USD') continue;
+    total += (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+  }
+  return total;
+}
+
+/// 1.26.1 (Cobrar Parcial): todos los entrenadores con
+/// arrastre CUP vivo: telegram_id → (total, nombre). Un
+/// entrenador puede deber SOLO arrastre (un parcial
+/// cubrió todos sus pagos): no aparece en la lista de
+/// pagos pendientes y, sin esto, su saldo sería
+/// invisible en la pantalla del dueño.
+Future<Map<int, ({double total, String nombre})>>
+    arrastresVivosCup() async {
+  final res = <int, ({double total, String nombre})>{};
+  for (final l
+      in await LocalDb.instance.allMirror('liquidaciones_caja')) {
+    final tid =
+        LocalDb.normalizarTelegramId(l['entrenador_telegram_id']);
+    if (tid == null) continue;
+    if ((l['estado'] as String?) != 'parcial') continue;
+    if ((l['moneda'] as String?) == 'USD') continue;
+    final saldo = (l['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+    if (saldo <= 0) continue;
+    final prev = res[tid];
+    final nombre = (l['entrenador_nombre'] as String?) ?? '';
+    res[tid] = (
+      total: (prev?.total ?? 0) + saldo,
+      nombre: nombre.isNotEmpty ? nombre : (prev?.nombre ?? ''),
+    );
+  }
+  res.removeWhere((_, v) => v.total <= 0.01);
+  return res;
+}
+
+/// 1.26.1 (Cobrar Parcial): filas del pendiente CUP en
+/// efectivo de un entrenador en orden FIFO (fecha, luego
+/// id), con los MISMOS filtros que idsPendienteArqueo:
+/// sin anulados en cola, sin cubiertos por liquidaciones
+/// ni por el libro C1, solo efectivo pendiente de
+/// entrega. Es la materia prima del compositor puro
+/// (lib/cobro_parcial.dart).
+Future<List<FilaCobro>> filasPendientesCupFifo(int telegramId) async {
+  final cubiertos = await idsLiquidados(telegramId);
+  final cubiertosLibro = await idsCubiertosLibroC1(telegramId);
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
+  final filas = <FilaCobro>[];
+  DateTime fechaDe(Map<String, dynamic> r) {
+    final f = DateTime.tryParse('${r['creada_en'] ?? r['fecha'] ?? ''}');
+    return f == null
+        ? DateTime.fromMillisecondsSinceEpoch(0)
+        : aHabana(f);
+  }
+
+  for (final p in await LocalDb.instance
+      .mirrorFiltrado('pagos', {'telegram_user_id': telegramId})) {
+    if (esPagoAnulado(p, anuladosCola)) continue;
+    if (cubiertos.contains('pagos:${p['id']}')) continue;
+    if (cubiertosLibro.contains('pagos:${p['id']}')) continue;
+    if ((p['metodo'] as String?) == 'efectivo' &&
+        esPendiente(p['entregado'])) {
+      final id = (p['id'] as num?)?.toInt();
+      if (id != null) {
+        filas.add(FilaCobro(
+            tabla: 'pagos',
+            id: id,
+            monto: (p['monto'] as num?)?.toDouble() ?? 0,
+            fecha: fechaDe(p)));
+      }
+    }
+  }
+  for (final d in await LocalDb.instance
+      .mirrorFiltrado('pagos_diarios', {'registrado_por': telegramId})) {
+    if (cubiertos.contains('pagos_diarios:${d['id']}')) continue;
+    if (cubiertosLibro.contains('pagos_diarios:${d['id']}')) {
+      continue;
+    }
+    if (esPendiente(d['entregado']) && esPagoDiarioEfectivo(d)) {
+      final id = (d['id'] as num?)?.toInt();
+      if (id != null) {
+        filas.add(FilaCobro(
+            tabla: 'pagos_diarios',
+            id: id,
+            monto: (d['total'] as num?)?.toDouble() ?? 0,
+            fecha: fechaDe(d)));
+      }
+    }
+  }
+  for (final v in await ventasSuplementosCup()) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) !=
+        telegramId) {
+      continue;
+    }
+    if (cubiertos.contains('ventas_suplementos:${v['id']}')) {
+      continue;
+    }
+    if (cubiertosLibro.contains('ventas_suplementos:${v['id']}')) {
+      continue;
+    }
+    if (esPendiente(v['entregado'])) {
+      final id = (v['id'] as num?)?.toInt();
+      if (id != null) {
+        filas.add(FilaCobro(
+            tabla: 'ventas_suplementos',
+            id: id,
+            monto: totalVentaCup(v),
+            fecha: fechaDe(v)));
+      }
+    }
+  }
+  for (final v in await LocalDb.instance.servicioVentasPorFiltro(
+      responsableId: telegramId, metodo: 'efectivo')) {
+    final resp =
+        LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
+            LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (resp != telegramId) continue;
+    if (cubiertos.contains('servicio_ventas:${v['id']}')) continue;
+    if (cubiertosLibro.contains('servicio_ventas:${v['id']}')) {
+      continue;
+    }
+    if ((v['metodo'] as String?) == 'efectivo' &&
+        (v['casa'] as num?)?.toInt() != 1 &&
+        esPendiente(v['entregado'])) {
+      final id = (v['id'] as num?)?.toInt();
+      if (id != null) {
+        filas.add(FilaCobro(
+            tabla: 'servicio_ventas',
+            id: id,
+            monto: ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+                ((v['cantidad'] as num?)?.toDouble() ?? 0),
+            fecha: fechaDe(v)));
+      }
+    }
+  }
+  filas.sort((a, b) {
+    final c = a.fecha.compareTo(b.fecha);
+    return c != 0 ? c : a.id.compareTo(b.id);
+  });
+  return filas;
+}
+
+/// 1.26.1 (Cobrar Parcial): la foto del pendiente
+/// liquidable de un entrenador — filas FIFO + arrastre +
+/// total (arrastre + suma de filas). En el mundo limpio
+/// de las guardas H11 (sin adelantos vivos ni resto C1)
+/// el total coincide con pendienteArqueo().cup; la
+/// pantalla cruza ambas cifras antes de abrir la hoja y
+/// otra vez antes de encolar (Punto D de Argón).
+Future<({List<FilaCobro> filas, double arrastre, double total})>
+    fotoCobroParcial(int telegramId) async {
+  final filas = await filasPendientesCupFifo(telegramId);
+  final arrastre = await arrastreVivoCup(telegramId);
+  final total =
+      arrastre + filas.fold(0.0, (a, f) => a + f.monto);
+  return (filas: filas, arrastre: arrastre, total: total);
 }
 
 /// Resumen reconciliado del pendiente de un entrenador

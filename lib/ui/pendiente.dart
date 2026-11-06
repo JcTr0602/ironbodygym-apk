@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../bloque2_resto.dart';
+import '../cobro_parcial.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
@@ -21,6 +22,7 @@ import 'package:flutter/services.dart';
 import '../sync.dart';
 import 'app_bar.dart';
 import 'arqueo.dart';
+import 'hoja_cobrar_parcial.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -52,6 +54,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
   // v1.3.4 (C2d): detalle de ventas de suplementos indexado por id,
   // para el badge de "precio modificado" en el arqueo de caja.
   Map<int, Map<String, dynamic>> _detalleVentasSup = {};
+  // 1.26.1 (Cobrar Parcial): saldo de arrastre vivo CUP
+  // por entrenador (clave: trainerTelegramId en texto),
+  // para la línea «Saldo de cobros parciales» de su
+  // tarjeta y para enrutar su «Cobrar todo».
+  Map<String, double> _arrastresCup = {};
   bool _cargando = true;
   bool _confirmando = false;
   late final bool _esDueno;
@@ -78,6 +85,35 @@ class _PendienteScreenState extends State<PendienteScreen> {
       final autCup =
           await pendienteRecoger(excluirTelegramId: auth.telegramId);
       final lista = procesarPendientes(crudos);
+      // 1.26.1: arrastre vivo por entrenador (para la
+      // línea de saldo y el enrutado de «Cobrar todo»).
+      final arrastres = <String, double>{};
+      for (final e in lista) {
+        final t = int.tryParse(e.trainerTelegramId);
+        if (t != null) {
+          arrastres[e.trainerTelegramId] =
+              await arrastreVivoCup(t);
+        }
+      }
+      // 1.26.1: un entrenador que debe SOLO arrastre
+      // (un parcial cubrió todos sus pagos) no sale de
+      // pagosPendientesDetalle: se añade su tarjeta con
+      // la línea de saldo para que el resto nunca quede
+      // invisible; su cobro va por las mismas vías
+      // («Cobrar parcial» con op_ids vacío, «Cobrar
+      // todo» por liquidación).
+      for (final e in (await arrastresVivosCup()).entries) {
+        if (e.key == auth.telegramId) continue;
+        final clave = '${e.key}';
+        if (arrastres.containsKey(clave)) continue;
+        arrastres[clave] = e.value.total;
+        lista.add(EntrenadorPendiente(
+          nombre:
+              e.value.nombre.isNotEmpty ? e.value.nombre : 'Entrenador',
+          trainerTelegramId: clave,
+          dias: const [],
+        ));
+      }
       double brutoCup = 0;
       for (final e in lista) {
         brutoCup += e.totalPorMoneda('CUP');
@@ -90,6 +126,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
         setState(() {
           _crudos = crudos;
           _entrenadores = lista;
+          _arrastresCup = arrastres;
           _totalUsd = usd;
           _totalAutoritativoCup = autCup;
           _ajusteNetoCup = ajusteCup.abs() > 0.01 ? ajusteCup : 0;
@@ -325,6 +362,227 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // Gemini: NO llamar _cargar() aquí — el estado optimista ya está
     // actualizado. Recargar ahora haría reaparecer los pagos porque
     // el mirror aún no se actualizó (el push va en background).
+  }
+
+  /// H11 compartido (1.26.1): si el entrenador tiene
+  /// adelantos vivos o resto C1 sin liquidar, avisar y
+  /// llevar al Arqueo, donde la liquidación sí los
+  /// descuenta. Devuelve true si redirigió (el llamador
+  /// aborta su flujo). Es la misma guarda que
+  /// _confirmarPorIds aplica en línea.
+  Future<bool> _redirigirArqueoSiBloqueado(int tid) async {
+    final adelantos = await adelantosEnPendiente(tid);
+    double restoC1 = 0;
+    for (final e in await historialEntregasC1(tid)) {
+      restoC1 += (e['resto_sin_ids'] as num?)?.toDouble() ?? 0;
+    }
+    if (adelantos <= 0.01 && restoC1.abs() <= 0.01) return false;
+    if (!mounted) return true;
+    mostrarSnack(context, 'Este entrenador tiene adelantos o entregas parciales sin liquidar: liquida desde Arqueo para no dejar descuadres.', significado: SignificadoChip.alerta);
+    Navigator.push(context,
+        RutaIron(builder: (_) => const ArqueoScreen()));
+    return true;
+  }
+
+  /// 1.26.1: «Cobrar parcial» — el dueño teclea cuánto
+  /// recogió; el monto se compone FIFO (arrastre primero,
+  /// luego los pagos más viejos) y se encola como
+  /// liquidar_caja, sin partir ningún pago.
+  Future<void> _abrirCobrarParcial(
+      EntrenadorPendiente ent) async {
+    if (!_esDueno || _confirmando) return;
+    final tid = int.tryParse(ent.trainerTelegramId);
+    if (tid == null) return;
+    if (await _redirigirArqueoSiBloqueado(tid)) return;
+    final foto = await fotoCobroParcial(tid);
+    final arq = await pendienteArqueo(tid);
+    if (!mounted) return;
+    if (foto.total <= 0.01) {
+      mostrarSnack(context, '${ent.nombre} no tiene pendiente en CUP por recoger.', significado: SignificadoChip.alerta);
+      return;
+    }
+    // Cruce con la cifra de la liquidación: si no
+    // coinciden, el estado no es el limpio que el
+    // compositor supone (ajustes C1 en vuelo) y la vía
+    // segura es el Arqueo.
+    if ((arq.cup - foto.total).abs() > 0.01) {
+      mostrarSnack(context, 'El pendiente de ${ent.nombre} tiene ajustes en curso: liquídalo desde el Arqueo.', significado: SignificadoChip.alerta);
+      Navigator.push(context,
+          RutaIron(builder: (_) => const ArqueoScreen()));
+      return;
+    }
+    final monto = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => HojaCobrarParcial(
+          nombre: ent.nombre,
+          total: foto.total,
+          arrastre: foto.arrastre),
+    );
+    if (monto == null || !mounted) return;
+    // Punto D (Argón): reverificar contra una foto
+    // fresca antes de encolar. Si el pendiente cambió
+    // mientras la hoja estaba abierta (llegó un sync),
+    // no se encola sobre la foto vieja: se avisa y la
+    // pantalla se recarga para confirmar de nuevo
+    // (el patrón del Arqueo).
+    final fresca = await fotoCobroParcial(tid);
+    if (!mounted) return;
+    var mismas = fresca.filas.length == foto.filas.length;
+    if (mismas) {
+      for (var i = 0; i < fresca.filas.length; i++) {
+        if (fresca.filas[i].uid != foto.filas[i].uid ||
+            fresca.filas[i].monto != foto.filas[i].monto) {
+          mismas = false;
+          break;
+        }
+      }
+    }
+    if ((fresca.total - foto.total).abs() > 0.01 || !mismas) {
+      mostrarSnack(context, 'El pendiente de ${ent.nombre} cambió mientras decidías (era ${fmtMonto(foto.total)} CUP y ahora es ${fmtMonto(fresca.total)} CUP). Revísalo y confirma de nuevo.', significado: SignificadoChip.alerta);
+      _cargar();
+      return;
+    }
+    final comp = componerCobroParcial(
+        filasFifo: fresca.filas,
+        arrastre: fresca.arrastre,
+        monto: monto);
+    if (comp == null) {
+      mostrarSnack(context, 'Cantidad inválida para el pendiente actual.', significado: SignificadoChip.error);
+      return;
+    }
+    setState(() => _confirmando = true);
+    try {
+      await crearLiquidacion(
+        entrenadorTelegramId: tid,
+        entrenadorNombre: ent.nombre,
+        montoEsperado: comp.montoEsperado,
+        montoEntregado: comp.montoEntregado,
+        opIds: comp.opIds,
+        moneda: 'CUP',
+        nota: 'Cobro parcial (Pendiente a recoger)',
+      );
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(context, 'Error al guardar, intenta de nuevo', significado: SignificadoChip.error);
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _confirmando = false);
+    }
+    // Optimista, como _confirmarPorIds: salen los pagos
+    // cubiertos y el arrastre pasa a ser el nuevo (la
+    // liquidación aún no bajó al espejo; recargar
+    // ahora lo desharía visualmente).
+    final uids = comp.cubiertas.map((f) => f.uid).toSet();
+    setState(() {
+      _crudos.removeWhere(
+          (p) => uids.contains('${p['tipo']}_${p['id']}'));
+      _entrenadores = procesarPendientes(_crudos);
+      _arrastresCup[ent.trainerTelegramId] = comp.nuevoArrastre;
+      _totalUsd = _entrenadores.fold(
+          0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
+      if (_totalAutoritativoCup != null) {
+        _totalAutoritativoCup =
+            (_totalAutoritativoCup! - monto).clamp(0.0, double.infinity);
+      }
+    });
+    unawaited(SyncEngine.instance.push());
+    if (!mounted) return;
+    mostrarSnack(context, 'Cobro parcial de ${fmtMonto(monto)} CUP de ${ent.nombre} registrado (se aplicará al sincronizar)', significado: SignificadoChip.exito);
+  }
+
+  /// 1.26.1 (Argón, punto 1 del veredicto): «Cobrar
+  /// todo» con saldo de arrastre vivo va por
+  /// liquidar_caja (esperado = entregado =
+  /// pendienteArqueo, con todos los IDs vivos): la vía
+  /// confirmar_entrega solo marca IDs y dejaría el
+  /// arrastre sucio en liquidaciones_caja para siempre.
+  Future<void> _cobrarTodoConArrastre(
+      EntrenadorPendiente ent) async {
+    if (!_esDueno || _confirmando) return;
+    final tid = int.tryParse(ent.trainerTelegramId);
+    if (tid == null) return;
+    var esperado = (await pendienteArqueo(tid)).cup;
+    if (!mounted) return;
+    if (esperado <= 0.01) {
+      mostrarSnack(context, '${ent.nombre} no tiene pendiente confirmado en CUP.', significado: SignificadoChip.alerta);
+      return;
+    }
+    final usdPendiente = ent.totalPorMoneda('USD');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cobrar todo de ${ent.nombre}'),
+        content: Text(
+            '¿Confirmas que recibiste ${fmtMonto(esperado)} CUP de ${ent.nombre}?\n\n'
+            'Incluye el saldo de cobros parciales anteriores y se liquida con las reglas del arqueo.'
+            '${usdPendiente > 0.01 ? '\n\nEl pendiente en USD (${fmtMonto(usdPendiente)} USD) no entra aquí: se liquida en el Arqueo principal.' : ''}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          BotonPrimario(
+            texto: 'Confirmar',
+            onPressed: () => Navigator.pop(ctx, true),
+            expandido: false,
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    // Reverificación (patrón Arqueo): si la cifra
+    // cambió desde el diálogo, no se encola sobre la
+    // foto vieja.
+    final fresco = (await pendienteArqueo(tid)).cup;
+    if (!mounted) return;
+    if ((fresco - esperado).abs() > 0.01) {
+      mostrarSnack(context, 'El pendiente cambió: era ${fmtMonto(esperado)} CUP y ahora es ${fmtMonto(fresco)} CUP. La pantalla se actualizó; confirma de nuevo.', significado: SignificadoChip.alerta);
+      _cargar();
+      return;
+    }
+    esperado = fresco;
+    setState(() => _confirmando = true);
+    try {
+      final opIds = await idsPendienteArqueo(tid, moneda: 'CUP');
+      await crearLiquidacion(
+        entrenadorTelegramId: tid,
+        entrenadorNombre: ent.nombre,
+        montoEsperado: esperado,
+        montoEntregado: esperado,
+        opIds: opIds,
+        moneda: 'CUP',
+        nota: 'Cobro total con saldo de parciales (Pendiente a recoger)',
+      );
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(context, 'Error al guardar, intenta de nuevo', significado: SignificadoChip.error);
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _confirmando = false);
+    }
+    setState(() {
+      // Solo sale lo CUP (lo liquidado); el pendiente
+      // USD del entrenador NO se tocó y sigue visible
+      // (autoauditoría 1.26.1: la retirada optimista
+      // inicial borraba también sus filas USD).
+      _crudos.removeWhere((p) =>
+          '${p['trainer_telegram_id'] ?? p['entrenador_id'] ?? ''}' ==
+              ent.trainerTelegramId &&
+          (p['moneda'] as String? ?? 'CUP') == 'CUP');
+      _entrenadores = procesarPendientes(_crudos);
+      _arrastresCup[ent.trainerTelegramId] = 0;
+      _totalUsd = _entrenadores.fold(
+          0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
+      if (_totalAutoritativoCup != null) {
+        _totalAutoritativoCup =
+            (_totalAutoritativoCup! - esperado).clamp(0.0, double.infinity);
+      }
+    });
+    unawaited(SyncEngine.instance.push());
+    if (!mounted) return;
+    mostrarSnack(context, 'Recibido de ${ent.nombre} confirmado (se aplicará al sincronizar)', significado: SignificadoChip.exito);
   }
 
   @override
@@ -576,6 +834,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
         confirmando: _confirmando,
         // v1.3.4 (C2d): detalle de ventas para el badge de precio.
         detalleVentas: _detalleVentasSup,
+        // 1.26.1: arrastre vivo y cobro parcial.
+        arrastreCup:
+            _arrastresCup[_entrenadores[i].trainerTelegramId] ?? 0,
+        onCobrarParcial: () =>
+            _abrirCobrarParcial(_entrenadores[i]),
         onConfirmarDia: (dia) => _confirmarPorIds(
           dia,
           _entrenadores[i].nombre,
@@ -584,6 +847,17 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _entrenadores[i].trainerTelegramId,
         ),
         onConfirmarTodo: () {
+          // 1.26.1 (Argón, Cobrar Parcial punto 1): con
+          // saldo de arrastre vivo, «Cobrar todo» NO va
+          // por confirmar_entrega (dejaría el arrastre
+          // sucio): se liquida completo por liquidar_caja.
+          if ((_arrastresCup[_entrenadores[i]
+                      .trainerTelegramId] ??
+                  0) >
+              0.01) {
+            _cobrarTodoConArrastre(_entrenadores[i]);
+            return;
+          }
           // Autoauditoría 1.22 #1 (2026-11-03): «Cobrar todo»
           // NO remezcla monedas. Los días vienen separados por
           // fecha+moneda (Fix #15) y el pseudo-día viejo los
@@ -648,6 +922,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
       EntrenadorPendiente ent) async {
     final totalCup = ent.totalPorMoneda('CUP');
     final totalUsd = ent.totalPorMoneda('USD');
+    // 1.26.1: el saldo de cobros parciales también es
+    // dinero en su mano — el cuadre lo nombra y lo suma,
+    // como hace el resumen del servidor.
+    final arrastre = _arrastresCup[ent.trainerTelegramId] ?? 0;
     final buf = StringBuffer();
     buf.writeln(
         '${ent.nombre}, pendiente a entregar:');
@@ -661,7 +939,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
           '${fmtMonto(dia.totalPorMoneda(m))} $m '
           '(${dia.pagos.length} pagos)');
     }
-    buf.write('Total: ${fmtMonto(totalCup)} CUP');
+    if (arrastre > 0.01) {
+      buf.writeln(
+          '• Saldo de cobros parciales: ${fmtMonto(arrastre)} CUP');
+    }
+    buf.write('Total: ${fmtMonto(totalCup + arrastre)} CUP');
     if (totalUsd > 0) {
       buf.write(' + ${fmtMonto(totalUsd)} USD');
     }
@@ -680,6 +962,12 @@ class _EntrenadorCard extends StatelessWidget {
   final VoidCallback onConfirmarTodo;
   final VoidCallback onWhatsApp;
 
+  /// 1.26.1: saldo de arrastre vivo CUP del entrenador
+  /// (de cobros parciales anteriores) y la acción de
+  /// cobrar parcialmente con monto tecleado.
+  final double arrastreCup;
+  final VoidCallback onCobrarParcial;
+
   /// 1.25 T70: liquidar en el arqueo de ESTE entrenador
   /// sin salir a buscar la pantalla (el paso final del
   /// flujo único «Efectivo por entregar»).
@@ -694,6 +982,8 @@ class _EntrenadorCard extends StatelessWidget {
     required this.onConfirmarTodo,
     required this.onWhatsApp,
     required this.onLiquidar,
+    required this.onCobrarParcial,
+    this.arrastreCup = 0,
     this.detalleVentas = const {},
   });
 
@@ -701,7 +991,12 @@ class _EntrenadorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final nombre = entrenador.nombre;
     // Argón B2: mostrar CUP y USD.
-    final totalCup = entrenador.totalPorMoneda('CUP');
+    // 1.26.1: el total de la tarjeta incluye el saldo
+    // de cobros parciales (es dinero en su mano y es lo
+    // que «Cobrar todo» cobra en CUP por la vía de
+    // liquidación cuando hay arrastre).
+    final totalCup =
+        entrenador.totalPorMoneda('CUP') + arrastreCup;
     final totalUsd = entrenador.totalPorMoneda('USD');
     final totalTxt = totalUsd > 0
         ? '${fmtMonto(totalCup)} CUP + ${fmtMonto(totalUsd)} USD'
@@ -736,8 +1031,9 @@ class _EntrenadorCard extends StatelessWidget {
             ],
           ],
         ),
-        subtitle:
-            Text('$n pago${n == 1 ? '' : 's'} sin entregar'),
+        subtitle: Text(n == 0
+            ? 'Solo saldo de cobros parciales'
+            : '$n pago${n == 1 ? '' : 's'} sin entregar'),
         trailing: Text(
           totalTxt,
           style: AppTexto.subtitulo.copyWith(
@@ -758,7 +1054,50 @@ class _EntrenadorCard extends StatelessWidget {
                         ? null
                         : () => onConfirmarDia(dia),
                   ),
-                const SizedBox(height: 8),
+                // 1.26.1 (rediseño + Cobrar Parcial): el
+                // saldo de parciales se VE en su propia
+                // línea — un resto sin pagos concretos
+                // nunca queda invisible.
+                if (arrastreCup > 0.01) ...[
+                  Row(
+                    children: [
+                      Icon(Icons.autorenew_rounded,
+                          size: 16,
+                          color:
+                              AppColores.textoNaranja(context)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Saldo de cobros parciales: ${fmtMonto(arrastreCup)} CUP',
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores.textoNaranja(
+                                  context),
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (totalCup > 0 || arrastreCup > 0.01) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.payments_rounded,
+                          size: 18),
+                      label: const Text('Cobrar parcial'),
+                      onPressed:
+                          confirmando ? null : onCobrarParcial,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor:
+                            AppColores.textoNaranja(context),
+                        side: const BorderSide(
+                            color: AppColores.naranja),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                ],
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
@@ -791,13 +1130,14 @@ class _EntrenadorCard extends StatelessWidget {
                     onPressed: onLiquidar,
                   ),
                 ),
-                const SizedBox(height: 4),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.share_rounded, size: 16),
-                    label:
-                        const Text('Cuadre a WhatsApp'),
+                // 1.26.1 (rediseño): el cuadre baja a
+                // acción de texto discreta; los botones
+                // de cobro son los protagonistas.
+                Center(
+                  child: TextButton.icon(
+                    icon:
+                        const Icon(Icons.share_rounded, size: 15),
+                    label: const Text('Cuadre a WhatsApp'),
                     onPressed: onWhatsApp,
                   ),
                 ),
@@ -999,21 +1339,26 @@ class _DiaTileState extends State<_DiaTile> {
                             : p.tipo == 'servicio'
                                 ? Icons.bolt_rounded
                                 : Icons.today_rounded,
-                        size: 14,
+                        size: 16,
                         color: AppColores.textoSecundario(context),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
+                          // 1.26.1 (rediseño): contraste
+                          // pleno — en la captura de Jc
+                          // las filas salían atenuadas
+                          // como si estuvieran
+                          // deshabilitadas.
                           '${p.descripcion} (${p.tipo})',
-                          style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
+                          style: AppTexto.cuerpo.copyWith(color: AppColores.texto(context)),
                           overflow:
                               TextOverflow.ellipsis,
                         ),
                       ),
                       Text(
                         '${fmtMonto(p.monto)} ${p.moneda}',
-                        style: AppTexto.metadato.copyWith(color: AppColores.texto(context), fontWeight: FontWeight.w600),
+                        style: AppTexto.cuerpo.copyWith(color: AppColores.texto(context), fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
