@@ -168,7 +168,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                 onTap: () async {
                                   await Navigator.of(context).push(
                                     RutaIron(
-                                      builder: (_) => _DetalleArqueoScreen(
+                                      builder: (_) => DetalleArqueoScreen(
                                         telegramId: e['telegram_id'] as int,
                                         nombre: '${e['nombre']}',
                                       ),
@@ -220,18 +220,18 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
 
 /// Detalle de un entrenador: esperado confirmado, historial y formulario
 /// de liquidación.
-class _DetalleArqueoScreen extends StatefulWidget {
+class DetalleArqueoScreen extends StatefulWidget {
   final int telegramId;
   final String nombre;
 
-  const _DetalleArqueoScreen(
+  const DetalleArqueoScreen(
       {required this.telegramId, required this.nombre});
 
   @override
-  State<_DetalleArqueoScreen> createState() => _DetalleArqueoScreenState();
+  State<DetalleArqueoScreen> createState() => _DetalleArqueoScreenState();
 }
 
-class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
+class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
   bool _cargando = true;
   bool _liquidando = false;
   double _cup = 0;

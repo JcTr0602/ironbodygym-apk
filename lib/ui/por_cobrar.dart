@@ -1,0 +1,133 @@
+/// 1.25 T74: «Por cobrar» — UNA pantalla para todo el
+/// dinero que está en la calle: pestañas Vencidos /
+/// Fiados y un héroe con el TOTAL combinado arriba.
+/// Cada pestaña es la pantalla de siempre incrustada
+/// (sus grupos por antigüedad y sus acciones no
+/// cambian); el héroe suma lo que cada una reporta.
+library;
+
+import 'package:flutter/material.dart';
+
+import '../negocio.dart' show fmtMonto;
+import 'app_bar.dart';
+import 'componentes.dart';
+import 'cuentas_cobrar.dart';
+import 'cuentas_por_cobrar.dart';
+import 'diseno.dart';
+import 'widgets.dart';
+
+class PorCobrarScreen extends StatefulWidget {
+  /// Pestaña inicial: 0 = Vencidos, 1 = Fiados.
+  final int pestanaInicial;
+
+  const PorCobrarScreen({super.key, this.pestanaInicial = 0});
+
+  @override
+  State<PorCobrarScreen> createState() => _PorCobrarScreenState();
+}
+
+class _PorCobrarScreenState extends State<PorCobrarScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  double? _totalVencidos;
+  double? _fiadosCup;
+  double? _fiadosUsd;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(
+        length: 2, vsync: this, initialIndex: widget.pestanaInicial);
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final combinadoCup =
+        (_totalVencidos ?? 0) + (_fiadosCup ?? 0);
+    final cargando = _totalVencidos == null || _fiadosCup == null;
+    return Scaffold(
+      appBar: appBarIron(
+        context,
+        'Por cobrar',
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: TabBar(
+            controller: _tabs,
+            tabs: const [
+              Tab(text: 'Vencidos'),
+              Tab(text: 'Fiados'),
+            ],
+          ),
+        ),
+      ),
+      body: Column(
+        children: [
+          const SyncBanner(compact: true),
+          // El héroe combinado: todo el dinero en la
+          // calle, de un vistazo.
+          Padding(
+            padding: const EdgeInsets.all(AppEspacio.md),
+            child: Tarjeta(
+              color: AppColores.carbon,
+              child: Column(
+                children: [
+                  Text(
+                    'Dinero en la calle',
+                    style: AppTexto.secundario
+                        .copyWith(color: Colors.white70),
+                  ),
+                  Text(
+                    cargando
+                        ? '…'
+                        : '${fmtMonto(combinadoCup)} CUP'
+                            '${(_fiadosUsd ?? 0) > 0 ? ' · ${fmtMonto(_fiadosUsd!)} USD' : ''}',
+                    style: AppTexto.display
+                        .copyWith(color: AppColores.naranja),
+                  ),
+                  Text(
+                    'Vencidos ${_totalVencidos == null ? '…' : '${fmtMonto(_totalVencidos!)} CUP'}'
+                    ' · Fiados ${_fiadosCup == null ? '…' : '${fmtMonto(_fiadosCup!)} CUP'}',
+                    style: AppTexto.minuscula
+                        .copyWith(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                CuentasCobrarScreen(
+                  incrustada: true,
+                  onTotalCup: (t) {
+                    if (mounted) {
+                      setState(() => _totalVencidos = t);
+                    }
+                  },
+                ),
+                CuentasPorCobrarScreen(
+                  incrustada: true,
+                  onTotales: (t) {
+                    if (mounted) {
+                      setState(() {
+                        _fiadosCup = t.cup;
+                        _fiadosUsd = t.usd;
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

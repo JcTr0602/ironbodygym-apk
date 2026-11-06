@@ -619,6 +619,26 @@ class _PendienteScreenState extends State<PendienteScreen> {
         },
         onWhatsApp: () =>
             _copiarCuadre(_entrenadores[i]),
+        onLiquidar: () async {
+          final tid =
+              int.tryParse(_entrenadores[i].trainerTelegramId);
+          if (tid == null) {
+            mostrarSnack(context,
+                'No se pudo abrir el arqueo de ${_entrenadores[i].nombre}.',
+                significado: SignificadoChip.error);
+            return;
+          }
+          await Navigator.push(
+            context,
+            RutaIron(
+              builder: (_) => DetalleArqueoScreen(
+                telegramId: tid,
+                nombre: _entrenadores[i].nombre,
+              ),
+            ),
+          );
+          if (mounted) _cargar();
+        },
       ),
     );
   }
@@ -659,6 +679,11 @@ class _EntrenadorCard extends StatelessWidget {
   final void Function(PendienteDia dia) onConfirmarDia;
   final VoidCallback onConfirmarTodo;
   final VoidCallback onWhatsApp;
+
+  /// 1.25 T70: liquidar en el arqueo de ESTE entrenador
+  /// sin salir a buscar la pantalla (el paso final del
+  /// flujo único «Efectivo por entregar»).
+  final VoidCallback onLiquidar;
   // v1.3.4 (C2d): ventas de suplementos por id (badge precio modificado).
   final Map<int, Map<String, dynamic>> detalleVentas;
 
@@ -668,6 +693,7 @@ class _EntrenadorCard extends StatelessWidget {
     required this.onConfirmarDia,
     required this.onConfirmarTodo,
     required this.onWhatsApp,
+    required this.onLiquidar,
     this.detalleVentas = const {},
   });
 
@@ -747,6 +773,22 @@ class _EntrenadorCard extends StatelessWidget {
                       backgroundColor: AppColores.exito,
                       foregroundColor: Colors.white,
                     ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                // 1.25 T70: Liquidar es el paso final del
+                // flujo en esta misma pantalla: abre el
+                // arqueo de este entrenador (adelantos,
+                // parciales y USD van por esa vía) y al
+                // volver la lista se recarga aquí.
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(
+                        Icons.account_balance_wallet_rounded,
+                        size: 16),
+                    label: const Text('Liquidar en arqueo…'),
+                    onPressed: onLiquidar,
                   ),
                 ),
                 const SizedBox(height: 4),

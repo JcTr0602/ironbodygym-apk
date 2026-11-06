@@ -18,7 +18,14 @@ import 'ficha.dart';
 import 'widgets.dart';
 
 class CuentasCobrarScreen extends StatefulWidget {
-  const CuentasCobrarScreen({super.key});
+  /// 1.25 T74: dentro de «Por cobrar» va sin Scaffold
+  /// propio y sin su héroe (el combinado lo pone la
+  /// pantalla única); reporta su total con [onTotalCup].
+  final bool incrustada;
+  final ValueChanged<double>? onTotalCup;
+
+  const CuentasCobrarScreen(
+      {super.key, this.incrustada = false, this.onTotalCup});
 
   @override
   State<CuentasCobrarScreen> createState() =>
@@ -96,23 +103,13 @@ class _CuentasCobrarScreenState
         _total = total;
         _cargando = false;
       });
+      widget.onTotalCup?.call(total);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: appBarIron(
-        context,
-        'Vencidos por cobrar',
-        acciones: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _cargar,
-          ),
-        ],
-      ),
-      body: _cargando
+    final cuerpo = _cargando
           ? const EstadoCargando(texto: 'Cargando cuentas por cobrar…')
           : RefreshIndicator(
               onRefresh: _cargar,
@@ -120,10 +117,16 @@ class _CuentasCobrarScreenState
                 padding:
                     const EdgeInsets.all(AppEspacio.lg),
                 children: [
-                  const SyncBanner(alcance: 'pagos'),
-                  const SizedBox(height: AppEspacio.sm),
+                  if (!widget.incrustada) ...[
+                    const SyncBanner(alcance: 'pagos'),
+                    const SizedBox(height: AppEspacio.sm),
+                  ],
                   // Hero: tarjeta carbón con el total
                   // (texto claro legible en ambos temas).
+                  // 1.25 T74: incrustada no lo pinta — el
+                  // total combinado es el héroe de la
+                  // pantalla única.
+                  if (!widget.incrustada)
                   Tarjeta(
                     color: AppColores.carbon,
                     child: Column(
@@ -252,7 +255,22 @@ class _CuentasCobrarScreenState
                     ],
                 ],
               ),
-            ),
+            );
+    // 1.25 T74: incrustada, el cuerpo va pelado dentro de
+    // la pestaña de «Por cobrar».
+    if (widget.incrustada) return cuerpo;
+    return Scaffold(
+      appBar: appBarIron(
+        context,
+        'Vencidos por cobrar',
+        acciones: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _cargar,
+          ),
+        ],
+      ),
+      body: cuerpo,
     );
   }
 

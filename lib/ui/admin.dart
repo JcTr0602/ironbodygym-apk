@@ -45,6 +45,7 @@ import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'categorias_suplemento.dart';
 import 'cuentas_por_cobrar.dart';
+import 'por_cobrar.dart';
 import 'historial_ventas.dart';
 import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
@@ -2420,7 +2421,7 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.account_balance_wallet_rounded,
         'Fiados por cobrar',
         'Ventas de suplementos a crédito por cobrar',
-        () => _ir(const CuentasPorCobrarScreen()),
+        () => _ir(const PorCobrarScreen(pestanaInicial: 1)),
       ),
       _tarjetaFlujo(
         Icons.warning_amber_rounded,

@@ -48,7 +48,15 @@ import 'widgets.dart';
 }
 
 class CuentasPorCobrarScreen extends StatefulWidget {
-  const CuentasPorCobrarScreen({super.key});
+  /// 1.25 T74: dentro de «Por cobrar» va sin Scaffold
+  /// propio ni su tarjeta de total (el héroe combinado
+  /// lo pone la pantalla única); reporta sus totales
+  /// con [onTotales].
+  final bool incrustada;
+  final ValueChanged<({double cup, double usd})>? onTotales;
+
+  const CuentasPorCobrarScreen(
+      {super.key, this.incrustada = false, this.onTotales});
 
   @override
   State<CuentasPorCobrarScreen> createState() =>
@@ -205,6 +213,7 @@ class _CuentasPorCobrarScreenState
       _clientes = mapaCli;
       _cargando = false;
     });
+    widget.onTotales?.call(totalesFiados(fiados));
   }
 
   String _textoTotal() {
@@ -312,6 +321,8 @@ class _CuentasPorCobrarScreenState
       setState(() {
         _fiados.remove(v);
       });
+      // 1.25 T74: el héroe combinado se entera al momento.
+      widget.onTotales?.call(totalesFiados(_fiados));
       mostrarSnack(context, 'Fiado cobrado (se sincronizará)', significado: SignificadoChip.exito);
     }
     unawaited(SyncEngine.instance.push());
@@ -319,6 +330,9 @@ class _CuentasPorCobrarScreenState
 
   @override
   Widget build(BuildContext context) {
+    // 1.25 T74: incrustada, solo la lista dentro de la
+    // pestaña de «Por cobrar».
+    if (widget.incrustada) return _cuerpo();
     return Scaffold(
       appBar: appBarIron(context, 'Fiados por cobrar'),
       body: Column(

@@ -22,6 +22,63 @@ String textoFechaEnvio(String iso) {
       '${iso.substring(11, 16)}';
 }
 
+/// 1.25 T77: el número de la tarjeta agrupado de 4 en 4
+/// para leerlo y dictarlo sin error («9224 1299 7203
+/// 5419»). Si no son 16 dígitos, se devuelve limpio.
+String numeroTarjetaAgrupado(String valor) {
+  final d = valor.replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length != 16) return d.isEmpty ? valor : d;
+  return [
+    for (var i = 0; i < 16; i += 4) d.substring(i, i + 4),
+  ].join(' ');
+}
+
+const _mesesEnvio = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre',
+  'Diciembre',
+];
+
+/// 1.25 T77: el historial de envíos agrupado por mes
+/// (reciente primero), con el conteo de cada grupo.
+/// La clave sale de `enviada_ts` (ISO); sin fecha válida
+/// va al grupo «Sin fecha» al final.
+List<({String titulo, List<Map<String, dynamic>> envios})>
+    gruposEnviosPorMes(List<Map<String, dynamic>> envios) {
+  final grupos = <String, List<Map<String, dynamic>>>{};
+  final orden = <String>[];
+  for (final e in envios) {
+    final ts = '${e['enviada_ts'] ?? ''}';
+    var clave = 'sin-fecha';
+    if (ts.length >= 7) {
+      final mes = int.tryParse(ts.substring(5, 7));
+      if (mes != null && mes >= 1 && mes <= 12) {
+        clave = '${ts.substring(0, 4)}-$mes';
+      }
+    }
+    if (!grupos.containsKey(clave)) {
+      grupos[clave] = [];
+      orden.add(clave);
+    }
+    grupos[clave]!.add(e);
+  }
+  orden.sort((a, b) {
+    if (a == 'sin-fecha') return 1;
+    if (b == 'sin-fecha') return -1;
+    return b.compareTo(a);
+  });
+  return [
+    for (final clave in orden)
+      (
+        titulo: clave == 'sin-fecha'
+            ? 'Sin fecha'
+            : '${_mesesEnvio[int.parse(clave.split('-')[1]) - 1]} '
+                '${clave.split('-')[0]}',
+        envios: grupos[clave]!,
+      ),
+  ];
+}
+
 class TransferenciaScreen extends StatefulWidget {
   const TransferenciaScreen({super.key});
   @override
@@ -126,15 +183,36 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
                     style: AppTexto.secundario,
                   )
                 else
-                  for (final e in _envios)
+                  // 1.25 T77: agrupado por mes, con el
+                  // total de envíos de cada mes.
+                  for (final grupo in gruposEnviosPorMes(_envios)) ...[
                     Padding(
-                      padding: const EdgeInsets.only(bottom: AppEspacio.xs),
-                      child: Text(
-                        '${e['tarjeta']} → ${e['movil']} · ${e['canal']} '
-                        '· ${textoFechaEnvio('${e['enviada_ts'] ?? ''}')}',
-                        style: AppTexto.cuerpo,
+                      padding: const EdgeInsets.only(
+                          top: AppEspacio.sm, bottom: AppEspacio.xs),
+                      child: Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(grupo.titulo,
+                              style: AppTexto.subtitulo),
+                          Text(
+                            '${grupo.envios.length} envío${grupo.envios.length == 1 ? '' : 's'}',
+                            style: AppTexto.secundario,
+                          ),
+                        ],
                       ),
                     ),
+                    for (final e in grupo.envios)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(bottom: AppEspacio.xs),
+                        child: Text(
+                          '${e['tarjeta']} → ${e['movil']} · ${e['canal']} '
+                          '· ${textoFechaEnvio('${e['enviada_ts'] ?? ''}')}',
+                          style: AppTexto.cuerpo,
+                        ),
+                      ),
+                  ],
               ],
             ),
           ),
@@ -144,8 +222,16 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
   }
 
   /// Tarjeta con número copiable + envío por SMS/WhatsApp a un cliente.
+  /// 1.25 T77: las cuentas (Bandec/BPA) se presentan como
+  /// una TARJETA BANCARIA: degradado grafito, el número
+  /// grande en mono agrupado de 4 en 4 y el botón
+  /// «Copiar datos» a la vista — es la pantalla que el
+  /// staff enseña para dar los datos de pago y el número
+  /// debe ser lo más claro de la app. El móvil de
+  /// confirmación no es una cuenta: conserva su fila.
   Widget _tarjeta(BuildContext context, String etiqueta, String valor,
       TextEditingController movilCtrl) {
+    final esCuenta = etiqueta == 'Bandec' || etiqueta == 'BPA';
     return Padding(
       padding: const EdgeInsets.only(bottom: AppEspacio.md),
       child: Tarjeta(
@@ -153,32 +239,92 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                    children: [
-                      Text(etiqueta,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 2),
-                      Text(valor,
-                          style: AppTexto.titulo.copyWith(
-                              fontFamily: 'monospace',
-                              fontWeight: FontWeight.normal)),
-                    ],
+            if (esCuenta)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppEspacio.lg),
+                decoration: BoxDecoration(
+                  gradient: AppColores.gradienteCarbon,
+                  borderRadius:
+                      BorderRadius.circular(AppRadio.lg),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(etiqueta.toUpperCase(),
+                            style: AppTexto.etiqueta.copyWith(
+                                color: AppColores.naranja,
+                                letterSpacing: 2)),
+                        const Spacer(),
+                        const Icon(Icons.nfc_rounded,
+                            color: Colors.white38, size: 22),
+                      ],
+                    ),
+                    const SizedBox(height: AppEspacio.lg),
+                    Text(
+                      numeroTarjetaAgrupado(valor),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'monospace',
+                        fontSize: 21,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: AppEspacio.md),
+                    Row(
+                      children: [
+                        Text('IRON BODY GYM',
+                            style: AppTexto.minuscula.copyWith(
+                                color: Colors.white54,
+                                letterSpacing: 1.5)),
+                        const Spacer(),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.copy_rounded,
+                              size: 16),
+                          label: const Text('Copiar datos'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(
+                                color: Colors.white38),
+                          ),
+                          onPressed: () => copiar(context,
+                              valor.replaceAll(' ', '')),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Text(etiqueta,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 2),
+                        Text(valor,
+                            style: AppTexto.titulo.copyWith(
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.normal)),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy_rounded),
-                  tooltip: 'Copiar',
-                  onPressed: () =>
-                      copiar(context, valor.replaceAll(' ', '')),
-                ),
-              ],
-            ),
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded),
+                    tooltip: 'Copiar',
+                    onPressed: () =>
+                        copiar(context, valor.replaceAll(' ', '')),
+                  ),
+                ],
+              ),
             const Divider(height: 20),
             Text('Enviar a un cliente:',
                 style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),

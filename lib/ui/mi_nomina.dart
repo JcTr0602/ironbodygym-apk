@@ -687,28 +687,9 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                 ),
               ),
             const SizedBox(height: AppEspacio.md),
-            // B2: base explicada.
-            Tarjeta(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Cómo se calcula tu base',
-                      style: AppTexto.subtitulo),
-                  const SizedBox(height: AppEspacio.sm),
-                  Text(
-                    // #1 (Argón nómina): sin permiso de cifras, el
-                    // conteo global no se muestra (solo el monto
-                    // base propio).
-                    _puedeVerConteo
-                        ? textoBaseNominaExplicada(
-                            _clientesPagados, _tarifa)
-                        : 'Tu base este mes: ${fmtMonto(_base)} CUP.',
-                    style: AppTexto.cuerpo,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppEspacio.md),
+            // 1.25 T79: la vista previa (el neto) sube
+            // ANTES de la explicación de la base:
+            // primero mi dinero, luego el detalle.
             // B3: vista previa en vivo.
             Tarjeta(
               child: Column(
@@ -768,6 +749,28 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
               ),
             ),
             const SizedBox(height: AppEspacio.md),
+            // B2: base explicada.
+            Tarjeta(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Cómo se calcula tu base',
+                      style: AppTexto.subtitulo),
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    // #1 (Argón nómina): sin permiso de cifras, el
+                    // conteo global no se muestra (solo el monto
+                    // base propio).
+                    _puedeVerConteo
+                        ? textoBaseNominaExplicada(
+                            _clientesPagados, _tarifa)
+                        : 'Tu base este mes: ${fmtMonto(_base)} CUP.',
+                    style: AppTexto.cuerpo,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppEspacio.md),
             // B4: mis adelantos + solicitudes (sin mezclar).
             Tarjeta(
               child: Column(
@@ -781,15 +784,22 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                         style: AppTexto.secundario)
                   else
                     for (final e in _eventos)
-                      Text(
+                      // 1.25 T79: el origen del adelanto va
+                      // de CHIP, no pegado al texto.
+                      _filaConChip(
                         '· ${fmtMonto((e['monto'] as num?)?.toDouble() ?? 0)} CUP'
                         ' · mes ${e['mes_nomina'] ?? ''}'
                         // Argón P3#8-parte-motivo: el servidor mete el
                         // motivo en la columna `nota`; `motivo` solo
                         // como respaldo.
-                        '${(e['nota'] ?? e['motivo']) != null && '${e['nota'] ?? e['motivo']}'.isNotEmpty ? ' · ${e['nota'] ?? e['motivo']}' : ''}'
-                        '${_origenAdelanto(e)}',
-                        style: AppTexto.cuerpo,
+                        '${(e['nota'] ?? e['motivo']) != null && '${e['nota'] ?? e['motivo']}'.isNotEmpty ? ' · ${e['nota'] ?? e['motivo']}' : ''}',
+                        _origenAdelanto(e).isEmpty
+                            ? null
+                            : ChipEstado.semantico(
+                                texto: _origenAdelanto(e)
+                                    .replaceAll(' · ', ''),
+                                significado:
+                                    SignificadoChip.neutral),
                       ),
                   const SizedBox(height: AppEspacio.sm),
                   // 19/25: pedidos aún sin subir (op en cola): el
@@ -802,10 +812,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                         style: AppTexto.secundario),
                     for (final s in _solicitudes.where(
                         (s) => s.estado == 'por_enviar'))
-                      Text(
+                      _filaConChip(
                         '· ${fmtMonto(s.monto)} CUP · ${s.motivo}'
                         '${s.creadoEn != null && s.creadoEn!.length >= 10 ? ' · ${s.creadoEn!.substring(0, 10)}' : ''}',
-                        style: AppTexto.cuerpo,
+                        _chipSolicitud(s),
                       ),
                     const SizedBox(height: AppEspacio.sm),
                   ],
@@ -818,10 +828,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                         style: AppTexto.secundario)
                   else
                     for (final s in _solicitudes.where((s) => s.pendiente))
-                      Text(
+                      _filaConChip(
                         '· ${fmtMonto(s.monto)} CUP · ${s.motivo}'
                         '${s.creadoEn != null ? ' · ${s.creadoEn!.substring(0, 10)}' : ''}',
-                        style: AppTexto.cuerpo,
+                        _chipSolicitud(s),
                       ),
                   // v1.12.0 (F3 destino): solicitudes resueltas con
                   // su destino, cuando el dato llega del espejo.
@@ -834,11 +844,11 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                         style: AppTexto.secundario),
                     for (final s in _solicitudes.where((s) =>
                         !s.pendiente && s.estado != 'por_enviar'))
-                      Text(
-                        '· ${fmtMonto(s.monto)} CUP · ${s.estado}'
+                      _filaConChip(
+                        '· ${fmtMonto(s.monto)} CUP · ${s.motivo}'
                         '${s.destinoEtiqueta != null ? ' · destino: ${s.destinoEtiqueta}' : ''}'
                         '${s.estado == 'rechazado' && (s.motivoResolucion ?? '').isNotEmpty ? ' · «${s.motivoResolucion}»' : ''}',
-                        style: AppTexto.cuerpo,
+                        _chipSolicitud(s),
                       ),
                   ],
                   const SizedBox(height: AppEspacio.md),
@@ -873,45 +883,6 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
               ),
             ),
             const SizedBox(height: AppEspacio.md),
-            // C3: venta rápida de dosis (mismo flujo).
-            Tarjeta(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Venta rápida de dosis',
-                      style: AppTexto.subtitulo),
-                  const SizedBox(height: AppEspacio.sm),
-                  Wrap(
-                    spacing: AppEspacio.sm,
-                    children: [
-                      FilledButton.icon(
-                        icon: const Icon(Icons.local_drink_rounded,
-                            size: 18),
-                        label: const Text('Dosis sin agua'),
-                        onPressed: () => Navigator.of(context).push(
-                          RutaIron(
-                            builder: (_) => const ServiciosScreen(
-                                tipoInicial: 'dosis_sin_agua'),
-                          ),
-                        ),
-                      ),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.water_drop_rounded,
-                            size: 18),
-                        label: const Text('Dosis con agua'),
-                        onPressed: () => Navigator.of(context).push(
-                          RutaIron(
-                            builder: (_) => const ServiciosScreen(
-                                tipoInicial: 'dosis_con_agua'),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppEspacio.md),
             // C5: historial de mis ventas.
             Tarjeta(
               child: Column(
@@ -919,6 +890,71 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                 children: [
                   const Text('Mis ventas', style: AppTexto.subtitulo),
                   const SizedBox(height: AppEspacio.sm),
+                  // 1.25 T79: el total del mes por tipo en
+                  // tarjetas, antes de la lista — cuánto
+                  // vendí de cada cosa sin sumar de cabeza.
+                  if (_ventas.isNotEmpty) ...[
+                    Builder(builder: (context) {
+                      final t = totalesVentasMesPorTipo(
+                          _ventas, _pref);
+                      Widget mini(String titulo, double total,
+                          int n, IconData icono) {
+                        return Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(
+                                AppEspacio.md),
+                            decoration: BoxDecoration(
+                              color: AppColores.naranja
+                                  .withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.md),
+                            ),
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(icono,
+                                        size: 16,
+                                        color:
+                                            AppColores.naranja),
+                                    const SizedBox(
+                                        width: AppEspacio.xs),
+                                    Text(titulo,
+                                        style:
+                                            AppTexto.etiqueta),
+                                  ],
+                                ),
+                                const SizedBox(
+                                    height: AppEspacio.xs),
+                                Text('${fmtMonto(total)} CUP',
+                                    style: AppTexto.titulo),
+                                Text(
+                                    '$n venta${n == 1 ? '' : 's'} este mes',
+                                    style:
+                                        AppTexto.secundario),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          mini('Dosis', t.dosis, t.nDosis,
+                              Icons.local_drink_rounded),
+                          const SizedBox(width: AppEspacio.sm),
+                          mini('Suplementos', t.suplementos,
+                              t.nSuplementos,
+                              Icons.medication_rounded),
+                        ],
+                      );
+                    }),
+                    const SizedBox(height: AppEspacio.md),
+                  ],
                   if (_ventas.isEmpty)
                     const Text(
                       'Sin ventas registradas a tu nombre en este '
@@ -938,6 +974,38 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
         ),
       ),
     );
+  }
+
+  /// 1.25 T79: una línea de adelanto/solicitud con su
+  /// chip de estado a la derecha, como en la nómina del
+  /// dueño (el estado no va escondido en el texto).
+  Widget _filaConChip(String texto, Widget? chip) {
+    if (chip == null) return Text(texto, style: AppTexto.cuerpo);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: Text(texto, style: AppTexto.cuerpo)),
+          const SizedBox(width: AppEspacio.sm),
+          chip,
+        ],
+      ),
+    );
+  }
+
+  /// 1.25 T79: el chip de una solicitud según su estado.
+  Widget _chipSolicitud(SolicitudAdelanto s) {
+    return switch (s.estado) {
+      'por_enviar' => const ChipEstado.semantico(
+          texto: 'Por enviar', significado: SignificadoChip.alerta),
+      'aprobado' => const ChipEstado.semantico(
+          texto: 'Aprobada', significado: SignificadoChip.exito),
+      'rechazado' => const ChipEstado.semantico(
+          texto: 'Rechazada', significado: SignificadoChip.error),
+      _ => const ChipEstado.semantico(
+          texto: 'Pendiente', significado: SignificadoChip.alerta),
+    };
   }
 
   /// Origen del adelanto en palabras claras, solo cuando el
@@ -1104,4 +1172,42 @@ String textoReciboNomina({
   b.writeln('NETO ESTIMADO: ${fmtMonto(neto)} CUP');
   b.writeln('El pago se hace el último día del mes.');
   return b.toString();
+}
+
+
+/// 1.25 T79: totales de mis ventas del mes [prefijoMes]
+/// ('AAAA-MM') separados por tipo: dosis/servicios
+/// contra suplementos, con sus conteos. La clasificación
+/// es la de la lista (`origen`); el monto sale de
+/// monto/precio/total, como en `_textoVenta`.
+({double dosis, double suplementos, int nDosis, int nSuplementos})
+    totalesVentasMesPorTipo(
+        List<Map<String, dynamic>> ventas, String prefijoMes) {
+  var dosis = 0.0;
+  var suplementos = 0.0;
+  var nDosis = 0;
+  var nSuplementos = 0;
+  for (final v in ventas) {
+    final fecha = '${v['fecha'] ?? v['creada_en'] ?? ''}';
+    if (prefijoMes.isNotEmpty && !fecha.startsWith(prefijoMes)) {
+      continue;
+    }
+    final monto =
+        ((v['monto'] ?? v['precio'] ?? v['total']) as num?)
+                ?.toDouble() ??
+            0;
+    if (v['origen'] == 'suplemento') {
+      suplementos += monto;
+      nSuplementos++;
+    } else {
+      dosis += monto;
+      nDosis++;
+    }
+  }
+  return (
+    dosis: dosis,
+    suplementos: suplementos,
+    nDosis: nDosis,
+    nSuplementos: nSuplementos,
+  );
 }

@@ -27,6 +27,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'categorias_suplemento.dart';
 import 'cuentas_por_cobrar.dart';
+import 'por_cobrar.dart';
 import 'detalle_suplemento.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
@@ -382,8 +383,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 await Navigator.push(
                   context,
                   RutaIron(
-                      builder: (_) =>
-                          const CuentasPorCobrarScreen()),
+                      builder: (_) => const PorCobrarScreen(
+                          pestanaInicial: 1)),
                 );
               } else if (v == 'historial') {
                 await Navigator.push(

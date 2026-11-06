@@ -23,6 +23,10 @@ class ReporteMensualDiariosScreen extends StatefulWidget {
 class _ReporteMensualDiariosScreenState
     extends State<ReporteMensualDiariosScreen> {
   bool _cargando = true;
+
+  /// 1.25 T72: día tocado en el gráfico diario (null =
+  /// se muestra el mejor día).
+  int? _diaSel;
   // Argón stats MEDIO: DateTime.now() local en vez de hora Habana
   // (el último día del mes después de las 7-8 PM abría el mes
   // siguiente en teléfonos con zona distinta).
@@ -58,6 +62,85 @@ class _ReporteMensualDiariosScreenState
         _cargando = false;
       });
     }
+  }
+
+  /// 1.25 T72: las barras de los días del mes en curso.
+  Widget _graficoDias(Map<String, dynamic> porDia) {
+    final diasEnMes =
+        DateTime(_mes.year, _mes.month + 1, 0).day;
+    final serie = serieDiasReporte(porDia, _mes.year,
+        _mes.month, diasEnMes);
+    final mejor = mejorDiaReporte(serie);
+    var maximo = 0.0;
+    for (final v in serie) {
+      if (v > maximo) maximo = v;
+    }
+    final sel = _diaSel;
+    final diaRotulo = sel ?? (mejor >= 0 ? mejor + 1 : null);
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Diarios por día',
+                    style: AppTexto.subtitulo),
+              ),
+              if (mejor >= 0)
+                Text('★ Mejor día: ${mejor + 1}',
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.naranja,
+                        fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (var i = 0; i < serie.length; i++)
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () =>
+                        setState(() => _diaSel = i + 1),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 1),
+                      child: Container(
+                        height: 8 +
+                            (maximo > 0
+                                ? serie[i] / maximo * 56
+                                : 0),
+                        decoration: BoxDecoration(
+                          color: i == mejor
+                              ? AppColores.naranja
+                              : sel == i + 1
+                                  ? AppColores.naranja
+                                      .withValues(alpha: 0.85)
+                                  : AppColores.naranja
+                                      .withValues(alpha: 0.35),
+                          borderRadius:
+                              const BorderRadius.vertical(
+                                  top: Radius.circular(2)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Text(
+            diaRotulo == null
+                ? 'Sin registros este mes'
+                : 'Día $diaRotulo: '
+                    '${fmtMonto(serie[diaRotulo - 1])} CUP'
+                    '${sel == null && diaRotulo == mejor + 1 ? ' · el mejor del mes' : ''}',
+            style: AppTexto.secundario,
+          ),
+        ],
+      ),
+    );
   }
 
   void _cambiarMes(int delta) {
@@ -149,6 +232,13 @@ class _ReporteMensualDiariosScreenState
                   ),
                 ),
                 const SizedBox(height: 16),
+                // 1.25 T72: el mes en barras — un vistazo
+                // al ritmo de los diarios, con el mejor
+                // día marcado; tocar una barra la detalla.
+                if (total > 0) ...[
+                  _graficoDias(porDia),
+                  const SizedBox(height: 16),
+                ],
                 // Por turno
                 const Text('Por turno',
                     style: AppTexto.subtitulo),
@@ -314,4 +404,33 @@ class _ReporteMensualDiariosScreenState
             ),
     );
   }
+}
+
+
+/// 1.25 T72: los totales de pagos diarios por día del
+/// mes (índice 0 = día 1), 0 donde no hubo registro.
+/// [porDia] trae las claves 'AAAA-MM-DD'.
+List<double> serieDiasReporte(Map<String, dynamic> porDia,
+    int anio, int mes, int diasEnMes) {
+  String clave(int d) =>
+      '$anio-${mes.toString().padLeft(2, '0')}-'
+      '${d.toString().padLeft(2, '0')}';
+  return [
+    for (var d = 1; d <= diasEnMes; d++)
+      (porDia[clave(d)] as num?)?.toDouble() ?? 0,
+  ];
+}
+
+/// 1.25 T72: índice (0-based) del día con mayor total;
+/// -1 si todos son cero.
+int mejorDiaReporte(List<double> serie) {
+  var mejor = -1;
+  var maximo = 0.0;
+  for (var i = 0; i < serie.length; i++) {
+    if (serie[i] > maximo) {
+      maximo = serie[i];
+      mejor = i;
+    }
+  }
+  return mejor;
 }

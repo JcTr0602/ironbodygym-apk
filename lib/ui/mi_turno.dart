@@ -18,6 +18,7 @@ import '../tiempo.dart';
 import '../turno_service.dart';
 import '../turnos_resolucion.dart';
 import 'app_bar.dart';
+import 'servicios.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'permisos_ui.dart';
@@ -857,6 +858,48 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             .then((_) => _cargar()),
                       ),
                     ),
+                    // 1.25 T79: la venta rápida de dosis vive AQUÍ,
+                    // en Mi Turno (es una acción del turno),
+                    // no en Mi Nómina (que es un informe).
+                    // C3: venta rápida de dosis (mismo flujo).
+                    Tarjeta(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Venta rápida de dosis',
+                              style: AppTexto.subtitulo),
+                          const SizedBox(height: AppEspacio.sm),
+                          Wrap(
+                            spacing: AppEspacio.sm,
+                            children: [
+                              FilledButton.icon(
+                                icon: const Icon(Icons.local_drink_rounded,
+                                    size: 18),
+                                label: const Text('Dosis sin agua'),
+                                onPressed: () => Navigator.of(context).push(
+                                  RutaIron(
+                                    builder: (_) => const ServiciosScreen(
+                                        tipoInicial: 'dosis_sin_agua'),
+                                  ),
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.water_drop_rounded,
+                                    size: 18),
+                                label: const Text('Dosis con agua'),
+                                onPressed: () => Navigator.of(context).push(
+                                  RutaIron(
+                                    builder: (_) => const ServiciosScreen(
+                                        tipoInicial: 'dosis_con_agua'),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppEspacio.md),
                     const SizedBox(height: 8),
                     Tarjeta(
                       color: AppColores.info

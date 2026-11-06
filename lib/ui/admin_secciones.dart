@@ -28,6 +28,7 @@ import 'app_bar.dart';
 import 'invitados.dart';
 import 'componentes.dart';
 import 'cuentas_cobrar.dart';
+import 'por_cobrar.dart';
 import 'detalle_pendiente.dart';
 import 'diseno.dart';
 import 'historial_entrenador.dart';
@@ -256,7 +257,7 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
               texto: 'Ver vencidos por cobrar',
               icono: Icons.money_off_rounded,
               onPressed: () =>
-                  _irYActualizar(const CuentasCobrarScreen()),
+                  _irYActualizar(const PorCobrarScreen()),
             ),
           ]),
           seccionAdmin(
