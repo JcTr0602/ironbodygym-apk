@@ -154,3 +154,41 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
         '${b['fecha_medicion']}'.compareTo('${a['fecha_medicion']}'));
   return lista;
 }
+
+/// 1.25 T57: resumen de la última medida con peso para la
+/// fila de la ficha: el peso más reciente y su variación
+/// contra la medición anterior con peso (null si no hay
+/// anterior comparable). La lista llega recientes primero
+/// (medicionesClienteLocal). La variación se presenta sin
+/// juicio (subir o bajar no es bueno ni malo por sí solo).
+({double peso, double? delta, String fecha})? resumenUltimaMedida(
+    List<Map<String, dynamic>> mediciones) {
+  double? pesoDe(Map<String, dynamic> m) {
+    final medidas = m['medidas'];
+    if (medidas is Map) {
+      return (medidas['peso_kg'] as num?)?.toDouble();
+    }
+    return null;
+  }
+
+  double? ultimo;
+  double? anterior;
+  var fecha = '';
+  for (final m in mediciones) {
+    final p = pesoDe(m);
+    if (p == null) continue;
+    if (ultimo == null) {
+      ultimo = p;
+      fecha = '${m['fecha_medicion'] ?? ''}';
+    } else {
+      anterior = p;
+      break;
+    }
+  }
+  if (ultimo == null) return null;
+  return (
+    peso: ultimo,
+    delta: anterior == null ? null : ultimo - anterior,
+    fecha: fecha,
+  );
+}

@@ -18,6 +18,7 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../permisos_entrenador.dart';
 import '../plus_residual.dart';
+import '../mediciones_cliente.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
@@ -174,6 +175,14 @@ class _FichaScreenState extends State<FichaScreen> {
   // precalculados en _cargar (antes se reconstruían, ordenaban
   // y recorrían en CADA build de la ficha).
   List<Map<String, dynamic>> _entradasCache = [];
+  // 1.25 T55: montos de los últimos cobros (cronológica,
+  // sin cortesías) para el mini-gráfico del Resumen.
+  List<double> _seriePagos = const [];
+
+  // 1.25 T57: última medida con peso (del espejo local)
+  // para la fila-resumen sobre las acciones.
+  ({double peso, double? delta, String fecha})? _ultimaMedida;
+
   ({int n, double total, String metodoTop}) _resumenPagos =
       (n: 0, total: 0, metodoTop: '');
   // 1.25 T15: el último pago REAL (sin cortesía): de él
@@ -239,6 +248,13 @@ class _FichaScreenState extends State<FichaScreen> {
       fiadoPend = await LocalDb.instance
           .fiadoPendienteDeCliente(widget.clienteId);
     } catch (_) {}
+    // 1.25 T57: última medida con peso, del espejo local
+    // (tolerante: sin espejo, la fila-resumen no sale).
+    ({double peso, double? delta, String fecha})? ultimaMedida;
+    try {
+      ultimaMedida = resumenUltimaMedida(
+          await medicionesClienteLocal(widget.clienteId));
+    } catch (_) {}
     // v1.3.9 (F1): el caché de accesos también se carga en
     // _enriquecerDesdeServidor (era el segundo await de red
     // sin timeout antes de pintar; misma causa del cuelgue).
@@ -263,6 +279,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _incidencias = incidencias;
         _foto = null;
         _regaloAnio = regaloAnio;
+        _ultimaMedida = ultimaMedida;
         _fiadoPendiente = fiadoPend;
         _especialActiva = especialActiva;
         _tieneRegistroTarifa = tieneRegistro;
@@ -288,6 +305,16 @@ class _FichaScreenState extends State<FichaScreen> {
                   .reduce((a, b) => a.value >= b.value ? a : b)
                   .key,
         );
+        // 1.25 T55: la serie del mini-gráfico — últimos 12
+        // pagos reales (monto > 0), de más antiguo a más
+        // reciente (_pagos viene de más reciente a antiguo).
+        _seriePagos = pagosReales
+            .where((p) => ((p['monto'] as num?)?.toDouble() ?? 0) > 0)
+            .take(12)
+            .map((p) => (p['monto'] as num?)?.toDouble() ?? 0)
+            .toList()
+            .reversed
+            .toList();
       });
     }
     // La ficha YA pintó con datos locales: la red enriquece
@@ -2299,6 +2326,20 @@ class _FichaScreenState extends State<FichaScreen> {
                         // siempre puede).
                         puedeCambiarFoto: AuthService().isOwner ||
                             PermisosEntrenador().canEditarFichas,
+                        // 1.25 T53: el anillo del avatar ES
+                        // el progreso del período (absorbe
+                        // la barra del mes).
+                        fraccionPeriodo: esCasa
+                            ? null
+                            : progresoPeriodoFicha(
+                                fechaInicioRaw: _ultimoPagoReal ==
+                                        null
+                                    ? null
+                                    : '${_ultimoPagoReal!['fecha'] ?? ''}',
+                                pagadoHastaRaw:
+                                    '${_c?['pagado_hasta'] ?? ''}',
+                              )?.frac,
+                        periodoPausado: congelado,
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
@@ -2496,7 +2537,13 @@ class _FichaScreenState extends State<FichaScreen> {
                       if (AuthService().isOwner) ...[
                         const SizedBox(height: AppEspacio.md),
                         SeccionFotoPersonal(
-                            clienteId: widget.clienteId),
+                          clienteId: widget.clienteId,
+                          // 1.25 T58: el par de fotos con la
+                          // de gestión y su visor.
+                          fotoGestion: _foto,
+                          onVerFotoGestion:
+                              _foto != null ? _verFotoGrande : null,
+                        ),
                       ],
                       const SizedBox(
                           height: AppEspacio.md),
@@ -2554,11 +2601,12 @@ class _FichaScreenState extends State<FichaScreen> {
                             FilaInfoFicha(icono: Icons.date_range_rounded, etiqueta: 'Inscripción', valor: fmtFecha(c[
                                         'fecha_inscripcion']
                                     as String?)),
-                            // Bloque 1: barra del mes pagado (del
-                            // último pago al vencimiento). En Casa
-                            // no hay vencimiento: no se muestra.
+                            // Bloque 1: barra del mes pagado.
+                            // 1.25 T53: el anillo del avatar la
+                            // absorbió; aquí queda su texto.
+                            // En Casa no hay vencimiento.
                             if (!esCasa)
-                              BarraMesFicha(
+                              LineaPeriodoFicha(
                                 fechaInicioRaw: _ultimoPagoReal == null
                                     ? null
                                     : '${_ultimoPagoReal!['fecha'] ?? ''}',
@@ -2573,7 +2621,9 @@ class _FichaScreenState extends State<FichaScreen> {
                           height: AppEspacio.md),
                       // Resumen 360
                       if (_pagos.isNotEmpty)
-                        Resumen360Ficha(resumen: _resumenPagos),
+                        Resumen360Ficha(
+                            resumen: _resumenPagos,
+                            serieMontos: _seriePagos),
                       // Bloque 1: línea de tiempo única (pagos +
                       // ventas de suplementos y servicios) con
                       // filtros. Absorbe las 3 tarjetas sueltas
@@ -2660,6 +2710,61 @@ class _FichaScreenState extends State<FichaScreen> {
                       // condiciones y mismos callbacks.
                       // (Progreso: Argón, archivo separado para no
                       // saturar ficha.dart.)
+                      // 1.25 T57: la última medida, sin
+                      // abrir Progreso: peso y variación
+                      // contra la anterior, enlazando a la
+                      // misma pantalla que la acción.
+                      if (_ultimaMedida != null)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                              bottom: AppEspacio.md),
+                          child: Tarjeta(
+                            child: ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(
+                                  Icons.monitor_weight_rounded,
+                                  color: AppColores.naranja),
+                              title: Text(
+                                  'Última medida: '
+                                  '${_ultimaMedida!.peso.toStringAsFixed(1).replaceAll('.', ',')} kg',
+                                  style: AppTexto.subtitulo),
+                              subtitle: Text(
+                                [
+                                  if (_ultimaMedida!.fecha
+                                      .isNotEmpty)
+                                    fmtFecha(
+                                        _ultimaMedida!.fecha),
+                                  if (_ultimaMedida!.delta !=
+                                          null &&
+                                      _ultimaMedida!.delta != 0)
+                                    '${_ultimaMedida!.delta! > 0 ? '▲' : '▼'} '
+                                        '${_ultimaMedida!.delta!.abs().toStringAsFixed(1).replaceAll('.', ',')} kg '
+                                        'desde la anterior',
+                                  if (_ultimaMedida!.delta == 0)
+                                    'Sin cambio desde la anterior',
+                                ].join(' · '),
+                                style: AppTexto.secundario,
+                              ),
+                              trailing: const Icon(
+                                  Icons.chevron_right_rounded),
+                              onTap: () {
+                                final cli = _c;
+                                Navigator.push(
+                                  context,
+                                  RutaIron(
+                                    builder: (_) =>
+                                        PestanaProgreso(
+                                      clienteId:
+                                          '${widget.clienteId}',
+                                      nombreCliente:
+                                          '${cli?['nombre'] ?? ''}',
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
                       TarjetaAccionesCliente(
                         vencido: vencido,
                         congelado: (_c?['estado'] as String?) ==

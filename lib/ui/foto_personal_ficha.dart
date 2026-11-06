@@ -26,7 +26,22 @@ import 'diseno.dart';
 
 class SeccionFotoPersonal extends StatefulWidget {
   final int clienteId;
-  const SeccionFotoPersonal({super.key, required this.clienteId});
+
+  /// 1.25 T58: la foto de gestión del cliente (la de la
+  /// ficha) para pintar el PAR etiquetado «Gestión» /
+  /// «Del cliente». Sin ella, la personal va grande como
+  /// siempre.
+  final File? fotoGestion;
+
+  /// 1.25 T58: abrir la foto de gestión en el visor de la
+  /// ficha (el mismo gesto que tocar el avatar).
+  final VoidCallback? onVerFotoGestion;
+
+  const SeccionFotoPersonal(
+      {super.key,
+      required this.clienteId,
+      this.fotoGestion,
+      this.onVerFotoGestion});
 
   @override
   State<SeccionFotoPersonal> createState() =>
@@ -151,6 +166,31 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
     }
   }
 
+  /// 1.25 T58: una miniatura del par, con su etiqueta.
+  Widget _miniaturaPar({
+    required String etiqueta,
+    required File archivo,
+    required VoidCallback? alTocar,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: alTocar,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            child: Image.file(archivo,
+                height: 150,
+                width: double.infinity,
+                fit: BoxFit.cover),
+          ),
+        ),
+        const SizedBox(height: AppEspacio.xs),
+        Text(etiqueta, style: AppTexto.etiqueta),
+      ],
+    );
+  }
+
   // 1.25 T117 (F1-45): tocar la foto la abre grande, como la
   // foto de la ficha (_verFotoGrande).
   void _verGrande() {
@@ -226,7 +266,31 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
               Text('La que se puso en su app de cliente.',
                   style: AppTexto.secundario),
               const SizedBox(height: AppEspacio.sm),
-              if (_archivo != null)
+              if (_archivo != null && widget.fotoGestion != null)
+                // 1.25 T58: el par etiquetado — la de
+                // gestión y la del cliente, lado a lado,
+                // cada una con su visor.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _miniaturaPar(
+                        etiqueta: 'Gestión',
+                        archivo: widget.fotoGestion!,
+                        alTocar: widget.onVerFotoGestion,
+                      ),
+                    ),
+                    const SizedBox(width: AppEspacio.sm),
+                    Expanded(
+                      child: _miniaturaPar(
+                        etiqueta: 'Del cliente',
+                        archivo: _archivo!,
+                        alTocar: _verGrande,
+                      ),
+                    ),
+                  ],
+                )
+              else if (_archivo != null)
                 GestureDetector(
                   onTap: _verGrande,
                   child: ClipRRect(

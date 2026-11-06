@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/ficha_secciones.dart';
 
@@ -15,8 +16,9 @@ String _iso(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
-Map<String, dynamic> _pago(int n) => {
+Map<String, dynamic> _pago(int n, {String fecha = ''}) => {
       'tipo': 'pago',
+      'fecha': fecha,
       'titulo': 'Pago $n',
       'subtitulo': 'Efectivo',
       'trailing': '2000',
@@ -93,24 +95,33 @@ void main() {
         findsOneWidget);
   });
 
+  // 1.25 T56: el tope de 8 con «Ver todo» (contrato de
+  // T117/F1-38) lo sustituye el historial por meses
+  // plegables: el mes reciente empieza abierto y los
+  // demás solo enseñan su cabecera con conteo y suma.
   testWidgets(
-      'Historial: tope de 8 y «Ver todo» despliega el resto',
-      (t) async {
-    await t.pumpWidget(
-        _historial([for (var i = 1; i <= 10; i++) _pago(i)]));
+      'Historial: meses plegables — el reciente abierto, '
+      'el anterior solo con cabecera', (t) async {
+    final hoy = ahoraHabana();
+    final mesActual = _iso(hoy);
+    final mesAnterior =
+        _iso(DateTime(hoy.year, hoy.month - 1, 15));
+    await t.pumpWidget(_historial([
+      _pago(1, fecha: mesActual),
+      _pago(2, fecha: mesActual),
+      _pago(3, fecha: mesAnterior),
+    ]));
     expect(find.text('Pago 1'), findsOneWidget);
-    expect(find.text('Pago 8'), findsOneWidget);
-    expect(find.text('Pago 9'), findsNothing);
-    expect(find.text('Ver todo el historial (2 más)'),
+    expect(find.text('Pago 2'), findsOneWidget);
+    // El mes anterior está plegado: su pago no se ve,
+    // pero su cabecera resume «1 pago · 2 000 CUP».
+    expect(find.text('Pago 3'), findsNothing);
+    expect(find.text('1 pago · ${fmtMonto(2000)} CUP'),
         findsOneWidget);
-    await t.ensureVisible(
-        find.text('Ver todo el historial (2 más)'));
+    // Al tocar la cabecera, el mes se despliega.
+    await t.tap(find.text('1 pago · ${fmtMonto(2000)} CUP'));
     await t.pumpAndSettle();
-    await t.tap(find.text('Ver todo el historial (2 más)'));
-    await t.pumpAndSettle();
-    expect(find.text('Pago 9'), findsOneWidget);
-    expect(find.text('Pago 10'), findsOneWidget);
-    expect(find.text('Ver todo el historial (2 más)'), findsNothing);
+    expect(find.text('Pago 3'), findsOneWidget);
   });
 
   testWidgets(
