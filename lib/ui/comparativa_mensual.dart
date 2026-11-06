@@ -270,8 +270,8 @@ class _ComparativaMensualState
         ],
       ),
       body: _cargando
-          ? const Center(
-              child: CircularProgressIndicator())
+          // F2-20: carga del sistema, como las hermanas del frente.
+          ? const EstadoCargando(texto: 'Cargando comparativa…')
           : Column(
               children: [
                 Padding(

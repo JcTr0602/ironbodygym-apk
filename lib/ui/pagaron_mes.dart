@@ -20,6 +20,7 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../nomina_calc.dart';
+import '../perfil.dart';
 import '../sync.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -37,6 +38,25 @@ class PagaronMesScreen extends StatefulWidget {
 class _PagaronMesScreenState extends State<PagaronMesScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _filas = [];
+  // 1.25 T118 (F2-17): buscador de la lista y tarifa vigente
+  // para la cabecera de base de nómina (solo dueño).
+  final _qCtrl = TextEditingController();
+  String _q = '';
+  int? _tarifa;
+
+  @override
+  void dispose() {
+    _qCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _visibles {
+    final q = _q.trim().toLowerCase();
+    if (q.isEmpty) return _filas;
+    return _filas
+        .where((c) => '${c['nombre']}'.toLowerCase().contains(q))
+        .toList();
+  }
 
   /// 1.23 (H-04, Argón): total canónico de la cifra de Home
   /// (ids ANTES de ocultar protegidos a un no-dueño). El título
@@ -130,13 +150,57 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
           },
     ];
     lista.sort(compararPorNombre);
+    // F2-17: la tarifa para la cabecera de base (la misma
+    // fuente que la foto de nómina); si no se puede leer, la
+    // cabecera simplemente no se pinta.
+    int? tarifa;
+    if (AuthService().isOwner) {
+      try {
+        tarifa = await PerfilService.instance.getPagoEntrenador();
+      } catch (_) {
+        tarifa = null;
+      }
+    }
     if (mounted) {
       setState(() {
         _filas = lista;
         _totalCanonico = ids.length;
+        _tarifa = tarifa;
         _cargando = false;
       });
     }
+  }
+
+  /// 1.25 T118 (F2-17): chip de vencimiento cercano de una
+  /// fila («Vence hoy», «Vence en N días», «Venció hace N
+  /// días»); sin chip si faltan más de 7 días o no hay fecha.
+  Widget _chipVencePronto(String? pagadoHasta) {
+    final d = diasRestantes(pagadoHasta);
+    if (d == null || d > 7) return const SizedBox.shrink();
+    final (texto, color) = d < 0
+        ? ('Venció hace ${-d} día${d == -1 ? '' : 's'}', AppColores.error)
+        : d == 0
+            ? ('Vence hoy', AppColores.error)
+            : (
+                'Vence en $d día${d == 1 ? '' : 's'}',
+                AppColores.alertaOscuro
+              );
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.sm, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+        ),
+        child: Text(
+          texto,
+          style: AppTexto.minuscula
+              .copyWith(color: color, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
   }
 
   @override
@@ -163,6 +227,47 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       body: Column(
         children: [
           const SyncBanner(alcance: 'pagos'),
+          // 1.25 T118 (F2-17): buscador y, para el dueño, la
+          // base de nómina que esta lista forma (antes la
+          // cifra vivía solo en el título y la base de
+          // 150 CUP por cliente no se decía en la pantalla).
+          if (!_cargando && _filas.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: TextField(
+                controller: _qCtrl,
+                onChanged: (v) => setState(() => _q = v),
+                decoration: InputDecoration(
+                  hintText: 'Buscar cliente…',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _q.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Limpiar búsqueda',
+                          onPressed: () {
+                            _qCtrl.clear();
+                            setState(() => _q = '');
+                          },
+                        ),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
+            if (esDueno && _tarifa != null && _q.trim().isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                    AppEspacio.sm, AppEspacio.lg, 0),
+                child: Text(
+                  'Base de nómina por entrenador: '
+                  '$_totalCanonico × ${fmtMonto(_tarifa!.toDouble())} CUP = '
+                  '${fmtMonto(_totalCanonico * _tarifa!.toDouble())} CUP',
+                  style: AppTexto.secundario,
+                ),
+              ),
+          ],
           Expanded(
             child: _cargando
                 ? const EstadoCargando(texto: 'Cargando pagos del mes…')
@@ -172,18 +277,26 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                         titulo: 'Nadie ha pagado este mes',
                         subtitulo:
                             'Los clientes que paguen aparecerán aquí')
-                    : RefreshIndicator(
+                    : _visibles.isEmpty
+                        ? EstadoVacio(
+                            icono: Icons.search_off_rounded,
+                            titulo: 'Sin resultados',
+                            subtitulo:
+                                'Nadie de la lista coincide con «${_q.trim()}»')
+                        : RefreshIndicator(
                         onRefresh: _actualizar,
                         child: ListView.builder(
                           // H-04: si hay protegidos ocultos, la
                           // última fila es la nota que reconcilia
-                          // el título (canónico) con las filas.
-                          itemCount: _filas.length +
-                              (_totalCanonico > _filas.length
+                          // el título (canónico) con las filas
+                          // (solo sin búsqueda activa).
+                          itemCount: _visibles.length +
+                              (_q.trim().isEmpty &&
+                                      _totalCanonico > _filas.length
                                   ? 1
                                   : 0),
                           itemBuilder: (ctx, i) {
-                            if (i == _filas.length) {
+                            if (i == _visibles.length) {
                               return Padding(
                                 padding: const EdgeInsets.all(
                                     AppEspacio.lg),
@@ -196,7 +309,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                                 ),
                               );
                             }
-                            final c = _filas[i];
+                            final c = _visibles[i];
                             final sinDatos = c['sin_datos'] == true;
                             return ListTile(
                               leading: sinDatos
@@ -210,12 +323,25 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                                           c['foto_storage'] as String?,
                                     ),
                               title: Text('${c['nombre']}'),
-                              subtitle: Text(
-                                sinDatos
-                                    ? 'Datos aún sin descargar'
-                                    : 'Pagado hasta: '
-                                        '${fmtFecha(c['pagado_hasta'] as String?)}',
-                                style: AppTexto.metadato,
+                              subtitle: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    sinDatos
+                                        ? 'Datos aún sin descargar'
+                                        : 'Pagado hasta: '
+                                            '${fmtFecha(c['pagado_hasta'] as String?)}',
+                                    style: AppTexto.metadato,
+                                  ),
+                                  // F2-17: aviso de vencimiento
+                                  // cercano — la lista ya trae
+                                  // pagado_hasta y no se usaba
+                                  // para priorizar.
+                                  if (!sinDatos)
+                                    _chipVencePronto(
+                                        c['pagado_hasta'] as String?),
+                                ],
                               ),
                               trailing: sinDatos || !esDueno
                                   ? null

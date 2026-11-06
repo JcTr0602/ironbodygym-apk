@@ -81,8 +81,11 @@ class _ReporteMensualDiariosScreenState
     return Scaffold(
       appBar: appBarIron(context, 'Pagos diarios del mes'),
       body: _cargando
-          ? const Center(
-              child: CircularProgressIndicator())
+          // 1.25 T118 (F2-20): carga del sistema (antes un
+          // CircularProgressIndicator crudo; las pantallas
+          // hermanas del frente usan EstadoCargando para
+          // resúmenes y SkeletonLista para listas).
+          ? const EstadoCargando(texto: 'Cargando pagos diarios…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [

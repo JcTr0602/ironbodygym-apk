@@ -15,6 +15,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import '../negocio.dart' show fmtFecha;
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
@@ -359,14 +360,53 @@ class _CuentasPorCobrarScreenState
     );
   }
 
+  /// 1.25 T118 (F2-18): chip «hace N días» de un fiado;
+  /// ámbar desde 15 días y rojo desde 30 (la lista ya ordena
+  /// del más viejo al más nuevo: el chip dice la urgencia).
+  Widget _chipAntiguedadFiado(String fechaIso) {
+    if (fechaIso.length < 10) return const SizedBox.shrink();
+    final f = DateTime.tryParse(fechaIso.substring(0, 10));
+    if (f == null) return const SizedBox.shrink();
+    final hoy = ahoraHabana();
+    final dias = DateTime.utc(hoy.year, hoy.month, hoy.day)
+        .difference(DateTime.utc(f.year, f.month, f.day))
+        .inDays;
+    if (dias <= 0) return const SizedBox.shrink();
+    final color = dias >= 30
+        ? AppColores.error
+        : dias >= 15
+            ? AppColores.alertaOscuro
+            : AppColores.textoSecundario(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.sm, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+        ),
+        child: Text(
+          'hace $dias día${dias == 1 ? '' : 's'}',
+          style: AppTexto.minuscula
+              .copyWith(color: color, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
   Widget _cuerpo() {
     if (_cargando) {
       return const EstadoCargando(texto: 'Cargando fiados por cobrar…');
     }
     if (_fiados.isEmpty) {
-      return const Center(
-          child: Text('Sin fiados pendientes',
-              style: AppTexto.secundario));
+      // 1.25 T118 (F2-18): vacío del sistema (antes un texto
+      // suelto centrado).
+      return const EstadoVacio(
+        icono: Icons.receipt_long_rounded,
+        titulo: 'Sin fiados pendientes',
+        subtitulo: 'Nadie debe suplementos ahora mismo.',
+      );
     }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(
@@ -399,9 +439,16 @@ class _CuentasPorCobrarScreenState
             title: Text('$nombreProd × $cant',
                 style: AppTexto.cuerpo
                     .copyWith(fontWeight: FontWeight.w600)),
-            subtitle: Text(
-                '$nombreCli\n$fecha',
-                style: AppTexto.secundario),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(nombreCli, style: AppTexto.secundario),
+                Text(fmtFecha(fecha), style: AppTexto.secundario),
+                // F2-18: antigüedad del fiado con semáforo —
+                // la fecha ya estaba y no se usaba.
+                _chipAntiguedadFiado(fecha),
+              ],
+            ),
             isThreeLine: true,
             trailing: Column(
               mainAxisAlignment: MainAxisAlignment.center,

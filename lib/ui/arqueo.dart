@@ -13,6 +13,7 @@ import '../auth.dart';
 import '../diferencias_caja.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tiempo.dart' show hoyHabanaIso;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diferencias_caja.dart';
@@ -600,6 +601,61 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                       const SizedBox(height: AppEspacio.lg),
                       const Text('Historial', style: AppTexto.subtitulo),
                       const SizedBox(height: AppEspacio.sm),
+                      // 1.25 T118 (F2-21): resumen del mes
+                      // sobre la lista plana (antes había que
+                      // sumar las tarjetas a ojo). Solo CUP en
+                      // las cifras: las monedas no se mezclan.
+                      if (_historial.isNotEmpty)
+                        Builder(builder: (ctx) {
+                          final prefMes = hoyHabanaIso().substring(0, 7);
+                          final delMes = _historial
+                              .where((h) =>
+                                  '${h['creada_en'] ?? ''}'
+                                      .startsWith(prefMes))
+                              .toList();
+                          if (delMes.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          final entregadoCup = delMes
+                              .where((h) =>
+                                  (h['moneda'] ?? 'CUP') == 'CUP')
+                              .fold<double>(
+                                  0,
+                                  (a, h) =>
+                                      a +
+                                      ((h['monto_entregado'] as num?)
+                                              ?.toDouble() ??
+                                          0));
+                          final entregadoUsd = delMes
+                              .where((h) =>
+                                  (h['moneda'] ?? 'CUP') == 'USD')
+                              .fold<double>(
+                                  0,
+                                  (a, h) =>
+                                      a +
+                                      ((h['monto_entregado'] as num?)
+                                              ?.toDouble() ??
+                                          0));
+                          final diferenciasCup = delMes
+                              .where((h) =>
+                                  (h['moneda'] ?? 'CUP') == 'CUP')
+                              .fold<double>(
+                                  0,
+                                  (a, h) =>
+                                      a + diferenciaDeLiquidacion(h));
+                          return Padding(
+                            padding: const EdgeInsets.only(
+                                bottom: AppEspacio.sm),
+                            child: Text(
+                              'Este mes: ${delMes.length} '
+                              'liquidaci${delMes.length == 1 ? 'ón' : 'ones'} · '
+                              '${fmtMonto(entregadoCup)} CUP entregados'
+                              '${entregadoUsd > 0 ? ' + ${fmtMonto(entregadoUsd)} USD' : ''} · '
+                              'diferencias: ${fmtMonto(diferenciasCup)} CUP',
+                              style: AppTexto.secundario,
+                            ),
+                          );
+                        }),
                       if (_historial.isEmpty)
                         Text('Sin liquidaciones registradas.',
                             style: TextStyle(
