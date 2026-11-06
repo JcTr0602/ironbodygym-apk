@@ -408,7 +408,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
+  // 1.26 (auditoría de botones, MEDIA 5): guarda de
+  // entrada compartida de los dos flujos de venta. Un
+  // doble toque apilaba dos diálogos de venta y confirmar
+  // ambos vendía dos veces. Check-and-set síncrono antes
+  // del primer await; se libera al cerrar el flujo.
+  bool _ventaEnCurso = false;
+
   Future<void> _vender(String tipo) async {
+    if (_ventaEnCurso) return;
+    _ventaEnCurso = true;
+    try {
+      await _venderInterno(tipo);
+    } finally {
+      _ventaEnCurso = false;
+    }
+  }
+
+  Future<void> _venderInterno(String tipo) async {
     // 1.25 Bloque 2: sin pomo a la vista, primero refrescar
     // el espejo (ver _pomoParaVender); el aviso sale de ahí.
     if (tipo != 'agua_suelta' && await _pomoParaVender() == null) {
@@ -926,6 +943,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   /// El dueño tiene tope local (saldo del pomo); el entrenador es
   /// ciego al pomo y no tiene tope local (el servidor aplica).
   Future<void> _ventaMultiple() async {
+    // 1.26 (MEDIA 5): misma guarda que _vender.
+    if (_ventaEnCurso) return;
+    _ventaEnCurso = true;
+    try {
+      await _ventaMultipleInterno();
+    } finally {
+      _ventaEnCurso = false;
+    }
+  }
+
+  Future<void> _ventaMultipleInterno() async {
     final pomo = await _pomoParaVender();
     if (pomo == null) return;
     final topeDosis =
@@ -1398,6 +1426,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final pomo = await _pomoParaVender();
     if (pomo == null) return;
     var motivo = 'merma';
+    // 1.26 (BAJA): error de validación DENTRO del diálogo
+    // (antes «Registrar» cerraba y validaba después: lo
+    // tecleado se perdía con el aviso de error).
+    String? errorDosis;
     final dosisCtrl = TextEditingController(text: '1');
     final notaCtrl = TextEditingController();
     final ok = await showDialog<bool>(
@@ -1435,7 +1467,19 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 keyboardType: TextInputType.number,
                 decoration:
                     const InputDecoration(labelText: 'Dosis'),
+                onChanged: (_) {
+                  if (errorDosis != null) {
+                    setD(() => errorDosis = null);
+                  }
+                },
               ),
+              if (errorDosis != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(errorDosis!,
+                      style: const TextStyle(
+                          color: AppColores.error, fontSize: 13)),
+                ),
               TextField(
                 controller: notaCtrl,
                 decoration: const InputDecoration(
@@ -1449,7 +1493,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () {
+                // 1.26 (BAJA): validar sin cerrar el diálogo.
+                final d = int.tryParse(dosisCtrl.text.trim());
+                if (d == null || d <= 0) {
+                  setD(() => errorDosis =
+                      'Escribe cuántas dosis salen (1 o más).');
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
               child: const Text('Registrar'),
             ),
           ],
@@ -1509,6 +1562,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
     final motivoCtrl = TextEditingController();
     var polvoPerdido = false;
+    // 1.26 (BAJA): error de validación DENTRO del diálogo
+    // (antes «Revertir» cerraba y el motivo vacío se
+    // avisaba después, perdiendo lo tecleado).
+    String? errorMotivo;
     // Argón #9 (BAJO): la comisión del diálogo era un texto fijo
     // («50 CUP») aunque la comisión es configurable y puede ser 0
     // (dueño, agua suelta, Casa). Se usa la real de la fila.
@@ -1535,7 +1592,19 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 controller: motivoCtrl,
                 decoration: const InputDecoration(
                     labelText: 'Motivo (obligatorio)'),
+                onChanged: (_) {
+                  if (errorMotivo != null) {
+                    setD(() => errorMotivo = null);
+                  }
+                },
               ),
+              if (errorMotivo != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(errorMotivo!,
+                      style: const TextStyle(
+                          color: AppColores.error, fontSize: 13)),
+                ),
               // 1.15 V5: «polvo perdido» solo lo marca el dueño
               // (patrón AuthService().isOwner vía _esDueno). La
               // regla del servidor no cambia: sin salida por merma
@@ -1563,7 +1632,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () {
+                // 1.26 (BAJA): validar sin cerrar el diálogo.
+                if (motivoCtrl.text.trim().isEmpty) {
+                  setD(() => errorMotivo =
+                      'Escribe el motivo de la reversión');
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
               child: const Text('Revertir'),
             ),
           ],
