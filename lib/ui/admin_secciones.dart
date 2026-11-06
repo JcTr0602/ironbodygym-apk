@@ -481,9 +481,17 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
         children: [
           seccionAdmin(context, Icons.receipt_long_rounded, 'Últimos gastos', [
             if (gastos.isEmpty)
-              Text('Sin gastos registrados.',
-                  style: TextStyle(
-                      color: AppColores.textoSecundario(context))),
+              // 1.25 T107: vacío con icono, explicación y
+              // la acción de registrar el primer gasto.
+              EstadoVacio(
+                icono: Icons.receipt_long_rounded,
+                titulo: 'Sin gastos registrados',
+                subtitulo:
+                    'Los gastos del gym (compras, servicios, '
+                    'material) se anotan aquí.',
+                textoAccion: 'Registrar gasto',
+                onAccion: _agregarYActualizar,
+              ),
             for (final g in gastos.take(10))
               ListTile(
                 dense: true,

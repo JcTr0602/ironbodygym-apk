@@ -462,7 +462,14 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
                     expandido: false,
                   ),
                 ] else
-                  const Text('Sin datos.', style: AppTexto.secundario),
+                  // 1.25 T107: vacío con el estándar.
+                  const EstadoVacio(
+                    icono: Icons.book_rounded,
+                    titulo: 'Sin datos del mes',
+                    subtitulo:
+                        'El registro se arma con los cobros y '
+                        'gastos del mes: aún no hay ninguno.',
+                  ),
               ],
             ),
     );

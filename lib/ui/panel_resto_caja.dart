@@ -336,7 +336,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Liquidar efectivo'),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando caja…')
+          ? const EstadoCargando(texto: 'Cargando liquidaciones…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -544,7 +544,7 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Nómina pre-calculada'),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando caja…')
+          ? const EstadoCargando(texto: 'Cargando nómina…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -761,7 +761,7 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Adelantos'),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando caja…')
+          ? const EstadoCargando(texto: 'Cargando adelantos…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -786,8 +786,15 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
                 ),
                 const SizedBox(height: 8),
                 if (visibles.isEmpty)
-                  const Text('Sin adelantos en este filtro.',
-                      style: AppTexto.secundario)
+                  // 1.25 T107: vacío con el estándar
+                  // EstadoVacio (icono + explicación).
+                  const EstadoVacio(
+                    icono: Icons.forward_rounded,
+                    titulo: 'Sin adelantos en este filtro',
+                    subtitulo:
+                        'Cuando un entrenador reciba un adelanto '
+                        'de su nómina, saldrá aquí.',
+                  )
                 else
                   for (final f in visibles)
                     Tarjeta(
@@ -938,7 +945,7 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Ingresos por período'),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando caja…')
+          ? const EstadoCargando(texto: 'Cargando ingresos…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -968,7 +975,13 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
                     style: AppTexto.secundario),
                 const SizedBox(height: 12),
                 if (r == null)
-                  const Text('Sin datos.', style: AppTexto.secundario)
+                  // 1.25 T107: vacío con el estándar.
+                  const EstadoVacio(
+                    icono: Icons.insights_rounded,
+                    titulo: 'Sin ingresos en este período',
+                    subtitulo:
+                        'Prueba con otro rango de fechas.',
+                  )
                 else ...[
                   Tarjeta(
                     child: Column(
@@ -1150,7 +1163,7 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Precios por método'),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando caja…')
+          ? const EstadoCargando(texto: 'Cargando precios…')
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
