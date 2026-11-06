@@ -2341,14 +2341,22 @@ class _FichaScreenState extends State<FichaScreen> {
                           // qué repite (tipo · método); el
                           // monto se recalcula hoy y el
                           // Preview sigue confirmando.
-                          if (_ultimoPagoReal != null)
+                          // Argón 1.25 MEDIA: el botón solo
+                          // aparece si el último cobro tiene
+                          // tipo repetible (un personalizado
+                          // puro o una promo prometían
+                          // repetir lo que no repetían).
+                          if (_ultimoPagoReal != null &&
+                              seleccionRepetirCobro(_ultimoPagoReal)
+                                      .tipoId !=
+                                  null)
                             TextButton.icon(
                               onPressed: () => _pagar(repetir: true),
                               icon: const Icon(Icons.replay_rounded,
                                   size: 18),
                               label: Text(
                                   'Repetir último cobro · '
-                                  '${_ultimoPagoReal!['periodo'] ?? 'mensual'}'
+                                  '${seleccionRepetirCobro(_ultimoPagoReal).tipoId}'
                                   ' · ${_ultimoPagoReal!['metodo'] ?? ''}'),
                             ),
                         ],

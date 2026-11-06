@@ -106,6 +106,12 @@ class _PagosPorMetodoState
         // Argón P1#8: misma cobertura que pagosDelPeriodo (hoy/mes):
         // pagos + diarios + suplementos + servicios, con Casa fuera.
         final casas = await LocalDb.instance.idsCuentasCasa();
+        // Argón 1.25 MEDIA: fuera también los anulados
+        // en cola y, del CONTEO de operaciones, los
+        // métodos sin cobro (cortesia/promo, monto 0):
+        // inflaban el «N pagos» de la barra.
+        final anuladosCola =
+            await LocalDb.instance.pagosAnuladosEnCola();
         bool esCasa(Map<String, dynamic> p) {
           if (p['casa'] == 1 || p['casa'] == true) return true;
           final cid = p['cliente_id'];
@@ -118,10 +124,14 @@ class _PagosPorMetodoState
         for (final p in await LocalDb.instance
             .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
           if (esCasa(p)) continue;
+          if (esPagoAnulado(p, anuladosCola)) continue;
           final monto =
               (p['monto'] as num?)?.toDouble() ?? 0;
           final metodo =
               '${p['metodo'] ?? 'efectivo'}'.toLowerCase();
+          if (metodo == 'cortesia' || metodo == 'promo') {
+            continue;
+          }
           if (metodo.contains('transfer')) {
             transferencia += monto;
             nTransferencia++;
@@ -233,6 +243,11 @@ class _PagosPorMetodoState
           final metodo =
               '${p['metodo'] ?? 'efectivo'}'
                   .toLowerCase();
+          // Argón 1.25 MEDIA: cortesía/promo (monto 0)
+          // no cuentan como operación de cobro.
+          if (metodo == 'cortesia' || metodo == 'promo') {
+            continue;
+          }
           if (metodo.contains('transfer')) {
             transferencia += monto;
             nTransferencia++;

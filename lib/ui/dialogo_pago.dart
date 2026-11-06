@@ -227,17 +227,27 @@ String _etiquetaPeriodo(PeriodoSel s) {
 /// El MONTO no se repite nunca: lo recalcula el motor
 /// con los precios y la tarifa especial de HOY (repetir
 /// el monto viejo cobraría mal si algo cambió). Los
-/// períodos sin tipo repetible (personalizado) y los
-/// métodos que no son cobro (promo, cortesía) no se
-/// repiten.
+/// períodos sin tipo repetible (personalizado) dan
+/// tipoId null; los métodos que no son cobro (promo,
+/// cortesía) no se preseleccionan (metodo null).
 ({String? tipoId, String? metodo}) seleccionRepetirCobro(
     Map<String, dynamic>? ultimoPago) {
   if (ultimoPago == null) return (tipoId: null, metodo: null);
   final periodo = '${ultimoPago['periodo'] ?? ''}';
-  final String? tipoId = switch (periodo) {
-    'mensual' || 'semanal' || 'quincenal' => periodo,
-    _ => null,
-  };
+  // El tipo real manda: primero el tipo_id que la fila
+  // traiga; si no, el prefijo 'tipo:<id>' del periodo
+  // (las tarifas personalizadas y las ofertas viajan
+  // así y el switch de abajo las degradaba a mensual
+  // estándar perdiendo la tarifa).
+  final tipoIdFila = '${ultimoPago['tipo_id'] ?? ''}'.trim();
+  final String? tipoId = tipoIdFila.isNotEmpty
+      ? tipoIdFila
+      : periodo.startsWith('tipo:') && periodo.length > 5
+          ? periodo.substring(5)
+          : switch (periodo) {
+              'mensual' || 'semanal' || 'quincenal' => periodo,
+              _ => null,
+            };
   final metodoPago = '${ultimoPago['metodo'] ?? ''}';
   final String? metodo = switch (metodoPago) {
     'efectivo' || 'transferencia' => metodoPago,

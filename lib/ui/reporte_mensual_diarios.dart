@@ -75,7 +75,12 @@ class _ReporteMensualDiariosScreenState
     for (final v in serie) {
       if (v > maximo) maximo = v;
     }
-    final sel = _diaSel;
+    // Argón 1.25 MEDIA: una selección de un mes más
+    // largo (día 31) no puede indexar la serie de un
+    // mes corto (RangeError al pintar el rótulo).
+    final sel = (_diaSel != null && _diaSel! <= serie.length)
+        ? _diaSel
+        : null;
     final diaRotulo = sel ?? (mejor >= 0 ? mejor + 1 : null);
     return Tarjeta(
       child: Column(
@@ -146,6 +151,9 @@ class _ReporteMensualDiariosScreenState
   void _cambiarMes(int delta) {
     setState(() {
       _mes = DateTime(_mes.year, _mes.month + delta);
+      // Argón 1.25 MEDIA: la selección de día no viaja
+      // entre meses (un 31 no existe en febrero).
+      _diaSel = null;
     });
     _cargar();
   }

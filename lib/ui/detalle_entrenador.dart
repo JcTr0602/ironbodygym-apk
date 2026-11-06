@@ -128,6 +128,13 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     // enAnterior se aplican en Dart como antes).
     final pagos =
         await LocalDb.instance.pagosDesde(_iso(inicioAnterior));
+    // Argón 1.25 (menor): el detalle debe cuadrar con
+    // comparativaEntrenadores — fuera los pagos cuya
+    // anulación sigue en cola y los de Cuentas a la
+    // Casa (antes sumaban aquí y no allí).
+    final anuladosCola =
+        await LocalDb.instance.pagosAnuladosEnCola();
+    final casasDetalle = await LocalDb.instance.idsCuentasCasa();
     final diarios = await LocalDb.instance.allMirror('pagos_diarios');
     final clientes = await LocalDb.instance.allMirror('clientes');
     final nombrePorId = <int, String>{};
@@ -149,6 +156,11 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     final porDia = <String, double>{};
 
     for (final p in pagos) {
+      if (esPagoAnulado(p, anuladosCola)) continue;
+      final cidCasa = (p['cliente_id'] as num?)?.toInt();
+      if (cidCasa != null && casasDetalle.contains(cidCasa)) {
+        continue;
+      }
       final fecha = fechaCorta(p['fecha'] ?? '', 10);
       final monto = (p['monto'] as num?)?.toDouble() ?? 0;
       // T86: por ID cuando la fila lo trae (el nombre

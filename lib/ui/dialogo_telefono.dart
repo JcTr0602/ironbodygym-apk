@@ -24,6 +24,59 @@ import '../negocio.dart' show validarTelefono, antesEdicionCliente;
 import '../sync.dart';
 import 'componentes.dart';
 
+/// El diálogo en sí, con su controlador en un State
+/// propio (patrón de la casa): el dispose vive en
+/// State.dispose(). La versión anterior lo liberaba en
+/// un finally tras `await showDialog`, cuando la
+/// animación de cierre aún mantiene el TextField
+/// montado: «used after being disposed» (Argón 1.25
+/// MEDIA, reintroducido al extraer el componente).
+/// Devuelve el texto tecleado o null al cancelar.
+class _DialogoTelefono extends StatefulWidget {
+  const _DialogoTelefono();
+
+  @override
+  State<_DialogoTelefono> createState() =>
+      _DialogoTelefonoState();
+}
+
+class _DialogoTelefonoState extends State<_DialogoTelefono> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Agregar teléfono'),
+      content: TextField(
+        controller: _ctrl,
+        keyboardType: TextInputType.phone,
+        maxLength: 8,
+        decoration: const InputDecoration(
+          hintText: 'Ej. 58191577',
+          helperText: '8 dígitos, empieza con 5 o 6',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        BotonPrimario(
+          texto: 'Guardar',
+          onPressed: () => Navigator.pop(context, _ctrl.text),
+          expandido: false,
+        ),
+      ],
+    );
+  }
+}
+
 Future<String?> dialogoAgregarTelefono(
   BuildContext context, {
   required int clienteId,
@@ -31,36 +84,13 @@ Future<String?> dialogoAgregarTelefono(
 }) async {
   if (soloDueno && !AuthService().isOwner) return null;
   if (clienteId <= 0) return null;
-  final ctrl = TextEditingController();
-  try {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Agregar teléfono'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.phone,
-          maxLength: 8,
-          decoration: const InputDecoration(
-            hintText: 'Ej. 58191577',
-            helperText: '8 dígitos, empieza con 5 o 6',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          BotonPrimario(
-            texto: 'Guardar',
-            onPressed: () => Navigator.pop(ctx, true),
-            expandido: false,
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !context.mounted) return null;
-    final tel = ctrl.text.trim();
+  final crudo = await showDialog<String>(
+    context: context,
+    builder: (_) => const _DialogoTelefono(),
+  );
+  if (crudo == null || !context.mounted) return null;
+  {
+    final tel = crudo.trim();
     if (!validarTelefono(tel)) {
       if (context.mounted) {
         mostrarSnack(context,
@@ -94,9 +124,5 @@ Future<String?> dialogoAgregarTelefono(
           significado: SignificadoChip.exito);
     }
     return tel;
-  } finally {
-    // El controlador del diálogo se libera siempre (antes
-    // quedaba vivo en cada apertura).
-    ctrl.dispose();
   }
 }

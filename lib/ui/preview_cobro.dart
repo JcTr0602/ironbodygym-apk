@@ -574,9 +574,18 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         final anterior = filas.first['pagado_hasta'] as String?;
         pagadoHastaAnterior =
             (anterior == null || anterior.isEmpty) ? null : anterior;
-        final tel = '${filas.first['telefono'] ?? ''}'
-            .replaceAll(RegExp(r'[^0-9]'), '');
-        if (tel.length == 8) telefonoCliente = tel;
+        // Argón 1.25 MEDIA: el teléfono se resuelve como
+        // en la ficha (T17) — primero `movil`, luego
+        // `telefono`, con el normalizador canónico (un
+        // número con prefijo 53 o en movil ya no deja
+        // sin recibo al cliente).
+        final waMovil = normalizarTelefonoWaMe(
+            '${filas.first['movil'] ?? ''}');
+        final waTel = waMovil.isNotEmpty
+            ? waMovil
+            : normalizarTelefonoWaMe(
+                '${filas.first['telefono'] ?? ''}');
+        if (waTel.isNotEmpty) telefonoCliente = waTel;
       }
     } catch (_) {}
   }
@@ -668,8 +677,10 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
                         ? fmtFecha(vencRaw)
                         : vencRaw,
                   );
+                  // telefonoCliente ya viene normalizado
+                  // con el 53 (normalizarTelefonoWaMe).
                   final url = Uri.parse(
-                      'https://wa.me/53$telefonoCliente'
+                      'https://wa.me/$telefonoCliente'
                       '?text=${Uri.encodeComponent(texto)}');
                   try {
                     await launchUrl(url,

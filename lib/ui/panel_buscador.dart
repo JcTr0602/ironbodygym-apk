@@ -13,6 +13,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -441,6 +443,11 @@ List<Map<String, dynamic>> buscarClientesPanel(
   for (final c in clientes) {
     final id = (c['id'] as num?)?.toInt() ?? 0;
     if (id <= 0 || LocalDb.esEliminadoDe(c)) continue;
+    // Argón 1.25 ALTA: un cliente protegido jamás sale
+    // en el buscador para un no-dueño (la vista
+    // protegida es el filtro canónico del proyecto;
+    // para el dueño devuelve false y ve todo).
+    if (esVistaProtegida(c)) continue;
     final texto = normalizarTextoPanel(
         '${c['nombre'] ?? ''} ${c['telefono'] ?? ''}');
     if (tokens.every((t) => texto.contains(t))) {
@@ -486,11 +493,16 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
   // rellena al llegar (es local: no hay red de por medio).
   List<Map<String, dynamic>> _clientes = const [];
 
+  // Argón 1.25 ALTA (segunda capa): el buscador global
+  // es del Panel (territorio del dueño); un no-dueño ni
+  // siquiera carga el espejo de clientes.
+  bool get _soyDueno => AuthService().isOwner;
+
   @override
   void initState() {
     super.initState();
     _cargarRecientes();
-    _cargarClientes();
+    if (_soyDueno) _cargarClientes();
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _foco.requestFocus());
   }
@@ -554,6 +566,13 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_soyDueno) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Buscar en el Panel'),
+        body: const Center(
+            child: Text('Solo el dueño usa el buscador.')),
+      );
+    }
     final resultados = buscarFuncionesPanel(_consulta);
     final clientesRes = buscarClientesPanel(_consulta, _clientes);
     final recientes = recientesPanel(_recientesIds);

@@ -6488,10 +6488,17 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
   // v1.3.4 (ítem 2): mirrorPorFecha usa la columna indexada `fecha`
   // para el espejo `pagos` (misma semántica que el filtro en Dart).
   // Ronda 3-9 #2: Casa nunca suma en ingresos.
+  // Argón 1.25 MEDIA: tampoco suman los pagos cuya
+  // anulación sigue en cola — el resto de funciones
+  // financieras ya lo cruzaba y este detalle (y
+  // PagosPorMetodo, que lo consume) quedaba inflado
+  // hasta que el servidor procesaba la baja.
   final casas = await LocalDb.instance.idsCuentasCasa();
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   for (final p in await LocalDb.instance
       .mirrorPorFecha('pagos', 'fecha', desdeIso, hastaIso)) {
     if (_esPagoCasa(p, casas)) continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     out.add({
       'monto': (p['monto'] as num?)?.toDouble() ?? 0,
       'metodo': '${p['metodo'] ?? 'efectivo'}',
