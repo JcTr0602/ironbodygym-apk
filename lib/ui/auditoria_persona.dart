@@ -46,6 +46,9 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   List<TurnoAuditado> _turnos = [];
   DineroAuditado? _dinero;
   ResumenAuditoria? _resumen;
+  // 1.25 T115: las series diarias de la tarjeta resumen.
+  List<Map<String, dynamic>> _serieMinutos = const [];
+  List<Map<String, dynamic>> _serieCobros = const [];
   List<Map<String, dynamic>> _sensibles = [];
   String? _avisoCobertura;
   String _periodoTexto = '';
@@ -206,7 +209,18 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           );
           _avisoCobertura = avisoCoberturaAperturas(
               desdeIso: desdeIso, minFechaEspejo: minFecha);
-          _periodoTexto = '$desdeIso → $hastaIso';
+          // 1.25 T115: series diarias y período LEGIBLE.
+          _serieMinutos = serieMinutosPorDia(
+              turnos: turnos, desdeIso: desdeIso, hastaIso: hastaIso);
+          _serieCobros = serieCobrosPorDia(
+              persona: persona,
+              desdeIso: desdeIso,
+              hastaIso: hastaIso,
+              pagos: pagos,
+              pagosDiarios: diarios,
+              ventasSuplementos: ventasSup,
+              ventasServicios: ventasServ);
+          _periodoTexto = textoPeriodoLegible(desdeIso, hastaIso);
           _cargando = false;
         });
       }
@@ -365,15 +379,40 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
             ],
           ),
         );
+    // 1.25 T115: rejilla legible 3+3 (antes 5 métricas
+    // apretadas en una fila) + los dos mini-gráficos
+    // del período con el componente de barras de la casa.
     return Tarjeta(
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          dato('Días trabajados', '${r.diasTrabajados}'),
-          dato('Horas reales', '${horas}h ${mins}m'),
-          dato('Total cobrado', fmtMonto(r.totalCobrado)),
-          dato('Acciones sensibles', '${r.accionesSensibles}'),
-          dato('Anomalías', '${r.anomalias}'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              dato('Días trabajados', '${r.diasTrabajados}'),
+              dato('Horas reales', '${horas}h ${mins}m'),
+              dato('Total cobrado', fmtMonto(r.totalCobrado)),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              dato('Turnos', '${_turnos.length}'),
+              dato('Acciones sensibles', '${r.accionesSensibles}'),
+              dato('Anomalías', '${r.anomalias}'),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
+          const Divider(height: 1),
+          const SizedBox(height: AppEspacio.md),
+          const Text('Minutos por día', style: AppTexto.subtitulo),
+          const SizedBox(height: AppEspacio.sm),
+          GraficoBarrasDiarias(datos: _serieMinutos, altura: 64),
+          const SizedBox(height: AppEspacio.md),
+          const Text('Cobros por día (CUP)', style: AppTexto.subtitulo),
+          const SizedBox(height: AppEspacio.sm),
+          GraficoBarrasDiarias(datos: _serieCobros, altura: 64),
         ],
       ),
     );

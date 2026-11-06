@@ -342,6 +342,121 @@ ResumenAuditoria resumirAuditoria({
   );
 }
 
+/// 1.25 T115: el período en fecha LEGIBLE («1 nov →
+/// 30 nov 2026»), en vez del ISO crudo. Si cruza de año,
+/// el año va en los dos lados.
+String textoPeriodoLegible(String desdeIso, String hastaIso) {
+  const meses = [
+    'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+  ];
+  String una(String iso, {required bool conAno}) {
+    final d = DateTime.tryParse(iso);
+    if (d == null) return iso;
+    final base = '${d.day} ${meses[d.month - 1]}';
+    return conAno ? '$base ${d.year}' : base;
+  }
+
+  final a = DateTime.tryParse(desdeIso);
+  final b = DateTime.tryParse(hastaIso);
+  if (a == null || b == null) return '$desdeIso → $hastaIso';
+  if (desdeIso == hastaIso) return una(desdeIso, conAno: true);
+  final cruzaAno = a.year != b.year;
+  return '${una(desdeIso, conAno: cruzaAno)} → ${una(hastaIso, conAno: true)}';
+}
+
+/// Los días del período como filas {fecha, total: 0}
+/// listas para rellenar (el formato del componente de
+/// barras diarias).
+List<Map<String, dynamic>> _diasDelPeriodo(
+    String desdeIso, String hastaIso) {
+  final a = DateTime.tryParse(desdeIso);
+  final b = DateTime.tryParse(hastaIso);
+  if (a == null || b == null) return const [];
+  final out = <Map<String, dynamic>>[];
+  var d = DateTime.utc(a.year, a.month, a.day);
+  final fin = DateTime.utc(b.year, b.month, b.day);
+  while (!d.isAfter(fin)) {
+    out.add({'fecha': isoFechaTurno(d), 'total': 0});
+    d = d.add(const Duration(days: 1));
+  }
+  return out;
+}
+
+/// 1.25 T115: minutos trabajados por día del período
+/// (la serie del mini-gráfico; suma mañana y tarde).
+List<Map<String, dynamic>> serieMinutosPorDia({
+  required List<TurnoAuditado> turnos,
+  required String desdeIso,
+  required String hastaIso,
+}) {
+  final dias = _diasDelPeriodo(desdeIso, hastaIso);
+  final porFecha = {for (final d in dias) '${d['fecha']}': d};
+  for (final t in turnos) {
+    if (t.duracionMin == null) continue;
+    final fila = porFecha[isoFechaTurno(t.fecha)];
+    if (fila != null) {
+      fila['total'] = (fila['total'] as int) + t.duracionMin!;
+    }
+  }
+  return dias;
+}
+
+/// 1.25 T115: cobros por día del período (CUP), con
+/// LAS MISMAS reglas de auditarDineroPersona (mensual
+/// + diario + suplementos sin anuladas ni otra moneda
+/// + dosis sin Casa): la serie y el total del resumen
+/// nunca se contradicen.
+List<Map<String, dynamic>> serieCobrosPorDia({
+  required PersonaApk persona,
+  required String desdeIso,
+  required String hastaIso,
+  required List<Map<String, dynamic>> pagos,
+  required List<Map<String, dynamic>> pagosDiarios,
+  required List<Map<String, dynamic>> ventasSuplementos,
+  required List<Map<String, dynamic>> ventasServicios,
+}) {
+  final dias = _diasDelPeriodo(desdeIso, hastaIso);
+  final porFecha = {for (final d in dias) '${d['fecha']}': d};
+  void suma(Map<String, dynamic> fila, double monto) {
+    if (!_enPeriodo(fila, desdeIso, hastaIso)) return;
+    if (!filaEsDePersona(fila, persona)) return;
+    final f = porFecha['${fila['fecha'] ?? ''}'.substring(0, 10)];
+    if (f != null) f['total'] = (f['total'] as int) + monto.round();
+  }
+
+  for (final p in pagos) {
+    suma(p, (p['monto'] as num?)?.toDouble() ?? 0);
+  }
+  for (final p in pagosDiarios) {
+    suma(p, (p['total'] as num?)?.toDouble() ?? 0);
+  }
+  for (final v in ventasSuplementos) {
+    if ('${v['estado'] ?? ''}' == 'anulada') continue;
+    if ((v['anulada'] as num?)?.toInt() == 1 ||
+        (v['anulado'] as num?)?.toInt() == 1 ||
+        v['anulada'] == true ||
+        v['anulado'] == true) {
+      continue;
+    }
+    if ((v['moneda'] as String?) != null &&
+        (v['moneda'] as String?) != 'CUP') {
+      continue;
+    }
+    suma(
+        v,
+        ((v['total'] as num?)?.toDouble() ??
+            ((v['precio'] as num?)?.toDouble() ?? 0) *
+                ((v['cantidad'] as num?)?.toDouble() ?? 0)));
+  }
+  for (final v in ventasServicios) {
+    if ((v['casa'] as int? ?? 0) == 1) continue;
+    final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
+    suma(v, ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant);
+  }
+  return dias;
+}
+
 /// P2 — Texto de cobertura del espejo de aperturas: se decide
 /// contra la ventana GLOBAL sincronizada (fecha más vieja del
 /// espejo), nunca por las filas de la persona.
