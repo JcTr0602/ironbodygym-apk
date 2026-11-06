@@ -1440,10 +1440,37 @@ class _FichaScreenState extends State<FichaScreen> {
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
             // Argón P1#16: limpiar la fecha (pagado_hasta a null).
+            // 1.26 (auditoría de botones, MEDIA 3): antes este
+            // botón cerraba el diálogo con «guardar» al instante:
+            // un toque borraba la fecha de pago y encolaba el
+            // cambio sin confirmación. Ahora pide confirmación
+            // explícita, como toda acción destructiva de la app.
             TextButton(
-                onPressed: () {
+                onPressed: () async {
+                  final confirma = await showDialog<bool>(
+                    context: ctx,
+                    builder: (c2) => AlertDialog(
+                      title: const Text('¿Borrar la fecha de pago?'),
+                      content: const Text(
+                          'El cliente quedará SIN fecha de pago, '
+                          'como si no hubiera pagado, y el cambio '
+                          'se sincronizará al guardar. Esto no se '
+                          'puede deshacer desde aquí.'),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(c2, false),
+                            child: const Text('Volver')),
+                        FilledButton(
+                            onPressed: () => Navigator.pop(c2, true),
+                            style: FilledButton.styleFrom(
+                                backgroundColor: AppColores.error),
+                            child: const Text('Borrar fecha')),
+                      ],
+                    ),
+                  );
+                  if (confirma != true) return;
                   setS(() => pagadoHasta = null);
-                  Navigator.pop(ctx, true);
+                  if (ctx.mounted) Navigator.pop(ctx, true);
                 },
                 child: const Text('Limpiar fecha')),
             ElevatedButton(
