@@ -190,10 +190,17 @@ class FilaInfoFicha extends StatelessWidget {
           Expanded(
               child: Text(etiqueta,
                   style: AppTexto.cuerpo)),
-          Text(valor,
-              style: AppTexto.cuerpo.copyWith(
-                  fontWeight: FontWeight.w600),
-              textAlign: TextAlign.right),
+          // 1.25 T16: el valor tiene su propio espacio
+          // (flex 2) y envuelve en vez de apretar la
+          // etiqueta o desbordar con la letra grande del
+          // sistema (tarifa especial y Plus son largos).
+          Expanded(
+            flex: 2,
+            child: Text(valor,
+                style: AppTexto.cuerpo.copyWith(
+                    fontWeight: FontWeight.w600),
+                textAlign: TextAlign.right),
+          ),
         ],
       ),
     );
@@ -560,36 +567,56 @@ class FilaTimelineFicha extends StatelessWidget {
                           onPressed: () =>
                               onReenviarRecibo(pagoFila),
                         ),
-                      if (uuidComprobante.isNotEmpty)
-                        IconButton(
-                          tooltip: 'Ver comprobante',
+                      // 1.25 T16: las acciones SECUNDARIAS de
+                      // la fila viven en un menú «⋮» (antes
+                      // hasta 4 botones en la misma línea
+                      // aplastaban el título con letra grande).
+                      if (uuidComprobante.isNotEmpty ||
+                          (e['tipo'] == 'pago' && esAdmin) ||
+                          (e['tipo'] == 'pago' &&
+                              pagoFila != null &&
+                              '${pagoFila['metodo'] ?? ''}' ==
+                                  'transferencia' &&
+                              esOwner))
+                        PopupMenuButton<String>(
+                          tooltip: 'Más acciones',
                           icon: const Icon(
-                              Icons.image_rounded, size: 20),
-                          onPressed: () =>
-                              onVerComprobante(uuidComprobante),
-                        ),
-                      if (e['tipo'] == 'pago' &&
-                          esAdmin)
-                        IconButton(
-                          tooltip: 'Corregir pago',
-                          icon:
-                              const Icon(Icons.tune_rounded, size: 20),
-                          onPressed: () => onCorregirPago(
-                              e['pago'] as Map<String, dynamic>),
-                        ),
-                      // T4 (1.20): conciliar la transferencia
-                      // (solo el dueño; el servidor lo exige).
-                      if (e['tipo'] == 'pago' &&
-                          pagoFila != null &&
-                          '${pagoFila['metodo'] ?? ''}' ==
-                              'transferencia' &&
-                          esOwner)
-                        IconButton(
-                          tooltip: 'Conciliar transferencia',
-                          icon: const Icon(
-                              Icons.fact_check_rounded, size: 20),
-                          onPressed: () =>
-                              onConciliar(pagoFila),
+                              Icons.more_vert_rounded, size: 20),
+                          onSelected: (accion) {
+                            switch (accion) {
+                              case 'comprobante':
+                                onVerComprobante(uuidComprobante);
+                              case 'corregir':
+                                onCorregirPago(e['pago']
+                                    as Map<String, dynamic>);
+                              case 'conciliar':
+                                onConciliar(pagoFila!);
+                            }
+                          },
+                          itemBuilder: (ctx) => [
+                            if (uuidComprobante.isNotEmpty)
+                              const PopupMenuItem(
+                                value: 'comprobante',
+                                child: Text('Ver comprobante'),
+                              ),
+                            if (e['tipo'] == 'pago' && esAdmin)
+                              const PopupMenuItem(
+                                value: 'corregir',
+                                child: Text('Corregir pago'),
+                              ),
+                            // T4 (1.20): conciliar (solo el
+                            // dueño; el servidor lo exige).
+                            if (e['tipo'] == 'pago' &&
+                                pagoFila != null &&
+                                '${pagoFila['metodo'] ?? ''}' ==
+                                    'transferencia' &&
+                                esOwner)
+                              const PopupMenuItem(
+                                value: 'conciliar',
+                                child:
+                                    Text('Conciliar transferencia'),
+                              ),
+                          ],
                         ),
                     ],
                   ),
