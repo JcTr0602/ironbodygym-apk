@@ -70,6 +70,25 @@ class _PendienteScreenState extends State<PendienteScreen> {
     _cargar();
   }
 
+  /// 1.26.1 (ajuste 1 de Argón): reconstruye la lista de
+  /// tarjetas desde los crudos CONSERVANDO la tarjeta
+  /// sintética de quien sigue debiendo solo arrastre.
+  /// procesarPendientes solo ve pagos: sin esta
+  /// reinyección, un cobro parcial que consume todos los
+  /// pagos de un entrenador pero deja arrastre haría
+  /// desaparecer su tarjeta en la vista optimista aunque
+  /// el saldo siga vivo en _arrastresCup.
+  List<EntrenadorPendiente> _reconstruirEntrenadores(
+    List<Map<String, dynamic>> crudos,
+    Map<String, double> arrastres, {
+    Map<String, String> nombresPrevios = const {},
+  }) =>
+      reconstruirEntrenadores(crudos, arrastres,
+          nombresPrevios: nombresPrevios);
+
+  Map<String, String> get _nombresActuales =>
+      {for (final e in _entrenadores) e.trainerTelegramId: e.nombre};
+
   Future<void> _cargar() async {
     final auth = AuthService();
     if (_esDueno) {
@@ -313,7 +332,8 @@ class _PendienteScreenState extends State<PendienteScreen> {
         final id = p['id'] as int? ?? -1;
         return uids.contains('${tipo}_$id');
       });
-      _entrenadores = procesarPendientes(_crudos);
+      _entrenadores = _reconstruirEntrenadores(_crudos, _arrastresCup,
+          nombresPrevios: _nombresActuales);
       // Argón B2: recalcular _totalUsd en el setState optimista.
       _totalUsd = _entrenadores.fold(
           0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
@@ -343,7 +363,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
       if (mounted) {
         setState(() {
           _crudos = crudosAnteriores;
-          _entrenadores = procesarPendientes(_crudos);
+          _entrenadores = _reconstruirEntrenadores(
+              _crudos, _arrastresCup,
+              nombresPrevios: _nombresActuales);
           _totalUsd = _entrenadores.fold(
               0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
         });
@@ -478,8 +500,13 @@ class _PendienteScreenState extends State<PendienteScreen> {
     setState(() {
       _crudos.removeWhere(
           (p) => uids.contains('${p['tipo']}_${p['id']}'));
-      _entrenadores = procesarPendientes(_crudos);
+      // 1.26.1 (ajuste 1 de Argón): el arrastre nuevo se
+      // fija ANTES de reconstruir y la reconstrucción
+      // conserva la tarjeta sintética si el entrenador
+      // quedó debiendo solo saldo de parciales.
       _arrastresCup[ent.trainerTelegramId] = comp.nuevoArrastre;
+      _entrenadores = _reconstruirEntrenadores(_crudos, _arrastresCup,
+          nombresPrevios: _nombresActuales);
       _totalUsd = _entrenadores.fold(
           0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
       if (_totalAutoritativoCup != null) {
@@ -503,6 +530,11 @@ class _PendienteScreenState extends State<PendienteScreen> {
     if (!_esDueno || _confirmando) return;
     final tid = int.tryParse(ent.trainerTelegramId);
     if (tid == null) return;
+    // 1.26.1 (ajuste 2 de Argón): la misma guarda H11
+    // que _abrirCobrarParcial y _confirmarPorIds — con
+    // adelanto vivo o resto del libro C1, «Cobrar todo»
+    // también se resuelve en el Arqueo, no aquí.
+    if (await _redirigirArqueoSiBloqueado(tid)) return;
     var esperado = (await pendienteArqueo(tid)).cup;
     if (!mounted) return;
     if (esperado <= 0.01) {
@@ -571,8 +603,13 @@ class _PendienteScreenState extends State<PendienteScreen> {
           '${p['trainer_telegram_id'] ?? p['entrenador_id'] ?? ''}' ==
               ent.trainerTelegramId &&
           (p['moneda'] as String? ?? 'CUP') == 'CUP');
-      _entrenadores = procesarPendientes(_crudos);
+      // 1.26.1 (ajuste 1 de Argón): mismo criterio que
+      // en el cobro parcial — arrastre a 0 primero y
+      // reconstrucción que conserva las tarjetas
+      // sintéticas de los DEMÁS entrenadores.
       _arrastresCup[ent.trainerTelegramId] = 0;
+      _entrenadores = _reconstruirEntrenadores(_crudos, _arrastresCup,
+          nombresPrevios: _nombresActuales);
       _totalUsd = _entrenadores.fold(
           0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
       if (_totalAutoritativoCup != null) {

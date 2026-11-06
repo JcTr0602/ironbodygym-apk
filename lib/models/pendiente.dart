@@ -226,3 +226,29 @@ List<EntrenadorPendiente> procesarPendientes(
         dias: dias);
   }).toList();
 }
+
+/// 1.26.1 (ajuste 1 de Argón): como [procesarPendientes],
+/// pero reinyecta la tarjeta sintética (sin días) de
+/// cada entrenador que sigue debiendo solo saldo de
+/// cobros parciales ([arrastres] vivo > 0.01) y ya no
+/// tiene pagos en los crudos. Sin ella, la vista
+/// optimista tras un cobro parcial haría desaparecer
+/// la tarjeta de un saldo que sigue vivo.
+List<EntrenadorPendiente> reconstruirEntrenadores(
+  List<Map<String, dynamic>> crudos,
+  Map<String, double> arrastres, {
+  Map<String, String> nombresPrevios = const {},
+}) {
+  final lista = procesarPendientes(crudos);
+  final presentes = {for (final e in lista) e.trainerTelegramId};
+  for (final entry in arrastres.entries) {
+    if (entry.value <= 0.01) continue;
+    if (presentes.contains(entry.key)) continue;
+    lista.add(EntrenadorPendiente(
+      nombre: nombresPrevios[entry.key] ?? 'Entrenador',
+      trainerTelegramId: entry.key,
+      dias: const [],
+    ));
+  }
+  return lista;
+}

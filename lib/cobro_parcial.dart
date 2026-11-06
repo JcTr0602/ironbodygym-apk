@@ -120,7 +120,10 @@ CobroParcialCompuesto? componerCobroParcial({
   return CobroParcialCompuesto(
     opIds: opIds,
     montoEsperado: esperado,
-    montoEntregado: monto,
+    // 1.26.1 (ajuste 3 de Argón): el entregado también
+    // viaja redondeado a 2 decimales, como el esperado
+    // y el nuevo arrastre.
+    montoEntregado: _redondear2(monto),
     nuevoArrastre: _redondear2(
         (esperado - monto).clamp(0, double.infinity).toDouble()),
     cubiertas: cubiertas,
