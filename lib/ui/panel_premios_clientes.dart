@@ -11,6 +11,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'widgets.dart';
 
 /// Premios (1.27, S3/G3): pestaña «Clientes» del hub —
 /// buscador sobre el espejo local y, por cliente, el
@@ -68,6 +69,12 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   String? _pagadoHasta;
   Set<int> _anulacionesEnCurso = {};
 
+  // H-01 (Argón 1.27): candado anti doble-toque de las
+  // acciones del detalle (patrón _resolviendo de la
+  // Bandeja): check-and-set SÍNCRONO antes del primer
+  // await; un doble toque apilaba dos diálogos.
+  bool _operando = false;
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +92,10 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     final filas = await LocalDb.instance.allMirror('clientes');
     final out = <({int id, String nombre, String telefono})>[];
     for (final m in filas) {
+      // H-04 (Argón 1.27): las cáscaras de clientes
+      // eliminados no son personas: fuera del buscador,
+      // como en el resto de listas de la casa.
+      if (esClienteEliminado(m)) continue;
       final id = (m['id'] as num?)?.toInt() ??
           int.tryParse('${m['id'] ?? ''}');
       if (id == null) continue;
@@ -172,6 +183,12 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   /// espejo como avance (el pull lo confirma).
   Future<void> _anularReal(int clienteId, ValeHistorial vale,
       String modo, int diasQuitables, String nota) async {
+    // H-01 (Argón 1.27): si este teléfono ya encoló la
+    // anulación de este vale, no se encola otra: la
+    // marca meta sobrevive a matar la app entre el
+    // queueOp y el setMeta, y a que el detalle se
+    // recargue con la foto vieja del servidor.
+    if (await _enCursoReal(vale.id)) return;
     final opUuid = const Uuid().v4();
     final k = modo == 'completo' ? vale.premioDias : diasQuitables;
     await LocalDb.instance.queueOp(
@@ -188,14 +205,15 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     await LocalDb.instance
         .setMeta('premio_vale_anulado_${vale.id}', opUuid);
     if (k > 0 && _pagadoHasta != null) {
-      final hasta = DateTime.tryParse(_pagadoHasta!);
-      if (hasta != null) {
-        final nuevo = hasta.subtract(Duration(days: k));
+      // H-01 (Argón 1.27): aritmética UTC pura
+      // (sumarDiasIso). Restar un Duration a un
+      // DateTime en hora local cruza el cambio de
+      // horario de Cuba y puede correr el espejo un
+      // día de más que el servidor.
+      if (DateTime.tryParse(_pagadoHasta!) != null) {
         await LocalDb.instance.updateMirrorPagadoHasta(
           clienteId,
-          '${nuevo.year.toString().padLeft(4, '0')}-'
-          '${nuevo.month.toString().padLeft(2, '0')}-'
-          '${nuevo.day.toString().padLeft(2, '0')}',
+          sumarDiasIso(_pagadoHasta!, -k),
         );
       }
     }
@@ -264,77 +282,105 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   }
 
   Future<void> _conceder() async {
+    // H-01 (Argón 1.27): check-and-set síncrono ANTES
+    // del primer await (patrón _resolviendo de la
+    // Bandeja); sin él, un doble toque apilaba dos
+    // diálogos de concesión.
+    if (_operando) return;
     final id = _seleccionadoId;
     if (id == null) return;
-    List<EntradaCatalogoPremio> catalogo;
+    setState(() => _operando = true);
     try {
-      catalogo = await (widget.cargarCatalogo ?? _catalogoReal)();
-    } catch (_) {
-      if (mounted) {
-        mostrarSnack(context, 'Sin conexión con el servidor.',
-            significado: SignificadoChip.error);
+      List<EntradaCatalogoPremio> catalogo;
+      try {
+        catalogo = await (widget.cargarCatalogo ?? _catalogoReal)();
+      } catch (_) {
+        if (mounted) {
+          mostrarSnack(context, 'Sin conexión con el servidor.',
+              significado: SignificadoChip.error);
+        }
+        return;
       }
-      return;
-    }
-    if (!mounted) return;
-    final hecho = await showDialog<bool>(
-      context: context,
-      builder: (_) => _DialogoConcederVale(
-        nombreCliente: _seleccionadoNombre,
-        catalogo: catalogo,
-        conceder: (logroId, dias, nota) =>
-            (widget.concederVale ?? _concederReal)(
-                id, logroId, dias, nota),
-      ),
-    );
-    if (hecho == true && mounted) {
-      mostrarSnack(
-          context,
-          'Vale creado: está en la Bandeja, apruébalo ahí '
-          'para aplicar los días.',
-          significado: SignificadoChip.exito);
-      await _recargarDetalle();
+      if (!mounted) return;
+      final hecho = await showDialog<bool>(
+        context: context,
+        builder: (_) => _DialogoConcederVale(
+          nombreCliente: _seleccionadoNombre,
+          catalogo: catalogo,
+          conceder: (logroId, dias, nota) =>
+              (widget.concederVale ?? _concederReal)(
+                  id, logroId, dias, nota),
+        ),
+      );
+      if (hecho == true && mounted) {
+        mostrarSnack(
+            context,
+            'Vale creado: está en la Bandeja, apruébalo ahí '
+            'para aplicar los días.',
+            significado: SignificadoChip.exito);
+        await _recargarDetalle();
+      }
+    } finally {
+      if (mounted) setState(() => _operando = false);
     }
   }
 
   Future<void> _anular(ValeHistorial v) async {
+    // H-01 (Argón 1.27): misma guarda síncrona que
+    // _conceder — dos diálogos de anulación confirmados
+    // encolarían DOS ops anular_vale_premio con uuid
+    // distinto para el mismo vale.
+    if (_operando) return;
     final id = _seleccionadoId;
     if (id == null) return;
-    final hecho = await showDialog<bool>(
-      context: context,
-      builder: (_) => _DialogoAnularVale(
-        nombreCliente: _seleccionadoNombre,
-        vale: v,
-        pagadoHasta: _pagadoHasta,
-        hoy: ahoraHabana(),
-        anular: (modo, k, nota) =>
-            (widget.anularVale ?? _anularReal)(id, v, modo, k, nota),
-      ),
-    );
-    if (hecho == true && mounted) {
-      setState(() => _anulacionesEnCurso = {..._anulacionesEnCurso, v.id});
-      mostrarSnack(
-          context,
-          'Anulación encolada: se aplica al sincronizar.',
-          significado: SignificadoChip.exito);
+    setState(() => _operando = true);
+    try {
+      final hecho = await showDialog<bool>(
+        context: context,
+        builder: (_) => _DialogoAnularVale(
+          nombreCliente: _seleccionadoNombre,
+          vale: v,
+          pagadoHasta: _pagadoHasta,
+          hoy: ahoraHabana(),
+          anular: (modo, k, nota) =>
+              (widget.anularVale ?? _anularReal)(id, v, modo, k, nota),
+        ),
+      );
+      if (hecho == true && mounted) {
+        setState(
+            () => _anulacionesEnCurso = {..._anulacionesEnCurso, v.id});
+        mostrarSnack(
+            context,
+            'Anulación encolada: se aplica al sincronizar.',
+            significado: SignificadoChip.exito);
+      }
+    } finally {
+      if (mounted) setState(() => _operando = false);
     }
   }
 
   Future<void> _reiniciar() async {
+    // H-01 (Argón 1.27): misma guarda síncrona.
+    if (_operando) return;
     final id = _seleccionadoId;
     if (id == null) return;
-    final hecho = await showDialog<bool>(
-      context: context,
-      builder: (_) => _DialogoReiniciarCiclo(
-        nombreCliente: _seleccionadoNombre,
-        reiniciar: (nota) =>
-            (widget.reiniciarCiclo ?? _reiniciarReal)(id, nota),
-      ),
-    );
-    if (hecho == true && mounted) {
-      mostrarSnack(context, 'Ciclo reiniciado: el conteo parte de hoy.',
-          significado: SignificadoChip.exito);
-      await _recargarDetalle();
+    setState(() => _operando = true);
+    try {
+      final hecho = await showDialog<bool>(
+        context: context,
+        builder: (_) => _DialogoReiniciarCiclo(
+          nombreCliente: _seleccionadoNombre,
+          reiniciar: (nota) =>
+              (widget.reiniciarCiclo ?? _reiniciarReal)(id, nota),
+        ),
+      );
+      if (hecho == true && mounted) {
+        mostrarSnack(context, 'Ciclo reiniciado: el conteo parte de hoy.',
+            significado: SignificadoChip.exito);
+        await _recargarDetalle();
+      }
+    } finally {
+      if (mounted) setState(() => _operando = false);
     }
   }
 
@@ -403,6 +449,11 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
               style: AppTexto.subtitulo),
           subtitle: const Text('Premios y logros'),
         ),
+        // H-04 (Argón 1.27): al terminar el sync, el
+        // detalle se recarga solo (patrón de la Bandeja):
+        // el «⏳ Anulación en curso (sincronizando)» se
+        // resuelve con la foto fresca sin salir y volver.
+        SyncBanner(alTerminarSync: _recargarDetalle),
         Expanded(
           child: _cargandoDetalle
               ? const EstadoCargando(texto: 'Cargando detalle…')
@@ -433,7 +484,7 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: _conceder,
+                onPressed: _operando ? null : _conceder,
                 icon: const Icon(Icons.card_giftcard_rounded,
                     size: 18),
                 label: const Text('Conceder vale'),
@@ -442,7 +493,7 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: _reiniciar,
+                onPressed: _operando ? null : _reiniciar,
                 icon: const Icon(Icons.restart_alt_rounded,
                     size: 18),
                 label: const Text('Reiniciar ciclo'),
@@ -603,7 +654,7 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed: () => _anular(v),
+                  onPressed: _operando ? null : () => _anular(v),
                   icon: const Icon(Icons.undo_rounded, size: 18),
                   label: const Text('Anular vale'),
                 ),
@@ -944,13 +995,13 @@ class _DialogoAnularValeState extends State<_DialogoAnularVale> {
   String _hastaTras(int diasMenos) {
     final hasta = widget.pagadoHasta;
     if (hasta == null) return '—';
-    final f = DateTime.tryParse(hasta);
-    if (f == null) return '—';
-    final n = f.subtract(Duration(days: diasMenos));
-    return fmtFecha(
-        '${n.year.toString().padLeft(4, '0')}-'
-        '${n.month.toString().padLeft(2, '0')}-'
-        '${n.day.toString().padLeft(2, '0')}');
+    if (DateTime.tryParse(hasta) == null) return '—';
+    // H-01 (Argón 1.27): aritmética UTC pura
+    // (sumarDiasIso). La resta sobre un DateTime local
+    // cruzaba el cambio de horario (marzo en Cuba) y
+    // la vista previa se corría un día frente al
+    // servidor.
+    return fmtFecha(sumarDiasIso(hasta, -diasMenos));
   }
 
   Future<void> _enviar() async {
@@ -1016,11 +1067,25 @@ class _DialogoAnularValeState extends State<_DialogoAnularVale> {
                   contentPadding: EdgeInsets.zero,
                   value: 'completo',
                   title: const Text('Quitar el pago completo'),
-                  subtitle: Text(
-                      'Se elimina el pago de cortesía de '
-                      '${v.premioDias} días y el vencimiento se '
-                      'recalcula sin él (también se caen los '
-                      'días ya disfrutados).'),
+                  // H-03 (Argón 1.27): la fecha que sale
+                  // de restar los días es solo la
+                  // ESTIMACIÓN local: en modo completo el
+                  // servidor borra el pago y recalcula el
+                  // vencimiento sin él, y esa es la fecha
+                  // que manda (con un hueco de por medio,
+                  // la resta lineal puede no coincidir).
+                  subtitle: Text(widget.pagadoHasta != null
+                      ? 'Se quitan los ${v.premioDias} días '
+                          'completos (también los ya '
+                          'disfrutados): pasaría de '
+                          '${fmtFecha(widget.pagadoHasta)} a '
+                          '${_hastaTras(v.premioDias)}. Es una '
+                          'estimación: la fecha exacta la '
+                          'confirma el servidor al sincronizar.'
+                      : 'Se quitan los ${v.premioDias} días '
+                          'completos (también los ya '
+                          'disfrutados). La fecha exacta la '
+                          'confirma el servidor al sincronizar.'),
                 ),
               ],
             ),

@@ -768,6 +768,8 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const ListaIncidenciasScreen());
       case 'premios':
         _ir(const PremiosHubScreen());
+      case 'comunidad':
+        _ir(const ComunidadPanelScreen());
       case 'errores_sync':
         _ir(const ErroresSyncPanelScreen());
       case 'auditoria':

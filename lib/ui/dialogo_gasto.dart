@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
@@ -19,6 +21,22 @@ import 'diseno.dart';
 ///
 /// Devuelve true si el gasto quedó encolado.
 Future<bool> agregarGastoFlow(BuildContext context) async {
+  // H-02 (Argón 1.27): guarda de permiso DENTRO del
+  // flujo compartido, antes de abrir el diálogo. Las
+  // pantallas que lo llaman pueden quedar abiertas en
+  // segundo plano con el permiso ya revocado: sin esta
+  // guarda, el entrenador seguía registrando y veía el
+  // falso «Gasto guardado (se sincronizará)» mientras
+  // el servidor rebotaba la op. El servidor sigue
+  // siendo el cinturón final (permisos_ops).
+  if (!AuthService().isOwner &&
+      !PermisosEntrenador().canRegistrarGastos) {
+    mostrarSnack(
+        context,
+        'No tienes permiso para registrar gastos. Pídeselo a Jc.',
+        significado: SignificadoChip.error);
+    return false;
+  }
   final datos = await showDialog<({String concepto, double monto})>(
     context: context,
     builder: (_) => const DialogoAgregarGasto(),

@@ -3,6 +3,7 @@
 // ficha lista las fotos del cliente, no ocupa espacio
 // si no hay ninguna, y el borrado de moderación pasa
 // por la puerta inyectada y retira la foto de la lista.
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -69,6 +70,100 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Eliminar'));
     await tester.pumpAndSettle();
     expect(eliminada, 'f1');
+    expect(find.text('03/10/2026'), findsNothing);
+    expect(find.text('01/11/2026'), findsOneWidget);
+  });
+
+  // H-08 (Argón 1.27): una miniatura que descarga null
+  // no queda cacheada para siempre: el toque reintenta
+  // la descarga y, si esta vez llega, el visor abre.
+  testWidgets('H-08: miniatura fallida se reintenta al '
+      'tocar de nuevo', (tester) async {
+    var descargas = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: SeccionFotosProgresoNube(
+            clienteId: 5,
+            cargarFotos: () async => const [
+              {'id': 'f1', 'fecha': '2026-10-03'},
+            ],
+            descargarFoto: (_) async {
+              descargas++;
+              // La primera descarga (la miniatura del
+              // grid) falla; la del reintento llega.
+              return descargas == 1 ? null : _png1px;
+            },
+            eliminarFoto: (_) async => true,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(descargas, 1);
+    expect(find.byIcon(Icons.broken_image_outlined),
+        findsOneWidget);
+    // Tocar la celda: como el null no quedó cacheado,
+    // se vuelve a descargar y el visor abre.
+    await tester.tap(find.text('03/10/2026'));
+    await tester.pumpAndSettle();
+    expect(descargas, 2);
+    expect(find.text('Eliminar de la nube'), findsOneWidget);
+  });
+
+  // H-06 (Argón 1.27): mientras la eliminación está en
+  // vuelo, la celda se congela (indicador + sin toque)
+  // y no cabe un segundo admin_eliminar de la misma
+  // foto.
+  testWidgets('H-06: celda congelada durante la '
+      'eliminación en vuelo', (tester) async {
+    final enVuelo = Completer<bool>();
+    var eliminaciones = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: SeccionFotosProgresoNube(
+            clienteId: 5,
+            cargarFotos: () async => const [
+              {'id': 'f1', 'fecha': '2026-10-03'},
+              {'id': 'f2', 'fecha': '2026-11-01'},
+            ],
+            descargarFoto: (_) async => _png1px,
+            eliminarFoto: (_) {
+              eliminaciones++;
+              return enVuelo.future;
+            },
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('03/10/2026'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Eliminar de la nube'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Eliminar'));
+    // Sin pumpAndSettle a partir de aquí: el indicador
+    // de la celda es indeterminado y nunca «asienta».
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+    // La eliminación quedó en vuelo: UNA llamada, la
+    // celda de f1 con indicador y el visor cerrado.
+    expect(eliminaciones, 1);
+    expect(find.byType(CircularProgressIndicator),
+        findsOneWidget);
+    expect(find.text('Eliminar de la nube'), findsNothing);
+    // Tocar la celda congelada no hace nada: ni visor
+    // ni segunda eliminación.
+    await tester.tap(find.text('03/10/2026'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(eliminaciones, 1);
+    expect(find.text('Eliminar de la nube'), findsNothing);
+    // Al confirmarse, la foto sale de la lista.
+    enVuelo.complete(true);
+    await tester.pumpAndSettle();
     expect(find.text('03/10/2026'), findsNothing);
     expect(find.text('01/11/2026'), findsOneWidget);
   });

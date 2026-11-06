@@ -4,8 +4,11 @@
 /// vale con nota obligatoria.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/premios_panel.dart';
 import 'package:ironbody_gym/ui/panel_premios_clientes.dart';
 
@@ -240,5 +243,164 @@ void main() {
     await tester.pumpAndSettle();
     expect(concesion, (7, 'manual', 7, 'Premio especial'));
     detalleJson = _jsonDetalle();
+  });
+
+  // H-01 (Argón 1.27): la guarda _operando se toma
+  // SÍNCRONA antes del primer await: con la carga del
+  // catálogo en vuelo, el botón queda deshabilitado y
+  // un segundo toque no vuelve a pedir el catálogo ni
+  // apila un segundo diálogo.
+  testWidgets('H-01: doble toque en Conceder no apila '
+      'dos diálogos', (tester) async {
+    var cargasCatalogo = 0;
+    final enVuelo = Completer<List<EntradaCatalogoPremio>>();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PremiosClientesTab(
+          buscarClientes: () async => [
+            (id: 7, nombre: 'Ana Prueba', telefono: '55551234'),
+          ],
+          cargarDetalle: (_) async => _jsonDetalle(),
+          cargarCatalogo: () {
+            cargasCatalogo++;
+            return enVuelo.future;
+          },
+          concederVale: (_, __, ___, ____) async => {'ok': true},
+          reiniciarCiclo: (_, __) async => {'ok': true},
+          pagadoHastaDe: (_) async => '2026-12-01',
+          anulacionEnCursoDe: (_) async => false,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ana Prueba'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Conceder vale'));
+    await tester.pump();
+    expect(cargasCatalogo, 1);
+    final boton = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Conceder vale'));
+    expect(boton.onPressed, isNull);
+    // Segundo toque con la operación en curso: no-op.
+    await tester.tap(find.text('Conceder vale'));
+    await tester.pump();
+    expect(cargasCatalogo, 1);
+    enVuelo.complete(const [
+      EntradaCatalogoPremio(
+        logroId: 'manual',
+        nombre: 'Vale manual',
+        metaDias: 1,
+        premioDias: 0,
+        activo: false,
+        ultimoCambioTexto: null,
+      ),
+    ]);
+    await tester.pumpAndSettle();
+    // Un solo diálogo de concesión.
+    expect(find.text('Crear vale'), findsOneWidget);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+    // La guarda se liberó en el finally: el botón revive.
+    final boton2 = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Conceder vale'));
+    expect(boton2.onPressed, isNotNull);
+  });
+
+  // H-01: la guarda también cubre Anular — con el
+  // diálogo abierto sigue tomada (el botón de la
+  // tarjeta, deshabilitado) y se libera al cerrarlo.
+  testWidgets('H-01: la guarda de Anular vive lo que '
+      'dura el diálogo', (tester) async {
+    String iso(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final hoy = DateTime.now();
+    final detalle = _jsonDetalle();
+    (detalle['vales'] as List)[0]['resuelto_en'] =
+        '${iso(hoy.subtract(const Duration(days: 5)))}T11:00:00Z';
+    final hastaFutura = iso(hoy.add(const Duration(days: 25)));
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PremiosClientesTab(
+          buscarClientes: () async => [
+            (id: 7, nombre: 'Ana Prueba', telefono: '55551234'),
+          ],
+          cargarDetalle: (_) async => detalle,
+          cargarCatalogo: () async => const [],
+          concederVale: (_, __, ___, ____) async => {'ok': true},
+          reiniciarCiclo: (_, __) async => {'ok': true},
+          pagadoHastaDe: (_) async => hastaFutura,
+          anulacionEnCursoDe: (_) async => false,
+          anularVale: (_, __, ___, ____, _____) async {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ana Prueba'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Anular vale'), 200);
+    await tester.tap(find.text('Anular vale'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('ya se aplicó'), findsOneWidget);
+    final durante = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, 'Anular vale'));
+    expect(durante.onPressed, isNull);
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+    final despues = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, 'Anular vale'));
+    expect(despues.onPressed, isNotNull);
+  });
+
+  // H-03 (Argón 1.27): el subtítulo del modo completo
+  // enseña la fecha estimada (pagado_hasta − premio)
+  // y avisa de que la exacta la confirma el servidor.
+  testWidgets('H-03: el modo completo muestra la fecha '
+      'estimada y el aviso del servidor', (tester) async {
+    String iso(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final hoy = DateTime.now();
+    final detalle = _jsonDetalle();
+    (detalle['vales'] as List)[0]['resuelto_en'] =
+        '${iso(hoy.subtract(const Duration(days: 5)))}T11:00:00Z';
+    final hastaFutura = iso(hoy.add(const Duration(days: 25)));
+    // Vale de 7 días: la estimación del modo completo
+    // es hastaFutura − 7 días = hoy + 18.
+    final estimada = iso(hoy.add(const Duration(days: 18)));
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PremiosClientesTab(
+          buscarClientes: () async => [
+            (id: 7, nombre: 'Ana Prueba', telefono: '55551234'),
+          ],
+          cargarDetalle: (_) async => detalle,
+          cargarCatalogo: () async => const [],
+          concederVale: (_, __, ___, ____) async => {'ok': true},
+          reiniciarCiclo: (_, __) async => {'ok': true},
+          pagadoHastaDe: (_) async => hastaFutura,
+          anulacionEnCursoDe: (_) async => false,
+          anularVale: (_, __, ___, ____, _____) async {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ana Prueba'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Anular vale'), 200);
+    await tester.tap(find.text('Anular vale'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Quitar el pago completo'));
+    await tester.pumpAndSettle();
+    expect(
+        find.textContaining('pasaría de ${fmtFecha(hastaFutura)} '
+            'a ${fmtFecha(estimada)}'),
+        findsOneWidget);
+    expect(
+        find.textContaining(
+            'la fecha exacta la confirma el servidor'),
+        findsOneWidget);
   });
 }

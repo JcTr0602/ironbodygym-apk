@@ -466,9 +466,22 @@ class SeccionGastosScreen extends StatefulWidget {
 }
 
 class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
+  // H-01 (Argón 1.27): candado anti doble-toque —
+  // esta es la superficie que recibe los toques (el
+  // botón «Agregar gasto» y la acción del estado
+  // vacío): check-and-set síncrono antes del primer
+  // await, patrón _operacionEnCurso de admin.dart.
+  bool _operando = false;
+
   Future<void> _agregarYActualizar() async {
-    await widget.onAgregarGasto();
-    if (mounted) setState(() {});
+    if (_operando) return;
+    _operando = true;
+    try {
+      await widget.onAgregarGasto();
+      if (mounted) setState(() {});
+    } finally {
+      _operando = false;
+    }
   }
 
   @override

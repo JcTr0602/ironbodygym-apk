@@ -336,6 +336,15 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       titulo: 'Premios por aprobar',
       sinonimos: ['vales', 'logros de clientes', 'canjear premio', 'constancia real'],
       icono: Icons.emoji_events_rounded),
+  // H-07 (Argón 1.27): la tarjeta «Comunidad» del
+  // Panel no estaba en el índice del buscador: sin
+  // esta entrada (y su case en _abrirFuncionPanel)
+  // el destino era inalcanzable desde la búsqueda.
+  FuncionPanel(
+      id: 'comunidad',
+      titulo: 'Comunidad',
+      sinonimos: ['perfiles visibles', 'social', 'ocultar perfil de cliente'],
+      icono: Icons.groups_rounded),
   FuncionPanel(
       id: 'errores_sync',
       titulo: 'Errores de sync',

@@ -51,6 +51,13 @@ class _SeccionFotosProgresoNubeState
   List<Map<String, dynamic>> _fotos = const [];
   final Map<String, Future<Uint8List?>> _miniaturas = {};
 
+  // H-06 (Argón 1.27): fotos con la eliminación de
+  // moderación EN VUELO (la llamada puede tardar
+  // segundos): su celda se congela con un indicador y
+  // no admite otro toque que dispare un segundo
+  // admin_eliminar sobre la misma foto.
+  final Set<String> _eliminandoIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -147,15 +154,34 @@ class _SeccionFotosProgresoNubeState
     }
   }
 
-  Future<Uint8List?> _miniatura(String fotoId) =>
-      _miniaturas.putIfAbsent(
-          fotoId, () => (widget.descargarFoto ?? _descargarReal)(fotoId));
+  Future<Uint8List?> _miniatura(String fotoId) {
+    return _miniaturas.putIfAbsent(fotoId, () {
+      final descarga =
+          (widget.descargarFoto ?? _descargarReal)(fotoId);
+      // H-08 (Argón 1.27): si la descarga resuelve
+      // null (o falla), la entrada se EXPULSA de la
+      // caché al completar: antes el Future fallido
+      // quedaba cacheado para siempre y ningún toque
+      // posterior podía reintentar la descarga.
+      return descarga.then<Uint8List?>((bytes) {
+        if (bytes == null) _miniaturas.remove(fotoId);
+        return bytes;
+      }, onError: (Object _) {
+        _miniaturas.remove(fotoId);
+        return null;
+      });
+    });
+  }
 
   Future<void> _verGrande(Map<String, dynamic> foto) async {
     final fotoId = foto['id']?.toString() ?? '';
     final bytes = await _miniatura(fotoId);
     if (!mounted) return;
     if (bytes == null) {
+      // H-08: expulsar también aquí por si la entrada
+      // se cacheó por otra vía — el próximo toque
+      // reintenta la descarga.
+      _miniaturas.remove(fotoId);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('No se pudo descargar la foto.')));
       return;
@@ -232,8 +258,18 @@ class _SeccionFotosProgresoNubeState
       ),
     );
     if (borrada != true || !mounted) return;
-    final ok =
-        await (widget.eliminarFoto ?? _eliminarReal)(fotoId);
+    // H-06 (Argón 1.27): la celda queda marcada como
+    // «eliminando» ANTES del await (que puede tardar
+    // hasta el timeout): el grid la congela y un
+    // segundo toque no dispara otro admin_eliminar.
+    setState(() => _eliminandoIds.add(fotoId));
+    bool ok;
+    try {
+      ok = await (widget.eliminarFoto ?? _eliminarReal)(fotoId);
+    } finally {
+      _eliminandoIds.remove(fotoId);
+      if (mounted) setState(() {});
+    }
     if (!mounted) return;
     if (ok) {
       setState(() {
@@ -311,8 +347,11 @@ class _SeccionFotosProgresoNubeState
             itemBuilder: (ctx, i) {
               final f = _fotos[i];
               final fotoId = f['id']?.toString() ?? '';
+              // H-06: celda congelada mientras su
+              // eliminación está en vuelo.
+              final eliminando = _eliminandoIds.contains(fotoId);
               return InkWell(
-                onTap: () => _verGrande(f),
+                onTap: eliminando ? null : () => _verGrande(f),
                 borderRadius: BorderRadius.circular(10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,29 +359,42 @@ class _SeccionFotosProgresoNubeState
                     Expanded(
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: FutureBuilder<Uint8List?>(
-                          future: _miniatura(fotoId),
-                          builder: (ctx, snap) {
-                            final bytes = snap.data;
-                            if (bytes == null) {
-                              return Container(
-                                color: Colors.black12,
-                                child: Center(
-                                  child: snap.connectionState ==
-                                          ConnectionState.waiting
-                                      ? const CircularProgressIndicator(
-                                          strokeWidth: 2)
-                                      : const Icon(
-                                          Icons.broken_image_outlined),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            FutureBuilder<Uint8List?>(
+                              future: _miniatura(fotoId),
+                              builder: (ctx, snap) {
+                                final bytes = snap.data;
+                                if (bytes == null) {
+                                  return Container(
+                                    color: Colors.black12,
+                                    child: Center(
+                                      child: snap.connectionState ==
+                                              ConnectionState.waiting
+                                          ? const CircularProgressIndicator(
+                                              strokeWidth: 2)
+                                          : const Icon(
+                                              Icons.broken_image_outlined),
+                                    ),
+                                  );
+                                }
+                                return Image.memory(
+                                  bytes,
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                );
+                              },
+                            ),
+                            if (eliminando)
+                              Container(
+                                color: Colors.black38,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
                                 ),
-                              );
-                            }
-                            return Image.memory(
-                              bytes,
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                            );
-                          },
+                              ),
+                          ],
                         ),
                       ),
                     ),

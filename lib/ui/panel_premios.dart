@@ -335,18 +335,31 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
           if (_bandeja.recientes.isNotEmpty) ...[
             const EncabezadoSeccion(titulo: 'Resueltos recientes'),
             for (final r in _bandeja.recientes)
+              // H-05 (Argón 1.27): switch por el ESTADO
+              // real del vale, no por el booleano canjeado:
+              // un vale 'anulado' (S7) se pintaba como
+              // «Rechazado». Mismo patrón de
+              // _tarjetaValeHistorial (clientes).
               ListTile(
                 leading: Icon(
-                    r.canjeado
-                        ? Icons.emoji_events_rounded
-                        : Icons.block_rounded,
-                    color: r.canjeado
-                        ? AppColores.naranja
-                        : AppColores.textoSecundario(context)),
+                    switch (r.estado) {
+                      'canjeado' => Icons.emoji_events_rounded,
+                      'anulado' => Icons.undo_rounded,
+                      _ => Icons.block_rounded,
+                    },
+                    color: switch (r.estado) {
+                      'canjeado' => AppColores.naranja,
+                      'anulado' => AppColores.alerta,
+                      _ => AppColores.textoSecundario(context),
+                    }),
                 title: Text(
                     '${r.nombre} · ${r.premioDias} días'),
                 subtitle: Text(
-                    '${r.canjeado ? 'Canjeado' : 'Rechazado'}'
+                    '${switch (r.estado) {
+                      'canjeado' => 'Canjeado',
+                      'anulado' => 'Anulado',
+                      _ => 'Rechazado',
+                    }}'
                     '${r.resueltoEn.length >= 10 ? ' el ${fmtFecha(r.resueltoEn.substring(0, 10))}' : ''}'
                     '${r.resueltoNota.isNotEmpty ? ' · ${r.resueltoNota}' : ''}'),
               ),
