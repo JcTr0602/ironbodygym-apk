@@ -20,8 +20,10 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'localdb.dart';
 import 'negocio.dart';
@@ -268,6 +270,130 @@ class TurnoService {
         }
       }
     } catch (_) {}
+    // 1.27 (caso de campo Duany, 2026-11-06): los cierres hechos
+    // por OTRA persona (el dueño administrativamente en el
+    // servidor) nunca bajan por los espejos — las tablas de
+    // turnos son solo-dueño (RLS + tablas prohibidas al
+    // entrenador) — y la lista local quedaba «sin cerrar» para
+    // siempre (11 turnos fantasma en su Inicio). Se reconcilian
+    // aparte contra la RPC de cierres propios. Va FUERA del try
+    // anterior y con su propio catch: su fallo jamás toca la
+    // reconciliación local de arriba.
+    try {
+      await reconciliarConServidorDe(tid);
+    } catch (_) {}
+  }
+
+  /// Reconcilia la lista local con los cierres que constan en el
+  /// SERVIDOR para el entrenador logueado (ver
+  /// [reconciliarConServidorDe]). Sin sesión no hace nada.
+  Future<void> reconciliarConServidor() async {
+    final tid = _auth.telegramId;
+    if (tid == null) return;
+    await reconciliarConServidorDe(tid);
+  }
+
+  /// Trae los cierres PROPIOS desde el servidor: RPC
+  /// `mis_cierres_turno` (SECURITY DEFINER; el servidor filtra
+  /// por el telegram_id del JWT del llamante, así que un
+  /// entrenador solo ve los suyos — los datos de turnos de
+  /// otros no salen del servidor). Patrón de RPC de la casa
+  /// (Supabase.instance.client.rpc + timeout de 12 s, como en
+  /// estado_cuenta.dart y panel_comunidad.dart). Devuelve las
+  /// filas crudas [{turno_id, fecha, turno}].
+  Future<List<Map<String, dynamic>>> _cierresDelServidor() async {
+    final res = await Supabase.instance.client
+        .rpc('mis_cierres_turno')
+        .timeout(const Duration(seconds: 12));
+    final filas = <Map<String, dynamic>>[];
+    if (res is List) {
+      for (final f in res) {
+        if (f is Map) filas.add(Map<String, dynamic>.from(f));
+      }
+    }
+    return filas;
+  }
+
+  /// Núcleo de la reconciliación con el servidor, con el
+  /// telegram explícito (costura de test, como
+  /// [promoverTurnosConEvidencia]; [reconciliarConServidor] y
+  /// [reconciliarTurnos] lo envuelven con la sesión).
+  ///
+  /// Por cada cierre propio que devuelve la RPC: si hay una
+  /// fila local de ESTE entrenador sin resolver (abierto_local,
+  /// abierto_sincronizado o no_cerrado — los tres estados que
+  /// pinta [turnosSinResolver]) con ese turno_id, se marca
+  /// cerrado_sincronizado. Respaldo por clave natural
+  /// (fecha_turno+turno, única por entrenador): cubre el caso
+  /// de que el turno_id canónico del servidor aún no se haya
+  /// reconciliado localmente (Argón P1 corre por su carril).
+  /// NO crea filas: un cierre sin fila local se ignora.
+  ///
+  /// El estado cerrado_sincronizado es honesto: el cierre YA
+  /// consta en el servidor (la fila de la RPC es la evidencia
+  /// positiva, el mismo criterio que la op 'aplicada' del
+  /// flujo propio). hora_cierre se rellena con la hora Habana
+  /// del momento de reconciliar (la RPC no devuelve la hora
+  /// del cierre administrativo) y el origen queda anotado en
+  /// cierre_snapshot. cierre_op_uuid queda null a propósito:
+  /// no hubo op local de cierre.
+  ///
+  /// Offline-first: NUNCA lanza. Red caída, timeout, RPC aún
+  /// no desplegada o respuesta rara = no-op con log.
+  Future<void> reconciliarConServidorDe(
+    int tid, {
+    Future<List<Map<String, dynamic>>> Function()? traerCierres,
+  }) async {
+    try {
+      final cierres = await (traerCierres ?? _cierresDelServidor)();
+      final db = await _db.db;
+      const sinResolver =
+          "estado IN ('abierto_local','abierto_sincronizado',"
+          "'no_cerrado')";
+      var marcados = 0;
+      for (final c in cierres) {
+        final turnoIdSrv = '${c['turno_id'] ?? ''}'.trim();
+        final fechaSrv = '${c['fecha'] ?? ''}'.trim();
+        final turnoSrv = '${c['turno'] ?? ''}'.trim();
+        Map<String, dynamic>? fila;
+        if (turnoIdSrv.isNotEmpty) {
+          final r = await db.query('turnos',
+              columns: ['turno_id'],
+              where: 'turno_id=? AND telegram_id=? AND $sinResolver',
+              whereArgs: [turnoIdSrv, tid],
+              limit: 1);
+          if (r.isNotEmpty) fila = r.first;
+        }
+        if (fila == null && fechaSrv.isNotEmpty && turnoSrv.isNotEmpty) {
+          final r = await db.query('turnos',
+              columns: ['turno_id'],
+              where: 'fecha_turno=? AND turno=? AND telegram_id=? '
+                  'AND $sinResolver',
+              whereArgs: [fechaSrv, turnoSrv, tid],
+              limit: 1);
+          if (r.isNotEmpty) fila = r.first;
+        }
+        if (fila == null) continue;
+        final ahora = ahoraHabana();
+        await _db.marcarEstadoTurno(
+          '${fila['turno_id']}',
+          'cerrado_sincronizado',
+          horaCierre: isoHabana(ahora),
+          snapshot: jsonEncode({
+            'origen': 'cierre_servidor',
+            'reconciliado_en': isoHabana(ahora),
+            'turno_id_servidor': turnoIdSrv,
+          }),
+        );
+        marcados++;
+      }
+      if (marcados > 0) {
+        AppLog.info('turnos', 'cierres_reconciliados_servidor',
+            d: 'tid=$tid marcados=$marcados');
+      }
+    } catch (e) {
+      AppLog.aviso('turnos', 'reconciliacion_servidor_fallo', d: '$e');
+    }
   }
 
   /// Tras cada run(): promueve estados con evidencia positiva
