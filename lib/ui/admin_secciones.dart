@@ -96,48 +96,6 @@ Widget filaAdmin(BuildContext context, IconData? icono, String etiqueta,
   );
 }
 
-// -- A · Resumen ------------------------------------------------------------
-class SeccionResumenScreen extends StatelessWidget {
-  final double ingresos;
-  final int inscMes;
-  final int morosos;
-  final List<Map<String, dynamic>> inscPorEntrenador;
-
-  const SeccionResumenScreen({
-    super.key,
-    required this.ingresos,
-    required this.inscMes,
-    required this.morosos,
-    required this.inscPorEntrenador,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: appBarIron(context, 'Resumen'),
-      body: ListView(
-        padding: const EdgeInsets.all(AppEspacio.lg),
-        children: [
-          seccionAdmin(context, Icons.bar_chart_rounded, 'Estadísticas del mes', [
-            filaAdmin(context, Icons.payments_rounded, 'Ingresos',
-                '${fmtMonto(ingresos)} CUP'),
-            filaAdmin(
-                context, Icons.person_add_rounded, 'Inscripciones', '$inscMes'),
-            filaAdmin(context, Icons.warning_rounded, 'Morosos', '$morosos'),
-          ]),
-          if (inscPorEntrenador.isNotEmpty)
-            seccionAdmin(
-                context, Icons.group_rounded, 'Inscripciones por entrenador', [
-              for (final e in inscPorEntrenador)
-                filaAdmin(
-                    context, null, '${e['nombre']}', '${e['cantidad']}'),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
 // -- B · Cobros -------------------------------------------------------------
 class SeccionCobrosScreen extends StatefulWidget {
   final Map<String, double> Function() getCaja;
