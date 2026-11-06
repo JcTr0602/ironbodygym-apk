@@ -240,6 +240,11 @@ void main() {
 
     expect(find.text('Vender 1 unidad'), findsOneWidget);
     expect(find.text('Registrar venta completa'), findsOneWidget);
+    // 1.25 T120 (F4-06): la foto del detalle creció (200 → 264)
+    // y en el viewport del test el chip de stock queda bajo el
+    // pliegue del ListView (que no construye lo no visible):
+    // se desplaza hasta él antes de comprobarlo.
+    await tester.scrollUntilVisible(find.text('5 disponibles'), 120);
     expect(find.text('5 disponibles'), findsWidgets);
   });
 }

@@ -7677,6 +7677,28 @@ class LocalDb {
     ];
   }
 
+  /// 1.25 T120 (F4-12): unidades vendidas por suplemento
+  /// (histórico, misma agregación que topVendidosSuplementos:
+  /// sin anuladas ni inactivas). La banda «Más vendidos»
+  /// afirma el orden sin mostrar la cifra que lo prueba; con
+  /// este mapa la minitarjeta la enseña.
+  Future<Map<int, int>> totalesVendidosSuplementos() async {
+    final d = await db;
+    final rows = await d.rawQuery(
+        "SELECT CAST(json_extract(data, '\$.suplemento_id') AS INTEGER) AS sid, "
+        "SUM(CAST(json_extract(data, '\$.cantidad') AS INTEGER)) AS total "
+        'FROM ventas_suplementos '
+        "WHERE COALESCE(CAST(json_extract(data, '\$.anulada') AS INTEGER), 0) != 1 "
+        "AND COALESCE(CAST(json_extract(data, '\$.activo') AS INTEGER), 1) != 0 "
+        "AND json_extract(data, '\$.suplemento_id') IS NOT NULL "
+        'GROUP BY sid HAVING total > 0');
+    return {
+      for (final r in rows)
+        if (r['sid'] != null)
+          (r['sid'] as num).toInt(): (r['total'] as num?)?.toInt() ?? 0,
+    };
+  }
+
   /// Todos los ids avisados de una vez (auditoría 1.21 D-08:
   /// la lista de vencimientos consultaba getAvisado por fila y
   /// por reconstrucción; ahora precarga el conjunto al cargar).

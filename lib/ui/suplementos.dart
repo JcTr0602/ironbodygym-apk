@@ -62,6 +62,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   // v1.2.1: tasa USD del día + ids de los más vendidos.
   double? _tasaUsd;
   List<int> _topIds = [];
+  // 1.25 T120 (F4-12): unidades vendidas por suplemento.
+  Map<int, int> _topTotales = {};
 
   // SU2 (estéticas 1.19): vista del catálogo (cuadrícula/lista).
   bool _vistaLista = false;
@@ -107,6 +109,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     // entero de ventas solo para el top-4.
     final topIds =
         await LocalDb.instance.topVendidosSuplementos();
+    final topTotales =
+        await LocalDb.instance.totalesVendidosSuplementos();
     if (!mounted) return;
     setState(() {
       // v1.2.2: entrenadores solo ven productos con stock > 0
@@ -133,6 +137,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       _promoActiva = (aj['promo_suplementos'] as num?)?.toInt() != 0;
       _tasaUsd = (aj['tasa_usd'] as num?)?.toDouble();
       _topIds = topIds;
+      _topTotales = topTotales;
       _cargando = false;
     });
     await _cargarReservasPendientes();
@@ -342,12 +347,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 label: const Text('Nuevo'),
               ),
             ),
-          // v1.3.4 (B2): compartir el catálogo como texto (WhatsApp).
-          IconButton(
-            icon: const Icon(Icons.share_rounded),
-            tooltip: 'Compartir catálogo',
-            onPressed: _compartirCatalogo,
-          ),
+          // 1.25 T120 (F4-14): en la barra quedan solo «Nuevo»
+          // y Reservas (con contador) — compartir y fiados
+          // pasaron al menú ⋮, agrupados por bloques.
           // Reservas v2: bandeja de reservas de los clientes,
           // con contador de solicitudes sin responder.
           if (_puedeReservas)
@@ -367,25 +369,23 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 if (mounted) _cargar();
               },
             ),
-          // v1.3.7 (Fase B §6.2): fiados por cobrar (fiados).
-          IconButton(
-            icon: const Icon(Icons.account_balance_wallet_rounded),
-            tooltip: 'Fiados por cobrar',
-            onPressed: () => Navigator.push(
-              context,
-              RutaIron(
-                  builder: (_) =>
-                      const CuentasPorCobrarScreen()),
-            ),
-          ),
-          // Rediseño 1.20: Historial, Categorías y Servicios
-          // se agrupan en el menú ⋮ (antes iconos sueltos y una
-          // tarjeta grande en el cuerpo).
+          // Rediseño 1.20 + F4-14 (1.25): el menú ⋮ agrupa
+          // todo lo demás por bloques (Vender / Consultar /
+          // Administrar).
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded),
             tooltip: 'Más opciones',
             onSelected: (v) async {
-              if (v == 'historial') {
+              if (v == 'compartir') {
+                _compartirCatalogo();
+              } else if (v == 'fiados') {
+                await Navigator.push(
+                  context,
+                  RutaIron(
+                      builder: (_) =>
+                          const CuentasPorCobrarScreen()),
+                );
+              } else if (v == 'historial') {
                 await Navigator.push(
                   context,
                   RutaIron(
@@ -420,7 +420,19 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 );
               }
             },
+            // F4-14: bloques Vender / Consultar / Administrar.
             itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'servicios',
+                child: Row(
+                  children: [
+                    Icon(Icons.bolt_rounded, size: 20),
+                    SizedBox(width: AppEspacio.sm),
+                    Text('Servicios ⚡ por dosis'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
               PopupMenuItem(
                 value: 'historial',
                 child: Row(
@@ -437,7 +449,29 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                   ],
                 ),
               ),
-              if (_esDueno)
+              const PopupMenuItem(
+                value: 'fiados',
+                child: Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet_rounded,
+                        size: 20),
+                    SizedBox(width: AppEspacio.sm),
+                    Text('Fiados por cobrar'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'compartir',
+                child: Row(
+                  children: [
+                    Icon(Icons.share_rounded, size: 20),
+                    SizedBox(width: AppEspacio.sm),
+                    Text('Compartir catálogo'),
+                  ],
+                ),
+              ),
+              if (_esDueno) ...[
+                const PopupMenuDivider(),
                 const PopupMenuItem(
                   value: 'categorias',
                   child: Row(
@@ -448,10 +482,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                     ],
                   ),
                 ),
-              // 1.23 (backlog de campo): administración completa
-              // de las dosis a mano desde la sección (solo dueño;
-              // la pantalla además se protege sola).
-              if (_esDueno)
+                // 1.23 (backlog de campo): administración
+                // completa de las dosis a mano desde la sección
+                // (solo dueño; la pantalla además se protege).
                 const PopupMenuItem(
                   value: 'admin_servicios',
                   child: Row(
@@ -462,16 +495,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                     ],
                   ),
                 ),
-              const PopupMenuItem(
-                value: 'servicios',
-                child: Row(
-                  children: [
-                    Icon(Icons.bolt_rounded, size: 20),
-                    SizedBox(width: AppEspacio.sm),
-                    Text('Servicios ⚡ por dosis'),
-                  ],
-                ),
-              ),
+              ],
             ],
           ),
         ],
@@ -795,6 +819,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                       color: AppColores.naranja,
                       fontWeight: FontWeight.bold));
             }),
+            // F4-12: la cifra que sostiene el «más vendido»
+            // (histórico de ventas no anuladas).
+            if ((_topTotales[(s['id'] as num?)?.toInt()] ?? 0) > 0)
+              Text(
+                '${_topTotales[(s['id'] as num?)?.toInt()]} uds. vendidas',
+                style: AppTexto.minuscula,
+              ),
           ],
         ),
       ),
@@ -1008,9 +1039,17 @@ class _TarjetaSuplemento extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 1.25 T120 (F4-07): el nombre va a UNA
+                    // línea en la cuadrícula — la celda tiene
+                    // alto fijo (childAspectRatio) y no crece
+                    // con la escala de texto del sistema: a
+                    // 150-200 % el nombre en 2 líneas empujaba
+                    // el precio y el botón fuera de la celda.
+                    // El nombre completo se ve en la vista de
+                    // lista y en el detalle.
                     Text(
                       nombre,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppTexto.secundario.copyWith(
                           fontWeight: FontWeight.w600),

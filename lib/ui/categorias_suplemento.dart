@@ -29,6 +29,10 @@ class _CategoriasSuplementoScreenState
   List<Map<String, dynamic>> _items = [];
   // Rediseño 1.20: suplementos por categoría (del espejo).
   Map<int, int> _conteos = {};
+  // 1.25 T120 (F4-08): con stock por categoría y cubeta de
+  // «Sin categoría» (solo vendibles: activos no eliminados).
+  Map<int, int> _conStock = {};
+  int _sinCategoria = 0;
   bool _cargando = true;
 
   bool get _esDueno => _auth.isOwner;
@@ -45,17 +49,44 @@ class _CategoriasSuplementoScreenState
     final sups =
         await LocalDb.instance.allMirror('suplementos');
     final conteos = <int, int>{};
+    final conStock = <int, int>{};
+    var sinCategoria = 0;
     for (final s in sups) {
+      // F4-08: el conteo es del catálogo VENDIBLE — antes
+      // sumaba también los eliminados y los inactivos, y la
+      // pantalla decía «12 proteínas» cuando vendibles había 7.
+      if (s['eliminado'] == 1 || s['eliminado'] == true) continue;
+      if ((s['activo'] as num?)?.toInt() != 1) continue;
       final cid = (s['categoria_id'] as num?)?.toInt();
-      if (cid != null) conteos[cid] = (conteos[cid] ?? 0) + 1;
+      final stock = (s['stock'] as num?)?.toInt() ?? 0;
+      if (cid == null) {
+        sinCategoria++;
+      } else {
+        conteos[cid] = (conteos[cid] ?? 0) + 1;
+        if (stock > 0) conStock[cid] = (conStock[cid] ?? 0) + 1;
+      }
     }
     if (!mounted) return;
     setState(() {
       _items = items
         ..sort(compararPorNombre);
       _conteos = conteos;
+      _conStock = conStock;
+      _sinCategoria = sinCategoria;
       _cargando = false;
     });
+  }
+
+  /// F4-08: «N suplementos» y, cuando alguno está agotado,
+  /// el desglose «M con stock · K agotados».
+  String _textoConteo(int? cid) {
+    final n = cid == null ? 0 : (_conteos[cid] ?? 0);
+    final base = '$n suplemento${n == 1 ? '' : 's'}';
+    if (cid == null || n == 0) return base;
+    final con = _conStock[cid] ?? 0;
+    final agotados = n - con;
+    if (agotados <= 0) return base;
+    return '$base · $con con stock · $agotados agotado${agotados == 1 ? '' : 's'}';
   }
 
   Future<void> _guardar(String nombre, {int? id}) async {
@@ -179,8 +210,61 @@ class _CategoriasSuplementoScreenState
                               AppEspacio.sm,
                               AppEspacio.md,
                               96),
-                          itemCount: _items.length,
+                          itemCount:
+                              _items.length + (_sinCategoria > 0 ? 1 : 0),
                           itemBuilder: (ctx, i) {
+                            // F4-08: la última fila es la cubeta
+                            // «Sin categoría» (informativa, sin
+                            // acciones) cuando hay vendibles sin
+                            // asignar.
+                            if (i >= _items.length) {
+                              return Padding(
+                                padding: const EdgeInsets.only(
+                                    bottom: AppEspacio.sm),
+                                child: Tarjeta(
+                                  padding: const EdgeInsets.all(
+                                      AppEspacio.md),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          color: AppColores.naranja
+                                              .withValues(alpha: 0.14),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                            Icons
+                                                .category_outlined,
+                                            color: AppColores
+                                                .textoSecundario(
+                                                    ctx)),
+                                      ),
+                                      const SizedBox(
+                                          width: AppEspacio.md),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment
+                                                  .start,
+                                          children: [
+                                            const Text(
+                                                'Sin categoría',
+                                                style: AppTexto
+                                                    .subtitulo),
+                                            Text(
+                                                '$_sinCategoria suplemento${_sinCategoria == 1 ? '' : 's'} sin asignar',
+                                                style: AppTexto
+                                                    .secundario),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
                             final c = _items[i];
                             final activa =
                                 (c['activa'] as int?) != 0;
@@ -225,7 +309,9 @@ class _CategoriasSuplementoScreenState
                                               style: AppTexto
                                                   .subtitulo),
                                           Text(
-                                              '${_conteos[(c['id'] as num?)?.toInt()] ?? 0} suplemento${(_conteos[(c['id'] as num?)?.toInt()] ?? 0) == 1 ? '' : 's'}',
+                                              _textoConteo(
+                                                  (c['id'] as num?)
+                                                      ?.toInt()),
                                               style: AppTexto
                                                   .secundario),
                                           if (!activa)

@@ -108,12 +108,16 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                 ),
                 Expanded(
                   child: _filas.isEmpty
-                      ? Center(
-                          child: Text(
-                              'Sin compras de servicios todavía.',
-                              style: TextStyle(
-                                  color: AppColores.textoSecundario(
-                                      context))))
+                      // 1.25 T120 (F4-18): vacío con el
+                      // componente compartido (antes un Text
+                      // centrado pelado).
+                      ? const EstadoVacio(
+                          icono: Icons.leaderboard_rounded,
+                          titulo: 'Sin compras de servicios',
+                          subtitulo:
+                              'Cuando un cliente compre dosis, '
+                              'combos o agua, aparecerá aquí.',
+                        )
                       : ListView.builder(
                           padding: const EdgeInsets.all(AppEspacio.md),
                           itemCount: _filas.length,
@@ -127,33 +131,77 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                               if ((f['aguas'] as int) > 0)
                                 'Agua: ${f['aguas']}',
                             ].join(' · ');
+                            // F4-18: el podio se distingue por
+                            // color (1º naranja, 2º azul, 3º
+                            // ámbar) y cada fila lleva una barra
+                            // proporcional a su monto contra el
+                            // del primero: cuánto pesa cada uno
+                            // se ve de un vistazo.
+                            final maximo = _filas.isEmpty
+                                ? 0.0
+                                : (_filas.first['monto'] as double);
+                            final fraccion = maximo > 0
+                                ? ((f['monto'] as double) / maximo)
+                                    .clamp(0.0, 1.0)
+                                : 0.0;
+                            final colorPodio = switch (i) {
+                              0 => AppColores.naranja,
+                              1 => AppColores.info,
+                              2 => AppColores.alerta,
+                              _ => null,
+                            };
                             return Padding(
                               padding:
                                   const EdgeInsets.only(bottom: AppEspacio.sm),
                               child: Tarjeta(
                                 padding: EdgeInsets.zero,
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: i == 0
-                                        ? AppColores.naranja
-                                        : Colors.grey.shade300,
-                                    foregroundColor: i == 0
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    child: Text('${i + 1}',
-                                        style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.bold)),
-                                  ),
-                                  title: Text(
-                                      '${f['cliente_nombre']}',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600)),
-                                  subtitle:
-                                      Text(detalle.isEmpty ? '—' : detalle),
-                                  trailing: Text(
-                                      '${fmtMonto(f['monto'] as double)} CUP',
-                                      style: AppTexto.subtitulo.copyWith(fontWeight: FontWeight.bold)),
+                                child: Column(
+                                  children: [
+                                    ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor:
+                                            colorPodio ??
+                                                Colors.grey.shade300,
+                                        foregroundColor:
+                                            colorPodio != null
+                                                ? Colors.white
+                                                : Colors.black87,
+                                        child: Text('${i + 1}',
+                                            style: const TextStyle(
+                                                fontWeight:
+                                                    FontWeight.bold)),
+                                      ),
+                                      title: Text(
+                                          '${f['cliente_nombre']}',
+                                          style: const TextStyle(
+                                              fontWeight:
+                                                  FontWeight.w600)),
+                                      subtitle: Text(detalle.isEmpty
+                                          ? '—'
+                                          : detalle),
+                                      trailing: Text(
+                                          '${fmtMonto(f['monto'] as double)} CUP',
+                                          style: AppTexto.subtitulo
+                                              .copyWith(
+                                                  fontWeight:
+                                                      FontWeight.bold)),
+                                    ),
+                                    Align(
+                                      alignment:
+                                          Alignment.centerLeft,
+                                      child: FractionallySizedBox(
+                                        widthFactor: fraccion,
+                                        child: Container(
+                                          height: 4,
+                                          color: (colorPodio ??
+                                                  AppColores
+                                                      .textoSecundario(
+                                                          c))
+                                              .withValues(alpha: 0.55),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             );

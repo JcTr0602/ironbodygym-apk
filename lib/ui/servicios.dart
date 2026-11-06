@@ -1111,37 +1111,53 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         setD(() => paraDuenoCasa = v ?? false),
                   ),
                 const SizedBox(height: 12),
-                Row(
+                // 1.25 T120 (F4-19): los dos contadores van en un
+                // Wrap — antes compartían una fila fija y con la
+                // letra del sistema grande el diálogo desbordaba.
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text('Dosis:'),
-                    IconButton(
-                      onPressed:
-                          n > 2 ? () => setD(() => n--) : null,
-                      icon: const Icon(Icons.remove_circle_outline_rounded),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Dosis:'),
+                        IconButton(
+                          onPressed:
+                              n > 2 ? () => setD(() => n--) : null,
+                          icon: const Icon(
+                              Icons.remove_circle_outline_rounded),
+                        ),
+                        Text('$n', style: AppTexto.titulo),
+                        IconButton(
+                          onPressed: n < topeEfectivo
+                              ? () => setD(() => n++)
+                              : null,
+                          icon: const Icon(
+                              Icons.add_circle_outline_rounded),
+                        ),
+                      ],
                     ),
-                    Text('$n',
-                        style: AppTexto.titulo),
-                    IconButton(
-                      onPressed: n < topeEfectivo
-                          ? () => setD(() => n++)
-                          : null,
-                      icon: const Icon(Icons.add_circle_outline_rounded),
-                    ),
-                    const SizedBox(width: 16),
-                    const Text('Pomos:'),
-                    IconButton(
-                      onPressed:
-                          m > 0 ? () => setD(() => m--) : null,
-                      icon: const Icon(Icons.remove_circle_outline_rounded),
-                    ),
-                    Text('$m',
-                        style: AppTexto.titulo),
-                    IconButton(
-                      onPressed:
-                          m < n && m < topePomos
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Pomos:'),
+                        IconButton(
+                          onPressed:
+                              m > 0 ? () => setD(() => m--) : null,
+                          icon: const Icon(
+                              Icons.remove_circle_outline_rounded),
+                        ),
+                        Text('$m', style: AppTexto.titulo),
+                        IconButton(
+                          onPressed: m < n && m < topePomos
                               ? () => setD(() => m++)
                               : null,
-                      icon: const Icon(Icons.add_circle_outline_rounded),
+                          icon: const Icon(
+                              Icons.add_circle_outline_rounded),
+                        ),
+                      ],
                     ),
                   ],
                 ),

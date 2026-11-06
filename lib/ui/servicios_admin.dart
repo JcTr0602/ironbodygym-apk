@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../fotos.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
@@ -65,6 +67,25 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     }
     _comisionCtrl.dispose();
     super.dispose();
+  }
+
+  Map<String, dynamic>? _supPorIdLocal(int? id) {
+    for (final s in _suplementos) {
+      if ((s['id'] as num?)?.toInt() == id) return s;
+    }
+    return null;
+  }
+
+  /// 1.25 T120 (F4-17): semáforo del saldo de un pomo — un pomo
+  /// a punto de agotarse se veía igual que uno lleno (el saldo
+  /// iba en texto gris). Verde > 10, ámbar 5-10, rojo ≤ 4; sin
+  /// saldo numérico, sin punto.
+  Color? _colorSaldoPomo(dynamic saldo) {
+    final n = (saldo as num?)?.toInt();
+    if (n == null) return null;
+    if (n > 10) return AppColores.exito;
+    if (n > 4) return AppColores.alerta;
+    return AppColores.error;
   }
 
   /// Ítem 13: «Nombre · Categoría» en toda identificación de producto
@@ -876,6 +897,43 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     );
   }
 
+  /// F4-17: foto del producto del pomo con el punto semáforo
+  /// del saldo en la esquina; sin suplemento, el icono de
+  /// siempre.
+  Widget _leadingPomo(Map<String, dynamic> l) {
+    final sup =
+        _supPorIdLocal((l['suplemento_id'] as num?)?.toInt());
+    final color = _colorSaldoPomo(l['saldo_local']);
+    if (sup == null) {
+      return Icon(
+        (l['es_principal'] as num?)?.toInt() == 1
+            ? Icons.science_rounded
+            : Icons.local_drink_rounded,
+        color: AppColores.textoSecundario(context),
+      );
+    }
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        _FotoPomoAdmin(sup: sup),
+        if (color != null)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _seccionPomos() {
     // Principal primero, luego entrenadores por nombre.
     final pomos = [..._pomos]
@@ -902,12 +960,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             for (final l in pomos)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  (l['es_principal'] as num?)?.toInt() == 1
-                      ? Icons.science_rounded
-                      : Icons.local_drink_rounded,
-                  color: AppColores.textoSecundario(context),
-                ),
+                // F4-17: la fila lleva la foto del producto y
+                // el punto semáforo de su saldo.
+                leading: _leadingPomo(l),
                 title: Text(
                     '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : _nombrePersona((l['titular_telegram_id'] as num?)?.toInt())} '
                     '· ${_nombreSup((l['suplemento_id'] as num?)?.toInt())}'),
@@ -936,4 +991,72 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     );
   }
 
+}
+
+/// F4-17: miniatura del producto de un pomo (mismo patrón de
+/// resolución que la del catálogo: resolverFotoSuplemento).
+class _FotoPomoAdmin extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  const _FotoPomoAdmin({required this.sup});
+
+  @override
+  State<_FotoPomoAdmin> createState() => _FotoPomoAdminState();
+}
+
+class _FotoPomoAdminState extends State<_FotoPomoAdmin> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = resolverFotoSuplemento(widget.sup);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FotoPomoAdmin oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sup['id'] != widget.sup['id'] ||
+        oldWidget.sup['foto_local'] != widget.sup['foto_local'] ||
+        oldWidget.sup['foto_storage'] != widget.sup['foto_storage']) {
+      _futura = resolverFotoSuplemento(widget.sup);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f == null) {
+          return Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColores.fondo(ctx),
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+            ),
+            child: Icon(Icons.medication_rounded,
+                size: 20, color: AppColores.textoSecundario(ctx)),
+          );
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          child: Image(
+            image: providerFotoAcotada(FileImage(f), ancho: 128),
+            width: 40,
+            height: 40,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              width: 40,
+              height: 40,
+              color: AppColores.fondo(ctx),
+              child: Icon(Icons.medication_rounded,
+                  size: 20, color: AppColores.textoSecundario(ctx)),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 
 /// Margen en USD de un suplemento del espejo (Argón #9 BLOQUEANTE).
@@ -132,6 +133,16 @@ class _ReporteMargenesScreenState
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
+          // F4-16: sin productos activos la pantalla quedaba
+          // en blanco como si estuviera rota.
+          : _datos.isEmpty
+              ? const EstadoVacio(
+                  icono: Icons.trending_up_rounded,
+                  titulo: 'Sin productos para calcular',
+                  subtitulo:
+                      'No hay suplementos activos con costo en '
+                      'este teléfono todavía.',
+                )
           : Column(
               children: [
                 Container(
@@ -173,6 +184,14 @@ class _ReporteMargenesScreenState
                       final r = _datos[i];
                       final margenUnit =
                           (r['margen_unitario'] as num?)?.toDouble();
+                      // 1.25 T120 (F4-16): el margen potencial
+                      // (unitario × stock) se calculaba y solo
+                      // alimentaba el KPI total: ahora cada fila
+                      // enseña cuánto margen hay dormido en ESE
+                      // producto, que es el dato para reponer.
+                      final margenPot =
+                          (r['margen_potencial'] as num?)
+                              ?.toDouble();
                       final pct =
                           (r['pct'] as num?)?.toDouble();
                       final stock =
@@ -196,7 +215,8 @@ class _ReporteMargenesScreenState
                           'Precio: \$${precio.toStringAsFixed(2)} $moneda'
                           '${moneda == 'CUP' && precioUsd != null ? ' (≈ \$${precioUsd.toStringAsFixed(2)} USD)' : ''}'
                           '${sinTasa ? ' · sin tasa USD' : ''} '
-                          '($stock disp.)',
+                          '($stock disp.)'
+                          '${margenPot != null ? '\nMargen en stock: \$${margenPot.toStringAsFixed(2)} USD' : ''}',
                           style: AppTexto.metadato.copyWith(color: Colors.grey[400]),
                         ),
                         trailing: Column(

@@ -561,11 +561,13 @@ Future<void> compartirSuplemento(BuildContext context,
   final cup = moneda == 'USD' && tasaUsd != null && tasaUsd > 1.0
       ? ' (≈ ${fmtMonto(precioOficialEn('CUP', precio, tasaUsd)!)} CUP)'
       : '';
-  final stock = (s['stock'] as num?)?.toInt() ?? 0;
+  // 1.25 T120 (F4-13): SIN stock, como el catálogo compartido
+  // (criterio de Jc 2026-10-17: el cliente no necesita verlo).
+  // Este compartir incluía «Disponibles: N» — dos criterios
+  // opuestos para el mismo gesto.
   final texto = 'Iron Body Gym — Suplementos\n\n'
       '$nombre\n'
-      'Precio: ${precio.toStringAsFixed(2)} $moneda$cup\n'
-      'Disponibles: $stock';
+      'Precio: ${precio.toStringAsFixed(2)} $moneda$cup';
   try {
     // v1.3.3: preferir la foto local recién tomada (offline) si existe.
     File? archivo;
@@ -587,6 +589,27 @@ Future<void> compartirSuplemento(BuildContext context,
       mostrarSnack(context, 'No se pudo compartir', significado: SignificadoChip.error);
     }
   }
+}
+
+/// 1.25 T120 (F4-06): visor de la foto a pantalla completa
+/// (mismo patrón que el de la ficha del cliente, con zoom).
+void _verFotoGrande(BuildContext context, File f) {
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(AppEspacio.lg),
+      child: GestureDetector(
+        onTap: () => Navigator.of(ctx).pop(),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          child: InteractiveViewer(
+            child: Image.file(f, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class DetalleSuplementoScreen extends StatelessWidget {
@@ -768,15 +791,19 @@ class DetalleSuplementoScreen extends StatelessWidget {
               child: ClipRRect(
               borderRadius:
                   BorderRadius.circular(AppRadio.lg),
-              child: Image(
+              // 1.25 T120 (F4-06): la foto del escaparate crece
+              // (200 → 264) y se amplía al toque.
+              child: GestureDetector(
+                onTap: () => _verFotoGrande(context, archivoLocal),
+                child: Image(
                   image: providerFotoAcotada(
                       FileImage(archivoLocal),
                       ancho: 1080),
-                  height: 200,
+                  height: 264,
                   width: double.infinity,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => Container(
-                    height: 200,
+                    height: 264,
                     decoration: BoxDecoration(
                       color: AppColores.fondo(context),
                       borderRadius:
@@ -787,6 +814,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                         size: 72,
                         color: AppColores.textoSecundario(context)),
                   )),
+                ),
               ),
             )
           else
@@ -806,7 +834,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   final f = snap.data;
                   if (f == null) {
                     return Container(
-                      height: 200,
+                      height: 264,
                       decoration: BoxDecoration(
                         color: AppColores.fondo(context),
                         borderRadius:
@@ -821,12 +849,15 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   return ClipRRect(
                     borderRadius:
                         BorderRadius.circular(AppRadio.lg),
-                    child: Image(
-                        image: providerFotoAcotada(FileImage(f),
-                            ancho: 1080),
-                        height: 200,
-                        width: double.infinity,
-                        fit: BoxFit.cover),
+                    child: GestureDetector(
+                      onTap: () => _verFotoGrande(context, f),
+                      child: Image(
+                          image: providerFotoAcotada(FileImage(f),
+                              ancho: 1080),
+                          height: 264,
+                          width: double.infinity,
+                          fit: BoxFit.cover),
+                    ),
                   );
                 },
               ),
@@ -918,7 +949,17 @@ class DetalleSuplementoScreen extends StatelessWidget {
               final costo =
                   (suplemento['costo'] as num?)?.toDouble() ?? 0;
               if (costo <= 0 || precio <= 0) {
-                return const SizedBox.shrink();
+                // 1.25 T120 (F4-06): antes el bloque desaparecía
+                // en silencio y «sin margen calculable» se leía
+                // como margen cero.
+                return const Padding(
+                  padding: EdgeInsets.only(top: AppEspacio.md),
+                  child: Text(
+                    'Sin costo registrado: el margen no se puede '
+                    'calcular.',
+                    style: AppTexto.secundario,
+                  ),
+                );
               }
               double? precioUsd;
               if (monedaSup == 'USD') {
@@ -927,7 +968,14 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 precioUsd = precio / tasaUsd!;
               }
               if (precioUsd == null) {
-                return const SizedBox.shrink();
+                return const Padding(
+                  padding: EdgeInsets.only(top: AppEspacio.md),
+                  child: Text(
+                    'Sin tasa USD válida: el margen no se puede '
+                    'calcular.',
+                    style: AppTexto.secundario,
+                  ),
+                );
               }
               final margen = precioUsd - costo;
               final pct =

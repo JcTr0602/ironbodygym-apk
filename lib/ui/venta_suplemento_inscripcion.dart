@@ -9,10 +9,12 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../fotos.dart';
 import '../negocio.dart';
 import '../localdb.dart';
 import '../sync.dart';
@@ -404,16 +406,28 @@ class _VentaSuplementoInscripcionScreenState
           const EncabezadoSeccion(
               titulo: 'Venta del suplemento'),
           Tarjeta(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${widget.suplemento['nombre']}',
-                    style: AppTexto.subtitulo),
-                const SizedBox(height: 4),
-                Text(
-                  _lineaVenta(),
-                  style: AppTexto.cuerpo,
+                // 1.25 T120 (F4-19): la banda lleva la foto del
+                // producto, como en el resto de pantallas de
+                // venta (antes era solo texto).
+                _FotoBandaVenta(sup: widget.suplemento),
+                const SizedBox(width: AppEspacio.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Text('${widget.suplemento['nombre']}',
+                          style: AppTexto.subtitulo),
+                      const SizedBox(height: 4),
+                      Text(
+                        _lineaVenta(),
+                        style: AppTexto.cuerpo,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -468,7 +482,11 @@ class _VentaSuplementoInscripcionScreenState
           const SizedBox(height: AppEspacio.sm),
           CampoTexto(
             controller: _carnet,
-            etiqueta: 'Carnet (6 dígitos, opcional)',
+            // 1.25 T120 (F4-05): la etiqueta prometía «6
+            // dígitos» pero la validación acepta de 6 a 11
+            // (los invitados traen 11): quien inscribía a un
+            // invitado creía que su carnet no servía.
+            etiqueta: 'Carnet (6 a 11 dígitos, opcional)',
             icono: Icons.badge_rounded,
             teclado: TextInputType.number,
             onChanged: (_) => setState(() {}),
@@ -553,8 +571,17 @@ class _VentaSuplementoInscripcionScreenState
               ),
             ),
           ],
-          const SizedBox(height: AppEspacio.lg),
-          BotonPrimario(
+        ],
+      ),
+      // 1.25 T120 (F4-19): el botón de confirmar va FIJO abajo,
+      // como en el detalle y la venta completa — antes quedaba
+      // al final del scroll y había que recorrer todo el
+      // formulario para alcanzarlo.
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+              AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+          child: BotonPrimario(
             texto: _guardando
                 ? 'Registrando…'
                 : 'Confirmar inscripción + venta',
@@ -571,7 +598,7 @@ class _VentaSuplementoInscripcionScreenState
                 ? null
                 : _confirmar,
           ),
-        ],
+        ),
       ),
     );
   }
@@ -583,5 +610,74 @@ class _VentaSuplementoInscripcionScreenState
     final tasaTxt = (t != null && t > 0) ? ' (tasa ${t.toStringAsFixed(2)})' : '';
     return '$base$tasaTxt\n'
         'Total: ${textoTotalVenta(_total, widget.moneda, widget.usdTasa)}';
+  }
+}
+
+/// F4-19: miniatura del producto en la banda de la venta —
+/// mismo patrón de resolución que la del catálogo
+/// (resolverFotoSuplemento, en fotos.dart).
+class _FotoBandaVenta extends StatefulWidget {
+  final Map<String, dynamic> sup;
+  const _FotoBandaVenta({required this.sup});
+
+  @override
+  State<_FotoBandaVenta> createState() => _FotoBandaVentaState();
+}
+
+class _FotoBandaVentaState extends State<_FotoBandaVenta> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = resolverFotoSuplemento(widget.sup);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FotoBandaVenta oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sup['id'] != widget.sup['id'] ||
+        oldWidget.sup['foto_local'] != widget.sup['foto_local'] ||
+        oldWidget.sup['foto_storage'] != widget.sup['foto_storage']) {
+      _futura = resolverFotoSuplemento(widget.sup);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f == null) {
+          return Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColores.fondo(ctx),
+              borderRadius: BorderRadius.circular(AppRadio.md),
+            ),
+            child: Icon(Icons.medication_rounded,
+                color: AppColores.textoSecundario(ctx)),
+          );
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.md),
+          child: Image(
+            image: providerFotoAcotada(FileImage(f), ancho: 256),
+            width: 56,
+            height: 56,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              width: 56,
+              height: 56,
+              color: AppColores.fondo(ctx),
+              child: Icon(Icons.medication_rounded,
+                  color: AppColores.textoSecundario(ctx)),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
