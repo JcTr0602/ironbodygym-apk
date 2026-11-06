@@ -16,6 +16,15 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.27.0', [
+    'Premios con control total: el catálogo de premios se edita desde la app (días, meta y activo), puedes crear un vale manual para cualquier cliente con su motivo, ver el historial completo de cada uno y anular un vale ya canjeado eligiendo si quitas el pago completo o solo los días no usados',
+    'Gastos para el equipo: un entrenador con tu permiso ya puede registrar gastos desde su teléfono (nueva sección «Gastos»); sin permiso, ni siquiera puede encolarlos',
+    'Comunidad bajo tu mirada: en el Panel ves qué clientes tienen su vitrina encendida y qué comparten, y puedes ocultar un perfil; encenderla sigue siendo decisión de cada cliente',
+    'Fotos de progreso en la nube: si un cliente elige guardarlas en la nube, las ves en su ficha (solo tú, el dueño) y puedes ampliarlas o eliminarlas',
+    'Turnos que se curan solos: si un cierre de turno se hizo desde el servidor, el teléfono del entrenador lo refleja sin tener que cerrar sesión; y la tarjeta «A entregar» del Inicio ahora abre el detalle completo de lo que debe entregar',
+    'Servicios más fiable: el chequeo diario de sincronización ahora vigila también pomos, ventas y salidas — si el espejo de un teléfono se desfasaba, se corrige solo en la siguiente sincronización',
+    'Adelantos honestos: si falta un dato para registrar un adelanto, la app lo dice en el momento en vez de mostrar un falso «registrado»',
+  ]),
   Novedad('1.26.1', [
     'Cobrar parcial en «Pendiente a recoger»: si recoges menos de lo que el entrenador debe, escribes la cantidad y listo — el resto queda visible como «Saldo de cobros parciales» y se cobra primero la próxima vez; los pagos se cubren del más viejo al más nuevo, sin partir ninguno',
     'La pantalla de pendientes se lee mejor: las filas salen con contraste pleno (antes se veían atenuadas) y el cuadre a WhatsApp queda como acción discreta bajo los botones de cobro',
