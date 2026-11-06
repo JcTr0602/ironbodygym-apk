@@ -5365,6 +5365,39 @@ class SyncEngine {
     }
   }
 
+  /// Mapa del manifiesto: tabla en Supabase → tabla local del
+  /// espejo. La divergencia setea `forzar_redescarga_<local>`,
+  /// que _download consume POR TABLA (cursor a 0 y re-descarga
+  /// completa de solo esa tabla, en el pull completo o en el
+  /// scope que la incluya). Los nombres locales deben ser los
+  /// del espejo (los de `supTablas` en _download), no los de
+  /// Supabase.
+  ///
+  /// 1.27 (campo Duany 2026-11-06): entran las 5 tablas de
+  /// servicios. Sin ellas, un espejo de servicios desfasado
+  /// (el de Duany quedó sin su fila de `servicio_pomos` y la
+  /// app le decía «sin pomo activo») nunca divergía en el
+  /// manifiesto y jamás se autocuraba: el chequeo diario solo
+  /// vigilaba las 8 tablas de arriba. La RPC filtra por rol
+  /// en el servidor (ventas/salidas: solo las filas del
+  /// propio telegram_id; pomos/botes/agua: legibles por todo
+  /// el staff, como en su RLS).
+  static const Map<String, String> tablasManifiesto = {
+    'sync_clientes': 'clientes',
+    'sync_pagos': 'pagos',
+    'sync_pagos_diarios': 'pagos_diarios',
+    'sync_gastos': 'gastos',
+    'sync_suplementos': 'suplementos',
+    'sync_ventas_suplementos': 'ventas_suplementos',
+    'sync_categorias_suplemento': 'categorias_suplemento',
+    'sync_incidencias': 'incidencias_mirror',
+    'sync_servicio_pomos': 'servicio_pomos',
+    'sync_servicio_ventas': 'servicio_ventas',
+    'sync_servicio_salidas': 'servicio_salidas',
+    'sync_servicio_botes': 'servicio_botes',
+    'sync_servicio_agua_movimientos': 'servicio_agua_movimientos',
+  };
+
   /// v1.2.5 (D19): verificación por manifiesto (buckets sensibles al rol).
   ///
   /// Pide al servidor los (id, sync_seq) por bucket y compara contra el
@@ -5376,16 +5409,7 @@ class SyncEngine {
   /// devolvía 0 y manifiestoDiarioSiToca sellaba el día como si todo
   /// coincidiera, escondiendo el fallo.
   Future<int> verificarManifiesto({int nBuckets = 8}) async {
-    const tablas = {
-      'sync_clientes': 'clientes',
-      'sync_pagos': 'pagos',
-      'sync_pagos_diarios': 'pagos_diarios',
-      'sync_gastos': 'gastos',
-      'sync_suplementos': 'suplementos',
-      'sync_ventas_suplementos': 'ventas_suplementos',
-      'sync_categorias_suplemento': 'categorias_suplemento',
-      'sync_incidencias': 'incidencias_mirror',
-    };
+    const tablas = tablasManifiesto;
     var divergentes = 0;
     var concluyente = true;
     for (final entry in tablas.entries) {

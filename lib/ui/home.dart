@@ -42,6 +42,7 @@ import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'cumpleanos.dart';
 import 'dashboard.dart';
+import 'detalle_pendiente.dart';
 import 'gastos.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
@@ -1830,24 +1831,44 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: AppEspacio.sm),
             Row(
               children: [
-                // 1.25 T116 (F1-15): estas dos celdas ya no
-                // son tocables por separado — llevaban al
-                // mismo sitio que la cabecera de la tarjeta
-                // (que conserva su chevron) y cada una pintaba
-                // su propia flecha como si fuera otro destino.
+                // 1.25 T116 (F1-15): «Cobrado hoy» sigue sin
+                // ser tocable por separado — llevaba al mismo
+                // sitio que la cabecera de la tarjeta (que
+                // conserva su chevron).
                 Expanded(
                     child: _datoFinanciero(
                         'Cobrado hoy',
                         fmtMonto(_cobradoHoy),
                         AppColores.exito)),
+                // 1.27 (pedido de Jc, campo Duany 2026-11-06):
+                // «A entregar» SÍ es tocable y NO va a Mi Turno:
+                // abre el detalle completo de SU pendiente
+                // (DetallePendienteScreen, que ya restringe
+                // al entrenador a ver solo el suyo). El
+                // micro-chevron de _datoFinancieroTappable es
+                // el mismo lenguaje visual de las celdas
+                // tocables de abajo («Pagaron el mes»/«Mi
+                // base»). Sin telegram_id en la sesión no hay
+                // detalle que abrir: queda la celda simple.
                 Expanded(
-                    child: _datoFinanciero(
-                        'A entregar',
-                        fmtMonto(_pendiente),
-                        AppColores.alerta,
-                        detalle: _pendienteUsd > 0
-                            ? '+ ${fmtMonto(_pendienteUsd)} USD'
-                            : null)),
+                    child: _auth.telegramId == null
+                        ? _datoFinanciero(
+                            'A entregar',
+                            fmtMonto(_pendiente),
+                            AppColores.alerta,
+                            detalle: _pendienteUsd > 0
+                                ? '+ ${fmtMonto(_pendienteUsd)} USD'
+                                : null)
+                        : _datoFinancieroTappable(
+                            'A entregar',
+                            fmtMonto(_pendiente),
+                            AppColores.alerta,
+                            () => _ir(DetallePendienteScreen(
+                                trainerId: _auth.telegramId!,
+                                nombre: _auth.displayName)),
+                            detalle: _pendienteUsd > 0
+                                ? '+ ${fmtMonto(_pendienteUsd)} USD'
+                                : null)),
               ],
             ),
             const SizedBox(height: AppEspacio.sm),
