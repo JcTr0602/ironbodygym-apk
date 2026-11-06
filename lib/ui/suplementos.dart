@@ -493,14 +493,17 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                   setState(() => _busqueda = v.trim()),
             ),
           ),
-          // v1.2.1: filtro por categoría (visible si hay categorías).
-          if (_categorias.isNotEmpty)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppEspacio.md),
-              child: Row(
-                children: [
+          // v1.2.1 + 14/25, unificadas en 1.25 T33: UNA sola
+          // fila de filtros con scroll horizontal (categoría y
+          // disponibilidad): antes eran dos filas fijas que
+          // empujaban el catálogo media pantalla hacia abajo.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.md, 0, AppEspacio.md, 0),
+            child: Row(
+              children: [
+                if (_categorias.isNotEmpty) ...[
                   ChoiceChip(
                     label: const Text('Todas',
                         style: AppTexto.etiqueta),
@@ -521,16 +524,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                     ),
                     const SizedBox(width: 8),
                   ],
+                  const SizedBox(width: 8),
                 ],
-              ),
-            ),
-          // 14/25: filtro por disponibilidad.
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.md, 0, AppEspacio.md, 0),
-            child: Row(
-              children: [
                 for (final f in const [
                   ('todos', 'Todos'),
                   ('con_stock', 'Con stock'),
@@ -556,6 +551,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   }
 
   Widget _tarjetaPromo() {
+    // 1.25 T33: para el entrenador, con la promo apagada la
+    // banda solo ocupaba una capa más sobre el catálogo sin
+    // decir nada accionable: no se pinta. El dueño la ve
+    // siempre (lleva el interruptor).
+    if (!_esDueno && !_promoActiva) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
@@ -638,7 +640,6 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         _filtroStock != 'todos';
     return Column(
       children: [
-        if (top.isNotEmpty) _seccionTop(top),
         // SU2 (estéticas 1.19): interruptor cuadrícula/lista.
         // Rediseño 1.20: contador de resultados a la izquierda.
         Padding(
@@ -718,6 +719,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                   ),
           ),
         ),
+        // 1.25 T33: «Más vendidos» baja a banda inferior (a
+        // alcance del pulgar al vender): encima del catálogo
+        // lo enterraba bajo cinco capas y el primer producto
+        // caía a mitad de pantalla.
+        if (top.isNotEmpty) _seccionTop(top),
       ],
     );
   }
