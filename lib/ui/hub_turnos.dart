@@ -22,10 +22,14 @@ import '../turno_service.dart';
 import '../turnos_resolucion.dart';
 import 'app_bar.dart';
 import 'arqueo.dart';
+import 'cierre_turno.dart';
+import 'avatar_entrenador.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_turno.dart';
-import 'turnos_calendario.dart' show colorChipEntrenador;
+import 'horario_turnos.dart';
+import 'turnos_calendario.dart'
+    show CalendarioTurnosScreen, colorChipEntrenador;
 import 'turno_abrir.dart';
 import 'turnos_hub.dart';
 
@@ -205,32 +209,14 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   Future<void> _cerrar() async {
     setState(() => _procesando = true);
     try {
-      final prep = await TurnoService.instance.prepararCierre();
-      if (prep['ok'] != true) {
-        _snack('No hay turno abierto para cerrar.');
-        return;
+      // 1.25 T84: el cierre vive en cierre_turno.dart,
+      // compartido con Mi Turno (una sola implementación
+      // del preparar → confirmar → cerrar).
+      final cerrado = await cerrarTurnoConDialogo(context);
+      if (cerrado) {
+        _snack('Turno cerrado.');
+        await _cargar();
       }
-      if (!mounted) return;
-      final limpio = prep['limpio'] == true;
-      final ok = await DialogoApp.confirmar(
-        context,
-        titulo: 'Cerrar turno',
-        mensaje: 'Cobrado del día: ${prep['pagosCount']} pago(s). '
-            'Pendientes sin sincronizar: ${prep['pendientesCount']} '
-            '(${fmtMonto((prep['pendientesCup'] as num).toDouble())} CUP'
-            '${(prep['pendientesUsd'] as num) > 0 ? ' + ${fmtMonto((prep['pendientesUsd'] as num).toDouble())} USD' : ''})'
-            '${(prep['revisionCount'] as int) > 0 ? ', ${prep['revisionCount']} en revisión' : ''}.'
-            '${limpio ? '' : ' Cerrar de todos modos deja los pendientes guardados en este teléfono.'}',
-        aceptar: limpio ? 'Confirmar cierre' : 'Cerrar de todos modos',
-        icono: Icons.lock_outline_rounded,
-      );
-      if (!ok) return;
-      await TurnoService.instance.confirmarCierre(
-        turnoId: '${prep['turnoId']}',
-        forzado: !limpio,
-      );
-      _snack('Turno cerrado.');
-      await _cargar();
     } catch (e) {
       _snack('No se pudo cerrar el turno: $e');
     } finally {
@@ -300,15 +286,11 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
             children: [
               const Text('De turno: ', style: AppTexto.cuerpo),
               if (est.mostrado != null) ...[
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: colorChipEntrenador(est.mostrado),
-                  ),
-                ),
-                const SizedBox(width: 5),
+                // 1.25 T83: la foto del entrenador (o su
+                // inicial con su color), no solo un punto.
+                AvatarEntrenador(
+                    nombre: est.mostrado!, tamano: 26),
+                const SizedBox(width: AppEspacio.sm),
               ],
               Flexible(
                 child: Text(
@@ -327,6 +309,110 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
       ),
     );
   }
+
+  /// 1.25 T82: la franja horizontal del día.
+  Widget _lineaDeTiempo() {
+    final vM = ventanaFranja(_hoy, 'manana');
+    final vT = ventanaFranja(_hoy, 'tarde');
+    if (vM == null && vT == null) return const SizedBox.shrink();
+    final inicio = vM?.inicio ?? vT!.inicio;
+    var fin = vM?.fin ?? 0;
+    if (vT != null && vT.fin > fin) fin = vT.fin;
+    if (fin <= inicio) return const SizedBox.shrink();
+    final ahoraMin = _hoy.hour * 60 + _hoy.minute;
+
+    Widget bloque(({int inicio, int fin}) v, String franja) {
+      final est = estadoFranjaCompleto(
+        fecha: _hoy,
+        franja: franja,
+        patron: _patron,
+        excepciones: _excepciones,
+        aperturas: _aperturas,
+        cierres: _cierres,
+      );
+      final mostrado = est.mostrado;
+      final color = mostrado != null
+          ? colorChipEntrenador(mostrado)
+          : AppColores.error;
+      final fracIni = (v.inicio - inicio) / (fin - inicio);
+      final fracFin = (v.fin - inicio) / (fin - inicio);
+      return Positioned(
+        left: fracIni * _anchoLinea,
+        width: (fracFin - fracIni) * _anchoLinea,
+        top: 0,
+        bottom: 0,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.30),
+            border: Border.all(color: color, width: 1),
+            borderRadius: BorderRadius.circular(AppRadio.sm),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            mostrado ?? 'Sin cubrir',
+            style: AppTexto.minuscula.copyWith(
+                fontWeight: FontWeight.w700,
+                color: AppColores.texto(context)),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          LayoutBuilder(
+            builder: (context, cons) {
+              _anchoLinea = cons.maxWidth;
+              return SizedBox(
+                height: 34,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    if (vM != null) bloque(vM, 'manana'),
+                    if (vT != null) bloque(vT, 'tarde'),
+                    if (ahoraMin >= inicio && ahoraMin <= fin)
+                      Positioned(
+                        left: (ahoraMin - inicio) /
+                                (fin - inicio) *
+                                cons.maxWidth -
+                            1,
+                        top: -4,
+                        bottom: -4,
+                        child: Container(
+                          width: 2.5,
+                          color: AppColores.naranja,
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: AppEspacio.xs),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(horaMinutosLinea(inicio),
+                  style: AppTexto.minuscula),
+              if (ahoraMin >= inicio && ahoraMin <= fin)
+                Text('▲ ahora (${horaMinutosLinea(ahoraMin)})',
+                    style: AppTexto.minuscula.copyWith(
+                        color: AppColores.naranja,
+                        fontWeight: FontWeight.w700)),
+              Text(horaMinutosLinea(fin),
+                  style: AppTexto.minuscula),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _anchoLinea = 0;
 
   /// M5 (1.20): mini mapa de calor de la semana — cuántas
   /// franjas de cada día tienen entrenador asignado, resuelto
@@ -440,6 +526,11 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   style: AppTexto.subtitulo,
                 ),
                 const SizedBox(height: 12),
+                // 1.25 T82: el día como UNA línea de
+                // tiempo — los bloques de cada franja con
+                // su entrenador, el «ahora» marcado y los
+                // huecos sin cubrir en rojo suave.
+                if (!_errorCarga) _lineaDeTiempo(),
                 if (_errorCarga) ...[
                   Tarjeta(
                     child: Column(
@@ -732,6 +823,58 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                     ),
                   ),
                 // T3 (estéticas 1.19): explicación del hub,
+                // 1.25 T80: el dueño configura SIN salir
+                // del hub — el plan y los ajustes viven
+                // también aquí, bajo el día. La pantalla
+                // intermedia del Panel deja de ser el
+                // único camino al patrón.
+                if (_soyDueno) ...[
+                  const SizedBox(height: 12),
+                  const EncabezadoSeccion(
+                      titulo: 'Plan y ajustes de turnos'),
+                  Tarjeta(
+                    onTap: () => Navigator.of(context).push(
+                      RutaIron(
+                        builder: (_) =>
+                            const HorarioTurnosScreen(),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.calendar_view_week_rounded,
+                            color: AppColores.naranja),
+                        SizedBox(width: AppEspacio.md),
+                        Expanded(
+                          child: Text('Patrón semanal',
+                              style: AppTexto.cuerpo),
+                        ),
+                        Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppEspacio.sm),
+                  Tarjeta(
+                    onTap: () => Navigator.of(context).push(
+                      RutaIron(
+                        builder: (_) =>
+                            const CalendarioTurnosScreen(),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.edit_calendar_rounded,
+                            color: AppColores.naranja),
+                        SizedBox(width: AppEspacio.md),
+                        Expanded(
+                          child: Text(
+                              'Calendario de excepciones',
+                              style: AppTexto.cuerpo),
+                        ),
+                        Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                  ),
+                ],
                 // plegable para no ocupar sitio a diario.
                 const SizedBox(height: 12),
                 const ExpansionTile(

@@ -18,6 +18,7 @@ import '../tiempo.dart';
 import '../turno_service.dart';
 import '../turnos_resolucion.dart';
 import 'app_bar.dart';
+import 'cierre_turno.dart';
 import 'servicios.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -60,6 +61,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   double _cobradoAyer = 0;
   double _semanaAnt = 0;
   bool _cerrado = false; // v1.1.1: turno actual ya cerrado
+  // 1.25 T84: la primera carga pinta un estado de carga,
+  // no la pantalla en ceros; y el chip de cabecera sale
+  // del turno REAL de hoy (turnoVisible), no del reloj.
+  bool _cargando = true;
+  Map<String, dynamic>? _turnoVisible;
   final _auth = AuthService();
 
   @override
@@ -69,6 +75,18 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   }
 
   Future<void> _cargar() async {
+    try {
+      await _cargarDatos();
+    } finally {
+      // 1.25 T84: la carga inicial termina siempre,
+      // también si la lectura falla a mitad.
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final tid = _auth.telegramId;
     final t = await miTurnoHoy(tid);
     final hist = await historialTurno(tid, dias: 60);
@@ -207,6 +225,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final vencimientos = await _misVencimientos(tid);
     // v1.1.1: ¿el turno actual ya se cerró?
     final cerrado = await _turnoCerrado();
+    // 1.25 T84: el turno real de hoy para el chip.
+    Map<String, dynamic>? visible;
+    try {
+      visible = await TurnoService.instance.turnoVisible();
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _cobrado = t.$1;
@@ -229,6 +252,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         _semanaAnt = semanaAnt;
         _vencimientos = vencimientos;
         _cerrado = cerrado;
+        _turnoVisible = visible;
       });
     }
   }
@@ -324,6 +348,20 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   /// ya estuviera cerrado. (El estado de apertura vive en el
   /// flujo de cierre que unifica T84.)
   String _etiquetaTurnoChip() {
+    // 1.25 T84: el estado REAL manda sobre el reloj: si
+    // hoy hay un turno abierto, el chip nombra ESE turno
+    // y dice «abierto» aunque el reloj ya haya cruzado
+    // de franja (mismo criterio que el Home en T08).
+    final v = _turnoVisible;
+    final estadoV = '${v?['estado'] ?? ''}';
+    if (v != null && estadoV.startsWith('abierto')) {
+      final nombre = switch ('${v['turno'] ?? ''}') {
+        'manana' => 'Turno de mañana',
+        'tarde' => 'Turno de tarde',
+        _ => _turnoActual(),
+      };
+      return '$nombre · abierto';
+    }
     final base = _turnoActual();
     if (_cerrado && base != 'Fuera de franja de turno') {
       return '$base · cerrado';
@@ -587,38 +625,32 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                 final turnoAbierto =
                     await TurnoService.instance.turnoActual();
                 if (turnoAbierto != null) {
-                  final prep =
-                      await TurnoService.instance.prepararCierre();
-                  if (prep['ok'] == true) {
-                    await TurnoService.instance.confirmarCierre(
-                      turnoId: '${prep['turnoId']}',
-                      forzado: pendientes.isNotEmpty ||
-                          bloqueadas.isNotEmpty,
-                    );
-                    await vibrarConfirmacion();
+                  // 1.25 T84: la ejecución del cierre es
+                  // LA compartida (cierre_turno.dart); esta
+                  // hoja solo aporta su forzado y sus
+                  // avisos. T-08: si la ejecución falla, se
+                  // muestra el motivo y NO se cae al camino
+                  // legado (antes se «cerraba de mentira»).
+                  final r = await ejecutarCierreTurno(
+                    forzado: pendientes.isNotEmpty ||
+                        bloqueadas.isNotEmpty,
+                  );
+                  if (!r.ok) {
                     if (ctx.mounted) Navigator.of(ctx).pop();
                     if (mounted) {
-                      setState(() => _cerrado = true);
-                      mostrarSnack(context, 'Turno cerrado. ¡Buen trabajo!', significado: SignificadoChip.exito);
+                      mostrarSnack(
+                          context, motivoErrorCierre(r.error),
+                          significado: SignificadoChip.error);
                     }
                     return;
                   }
-                  // 1.22 T-08: hay turno abierto pero la
-                  // preparación falló: se muestra el motivo y
-                  // NO se cae al camino legado (antes se
-                  // «cerraba de mentira» con la meta legada y
-                  // el turno real quedaba abierto).
-                  final motivo =
-                      '${prep['error'] ?? ''}' == 'sin_turno_abierto'
-                          ? 'El turno ya no está abierto: pudo '
-                              'cerrarse desde otro flujo. Actualiza '
-                              'la pantalla e inténtalo de nuevo.'
-                          : 'No se pudo preparar el cierre: '
-                              '${prep['error'] ?? 'motivo desconocido'}';
+                  await vibrarConfirmacion();
                   if (ctx.mounted) Navigator.of(ctx).pop();
                   if (mounted) {
-                    mostrarSnack(context, motivo,
-                        significado: SignificadoChip.error);
+                    setState(() => _cerrado = true);
+                    mostrarSnack(context,
+                        'Turno cerrado. ¡Buen trabajo!',
+                        significado: SignificadoChip.exito);
                   }
                   return;
                 }
@@ -742,7 +774,10 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         children: [
           const SyncBanner(),
           Expanded(
-            child: RefreshIndicator(
+            child: _cargando
+                ? const EstadoCargando(
+                    texto: 'Cargando tu turno…')
+                : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -792,7 +827,17 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     ),
                     const SizedBox(height: 8),
                     // v1.0.16: qué tengo que entregar (idea 2)
+                    // 1.25 T84: UNA sola tarjeta de
+                    // «qué tengo que entregar» — antes la
+                    // cifra vivía aquí Y en el ListTile de
+                    // debajo; la tarjeta entera abre el
+                    // detalle de Pendiente a entregar.
                     Tarjeta(
+                      onTap: () => Navigator.of(context)
+                          .push(RutaIron(
+                              builder: (_) =>
+                                  const PendienteScreen()))
+                          .then((_) => _cargar()),
                       child: Column(
                         crossAxisAlignment:
                             CrossAxisAlignment.start,
@@ -804,9 +849,13 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                   size: 20),
                               SizedBox(
                                   width: AppEspacio.sm),
-                              Text(
-                                  'Qué tengo que entregar',
-                                  style: AppTexto.subtitulo),
+                              Expanded(
+                                child: Text(
+                                    'Qué tengo que entregar',
+                                    style: AppTexto.subtitulo),
+                              ),
+                              Icon(Icons.chevron_right_rounded,
+                                  color: AppColores.naranja),
                             ],
                           ),
                           const SizedBox(
@@ -830,32 +879,6 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                             ),
                           ],
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Tarjeta(
-                      padding: EdgeInsets.zero,
-                      child: ListTile(
-                        leading: Icon(
-                            _pendiente > 0
-                                ? Icons.payments_rounded
-                                : Icons.check_circle_rounded,
-                            color: _pendiente > 0
-                                ? AppColores.naranja
-                                : AppColores.exito,
-                            size: 32),
-                        title:
-                            const Text('Pendiente a entregar'),
-                        subtitle: Text(
-                            '${fmtMonto(_pendiente)} CUP',
-                            style: AppTexto.metrica),
-                        trailing:
-                            const Icon(Icons.chevron_right_rounded),
-                        onTap: () => Navigator.of(context)
-                            .push(RutaIron(
-                                builder: (_) =>
-                                    const PendienteScreen()))
-                            .then((_) => _cargar()),
                       ),
                     ),
                     // 1.25 T79: la venta rápida de dosis vive AQUÍ,

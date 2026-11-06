@@ -67,6 +67,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
   Map<String, Map<String, String?>> _excepciones = {};
   List<String> _entrenadores = [];
 
+  /// 1.25 T81: las aperturas REALES del espejo, por
+  /// fecha ISO — la marca de lo que pasó de verdad.
+  Map<String, List<Map<String, dynamic>>> _aperturasPorDia = {};
+
   @override
   void initState() {
     super.initState();
@@ -116,6 +120,19 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         }
       }
       _entrenadores = canon.values.toList();
+      // 1.25 T81: las aperturas reales para contrastar
+      // programado vs real en los días pasados.
+      try {
+        final aps =
+            await LocalDb.instance.allMirror('turnos_apertura');
+        final porDia = <String, List<Map<String, dynamic>>>{};
+        for (final a in aps) {
+          final f = '${a['fecha_turno'] ?? ''}';
+          if (f.isEmpty) continue;
+          porDia.putIfAbsent(f, () => []).add(a);
+        }
+        _aperturasPorDia = porDia;
+      } catch (_) {}
     } catch (_) {}
     if (mounted) setState(() => _cargando = false);
   }
@@ -392,6 +409,34 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                     ],
                   ),
                 const SizedBox(height: AppEspacio.md),
+                // 1.25 T81: leyenda de las marcas reales.
+                Wrap(
+                  spacing: AppEspacio.md,
+                  runSpacing: AppEspacio.xs,
+                  children: [
+                    for (final (color, txt) in [
+                      (AppColores.exito, 'Abrió el programado'),
+                      (AppColores.alerta, 'Abrió otro'),
+                      (AppColores.error, 'Nadie abrió'),
+                    ])
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: AppEspacio.xs),
+                          Text(txt, style: AppTexto.metadato),
+                        ],
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppEspacio.md),
                 const Tarjeta(
                   child: Text(
                     'Lo programado es lo que se muestra en las '
@@ -532,6 +577,39 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                                   ? AppColores.naranja
                                   : null, fontWeight: FontWeight.w800)),
                       const Spacer(),
+                      // 1.25 T81: la marca de lo REAL en
+                      // los días pasados (verde: abrió el
+                      // programado; ámbar: abrió otro;
+                      // rojo: nadie abrió).
+                      if (pasado && !domingo)
+                        Builder(builder: (context) {
+                          final marca = marcaRealDiaCalendario(
+                            programados: {
+                              if (manana != null) manana,
+                              if (tarde != null) tarde,
+                            },
+                            aperturasDia:
+                                _aperturasPorDia[iso] ?? const [],
+                          );
+                          if (marca == null) {
+                            return const SizedBox.shrink();
+                          }
+                          final color = switch (marca) {
+                            'abrio' => AppColores.exito,
+                            'distinto' => AppColores.alerta,
+                            _ => AppColores.error,
+                          };
+                          return Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(
+                                right: AppEspacio.xs),
+                            decoration: BoxDecoration(
+                              color: color,
+                              shape: BoxShape.circle,
+                            ),
+                          );
+                        }),
                       if (conExcepcion)
                         Container(
                           width: 7,

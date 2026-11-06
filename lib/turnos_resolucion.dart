@@ -85,6 +85,14 @@ void restablecerVentanasFranja() {
   return null;
 }
 
+/// 1.25 T82: minutos desde medianoche como 'HH:MM'
+/// para los extremos de la línea de tiempo del día.
+String horaMinutosLinea(int minutos) {
+  final h = (minutos ~/ 60).toString().padLeft(2, '0');
+  final m = (minutos % 60).toString().padLeft(2, '0');
+  return '$h:$m';
+}
+
 /// Franja en curso en [instante] (hora local habanera del
 /// negocio), o null fuera de horario.
 String? franjaDeInstante(DateTime instante) {
@@ -295,6 +303,30 @@ List<AperturaTurno> aperturasHoyConViva({
     ));
   }
   return out;
+}
+
+/// 1.25 T81, PURO: la marca de lo que PASÓ de verdad un
+/// día del calendario, contra lo programado:
+/// - 'abrio': abrió quien estaba programado.
+/// - 'distinto': abrió otro (cubriendo o fuera del plan).
+/// - 'no_abrio': había programado y nadie abrió.
+/// - null: sin programado ese día (nada que auditar).
+String? marcaRealDiaCalendario({
+  required Set<String> programados,
+  required List<Map<String, dynamic>> aperturasDia,
+}) {
+  if (programados.isEmpty) return null;
+  final abrieron = <String>{};
+  for (final a in aperturasDia) {
+    final n = normalizarNombreTurno('${a['entrenador_nombre'] ?? ''}');
+    if (n.isNotEmpty) abrieron.add(n);
+  }
+  if (abrieron.isEmpty) return 'no_abrio';
+  final normProg = {
+    for (final n in programados) normalizarNombreTurno(n),
+  };
+  if (abrieron.every(normProg.contains)) return 'abrio';
+  return 'distinto';
 }
 
 /// 24/25, PURO: estado de una franja para el hub.

@@ -11,6 +11,7 @@ import '../auth.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
+import 'avatar_entrenador.dart';
 import 'componentes.dart';
 import 'detalle_entrenador.dart';
 import 'diseno.dart';
@@ -167,11 +168,25 @@ class _ComparativaEntrenadoresScreenState
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                           vertical: AppEspacio.sm),
-                      child: Text(
-                        '${f['nombre']}',
-                        textAlign: TextAlign.right,
-                        style: AppTexto.subtitulo.copyWith(
-                            color: AppColores.textoNaranja(context)),
+                      // 1.25 T83: cara antes que nombre —
+                      // el avatar del entrenador abre su
+                      // columna.
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.end,
+                        children: [
+                          AvatarEntrenador(
+                              nombre: '${f['nombre']}',
+                              tamano: 30),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${f['nombre']}',
+                            textAlign: TextAlign.right,
+                            style: AppTexto.subtitulo.copyWith(
+                                color: AppColores
+                                    .textoNaranja(context)),
+                          ),
+                        ],
                       ),
                     ),
                   ),

@@ -2355,8 +2355,8 @@ class _AdminScreenState extends State<AdminScreen> {
       // precedencia (antes eran dos entradas sueltas y confusas).
       _tarjetaFlujo(
         Icons.calendar_month_rounded,
-        'Turnos',
-        'Plan semanal y ajustes por fecha',
+        'Plan y ajustes de turnos',
+        'Patrón semanal y excepciones por fecha',
         () => _ir(const TurnosHubScreen()),
       ),
       // 1.25 T38: fuera la puerta intermedia «Turnos y
@@ -2366,7 +2366,7 @@ class _AdminScreenState extends State<AdminScreen> {
       // del gym.
       _tarjetaFlujo(
         Icons.schedule_rounded,
-        'Horario del Gym',
+        'Horario de apertura',
         'Apertura y cierre del gym (mueve las franjas de turno)',
         () => _ir(const HorarioGym()),
       ),

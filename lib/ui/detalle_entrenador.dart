@@ -20,6 +20,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
+import 'avatar_entrenador.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'comparativa_entrenadores.dart';
@@ -270,6 +271,29 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(AppEspacio.lg),
                       children: [
+                        // 1.25 T83: cabecera con la cara del
+                        // entrenador (su foto de usuario o
+                        // su inicial con su color).
+                        Row(
+                          children: [
+                            AvatarEntrenador(
+                                nombre: widget.nombre, tamano: 56),
+                            const SizedBox(width: AppEspacio.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(widget.nombre,
+                                      style: AppTexto.subtitulo),
+                                  const Text('Entrenador',
+                                      style: AppTexto.secundario),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppEspacio.md),
                         // Resumen
                         Row(
                           children: [
