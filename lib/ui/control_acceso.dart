@@ -77,6 +77,10 @@ class ControlAccesoScreen extends StatelessWidget {
             // ---- Pestaña Entrenadores: usuarios APK + permisos ----
             Column(
               children: [
+                // 1.25 T29: la puerta a Usuarios ni se ofrece
+                // sin ser dueño (visibilidad = ocultar; la
+                // pantalla además trae su guarda de vista).
+                if (AuthService().isOwner)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                       AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),

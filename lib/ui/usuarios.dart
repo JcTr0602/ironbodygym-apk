@@ -434,6 +434,19 @@ Hola $username, estas son tus credenciales para la app del gym:
 
   @override
   Widget build(BuildContext context) {
+    // 1.25 T29: guarda de VISTA, no solo de acciones (patrón
+    // de la pantalla hermana PanelPermisos): un entrenador
+    // podía abrir Usuarios y ver cuentas, dispositivos,
+    // versiones y últimos accesos de todo el staff. La lista
+    // ni se pinta sin ser dueño; las acciones ya tenían su
+    // propio guard (puedeEjecutarAccionesUsuarios).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Usuarios APK'),
+        body: const Center(
+            child: Text('Solo el dueño puede ver los usuarios.')),
+      );
+    }
     return Scaffold(
       appBar: appBarIron(
         context,
