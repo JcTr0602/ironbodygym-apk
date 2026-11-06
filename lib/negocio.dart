@@ -1947,6 +1947,47 @@ Future<({double cup, double usd})> pendienteArqueo(int? telegramId) async {
   return (cup: cup < 0 ? 0.0 : cup, usd: usd < 0 ? 0.0 : usd);
 }
 
+/// Resumen reconciliado del pendiente de un entrenador
+/// (1.25 T05): LA función que consumen las pantallas.
+///
+/// - total: lo que el entrenador tiene en la mano
+///   (pendienteEntrega/pendienteEntregaUsd: espejo + cola
+///   local). Es la cifra de Hub, Mi Turno, Detalle y
+///   Pendiente.
+/// - confirmado: lo que el servidor ya vio
+///   (pendienteArqueo), la base de la liquidación — una
+///   liquidación no puede cubrir operaciones que el
+///   servidor aún no conoce.
+///
+/// Las dos cifras son legítimas pero responden a preguntas
+/// distintas; el defecto era enseñarlas con el mismo
+/// nombre y sin puente. Quien enseña el confirmado (el
+/// Arqueo) enseña también el total desde este resumen, y
+/// la diferencia queda explicada: es lo sin sincronizar.
+Future<
+    ({
+      double cupTotal,
+      double cupConfirmado,
+      double usdTotal,
+      double usdConfirmado
+    })> resumenPendienteEntrega(int? telegramId) async {
+  if (telegramId == null) {
+    return (
+      cupTotal: 0.0,
+      cupConfirmado: 0.0,
+      usdTotal: 0.0,
+      usdConfirmado: 0.0
+    );
+  }
+  final arq = await pendienteArqueo(telegramId);
+  return (
+    cupTotal: await pendienteEntrega(telegramId),
+    cupConfirmado: arq.cup,
+    usdTotal: await pendienteEntregaUsd(telegramId),
+    usdConfirmado: arq.usd,
+  );
+}
+
 /// IDs que componen el pendiente confirmado (para op_ids de la liquidación).
 Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     {String moneda = 'CUP'}) async {

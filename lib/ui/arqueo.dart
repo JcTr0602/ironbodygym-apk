@@ -235,6 +235,10 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
   bool _liquidando = false;
   double _cup = 0;
   double _usd = 0;
+  // 1.25 T05: totales canónicos (con la cola) del resumen
+  // reconciliado; _cup/_usd son el confirmado (espejo).
+  double _cupTotal = 0;
+  double _usdTotal = 0;
   String _moneda = 'CUP';
   List<Map<String, dynamic>> _historial = [];
   // T5 (1.20): expedientes por liquidación (chip o botón
@@ -258,10 +262,17 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
 
   double get _esperado => _moneda == 'USD' ? _usd : _cup;
 
+  // 1.25 T05: el total canónico (con la cola) de la moneda
+  // elegida, para el puente con las demás pantallas.
+  double get _totalMoneda => _moneda == 'USD' ? _usdTotal : _cupTotal;
+
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final pend = await pendienteArqueo(widget.telegramId);
+      // 1.25 T05: el resumen reconciliado (única función):
+      // _cup/_usd siguen siendo el CONFIRMADO (base de la
+      // liquidación) y los totales quedan para el puente.
+      final pend = await resumenPendienteEntrega(widget.telegramId);
       final hist = await liquidacionesDeEntrenador(widget.telegramId);
       var exps = _expedientes;
       try {
@@ -270,8 +281,10 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
       } catch (_) {}
       if (mounted) {
         setState(() {
-          _cup = pend.cup;
-          _usd = pend.usd;
+          _cup = pend.cupConfirmado;
+          _usd = pend.usdConfirmado;
+          _cupTotal = pend.cupTotal;
+          _usdTotal = pend.usdTotal;
           _historial = hist;
           _expedientes = exps;
           _cargando = false;
@@ -532,6 +545,22 @@ class _DetalleArqueoScreenState extends State<_DetalleArqueoScreen> {
                               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                       context)),
                             ),
+                            // 1.25 T05: el puente con la cifra de
+                            // Hub/Mi Turno/Detalle cuando difiere:
+                            // la diferencia es lo sin sincronizar,
+                            // no un error de cuentas.
+                            if ((_totalMoneda - _esperado).abs() > 0.01) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Pendiente total: '
+                                '${fmtMonto(_totalMoneda)} $_moneda. '
+                                'La diferencia con el confirmado es '
+                                'dinero aún sin sincronizar: se podrá '
+                                'liquidar cuando suba al servidor.',
+                                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
+                                        context)),
+                              ),
+                            ],
                           ],
                         ),
                       ),
