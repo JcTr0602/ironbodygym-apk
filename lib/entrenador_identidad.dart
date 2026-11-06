@@ -53,6 +53,46 @@ bool filaEsDelEntrenador(
       nombre.trim().toLowerCase();
 }
 
+/// 1.25 T101, PURO: resuelve el entrenador de
+/// entrenadores_autorizados contra usuarios_apk por el
+/// username (la parte local del correo): devuelve su
+/// nombre REAL y su telegram_id, o null si el username
+/// no está en la meta. Acaba con el «nombre» fabricado
+/// desde el correo (T37/F5-21) donde sí hay identidad.
+({String nombre, int telegramId})? identidadPorEmail(
+  String email,
+  List<Map<String, dynamic>> usuarios,
+) {
+  final username =
+      email.split('@').first.trim().toLowerCase();
+  if (username.isEmpty) return null;
+  for (final m in usuarios) {
+    if ('${m['username'] ?? ''}'.trim().toLowerCase() !=
+        username) {
+      continue;
+    }
+    final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
+    final nombre = '${m['nombre'] ?? ''}'.trim();
+    if (tid == null || nombre.isEmpty) return null;
+    return (nombre: nombre, telegramId: tid);
+  }
+  return null;
+}
+
+/// La meta usuarios_apk decodificada (lista de mapas).
+Future<List<Map<String, dynamic>>> usuariosApk() async {
+  try {
+    final raw = await LocalDb.instance.getMeta('usuarios_apk');
+    if (raw == null || raw.isEmpty) return const [];
+    return [
+      for (final u in jsonDecode(raw) as List)
+        Map<String, dynamic>.from(u as Map),
+    ];
+  } catch (_) {
+    return const [];
+  }
+}
+
 /// telegram_id → nombre visible canónico, desde el
 /// meta usuarios_apk.
 Future<Map<int, String>> nombresCanonEntrenadores() async {

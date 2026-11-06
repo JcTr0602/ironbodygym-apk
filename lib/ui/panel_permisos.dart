@@ -1,9 +1,16 @@
 // lib/ui/panel_permisos.dart
 // v1.3.9 Sprint 1 (#14): panel de permisos para entrenadores.
 // Solo el dueño (Jc) puede acceder.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth.dart';
+import '../entrenador_identidad.dart';
+import '../localdb.dart';
+import '../negocio.dart' show pendientePorEntrenador, fmtMonto;
+import '../tiempo.dart';
+import '../ultimo_sync.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -14,12 +21,59 @@ class EntrenadorPermiso {
   bool activo;
   Map<String, bool> permisos;
 
+  /// 1.25 T101: telegram_id resuelto contra usuarios_apk
+  /// (null si el username del correo no está en la meta):
+  /// con él la tarjeta cruza turno, sync y pendiente.
+  final int? telegramId;
+
   EntrenadorPermiso({
     required this.email,
     required this.nombre,
     required this.activo,
     required this.permisos,
+    this.telegramId,
   });
+
+  /// 1.25 T101: los 14 permisos AGRUPADOS por lo que
+  /// gobiernan, cada grupo con su línea de ayuda (antes
+  /// eran 14 interruptores planos que mezclaban niveles:
+  /// un candado de servidor junto a una visibilidad).
+  static const gruposPermisos = [
+    (
+      'Puede hacer',
+      'Acciones que registran o cambian datos del gym; '
+          'el servidor las verifica.',
+      [
+        'can_cobrar_pagos',
+        'can_inscribir_clientes',
+        'can_editar_fichas',
+        'can_vender_suplementos',
+        'can_registrar_gastos',
+        'can_gestionar_turnos',
+      ],
+    ),
+    (
+      'Puede ver',
+      'Solo visibilidad en su app: no cambia ningún dato.',
+      [
+        'can_view_payroll',
+        'can_ver_todos_pagos',
+        'can_ver_cifras',
+        'can_ver_ranking_servicios',
+        'can_view_progress',
+      ],
+    ),
+    (
+      'App de clientes',
+      'Lo que afecta a la app de los clientes: sus '
+          'accesos y lo que ven de su progreso.',
+      [
+        'can_generate_pin',
+        'can_edit_nutrition',
+        'can_record_measurements',
+      ],
+    ),
+  ];
 
   static const permisosDisponibles = [
     ('can_generate_pin', 'Generar PIN app', 'Crear accesos para clientes'),
@@ -40,6 +94,12 @@ class EntrenadorPermiso {
     ('can_ver_cifras', 'Ver cifras', 'Ver totales de dinero del panel'),
     ('can_ver_ranking_servicios', 'Ver ranking de Servicios', 'Ver quién compra más dosis y agua del gym'),
   ];
+
+  /// La tupla (clave, título, ayuda) de un permiso por
+  /// su clave, para pintar los grupos sin re-recorrer.
+  static final porClave = {
+    for (final p in permisosDisponibles) p.$1: p,
+  };
 }
 
 class PanelPermisos extends StatefulWidget {
@@ -55,6 +115,14 @@ class PanelPermisos extends StatefulWidget {
 class _PanelPermisosState extends State<PanelPermisos> {
   List<EntrenadorPermiso> _entrenadores = [];
   bool _cargando = true;
+  // 1.25 T101: la foto viva del equipo (espejo local, sin
+  // red): última sync por telegram_id, quién tiene el
+  // turno abierto hoy y el pendiente a entregar. Si la
+  // lectura local falla, quedan vacíos y la tarjeta
+  // simplemente no pinta la fila (nada inventado).
+  Map<int, String> _syncPorTid = {};
+  Set<int> _enTurnoHoy = {};
+  Map<int, double> _pendientePorTid = {};
 
   /// 1.15 (campo): entrenadores con la lista de permisos
   /// desplegada. Por defecto todo colapsado: la tarjeta muestra
@@ -107,6 +175,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
           .select('email, activo, permisos')
           .order('email')
           .timeout(const Duration(seconds: 12));
+      final usuarios = await usuariosApk();
       final lista = (res as List).map((e) {
         final m = Map<String, dynamic>.from(e as Map);
         final email = m['email']?.toString() ?? '';
@@ -129,17 +198,69 @@ class _PanelPermisosState extends State<PanelPermisos> {
           permisos: map,
         );
       }).toList();
+      // 1.25 T101: el nombre REAL y el telegram_id salen
+      // de usuarios_apk (por el username del correo); el
+      // nombre fabricado del correo queda solo de
+      // respaldo cuando la meta no lo resuelve.
+      for (var i = 0; i < lista.length; i++) {
+        final id = identidadPorEmail(lista[i].email, usuarios);
+        if (id != null) {
+          lista[i] = EntrenadorPermiso(
+            email: lista[i].email,
+            nombre: id.nombre,
+            activo: lista[i].activo,
+            permisos: lista[i].permisos,
+            telegramId: id.telegramId,
+          );
+        }
+      }
       if (mounted) {
         setState(() {
           _entrenadores = lista;
           _cargando = false;
         });
+        unawaited(_cargarDatosVivos());
       }
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
         mostrarSnack(context, 'Error al cargar: $e', significado: SignificadoChip.error);
       }
+    }
+  }
+
+  /// 1.25 T101: la foto viva del equipo desde el espejo
+  /// local (sin red): última sync, turno abierto hoy y
+  /// pendiente a entregar, por telegram_id. Tolerante:
+  /// si algo falla, las tarjetas no pintan la fila.
+  Future<void> _cargarDatosVivos() async {
+    try {
+      final filas = await ultimoSyncPorTelefono();
+      final sync = <int, String>{};
+      for (final f in filas) {
+        final tid =
+            LocalDb.normalizarTelegramId(f['telegram_user_id']);
+        if (tid != null) {
+          sync[tid] = etiquetaUltimoSync(f, ahoraHabana());
+        }
+      }
+      final enTurno = await LocalDb.instance
+          .telegramIdsConTurnoAbierto(hoyHabanaIso());
+      final pend = await pendientePorEntrenador();
+      final pendMap = <int, double>{
+        for (final e in pend)
+          if ((e['id'] as num?) != null)
+            (e['id'] as num).toInt():
+                (e['total'] as num?)?.toDouble() ?? 0,
+      };
+      if (!mounted) return;
+      setState(() {
+        _syncPorTid = sync;
+        _enTurnoHoy = enTurno;
+        _pendientePorTid = pendMap;
+      });
+    } catch (_) {
+      // Sin fila viva: la pantalla de permisos sigue.
     }
   }
 
@@ -343,6 +464,20 @@ class _PanelPermisosState extends State<PanelPermisos> {
     );
   }
 
+  /// 1.25 T101: un dato vivo de la tarjeta (icono +
+  /// texto corto), en la fila Wrap del entrenador.
+  Widget _datoVivo(IconData icono, String texto) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icono,
+            size: 14, color: AppColores.textoSecundario(context)),
+        const SizedBox(width: 4),
+        Text(texto, style: AppTexto.metadato),
+      ],
+    );
+  }
+
   Widget _buildEntrenadorCard(EntrenadorPermiso ent) {
     // 1.15 (campo): colapsado por defecto; el conteo se lee sin abrir.
     final expandido = _expandidos.contains(ent.email);
@@ -397,6 +532,36 @@ class _PanelPermisosState extends State<PanelPermisos> {
                 ),
               ],
             ),
+            // 1.25 T101: la fila viva del entrenador —
+            // turno de hoy, última sync y pendiente a
+            // entregar, solo si la foto local cargó.
+            if (ent.telegramId != null && _syncPorTid.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Wrap(
+                  spacing: AppEspacio.md,
+                  runSpacing: AppEspacio.xs,
+                  children: [
+                    _datoVivo(
+                      Icons.schedule_rounded,
+                      _enTurnoHoy.contains(ent.telegramId)
+                          ? 'Turno abierto hoy'
+                          : 'Sin turno abierto hoy',
+                    ),
+                    _datoVivo(
+                      Icons.sync_rounded,
+                      _syncPorTid[ent.telegramId] ??
+                          'Sin registro de sync',
+                    ),
+                    if ((_pendientePorTid[ent.telegramId] ?? 0) > 0)
+                      _datoVivo(
+                        Icons.payments_rounded,
+                        'Pendiente a entregar: '
+                        '\$${fmtMonto(_pendientePorTid[ent.telegramId]!)}',
+                      ),
+                  ],
+                ),
+              ),
             const Divider(),
             InkWell(
               onTap: () => setState(() {
@@ -426,20 +591,35 @@ class _PanelPermisosState extends State<PanelPermisos> {
                 ),
               ),
             ),
+            // 1.25 T101: los permisos agrupados por lo
+            // que gobiernan, con la ayuda de cada grupo.
             if (expandido)
-              ...EntrenadorPermiso.permisosDisponibles.map(
-                (p) => SwitchListTile(
-                  title: Text(p.$2,
-                      style: AppTexto.cuerpo),
-                  subtitle: Text(p.$3,
-                      style: AppTexto.metadato),
-                  value: ent.permisos[p.$1] ?? false,
-                  onChanged: ent.activo
-                      ? (v) => _togglePermiso(ent, p.$1, v)
-                      : null,
-                  dense: true,
+              for (final g in EntrenadorPermiso.gruposPermisos) ...[
+                Padding(
+                  padding:
+                      const EdgeInsets.only(top: AppEspacio.md),
+                  child: Text(g.$1,
+                      style: AppTexto.cuerpo
+                          .copyWith(fontWeight: FontWeight.w700)),
                 ),
-              ),
+                Text(g.$2, style: AppTexto.secundario),
+                for (final p in [
+                  for (final clave in g.$3)
+                    if (EntrenadorPermiso.porClave[clave] != null)
+                      EntrenadorPermiso.porClave[clave]!,
+                ])
+                    SwitchListTile(
+                      title: Text(p.$2,
+                          style: AppTexto.cuerpo),
+                      subtitle: Text(p.$3,
+                          style: AppTexto.metadato),
+                      value: ent.permisos[p.$1] ?? false,
+                      onChanged: ent.activo
+                          ? (v) => _togglePermiso(ent, p.$1, v)
+                          : null,
+                      dense: true,
+                    ),
+              ],
           ],
         ),
       ),
