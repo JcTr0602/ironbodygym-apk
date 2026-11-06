@@ -146,6 +146,12 @@ class _FichaScreenState extends State<FichaScreen> {
   /// respuesta tardía no pisa una recarga más nueva).
   int _cargaGen = 0;
   bool _verificando = false;
+  // 1.25 T18: la primera carga local ya terminó. Sin esto,
+  // «cargando» y «el cliente no está en este teléfono» eran
+  // el mismo estado (c == null) y un cliente borrado o
+  // enviado a la papelera desde otro equipo dejaba la
+  // ficha girando para siempre, como si la app se trabara.
+  bool _cargaLocalTerminada = false;
   // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
   // se otorgó. Candado anual + botón "Reenviar WhatsApp".
   Map<String, dynamic>? _regaloAnio;
@@ -241,6 +247,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!mounted || gen != _cargaGen) return;
     if (mounted) {
       setState(() {
+        _cargaLocalTerminada = true;
         _plusResidual = null;
         _accesoSinConexion = false;
         _c = c;
@@ -360,6 +367,59 @@ class _FichaScreenState extends State<FichaScreen> {
   /// de Jc 2026-11-02). [gen] es la generación de _cargar que
   /// lo disparó: si ya hubo otra recarga, el resultado se
   /// descarta.
+  /// 1.25 T18: la carga terminó y el cliente no está en el
+  /// espejo local (borrado, o a la papelera desde otro
+  /// equipo). Antes esto era indistinguible de «cargando»
+  /// y la ficha giraba para siempre.
+  Widget _clienteNoEncontrado() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppEspacio.xxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.person_off_rounded,
+                size: 56,
+                color: AppColores.textoSecundario(context)),
+            const SizedBox(height: 12),
+            const Text('Este cliente ya no está en este teléfono',
+                textAlign: TextAlign.center,
+                style: AppTexto.subtitulo),
+            const SizedBox(height: 8),
+            Text(
+              'Pudo haberse borrado o enviado a la papelera '
+              'desde otro equipo. Si acabas de sincronizar y '
+              'sigue sin aparecer, ya no está en el padrón.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: AppColores.textoSecundario(context)),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                BotonSecundario(
+                  texto: 'Volver',
+                  icono: Icons.arrow_back_rounded,
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                BotonPrimario(
+                  texto: 'Reintentar',
+                  icono: Icons.refresh_rounded,
+                  onPressed: () {
+                    setState(() => _cargaLocalTerminada = false);
+                    _cargar();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _enriquecerDesdeServidor(int gen) async {
     if (!AuthService().isOwner) return;
     // Plus residual (solo dueño; la RPC devuelve
@@ -846,14 +906,8 @@ class _FichaScreenState extends State<FichaScreen> {
     required String? anteriorFmt,
   }) async {
     final c = _c;
-    String telefono = '';
-    for (final raw in ['${c?['movil'] ?? ''}', '${c?['telefono'] ?? ''}']) {
-      final norm = _normalizarTelefono(raw);
-      if (norm.isNotEmpty) {
-        telefono = norm;
-        break;
-      }
-    }
+    // 1.25 T17: el teléfono efectivo único.
+    final telefono = _telefonoEfectivoWa(c);
     // Ronda 3-9 #4: el campo guarda 8 dígitos (como el resto de
     // la app) y el '+53 ' va solo como prefijo visual. Antes se
     // inicializaba con los 10 dígitos wa.me (53…) y el prefijo
@@ -993,6 +1047,31 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Normaliza un teléfono cubano para wa.me (Argón spec 3).
   /// Implementación en negocio.dart (probada).
   String _normalizarTelefono(String tel) => normalizarTelefonoWaMe(tel);
+
+  /// 1.25 T17: EL teléfono efectivo del cliente, calculado
+  /// de una sola manera: el primer número válido entre
+  /// movil y telefono, en forma wa.me (53 + 8 dígitos) o ''
+  /// si no hay ninguno. En clientes migrados el celular
+  /// vive en movil y telefono puede traer el carnet u otro
+  /// dato. Lo usan la fila visible de la ficha, WhatsApp,
+  /// el regalo y el reenvío del recibo: lo que se ve es lo
+  /// que se abre (antes cada camino derivaba el suyo y la
+  /// fila podía enseñar un número que no era el móvil).
+  String _telefonoEfectivoWa(Map<String, dynamic>? c) {
+    for (final raw in ['${c?['movil'] ?? ''}', '${c?['telefono'] ?? ''}']) {
+      final norm = _normalizarTelefono(raw);
+      if (norm.isNotEmpty) return norm;
+    }
+    return '';
+  }
+
+  /// El teléfono efectivo en forma local (8 dígitos) para
+  /// enseñarlo en la ficha; '—' si no hay ninguno válido.
+  String _telefonoEfectivoVisible(Map<String, dynamic>? c) {
+    final wa = _telefonoEfectivoWa(c);
+    if (wa.isEmpty) return '—';
+    return wa.length == 10 ? wa.substring(2) : wa;
+  }
 
   Future<void> _editar() async {
     final c = _c;
@@ -2127,10 +2206,12 @@ class _FichaScreenState extends State<FichaScreen> {
         children: [
           const SyncBanner(),
           Expanded(
-            child: c == null
+            child: c == null && !_cargaLocalTerminada
                 ? const Center(
                     child: CircularProgressIndicator())
-                : FadeEntrada(
+                : c == null
+                    ? _clienteNoEncontrado()
+                    : FadeEntrada(
                     child: ListView(
                     padding: const EdgeInsets.all(
                         AppEspacio.lg),
@@ -2265,7 +2346,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                     Expanded(
                                       flex: 2,
                                       child: Text(
-                                        '${c['telefono'] ?? '—'}',
+                                        _telefonoEfectivoVisible(c),
                                         style: AppTexto.cuerpo
                                             .copyWith(
                                                 fontWeight:
@@ -2665,17 +2746,8 @@ class _FichaScreenState extends State<FichaScreen> {
     // (movil primero): en clientes migrados el celular vive en
     // movil y telefono puede traer el carnet u otro dato, y el
     // toque directo fallaba aunque el regalo sí abría WhatsApp.
-    var tel = '';
-    for (final raw in [
-      '${_c?['movil'] ?? ''}',
-      '${_c?['telefono'] ?? ''}'
-    ]) {
-      final norm = _normalizarTelefono(raw);
-      if (norm.isNotEmpty) {
-        tel = norm;
-        break;
-      }
-    }
+    // 1.25 T17: el teléfono efectivo único.
+    final tel = _telefonoEfectivoWa(_c);
     if (tel.length < 8) {
       if (!mounted) return;
       mostrarSnack(context, 'Este cliente no tiene un teléfono válido registrado.', significado: SignificadoChip.alerta);
@@ -3161,7 +3233,9 @@ class _FichaScreenState extends State<FichaScreen> {
       fechaIso: '${p['fecha'] ?? ''}',
       cobradoPor: '${p['registrado_por'] ?? ''}',
     );
-    final wa = normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+    // 1.25 T17: el recibo va al teléfono EFECTIVO (movil
+    // primero), el mismo que la ficha enseña.
+    final wa = _telefonoEfectivoWa(c);
     if (wa.isEmpty) {
       if (mounted) {
         mostrarSnack(
