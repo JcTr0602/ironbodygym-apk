@@ -85,6 +85,7 @@ import 'panel_bloque2.dart';
 import 'panel_candado.dart';
 import 'panel_permisos.dart';
 import 'panel_resto_caja.dart';
+import 'panel_premios.dart';
 import 'panel_resto_config.dart';
 import 'panel_resto_sistema.dart';
 import 'recordatorios.dart';
@@ -761,6 +762,8 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const VerificacionEspejoScreen());
       case 'incidencias':
         _ir(const ListaIncidenciasScreen());
+      case 'premios':
+        _ir(const PremiosPanelScreen());
       case 'errores_sync':
         _ir(const ErroresSyncPanelScreen());
       case 'auditoria':
@@ -2666,6 +2669,14 @@ class _AdminScreenState extends State<AdminScreen> {
         'Cuentas a la Casa',
         'Precio 0, solo el dueño las otorga',
         () => _ir(const CuentasCasaScreen()),
+      ),
+      // 1.26 (Premios, Pieza G): vales de logros que los
+      // clientes reclaman en su app; el dueño aprueba.
+      _tarjetaFlujo(
+        Icons.emoji_events_rounded,
+        'Premios por aprobar',
+        'Vales de logros reclamados desde la app de clientes',
+        () => _ir(const PremiosPanelScreen()),
       ),
       _tarjetaFlujo(
         Icons.event_rounded,

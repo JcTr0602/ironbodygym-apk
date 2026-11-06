@@ -330,6 +330,11 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       sinonimos: ['operaciones rechazadas', 'revisar sync', 'errores por aprobar'],
       icono: Icons.sync_problem_rounded),
   FuncionPanel(
+      id: 'premios',
+      titulo: 'Premios por aprobar',
+      sinonimos: ['vales', 'logros de clientes', 'canjear premio', 'constancia real'],
+      icono: Icons.emoji_events_rounded),
+  FuncionPanel(
       id: 'errores_sync',
       titulo: 'Errores de sync',
       sinonimos: ['fallos de sincronización'],
