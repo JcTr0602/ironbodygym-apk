@@ -17,6 +17,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
@@ -63,6 +64,20 @@ void main() {
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
+    // Patrón de la casa (gestion125_t121): sin estos
+    // mocks, la escucha de deep links de Supabase Auth
+    // lanza MissingPluginException de forma ASÍNCRONA y
+    // tumba el test que esté corriendo cuando cae (en
+    // solitario pasaba por suerte de tiempos; en la
+    // suite completa cayó sobre este archivo).
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockStreamHandler(
+            const EventChannel('com.llfbandit.app_links/events'),
+            MockStreamHandler.inline(onListen: (args, events) {}));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('com.llfbandit.app_links/messages'),
+            (call) async => null);
     await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
   });
 
