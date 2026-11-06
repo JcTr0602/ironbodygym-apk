@@ -268,9 +268,20 @@ void main() {
             metodoTexto: 'Efectivo',
             periodoTexto: 'Mensual',
             nuevoVencimientoTexto: '25/11/2026',
+            // 1.25 T21: la confirmación enseña la fecha del
+            // pago, el escalón y sus avisos.
+            fechaTexto: '05/11/2026',
+            escalonTexto: 'Tarifa de menores',
+            avisos: ['Aviso de prueba del escalón'],
           ),
         ),
       );
+      // 1.25 T21: el Preview enseña fecha, escalón y avisos.
+      expect(find.text('Fecha del pago'), findsOneWidget);
+      expect(find.text('05/11/2026'), findsOneWidget);
+      expect(find.text('Precio según'), findsOneWidget);
+      expect(find.text('Tarifa de menores'), findsOneWidget);
+      expect(find.text('Aviso de prueba del escalón'), findsOneWidget);
       final boton = find.byType(BotonPrimario);
       expect(boton, findsOneWidget);
       expect(tester.widget<BotonPrimario>(boton).onPressed, isNotNull);

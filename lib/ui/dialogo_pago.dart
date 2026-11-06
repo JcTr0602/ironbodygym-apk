@@ -344,6 +344,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
       // Preview con el período por defecto (mensual 30 días) para mostrar
       // la consecuencia de cada opción. El preview exacto se recalcula
       // en el paso 1 con el período elegido.
+      // 1.25 T22: el texto lo DICE (antes prometía esas
+      // fechas como si fueran las del cobro, y con Semana o
+      // Quincena el vencimiento real era otro: la discusión
+      // era con el cliente delante).
       final hastaSi = previewHastaDias(pagadoHasta, 30,
           fechaPago: fpIso, base: pagadoHasta);
       final hastaNo =
@@ -358,7 +362,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
             '(hace $diasVencido día${diasVencido == 1 ? '' : 's'}).\n'
             '¿Siguió viniendo después del vencimiento?\n\n'
             'Sí → nuevo vencimiento: ${fmtFecha(hastaSi)}\n'
-            'No → nuevo vencimiento: ${fmtFecha(hastaNo)}',
+            'No → nuevo vencimiento: ${fmtFecha(hastaNo)}\n\n'
+            '(Fechas con el período Mensual. Si eliges Semana '
+            'o Quincena, el vencimiento será otro: lo verás '
+            'antes de confirmar.)',
           ),
           actions: [
             TextButton(
@@ -633,9 +640,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     }
                     final diasV =
                         diasVencidosCobro(phNorm, pickedIso) ?? 0;
-                    final hastaSi = previewHastaDias(phNorm, 30,
+                    // 1.25 T22: las fechas se calculan con el
+                    // período ELEGIDO en el diálogo (antes 30
+                    // fijos: con Semana prometía un mes que el
+                    // cobro no cumplía).
+                    final diasSel = tipoSel.id == 'personalizado'
+                        ? (int.tryParse(diasCtrl.text.trim()) ?? 30)
+                        : tipoSel.dias;
+                    final hastaSi = previewHastaDias(phNorm, diasSel,
                         fechaPago: pickedIso, base: phNorm);
-                    final hastaNo = previewHastaDias(phNorm, 30,
+                    final hastaNo = previewHastaDias(phNorm, diasSel,
                         fechaPago: pickedIso);
                     if (!ctx.mounted) return;
                     final r = await showDialog<bool>(
@@ -648,7 +662,10 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           '(hace $diasV día${diasV == 1 ? '' : 's'}).\n'
                           '¿Siguió viniendo después del vencimiento?\n\n'
                           'Sí → nuevo vencimiento: ${fmtFecha(hastaSi)}\n'
-                          'No → nuevo vencimiento: ${fmtFecha(hastaNo)}',
+                          'No → nuevo vencimiento: ${fmtFecha(hastaNo)}\n\n'
+                          '(Con el período elegido ahora; si lo '
+                          'cambias, la fecha cambia y la verás '
+                          'antes de confirmar.)',
                         ),
                         actions: [
                           TextButton(
@@ -988,6 +1005,13 @@ Future<Map<String, dynamic>?> pagoDialogo(
     // v1.3.2: base explícita si el cliente siguió viniendo vencido.
     // El servidor la respeta en record_payment.
     if (basePago != null) 'base': basePago,
+    // 1.25 T21: el escalón que decidió el precio y sus
+    // avisos viajan al Preview (claves locales '_': la
+    // confirmación las retira; no viajan en la op). Sin
+    // esto, el «por qué cuesta eso» se perdía al salir del
+    // diálogo y la confirmación era a ciegas.
+    '_escalon': s.escalon,
+    if (s.avisos.isNotEmpty) '_avisos': s.avisos,
     'siguio_viniendo': basePago != null,
     'fecha': isoFechaHabana(fechaPago),
     // 1.23 (Delta Argón 5ª#1): el dueño no se debe a sí mismo —

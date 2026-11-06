@@ -579,14 +579,13 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Botón rápido + cantidad
-                BotonPrimario(
-                  texto: 'Registrar 1',
-                  icono: Icons.flash_on_rounded,
-                  onPressed: _guardando ? null : _rapido,
-                ),
-                const SizedBox(height: 12),
-                const Text('O varios a la vez:'),
+                // 1.25 T23: UN solo botón principal, con la
+                // cantidad y el total DENTRO de su rótulo.
+                // Antes convivían «Registrar 1» (principal,
+                // siempre 1) y «Guardar cantidad» (secundario)
+                // con la línea «Total» del segundo: con 5 en
+                // pantalla, el botón grande registraba 200
+                // CUP mientras el total decía 1 000.
                 Row(
                   children: [
                     const Text('Cantidad: '),
@@ -612,14 +611,21 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   hint: 'Ej: grupo de 3',
                   icono: Icons.note_rounded,
                 ),
-                const SizedBox(height: 8),
-                Text('Total: ${fmtMonto(_precio * _cantidad)} CUP',
-                    style: AppTexto.tituloPagina),
                 const SizedBox(height: 12),
-                BotonSecundario(
-                  texto: 'Guardar cantidad',
+                BotonPrimario(
+                  texto:
+                      'Registrar $_cantidad · ${fmtMonto(_precio * _cantidad)} CUP',
+                  icono: Icons.flash_on_rounded,
                   onPressed: _guardando ? null : _guardar,
                 ),
+                if (_cantidad > 1)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _guardando ? null : _rapido,
+                      child: const Text('Registrar solo 1'),
+                    ),
+                  ),
                 const SizedBox(height: 24),
                 const Divider(),
                 Row(

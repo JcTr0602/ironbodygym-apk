@@ -42,6 +42,15 @@ class PreviewCobroScreen extends StatefulWidget {
   final String metodoTexto;
   final String periodoTexto;
   final String nuevoVencimientoTexto;
+  // 1.25 T21: la confirmación ya no es a ciegas — fecha del
+  // pago (puede ser retroactiva), base aplicada cuando
+  // siguió viniendo, comprobante adjunto, el escalón que
+  // decidió el precio y sus avisos.
+  final String fechaTexto;
+  final String? baseTexto;
+  final bool conComprobante;
+  final String? escalonTexto;
+  final List<String> avisos;
 
   const PreviewCobroScreen({
     super.key,
@@ -50,6 +59,11 @@ class PreviewCobroScreen extends StatefulWidget {
     required this.metodoTexto,
     required this.periodoTexto,
     required this.nuevoVencimientoTexto,
+    required this.fechaTexto,
+    this.baseTexto,
+    this.conComprobante = false,
+    this.escalonTexto,
+    this.avisos = const [],
   });
 
   @override
@@ -75,14 +89,55 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                     children: [
                       _fila(context, 'Cliente', widget.nombreCliente),
                       const Divider(),
+                      _fila(context, 'Fecha del pago',
+                          widget.fechaTexto),
+                      const Divider(),
                       _filaMonto(context),
                       const Divider(),
                       _filaMetodo(context),
+                      if (widget.conComprobante) ...[
+                        const Divider(),
+                        _fila(context, 'Comprobante',
+                            'Adjunto ✓'),
+                      ],
                       const Divider(),
                       _fila(context, 'Período', widget.periodoTexto),
+                      if (widget.baseTexto != null) ...[
+                        const Divider(),
+                        _fila(context, 'Base del período',
+                            widget.baseTexto!),
+                      ],
                       const Divider(),
                       _fila(context, 'Nuevo vencimiento',
                           widget.nuevoVencimientoTexto),
+                      if (widget.escalonTexto != null) ...[
+                        const Divider(),
+                        _fila(context, 'Precio según',
+                            widget.escalonTexto!),
+                      ],
+                      if (widget.avisos.isNotEmpty) ...[
+                        const Divider(),
+                        for (final aviso in widget.avisos)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                top: AppEspacio.sm),
+                            child: Row(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Icon(Icons.info_rounded,
+                                    size: 18,
+                                    color: AppColores.alerta),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(aviso,
+                                      style:
+                                          AppTexto.secundario),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -237,6 +292,23 @@ int _diasPayload(dynamic v) =>
 /// 1.15 (M7): mensual con 'N meses' cuando meses > 1;
 /// personalizado con 'N días' usando `dias`, también para
 /// ofertas (que viajan como personalizado o `tipo:<id>`).
+/// 1.25 T21: rótulo del escalón que decidió el precio,
+/// para el Preview («Precio según»). El estándar no se
+/// anuncia (es lo normal); la Casa tampoco llega aquí
+/// (su cobro está bloqueado antes del Preview).
+String? escalonTextoPreview(String? escalon) {
+  switch (escalon) {
+    case 'especial':
+      return 'Tarifa especial del cliente';
+    case 'menores':
+      return 'Tarifa de menores';
+    case 'oferta':
+      return 'Oferta 50 %';
+    default:
+      return null;
+  }
+}
+
 String periodoTextoPreview(Map<String, dynamic> payload) {
   final periodo = '${payload['periodo'] ?? ''}';
   switch (periodo) {
@@ -352,6 +424,20 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         periodoTexto: periodoTextoPreview(payload),
         nuevoVencimientoTexto:
             vencRaw.length >= 10 ? fmtFecha(vencRaw) : vencRaw,
+        // 1.25 T21: fecha (puede ser retroactiva), base,
+        // comprobante, escalón y avisos.
+        fechaTexto: fmtFecha('${payload['fecha'] ?? ''}'),
+        baseTexto: payload['base'] != null
+            ? 'Vencimiento anterior '
+                '(${fmtFecha('${payload['base']}')}) — siguió viniendo'
+            : null,
+        conComprobante: payload['_comprobante_ruta'] != null,
+        escalonTexto:
+            escalonTextoPreview('${payload['_escalon'] ?? ''}'),
+        avisos: (payload['_avisos'] as List?)
+                ?.map((e) => '$e')
+                .toList() ??
+            const [],
       ),
     ),
   );
@@ -396,6 +482,10 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   String? comprobanteUuid;
   final payloadOp = Map<String, dynamic>.from(payload)
     ..remove('_comprobante_ruta')
+    // 1.25 T21: las claves de exhibición del Preview no
+    // viajan en la op.
+    ..remove('_escalon')
+    ..remove('_avisos')
     ..['pagado_hasta_anterior'] = pagadoHastaAnterior;
   if (rutaComprobante != null &&
       '${payload['metodo'] ?? ''}' == 'transferencia') {
