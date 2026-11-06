@@ -27,6 +27,8 @@ import '../negocio.dart';
 import '../nomina_calc.dart';
 import '../nomina_foto.dart';
 import '../perfil.dart';
+import '../permisos_entrenador.dart';
+import 'dialogo_gasto.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../tipos_pago.dart';
@@ -1426,87 +1428,28 @@ class _AdminScreenState extends State<AdminScreen> {
 
   // -- gastos ------------------------------------------------------------
   // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
+  // 1.27: la guarda admite TAMBIÉN el permiso
+  // can_registrar_gastos (conectado de verdad): el flujo
+  // vive en dialogo_gasto.dart, compartido con la
+  // pantalla de Gastos del entrenador; el servidor ya
+  // verificaba la op 'gasto' contra ese permiso
+  // (permisos_ops). AdminScreen sigue sin cargar datos
+  // para no-dueños (M2-H1): esta vía es defensa en
+  // profundidad, la entrada del entrenador es Home.
   Future<void> _agregarGasto() async {
-    if (!AuthService().isOwner) return;
+    if (!AuthService().isOwner &&
+        !PermisosEntrenador().canRegistrarGastos) {
+      return;
+    }
     if (_operacionEnCurso) return;
     _operacionEnCurso = true;
     try {
-      await _agregarGastoImpl();
+      if (await agregarGastoFlow(context) && mounted) {
+        await _cargar();
+      }
     } finally {
       _operacionEnCurso = false;
     }
-  }
-
-  Future<void> _agregarGastoImpl() async {
-    final conceptoCtrl = TextEditingController();
-    final montoCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Agregar gasto',
-        iconoTitulo: Icons.receipt_long_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CampoTexto(
-                controller: conceptoCtrl,
-                etiqueta: 'Concepto (ej: pago de la luz)'),
-            const SizedBox(height: 8),
-            CampoTexto(
-                controller: montoCtrl,
-                etiqueta: 'Monto (CUP)',
-                teclado:
-                    const TextInputType.numberWithOptions(decimal: true)),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Guardar')),
-        ],
-      ),
-    );
-    final concepto = conceptoCtrl.text.trim();
-    final montoTexto = montoCtrl.text.replaceAll(',', '.');
-    // 1.23 AT-09: sin dispose aquí (animación de salida del
-    // diálogo; ver _confirmarEntregaImpl).
-    if (ok != true || !mounted) return;
-    final monto = double.tryParse(montoTexto);
-    // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity pasaban el
-    // <= 0 y el payload del gasto reventaba al codificarse (JSON
-    // no admite no-finitos) o quedaba envenenado.
-    if (concepto.isEmpty || monto == null || !monto.isFinite || monto <= 0) {
-      mostrarSnack(context, 'Concepto o monto inválidos', significado: SignificadoChip.alerta);
-      return;
-    }
-    final hoy = ahoraHabana();
-    final fecha = '${hoy.year.toString().padLeft(4, '0')}-'
-        '${hoy.month.toString().padLeft(2, '0')}-'
-        '${hoy.day.toString().padLeft(2, '0')}';
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'gasto',
-      payload: {
-        'fecha': fecha,
-        'concepto': concepto,
-        'monto': monto,
-      },
-    );
-    if (!mounted) return;
-    mostrarSnack(context, 'Gasto guardado (se sincronizará)', significado: SignificadoChip.exito);
-    await _cargar();
-    SyncEngine.instance.push();
   }
 
   // -- exportar ----------------------------------------------------------

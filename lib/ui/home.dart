@@ -42,6 +42,7 @@ import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'cumpleanos.dart';
 import 'dashboard.dart';
+import 'gastos.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
 import 'mi_nomina.dart';
@@ -2997,6 +2998,24 @@ class _HomeScreenState extends State<HomeScreen>
             () => _ir(const InvitadosScreen())),
         _herramienta(Icons.cake_rounded, 'Cumpleaños',
             () => _ir(const CumpleanosScreen())),
+        // 1.27: permiso can_registrar_gastos conectado de
+        // verdad — el dueño entra directo; el entrenador
+        // pasa el permiso operativo al tocar (visible con
+        // aviso, patrón 1.24/1.25) y el servidor verifica
+        // la op 'gasto' contra el mismo permiso.
+        _herramienta(Icons.receipt_long_rounded, 'Gastos',
+            () async {
+          if (_auth.isOwner) {
+            _ir(const GastosScreen());
+            return;
+          }
+          if (await permisoOperativoOkConRefresco(
+              context,
+              () => PermisosEntrenador().canRegistrarGastos,
+              'registrar gastos')) {
+            _ir(const GastosScreen());
+          }
+        }),
         if (_auth.isAdmin)
           _herramienta(Icons.badge_rounded, 'Mis cobros',
               () => _ir(const MiTurnoScreen())),
