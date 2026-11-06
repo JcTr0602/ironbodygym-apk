@@ -331,23 +331,7 @@ class _AdminScreenState extends State<AdminScreen> {
         // segundo pase lo renueve o falle (y si falla, queda la
         // caché con su nota «Sin red · datos de…»).
         _cuentasCasa = casa;
-        _tipos = tipos;
-        _pagoEntrenador = pagoEnt;
-        for (final (clave, _) in clavesMontoConfig) {
-          final v = aj[clave] as num?;
-          _montos
-              .putIfAbsent(clave, () => TextEditingController())
-              .text = v != null
-                  ? '$v'
-                  : (clave == 'precio_app_plus' ? '1000' : '');
-        }
-        // v1.2.4: cargar datos bancarios (strings)
-        // v0.6.0: + titular de la cuenta (Pieza A de Clientes)
-        for (final clave in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion', 'titular']) {
-          _bancarios
-              .putIfAbsent(clave, () => TextEditingController())
-              .text = '${aj[clave] ?? ''}';
-        }
+        _aplicarConfig(aj, tipos, pagoEnt);
         _cargando = false;
       });
     }
@@ -510,6 +494,65 @@ class _AdminScreenState extends State<AdminScreen> {
     Navigator.of(context)
         .push(RutaIron(builder: (_) => w))
         .then((_) => _cargarContadores());
+  }
+
+  /// Aplica la foto de configuración a los campos y
+  /// controladores del Panel. Sin setState propio: la
+  /// llaman la carga completa y la recarga de
+  /// configuración dentro de sus setState.
+  void _aplicarConfig(
+      Map<String, dynamic> aj, List<TipoPago> tipos, int pagoEnt) {
+    _tipos = tipos;
+    _pagoEntrenador = pagoEnt;
+    for (final (clave, _) in clavesMontoConfig) {
+      final v = aj[clave] as num?;
+      _montos
+          .putIfAbsent(clave, () => TextEditingController())
+          .text = v != null
+              ? '$v'
+              : (clave == 'precio_app_plus' ? '1000' : '');
+    }
+    // v1.2.4: datos bancarios (strings) + titular (v0.6.0).
+    for (final clave
+        in ['tarjeta_bandec', 'tarjeta_bpa', 'movil_confirmacion', 'titular']) {
+      _bancarios
+          .putIfAbsent(clave, () => TextEditingController())
+          .text = '${aj[clave] ?? ''}';
+    }
+  }
+
+  /// 1.25 B-02: recarga SOLO la configuración al volver de
+  /// una pantalla de configuración (precios, tipos,
+  /// bancarios, ajustes del gym). Esas pantallas no tocan
+  /// dinero, inscripciones ni contadores: repetir las
+  /// ~19 lecturas de la carga completa era puro coste.
+  Future<void> _cargarConfiguracion() async {
+    if (!AuthService().isOwner) return;
+    final aj = await LocalDb.instance.getAjustes();
+    final preciosSinFijar = clavesPrecioSinFijar(aj).length;
+    final tipos = await getTiposPago(soloActivos: false);
+    final pagoEnt = await PerfilService.instance.getPagoEntrenador();
+    if (!mounted) return;
+    setState(() {
+      _aplicarConfig(aj, tipos, pagoEnt);
+      _preciosSinFijar = preciosSinFijar;
+    });
+  }
+
+  /// Navega a una pantalla de CONFIGURACIÓN y al volver
+  /// recarga solo la configuración (B-02).
+  void _irConfig(Widget w) {
+    Navigator.of(context)
+        .push(RutaIron(builder: (_) => w))
+        .then((_) => _cargarConfiguracion());
+  }
+
+  /// Navega a un destino de SOLO LECTURA demostrable (sin
+  /// ninguna op encolada en su código) y al volver NO
+  /// recarga: nada pudo cambiar (B-02). Si un destino
+  /// gana una acción que muta, debe volver a _ir.
+  void _irSoloLectura(Widget w) {
+    Navigator.of(context).push(RutaIron(builder: (_) => w));
   }
 
   /// Navega a una subpantalla y recarga al volver (para las secciones).
@@ -689,17 +732,17 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'bandeja_gympedia':
         _ir(const BandejaScreen());
       case 'precios_metodo':
-        _ir(const PreciosMetodoScreen());
+        _irConfig(const PreciosMetodoScreen());
       case 'tipos_pago':
-        _ir(_pantallaAjustes(seccion: 'tipos'));
+        _irConfig(_pantallaAjustes(seccion: 'tipos'));
       case 'tarifas':
         _ir(const TarifasScreen());
       case 'bancarios':
-        _ir(_pantallaAjustes(seccion: 'bancarios'));
+        _irConfig(_pantallaAjustes(seccion: 'bancarios'));
       case 'pago_base':
         _elegirPagoEntrenador();
       case 'ajustes_gym':
-        _ir(const AjustesGymScreen());
+        _irConfig(const AjustesGymScreen());
       case 'registro_mensual':
         _ir(const RegistroMensualScreen());
       case 'estado_sync':
@@ -707,7 +750,7 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'cola_sync':
         _ir(const ColaScreen());
       case 'historial_sync':
-        _ir(const HistorialSyncScreen());
+        _irSoloLectura(const HistorialSyncScreen());
       case 'verificacion_espejo':
         _ir(const VerificacionEspejoScreen());
       case 'incidencias':
@@ -715,11 +758,11 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'errores_sync':
         _ir(const ErroresSyncPanelScreen());
       case 'auditoria':
-        _ir(const AuditoriaScreen());
+        _irSoloLectura(const AuditoriaScreen());
       case 'auditoria_persona':
-        _ir(const AuditoriaPersonaScreen());
+        _irSoloLectura(const AuditoriaPersonaScreen());
       case 'anomalias':
-        _ir(const AuditoriaSilenciosaScreen());
+        _irSoloLectura(const AuditoriaSilenciosaScreen());
       case 'mantenimiento':
         _ir(const MantenimientoScreen());
       case 'copia':
@@ -2104,7 +2147,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 colorSub: _colorVariacion(_ingresosMesAnt == null
                     ? null
                     : variacionPct(_ingresos, _ingresosMesAnt!)),
-                onTap: () => _ir(const DashboardScreen()))),
+                onTap: () => _irSoloLectura(const DashboardScreen()))),
         const SizedBox(width: 8),
         // v1.6.0 (Jc, añadido 7): «Pagos este mes» abre el LISTADO
         // exacto de los que pagaron el mes (PagaronMesScreen, el
@@ -2243,7 +2286,7 @@ class _AdminScreenState extends State<AdminScreen> {
     return Padding(
       padding: const EdgeInsets.only(top: AppEspacio.md),
       child: Tarjeta(
-        onTap: () => _ir(const DashboardScreen()),
+        onTap: () => _irSoloLectura(const DashboardScreen()),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2841,13 +2884,13 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.tune_rounded,
         'Precios por método',
         'La lista única: mensualidad, períodos, App Plus y tasa USD · se guarda por campo',
-        () => _ir(const PreciosMetodoScreen()),
+        () => _irConfig(const PreciosMetodoScreen()),
       ),
       _tarjetaFlujo(
         Icons.payments_rounded,
         'Tipos de pago',
         '${_tipos.length} tipos configurados',
-        () => _ir(_pantallaAjustes(seccion: 'tipos')),
+        () => _irConfig(_pantallaAjustes(seccion: 'tipos')),
       ),
       _tarjetaFlujo(
         Icons.local_offer_rounded,
@@ -2861,7 +2904,7 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.account_balance_rounded,
         'Datos bancarios',
         'Tarjetas y móvil de confirmación',
-        () => _ir(_pantallaAjustes(seccion: 'bancarios')),
+        () => _irConfig(_pantallaAjustes(seccion: 'bancarios')),
       ),
       // 1.14 (rediseño): _elegirPagoEntrenador llevaba huérfano
       // desde la v1.6.0 (sin botón). Vuelve como «Pago base a
@@ -2877,7 +2920,7 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.settings_rounded,
         'Ajustes del gym',
         'Métodos y textos del gym',
-        () => _ir(const AjustesGymScreen()),
+        () => _irConfig(const AjustesGymScreen()),
       ),
       _tarjetaFlujo(
         Icons.book_rounded,
@@ -2926,7 +2969,7 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.timeline_rounded,
         'Historial de sync',
         'Subidas, bajadas, purgas y fallos recientes',
-        () => _ir(const HistorialSyncScreen()),
+        () => _irSoloLectura(const HistorialSyncScreen()),
       ),
       // Módulo 6 (1.19): conteos local antes/después de un ciclo
       // forzado, con su alcance declarado (cantidad, no contenido).
@@ -2953,7 +2996,7 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.fact_check_rounded,
         'Auditoría',
         'Quién hizo qué y cuándo',
-        () => _ir(const AuditoriaScreen()),
+        () => _irSoloLectura(const AuditoriaScreen()),
       ),
       // F5-23: fuera la intermedia «Auditoría detallada»
       // (dos enlaces, uno a la propia Auditoría): la vista
@@ -2962,13 +3005,13 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.person_search_rounded,
         'Auditoría por persona',
         'Día, semana, mes o rango de una persona',
-        () => _ir(const AuditoriaPersonaScreen()),
+        () => _irSoloLectura(const AuditoriaPersonaScreen()),
       ),
       _tarjetaFlujo(
         Icons.radar_rounded,
         'Anomalías',
         'Detección silenciosa (solo dueño)',
-        () => _ir(const AuditoriaSilenciosaScreen()),
+        () => _irSoloLectura(const AuditoriaSilenciosaScreen()),
       ),
       _subModulo('SISTEMA'),
       _tarjetaFlujo(
