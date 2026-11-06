@@ -88,6 +88,7 @@ import 'panel_candado.dart';
 import 'panel_permisos.dart';
 import 'panel_resto_caja.dart';
 import 'panel_premios.dart';
+import 'panel_comunidad.dart';
 import 'panel_premios_hub.dart';
 import 'panel_resto_config.dart';
 import 'panel_resto_sistema.dart';
@@ -2622,6 +2623,14 @@ class _AdminScreenState extends State<AdminScreen> {
         'Premios',
         'Vales por aprobar y catálogo de premios por logro',
         () => _ir(const PremiosHubScreen()),
+      ),
+      // 1.27 (Comunidad MVP, Pieza G): los perfiles
+      // visibles de la Comunidad y su ocultación.
+      _tarjetaFlujo(
+        Icons.groups_rounded,
+        'Comunidad',
+        'Perfiles visibles de los clientes y ocultación',
+        () => _ir(const ComunidadPanelScreen()),
       ),
       _tarjetaFlujo(
         Icons.event_rounded,
