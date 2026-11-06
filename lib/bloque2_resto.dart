@@ -583,6 +583,21 @@ double? parsePrecioCampo(String texto) {
   return v;
 }
 
+/// 1.25 Panel 10: claves de precio C6 sin valor válido en
+/// [ajustes] — la «decisión pendiente» del módulo de
+/// Precios (un precio sin fijar rompe su cobro).
+/// precio_app_plus no cuenta cuando la clave falta: su
+/// default vigente es 1000, el de su pantalla.
+List<String> clavesPrecioSinFijar(Map<String, dynamic> ajustes) {
+  return [
+    for (final c in kClavesPreciosC6)
+      if (parsePrecioCampo(
+              '${ajustes[c] ?? (c == 'precio_app_plus' ? 1000 : '')}') ==
+          null)
+        c,
+  ];
+}
+
 /// Claves que H1 edita SIN duplicar C6: métodos aceptados y textos
 /// base. Los precios y períodos viven solo en C6 (Argón ajuste 3).
 const kClavesAjustesH1 = ['metodos_aceptados', 'textos_base'];

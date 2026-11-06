@@ -130,6 +130,9 @@ class _AdminScreenState extends State<AdminScreen> {
   // mini-tendencia de 7 días (solo la carga completa los
   // trae; la recarga ligera de contadores no los toca).
   double? _ingresosMesAnt;
+  // 1.25 Panel 10: precios C6 sin fijar (badge del módulo
+  // de Precios); solo la carga completa lo calcula.
+  int _preciosSinFijar = 0;
   int? _pagosMesAnt;
   List<Map<String, dynamic>> _serie7Panel = const [];
   List<Map<String, dynamic>> _reservasSolicitadas = [];
@@ -234,6 +237,9 @@ class _AdminScreenState extends State<AdminScreen> {
         .fold<double>(
             0, (s, g) => s + ((g['monto'] as num?)?.toDouble() ?? 0));
     final aj = await LocalDb.instance.getAjustes();
+    // 1.25 Panel 10: decisiones pendientes del módulo de
+    // Precios = claves C6 sin valor válido.
+    final preciosSinFijar = clavesPrecioSinFijar(aj).length;
     final tipos = await getTiposPago(soloActivos: false);
     final pagoEnt = await PerfilService.instance.getPagoEntrenador();
     // Salud del sistema
@@ -305,6 +311,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _pendientesSubir = pendSubir;
         _pagosMes = pagosMes;
         _ingresosMesAnt = ingAnt;
+        _preciosSinFijar = preciosSinFijar;
         _pagosMesAnt = pagosMesAnt;
         _serie7Panel = serie7Panel;
         _netoNominaMes = netoNomina;
@@ -2321,7 +2328,12 @@ class _AdminScreenState extends State<AdminScreen> {
         tinte: AppColores.naranja,
         titulo: 'Equipo, Turnos y Permisos',
         resumen: 'Entrenadores · Turnos · Permisos',
-        badge: null,
+        // 1.25 Panel 10: los reportes de turno que faltan
+        // (hoy + ayer) son las decisiones pendientes de
+        // este módulo — el mismo conteo de la bandeja.
+        badge: (_sinReporteHoy.length + _sinReporteAyer.length) == 0
+            ? null
+            : _sinReporteHoy.length + _sinReporteAyer.length,
         tarjetas: _tarjetasModuloEquipo,
       ),
       (
@@ -2338,7 +2350,9 @@ class _AdminScreenState extends State<AdminScreen> {
         tinte: const Color(0xFF9AA3B2),
         titulo: 'Precios, Tarifas y Configuración',
         resumen: 'Precios · Tarifas · Ajustes · Pago base',
-        badge: null,
+        // 1.25 Panel 10: precios sin fijar = decisión
+        // pendiente del dueño en este módulo.
+        badge: _preciosSinFijar == 0 ? null : _preciosSinFijar,
         tarjetas: _tarjetasModuloPrecios,
       ),
       (
