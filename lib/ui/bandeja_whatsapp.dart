@@ -30,6 +30,52 @@ import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
 
+/// 1.25 Panel 13: el estado de un aviso dentro del lote —
+/// el «resultado por partes» de la acción en lote. La
+/// clave es la misma del registro de atendidos
+/// (tipo + cliente_id).
+String claveAvisoLote(Map<String, dynamic> a) =>
+    '${a['tipo']}_${a['cliente_id']}';
+
+enum EstadoAvisoLote { contactado, sinTelefono, pendiente }
+
+EstadoAvisoLote estadoAvisoLote(
+    Map<String, dynamic> a, Set<String> tocados) {
+  if (tocados.contains(claveAvisoLote(a))) {
+    return EstadoAvisoLote.contactado;
+  }
+  if (normalizarTelefonoWaMe('${a['telefono'] ?? ''}').isEmpty) {
+    return EstadoAvisoLote.sinTelefono;
+  }
+  return EstadoAvisoLote.pendiente;
+}
+
+/// Los avisos agrupados por su estado en el lote (las tres
+/// partes del resultado, en orden de lectura: hechos,
+/// imposibles y restantes).
+Map<EstadoAvisoLote, List<Map<String, dynamic>>> resumenLoteAvisos(
+    List<Map<String, dynamic>> avisos, Set<String> tocados) {
+  final grupos = <EstadoAvisoLote, List<Map<String, dynamic>>>{
+    EstadoAvisoLote.contactado: [],
+    EstadoAvisoLote.sinTelefono: [],
+    EstadoAvisoLote.pendiente: [],
+  };
+  for (final a in avisos) {
+    grupos[estadoAvisoLote(a, tocados)]!.add(a);
+  }
+  return grupos;
+}
+
+/// Rótulo corto del tipo de aviso para el resumen.
+String rotuloTipoAvisoLote(String tipo) => switch (tipo) {
+      'vencido' => 'Vencido',
+      'vence_hoy' => 'Vence hoy',
+      'por_vencer' => 'Por vencer',
+      'recibo' => 'Recibo',
+      'cumple' => 'Cumpleaños',
+      _ => tipo,
+    };
+
 class BandejaWhatsappScreen extends StatefulWidget {
   const BandejaWhatsappScreen({super.key});
 
@@ -106,8 +152,11 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
             quedan > 0
                 ? 'Contactado. Quedan $quedan en el lote.'
                 : 'Lote completo.',
-            accion: quedan > 0 ? 'Siguiente' : null,
-            alAccion: quedan > 0 ? _enviarLote : null,
+            // Panel 13: al cerrar el lote, el snack lleva
+            // al resultado por partes (qué se hizo, qué
+            // no se pudo y qué falta).
+            accion: quedan > 0 ? 'Siguiente' : 'Ver resumen',
+            alAccion: quedan > 0 ? _enviarLote : _mostrarResumenLote,
           );
         } else {
           mostrarSnack(
@@ -124,8 +173,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   /// Clave de "Atendido" en SQLite: tipo + cliente_id (la fecha va
   /// en su propia columna). La categoría evita que alguien atendido
   /// hoy en "Por vencer" aparezca atenuado mañana en "Vencen hoy".
-  String _clave(Map<String, dynamic> a) =>
-      '${a['tipo']}_${a['cliente_id']}';
+  String _clave(Map<String, dynamic> a) => claveAvisoLote(a);
 
   /// Migración única desde SharedPreferences (1.3.8/1.3.6): las
   /// claves atendido_YYYY-MM-DD_* de HOY pasan a SQLite y se borran
@@ -266,6 +314,65 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       n++;
     }
     return n;
+  }
+
+  /// 1.25 Panel 13: el resultado POR PARTES del lote —
+  /// quién quedó contactado, quién no se pudo (sin
+  /// teléfono) y quién falta, con nombres. Sin esto, el
+  /// lote solo decía «completo» y el detalle se perdía.
+  void _mostrarResumenLote() {
+    final grupos = resumenLoteAvisos(_avisos, _tocados);
+    Widget seccion(String titulo, IconData icono,
+        List<Map<String, dynamic>> filas) {
+      if (filas.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: AppEspacio.md),
+          Row(children: [
+            Icon(icono, size: 18, color: AppColores.naranja),
+            const SizedBox(width: 6),
+            Text('$titulo (${filas.length})',
+                style: AppTexto.etiqueta),
+          ]),
+          const SizedBox(height: 4),
+          for (final a in filas)
+            Padding(
+              padding: const EdgeInsets.only(left: 24, bottom: 2),
+              child: Text(
+                  '${a['nombre'] ?? 'Sin nombre'} · '
+                  '${rotuloTipoAvisoLote('${a['tipo'] ?? ''}')}',
+                  style: AppTexto.secundario),
+            ),
+        ],
+      );
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Resultado del lote'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              seccion('Contactados', Icons.check_circle_rounded,
+                  grupos[EstadoAvisoLote.contactado]!),
+              seccion('Sin teléfono', Icons.phone_disabled_rounded,
+                  grupos[EstadoAvisoLote.sinTelefono]!),
+              seccion('Pendientes', Icons.schedule_rounded,
+                  grupos[EstadoAvisoLote.pendiente]!),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cerrar')),
+        ],
+      ),
+    );
   }
 
   /// Modo lote: abre el próximo aviso pendiente (con teléfono) en
@@ -478,6 +585,19 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                           : 'Lote completo'),
                     ),
                   ),
+                  // 1.25 Panel 13: el resultado por partes
+                  // del lote, consultable en cuanto hay
+                  // actividad (no solo al terminar).
+                  if (_tocados.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _mostrarResumenLote,
+                        icon: const Icon(Icons.fact_check_rounded,
+                            size: 18),
+                        label: const Text('Resultado por partes'),
+                      ),
+                    ),
                 ],
               ),
             ),
