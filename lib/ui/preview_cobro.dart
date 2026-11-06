@@ -528,8 +528,12 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
       builder: (_) => ConfirmacionCobroScreen(
         nombreCliente: nombreCliente,
         monto: '${fmtMonto(monto)} CUP',
+        // 1.25 T117 (F1-82): el Recibo recibe la fecha YA
+        // formateada, igual que el Preview de arriba — antes
+        // le llegaba el ISO crudo (2026-12-05) y el cliente lo
+        // veía así en su justificante.
         nuevoVencimiento:
-            vencRaw.length >= 10 ? vencRaw.substring(0, 10) : vencRaw,
+            vencRaw.length >= 10 ? fmtFecha(vencRaw) : vencRaw,
         opUuid: opUuid,
         // Bloque 4 (T6): el monto del recibo cuenta hasta su
         // valor con MontoAnimado.

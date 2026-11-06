@@ -507,54 +507,77 @@ class _PagoScreenState extends State<PagoScreen> {
       child: Tarjeta(
         child: Column(
           children: [
+            // 1.25 T117 (F1-86): cada columna en Expanded (con
+            // letra grande y montos de 6 cifras la fila
+            // desbordaba) y el desglose con su etiqueta y su
+            // moneda: antes eran dos montos tras un icono de
+            // 14 px, sin decir cuál era cuál.
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Column(
-                  children: [
-                    Text(
-                      '${fmtMonto(_totalHoy)} CUP',
-                      style: AppTexto.metrica.copyWith(
-                          color: AppColores.naranja),
-                    ),
-                    Text('Cobrado hoy',
-                        style: AppTexto.etiqueta.copyWith(
-                            color: cs.onSurfaceVariant)),
-                  ],
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '${fmtMonto(_totalHoy)} CUP',
+                        style: AppTexto.metrica.copyWith(
+                            color: AppColores.naranja),
+                      ),
+                      Text('Cobrado hoy',
+                          style: AppTexto.etiqueta.copyWith(
+                              color: cs.onSurfaceVariant)),
+                    ],
+                  ),
                 ),
-                Column(
-                  children: [
-                    Text(
-                      '${_cobros.length}',
-                      style: AppTexto.metrica,
-                    ),
-                    Text('Pagos hoy',
-                        style: AppTexto.etiqueta.copyWith(
-                            color: cs.onSurfaceVariant)),
-                  ],
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '${_cobros.length}',
+                        style: AppTexto.metrica,
+                      ),
+                      Text('Pagos hoy',
+                          style: AppTexto.etiqueta.copyWith(
+                              color: cs.onSurfaceVariant)),
+                    ],
+                  ),
                 ),
-                Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Icon(Icons.payments_rounded,
-                          size: 14,
-                          color: AppColores.exito),
-                      const SizedBox(width: 4),
-                      Text(fmtMonto(_efectivoHoy),
-                          style: AppTexto.cuerpo),
-                    ]),
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      const Icon(Icons.smartphone_rounded,
-                          size: 14,
-                          color: AppColores.info),
-                      const SizedBox(width: 4),
-                      Text(fmtMonto(_transferHoy),
-                          style: AppTexto.cuerpo),
-                    ]),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        const Icon(Icons.payments_rounded,
+                            size: 14,
+                            color: AppColores.exito),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                              '${fmtMonto(_efectivoHoy)} CUP',
+                              style: AppTexto.cuerpo),
+                        ),
+                      ]),
+                      Text('Efectivo',
+                          style: AppTexto.metadato.copyWith(
+                              color: cs.onSurfaceVariant)),
+                      const SizedBox(height: 4),
+                      Row(children: [
+                        const Icon(Icons.smartphone_rounded,
+                            size: 14,
+                            color: AppColores.info),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                              '${fmtMonto(_transferHoy)} CUP',
+                              style: AppTexto.cuerpo),
+                        ),
+                      ]),
+                      Text('Transferencia',
+                          style: AppTexto.metadato.copyWith(
+                              color: cs.onSurfaceVariant)),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -591,16 +614,25 @@ class _PagoScreenState extends State<PagoScreen> {
         child: ExpansionTile(
           leading: Icon(Icons.schedule_rounded,
               color: AppColores.textoSecundario(context)),
-          title: Text('Últimos cobros (${items.length})',
+          // 1.25 T117 (F1-85): si hay más cobros que los que
+          // se muestran, el título lo dice («10 de 14»): antes
+          // «Pagos hoy: 14» y «Últimos cobros (10)» parecían
+          // contradecirse.
+          title: Text(
+              _cobros.length > items.length
+                  ? 'Últimos cobros (${items.length} de ${_cobros.length})'
+                  : 'Últimos cobros (${items.length})',
               style: AppTexto.cuerpo
                   .copyWith(fontWeight: FontWeight.w600)),
           children: items.isEmpty
               ? const [
-                  Padding(
-                    padding: EdgeInsets.all(
-                        AppEspacio.md),
-                    child: Text('Aún no hay cobros hoy.',
-                        style: AppTexto.secundario),
+                  // F1-94: vacío con el componente común, no
+                  // un texto suelto.
+                  EstadoVacio(
+                    icono: Icons.receipt_long_rounded,
+                    titulo: 'Aún no hay cobros hoy',
+                    subtitulo:
+                        'Los cobros que registres hoy salen aquí.',
                   ),
                 ]
               : items.map((c) {
@@ -660,11 +692,24 @@ class _PagoScreenState extends State<PagoScreen> {
                     onChanged: (_) => _buscarConDebounce(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                BotonPrimario(
-                    texto: 'Buscar',
-                    onPressed: _buscar,
-                    expandido: false),
+                // 1.25 T117 (F1-97): fuera el botón «Buscar» —
+                // el campo ya busca solo al teclear (debounce)
+                // y el botón duplicaba la acción compitiendo
+                // con los «Pagar» de las filas. En su lugar, un
+                // ✕ para limpiar cuando hay texto.
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _q,
+                  builder: (context, valor, _) => valor.text.isEmpty
+                      ? const SizedBox.shrink()
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Limpiar búsqueda',
+                          onPressed: () {
+                            _q.clear();
+                            _buscar();
+                          },
+                        ),
+                ),
               ],
             ),
           ),

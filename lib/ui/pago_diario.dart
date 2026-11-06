@@ -217,7 +217,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // 1.24 Bloque 5: con controlador (patrón de Servicios) para
     // cerrarla en dispose — el Deshacer muere con su pantalla.
     _ctrlDeshacer = mostrarSnackControladoEnMessenger(
-        ScaffoldMessenger.of(context), '$cantidad pago(s) guardado(s)',
+        ScaffoldMessenger.of(context), cantidad == 1 ? '1 pago guardado' : '$cantidad pagos guardados',
         significado: SignificadoChip.exito,
         // v1.2.7 (A3): se descarta solo a los 4s, no obliga a interactuar.
         duracion: const Duration(seconds: 4),
@@ -354,56 +354,29 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     }
     // (El gate de autoría ya se aplicó arriba, antes de la rama
     // optimista; no se duplica aquí.)
-    final cantCtrl = TextEditingController(
-        text: '${d['cantidad'] ?? 1}');
-    final notaCtrl =
-        TextEditingController(text: '${d['nota'] ?? ''}');
-    final accion = await showDialog<String>(
+    // 1.25 T117 (F1-95): el diálogo es un StatefulWidget propio
+    // que posee sus controladores y enseña el total resultante
+    // mientras se teclea (con el precio unitario DEL REGISTRO,
+    // la misma fuente que usa el guardado). Devuelve los textos
+    // ya capturados en el pop: nada se lee tras el dispose.
+    final cantD = (d['cantidad'] as num?)?.toDouble() ?? 1;
+    final totalD = (d['total'] as num?)?.toDouble() ?? 0;
+    final unitarioD =
+        (cantD > 0 && totalD > 0) ? totalD / cantD : _precio;
+    final res = await showDialog<
+        ({String accion, String cant, String nota})>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Editar pago diario',
-        iconoTitulo: Icons.edit_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: cantCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                  labelText: 'Cantidad'),
-            ),
-            TextField(
-              controller: notaCtrl,
-              decoration:
-                  const InputDecoration(labelText: 'Nota'),
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'eliminar'),
-            child: const Text('Eliminar',
-                style: TextStyle(color: AppColores.error)),
-          ),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, 'guardar'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Guardar')),
-        ],
+      builder: (ctx) => _DialogoEditarDiario(
+        cantidadIni: '${d['cantidad'] ?? 1}',
+        notaIni: '${d['nota'] ?? ''}',
+        precioUnitario: unitarioD,
+        turno: '${d['turno'] ?? ''}',
       ),
     );
-    // v1.3.1: capturar antes del dispose (evita used after disposed).
-    final cantTexto = cantCtrl.text.trim();
-    final notaTexto = notaCtrl.text.trim();
-    cantCtrl.dispose();
-    notaCtrl.dispose();
-    if (accion == null || !mounted) return;
+    if (res == null || !mounted) return;
+    final accion = res.accion;
+    final cantTexto = res.cant;
+    final notaTexto = res.nota;
 
     if (accion == 'eliminar') {
       final ok = await showDialog<bool>(
@@ -558,9 +531,32 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     return ListView(
       padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
-                Text('(${fmtMonto(_precio)} CUP por turno)',
-                    style: TextStyle(
-                        color: AppColores.textoSecundario(context))),
+                // 1.25 T117 (F1-98 + F1-92): la tarifa abre la
+                // vista DENTRO de su tarjeta (antes era una
+                // línea huérfana sin encabezado) y el método va
+                // a la vista: el pago diario entra SIEMPRE en
+                // efectivo y eso no se decía en ningún sitio.
+                Tarjeta(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.bolt_rounded,
+                          color: AppColores.naranja),
+                      const SizedBox(width: AppEspacio.sm),
+                      Expanded(
+                        child: Text(
+                          'Pago diario · ${fmtMonto(_precio)} CUP '
+                          'por turno',
+                          style: AppTexto.cuerpo,
+                        ),
+                      ),
+                      const ChipEstado.semantico(
+                        texto: 'Efectivo',
+                        significado: SignificadoChip.neutral,
+                        icono: Icons.payments_rounded,
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 16),
                 const Text('Turno:'),
                 Row(
@@ -643,10 +639,16 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
+                // F1-94: vacío con el componente común y su
+                // acción siguiente, no un texto suelto.
                 if (_hoy.isEmpty)
-                  Text('Nada registrado hoy todavía',
-                      style: TextStyle(
-                          color: AppColores.textoSecundario(context))),
+                  const EstadoVacio(
+                    icono: Icons.bolt_rounded,
+                    titulo: 'Nada registrado hoy todavía',
+                    subtitulo:
+                        'Registra el primer pago diario con el '
+                        'botón de arriba.',
+                  ),
                 for (final d in _hoy)
                   Padding(
                     padding: const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -661,7 +663,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                           color: AppColores.naranja,
                         ),
                         title: Text(
-                            '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
+                            '${d['cantidad']} pago${d['cantidad'] == 1 ? '' : 's'} — ${fmtMonto(d['total'])} CUP'),
                         subtitle: Text([
                           if ((d['nota'] as String?)
                                   ?.isNotEmpty ==
@@ -901,9 +903,11 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               if (_reporteDatos.isEmpty)
-                Text('Sin registros este día',
-                    style: TextStyle(
-                        color: AppColores.textoSecundario(context))),
+                const EstadoVacio(
+                  icono: Icons.calendar_month_rounded,
+                  titulo: 'Sin registros este día',
+                  subtitulo: 'Prueba con otro día del calendario.',
+                ),
               for (final d in _reporteDatos)
                 Padding(
                   padding: const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -918,7 +922,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         color: AppColores.naranja,
                       ),
                     title: Text(
-                        '${d['cantidad']} pago(s) — ${fmtMonto(d['total'])} CUP'),
+                        '${d['cantidad']} pago${d['cantidad'] == 1 ? '' : 's'} — ${fmtMonto(d['total'])} CUP'),
                     subtitle: Text([
                       if ((d['nota'] as String?)
                               ?.isNotEmpty ==
@@ -932,6 +936,15 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     ]
                         .where((s) => s.isNotEmpty)
                         .join(' · ')),
+                    // 1.25 T117 (F1-98): estas filas tienen la
+                    // misma cara que las editables de
+                    // «Registrados hoy» pero aquí no se editan:
+                    // se dice, no se adivina tocándolas.
+                    trailing: Text('solo lectura',
+                        style: TextStyle(
+                            color:
+                                AppColores.textoSecundario(context),
+                            fontSize: 11)),
                     ),
                   ),
                 ),
@@ -953,6 +966,113 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
         ],
       ),
+    );
+  }
+}
+
+/// 1.25 T117 (F1-95): diálogo de edición del pago diario como
+/// StatefulWidget propio: posee y dispone sus controladores
+/// (patrón de la casa) y enseña el total resultante MIENTRAS se
+/// teclea la cantidad — antes se editaba dinero a ciegas, con
+/// solo «Cantidad» y «Nota». Muestra también el turno y el
+/// precio por pago DEL REGISTRO (no la tarifa vigente).
+/// Devuelve los textos ya capturados al hacer pop.
+class _DialogoEditarDiario extends StatefulWidget {
+  final String cantidadIni;
+  final String notaIni;
+  final double precioUnitario;
+  final String turno;
+
+  const _DialogoEditarDiario({
+    required this.cantidadIni,
+    required this.notaIni,
+    required this.precioUnitario,
+    required this.turno,
+  });
+
+  @override
+  State<_DialogoEditarDiario> createState() =>
+      _DialogoEditarDiarioState();
+}
+
+class _DialogoEditarDiarioState extends State<_DialogoEditarDiario> {
+  late final TextEditingController _cantCtrl;
+  late final TextEditingController _notaCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _cantCtrl = TextEditingController(text: widget.cantidadIni);
+    _notaCtrl = TextEditingController(text: widget.notaIni);
+  }
+
+  @override
+  void dispose() {
+    _cantCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  ({String accion, String cant, String nota}) _salida(String accion) =>
+      (accion: accion, cant: _cantCtrl.text.trim(), nota: _notaCtrl.text.trim());
+
+  @override
+  Widget build(BuildContext context) {
+    final n = int.tryParse(_cantCtrl.text.trim()) ?? 0;
+    return DialogoApp(
+      titulo: 'Editar pago diario',
+      iconoTitulo: Icons.edit_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.turno.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                  'Turno: ${widget.turno == 'mañana' ? 'Mañana' : 'Tarde'}',
+                  style: AppTexto.secundario),
+            ),
+          TextField(
+            controller: _cantCtrl,
+            keyboardType: TextInputType.number,
+            decoration:
+                const InputDecoration(labelText: 'Cantidad'),
+            onChanged: (_) => setState(() {}),
+          ),
+          TextField(
+            controller: _notaCtrl,
+            decoration: const InputDecoration(labelText: 'Nota'),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Precio por pago: ${fmtMonto(widget.precioUnitario)} CUP'
+              ' · Nuevo total: ${fmtMonto(widget.precioUnitario * n)} CUP',
+              style: AppTexto.cuerpo,
+            ),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () =>
+              Navigator.pop(context, _salida('eliminar')),
+          child: const Text('Eliminar',
+              style: TextStyle(color: AppColores.error)),
+        ),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () =>
+                Navigator.pop(context, _salida('guardar')),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Guardar')),
+      ],
     );
   }
 }

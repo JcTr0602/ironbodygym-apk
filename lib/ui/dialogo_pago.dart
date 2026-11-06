@@ -730,7 +730,12 @@ Future<Map<String, dynamic>?> pagoDialogo(
                       DropdownMenuItem(
                           value: t.id,
                           child: Text(
-                              '${t.nombre} (${fmtMonto(montoEtiqueta(t))} CUP)')),
+                              // 1.25 T117 (F1-89): los días del tipo
+                              // van en la etiqueta (dos tipos con
+                              // igual monto y distinta duración ya
+                              // no se confunden). Mismo arreglo que
+                              // en Inscribir (F1-62).
+                              '${t.nombre} · ${t.dias} días · ${fmtMonto(montoEtiqueta(t))} CUP')),
                     const DropdownMenuItem(
                         value: 'personalizado',
                         child: Text('Personalizado…')),
@@ -751,6 +756,16 @@ Future<Map<String, dynamic>?> pagoDialogo(
                           orElse: () => tiposDisp.first);
                     }
                   }),
+                ),
+                // 1.25 T117 (F1-90): cambiar el método reescribe
+                // el precio de las opciones (2000 ↔ 2500 en la
+                // mensualidad estándar); se dice junto al
+                // desplegable en vez de que el precio «cambie
+                // solo» al tocar el chip de método.
+                const Text(
+                  'El precio de cada opción depende del método '
+                  'de pago elegido abajo.',
+                  style: AppTexto.secundario,
                 ),
                 // Selector de meses para mensual/menores
                 if (tipoSel.id == 'mensual' ||
@@ -821,7 +836,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
                       const SizedBox(width: 8),
                     if (aceptaTransfer)
                       ChoiceChip(
-                          label: const Text('Transfer.'),
+                          label: const Text('Transferencia'),
                           avatar: const Icon(
                               Icons.smartphone_rounded,
                               size: 18),
@@ -910,17 +925,33 @@ Future<Map<String, dynamic>?> pagoDialogo(
                     ),
                 ],
                 const SizedBox(height: 12),
-                Text('Período: ${_etiquetaPeriodo(s)}'),
+                // 1.25 T117 (F1-88): el pie es el «Resumen» (el
+                // encabezado «Período:» ya vive sobre el
+                // desplegable; repetirlo aquí duplicaba la
+                // etiqueta sin añadir nada).
+                const Text('Resumen',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(_etiquetaPeriodo(s)),
                 Text('Monto: ${fmtMonto(s.monto)} CUP',
                     style:
                         const TextStyle(fontWeight: FontWeight.bold)),
                 // v1.10.0 (Bloque 2, D6): chip + avisos del escalón
                 // que decidió el precio (no bloquean, informan).
-                if (s.escalon == 'especial')
-                  const Padding(
-                    padding: EdgeInsets.only(top: AppEspacio.xs),
+                // 1.25 T117 (F1-84): el chip sale para TODO escalón
+                // no estándar — antes solo la tarifa especial lo
+                // tenía y el «por qué cuesta eso» de menores y de
+                // la oferta se perdía (el Preview sí lo mostraba).
+                if (s.escalon != 'estandar')
+                  Padding(
+                    padding: const EdgeInsets.only(top: AppEspacio.xs),
                     child: Chip(
-                      label: Text('Tarifa especial'),
+                      label: Text(s.escalon == 'especial'
+                          ? 'Tarifa especial'
+                          : s.escalon == 'menores'
+                              ? 'Tarifa de menores'
+                              : s.escalon == 'oferta'
+                                  ? 'Oferta'
+                                  : s.escalon),
                       visualDensity: VisualDensity.compact,
                     ),
                   ),
