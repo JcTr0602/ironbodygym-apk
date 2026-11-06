@@ -5786,6 +5786,25 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
   );
 }
 
+/// 1.25 Panel 7: variación porcentual de [actual] contra
+/// [anterior]. Null cuando no hay base de comparación
+/// (anterior <= 0): la UI omite la línea en vez de inventar
+/// un «+100 %» el primer mes con datos.
+double? variacionPct(num actual, num anterior) {
+  if (anterior <= 0) return null;
+  return (actual - anterior) / anterior * 100;
+}
+
+/// Texto de la variación redondeada: '+8 %', '-3 %', '0 %';
+/// null si no hay base (ver [variacionPct]).
+String? textoVariacionPct(num actual, num anterior) {
+  final v = variacionPct(actual, anterior);
+  if (v == null) return null;
+  final r = v.round();
+  if (r == 0) return '0 %';
+  return r > 0 ? '+$r %' : '$r %';
+}
+
 /// Ingresos del mes calendario actual (espejo `pagos` + diarios).
 /// v1.0.15: ingresos del mes anterior (para comparativa).
 Future<double> ingresosMesAnterior() async {

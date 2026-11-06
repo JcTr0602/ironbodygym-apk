@@ -126,6 +126,12 @@ class _AdminScreenState extends State<AdminScreen> {
   // hub pinta «-- CUP», nunca un 0 inventado (regla de Argón).
   double? _netoNominaMes;
   int _clientesActivos = 0;
+  // 1.25 Panel 7: comparación contra el mes pasado y
+  // mini-tendencia de 7 días (solo la carga completa los
+  // trae; la recarga ligera de contadores no los toca).
+  double? _ingresosMesAnt;
+  int? _pagosMesAnt;
+  List<Map<String, dynamic>> _serie7Panel = const [];
   List<Map<String, dynamic>> _reservasSolicitadas = [];
   Map<String, String> _nombreSupl = {};
   List<Map<String, dynamic>> _stockCritico = [];
@@ -242,6 +248,12 @@ class _AdminScreenState extends State<AdminScreen> {
     // otros usos; aquí no se usa.
     final pagosMes = await NominaCalc.clientesQuePagaronElMes(
         NominaCalc.prefMesActual());
+    // 1.25 Panel 7: las cifras de comparación del mes pasado
+    // y la serie de 7 días de la mini-tendencia.
+    final ingAnt = await ingresosMesAnterior();
+    final pagosMesAnt = await NominaCalc.clientesQuePagaronElMes(
+        NominaCalc.prefMesAnterior());
+    final serie7Panel = await ingresosUltimos7Dias();
     final activos = resumenAct.activos; // 4ª#3: de la lectura única
     final fotoRS = await _fotoReservasStock();
     final solicitadas = fotoRS.solicitadas;
@@ -292,6 +304,9 @@ class _AdminScreenState extends State<AdminScreen> {
         _syncDet = det;
         _pendientesSubir = pendSubir;
         _pagosMes = pagosMes;
+        _ingresosMesAnt = ingAnt;
+        _pagosMesAnt = pagosMesAnt;
+        _serie7Panel = serie7Panel;
         _netoNominaMes = netoNomina;
         _clientesActivos = activos;
         _reservasSolicitadas = solicitadas;
@@ -1566,6 +1581,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         _resumenMes(),
                         _lineaCuentasCasa(),
                         _lineaNomina(),
+                        _miniTendencia7(),
                         _tituloSeccion('MÓDULOS'),
                         _tarjetasModulos(),
                         // 1.25 T121 (F5-26): fuera la nota
@@ -2047,6 +2063,14 @@ class _AdminScreenState extends State<AdminScreen> {
       'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
     ];
     final mes = meses[ahoraHabana().month - 1];
+    // 1.25 Panel 7: comparación contra el mes pasado.
+    final mesAnt = meses[(ahoraHabana().month + 10) % 12];
+    final varIng = _ingresosMesAnt == null
+        ? null
+        : textoVariacionPct(_ingresos, _ingresosMesAnt!);
+    final varPagos = _pagosMesAnt == null
+        ? null
+        : textoVariacionPct(_pagosMes, _pagosMesAnt!);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2061,6 +2085,10 @@ class _AdminScreenState extends State<AdminScreen> {
         Expanded(
             child: _kpi('\$${fmtMonto(_ingresos)}', 'Ingresos de $mes',
                 color: AppColores.exito,
+                sub: varIng == null ? null : '$varIng vs $mesAnt',
+                colorSub: _colorVariacion(_ingresosMesAnt == null
+                    ? null
+                    : variacionPct(_ingresos, _ingresosMesAnt!)),
                 onTap: () => _ir(const DashboardScreen()))),
         const SizedBox(width: 8),
         // v1.6.0 (Jc, añadido 7): «Pagos este mes» abre el LISTADO
@@ -2069,6 +2097,10 @@ class _AdminScreenState extends State<AdminScreen> {
         // que en la tarjeta de estadísticas de Home).
         Expanded(
             child: _kpi('$_pagosMes', 'Pagos este mes',
+                sub: varPagos == null ? null : '$varPagos vs $mesAnt',
+                colorSub: _colorVariacion(_pagosMesAnt == null
+                    ? null
+                    : variacionPct(_pagosMes, _pagosMesAnt!)),
                 onTap: () => _ir(const PagaronMesScreen()))),
         const SizedBox(width: 8),
         Expanded(
@@ -2143,7 +2175,7 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Widget _kpi(String valor, String etiqueta,
-      {Color? color, VoidCallback? onTap}) {
+      {Color? color, VoidCallback? onTap, String? sub, Color? colorSub}) {
     return Tarjeta(
       onTap: onTap,
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.md),
@@ -2157,7 +2189,93 @@ class _AdminScreenState extends State<AdminScreen> {
           const SizedBox(height: 2),
           Text(etiqueta,
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
+          // 1.25 Panel 7: línea de comparación («+8 % vs
+          // octubre») cuando hay base del mes pasado.
+          if (sub != null) ...[
+            const SizedBox(height: 2),
+            Text(sub,
+                style: AppTexto.metadato.copyWith(
+                    color: colorSub ??
+                        AppColores.textoSecundario(context),
+                    fontWeight: FontWeight.w700),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// Color de una línea de variación: sube = verde, baja =
+  /// rojo, plana o sin base = secundario.
+  Color _colorVariacion(double? v) {
+    if (v == null || v.round() == 0) {
+      return AppColores.textoSecundario(context);
+    }
+    return v > 0 ? AppColores.exito : AppColores.error;
+  }
+
+  /// 1.25 Panel 7: mini-tendencia del cobrado de los últimos
+  /// 7 días bajo los KPI del mes (la misma serie de Home).
+  /// Tocar abre el Dashboard completo.
+  Widget _miniTendencia7() {
+    if (_serie7Panel.isEmpty) return const SizedBox.shrink();
+    var maxMonto = 0.0;
+    for (final f in _serie7Panel) {
+      final m = (f['monto'] as num?)?.toDouble() ?? 0;
+      if (m > maxMonto) maxMonto = m;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: AppEspacio.md),
+      child: Tarjeta(
+        onTap: () => _ir(const DashboardScreen()),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cobrado · últimos 7 días',
+                style: AppTexto.etiqueta.copyWith(
+                    color: AppColores.textoSecundario(context))),
+            const SizedBox(height: AppEspacio.sm),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (final f in _serie7Panel)
+                  Expanded(
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          height: 34,
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              width: 14,
+                              height: 6 +
+                                  28 *
+                                      (maxMonto <= 0
+                                          ? 0
+                                          : (((f['monto'] as num?)
+                                                      ?.toDouble() ??
+                                                  0) /
+                                              maxMonto)),
+                              decoration: BoxDecoration(
+                                color: AppColores.naranja,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text('${f['dia'] ?? ''}',
+                            style: AppTexto.metadato.copyWith(
+                                color:
+                                    AppColores.textoSecundario(context))),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

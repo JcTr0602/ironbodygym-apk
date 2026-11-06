@@ -52,6 +52,20 @@ class NominaCalc {
   /// Prefijo del mes Habana en curso: 'YYYY-MM'.
   static String prefMesActual() => hoyHabanaIso().substring(0, 7);
 
+  /// Prefijo del mes Habana anterior: 'YYYY-MM'
+  /// (1.25 Panel 7: base de las comparaciones del Panel).
+  static String prefMesAnterior() {
+    final hoy = hoyHabanaIso();
+    var anio = int.parse(hoy.substring(0, 4));
+    var mes = int.parse(hoy.substring(5, 7)) - 1;
+    if (mes < 1) {
+      mes = 12;
+      anio--;
+    }
+    return '${anio.toString().padLeft(4, '0')}-'
+        '${mes.toString().padLeft(2, '0')}';
+  }
+
   /// Clientes únicos con al menos un pago registrado en el mes [pref].
   ///
   /// Misma fuente histórica de la pantalla de Nómina: la tabla espejo
