@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../bandeja.dart';
 import '../localdb.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'gympedia_editor.dart';
@@ -650,10 +651,12 @@ class _BandejaScreenState extends State<BandejaScreen>
         ? solicitudesPorEstado(_solicitudes, kBandejaPendiente).length
         : 0;
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Bandeja GymPedia'
-            '${pendientes > 0 ? ' ($pendientes)' : ''}'),
-        actions: [
+      // 1.25 T122 (F6-17): appBarIron, la barra compartida
+      // de la casa (antes AppBar crudo).
+      appBar: appBarIron(
+        context,
+        'Bandeja GymPedia${pendientes > 0 ? ' ($pendientes)' : ''}',
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,

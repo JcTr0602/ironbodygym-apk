@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import '../negocio.dart' show fmtFecha;
 import '../notificaciones_recordatorios.dart';
 import '../recordatorios.dart';
 import '../tiempo.dart';
@@ -90,14 +91,35 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
     await _cargar();
   }
 
+  // 1.25 T122 (F6-05/F6-18): los subtítulos enseñaban el
+  // enum crudo («personalizado · solo_mio · …»).
+  String _tipoLegible(String tipo) =>
+      const {
+        'vencimiento': 'Vencimiento',
+        'cumpleanos': 'Cumpleaños',
+        'personalizado': 'Personalizado',
+      }[tipo] ??
+      tipo;
+
+  String _alcanceLegible(String alcance) =>
+      const {
+        'solo_mio': 'solo para mí',
+        'todos': 'para todos',
+      }[alcance] ??
+      alcance;
+
   Future<void> _crear() async {
     final tituloCtrl = TextEditingController();
     var tipo = 'vencimiento';
     var alcance = 'solo_mio';
     var dias = 3;
     var frecuencia = 'ninguna';
-    final fechaCtrl =
-        TextEditingController(text: hoyHabanaIso());
+    // 1.25 T122 (F6-18): la fecha personalizada se ELIGE
+    // con el selector del sistema, no se teclea como texto
+    // YYYY-MM-DD (que fallaba por formato). El selector
+    // siempre devuelve una fecha válida: la validación de
+    // formato de Argón P2#15 ya no hace falta.
+    var fechaSel = hoyHabanaIso();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -167,10 +189,31 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                         setDialogState(() => dias = v.round())),
               ],
               if (tipo == 'personalizado') ...[
-                TextField(
-                    controller: fechaCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Fecha (personalizado, YYYY-MM-DD)')),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Fecha', style: AppTexto.cuerpo),
+                  subtitle: Text(fmtFecha(fechaSel),
+                      style: AppTexto.secundario),
+                  trailing: TextButton(
+                    onPressed: () async {
+                      final ini = DateTime.tryParse(fechaSel) ??
+                          ahoraHabana();
+                      final f = await showDatePicker(
+                        context: ctx,
+                        initialDate: ini,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2100),
+                      );
+                      if (f != null) {
+                        setDialogState(() => fechaSel =
+                            '${f.year.toString().padLeft(4, '0')}-'
+                            '${f.month.toString().padLeft(2, '0')}-'
+                            '${f.day.toString().padLeft(2, '0')}');
+                      }
+                    },
+                    child: const Text('Elegir'),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 // F4 (1.20): repetición del personalizado.
                 DropdownButton<String>(
@@ -204,34 +247,17 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
         ),
       ),
     );
-    if (ok != true) return;
     final titulo = tituloCtrl.text.trim();
+    tituloCtrl.dispose();
+    if (ok != true) return;
     if (titulo.isEmpty) return;
-    // Argón P2#15: validar la fecha fija antes de crear.
-    if (tipo == 'personalizado') {
-      final fechaTxt = fechaCtrl.text.trim();
-      final partes = fechaTxt.split('-');
-      final parsed = partes.length == 3
-          ? DateTime.tryParse(fechaTxt)
-          : null;
-      final fechaValida = parsed != null &&
-          parsed.year.toString().padLeft(4, '0') == partes[0] &&
-          parsed.month.toString().padLeft(2, '0') == partes[1] &&
-          parsed.day.toString().padLeft(2, '0') == partes[2];
-      if (!fechaValida) {
-        if (mounted) {
-          mostrarSnack(context, 'Fecha inválida: usa el formato YYYY-MM-DD.', significado: SignificadoChip.alerta);
-        }
-        return;
-      }
-    }
     try {
       await RecordatoriosService.instance.crear(
         titulo: titulo,
         tipo: tipo,
         alcance: _soyDueno ? alcance : 'solo_mio',
         diasAnticipacion: dias,
-        fechaFija: tipo == 'personalizado' ? fechaCtrl.text.trim() : null,
+        fechaFija: tipo == 'personalizado' ? fechaSel : null,
         frecuencia: tipo == 'personalizado' ? frecuencia : 'ninguna',
       );
       await _cargar();
@@ -245,7 +271,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: appBarIron(context, 'Recordatorios automáticos (G2)'),
+      appBar: appBarIron(context, 'Recordatorios automáticos'),
       floatingActionButton: FloatingActionButton(
         onPressed: _crear,
         child: const Icon(Icons.add_rounded),
@@ -281,6 +307,18 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                   ),
                   const SizedBox(height: 12),
                 ],
+                // 1.25 T122 (F6-18): sin nada hoy NI
+                // configurado, un solo EstadoVacio de
+                // pantalla en vez de dos textos planos.
+                if (_debidos.isEmpty && _configs.isEmpty)
+                  const EstadoVacio(
+                    icono: Icons.notifications_rounded,
+                    titulo: 'Sin recordatorios',
+                    subtitulo: 'Nada vence hoy y aún no hay '
+                        'recordatorios configurados. Crea el '
+                        'primero con el botón +.',
+                  )
+                else ...[
                 const Text('Hoy', style: AppTexto.titulo),
                 const SizedBox(height: 4),
                 if (_debidos.isEmpty)
@@ -300,7 +338,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                                 : AppColores.naranja),
                         title: Text(d.titulo, style: AppTexto.cuerpo),
                         subtitle: Text(
-                            '${d.tipo} · ${d.clienteNombre ?? d.targetKey}'
+                            '${_tipoLegible(d.tipo)} · ${d.clienteNombre ?? d.targetKey}'
                             '${d.yaDisparado ? ' · ya disparado hoy' : ''}'
                             '${!d.yaDisparado && !d.puedoDisparar ? ' · lo dispara el dueño' : ''}',
                             style: AppTexto.secundario),
@@ -333,7 +371,8 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                         title: Text('${c['titulo']}',
                             style: AppTexto.cuerpo),
                         subtitle: Text(
-                            '${c['tipo']} · ${c['alcance']} · '
+                            '${_tipoLegible('${c['tipo']}')} · '
+                            '${_alcanceLegible('${c['alcance']}')} · '
                             '${(c['activa'] as num?)?.toInt() == 1 ? 'activo' : 'pausado'}'
                             '${'${c['frecuencia'] ?? 'ninguna'}' == 'semanal' ? ' · cada semana' : '${c['frecuencia'] ?? 'ninguna'}' == 'mensual' ? ' · cada mes' : ''}',
                             style: AppTexto.secundario),
@@ -357,6 +396,20 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                               icon: const Icon(Icons.delete_outline_rounded,
                                   size: 20),
                               onPressed: () async {
+                                // F6-18: borrar pedía cero
+                                // confirmación; ahora sí.
+                                final seguro =
+                                    await DialogoApp.confirmar(
+                                  context,
+                                  titulo: 'Eliminar recordatorio',
+                                  mensaje: 'Se elimina '
+                                      '«${c['titulo']}» y deja de '
+                                      'dispararse. No se puede '
+                                      'deshacer.',
+                                  aceptar: 'Eliminar',
+                                  peligro: true,
+                                );
+                                if (!seguro) return;
                                 await RecordatoriosService.instance
                                     .eliminar('${c['id']}');
                                 await _cargar();
@@ -366,6 +419,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                         ),
                       ),
                     ),
+                ],
               ],
             ),
     );

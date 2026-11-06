@@ -25,7 +25,9 @@ import 'buscar.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
+import 'dialogo_telefono.dart';
 
 class CumpleanosScreen extends StatefulWidget {
   const CumpleanosScreen({super.key});
@@ -358,58 +360,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     }
   }
 
-  /// 1B reutilizado: agregar teléfono sin salir de la pantalla.
+  /// 1B reutilizado: agregar teléfono sin salir de la
+  /// pantalla. 1.25 T122 (F6-16): diálogo y guardado
+  /// compartidos en dialogo_telefono.dart.
   Future<void> _agregarTelefono(Map<String, dynamic> c) async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Agregar teléfono'),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.phone,
-          maxLength: 8,
-          decoration: const InputDecoration(
-            hintText: 'Ej. 58191577',
-            helperText: '8 dígitos, empieza con 5 o 6',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          BotonPrimario(
-            texto: 'Guardar',
-            onPressed: () => Navigator.pop(ctx, true),
-            expandido: false,
-          ),
-        ],
-      ),
-    );
-    // Pasada 2 de Argón (1.20): el controlador del diálogo se
-    // libera al cerrar (antes quedaba fugado en cada apertura).
-    final tel = ctrl.text.trim();
-    ctrl.dispose();
-    if (ok != true || !mounted) return;
-    if (!validarTelefono(tel)) {
-      if (mounted) {
-        mostrarSnack(context, 'Teléfono inválido: 8 dígitos, empieza con 5 o 6.', significado: SignificadoChip.alerta);
-      }
-      return;
-    }
     final id = (c['id'] as num?)?.toInt() ?? 0;
-    if (id <= 0) return;
-    await LocalDb.instance.updateMirrorTelefono(id, tel);
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'editar_cliente',
-      payload: {'cliente_id': id, 'telefono': tel},
-    );
-    unawaited(SyncEngine.instance.push());
-    if (mounted) {
+    final tel = await dialogoAgregarTelefono(context, clienteId: id);
+    if (tel != null && mounted) {
       setState(() => c['telefono'] = tel);
-      mostrarSnack(context, 'Teléfono guardado.', significado: SignificadoChip.exito);
     }
   }
 
@@ -425,8 +383,10 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   Widget build(BuildContext context) {
     final mes = _meses[ahoraHabana().month];
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Cumpleaños de $mes'),
+      // 1.25 T122 (F6-17): appBarIron, la barra compartida.
+      appBar: appBarIron(
+        context,
+        'Cumpleaños de $mes',
         bottom: TabBar(
           controller: _tabs,
           tabs: const [

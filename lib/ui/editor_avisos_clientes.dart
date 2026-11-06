@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth.dart';
+import '../tiempo.dart' show fmtFechaHabana;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -173,12 +174,11 @@ class _EditorAvisosClientesScreenState
                                             TextOverflow.ellipsis),
                                     if (a.creadoTs.isNotEmpty) ...[
                                       const SizedBox(height: 2),
+                                      // 1.25 T122 (F6-20): antes
+                                      // se enseñaba la subcadena
+                                      // ISO cruda del timestamp.
                                       Text(
-                                        a.creadoTs.substring(
-                                            0,
-                                            a.creadoTs.length > 10
-                                                ? 10
-                                                : a.creadoTs.length),
+                                        _fechaAviso(a.creadoTs),
                                         style: AppTexto.metadato,
                                       ),
                                     ],
@@ -353,4 +353,13 @@ class _FormularioAvisoScreenState extends State<_FormularioAvisoScreen> {
       ),
     );
   }
+}
+
+/// F6-20: fecha legible (d/m/aaaa, hora de La Habana) del
+/// timestamp del aviso; si no se puede interpretar, se
+/// devuelve el texto original recortado a la fecha.
+String _fechaAviso(String ts) {
+  final dt = DateTime.tryParse(ts);
+  if (dt == null) return ts.length > 10 ? ts.substring(0, 10) : ts;
+  return fmtFechaHabana(dt);
 }
