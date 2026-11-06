@@ -1067,26 +1067,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
     switch (accion) {
       case 'cobrar':
-        // 1.24 Bloque 3: permiso operativo al tocar.
-        if (!await permisoOperativoOkConRefresco(
-        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
-          return;
-        }
-        if (await mostrarBloqueoCasa(context, c)) return;
-        if (!mounted) return;
-        final payload = await pagoDialogo(context, c);
-        if (payload == null || !mounted) return;
-        final resultadoCobro = await cobrarConPreviewYRecibo(
-          context: context,
-          nombreCliente: '${c['nombre'] ?? ''}',
-          payload: payload,
-        );
-        if (!mounted) return;
-        if (resultadoCobro == ResultadoCobro.deshecho) {
-          mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
-        }
-        await _buscar();
-        SyncEngine.instance.push();
+        // 1.26 (auditoría de botones, MEDIA 2): el swipe y
+        // el menú rápido cobran por el MISMO camino que el
+        // botón de la fila (_cobrarDesdeBuscar), que trae
+        // la guarda _pagoEnCursoBuscar. Antes este caso
+        // duplicaba el flujo SIN guarda: un doble gesto
+        // apilaba dos pagoDialogo y completar ambos
+        // encolaba dos cobros del mismo cliente.
+        await _cobrarDesdeBuscar(c);
         return;
       case 'diario':
         if (!mounted) return;
