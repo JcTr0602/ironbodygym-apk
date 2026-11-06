@@ -1573,6 +1573,48 @@ class MontoAnimado extends StatelessWidget {
   }
 }
 
+/// 1.25 T65: la línea de corte punteada del ticket,
+/// compartida por el Preview y el Recibo del cobro (el
+/// mismo trazo que el comprobante ya usaba).
+class LineaPunteadaTicket extends StatelessWidget {
+  const LineaPunteadaTicket({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 1.2,
+      width: double.infinity,
+      child: CustomPaint(
+        painter: _PunteadaTicketPainter(AppColores.borde(context)),
+      ),
+    );
+  }
+}
+
+class _PunteadaTicketPainter extends CustomPainter {
+  final Color color;
+  const _PunteadaTicketPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.2;
+    const dash = 6.0;
+    const gap = 4.0;
+    var x = 0.0;
+    while (x < size.width) {
+      final fin = (x + dash).clamp(0.0, size.width);
+      canvas.drawLine(Offset(x, 0), Offset(fin, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PunteadaTicketPainter old) =>
+      old.color != color;
+}
+
 /// 1.23 B6 (Argón, feedback): origen de un aviso. Los avisos
 /// AUTOMÁTICOS (sync de fondo, procesos sin el usuario delante)
 /// respetan la ventana de protección de una barra crítica; los

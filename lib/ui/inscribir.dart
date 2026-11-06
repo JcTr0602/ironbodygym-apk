@@ -41,6 +41,12 @@ class InscribirScreen extends StatefulWidget {
 }
 
 class _InscribirScreenState extends State<InscribirScreen> {
+  // 1.25 T61: claves de las tres secciones para que la
+  // barra de pasos salte a cada una.
+  final _claveDatos = GlobalKey();
+  final _claveMembresia = GlobalKey();
+  final _claveFoto = GlobalKey();
+
   final _nombre = TextEditingController();
   final _telefono = TextEditingController();
   final _carnet = TextEditingController();
@@ -111,6 +117,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   void initState() {
     super.initState();
     _preciosFut = _precios();
+    // 1.25 T61: la barra de pasos y el resumen en vivo
+    // (T60) se refrescan al teclear nombre/teléfono.
+    _nombre.addListener(_refrescar);
+    _telefono.addListener(_refrescar);
     _carnet.addListener(_actualizarEsMenor);
     // Q5 (cola 1.20): el aviso «parece teléfono» depende de
     // AMBOS campos: también se recalcula al teclear el
@@ -304,6 +314,61 @@ class _InscribirScreenState extends State<InscribirScreen> {
       return int.tryParse(_dias.text.trim()) ?? 0;
     }
     return 30 * _meses;
+  }
+
+  /// 1.25 T60: la línea-resumen anclada sobre el botón de
+  /// guardar. En Casa no hay cobro: la línea lo dice en
+  /// dorado. El vencimiento se calcula con los días del
+  /// período elegido, como hará el guardado.
+  Widget _resumenEnVivo() {
+    if (_cuentaCasa) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF3CD),
+          borderRadius: BorderRadius.circular(AppRadio.md),
+        ),
+        child: const Text('Cuenta a la Casa · sin cobro',
+            style: AppTexto.secundario,
+            textAlign: TextAlign.center),
+      );
+    }
+    return FutureBuilder<Map<String, double>>(
+      future: _preciosFut,
+      builder: (ctx, snap) {
+        final pr = snap.data ??
+            const {
+              'mensual': 2000.0,
+              'semanal': 600.0,
+              'quincenal': 1200.0,
+              'transfer': 2500.0,
+            };
+        final dias = _diasPeriodo();
+        final vence = hoyHabanaIso().isEmpty || dias <= 0
+            ? null
+            : fmtFecha(sumarDiasIso(hoyHabanaIso(), dias));
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+          decoration: BoxDecoration(
+            color: AppColores.naranja.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(AppRadio.md),
+          ),
+          child: Text(
+            '${_etiquetaPeriodo()} · '
+            '${fmtMonto(_montoPeriodo(pr))} CUP · '
+            '${_metodoPago == 'transferencia' ? 'Transferencia' : 'Efectivo'}'
+            '${vence != null ? ' · vence el $vence' : ''}',
+            style: AppTexto.secundario
+                .copyWith(fontWeight: FontWeight.w700),
+            textAlign: TextAlign.center,
+          ),
+        );
+      },
+    );
   }
 
   String _etiquetaPeriodo() {
@@ -655,6 +720,118 @@ class _InscribirScreenState extends State<InscribirScreen> {
     };
   }
 
+  /// 1.25 T61: refresco ligero de la barra de pasos y
+  /// el resumen al teclear (los controladores no llaman
+  /// setState por sí solos).
+  void _refrescar() {
+    if (mounted) setState(() {});
+  }
+
+  /// 1.25 T61: barra de pasos «Datos → Membresía →
+  /// Foto» con su progreso. El paso activo es el primero
+  /// incompleto; tocar un paso salta a su sección. La
+  /// validación de cada paso es la misma del guardado
+  /// (nombre escrito; teléfono vacío o válido) y la
+  /// membresía siempre trae un período válido por
+  /// defecto — en Casa cuenta como completa sin cobro.
+  Widget _barraPasos() {
+    final tel = _telefono.text.trim();
+    final datosOk = _nombre.text.trim().isNotEmpty &&
+        (tel.isEmpty || validarTelefono(tel));
+    final pasos = <({String etiqueta, bool ok, GlobalKey clave})>[
+      (etiqueta: 'Datos', ok: datosOk, clave: _claveDatos),
+      (etiqueta: 'Membresía', ok: datosOk, clave: _claveMembresia),
+      (etiqueta: 'Foto', ok: _foto != null, clave: _claveFoto),
+    ];
+    var activo = pasos.indexWhere((p) => !p.ok);
+    if (activo < 0) activo = pasos.length - 1;
+    final completos = pasos.where((p) => p.ok).length;
+    return Material(
+      color: AppColores.superficie(context),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+            AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                for (var i = 0; i < pasos.length; i++) ...[
+                  if (i > 0)
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: pasos[i].ok || i <= activo
+                            ? AppColores.naranja
+                            : AppColores.borde(context),
+                      ),
+                    ),
+                  InkWell(
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.md),
+                    onTap: () {
+                      final ctx = pasos[i].clave.currentContext;
+                      if (ctx != null) {
+                        Scrollable.ensureVisible(ctx,
+                            duration:
+                                const Duration(milliseconds: 350),
+                            curve: Curves.easeOut,
+                            alignment: 0.05);
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppEspacio.xs,
+                          vertical: AppEspacio.xs),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircleAvatar(
+                            radius: 11,
+                            backgroundColor: pasos[i].ok
+                                ? AppColores.exito
+                                : i == activo
+                                    ? AppColores.naranja
+                                    : AppColores.borde(context),
+                            child: Icon(
+                              pasos[i].ok
+                                  ? Icons.check_rounded
+                                  : Icons.circle,
+                              size: pasos[i].ok ? 13 : 6,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: AppEspacio.xs),
+                          Text(pasos[i].etiqueta,
+                              style: AppTexto.etiqueta.copyWith(
+                                  color: i == activo
+                                      ? AppColores.naranja
+                                      : null,
+                                  fontWeight: i == activo
+                                      ? FontWeight.w800
+                                      : null)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: AppEspacio.xs),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+              child: LinearProgressIndicator(
+                value: completos / pasos.length,
+                minHeight: 3,
+                backgroundColor: AppColores.borde(context),
+                color: AppColores.naranja,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -665,6 +842,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
       body: Column(
         children: [
           const SyncBanner(compact: true),
+          _barraPasos(),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
@@ -723,6 +901,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 ],
                 // Bloque 1: información personal
                 Tarjeta(
+                  key: _claveDatos,
                   child: Column(
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
@@ -925,6 +1104,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 // cobro: se sustituye por el aviso dorado).
                 if (!_cuentaCasa)
                 Tarjeta(
+                  key: _claveMembresia,
                   child: Column(
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
@@ -1175,6 +1355,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     height: AppEspacio.md),
                 // Bloque 3: fotografía
                 Tarjeta(
+                  key: _claveFoto,
                   child: Column(
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
@@ -1266,7 +1447,17 @@ class _InscribirScreenState extends State<InscribirScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                   AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
-              child: _guardando
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 1.25 T60: resumen EN VIVO sobre el botón
+                  // — monto, período, método y vencimiento
+                  // se ven mientras se rellena, no solo en
+                  // el diálogo final. Sale de los mismos
+                  // cálculos del guardado (_montoPeriodo).
+                  _resumenEnVivo(),
+                  const SizedBox(height: AppEspacio.sm),
+                  _guardando
                   ? const Center(
                       child: CircularProgressIndicator(
                           color: AppColores.naranja))
@@ -1279,6 +1470,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       icono: Icons.check_rounded,
                       onPressed: _guardar,
                     ),
+                ],
+              ),
             ),
           ),
         ],

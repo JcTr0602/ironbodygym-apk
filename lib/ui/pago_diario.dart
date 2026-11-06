@@ -44,6 +44,10 @@ class PagoDiarioScreen extends StatefulWidget {
 class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   String _turno = 'mañana';
   int _cantidad = 1;
+
+  /// 1.25 T68: marca visual breve tras registrar (el
+  /// check que entra en la tarjeta de acción).
+  bool _recienRegistrado = false;
   bool _guardando = false;
   // 1.24 Bloque 5 (ítem 6 del panel): controlador de la barra
   // Deshacer viva — muere con su pantalla, como en Servicios.
@@ -207,6 +211,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   }
 
   void _trasGuardar(String? uuid, int cantidad) {
+    // 1.25 T68: micro-animación de confirmación en la
+    // tarjeta (además del snack y la vibración).
+    if (mounted) {
+      setState(() => _recienRegistrado = true);
+      Future.delayed(const Duration(milliseconds: 1400), () {
+        if (mounted) setState(() => _recienRegistrado = false);
+      });
+    }
     _cargarHoy();
     SyncEngine.instance.push();
     // v1.2.6 (Gemini): confirmación háptica al cobrar.
@@ -558,70 +570,127 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text('Turno:'),
-                Row(
-                  children: [
-                    ChoiceChip(
-                        label: const Text('Mañana'),
-                        selected: _turno == 'mañana',
-                        onSelected: (_) =>
-                            setState(() => _turno = 'mañana')),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                        label: const Text('Tarde'),
-                        selected: _turno == 'tarde',
-                        onSelected: (_) =>
-                            setState(() => _turno = 'tarde')),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // 1.25 T23: UN solo botón principal, con la
-                // cantidad y el total DENTRO de su rótulo.
-                // Antes convivían «Registrar 1» (principal,
-                // siempre 1) y «Guardar cantidad» (secundario)
-                // con la línea «Total» del segundo: con 5 en
-                // pantalla, el botón grande registraba 200
-                // CUP mientras el total decía 1 000.
-                Row(
-                  children: [
-                    const Text('Cantidad: '),
-                    IconButton(
-                        icon: const Icon(
-                            Icons.remove_circle_outline_rounded),
-                        onPressed: _cantidad > 1
-                            ? () => setState(() => _cantidad--)
-                            : null),
-                    Text('$_cantidad',
-                        style: AppTexto.metrica.copyWith(
-                            fontWeight: FontWeight.normal)),
-                    IconButton(
-                        icon: const Icon(
-                            Icons.add_circle_outline_rounded),
-                        onPressed: () =>
-                            setState(() => _cantidad++)),
-                  ],
-                ),
-                CampoTexto(
-                  controller: _notaCtrl,
-                  etiqueta: 'Nota (opcional)',
-                  hint: 'Ej: grupo de 3',
-                  icono: Icons.note_rounded,
-                ),
-                const SizedBox(height: 12),
-                BotonPrimario(
-                  texto:
-                      'Registrar $_cantidad · ${fmtMonto(_precio * _cantidad)} CUP',
-                  icono: Icons.flash_on_rounded,
-                  onPressed: _guardando ? null : _guardar,
-                ),
-                if (_cantidad > 1)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _guardando ? null : _rapido,
-                      child: const Text('Registrar solo 1'),
-                    ),
+                // 1.25 T68: UNA sola tarjeta de acción —
+                // turno segmentado, contador grande, nota
+                // y el botón con el total (T23) viven
+                // juntos; nada del registro queda suelto.
+                Tarjeta(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('Turno',
+                          style: AppTexto.etiqueta),
+                      const SizedBox(height: AppEspacio.sm),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                              value: 'mañana',
+                              icon: Icon(Icons.wb_sunny_rounded,
+                                  size: 18),
+                              label: Text('Mañana')),
+                          ButtonSegment(
+                              value: 'tarde',
+                              icon: Icon(Icons.wb_twilight_rounded,
+                                  size: 18),
+                              label: Text('Tarde')),
+                        ],
+                        selected: {_turno},
+                        onSelectionChanged: (sel) =>
+                            setState(() => _turno = sel.first),
+                        showSelectedIcon: false,
+                      ),
+                      const SizedBox(height: AppEspacio.md),
+                      const Text('Cantidad',
+                          style: AppTexto.etiqueta),
+                      Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            iconSize: 34,
+                            icon: const Icon(Icons
+                                .remove_circle_outline_rounded),
+                            onPressed: _cantidad > 1
+                                ? () =>
+                                    setState(() => _cantidad--)
+                                : null,
+                          ),
+                          SizedBox(
+                            width: 72,
+                            child: Text('$_cantidad',
+                                textAlign: TextAlign.center,
+                                style: AppTexto.displayPequeno),
+                          ),
+                          IconButton(
+                            iconSize: 34,
+                            icon: const Icon(
+                                Icons.add_circle_rounded),
+                            color: AppColores.naranja,
+                            onPressed: () =>
+                                setState(() => _cantidad++),
+                          ),
+                        ],
+                      ),
+                      CampoTexto(
+                        controller: _notaCtrl,
+                        etiqueta: 'Nota (opcional)',
+                        hint: 'Ej: grupo de 3',
+                        icono: Icons.note_rounded,
+                      ),
+                      const SizedBox(height: AppEspacio.md),
+                      // 1.25 T23: UN solo botón principal,
+                      // con la cantidad y el total DENTRO
+                      // de su rótulo.
+                      BotonPrimario(
+                        texto:
+                            'Registrar $_cantidad · ${fmtMonto(_precio * _cantidad)} CUP',
+                        icono: Icons.flash_on_rounded,
+                        onPressed: _guardando ? null : _guardar,
+                      ),
+                      if (_cantidad > 1)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _guardando ? null : _rapido,
+                            child: const Text('Registrar solo 1'),
+                          ),
+                        ),
+                      // 1.25 T68: el check de confirmación
+                      // entra y sale dentro de la tarjeta.
+                      AnimatedSwitcher(
+                        duration:
+                            const Duration(milliseconds: 300),
+                        child: _recienRegistrado
+                            ? Padding(
+                                key: const ValueKey('ok'),
+                                padding: const EdgeInsets.only(
+                                    top: AppEspacio.sm),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.check_circle_rounded,
+                                        size: 18,
+                                        color: AppColores.exito),
+                                    const SizedBox(
+                                        width: AppEspacio.xs),
+                                    Text('Registrado',
+                                        style: AppTexto.secundario
+                                            .copyWith(
+                                                color:
+                                                    AppColores.exito,
+                                                fontWeight:
+                                                    FontWeight.w700)),
+                                  ],
+                                ),
+                              )
+                            : const SizedBox.shrink(
+                                key: ValueKey('vacio')),
+                      ),
+                    ],
                   ),
+                ),
                 const SizedBox(height: 24),
                 const Divider(),
                 Row(

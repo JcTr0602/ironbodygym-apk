@@ -17,6 +17,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../comprobantes.dart';
@@ -52,6 +53,11 @@ class PreviewCobroScreen extends StatefulWidget {
   final String? escalonTexto;
   final List<String> avisos;
 
+  /// 1.25 T65/T66: valor numérico para el monto animado
+  /// del ticket y el sello corto del escalón.
+  final double? montoValor;
+  final String? selloTexto;
+
   const PreviewCobroScreen({
     super.key,
     required this.nombreCliente,
@@ -64,6 +70,8 @@ class PreviewCobroScreen extends StatefulWidget {
     this.conComprobante = false,
     this.escalonTexto,
     this.avisos = const [],
+    this.montoValor,
+    this.selloTexto,
   });
 
   @override
@@ -87,13 +95,41 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _fila(context, 'Cliente', widget.nombreCliente),
+                      // 1.25 T65: cabecera del ticket —
+                      // el cliente con su inicial en
+                      // círculo (el mismo avatar de las
+                      // listas) y, T66, el sello del
+                      // precio que rigió, siempre visible.
+                      Row(
+                        children: [
+                          AvatarCliente(
+                              nombre: widget.nombreCliente,
+                              tamano: TamanoAvatar.m),
+                          const SizedBox(width: AppEspacio.md),
+                          Expanded(
+                            child: Text(widget.nombreCliente,
+                                style: AppTexto.cuerpo.copyWith(
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                          if (widget.selloTexto != null)
+                            ChipEstado(
+                              texto: widget.selloTexto!,
+                              color: AppColores.alerta,
+                            ),
+                        ],
+                      ),
                       const Divider(),
                       _fila(context, 'Fecha del pago',
                           widget.fechaTexto),
                       const Divider(),
                       _filaMonto(context),
-                      const Divider(),
+                      // 1.25 T65: el corte del ticket,
+                      // como en el Recibo.
+                      const Padding(
+                        padding:
+                            EdgeInsets.symmetric(vertical: 2),
+                        child: LineaPunteadaTicket(),
+                      ),
                       _filaMetodo(context),
                       if (widget.conComprobante) ...[
                         const Divider(),
@@ -110,33 +146,49 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                       const Divider(),
                       _fila(context, 'Nuevo vencimiento',
                           widget.nuevoVencimientoTexto),
-                      if (widget.escalonTexto != null) ...[
-                        const Divider(),
-                        _fila(context, 'Precio según',
-                            widget.escalonTexto!),
-                      ],
                       if (widget.avisos.isNotEmpty) ...[
-                        const Divider(),
-                        for (final aviso in widget.avisos)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                                top: AppEspacio.sm),
-                            child: Row(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                Icon(Icons.info_rounded,
-                                    size: 18,
-                                    color: AppColores.alerta),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(aviso,
-                                      style:
-                                          AppTexto.secundario),
-                                ),
-                              ],
-                            ),
+                        const SizedBox(height: AppEspacio.md),
+                        // 1.25 T66: los avisos del cálculo
+                        // en una franja ámbar suave, no
+                        // como filas sueltas.
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(
+                              AppEspacio.md),
+                          decoration: BoxDecoration(
+                            color: AppColores.alerta
+                                .withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(
+                                AppRadio.md),
                           ),
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              for (final aviso in widget.avisos)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                      bottom: AppEspacio.xs),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(Icons.info_rounded,
+                                          size: 18,
+                                          color:
+                                              AppColores.alerta),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(aviso,
+                                            style: AppTexto
+                                                .secundario),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ],
                     ],
                   ),
@@ -215,10 +267,14 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
           Text('Monto', style: AppTexto.secundario),
           const SizedBox(width: 16),
           Flexible(
-            child: Text(widget.montoTexto,
-                textAlign: TextAlign.end,
-                style: AppTexto.metrica.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()])),
+            child: widget.montoValor != null
+                ? MontoAnimado(
+                    valor: widget.montoValor!,
+                    formato: (_) => widget.montoTexto)
+                : Text(widget.montoTexto,
+                    textAlign: TextAlign.end,
+                    style: AppTexto.metrica.copyWith(fontFeatures:
+                        const [FontFeature.tabularFigures()])),
           ),
         ],
       ),
@@ -296,6 +352,22 @@ int _diasPayload(dynamic v) =>
 /// para el Preview («Precio según»). El estándar no se
 /// anuncia (es lo normal); la Casa tampoco llega aquí
 /// (su cobro está bloqueado antes del Preview).
+/// 1.25 T66: el sello CORTO del escalón para el chip
+/// del ticket (junto al cliente, en Preview y Recibo).
+/// El texto largo sigue en [escalonTextoPreview].
+String? selloPrecioPreview(String? escalon) {
+  switch (escalon) {
+    case 'especial':
+      return 'ESPECIAL';
+    case 'menores':
+      return 'MENORES';
+    case 'oferta':
+      return 'OFERTA 50 %';
+    default:
+      return null;
+  }
+}
+
 String? escalonTextoPreview(String? escalon) {
   switch (escalon) {
     case 'especial':
@@ -352,6 +424,30 @@ bool pagoPareceDuplicado(
   final fOtra = '${enCola['fecha'] ?? ''}';
   if (fNueva.isEmpty || fOtra.isEmpty) return true;
   return diaDe(fNueva) == diaDe(fOtra);
+}
+
+/// 1.25 T69: el texto del recibo que se ofrece enviar
+/// por WhatsApp desde el Recibo. Cierra con la línea
+/// automática fija de los mensajes que compone la app
+/// (decisión de Jc, 2026-11-01).
+String textoReciboCobroWa({
+  required String nombreCliente,
+  required String montoTxt,
+  required String metodoTxt,
+  required String periodoTxt,
+  required String vencimientoTxt,
+}) {
+  final primerNombre = nombreCliente.trim().split(' ').first;
+  return '🧾 *Recibo de pago — Iron Body Gym*\n'
+      'Hola, $primerNombre. Confirmamos tu pago:\n'
+      '💰 Monto: $montoTxt\n'
+      '💳 Método: $metodoTxt\n'
+      '📅 Período: $periodoTxt\n'
+      '✅ Tu membresía vence el $vencimientoTxt.\n'
+      '¡Gracias por entrenar con nosotros! 💪\n\n'
+      '🤖 _Mensaje automático de nuestro sistema de gestión; '
+      'no lo envía una persona. Si vas a responder, '
+      'escríbenos al 58191577._';
 }
 
 /// Resultado del flujo de cobro. 1.24 Bloque 1 (botón roto de
@@ -434,6 +530,9 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         conComprobante: payload['_comprobante_ruta'] != null,
         escalonTexto:
             escalonTextoPreview('${payload['_escalon'] ?? ''}'),
+        // 1.25 T65/T66: monto animado y sello del precio.
+        montoValor: monto.toDouble(),
+        selloTexto: selloPrecioPreview('${payload['_escalon'] ?? ''}'),
         avisos: (payload['_avisos'] as List?)
                 ?.map((e) => '$e')
                 .toList() ??
@@ -464,6 +563,9 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   // NO cubre una op rechazada tras la ventana de 15 s.
   final clienteId = (payload['cliente_id'] as num?)?.toInt();
   String? pagadoHastaAnterior;
+  // 1.25 T69: el teléfono sale de la misma lectura del
+  // espejo (para ofrecer el recibo por WhatsApp).
+  String? telefonoCliente;
   if (clienteId != null) {
     try {
       final filas = await LocalDb.instance
@@ -472,6 +574,9 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         final anterior = filas.first['pagado_hasta'] as String?;
         pagadoHastaAnterior =
             (anterior == null || anterior.isEmpty) ? null : anterior;
+        final tel = '${filas.first['telefono'] ?? ''}'
+            .replaceAll(RegExp(r'[^0-9]'), '');
+        if (tel.length == 8) telefonoCliente = tel;
       }
     } catch (_) {}
   }
@@ -539,6 +644,45 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         // valor con MontoAnimado.
         montoValor: monto.toDouble(),
         montoFormato: (v) => '${fmtMonto(v)} CUP',
+        // 1.25 T66: el escalón también en el recibo.
+        escalonTexto:
+            escalonTextoPreview('${payload['_escalon'] ?? ''}'),
+        // 1.25 T69: enviar el recibo por WhatsApp si el
+        // cliente tiene teléfono en su ficha.
+        accionExtra: telefonoCliente == null
+            ? null
+            : AccionExtraConfirmacion(
+                texto: 'Enviar recibo por WhatsApp',
+                icono: Icons.send_rounded,
+                alPulsar: () async {
+                  final texto = textoReciboCobroWa(
+                    nombreCliente: nombreCliente,
+                    montoTxt: '${fmtMonto(monto)} CUP',
+                    metodoTxt:
+                        '${payload['metodo'] ?? ''}' ==
+                                'transferencia'
+                            ? 'Transferencia'
+                            : 'Efectivo',
+                    periodoTxt: periodoTextoPreview(payload),
+                    vencimientoTxt: vencRaw.length >= 10
+                        ? fmtFecha(vencRaw)
+                        : vencRaw,
+                  );
+                  final url = Uri.parse(
+                      'https://wa.me/53$telefonoCliente'
+                      '?text=${Uri.encodeComponent(texto)}');
+                  try {
+                    await launchUrl(url,
+                        mode: LaunchMode.externalApplication);
+                  } catch (_) {
+                    if (context.mounted) {
+                      mostrarSnack(context,
+                          'No se pudo abrir WhatsApp',
+                          significado: SignificadoChip.error);
+                    }
+                  }
+                },
+              ),
       ),
     ),
   );

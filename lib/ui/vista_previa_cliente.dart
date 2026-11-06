@@ -306,8 +306,63 @@ class _VistaPreviaClienteScreenState
                   )
                 : const SizedBox.shrink(),
           ),
+          // 1.25 T62: el contenido vive dentro de una
+          // silueta de teléfono (marco, notch y sombra):
+          // de un vistazo se distingue «esto es el
+          // teléfono del cliente» de la app de gestión.
           Expanded(
-            child: _cargando
+            child: Padding(
+              padding: const EdgeInsets.all(AppEspacio.md),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(36),
+                  border: Border.all(
+                      color: Colors.white24, width: 3),
+                  boxShadow: const [
+                    BoxShadow(
+                        color: Colors.black54,
+                        blurRadius: 18,
+                        offset: Offset(0, 6)),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(33),
+                  child: Column(
+                    children: [
+                      // El notch: pastilla centrada sobre el
+                      // fondo grafito de la «pantalla».
+                      Container(
+                        color: _grafito,
+                        padding: const EdgeInsets.only(
+                            top: AppEspacio.sm,
+                            bottom: AppEspacio.xs),
+                        alignment: Alignment.center,
+                        child: Container(
+                          width: 96,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius:
+                                BorderRadius.circular(9),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: _contenidoTelefono(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _contenidoTelefono() {
+    return _cargando
                 ? const Center(
                     child: CircularProgressIndicator(color: _naranja))
                 : _error != null
@@ -363,11 +418,7 @@ class _VistaPreviaClienteScreenState
                           _tabPlan(),
                           _tabProgreso(),
                         ],
-                      ),
-          ),
-        ],
-      ),
-    );
+                      );
   }
 
   // ---------------- Inicio ----------------
@@ -749,6 +800,10 @@ class _VistaPreviaClienteScreenState
               destacada: true,
               anterior:
                   mediciones.length > 1 ? mediciones[1] : null),
+          // 1.25 T63: la tendencia de peso y grasa tras
+          // la destacada — «¿va mejorando?» se responde
+          // con la línea, sin restar de cabeza.
+          _tarjetaTendencia(mediciones),
           for (final m in mediciones.skip(1)) _tarjetaMedicion(m),
         ],
         const SizedBox(height: 8),
@@ -796,6 +851,61 @@ class _VistaPreviaClienteScreenState
         ],
       ],
     );
+  }
+
+  /// 1.25 T63: tarjeta de tendencia con las líneas de
+  /// peso y grasa en orden cronológico y la variación
+  /// total de la serie visible. Sin color bueno/malo.
+  Widget _tarjetaTendencia(List<dynamic> mediciones) {
+    Widget linea(String nombre, String clave, String unidad) {
+      final serie = serieTendenciaVistaPrevia(mediciones, clave);
+      if (serie.length < 2) return const SizedBox.shrink();
+      final d = serie.last - serie.first;
+      return Padding(
+        padding: const EdgeInsets.only(top: AppEspacio.sm),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 92,
+              child: Text(
+                  '$nombre\n'
+                  '${formatoMonto(serie.first)} → '
+                  '${formatoMonto(serie.last)} $unidad',
+                  style: AppTexto.secundario
+                      .copyWith(color: Colors.white70)),
+            ),
+            Expanded(
+              child: SizedBox(
+                height: 34,
+                child: CustomPaint(
+                  painter: _SparkPainter(serie),
+                  size: Size.infinite,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppEspacio.sm),
+            Text(
+                d == 0
+                    ? 'sin cambio'
+                    : '${d > 0 ? '▲' : '▼'} ${formatoMonto(d.abs())}',
+                style: AppTexto.secundario.copyWith(color: _naranja)),
+          ],
+        ),
+      );
+    }
+
+    final hayPeso =
+        serieTendenciaVistaPrevia(mediciones, 'peso_kg').length >= 2;
+    final hayGrasa =
+        serieTendenciaVistaPrevia(mediciones, 'grasa_pct').length >= 2;
+    if (!hayPeso && !hayGrasa) return const SizedBox.shrink();
+    return _tarjeta([
+      const Text('Tendencia',
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold)),
+      if (hayPeso) linea('Peso', 'peso_kg', 'kg'),
+      if (hayGrasa) linea('Grasa', 'grasa_pct', '%'),
+    ]);
   }
 
   Widget _tarjetaMedicion(dynamic m,
@@ -1012,4 +1122,61 @@ class _VistaPreviaClienteScreenState
                 : Colors.white54;
     return _chip(disp, color);
   }
+}
+
+
+/// 1.25 T63: los valores de [clave] de las mediciones en
+/// orden CRONOLÓGICO (la vista las trae recientes
+/// primero), solo los numéricos presentes.
+List<double> serieTendenciaVistaPrevia(
+    List<dynamic> mediciones, String clave) {
+  final valores = <double>[];
+  for (final m in mediciones.reversed) {
+    final v = (m as Map)[clave];
+    if (v is num) valores.add(v.toDouble());
+  }
+  return valores;
+}
+
+/// 1.25 T63: línea de tendencia mínima — puntos unidos,
+/// primero y último resaltados.
+class _SparkPainter extends CustomPainter {
+  final List<double> serie;
+  const _SparkPainter(this.serie);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (serie.length < 2) return;
+    var min = serie.first, max = serie.first;
+    for (final v in serie) {
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    final rango = (max - min) == 0 ? 1.0 : (max - min);
+    Offset punto(int i) => Offset(
+          size.width * i / (serie.length - 1),
+          size.height -
+              4 -
+              (serie[i] - min) / rango * (size.height - 8),
+        );
+    final trazo = Paint()
+      ..color = const Color(0xFFFF7A1A)
+      ..strokeWidth = 1.6
+      ..style = PaintingStyle.stroke;
+    final camino = Path()..moveTo(punto(0).dx, punto(0).dy);
+    for (var i = 1; i < serie.length; i++) {
+      camino.lineTo(punto(i).dx, punto(i).dy);
+    }
+    canvas.drawPath(camino, trazo);
+    final puntoPint = Paint()..color = Colors.white;
+    for (var i = 0; i < serie.length; i++) {
+      canvas.drawCircle(punto(i), i == serie.length - 1 ? 3 : 1.8,
+          i == serie.length - 1
+              ? (Paint()..color = const Color(0xFFFF7A1A))
+              : puntoPint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SparkPainter old) => old.serie != serie;
 }

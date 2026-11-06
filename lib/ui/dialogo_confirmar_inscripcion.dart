@@ -71,19 +71,44 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
   }
 
   /// Cabecera: foto del cliente o check naranja si no hay foto / falla.
+  /// 1.25 T64: entra con la micro-animación de escala del
+  /// recibo (celebración contenida) y la foto lleva el
+  /// ANILLO del color del estado: dorado en Cuenta a la
+  /// Casa, naranja en la inscripción normal.
   Widget _cabecera() {
-    if (fotoPath == null || fotoPath!.isEmpty) return _iconoCheckNaranja();
-    return ClipOval(
-      child: Image.file(
-        File(fotoPath!),
-        width: 72,
-        height: 72,
-        fit: BoxFit.cover,
-        // Argón: decodificar solo miniatura ligera (la foto de cámara
-        // tiene resolución nativa de varios MB).
-        cacheWidth: 216,
-        errorBuilder: (_, __, ___) => _iconoCheckNaranja(),
-      ),
+    final colorAnillo =
+        esCasa ? const Color(0xFFB8860B) : AppColores.naranja;
+    Widget interior;
+    if (fotoPath == null || fotoPath!.isEmpty) {
+      interior = _iconoCheckNaranja();
+    } else {
+      interior = Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: colorAnillo, width: 3),
+        ),
+        child: ClipOval(
+          child: Image.file(
+            File(fotoPath!),
+            width: 72,
+            height: 72,
+            fit: BoxFit.cover,
+            // Argón: decodificar solo miniatura ligera (la foto de cámara
+            // tiene resolución nativa de varios MB).
+            cacheWidth: 216,
+            errorBuilder: (_, __, ___) => _iconoCheckNaranja(),
+          ),
+        ),
+      );
+    }
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.6, end: 1.0),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutBack,
+      builder: (context, escala, hijo) =>
+          Transform.scale(scale: escala, child: hijo),
+      child: interior,
     );
   }
 

@@ -472,6 +472,14 @@ class ConfirmacionCobroScreen extends StatelessWidget {
   final double? montoValor;
   final String Function(double)? montoFormato;
 
+  /// 1.25 T66: el escalón que rigió el precio, como fila
+  /// del ticket del recibo (el Preview lo lleva de chip).
+  final String? escalonTexto;
+
+  /// 1.25 T69: acción extra bajo el ticket (enviar el
+  /// recibo por WhatsApp), la misma vía de la venta.
+  final AccionExtraConfirmacion? accionExtra;
+
   const ConfirmacionCobroScreen({
     super.key,
     required this.nombreCliente,
@@ -481,6 +489,8 @@ class ConfirmacionCobroScreen extends StatelessWidget {
     this.opUuid,
     this.montoValor,
     this.montoFormato,
+    this.escalonTexto,
+    this.accionExtra,
   });
 
   @override
@@ -493,8 +503,13 @@ class ConfirmacionCobroScreen extends StatelessWidget {
       detalles: [
         (etiqueta: 'Cliente', valor: nombreCliente),
         (etiqueta: 'Nuevo vencimiento', valor: nuevoVencimiento),
+        // 1.25 T66: el sello del precio también en el
+        // recibo, como fila del ticket.
+        if (escalonTexto != null)
+          (etiqueta: 'Precio según', valor: escalonTexto!),
       ],
       opUuid: opUuid,
+      accionExtra: accionExtra,
     );
   }
 }
