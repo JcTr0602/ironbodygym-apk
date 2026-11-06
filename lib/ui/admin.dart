@@ -36,6 +36,7 @@ import 'config_precios_bancarios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
 import 'bandeja_whatsapp.dart';
+import 'ficha.dart';
 import 'panel_buscador.dart';
 import 'actividad.dart';
 import 'buscar.dart';
@@ -588,6 +589,13 @@ class _AdminScreenState extends State<AdminScreen> {
   /// 1.25 T100: el resolvedor del buscador — los mismos
   /// destinos que abren las tarjetas de los módulos.
   void _abrirFuncionPanel(String id) {
+    // 1.25 Panel 11: un resultado de cliente del buscador
+    // global abre su ficha directamente.
+    if (id.startsWith('cliente:')) {
+      final cid = int.tryParse(id.substring(8));
+      if (cid != null && cid > 0) _ir(FichaScreen(clienteId: cid));
+      return;
+    }
     switch (id) {
       case 'arqueo':
         _ir(const ArqueoScreen());

@@ -13,6 +13,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -407,6 +408,34 @@ List<FuncionPanel> buscarFuncionesPanel(String consulta,
   ];
 }
 
+/// PURO (1.25 Panel 11): clientes del espejo que casan
+/// con la consulta — TODOS los tokens dentro de
+/// nombre+teléfono, con la misma normalización de las
+/// funciones. Una consulta de un solo carácter no busca
+/// personas (sería ruido). Fuera eliminados y filas
+/// optimistas (id <= 0); tope [limite].
+List<Map<String, dynamic>> buscarClientesPanel(
+  String consulta,
+  List<Map<String, dynamic>> clientes, {
+  int limite = 8,
+}) {
+  final q = normalizarTextoPanel(consulta);
+  if (q.length < 2) return const [];
+  final tokens = q.split(' ');
+  final out = <Map<String, dynamic>>[];
+  for (final c in clientes) {
+    final id = (c['id'] as num?)?.toInt() ?? 0;
+    if (id <= 0 || LocalDb.esEliminadoDe(c)) continue;
+    final texto = normalizarTextoPanel(
+        '${c['nombre'] ?? ''} ${c['telefono'] ?? ''}');
+    if (tokens.every((t) => texto.contains(t))) {
+      out.add(c);
+      if (out.length >= limite) break;
+    }
+  }
+  return out;
+}
+
 /// PURO: los recientes como funciones del catálogo, en
 /// el orden guardado (más reciente primero), sin ids
 /// que ya no existan.
@@ -437,11 +466,16 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
   final _foco = FocusNode();
   var _consulta = '';
   List<String> _recientesIds = [];
+  // 1.25 Panel 11: el espejo de clientes para la mitad
+  // «clientes» del buscador global. Se pinta sin él y se
+  // rellena al llegar (es local: no hay red de por medio).
+  List<Map<String, dynamic>> _clientes = const [];
 
   @override
   void initState() {
     super.initState();
     _cargarRecientes();
+    _cargarClientes();
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _foco.requestFocus());
   }
@@ -458,6 +492,31 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
     if (!mounted) return;
     setState(() =>
         _recientesIds = prefs.getStringList(_kRecientesPanel) ?? []);
+  }
+
+  Future<void> _cargarClientes() async {
+    try {
+      final filas = await LocalDb.instance.allMirror('clientes');
+      if (!mounted) return;
+      setState(() => _clientes = filas);
+    } catch (_) {
+      // Sin espejo legible, el buscador de funciones sigue.
+    }
+  }
+
+  void _elegirCliente(Map<String, dynamic> c) =>
+      Navigator.pop(context, 'cliente:${c['id']}');
+
+  Widget _filaCliente(Map<String, dynamic> c) {
+    final tel = '${c['telefono'] ?? ''}'.trim();
+    return ListTile(
+      leading: AvatarCliente(
+          nombre: '${c['nombre'] ?? ''}', tamano: TamanoAvatar.s),
+      title: Text('${c['nombre'] ?? 'Sin nombre'}'),
+      subtitle: tel.isEmpty ? null : Text(tel),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => _elegirCliente(c),
+    );
   }
 
   Future<void> _elegir(FuncionPanel f) async {
@@ -481,6 +540,7 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
   @override
   Widget build(BuildContext context) {
     final resultados = buscarFuncionesPanel(_consulta);
+    final clientesRes = buscarClientesPanel(_consulta, _clientes);
     final recientes = recientesPanel(_recientesIds);
     return Scaffold(
       appBar: appBarIron(context, 'Buscar en el Panel'),
@@ -520,7 +580,7 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
                         _fila(f),
                     ],
                   )
-                : resultados.isEmpty
+                : (resultados.isEmpty && clientesRes.isEmpty)
                     ? const Center(
                         child: Text(
                             'Nada con ese nombre. Prueba con '
@@ -528,7 +588,26 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
                             style: AppTexto.secundario))
                     : ListView(
                         children: [
-                          for (final f in resultados) _fila(f),
+                          if (resultados.isNotEmpty) ...[
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: AppEspacio.lg),
+                              child: Text('Funciones',
+                                  style: AppTexto.secundario),
+                            ),
+                            for (final f in resultados) _fila(f),
+                          ],
+                          if (clientesRes.isNotEmpty) ...[
+                            if (resultados.isNotEmpty) const Divider(),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: AppEspacio.lg),
+                              child: Text('Clientes',
+                                  style: AppTexto.secundario),
+                            ),
+                            for (final c in clientesRes)
+                              _filaCliente(c),
+                          ],
                         ],
                       ),
           ),
