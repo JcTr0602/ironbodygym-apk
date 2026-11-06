@@ -36,9 +36,44 @@ String isoFechaTurno(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
+/// Ventanas de franja de UN día derivadas del horario del gym
+/// (1.25 T30): bloque 1 del día = mañana, bloque 2 = tarde;
+/// null = ese bloque no existe ese día.
+typedef VentanasDiaTurno = ({
+  ({int inicio, int fin})? manana,
+  ({int inicio, int fin})? tarde,
+});
+
+Map<int, VentanasDiaTurno> _ventanasDesdeHorarioGym = const {};
+
+/// Fija las ventanas de franja desde el horario del gym
+/// GUARDADO (gym_horarios). Antes las franjas eran constantes
+/// escritas en el código y editar el «Horario del Gym» no
+/// movía ningún turno: el horario que ve el cliente y el turno
+/// real podían separarse. Quien carga el horario canónico
+/// (horario_gym.dart) llama aquí; sin siembra, mandan las
+/// constantes de fábrica, que reproducen el horario vigente
+/// al nacer esta costura.
+void fijarVentanasDesdeHorarioGym(
+    Map<int, VentanasDiaTurno> porDia) {
+  _ventanasDesdeHorarioGym = porDia;
+}
+
+/// Vuelve a las constantes de fábrica (tests).
+void restablecerVentanasFranja() {
+  _ventanasDesdeHorarioGym = const {};
+}
+
 /// Ventana oficial de una franja en minutos desde medianoche.
 /// null = la franja no existe ese día (domingo; tarde de sábado).
+/// Si hay horario del gym sembrado (T30), manda el del día.
 ({int inicio, int fin})? ventanaFranja(DateTime fecha, String franja) {
+  final delHorario = _ventanasDesdeHorarioGym[fecha.weekday];
+  if (delHorario != null) {
+    if (franja == 'manana') return delHorario.manana;
+    if (franja == 'tarde') return delHorario.tarde;
+    return null;
+  }
   final wd = fecha.weekday; // 1 Lun .. 7 Dom
   if (wd == 7) return null;
   if (franja == 'manana') {

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../auth.dart';
+import '../turnos_resolucion.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
@@ -148,7 +149,60 @@ Future<List<DiaHorario>> cargarHorarioCanonico() async {
           jsonEncode(lista.map((d) => d.toJson()).toList()));
     }
   } catch (_) {}
+  // 1.25 T30: el horario cargado manda también en las franjas
+  // de turno de este teléfono.
+  if (dias.length == 7) aplicarHorarioAFranjas(dias);
   return dias;
+}
+
+int? _minutosDeHhMm(String? hhmm) {
+  if (hhmm == null || hhmm.length < 5) return null;
+  final h = int.tryParse(hhmm.substring(0, 2));
+  final m = int.tryParse(hhmm.substring(3, 5));
+  if (h == null || m == null) return null;
+  return h * 60 + m;
+}
+
+/// 1.25 T30: vuelca el horario canónico en las ventanas de
+/// franja de turnos (turnos_resolucion): bloque 1 = mañana,
+/// bloque 2 = tarde; día cerrado o bloque incompleto/invertido
+/// = esa franja no existe ese día. Sin esto, editar el horario
+/// no movía ningún turno (las franjas eran constantes).
+void aplicarHorarioAFranjas(List<DiaHorario> dias) {
+  if (dias.length != 7) return;
+  ({int inicio, int fin})? ventana(String? ap, String? ci) {
+    final i = _minutosDeHhMm(ap);
+    final f = _minutosDeHhMm(ci);
+    if (i == null || f == null || f <= i) return null;
+    return (inicio: i, fin: f);
+  }
+
+  fijarVentanasDesdeHorarioGym({
+    for (final d in dias)
+      d.diaSemana: (
+        manana: d.abierto ? ventana(d.apertura1, d.cierre1) : null,
+        tarde: d.abierto ? ventana(d.apertura2, d.cierre2) : null,
+      ),
+  });
+}
+
+/// Siembra las franjas SOLO desde la caché local del horario
+/// (sin red): la llama Home al arrancar para que la resolución
+/// de turnos nazca ya con el horario guardado en este teléfono.
+/// El refresco con red llega por cargarHorarioCanonico().
+Future<void> sembrarFranjasDesdeCacheHorario() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final cacheRaw = prefs.getString('cache_horarios_gym');
+    if (cacheRaw == null || cacheRaw.isEmpty) return;
+    final lista = (jsonDecode(cacheRaw) as List).map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      final ds = (m['dia_semana'] as num?)?.toInt() ?? 1;
+      return DiaHorario.fromJson(
+          m, _nombresDiasHorario[ds.clamp(1, 7)]);
+    }).toList();
+    if (lista.length == 7) aplicarHorarioAFranjas(lista);
+  } catch (_) {}
 }
 
 class HorarioGym extends StatefulWidget {
@@ -260,6 +314,9 @@ class _HorarioGymState extends State<HorarioGym> {
           await SharedPreferences.getInstance();
       await prefs.setString(
           _kCacheKey, jsonEncode(payload));
+      // 1.25 T30: el horario recién guardado mueve las
+      // franjas de turno al instante en este teléfono.
+      aplicarHorarioAFranjas(_dias);
       if (mounted) {
         mostrarSnack(context, 'Horario guardado', significado: SignificadoChip.exito);
       }

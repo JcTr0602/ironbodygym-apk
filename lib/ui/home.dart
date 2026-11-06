@@ -29,6 +29,7 @@ import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
 import 'admin.dart';
+import 'horario_gym.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'ajustes.dart';
 import 'bandeja.dart';
@@ -374,6 +375,10 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 1.25 T30: siembra las franjas de turno desde la caché
+    // del horario del gym (sin red): editar el horario mueve
+    // los turnos; sin siembra mandan las constantes.
+    sembrarFranjasDesdeCacheHorario();
     _cargar();
     // v1.3.9 Sprint 1 (#14): cargar permisos y verificar suspensión
     _verificarPermisos();
