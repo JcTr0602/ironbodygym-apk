@@ -44,6 +44,21 @@ int esencialesTrasPublicar({
   return porSlug.values.where((e) => e).length;
 }
 
+/// 1.25 T111: agrupa las fichas por equipo en el orden
+/// canónico dado; las de un equipo ya no vigente caen
+/// en «Otros». Lo usan la lista agrupada y la portada
+/// de conteos (la misma agrupación, una sola cara).
+Map<String, List<Map<String, dynamic>>> agruparFichasPorEquipo(
+    List<Map<String, dynamic>> fichas, List<String> equiposOrden) {
+  final porGrupo = <String, List<Map<String, dynamic>>>{};
+  for (final p in fichas) {
+    final eq = '${p['equipoId'] ?? ''}';
+    final clave = equiposOrden.contains(eq) ? eq : 'Otros';
+    (porGrupo[clave] ??= []).add(p);
+  }
+  return porGrupo;
+}
+
 class GuiaScreen extends StatefulWidget {
   const GuiaScreen({super.key});
 
@@ -62,6 +77,23 @@ class _GuiaScreenState extends State<GuiaScreen> {
   bool _publicandoLote = false;
   bool _soloEsenciales = false;
   String _busqueda = '';
+  // 1.25 T111: el buscador usa el CampoTexto compartido
+  // con GymPedia (una sola cara), con su controlador.
+  final _busquedaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
+
+  void _limpiarBusqueda() {
+    _busquedaCtrl.clear();
+    setState(() {
+      _busqueda = '';
+      _soloEsenciales = false;
+    });
+  }
 
   @override
   void initState() {
@@ -152,6 +184,63 @@ class _GuiaScreenState extends State<GuiaScreen> {
         for (final e in _equipos)
           if (e['activo'] == true) '${e['equipoId']}',
       };
+
+  /// 1.25 T111: la miniatura de la ficha, con la misma
+  /// cara que la de GymPedia (48 px, foto pública de la
+  /// revisión vigente); sin imagen, el punto de color en
+  /// una caja del mismo tamaño para que las filas
+  /// queden alineadas.
+  Widget _miniaturaFicha(Map<String, dynamic> p) {
+    final tieneImagen =
+        p['tiene_imagen'] == true || p['tiene_imagen'] == 1;
+    final colorPunto = p['esencial'] == true
+        ? AppColores.naranja
+        : AppColores.textoSecundario(context);
+    if (!tieneImagen) {
+      return Container(
+        width: 48,
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          border: Border.all(color: AppColores.borde(context)),
+        ),
+        child: Icon(Icons.circle_rounded, size: 14, color: colorPunto),
+      );
+    }
+    final slug = '${p['slug'] ?? p['id'] ?? ''}';
+    final rev = (p['imagen_rev'] as num?)?.toInt() ?? 0;
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadio.sm),
+        border: Border.all(color: AppColores.borde(context)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Image(
+          image: providerFotoAcotada(
+              NetworkImage(AppConfig.urlImagenGuia(slug, rev)),
+              ancho: 288),
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          loadingBuilder: (_, hijo, progreso) => progreso == null
+              ? hijo
+              : Container(
+                  color: AppColores.borde(context).withValues(alpha: 0.3),
+                  child: Icon(Icons.menu_book_rounded,
+                      size: 20,
+                      color: AppColores.textoSecundario(context)),
+                ),
+          errorBuilder: (_, __, ___) => Center(
+              child:
+                  Icon(Icons.circle_rounded, size: 14, color: colorPunto)),
+        ),
+      ),
+    );
+  }
 
   String _nombreEquipo(String equipoId) {
     for (final e in _equipos) {
@@ -503,13 +592,14 @@ class _GuiaScreenState extends State<GuiaScreen> {
     for (final e in _equipos) {
       if (e['activo'] == true) grupos.add('${e['equipoId']}');
     }
-    final porGrupo = <String, List<Map<String, dynamic>>>{};
-    for (final p in publicadasFiltradas) {
-      final eq = '${p['equipoId'] ?? ''}';
-      final clave = grupos.contains(eq) ? eq : 'Otros';
-      (porGrupo[clave] ??= []).add(p);
-    }
+    final porGrupo = agruparFichasPorEquipo(publicadasFiltradas, grupos);
     if (porGrupo.containsKey('Otros')) grupos.add('Otros');
+    // 1.25 T111: la portada resume la biblioteca ENTERA
+    // (sin el filtro de la búsqueda).
+    final conteosPortada = agruparFichasPorEquipo(_publicadas, [
+      for (final e in _equipos)
+        if (e['activo'] == true) '${e['equipoId']}',
+    ]);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
       children: [
@@ -559,13 +649,24 @@ class _GuiaScreenState extends State<GuiaScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        TextField(
-          decoration: const InputDecoration(
-            labelText: 'Buscar (título, equipo, músculo, sinónimo)',
-            prefixIcon: Icon(Icons.search_rounded),
-            border: OutlineInputBorder(),
-          ),
-          onChanged: (v) => setState(() => _busqueda = v),
+        // 1.25 T111: el MISMO CampoTexto que GymPedia.
+        Row(
+          children: [
+            Expanded(
+              child: CampoTexto(
+                controller: _busquedaCtrl,
+                hint: 'Buscar (título, equipo, músculo, sinónimo)',
+                icono: Icons.search_rounded,
+                onChanged: (v) => setState(() => _busqueda = v),
+              ),
+            ),
+            if (_busqueda.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.clear_rounded),
+                tooltip: 'Limpiar búsqueda',
+                onPressed: _limpiarBusqueda,
+              ),
+          ],
         ),
         const SizedBox(height: 8),
         Row(
@@ -584,6 +685,41 @@ class _GuiaScreenState extends State<GuiaScreen> {
           ],
         ),
         const SizedBox(height: 12),
+        // 1.25 T111: portada por equipo con conteos —
+        // tocar un equipo lo busca (el buscador ya mira
+        // el equipo).
+        if (_publicadas.isNotEmpty) ...[
+          Tarjeta(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_publicadas.length} fichas en ${conteosPortada.length} equipos',
+                  style: AppTexto.subtitulo,
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final g in conteosPortada.keys)
+                      ActionChip(
+                        label: Text(
+                            '${g == 'Otros' ? 'Otros' : _nombreEquipo(g)} · ${conteosPortada[g]!.length}'),
+                        onPressed: () {
+                          final nombre =
+                              g == 'Otros' ? 'Otros' : _nombreEquipo(g);
+                          _busquedaCtrl.text = nombre;
+                          setState(() => _busqueda = nombre);
+                        },
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         if (borradoresFiltrados.isNotEmpty) ...[
           const Text('Borradores', style: AppTexto.subtitulo),
           const SizedBox(height: 4),
@@ -634,13 +770,25 @@ class _GuiaScreenState extends State<GuiaScreen> {
             style: AppTexto.subtitulo),
         const SizedBox(height: 8),
         if (publicadasFiltradas.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppEspacio.xl),
-            child: Text(
-              'Aún no bajó ninguna ficha. Toca Actualizar con conexión.',
-              style: TextStyle(color: AppColores.textoSecundario(context)),
-            ),
-          ),
+          // 1.25 T111: vacío CON ACCIÓN y según la causa
+          // (sin fichas aún / filtro sin resultados).
+          _publicadas.isEmpty
+              ? EstadoVacio(
+                  icono: Icons.menu_book_rounded,
+                  titulo: 'Aún no bajó ninguna ficha',
+                  subtitulo:
+                      'Actualiza con conexión para bajar las fichas publicadas.',
+                  textoAccion: 'Actualizar',
+                  onAccion: _sincronizando ? null : _sincronizar,
+                )
+              : EstadoVacio(
+                  icono: Icons.search_off_rounded,
+                  titulo: 'Sin fichas para este filtro',
+                  subtitulo:
+                      'Ninguna ficha coincide con la búsqueda o el filtro de esenciales.',
+                  textoAccion: 'Limpiar búsqueda',
+                  onAccion: _limpiarBusqueda,
+                ),
         for (final g in grupos)
           if ((porGrupo[g] ?? []).isNotEmpty) ...[
             Padding(
@@ -653,28 +801,46 @@ class _GuiaScreenState extends State<GuiaScreen> {
               ),
             ),
             for (final p in porGrupo[g]!)
-              Card(
-                child: ListTile(
-                  leading: Icon(Icons.circle_rounded,
-                      size: 14,
-                      color: p['esencial'] == true
-                          ? AppColores.naranja
-                          : AppColores.textoSecundario(context)),
-                  title: Text('${p['titulo'] ?? ''}',
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(
-                      '${GuiaValidacion.nombreSilueta['${p['siluetaId']}'] ?? p['siluetaId'] ?? ''}'
-                      ' · ${((p['musculosPrincipales'] as List?) ?? []).isNotEmpty ? (p['musculosPrincipales'] as List).first : ''}'
-                      ' · Rev. ${(p['revision'] as num?)?.toInt() ?? 1}'
-                      '${(p['tiene_imagen'] == true || p['tiene_imagen'] == 1) ? ' · con imagen' : ''}'),
-                  trailing: p['esencial'] == true
-                      ? const Chip(
+              // 1.25 T111: TARJETA CON MINIATURA, como
+              // GymPedia (fuera el «· con imagen» de texto:
+              // la imagen se ve, no se nombra).
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+                child: Tarjeta(
+                  padding: const EdgeInsets.all(AppEspacio.md),
+                  onTap: () => _abrirEditor(publicado: p),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _miniaturaFicha(p),
+                      const SizedBox(width: AppEspacio.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${p['titulo'] ?? ''}',
+                                style: AppTexto.subtitulo,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                            const SizedBox(height: 2),
+                            Text(
+                                '${GuiaValidacion.nombreSilueta['${p['siluetaId']}'] ?? p['siluetaId'] ?? ''}'
+                                ' · ${((p['musculosPrincipales'] as List?) ?? []).isNotEmpty ? (p['musculosPrincipales'] as List).first : ''}'
+                                ' · Rev. ${(p['revision'] as num?)?.toInt() ?? 1}',
+                                style: AppTexto.secundario),
+                          ],
+                        ),
+                      ),
+                      if (p['esencial'] == true)
+                        const Chip(
                           label: Text('Esencial',
                               style: AppTexto.metadato),
                           visualDensity: VisualDensity.compact,
                         )
-                      : const Icon(Icons.chevron_right_rounded),
-                  onTap: () => _abrirEditor(publicado: p),
+                      else
+                        const Icon(Icons.chevron_right_rounded),
+                    ],
+                  ),
                 ),
               ),
           ],
