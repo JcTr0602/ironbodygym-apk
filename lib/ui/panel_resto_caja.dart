@@ -28,6 +28,7 @@ import '../plus_reportes.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'mi_nomina.dart' show BarraComposicionNomina;
 import 'diseno.dart';
 import 'nomina.dart';
 
@@ -576,29 +577,88 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                // 1.25 T105: la nómina VISUAL por
+                // entrenador (antes, siete magnitudes
+                // encadenadas en una frase con el neto
+                // enterrado al final): neto protagonista,
+                // la cascada en filas y la barra de
+                // composición de T73.
                 for (final f in _porEntrenador)
                   Tarjeta(
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text('${f['nombre']}',
-                          style: AppTexto.cuerpo),
-                      subtitle: Text(
-                          'Pagaron (global): ${f['pagaron']} · base: '
-                          '${(f['base'] as double).toStringAsFixed(0)} · '
-                          'bono: '
-                          '${(f['bono'] as double).toStringAsFixed(0)} · '
-                          'comisión dosis: '
-                          '${(f['comision'] as double).toStringAsFixed(0)} · '
-                          'adelantos: '
-                          '${(f['adelantos'] as double).toStringAsFixed(0)} · '
-                          'deuda anterior: '
-                          '${(f['deudaEntrante'] as double).toStringAsFixed(0)} · '
-                          'neto: ${(f['neto'] as double).toStringAsFixed(0)} CUP',
-                          style: AppTexto.secundario),
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: Text('${f['nombre']}',
+                                  style: AppTexto.titulo),
+                            ),
+                            Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.end,
+                              children: [
+                                const Text('NETO',
+                                    style: AppTexto.metadato),
+                                Text(
+                                  '${fmtMonto((f['neto'] as double))} CUP',
+                                  style: AppTexto.metrica,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppEspacio.sm),
+                        _filaNominaVisual(
+                            'Base (${f['pagaron']} pagaron)',
+                            (f['base'] as double)),
+                        if ((f['bono'] as double) != 0)
+                          _filaNominaVisual(
+                              '+ Bono', (f['bono'] as double)),
+                        if ((f['comision'] as double) != 0)
+                          _filaNominaVisual('+ Comisión dosis',
+                              (f['comision'] as double)),
+                        if ((f['adelantos'] as double) != 0)
+                          _filaNominaVisual('− Adelantos',
+                              (f['adelantos'] as double)),
+                        if ((f['deudaEntrante'] as double) != 0)
+                          _filaNominaVisual('− Deuda anterior',
+                              (f['deudaEntrante'] as double)),
+                        const SizedBox(height: AppEspacio.sm),
+                        BarraComposicionNomina(
+                          bruto: (f['base'] as double) +
+                              (f['bono'] as double) +
+                              (f['comision'] as double),
+                          neto: (f['neto'] as double),
+                          descuentos:
+                              (f['adelantos'] as double) +
+                                  (f['deudaEntrante'] as double),
+                        ),
+                      ],
                     ),
                   ),
               ],
             ),
+    );
+  }
+
+  /// 1.25 T105: una fila de la cascada de la nómina
+  /// visual (etiqueta a la izquierda, monto a la
+  /// derecha, sin cortar con puntos suspensivos).
+  Widget _filaNominaVisual(String etiqueta, double monto) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(etiqueta, style: AppTexto.cuerpo),
+          ),
+          Text('${fmtMonto(monto)} CUP', style: AppTexto.cuerpo),
+        ],
+      ),
     );
   }
 }
