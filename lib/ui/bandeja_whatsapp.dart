@@ -87,6 +87,9 @@ class BandejaWhatsappScreen extends StatefulWidget {
 class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
     with WidgetsBindingObserver {
   bool _cargando = true;
+  // 1.25 Panel 14: la carga falló — el vacío debe decirlo,
+  // no «Sin avisos por hoy».
+  bool _falloCarga = false;
   List<Map<String, dynamic>> _avisos = [];
   // Claves SQLite 'tipo_clienteId' del día (tabla
   // avisos_wa_contactados). NUNCA solo en RAM.
@@ -259,10 +262,16 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
           _avisos = avisos;
           _tocados = tocados;
           _cargando = false;
+          _falloCarga = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
+      }
     }
   }
 
@@ -615,6 +624,16 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                             style: AppTexto.secundario,
                           ),
                         ),
+                      )
+                    : _avisos.isEmpty && _falloCarga
+                    ? EstadoVacio(
+                        icono: Icons.cloud_off_rounded,
+                        titulo: 'No se pudo cargar la bandeja',
+                        subtitulo: 'Los datos de este teléfono no '
+                            'respondieron; puede que sí haya '
+                            'avisos hoy.',
+                        textoAccion: 'Reintentar',
+                        onAccion: _cargar,
                       )
                     : _avisos.isEmpty
                     ? Center(

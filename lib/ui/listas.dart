@@ -171,6 +171,9 @@ class _ListasScreenState extends State<ListasScreen>
   bool _ordenManual = false;
   // 1.25 Panel 12: vistas guardadas (SharedPreferences).
   List<VistaLista> _vistas = [];
+  // 1.25 Panel 14: la última carga falló — los vacíos de
+  // las pestañas deben decir ESO, no «nadie vence».
+  bool _falloCarga = false;
 
   void _recalcularVisibles() {
     _visHoy = _visibles(_hoy);
@@ -343,7 +346,22 @@ class _ListasScreenState extends State<ListasScreen>
     );
   }
 
+  /// 1.25 Panel 14: envoltorio de la carga — si la lectura
+  /// del espejo falla, la pantalla lo DECLARA (causa «no se
+  /// pudo cargar» con Reintentar) en vez de pintar cinco
+  /// vacíos falsos de «nadie vence».
   Future<void> _cargar() async {
+    try {
+      await _cargarInterno();
+      if (_falloCarga && mounted) {
+        setState(() => _falloCarga = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _falloCarga = true);
+    }
+  }
+
+  Future<void> _cargarInterno() async {
     final h = await vencenHoy();
     final m30crudo = await atrasados(masDe30: false);
     // 1.25 T09: atrasados(masDe30:false) incluye a los sin
@@ -779,6 +797,20 @@ class _ListasScreenState extends State<ListasScreen>
     // tras la lista principal, con sus mismas filas.
     final hayCola = cola != null && cola.isNotEmpty;
     if (rows.isEmpty && !hayCola) {
+      // 1.25 Panel 14: la causa manda — si la carga falló,
+      // el vacío lo dice y ofrece reintentar (antes que la
+      // búsqueda y que el «nadie vence» de la pestaña).
+      if (_falloCarga) {
+        return EstadoVacio(
+          icono: Icons.cloud_off_rounded,
+          titulo: 'No se pudo cargar esta lista',
+          subtitulo: 'Los datos de este teléfono no '
+              'respondieron; lo de las demás pestañas '
+              'también puede estar incompleto.',
+          textoAccion: 'Reintentar',
+          onAccion: _cargar,
+        );
+      }
       // 16/25: con búsqueda activa, el vacío es por la búsqueda
       // (no porque nadie venza) y ofrece limpiarla.
       if (_busqueda.isNotEmpty) {
