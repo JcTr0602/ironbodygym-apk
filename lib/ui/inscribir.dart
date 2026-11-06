@@ -63,6 +63,38 @@ class _InscribirScreenState extends State<InscribirScreen> {
   // inscribir. El servidor lo genera tras sincronizar y el PIN le llega
   // a Jc por Telegram (el cliente aún no existe en la nube al guardar).
   bool _crearAccesoApp = false;
+  // 1.25 T19: validación en vivo — error bajo el campo y
+  // foco al primer error al guardar (antes todo era un
+  // aviso suelto al final, de uno en uno y sin señalar).
+  final _focoNombre = FocusNode();
+  final _focoTelefono = FocusNode();
+  final _focoCarnet = FocusNode();
+  String? _errNombre;
+  String? _errTelefono;
+  String? _errCarnet;
+
+  void _fijarError(String campo, String? error) {
+    setState(() {
+      switch (campo) {
+        case 'nombre':
+          _errNombre = error;
+        case 'telefono':
+          _errTelefono = error;
+        case 'carnet':
+          _errCarnet = error;
+      }
+    });
+    if (error != null) {
+      switch (campo) {
+        case 'nombre':
+          _focoNombre.requestFocus();
+        case 'telefono':
+          _focoTelefono.requestFocus();
+        case 'carnet':
+          _focoCarnet.requestFocus();
+      }
+    }
+  }
   // v1.7.0: inscribir directamente como Cuenta a la Casa (solo
   // dueño; el servidor revalida que el actor sea admin).
   bool _cuentaCasa = false;
@@ -136,6 +168,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
   void dispose() {
     _carnet.removeListener(_actualizarEsMenor);
     _telefono.removeListener(_actualizarEsMenor);
+    _focoNombre.dispose();
+    _focoTelefono.dispose();
+    _focoCarnet.dispose();
     _nombre.dispose();
     _telefono.dispose();
     _carnet.dispose();
@@ -301,12 +336,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
   Future<void> _guardarAhora() async {
     final nombre = _nombre.text.trim();
     if (nombre.isEmpty) {
-      mostrarSnack(context, 'Escribe el nombre', significado: SignificadoChip.alerta);
+      _fijarError('nombre', 'Escribe el nombre');
       return;
     }
     final tel = _telefono.text.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
-      mostrarSnack(context, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
+      _fijarError(
+          'telefono', 'Teléfono inválido: 8 dígitos empezando con 5 o 6');
       return;
     }
     // Argón lote 4 MEDIO: con 'crear acceso' activo, el subtítulo
@@ -314,13 +350,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // telefono null y el servidor fallaba en silencio al crear la
     // cuenta. Se exige aquí, antes de cualquier await.
     if (_crearAccesoApp && !validarTelefono(tel)) {
-      mostrarSnack(context, 'Para crear el acceso de la app escribe un teléfono '
-              'válido de 8 dígitos.', significado: SignificadoChip.alerta);
+      _fijarError('telefono',
+          'Para crear el acceso de la app hace falta un teléfono válido de 8 dígitos.');
       return;
     }
     final carnet = _carnet.text.trim();
     if (carnet.isNotEmpty && !validarCarnet(carnet)) {
-      mostrarSnack(context, 'Carnet inválido: 6 a 11 dígitos', significado: SignificadoChip.alerta);
+      _fijarError('carnet', 'Carnet inválido: 6 a 11 dígitos');
       return;
     }
     // Argón lote 4 MEDIO: la fecha inválida solo avisaba en la UI y
@@ -655,6 +691,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           height: AppEspacio.md),
                       CampoTexto(
                           controller: _nombre,
+                          focusNode: _focoNombre,
+                          errorText: _errNombre,
+                          onChanged: (v) {
+                            if (_errNombre != null &&
+                                v.trim().isNotEmpty) {
+                              setState(() => _errNombre = null);
+                            }
+                          },
                           etiqueta:
                               'Nombre completo *'),
                       const SizedBox(
@@ -693,6 +737,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           height: AppEspacio.md),
                       CampoTexto(
                           controller: _telefono,
+                          focusNode: _focoTelefono,
+                          errorText: _errTelefono,
+                          onChanged: (v) {
+                            final t = v.trim();
+                            setState(() => _errTelefono =
+                                (t.isEmpty || validarTelefono(t))
+                                    ? null
+                                    : 'Teléfono inválido: 8 dígitos empezando con 5 o 6');
+                          },
                           etiqueta:
                               'Teléfono (8 dígitos)',
                           icono: Icons.phone_rounded,
@@ -702,6 +755,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           height: AppEspacio.md),
                       CampoTexto(
                           controller: _carnet,
+                          focusNode: _focoCarnet,
+                          errorText: _errCarnet,
+                          onChanged: (v) {
+                            final t = v.trim();
+                            setState(() => _errCarnet =
+                                (t.isEmpty || validarCarnet(t))
+                                    ? null
+                                    : 'Carnet inválido: 6 a 11 dígitos');
+                          },
                           etiqueta:
                               'Carnet (6–11 dígitos)',
                           icono: Icons.badge_rounded,
@@ -720,6 +782,70 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 ),
                 const SizedBox(
                     height: AppEspacio.md),
+                // 1.25 T19: las decisiones junto al dato del que
+                // dependen (antes vivían al final del formulario):
+                // el acceso, junto al teléfono que lo exige; la
+                // Casa, justo antes de la membresía que descarta.
+                // v1.4.0 Paso 2 (propuesta 11): acceso a la app de
+                // clientes al inscribir (solo dueño; el PIN llega por
+                // Telegram a Jc cuando el cliente sincroniza).
+                if (AuthService().isOwner) ...[
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                        'Crear acceso a la app de clientes'),
+                    subtitle: const Text(
+                        'Requiere el teléfono de arriba, de 8 '
+                        'dígitos. El PIN se genera al sincronizar '
+                        'y le llega a Jc por Telegram para '
+                        'entregarlo al cliente.',
+                        style: AppTexto.secundario),
+                    value: _crearAccesoApp,
+                    onChanged: (v) =>
+                        setState(() => _crearAccesoApp = v),
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                ],
+                // v1.7.0: inscribir como Cuenta a la Casa (solo
+                // dueño; no aplica en una conversión de invitado,
+                // que sigue su flujo con pago).
+                if (AuthService().isOwner &&
+                    widget.conversion == null) ...[
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Cuenta a la Casa'),
+                    subtitle: const Text(
+                        'Sin cobro y sin vencimiento: acceso '
+                        'permanente. No cuenta en nómina ni en '
+                        'avisos. Solo el dueño puede otorgarla.',
+                        style: AppTexto.secundario),
+                    value: _cuentaCasa,
+                    onChanged: (v) async {
+                      if (!v) {
+                        setState(() => _cuentaCasa = false);
+                        return;
+                      }
+                      // T19: activar la Casa DESCARTA la
+                      // membresía elegida abajo; se dice antes
+                      // de que ocurra, no después.
+                      final ok = await DialogoApp.confirmar(
+                        context,
+                        titulo: '¿Inscribir como Cuenta a la Casa?',
+                        mensaje:
+                            'La Casa no cobra: la sección de '
+                            'membresía se descarta y el cliente '
+                            'queda con acceso permanente, sin '
+                            'vencimiento.',
+                        aceptar: 'Sí, es Casa',
+                        icono: Icons.home_rounded,
+                      );
+                      if (ok == true && mounted) {
+                        setState(() => _cuentaCasa = true);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: AppEspacio.md),
+                ],
                 // Bloque 2: membresía (con Cuenta a la Casa no hay
                 // cobro: se sustituye por el aviso dorado).
                 if (!_cuentaCasa)
@@ -1031,44 +1157,6 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     ],
                   ),
                 ),
-                // v1.4.0 Paso 2 (propuesta 11): acceso a la app de
-                // clientes al inscribir (solo dueño; el PIN llega por
-                // Telegram a Jc cuando el cliente sincroniza).
-                if (AuthService().isOwner) ...[
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text(
-                        'Crear acceso a la app de clientes'),
-                    subtitle: const Text(
-                        'Requiere teléfono de 8 dígitos. El PIN se '
-                        'genera al sincronizar y le llega a Jc por '
-                        'Telegram para entregarlo al cliente.',
-                        style: AppTexto.secundario),
-                    value: _crearAccesoApp,
-                    onChanged: (v) =>
-                        setState(() => _crearAccesoApp = v),
-                  ),
-                  const SizedBox(height: AppEspacio.md),
-                ],
-                // v1.7.0: inscribir como Cuenta a la Casa (solo
-                // dueño; no aplica en una conversión de invitado,
-                // que sigue su flujo con pago).
-                if (AuthService().isOwner &&
-                    widget.conversion == null) ...[
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Cuenta a la Casa'),
-                    subtitle: const Text(
-                        'Sin cobro y sin vencimiento: acceso '
-                        'permanente. No cuenta en nómina ni en '
-                        'avisos. Solo el dueño puede otorgarla.',
-                        style: AppTexto.secundario),
-                    value: _cuentaCasa,
-                    onChanged: (v) =>
-                        setState(() => _cuentaCasa = v),
-                  ),
-                  const SizedBox(height: AppEspacio.md),
-                ],
                 const SizedBox(height: AppEspacio.lg),
               ],
             ),

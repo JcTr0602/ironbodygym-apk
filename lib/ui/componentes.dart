@@ -1029,6 +1029,10 @@ class CampoTexto extends StatelessWidget {
   final String? Function(String?)? validador;
   final void Function(String)? onChanged;
   final int? maxLineas;
+  // 1.25 T19: error visible bajo el campo y nodo de foco
+  // (validación en vivo que señala el campo culpable).
+  final String? errorText;
+  final FocusNode? focusNode;
 
   const CampoTexto({
     super.key,
@@ -1041,12 +1045,15 @@ class CampoTexto extends StatelessWidget {
     this.validador,
     this.onChanged,
     this.maxLineas = 1,
+    this.errorText,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
       obscureText: obscure,
       keyboardType: teclado,
       validator: validador,
@@ -1056,6 +1063,7 @@ class CampoTexto extends StatelessWidget {
       decoration: InputDecoration(
         labelText: etiqueta,
         hintText: hint,
+        errorText: errorText,
         prefixIcon:
             icono != null ? Icon(icono) : null,
         border: OutlineInputBorder(
