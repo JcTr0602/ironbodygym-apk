@@ -522,6 +522,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     final fechaCtrl = TextEditingController(text: hoyHabanaIso());
     var tipo = 'suplemento';
     String? clienteNombre;
+    // 1.25 T32: el id viaja con el nombre (antes solo el
+    // nombre y la fila nacía con cliente_id null: huérfana).
+    int? clienteId;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -572,10 +575,16 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                 const SizedBox(height: 8),
                 OutlinedButton(
                   onPressed: () async {
-                    final nombre =
-                        await _elegirClienteNombre(context);
-                    if (nombre != null) {
-                      setS(() => clienteNombre = nombre);
+                    final elegido =
+                        await _elegirCliente(context);
+                    if (elegido != null) {
+                      setS(() {
+                        clienteId = elegido.id;
+                        clienteNombre =
+                            elegido.nombre.isEmpty
+                                ? null
+                                : elegido.nombre;
+                      });
                     }
                   },
                   child: Text(clienteNombre == null
@@ -624,7 +633,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         'concepto': conceptoCtrl.text.trim(),
         'monto': monto,
         'fecha': fechaCtrl.text.trim(),
-        'cliente_id': null,
+        'cliente_id': clienteId,
         'cliente_nombre': clienteNombre ?? '',
         'metodo': 'efectivo',
         'anulada': 0,
@@ -641,6 +650,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           'concepto': conceptoCtrl.text.trim(),
           'monto': monto,
           'fecha': fechaCtrl.text.trim(),
+          'cliente_id': clienteId,
           'cliente_nombre': clienteNombre ?? '',
         },
         txn: txn,
@@ -653,10 +663,14 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     unawaited(SyncEngine.instance.push());
   }
 
-  Future<String?> _elegirClienteNombre(BuildContext context) async {
+  /// 1.25 T32: devuelve id Y nombre del cliente elegido;
+  /// (id: null, nombre: '') = «Sin cliente» explícito;
+  /// null = diálogo cerrado sin elegir (no cambia nada).
+  Future<({int? id, String nombre})?> _elegirCliente(
+      BuildContext context) async {
     final todos = await listaClientes('');
     final filtro = TextEditingController();
-    return showDialog<String>(
+    return showDialog<({int? id, String nombre})>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
@@ -691,8 +705,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
                           ListTile(
                             dense: true,
                             title: Text('${c['nombre'] ?? ''}'),
-                            onTap: () => Navigator.pop(
-                                ctx, '${c['nombre'] ?? ''}'),
+                            onTap: () => Navigator.pop(ctx, (
+                                  id: (c['id'] as num?)?.toInt(),
+                                  nombre: '${c['nombre'] ?? ''}',
+                                )),
                           ),
                       ],
                     ),
@@ -702,7 +718,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             ),
             acciones: [
               TextButton(
-                  onPressed: () => Navigator.pop(ctx, null),
+                  onPressed: () => Navigator.pop(
+                      ctx, (id: null, nombre: '')),
                   child: const Text('Sin cliente')),
             ],
           );
