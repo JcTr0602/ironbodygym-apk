@@ -16,6 +16,17 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.25.0', [
+    'Panel renovado: buscador global de funciones y clientes, contadores de pendientes en cada módulo, y las cifras de ingresos y pagos con su comparación contra el mes anterior y la mini-tendencia de los últimos 7 días',
+    'Tu día a tu manera: la estación diaria del Inicio se personaliza (mostrador, finanzas, bandeja y alertas) y las listas de clientes guardan vistas con su pestaña, orden y búsqueda',
+    'Cuando una lista sale vacía, la app dice por qué: sin resultados de la búsqueda, sin datos todavía o no se pudo cargar (con botón para reintentar), en vez de un hueco sin explicación',
+    'Ficha del cliente: el anillo de la foto muestra el progreso del período pagado, el historial de cobros viene agrupado por meses plegables y el último cobro se repite en un toque (el monto se calcula con la tarifa de hoy)',
+    'Bandeja de WhatsApp: al terminar un envío en lote ves el resultado por partes (contactados, sin teléfono y pendientes), y con presión larga sobre el botón verde la plantilla sale en un toque, sin pasar por el editor',
+    'Turnos: el calendario marca lo que pasó de verdad contra lo programado (verde si abrieron todos, ámbar si abrió otro o faltó uno, rojo si nadie abrió) y cerrar turno pide el permiso de gestionar turnos en todas las pantallas',
+    'Precios en un solo centro: métodos, tipos de pago, tarifas especiales, datos bancarios y pago base en un mismo sitio, y cada precio se guarda solo al salir del campo',
+    'La Biblioteca de la Guía muestra la foto de cada ficha y el conteo por equipo; el Centro de control reúne Actividad, Registro, Por persona y Anomalías; y toda la mensajería (bandeja, cumpleaños, campañas, avisos y plantillas) vive en un solo hub de Comunicación',
+    'Corrección: el cierre de turno ahora confirma de verdad antes de anunciar «Turno cerrado», y el detalle de un entrenador suma sus pagos diarios por su cuenta, no por el nombre (un tocayo ya no mezcla sus cifras)',
+  ]),
   Novedad('1.24.2', [
     'Buscar clientes, renovada: anillo de color en la foto según el estado (verde al día, ámbar por vencer, rojo vencido, dorado Casa) y un icono cuando el cliente tiene notas',
     'Orden a elegir en la lista de clientes (por nombre, por vencimiento o los vencidos primero) y vista compacta para ver más clientes por pantalla; la cabecera ocupa menos y la lista se ve desde más arriba',
