@@ -5061,10 +5061,13 @@ class LocalDb {
         [clienteId, 'cortesia', '$anio%']);
     for (final r in rows) {
       try {
-        res.add({
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        });
+        final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        // Argón 1.26 ALTA: los canjes de Premios también
+        // son 'cortesia' pero con periodo 'personalizado';
+        // no son el regalo de cumpleaños y no cuentan
+        // para su candado anual.
+        if (p['periodo'] == 'personalizado') continue;
+        res.add({...p, 'id': r['id']});
       } catch (_) {}
     }
     final nulos = await d.rawQuery(
@@ -5074,6 +5077,7 @@ class LocalDb {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
         if (normalizarTelegramId(p['cliente_id']) == clienteId &&
             p['metodo'] == 'cortesia' &&
+            p['periodo'] != 'personalizado' &&
             '${p['fecha'] ?? ''}'.startsWith(anio)) {
           res.add({...p, 'id': r['id']});
         }

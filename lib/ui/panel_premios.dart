@@ -131,15 +131,23 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
   }
 
   Future<void> _aprobar(ValePendiente v) async {
+    // Argón 1.26 ALTA: la guarda se toma ANTES del
+    // primer await (check-and-set síncrono, patrón
+    // mi_turno). Antes se asignaba tras el diálogo y un
+    // doble toque abría dos diálogos: dos ops con uuid
+    // distinto, el espejo sumando dos veces y la
+    // segunda op rechazada en el servidor para siempre.
     if (_resolviendo) return;
-    final cli =
-        await LocalDb.instance.mirrorPorIds('clientes', [v.clienteId]);
-    final hastaActual = cli.isNotEmpty
-        ? cli.first['pagado_hasta'] as String?
-        : v.pagadoHasta;
-    final nuevoHasta = previewHastaDias(hastaActual, v.premioDias);
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
+    setState(() => _resolviendo = true);
+    try {
+      final cli =
+          await LocalDb.instance.mirrorPorIds('clientes', [v.clienteId]);
+      final hastaActual = cli.isNotEmpty
+          ? cli.first['pagado_hasta'] as String?
+          : v.pagadoHasta;
+      final nuevoHasta = previewHastaDias(hastaActual, v.premioDias);
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('🏆 Aprobar premio'),
@@ -162,9 +170,20 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    setState(() => _resolviendo = true);
-    try {
+      if (ok != true || !mounted) return;
+      // Argón 1.26 ALTA (segunda capa): si este vale ya
+      // se resolvió en este teléfono (la marca sobrevive
+      // a un reinicio de la app, la bandeja puede venir
+      // vieja), no se encola otra op.
+      final yaResuelto = await LocalDb.instance
+          .getMeta('premio_vale_resuelto_${v.id}');
+      if (yaResuelto != null) {
+        if (!mounted) return;
+        mostrarSnack(context, 'Ese vale ya estaba resuelto',
+            significado: SignificadoChip.alerta);
+        await _cargar();
+        return;
+      }
       await (widget.aprobarVale ?? _aprobarReal)(v);
       if (!mounted) return;
       setState(() => _resueltosLocales = {..._resueltosLocales, v.id});
@@ -182,14 +201,17 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
   }
 
   Future<void> _rechazar(ValePendiente v) async {
+    // Argón 1.26 ALTA: misma guarda síncrona que
+    // _aprobar — antes del primer await, no tras el
+    // diálogo (doble toque = dos diálogos apilados).
     if (_resolviendo) return;
-    final nota = await showDialog<String>(
-      context: context,
-      builder: (_) => _DialogoRechazoVale(nombre: v.nombre),
-    );
-    if (nota == null || !mounted) return;
     setState(() => _resolviendo = true);
     try {
+      final nota = await showDialog<String>(
+        context: context,
+        builder: (_) => _DialogoRechazoVale(nombre: v.nombre),
+      );
+      if (nota == null || !mounted) return;
       final res =
           await (widget.rechazarVale ?? _rechazarReal)(v.id, nota);
       if (!mounted) return;
@@ -229,7 +251,10 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       appBar: appBarIron(context, 'Premios por aprobar'),
       body: Column(
         children: [
-          const SyncBanner(),
+          // Argón 1.26 MEDIA: al terminar el sync la
+          // bandeja se recarga (el aviso «terminando de
+          // sincronizarse» no queda congelado).
+          SyncBanner(alTerminarSync: _cargar),
           Expanded(child: _cuerpo()),
         ],
       ),

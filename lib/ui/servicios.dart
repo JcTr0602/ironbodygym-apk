@@ -1418,7 +1418,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
   }
 
+  // Argón 1.26 MEDIA: _salida y _revertir comparten la
+  // guarda de las ventas — también consultan el espejo
+  // antes de abrir su diálogo y un doble toque apilaba
+  // dos diálogos (dos mermas o dos reversiones).
   Future<void> _salida() async {
+    if (_ventaEnCurso) return;
+    _ventaEnCurso = true;
+    try {
+      await _salidaInterno();
+    } finally {
+      _ventaEnCurso = false;
+    }
+  }
+
+  Future<void> _salidaInterno() async {
     // Argón pasada 1 #7: solo el dueño registra salidas sin venta.
     // (Sin tope a la venta múltiple: el pomo ciego usa 999999 por
     // diseño; un tope revelaría el saldo al entrenador.)
@@ -1531,6 +1545,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   /// desactivado. Deshacer E3 (15 s + synced==0) es otro camino:
   /// este diálogo es solo para cuando ya no cabe Deshacer.
   Future<void> _revertir(Map<String, dynamic> v) async {
+    if (_ventaEnCurso) return;
+    _ventaEnCurso = true;
+    try {
+      await _revertirInterno(v);
+    } finally {
+      _ventaEnCurso = false;
+    }
+  }
+
+  Future<void> _revertirInterno(Map<String, dynamic> v) async {
     final pomoId = (v['pomo_id'] as num?)?.toInt();
     // Guardarraíl: si el pomo ya fue desactivado por el dueño, la
     // reversión está BLOQUEADA con motivo visible (la dosis no

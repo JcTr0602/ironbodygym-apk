@@ -486,7 +486,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final montoPendiente =
         await montoEfectivoOps([...pendientes, ...bloqueadas]);
     if (!mounted) return;
-    await showDialog(
+    final accion = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Cierre de turno'),
@@ -593,11 +593,10 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             TextButton.icon(
               icon: const Icon(Icons.sync_rounded, size: 18),
               label: const Text('Sincronizar ahora'),
-              onPressed: () async {
-                Navigator.of(ctx).pop();
-                await SyncEngine.instance.run(forzar: true);
-                if (mounted) _cierreTurno();
-              },
+              // Argón 1.26 MEDIA: solo sale con la señal;
+              // el sync y la reapertura ocurren fuera del
+              // diálogo (ver el final de _cierreTurnoInterno).
+              onPressed: () => Navigator.of(ctx).pop('sync'),
             ),
           if (!_cerrado)
             ElevatedButton.icon(
@@ -711,6 +710,17 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         ],
       ),
     );
+    // Argón 1.26 MEDIA: con el diálogo YA cerrado y la
+    // guarda _cierreEnCurso aún tomada por _cierreTurno,
+    // se sincroniza y se reabre el diálogo con los
+    // pendientes frescos. Antes la reapertura se pedía
+    // desde dentro del onPressed: si el sync retornaba
+    // en milisegundos (sin sesión/red), la guarda seguía
+    // tomada y el toque se perdía en silencio.
+    if (accion == 'sync' && mounted) {
+      await SyncEngine.instance.run(forzar: true);
+      if (mounted) await _cierreTurnoInterno();
+    }
   }
 
   String _hoy() => hoyHabanaIso();

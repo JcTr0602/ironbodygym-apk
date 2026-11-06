@@ -371,4 +371,30 @@ void main() {
 
     await db.close();
   });
+
+  test('pagosCortesiaClienteAnio excluye canjes de Premios (Argón 1.26)',
+      () async {
+    await _dbPathNuevo();
+    final db = await LocalDb.instance.db;
+
+    final dataset = [
+      // Regalo de cumpleaños real: cortesia + mensual.
+      {'id': 20, 'cliente_id': 5, 'metodo': 'cortesia', 'periodo': 'mensual', 'fecha': '2026-03-01'},
+      // Canje de Premios: cortesia + personalizado → NO cuenta.
+      {'id': 21, 'cliente_id': 5, 'metodo': 'cortesia', 'periodo': 'personalizado', 'fecha': '2026-09-15'},
+      // Cortesia vieja sin periodo (NULL en el JSON) → cuenta.
+      {'id': 22, 'cliente_id': 5, 'metodo': 'cortesia', 'fecha': '2026-05-10'},
+    ];
+    for (final m in dataset) {
+      await LocalDb.instance.upsertMirror(
+          'pagos', m['id'] as int, Map<String, dynamic>.from(m), 1);
+    }
+
+    final got =
+        await LocalDb.instance.pagosCortesiaClienteAnio(5, '2026');
+    final ids = got.map((p) => p['id']).toSet();
+    expect(ids, {20, 22});
+
+    await db.close();
+  });
 }
