@@ -1,7 +1,10 @@
 /// Listas: vencen hoy, atrasados, por vencer. Con mini foto y pago rápido.
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../localdb.dart';
@@ -38,6 +41,83 @@ bool coincideBusquedaListas(Map<String, dynamic> c, String texto) {
   }
   return false;
 }
+
+/// 1.25 Panel 12: una vista guardada de Listas = pestaña +
+/// orden + búsqueda, con nombre propio. El chip enseña su
+/// ALCANCE («Atrasados -30d · Días restantes») para saber
+/// qué cubre sin abrirla.
+class VistaLista {
+  final String nombre;
+  final int pestana;
+  final String orden;
+  final String busqueda;
+
+  const VistaLista({
+    required this.nombre,
+    required this.pestana,
+    required this.orden,
+    this.busqueda = '',
+  });
+
+  static const nombresPestana = [
+    'Hoy',
+    'Por vencer',
+    'Atrasados -30d',
+    'Atrasados +30d',
+    'Al día',
+  ];
+  static const ordenes = ['nombre', 'vencimiento', 'dias'];
+
+  String get alcance {
+    final o = switch (orden) {
+      'vencimiento' => 'Vencimiento',
+      'dias' => 'Días restantes',
+      _ => 'Nombre',
+    };
+    final base = '${nombresPestana[pestana]} · $o';
+    return busqueda.isEmpty ? base : '$base · «$busqueda»';
+  }
+
+  bool coincideCon(
+          {required int pestana,
+          required String orden,
+          required String busqueda}) =>
+      this.pestana == pestana &&
+      this.orden == orden &&
+      this.busqueda == busqueda;
+
+  Map<String, dynamic> toJson() => {
+        'nombre': nombre,
+        'pestana': pestana,
+        'orden': orden,
+        'busqueda': busqueda,
+      };
+
+  /// Null si el JSON no describe una vista válida (rangos
+  /// y tipos se verifican: las preferencias se pueden
+  /// corromper o venir de otra versión).
+  static VistaLista? fromJson(Map<String, dynamic> j) {
+    final nombre = '${j['nombre'] ?? ''}'.trim();
+    final pestana = (j['pestana'] as num?)?.toInt();
+    final orden = '${j['orden'] ?? ''}';
+    if (nombre.isEmpty ||
+        pestana == null ||
+        pestana < 0 ||
+        pestana >= nombresPestana.length ||
+        !ordenes.contains(orden)) {
+      return null;
+    }
+    return VistaLista(
+      nombre: nombre,
+      pestana: pestana,
+      orden: orden,
+      busqueda: '${j['busqueda'] ?? ''}',
+    );
+  }
+}
+
+const kVistasListasKey = 'listas_vistas_v1';
+const kMaxVistasListas = 6;
 
 class ListasScreen extends StatefulWidget {
   /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d,
@@ -89,6 +169,8 @@ class _ListasScreenState extends State<ListasScreen>
   // mano, cada pestaña usa SU defecto (urgencia en las de
   // trabajo, nombre en «Al día»).
   bool _ordenManual = false;
+  // 1.25 Panel 12: vistas guardadas (SharedPreferences).
+  List<VistaLista> _vistas = [];
 
   void _recalcularVisibles() {
     _visHoy = _visibles(_hoy);
@@ -134,6 +216,131 @@ class _ListasScreenState extends State<ListasScreen>
       }
     });
     _cargar();
+    _cargarVistas();
+  }
+
+  Future<void> _cargarVistas() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final crudas = prefs.getStringList(kVistasListasKey) ?? [];
+      final vistas = <VistaLista>[];
+      for (final t in crudas) {
+        try {
+          final v = VistaLista.fromJson(
+              Map<String, dynamic>.from(jsonDecode(t) as Map));
+          if (v != null) vistas.add(v);
+        } catch (_) {
+          // Una vista corrupta no tumba a las demás.
+        }
+      }
+      if (!mounted) return;
+      setState(() => _vistas = vistas);
+    } catch (_) {
+      // Sin preferencias, Listas funciona como siempre.
+    }
+  }
+
+  Future<void> _persistirVistas() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(kVistasListasKey,
+          [for (final v in _vistas) jsonEncode(v.toJson())]);
+    } catch (_) {}
+  }
+
+  /// Aplica una vista guardada: pestaña, orden (manual:
+  /// manda sobre el defecto por pestaña) y búsqueda.
+  void _aplicarVista(VistaLista v) {
+    setState(() {
+      _ordenManual = true;
+      _orden = v.orden;
+      _busqueda = v.busqueda;
+      _busquedaCtrl.text = v.busqueda;
+      _recalcularVisibles();
+    });
+    if (_tab.index != v.pestana) _tab.animateTo(v.pestana);
+  }
+
+  Future<void> _guardarVistaActual() async {
+    if (_vistas.length >= kMaxVistasListas) {
+      mostrarSnack(context,
+          'Ya hay $kMaxVistasListas vistas guardadas; quita una primero',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    final nombre = await showDialog<String>(
+      context: context,
+      builder: (_) => const _DialogoNombreVista(),
+    );
+    if (nombre == null || nombre.trim().isEmpty || !mounted) return;
+    setState(() {
+      _vistas = [
+        ..._vistas,
+        VistaLista(
+          nombre: nombre.trim(),
+          pestana: _tab.index,
+          orden: _orden,
+          busqueda: _busqueda,
+        ),
+      ];
+    });
+    await _persistirVistas();
+    if (!mounted) return;
+    mostrarSnack(context, 'Vista «${nombre.trim()}» guardada',
+        significado: SignificadoChip.exito);
+  }
+
+  Future<void> _quitarVista(VistaLista v) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Quitar vista'),
+        content: Text('¿Quitar la vista «${v.nombre}» (${v.alcance})?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Quitar')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _vistas = _vistas.where((x) => x != v).toList());
+    await _persistirVistas();
+  }
+
+  /// La fila de chips de vistas (Panel 12): cada chip dice
+  /// su alcance; la ✕ lo quita; el último guarda la actual.
+  Widget _filaVistas() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final v in _vistas) ...[
+              InputChip(
+                label: Text('${v.nombre} · ${v.alcance}'),
+                selected: v.coincideCon(
+                    pestana: _tab.index,
+                    orden: _orden,
+                    busqueda: _busqueda),
+                onPressed: () => _aplicarVista(v),
+                onDeleted: () => _quitarVista(v),
+              ),
+              const SizedBox(width: 8),
+            ],
+            ActionChip(
+              avatar: const Icon(Icons.bookmark_add_rounded, size: 18),
+              label: const Text('Guardar vista'),
+              onPressed: _guardarVistaActual,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _cargar() async {
@@ -393,6 +600,7 @@ class _ListasScreenState extends State<ListasScreen>
               ],
             ),
           ),
+          _filaVistas(),
           Expanded(
             child: TabBarView(
               controller: _tab,
@@ -779,6 +987,52 @@ class _ListasScreenState extends State<ListasScreen>
           ),
         ),
         Expanded(child: lista),
+      ],
+    );
+  }
+}
+
+
+/// Diálogo del nombre de la vista (Panel 12): controlador
+/// propio con dispose, como manda el estándar de la casa.
+class _DialogoNombreVista extends StatefulWidget {
+  const _DialogoNombreVista();
+
+  @override
+  State<_DialogoNombreVista> createState() =>
+      _DialogoNombreVistaState();
+}
+
+class _DialogoNombreVistaState extends State<_DialogoNombreVista> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Guardar vista'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        maxLength: 30,
+        decoration: const InputDecoration(
+          hintText: 'Ej. Deudores del lunes',
+          helperText: 'Guarda la pestaña, el orden y la búsqueda actuales',
+        ),
+        onSubmitted: (v) => Navigator.pop(context, v),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            child: const Text('Guardar')),
       ],
     );
   }
