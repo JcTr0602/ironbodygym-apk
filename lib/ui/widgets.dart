@@ -342,7 +342,17 @@ class _SyncBannerState extends State<SyncBanner>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(titulo,
-                                style: AppTexto.cuerpo.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+                                style: AppTexto.cuerpo.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                                // 1.27 (error gráfico de campo): el
+                                // título a UNA línea siempre. La frase
+                                // de «Sin conexión — N cambios…» se
+                                // envolvía a 2 líneas y el banner
+                                // cambiaba de altura entre estados:
+                                // toda la pantalla saltaba al cambiar
+                                // el estado de sync. El detalle vive
+                                // en el subtítulo.
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
                             if (subtitulo != null &&
                                 subtitulo.isNotEmpty)
                               Text(subtitulo,
