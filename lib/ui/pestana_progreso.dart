@@ -3,6 +3,7 @@
 // Gráfico de peso + lista + formulario de registro.
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../app_log.dart';
 import '../auth.dart';
 import '../mediciones_cliente.dart';
 import '../tiempo.dart';
@@ -163,9 +164,11 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         });
         return;
       }
+      AppLog.error('progreso', 'cargar_fallo', d: '$e');
       if (mounted) {
         setState(() {
-          _error = '$e';
+          _error = 'Sin conexión y sin mediciones guardadas '
+              'en este teléfono.';
           _cargando = false;
         });
       }
@@ -184,13 +187,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     // Verificar permiso de visualización
     if (!PermisosEntrenador().canViewProgress &&
         !AuthService().isOwner) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(AppEspacio.xxl),
+          padding: const EdgeInsets.all(AppEspacio.xxl),
           child: Text(
             'No tienes permisos para visualizar el progreso.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey),
+            style: AppTexto.secundario.copyWith(
+                color: AppColores.textoSecundario(context)),
           ),
         ),
       );
@@ -201,19 +205,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     }
 
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Error: $_error'),
-            const SizedBox(height: 16),
-            BotonPrimario(
-              texto: 'Reintentar',
-              onPressed: _cargar,
-              expandido: false,
-            ),
-          ],
-        ),
+      // F6-06: antes se pintaba la excepción de PostgREST
+      // íntegra; ahora EstadoError en claro con Reintentar.
+      return EstadoError(
+        titulo: 'No se pudo cargar el progreso',
+        detalle: _error,
+        onReintentar: _cargar,
       );
     }
 
@@ -226,7 +223,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           Card(
             child: ListTile(
               leading: const Icon(Icons.restaurant_menu_rounded,
-                  color: Colors.green),
+                  color: AppColores.exito),
               title: const Text('Plan Nutricional'),
               subtitle: const Text(
                   'Ver o editar el plan del cliente'),
@@ -275,10 +272,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             const SizedBox(height: 16),
           ],
 
-          // Botón registrar (solo con permiso)
-          if (PermisosEntrenador()
-                  .canRecordMeasurements ||
-              AuthService().isOwner)
+          // Botón registrar (solo con permiso). Con la
+          // lista vacía no se pinta: la acción vive en el
+          // EstadoVacio (F6-08), para no duplicar botones.
+          if (_mediciones.isNotEmpty &&
+              (PermisosEntrenador().canRecordMeasurements ||
+                  AuthService().isOwner))
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -292,19 +291,36 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
 
           // Lista de mediciones
           if (_mediciones.isEmpty)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(AppEspacio.xxl),
-                child: Text(
-                  'Sin mediciones registradas.',
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ),
+            EstadoVacio(
+              icono: Icons.monitor_weight_rounded,
+              titulo: 'Sin mediciones registradas',
+              subtitulo: 'Registra la primera medición para '
+                  'empezar a ver la evolución del peso.',
+              textoAccion: (PermisosEntrenador()
+                          .canRecordMeasurements ||
+                      AuthService().isOwner)
+                  ? 'Registrar medición'
+                  : null,
+              onAccion: () => _mostrarFormulario(context, null),
             )
-          else
+          else ...[
             ..._mediciones
                 .take(20)
                 .map((m) => _buildMedicionCard(m)),
+            // F6-08/F6-21: el corte a 20 se decía en
+            // silencio; ahora se cuenta.
+            if (_mediciones.length > 20)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Text(
+                  'Mostrando las 20 más recientes de '
+                  '${_mediciones.length} mediciones.',
+                  textAlign: TextAlign.center,
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -338,6 +354,15 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               '${fmtFechaHabana(m.createdAt)} • Por: ${m.registradoPor}',
               style: AppTexto.metadato,
             ),
+            // 1.25 T123 (F6-21): las notas ya venían en el
+            // modelo y solo se veían abriendo el detalle.
+            if (m.notas != null && m.notas!.isNotEmpty)
+              Text(
+                m.notas!,
+                style: AppTexto.secundario,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             // v1.4.0: solo medidas visibles (sin % grasa/pecho/cadera).
             if (m.cinturaCm != null || m.brazoCm != null || m.musloCm != null)
               Text(
@@ -370,7 +395,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                       value: 'eliminar',
                       child: Text('Eliminar',
                           style:
-                              TextStyle(color: Colors.red))),
+                              TextStyle(color: AppColores.error))),
                 ],
               )
             : null,
@@ -380,12 +405,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   }
 
   void _verDetalle(Medicion m) {
+    // F6-08: DialogoApp compartido (antes AlertDialog crudo).
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-            '${m.pesoKg.toStringAsFixed(1)} kg'),
-        content: Column(
+      builder: (ctx) => DialogoApp(
+        titulo: '${m.pesoKg.toStringAsFixed(1)} kg',
+        contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -406,7 +431,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               Text('Notas: ${m.notas}'),
           ],
         ),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cerrar'),
@@ -436,11 +461,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
 
     final guardar = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existente == null
+      // F6-08: DialogoApp compartido.
+      builder: (ctx) => DialogoApp(
+        titulo: existente == null
             ? 'Nueva medición'
-            : 'Editar medición'),
-        content: SingleChildScrollView(
+            : 'Editar medición',
+        contenido: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -499,7 +525,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             ],
           ),
         ),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar'),
@@ -559,34 +585,29 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         _cargar();
       }
     } catch (e) {
+      AppLog.error('progreso', 'guardar_medicion_fallo', d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo guardar la medición. Revisa la '
+            'conexión e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
       }
     }
   }
 
   Future<void> _confirmarEliminar(Medicion m) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Eliminar medición'),
-        content: Text(
-            '¿Eliminar la medición de ${m.pesoKg.toStringAsFixed(1)} kg?'),
-        actions: [
-          TextButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(true),
-              style: TextButton.styleFrom(
-                  foregroundColor: Colors.red),
-              child: const Text('Eliminar')),
-        ],
-      ),
+    // F6-08: confirmación compartida (antes AlertDialog
+    // crudo con el botón en Colors.red).
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Eliminar medición',
+      mensaje: 'Se elimina la medición de '
+          '${m.pesoKg.toStringAsFixed(1)} kg. No se puede '
+          'deshacer.',
+      aceptar: 'Eliminar',
+      peligro: true,
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     try {
       await Supabase.instance.client
           .rpc('eliminar_medicion', params: {
@@ -599,8 +620,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         _cargar();
       }
     } catch (e) {
+      AppLog.error('progreso', 'eliminar_medicion_fallo', d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo eliminar la medición. Revisa la '
+            'conexión e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
       }
     }
   }

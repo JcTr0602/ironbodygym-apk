@@ -554,7 +554,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                     icon: Icon(
                       regalado ? Icons.card_giftcard_rounded : Icons.redeem_rounded,
                       color: regalado
-                          ? Colors.amber
+                          ? AppColores.alerta
                           : AppColores.naranja,
                     ),
                     onPressed: () => _regalarYFelicitar(c),

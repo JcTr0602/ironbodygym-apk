@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
@@ -6,6 +8,8 @@ import '../negocio.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
 import 'app_bar.dart';
+import 'auditoria.dart' show descripcionOp;
+import 'cola.dart' show etiquetaEstadoOp;
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -52,6 +56,31 @@ class _AuditoriaSilenciosaScreenState
     extends State<AuditoriaSilenciosaScreen> {
   bool _cargando = true;
   final List<_Caso> _casos = [];
+  // 1.25 T123 (F6-05): telegram_id → nombre, desde el meta
+  // usuarios_apk (la misma fuente que usa Nómina).
+  Map<int, String> _nombresTelegram = {};
+
+  String _nombreEntrenador(dynamic tid) {
+    final id = tid is num ? tid.toInt() : int.tryParse('${tid ?? ''}');
+    final n = id != null ? _nombresTelegram[id] : null;
+    return (n != null && n.isNotEmpty) ? n : 'Un entrenador';
+  }
+
+  Future<void> _cargarNombres() async {
+    try {
+      final raw = await LocalDb.instance.getMeta('usuarios_apk');
+      if (raw == null || raw.isEmpty) return;
+      final mapa = <int, String>{};
+      for (final u in jsonDecode(raw) as List) {
+        final m = Map<String, dynamic>.from(u as Map);
+        final tid = (m['telegram_id'] as num?)?.toInt() ??
+            int.tryParse('${m['telegram_id'] ?? ''}');
+        final nombre = '${m['nombre'] ?? ''}'.trim();
+        if (tid != null && nombre.isNotEmpty) mapa[tid] = nombre;
+      }
+      _nombresTelegram = mapa;
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -65,6 +94,7 @@ class _AuditoriaSilenciosaScreenState
       _casos.clear();
     });
     try {
+      await _cargarNombres();
       await _detectarTurnosCortos();
       await _detectarEdiciones();
       await _detectarSinSync();
@@ -97,7 +127,7 @@ class _AuditoriaSilenciosaScreenState
         _casos.add(_Caso(
           'turno_corto',
           'Turno de $min min (${t['turno'] ?? '?'})',
-          'Entrenador ID ${t['telegram_id'] ?? '?'} · '
+          '${_nombreEntrenador(t['telegram_id'])} · '
               // 1.14 (D12): la misma hora corrida del Home: usar la
               // horaCorta compartida (Habana) en vez del helper
               // local que pintaba en zona del teléfono.
@@ -157,8 +187,8 @@ class _AuditoriaSilenciosaScreenState
       if (respaldada) continue;
       _casos.add(_Caso(
         'edicion',
-        'Edición sin respaldo: ${op['tipo']}',
-        'Por ID ${tid ?? '?'} · estado ${op['estado']} · '
+        'Edición sin respaldo: ${descripcionOp('${op['tipo']}')}',
+        'Por ${_nombreEntrenador(tid)} · ${etiquetaEstadoOp('${op['estado']}')} · '
             'sin ajuste de caja en ±${_Umbrales.ajusteVentanaHoras}h',
         ts.length >= 10 ? ts.substring(0, 10) : '',
       ));

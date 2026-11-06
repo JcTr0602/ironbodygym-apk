@@ -622,7 +622,8 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           'Envío asistido, uno a uno, desde tu WhatsApp. La app '
           'prepara el texto y lleva la cuenta; tú tocas enviar en '
           'cada chat. Máximo 40 por tanda.',
-          style: AppTexto.secundario.copyWith(color: Colors.grey),
+          style: AppTexto.secundario.copyWith(
+              color: AppColores.textoSecundario(context)),
         ),
         const SizedBox(height: 16),
         Text('¿A quién?',
@@ -710,7 +711,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(AppEspacio.md),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
+              border: Border.all(color: AppColores.borde(context)),
               borderRadius: BorderRadius.circular(AppRadio.sm),
             ),
             child: Text(_textoElegido),
@@ -752,7 +753,8 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         Text(
           'Resueltos $_resueltos de ${_items.length} · '
           'enviados $_enviados · saltados $_saltados',
-          style: AppTexto.metadato.copyWith(color: Colors.grey),
+          style: AppTexto.metadato.copyWith(
+              color: AppColores.textoSecundario(context)),
         ),
         const SizedBox(height: 16),
         Card(
@@ -764,7 +766,8 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
                 Text('${actual['nombre']}',
                     style: AppTexto.titulo),
                 Text('Tel. ${actual['telefono']}',
-                    style: const TextStyle(color: Colors.grey)),
+                    style: TextStyle(
+                        color: AppColores.textoSecundario(context))),
                 const Divider(height: 24),
                 Text(_mensajePara(actual)),
               ],

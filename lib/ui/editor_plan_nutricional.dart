@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
+import '../app_log.dart';
 import '../auth.dart';
 import '../permisos_entrenador.dart';
 
@@ -94,9 +95,15 @@ class _EditorPlanNutricionalState
         setState(() => _cargando = false);
       }
     } catch (e) {
+      // 1.25 T123 (F6-06): mensaje en claro; la excepción
+      // va a la bitácora, no a la cara del usuario.
+      AppLog.error('plan_nutricional', 'cargar_fallo', d: '$e');
       if (mounted) {
         setState(() => _cargando = false);
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo cargar el plan. Revisa la conexión '
+            'e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
       }
     }
   }
@@ -132,9 +139,13 @@ class _EditorPlanNutricionalState
         Navigator.pop(context, true);
       }
     } catch (e) {
+      AppLog.error('plan_nutricional', 'guardar_fallo', d: '$e');
       if (mounted) {
         setState(() => _guardando = false);
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo guardar el plan. Revisa la conexión '
+            'e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
       }
     }
   }

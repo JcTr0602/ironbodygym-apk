@@ -578,7 +578,8 @@ class _GuiaScreenState extends State<GuiaScreen> {
             const SizedBox(width: 8),
             Text(
               '$esenciales esenciales (recomendado 4–7)',
-              style: AppTexto.metadato.copyWith(color: Colors.grey),
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context)),
             ),
           ],
         ),
@@ -588,7 +589,8 @@ class _GuiaScreenState extends State<GuiaScreen> {
           const SizedBox(height: 4),
           Text(
             'Solo viven en este teléfono hasta que los publiques.',
-            style: AppTexto.metadato.copyWith(color: Colors.grey),
+            style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context)),
           ),
           const SizedBox(height: 8),
           for (final b in borradoresFiltrados)
@@ -610,7 +612,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
                         message:
                             'La ficha publicada cambió desde que abriste este borrador',
                         child: Icon(Icons.warning_amber_rounded,
-                            color: Colors.red),
+                            color: AppColores.error),
                       )
                     : _enCola.contains('${b['slug']}')
                         ? const Chip(
@@ -632,11 +634,11 @@ class _GuiaScreenState extends State<GuiaScreen> {
             style: AppTexto.subtitulo),
         const SizedBox(height: 8),
         if (publicadasFiltradas.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: AppEspacio.xl),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppEspacio.xl),
             child: Text(
               'Aún no bajó ninguna ficha. Toca Actualizar con conexión.',
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: AppColores.textoSecundario(context)),
             ),
           ),
         for (final g in grupos)
@@ -657,7 +659,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
                       size: 14,
                       color: p['esencial'] == true
                           ? AppColores.naranja
-                          : Colors.grey),
+                          : AppColores.textoSecundario(context)),
                   title: Text('${p['titulo'] ?? ''}',
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text(
@@ -681,25 +683,28 @@ class _GuiaScreenState extends State<GuiaScreen> {
         const SizedBox(height: 4),
         Text(
           'Ops aplicadas de este teléfono (GymPedia y Guía).',
-          style: AppTexto.metadato.copyWith(color: Colors.grey),
+          style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context)),
         ),
         const SizedBox(height: 8),
         if (_actividad.isEmpty)
-          const Text('Sin actividad todavía.',
-              style: TextStyle(color: Colors.grey)),
+          Text('Sin actividad todavía.',
+              style: TextStyle(
+                  color: AppColores.textoSecundario(context))),
         for (final a in _actividad)
           ListTile(
             dense: true,
             leading: const Icon(Icons.history_rounded, size: 18),
             title: Text(_tituloActividad(a),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text('${a['tipo']} · ${_fechaCorta('${a['creada_ts']}')}'),
+            subtitle: Text('${_tipoActividadLegible('${a['tipo']}')} · ${_fechaCorta('${a['creada_ts']}')}'),
           ),
         const SizedBox(height: 12),
         Text(
           'Las fichas se leen sin conexión en la app de clientes. '
           'Publicar y retirar se aplica al sincronizar.',
-          style: AppTexto.metadato.copyWith(color: Colors.grey),
+          style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context)),
         ),
       ],
     );
@@ -712,8 +717,19 @@ class _GuiaScreenState extends State<GuiaScreen> {
       final titulo = '${payload['titulo'] ?? payload['id'] ?? ''}';
       if (titulo.isNotEmpty) return titulo;
     } catch (_) {}
-    return '${a['tipo']}';
+    return _tipoActividadLegible('${a['tipo']}');
   }
+
+  /// 1.25 T123 (F6-05): el tipo de op de la guía en llano
+  /// (antes salía la clave cruda «guia_upsert_publicado»).
+  String _tipoActividadLegible(String tipo) =>
+      const {
+        'guia_upsert_publicado': 'Ficha publicada',
+        'guia_upsert_borrador': 'Borrador actualizado',
+        'guia_equipo_upsert': 'Equipo actualizado',
+        'guia_retirar': 'Ficha retirada',
+      }[tipo] ??
+      tipo;
 
   String _fechaCorta(String iso) {
     try {

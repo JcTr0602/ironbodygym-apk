@@ -14,6 +14,7 @@ import '../auth.dart';
 import '../negocio.dart';
 import '../sync.dart';
 import 'app_bar.dart';
+import 'auditoria.dart' show descripcionOp;
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
@@ -32,6 +33,9 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   List<Map<String, dynamic>> _pendientes = [];
   List<Map<String, dynamic>> _resueltas = [];
   bool _verResueltas = false;
+  // 1.25 T123 (F6-05): nombres de cliente resueltos al
+  // cargar, para que el resumen no enseñe «cliente_id: 123».
+  Map<int, String> _nombresClientes = {};
 
   @override
   void initState() {
@@ -44,15 +48,42 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
     try {
       final p = await incidenciasSyncPendientes();
       final r = await incidenciasSyncResueltas();
+      // F6-05: resolver los nombres de los clientes citados
+      // en los payloads (una pasada, sin N+1 en build).
+      final nombres = <int, String>{};
+      for (final inc in [...p, ...r]) {
+        final cid = _clienteIdDe(inc);
+        if (cid == null || cid <= 0 || nombres.containsKey(cid)) {
+          continue;
+        }
+        final fila = await clientePorId(cid);
+        final n = (fila?['nombre'] as String?)?.trim();
+        if (n != null && n.isNotEmpty) nombres[cid] = n;
+      }
       if (mounted) {
         setState(() {
           _pendientes = p;
           _resueltas = r;
+          _nombresClientes = nombres;
           _cargando = false;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  /// cliente_id citado en el payload de la incidencia.
+  int? _clienteIdDe(Map<String, dynamic> inc) {
+    try {
+      final raw = inc['payload'];
+      if (raw == null) return null;
+      final p = raw is String
+          ? jsonDecode(raw) as Map<String, dynamic>
+          : Map<String, dynamic>.from(raw as Map);
+      return (p['cliente_id'] as num?)?.toInt();
+    } catch (_) {
+      return null;
     }
   }
 
@@ -67,7 +98,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Aprobar incidencia'),
         content: Text(
-          'Se aplicará la operación "${inc['tipo']}" rechazada '
+          'Se aplicará la operación "${descripcionOp('${inc['tipo'] ?? ''}')}" rechazada '
           '(${inc['error'] ?? 'sin detalle'}). ¿Continuar?',
         ),
         actions: [
@@ -107,7 +138,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-                'Se descartará la operación "${inc['tipo']}" sin aplicarla.'),
+                'Se descartará la operación "${descripcionOp('${inc['tipo'] ?? ''}')}" sin aplicarla.'),
             const SizedBox(height: 12),
             TextField(
               controller: notaCtrl,
@@ -165,16 +196,28 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
       final p = raw is String
           ? jsonDecode(raw) as Map<String, dynamic>
           : Map<String, dynamic>.from(raw as Map);
+      // F6-05: etiquetas en llano, sin claves del payload
+      // («cliente_id: 123 · monto: 2000» no dice nada al
+      // decidir). El cliente sale por su NOMBRE si el
+      // payload lo trae o se resolvió al cargar.
       final partes = <String>[];
-      for (final k in [
-        'cliente_id',
-        'monto',
-        'total',
-        'nombre',
-        'concepto',
-        'fecha'
-      ]) {
-        if (p[k] != null) partes.add('$k: ${p[k]}');
+      final nombrePayload = (p['nombre'] as String?)?.trim();
+      final cid = (p['cliente_id'] as num?)?.toInt();
+      final nombre = (nombrePayload != null && nombrePayload.isNotEmpty)
+          ? nombrePayload
+          : (cid != null ? _nombresClientes[cid] : null);
+      if (nombre != null && nombre.isNotEmpty) {
+        partes.add('Cliente: $nombre');
+      }
+      if (p['monto'] != null) {
+        partes.add('Monto: ${fmtMonto(p['monto'])} CUP');
+      }
+      if (p['total'] != null) {
+        partes.add('Total: ${fmtMonto(p['total'])} CUP');
+      }
+      if (p['concepto'] != null) partes.add('Concepto: ${p['concepto']}');
+      if (p['fecha'] != null) {
+        partes.add('Fecha: ${fmtFecha('${p['fecha']}')}');
       }
       return partes.take(4).join(' · ');
     } catch (_) {
@@ -282,7 +325,9 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                     color: AppColores.alerta, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('${inc['tipo'] ?? '—'}',
+                  // F6-05: el tipo de op traducido, no la
+                  // clave cruda («pago_mensual»).
+                  child: Text(descripcionOp('${inc['tipo'] ?? ''}'),
                       style: AppTexto.subtitulo),
                 ),
                 if (!pendiente)

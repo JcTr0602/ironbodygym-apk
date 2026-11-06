@@ -231,14 +231,14 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                 child: Text(
                   'Variables NO permitidas (quedaron sin sustituir): '
                   '${render.bloqueadas.map((b) => '{{$b}}').join(', ')}',
-                  style: const TextStyle(color: Colors.red),
+                  style: const TextStyle(color: AppColores.error),
                 ),
               ),
             if (aviso != null)
               Padding(
                 padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(aviso,
-                    style: const TextStyle(color: Colors.orange)),
+                    style: const TextStyle(color: AppColores.alerta)),
               ),
           ],
         ),
@@ -371,7 +371,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Text(aviso,
-                    style: const TextStyle(color: Colors.orange)),
+                    style: const TextStyle(color: AppColores.alerta)),
               ),
           ],
         ),

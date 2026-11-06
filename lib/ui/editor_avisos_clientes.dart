@@ -14,6 +14,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../tiempo.dart' show fmtFechaHabana;
 import 'app_bar.dart';
@@ -96,7 +97,7 @@ class _EditorAvisosClientesScreenState
   Future<void> _abrirFormulario([AvisoCliente? aviso]) async {
     final cambiado = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => _FormularioAvisoScreen(aviso: aviso),
       ),
     );
@@ -254,7 +255,10 @@ class _FormularioAvisoScreenState extends State<_FormularioAvisoScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _guardando = false);
-      mostrarSnack(context, 'No se pudo publicar: $e',
+      AppLog.error('avisos_clientes', 'publicar_fallo', d: '$e');
+      mostrarSnack(context,
+          'No se pudo publicar el aviso. Revisa la conexión '
+          'e inténtalo de nuevo.',
           significado: SignificadoChip.error);
     }
   }

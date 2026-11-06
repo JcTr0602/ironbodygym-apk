@@ -226,40 +226,46 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
 /// Chip de estado para operaciones (v1.0.9.1).
 /// v1.3.4: extraído de `_ColaScreenState._estadoChip` a función top-level
 /// para reutilizarlo en [DetalleSyncScreen].
+/// 1.25 T123 (F6-05): la etiqueta legible de un estado de
+/// op, separada del chip para poder usarla en textos
+/// (diálogos, subtítulos) sin pintar el estado crudo.
+String etiquetaEstadoOp(String estado) => switch (estado) {
+      'aplicada' => 'Confirmada',
+      'rechazada' => 'Rechazada',
+      'enviada' => 'Confirmación pendiente',
+      'pendiente' => 'Pendiente',
+      'error' => 'Falló',
+      'necesita_revision' => 'Requiere revisión',
+      _ => estado,
+    };
+
 Widget chipEstadoOp(String estado) {
   Color color;
   IconData icono;
-  String texto;
+  final texto = etiquetaEstadoOp(estado);
   if (estado == 'aplicada') {
     color = AppColores.exito;
     icono = Icons.check_circle_rounded;
-    texto = 'Confirmada';
   } else if (estado == 'rechazada') {
     color = AppColores.error;
     icono = Icons.block_rounded;
-    texto = 'Rechazada';
   } else if (estado == 'enviada') {
     // v1.2.9+46: ámbar + etiqueta legible.
     color = AppColores.alerta;
     icono = Icons.sync_problem_rounded;
-    texto = 'Confirmación pendiente';
   } else if (estado == 'pendiente') {
     color = AppColores.naranja;
     icono = Icons.schedule_rounded;
-    texto = 'Pendiente';
   } else if (estado == 'error') {
     color = AppColores.error;
     icono = Icons.warning_rounded;
-    texto = 'Falló';
   } else if (estado == 'necesita_revision') {
     // v1.3.5 (auditoría 2026-10-16): etiqueta legible en vez del código.
     color = AppColores.alerta;
     icono = Icons.rule_rounded;
-    texto = 'Requiere revisión';
   } else {
     color = AppColores.naranja;
     icono = Icons.schedule_rounded;
-    texto = estado;
   }
   return ChipEstado(texto: texto, color: color, icono: icono);
 }
@@ -1246,23 +1252,9 @@ class _ColaScreenState extends State<ColaScreen> {
     }
   }
 
-  /// v1.2.9+46: etiqueta legible del estado (no el identificador técnico).
-  String _etiquetaEstado(String estado) {
-    switch (estado) {
-      case 'aplicada':
-        return 'Confirmada';
-      case 'enviada':
-        return 'Confirmación pendiente';
-      case 'pendiente':
-        return 'Pendiente';
-      case 'rechazada':
-        return 'Rechazada';
-      case 'error':
-        return 'Falló';
-      default:
-        return estado;
-    }
-  }
+  // La etiqueta legible del estado vive en la función
+  // compartida etiquetaEstadoOp (la copia local de v1.2.9+46
+  // quedó sin uso y se retiró en la 1.25 T123/F6-05).
 
   /// v1.2.9+46 (Gemini): delega al mapa centralizado.
   String _tipo(String t) => describirTipoOp(t);
@@ -1702,7 +1694,9 @@ class _ColaScreenState extends State<ColaScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('Estado: $estado'),
+            // F6-05: el estado traducido (la lista ya usa el
+            // chip; el diálogo enseñaba el código crudo).
+            Text('Estado: ${etiquetaEstadoOp(estado)}'),
             for (final d in detalles) ...[
               const SizedBox(height: 4),
               Text(d),

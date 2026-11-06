@@ -258,7 +258,7 @@ class _EditorRutinasGymScreenState extends State<EditorRutinasGymScreen> {
   Future<void> _abrirFormulario([RutinaGymAdmin? rutina]) async {
     final cambiado = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => _FormularioRutinaScreen(rutina: rutina),
       ),
     );
@@ -427,7 +427,7 @@ class _FormularioRutinaScreenState extends State<_FormularioRutinaScreen> {
   Future<void> _elegirFichas() async {
     final elegidas = await Navigator.push<List<String>>(
       context,
-      MaterialPageRoute(
+      RutaIron(
         builder: (_) => _SelectorFichasScreen(
           catalogo: _catalogo,
           seleccionInicial: _seleccion,
@@ -877,8 +877,8 @@ class _TarjetaEjercicioEditorState
                 borderRadius: BorderRadius.circular(AppRadio.sm),
               ),
               child: Text(_tipoCorto[c.tipo] ?? 'Normal',
-                  style: const TextStyle(
-                      fontSize: 11.5, fontWeight: FontWeight.w700)),
+                  style: AppTexto.minuscula
+                      .copyWith(fontWeight: FontWeight.w700)),
             ),
           ),
           const SizedBox(width: 6),

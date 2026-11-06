@@ -171,7 +171,8 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
             Text(
               'Renombrar NO republica las fichas: solo cambia el '
               'nombre que se muestra.',
-              style: AppTexto.metadato.copyWith(color: Colors.grey),
+              style: AppTexto.metadato.copyWith(
+              color: AppColores.textoSecundario(context)),
             ),
           ],
         ),
@@ -320,16 +321,17 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                   'Orden canónico: así se agrupan las fichas en la '
                   'lista. Los equipos nuevos van al final. No hay '
                   'borrado físico: desactivar es reversible.',
-                  style: AppTexto.metadato.copyWith(color: Colors.grey),
+                  style: AppTexto.metadato.copyWith(
+              color: AppColores.textoSecundario(context)),
                 ),
                 const SizedBox(height: 12),
                 if (_equipos.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: AppEspacio.xl),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: AppEspacio.xl),
                     child: Text(
                       'Aún no hay equipos. Crea el primero para '
                       'poder escribir fichas.',
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: AppColores.textoSecundario(context)),
                     ),
                   ),
                 for (var i = 0; i < _equipos.length; i++)

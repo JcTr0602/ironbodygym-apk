@@ -504,7 +504,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               const Icon(Icons.mark_chat_read_rounded,
-                                  size: 56, color: Colors.green),
+                                  size: 56, color: AppColores.exito),
                               const SizedBox(height: 12),
                               const Text('Sin avisos por hoy.',
                                   style: AppTexto.subtitulo),
@@ -671,7 +671,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                         : Icons.radio_button_unchecked_rounded,
                     size: 22,
                     color: atendido
-                        ? Colors.green
+                        ? AppColores.exito
                         : AppColores.textoSecundario(context),
                   ),
                 ),
@@ -696,7 +696,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                             if (atendido) ...[
                               const SizedBox(width: 8),
                               const Icon(Icons.check_circle_rounded,
-                                  size: 16, color: Colors.green),
+                                  size: 16, color: AppColores.exito),
                             ],
                           ],
                         ),
@@ -705,7 +705,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                             style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
                         if (atendido)
                           Text('✓ Atendido',
-                              style: AppTexto.minuscula.copyWith(color: Colors.green, fontWeight: FontWeight.w600)),
+                              style: AppTexto.minuscula.copyWith(color: AppColores.exito, fontWeight: FontWeight.w600)),
                         if (!tieneTelefono)
                           InkWell(
                             onTap: () => _agregarTelefono(a),
