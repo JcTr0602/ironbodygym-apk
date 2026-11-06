@@ -36,6 +36,7 @@ import 'config_precios_bancarios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
 import 'bandeja_whatsapp.dart';
+import 'panel_buscador.dart';
 import 'actividad.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
@@ -522,6 +523,185 @@ class _AdminScreenState extends State<AdminScreen> {
         _irLigera(const SeccionDiagnosticoScreen());
       case DestinoAtencion.suplementos:
         _ir(const SuplementosScreen());
+    }
+  }
+
+  /// 1.25 T100: extraídos de las tarjetas de Sistema —
+  /// el buscador del Panel los reutiliza tal cual.
+  Future<void> _exportarExcel() async {
+    // Ronda 17 M2-H1: exportar el Excel completo exige la
+    // misma guarda de dueño que _exportar().
+    if (!AuthService().isOwner) return;
+    final ok = await exportarExcel();
+    if (mounted) {
+      mostrarSnack(context, ok
+          ? 'Archivos listos para compartir'
+          : 'No se pudo generar el archivo');
+    }
+  }
+
+  Future<void> _exportarBitacora() async {
+    if (!AuthService().isOwner) return;
+    try {
+      final (path, _) = await AppLog.exportar();
+      await Share.shareXFiles([XFile(path)],
+          text: 'Bitácora Iron Body Gym');
+    } catch (_) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo exportar la bitácora',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  Future<void> _abrirBuscadorPanel() async {
+    final id = await Navigator.push<String>(
+      context,
+      RutaIron(builder: (_) => const BuscadorPanelScreen()),
+    );
+    if (id == null || !mounted) return;
+    _abrirFuncionPanel(id);
+  }
+
+  /// 1.25 T100: el resolvedor del buscador — los mismos
+  /// destinos que abren las tarjetas de los módulos.
+  void _abrirFuncionPanel(String id) {
+    switch (id) {
+      case 'arqueo':
+        _ir(const ArqueoScreen());
+      case 'cierre_caja':
+        _ir(_pantallaCierre());
+      case 'liquidar':
+        _ir(const ArqueoEntregaScreen());
+      case 'extracto':
+        _ir(const CentroComprasScreen());
+      case 'gastos':
+        _ir(SeccionGastosScreen(
+          getGastos: () => _gastos,
+          onAgregarGasto: _agregarGasto,
+        ));
+      case 'historial_caja':
+        _ir(const HistorialCajaScreen());
+      case 'pagos_metodo':
+        _ir(const PagosPorMetodo());
+      case 'comparativa':
+        _ir(const ComparativaMensual());
+      case 'ingresos_periodo':
+        _ir(const IngresosPeriodoScreen());
+      case 'nomina':
+        _ir(const NominaScreen());
+      case 'nomina_precalculada':
+        _ir(const NominaPrecalculadaScreen());
+      case 'adelantos':
+        _ir(const AdelantosListaScreen());
+      case 'solicitudes_adelanto':
+        _ir(const SolicitudesAdelantoScreen());
+      case 'usuarios':
+        _ir(const ControlAccesoScreen());
+      case 'candado':
+        _ir(const PanelCandadoScreen());
+      case 'recuperar':
+        _ir(const RiesgoScreen());
+      case 'congeladas':
+        _ir(const CongeladosScreen());
+      case 'papelera':
+        _ir(const PapeleraScreen());
+      case 'cuentas_casa':
+        _ir(const CuentasCasaScreen());
+      case 'vencimientos':
+        _ir(const VencimientosProximosScreen());
+      case 'cumpleanos':
+        _ir(const CumpleanosScreen());
+      case 'solicitudes_invitados':
+        _ir(const InvitadosScreen());
+      case 'invitados_frecuentes':
+        _ir(const InvitadosFrecuentesScreen());
+      case 'plantillas':
+        _ir(const PlantillasScreen());
+      case 'avisos_entrenadores':
+        _ir(const AvisosEntrenadorScreen());
+      case 'avisos_clientes':
+        _ir(const EditorAvisosClientesScreen());
+      case 'recordatorios':
+        _ir(const RecordatoriosScreen());
+      case 'info_publica':
+        _ir(const InfoPublicaScreen());
+      case 'entrenadores_apk':
+        _ir(const UsuariosScreen());
+      case 'plan_turnos':
+        _ir(const TurnosHubScreen());
+      case 'horario_apertura':
+        _ir(const HorarioGym());
+      case 'permisos':
+        _ir(const PanelPermisos());
+      case 'permisos_explicados':
+        mostrarPermisosExplicados(context);
+      case 'suplementos':
+        _ir(const SuplementosScreen());
+      case 'categorias':
+        _ir(const CategoriasSuplementoScreen());
+      case 'historial_ventas':
+        _ir(const HistorialVentasScreen());
+      case 'fiados':
+        _ir(const PorCobrarScreen(pestanaInicial: 1));
+      case 'sin_foto':
+        _ir(const SinFotoPrecioScreen());
+      case 'botes':
+        _ir(const ServiciosAdminScreen());
+      case 'reportes_plus':
+        _ir(const ReportesPlusScreen());
+      case 'reservas':
+        _ir(const ReservasScreen());
+      case 'biblioteca':
+        _ir(const BibliotecaScreen());
+      case 'rutinas_gym':
+        _ir(const EditorRutinasGymScreen());
+      case 'bandeja_gympedia':
+        _ir(const BandejaScreen());
+      case 'precios_metodo':
+        _ir(const PreciosMetodoScreen());
+      case 'tipos_pago':
+        _ir(_pantallaAjustes(seccion: 'tipos'));
+      case 'tarifas':
+        _ir(const TarifasScreen());
+      case 'bancarios':
+        _ir(_pantallaAjustes(seccion: 'bancarios'));
+      case 'pago_base':
+        _elegirPagoEntrenador();
+      case 'ajustes_gym':
+        _ir(const AjustesGymScreen());
+      case 'registro_mensual':
+        _ir(const RegistroMensualScreen());
+      case 'estado_sync':
+        _irLigera(const SeccionDiagnosticoScreen());
+      case 'cola_sync':
+        _ir(const ColaScreen());
+      case 'historial_sync':
+        _ir(const HistorialSyncScreen());
+      case 'verificacion_espejo':
+        _ir(const VerificacionEspejoScreen());
+      case 'incidencias':
+        _ir(const ListaIncidenciasScreen());
+      case 'errores_sync':
+        _ir(const ErroresSyncPanelScreen());
+      case 'auditoria':
+        _ir(const AuditoriaScreen());
+      case 'auditoria_persona':
+        _ir(const AuditoriaPersonaScreen());
+      case 'anomalias':
+        _ir(const AuditoriaSilenciosaScreen());
+      case 'mantenimiento':
+        _ir(const MantenimientoScreen());
+      case 'copia':
+        _ir(const CopiaSeguridadScreen());
+      case 'exportar_csv':
+        _exportar();
+      case 'exportar_excel':
+        _exportarExcel();
+      case 'bitacora':
+        _exportarBitacora();
+      case 'bajada':
+        _ir(const BajadaCompletaScreen());
     }
   }
 
@@ -1353,7 +1533,15 @@ class _AdminScreenState extends State<AdminScreen> {
       );
     }
     return Scaffold(
-      appBar: appBarIron(context, 'Administración'),
+      appBar: appBarIron(context, 'Administración', acciones: [
+        // 1.25 T100: el buscador del Panel («¿Qué quieres
+        // hacer?»): devuelve el id y aquí se navega.
+        IconButton(
+          icon: const Icon(Icons.search_rounded),
+          tooltip: 'Buscar una función del Panel',
+          onPressed: _abrirBuscadorPanel,
+        ),
+      ]),
       body: Column(
         children: [
           const SyncBanner(),
@@ -2669,34 +2857,13 @@ class _AdminScreenState extends State<AdminScreen> {
         Icons.table_chart_rounded,
         'Exportar Excel',
         'Clientes y pagos',
-        () async {
-          // Ronda 17 M2-H1: el botón exportaba el Excel completo
-          // sin pasar por la guarda de _exportar().
-          if (!AuthService().isOwner) return;
-          final ok = await exportarExcel();
-          if (mounted) {
-            mostrarSnack(context, ok
-                    ? 'Archivos listos para compartir'
-                    : 'No se pudo generar el archivo');
-          }
-        },
+        () => _exportarExcel(),
       ),
       _tarjetaFlujo(
         Icons.bug_report_rounded,
         'Bitácora',
         'Exportar el registro para diagnóstico',
-        () async {
-          if (!AuthService().isOwner) return;
-          try {
-            final (path, _) = await AppLog.exportar();
-            await Share.shareXFiles([XFile(path)],
-                text: 'Bitácora Iron Body Gym');
-          } catch (_) {
-            if (mounted) {
-              mostrarSnack(context, 'No se pudo exportar la bitácora', significado: SignificadoChip.error);
-            }
-          }
-        },
+        () => _exportarBitacora(),
       ),
       // Módulo 6 (1.19, AL FINAL por orden Terra): bajada completa
       // segura (21/25): re-descarga sin borrar pendientes ni
