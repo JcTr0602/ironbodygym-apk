@@ -159,6 +159,10 @@ class _VistaPreviaClienteScreenState
   Map<String, dynamic>? _datos;
   bool _cargando = true;
   String? _error;
+  // 1.25 T20: el detalle técnico del fallo, en pequeño
+  // bajo el mensaje en sencillo (antes la excepción cruda
+  // ERA todo el mensaje y no había cómo reintentar).
+  String? _errorDetalle;
   // Argón P1#13: horario canónico (no texto fijo): se carga junto a
   // los datos; mientras tanto se muestra el texto anterior.
   String? _horarioCanonico;
@@ -199,6 +203,7 @@ class _VistaPreviaClienteScreenState
     setState(() {
       _cargando = true;
       _error = null;
+      _errorDetalle = null;
     });
     // Horario canónico en paralelo al RPC (caché local primero).
     cargarHorarioCanonico().then((dias) {
@@ -229,7 +234,11 @@ class _VistaPreviaClienteScreenState
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = '$e';
+          // 1.25 T20: mensaje en sencillo + reintento; la
+          // excepción cruda queda como detalle en pequeño.
+          _error = 'Sin conexión o el servidor no respondió '
+              'al pedir la vista previa.';
+          _errorDetalle = '$e';
           _cargando = false;
         });
       }
@@ -294,10 +303,44 @@ class _VistaPreviaClienteScreenState
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(AppEspacio.xl),
-                          child: Text(_error!,
-                              style:
-                                  const TextStyle(color: Colors.white70),
-                              textAlign: TextAlign.center),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                  Icons.cloud_off_rounded,
+                                  size: 44,
+                                  color: Colors.white38),
+                              const SizedBox(
+                                  height: AppEspacio.md),
+                              Text(_error!,
+                                  style: const TextStyle(
+                                      color: Colors.white70),
+                                  textAlign: TextAlign.center),
+                              if (_errorDetalle != null) ...[
+                                const SizedBox(
+                                    height: AppEspacio.sm),
+                                Text(_errorDetalle!,
+                                    style: const TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 11),
+                                    textAlign: TextAlign.center),
+                              ],
+                              const SizedBox(
+                                  height: AppEspacio.lg),
+                              OutlinedButton.icon(
+                                icon: const Icon(
+                                    Icons.refresh_rounded,
+                                    size: 18),
+                                label: const Text('Reintentar'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: _naranja,
+                                  side: const BorderSide(
+                                      color: _naranja),
+                                ),
+                                onPressed: _cargar,
+                              ),
+                            ],
+                          ),
                         ),
                       )
                     : TabBarView(
