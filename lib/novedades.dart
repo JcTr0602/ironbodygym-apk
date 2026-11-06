@@ -16,6 +16,13 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.26.0', [
+    'Premios por aprobar: los vales que los clientes reclaman en su app al cumplir un logro llegan al Panel (módulo Clientes) y se aprueban con un toque: el premio se aplica como días de mensualidad gratis y queda registrado una sola vez',
+    'Doble toque, doble problema — resuelto: cerrar turno, cobrar desde Buscar, vender en Servicios y generar el PIN ya no se duplican si se toca dos veces seguidas',
+    'Cumpleaños honesto: «Felicitado» solo se marca cuando confirmas que el mensaje sí se envió (si abres WhatsApp y no envías nada, el aviso sigue vivo)',
+    'Suplementos de verdad: deslizar para actualizar ahora sí sincroniza con el servidor, y cuando el aviso de sincronización termina, el catálogo se recarga solo',
+    'Toques que ya no hacen daño en silencio: borrar la fecha de pago de una ficha pide confirmación; salir de Ajustes del gym con cambios sin guardar pregunta antes; y guardar una vista sin nombre avisa en vez de cerrar sin guardar',
+  ]),
   Novedad('1.25.0', [
     'Panel renovado: buscador global de funciones y clientes, contadores de pendientes en cada módulo, y las cifras de ingresos y pagos con su comparación contra el mes anterior y la mini-tendencia de los últimos 7 días',
     'Tu día a tu manera: la estación diaria del Inicio se personaliza (mostrador, finanzas, bandeja y alertas) y las listas de clientes guardan vistas con su pestaña, orden y búsqueda',
