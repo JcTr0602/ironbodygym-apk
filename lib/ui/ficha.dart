@@ -1015,13 +1015,19 @@ class _FichaScreenState extends State<FichaScreen> {
                 final tel8 = tel.length == 10 ? tel.substring(2) : tel;
                 await LocalDb.instance.updateMirrorTelefono(
                     widget.clienteId, tel8);
+                // 1.25 Panel 9: el teléfono anterior viaja en
+                // la op (registro antes → después).
+                final payloadTel = <String, dynamic>{
+                  'cliente_id': widget.clienteId,
+                  'telefono': tel8,
+                };
+                final antesTel = antesEdicionCliente(
+                    {'telefono': '${c?['telefono'] ?? ''}'}, payloadTel);
+                if (antesTel.isNotEmpty) payloadTel['antes'] = antesTel;
                 await LocalDb.instance.queueOp(
                   opUuid: const Uuid().v4(),
                   tipo: 'editar_cliente',
-                  payload: {
-                    'cliente_id': widget.clienteId,
-                    'telefono': tel8,
-                  },
+                  payload: payloadTel,
                 );
                 unawaited(SyncEngine.instance.push());
               }
@@ -1315,6 +1321,10 @@ class _FichaScreenState extends State<FichaScreen> {
       carnet: nuevoCar,
       sexo: sexo,
     );
+    // 1.25 Panel 9: foto «antes» de los campos que cambian,
+    // para el registro antes → después de la Auditoría.
+    final antesBasico = antesEdicionCliente(orig, payload);
+    if (antesBasico.isNotEmpty) payload['antes'] = antesBasico;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
@@ -1517,13 +1527,18 @@ class _FichaScreenState extends State<FichaScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    // 1.25 Panel 9: la nota anterior viaja en la op para el
+    // registro antes → después de la Auditoría.
+    final payloadNotas = <String, dynamic>{
+      'cliente_id': widget.clienteId,
+      'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
+    };
+    final antesNotas = antesEdicionCliente(_c, payloadNotas);
+    if (antesNotas.isNotEmpty) payloadNotas['antes'] = antesNotas;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
-      payload: {
-        'cliente_id': widget.clienteId,
-        'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
-      },
+      payload: payloadNotas,
     );
     // Argón #7B-2: reflejo optimista o _cargar() relee la nota vieja.
     await LocalDb.instance.updateMirrorBasico(widget.clienteId, {

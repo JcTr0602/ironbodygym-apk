@@ -369,6 +369,13 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
 
     switch (tipo) {
       case 'editar_cliente':
+        // 1.25 Panel 9: con foto «antes», la fila enseña el
+        // cambio con valores (antes → después).
+        final lineasAD = lineasAntesDespues(p);
+        if (lineasAD.isNotEmpty) {
+          final q = ' (${lineasAD.join('; ')})';
+          return nombre != null ? 'Editó a $nombre$q' : 'Edición$q';
+        }
         final campos = {
           'nombre': 'nombre',
           'telefono': 'teléfono',
@@ -871,6 +878,36 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         return AppColores.alerta;
     }
   }
+}
+
+/// 1.25 Panel 9: líneas «campo: antes → después» de una op
+/// editar_cliente cuyo payload trae la foto 'antes'
+/// (capturada al editar con [antesEdicionCliente]). Las ops
+/// viejas no la traen: sin líneas, la fila se describe como
+/// siempre. Valores vacíos se leen «—»; los largos se
+/// recortan (la fila no es sitio para una nota entera).
+List<String> lineasAntesDespues(Map<String, dynamic> payload) {
+  final antes = payload['antes'];
+  if (antes is! Map) return const [];
+  const etiquetas = {
+    'nombre': 'nombre',
+    'telefono': 'teléfono',
+    'carnet': 'carnet',
+    'sexo': 'sexo',
+    'notas': 'notas',
+    'pagado_hasta': 'vencimiento',
+  };
+  String fmt(Object? v) {
+    final t = '${v ?? ''}'.trim();
+    if (t.isEmpty) return '—';
+    return t.length > 40 ? '${t.substring(0, 40)}…' : t;
+  }
+
+  return [
+    for (final e in etiquetas.entries)
+      if (antes.containsKey(e.key))
+        '${e.value}: ${fmt(antes[e.key])} → ${fmt(payload[e.key])}',
+  ];
 }
 
 /// v1.3.7: traduce un tipo de op técnico a lenguaje humano.

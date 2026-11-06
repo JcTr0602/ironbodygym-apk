@@ -3231,6 +3231,35 @@ Future<int> pagosRealizadosMes() async {
 /// Teléfono cubano válido: 8 dígitos empezando con 5 o 6.
 /// v1.2.9+46 (Gemini): ETECSA asigna móviles 6xx; pero se mantiene
 /// restricción a 5/6 para no admitir fijos ni combinaciones inválidas.
+/// 1.25 Panel 9: foto «antes» de una edición de cliente,
+/// para el registro antes → después de la Auditoría. Solo
+/// entran los campos editables presentes en [payload] cuyo
+/// valor difiere del de [anterior] (diff mínimo: sin cambio
+/// real, sin foto). Viaja como clave 'antes' dentro del
+/// payload de editar_cliente; el servidor la ignora (su
+/// handler lee solo las claves que conoce) y la Auditoría
+/// la presenta.
+Map<String, dynamic> antesEdicionCliente(
+    Map<String, dynamic>? anterior, Map<String, dynamic> payload) {
+  if (anterior == null) return const {};
+  const campos = [
+    'nombre',
+    'telefono',
+    'carnet',
+    'sexo',
+    'notas',
+    'pagado_hasta',
+  ];
+  final antes = <String, dynamic>{};
+  for (final c in campos) {
+    if (!payload.containsKey(c)) continue;
+    if ('${anterior[c] ?? ''}' != '${payload[c] ?? ''}') {
+      antes[c] = anterior[c];
+    }
+  }
+  return antes;
+}
+
 bool validarTelefono(String v) {
   final d = v.replaceAll(RegExp(r'[^0-9]'), '');
   return d.length == 8 && (d.startsWith('5') || d.startsWith('6'));

@@ -20,7 +20,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
-import '../negocio.dart' show validarTelefono;
+import '../negocio.dart' show validarTelefono, antesEdicionCliente;
 import '../sync.dart';
 import 'componentes.dart';
 
@@ -69,12 +69,24 @@ Future<String?> dialogoAgregarTelefono(
       }
       return null;
     }
+    // 1.25 Panel 9: la fila previa aporta el «antes» del
+    // registro (aquí normalmente no hay teléfono: queda
+    // registrado como agregado, no como cambio).
+    final previas =
+        await LocalDb.instance.mirrorPorIds('clientes', [clienteId]);
+    final payloadTel = <String, dynamic>{
+      'cliente_id': clienteId,
+      'telefono': tel,
+    };
+    final antesTel = antesEdicionCliente(
+        previas.isEmpty ? null : previas.first, payloadTel);
+    if (antesTel.isNotEmpty) payloadTel['antes'] = antesTel;
     await LocalDb.instance.updateMirrorTelefono(clienteId, tel);
     // Encolar la edición para el servidor.
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'editar_cliente',
-      payload: {'cliente_id': clienteId, 'telefono': tel},
+      payload: payloadTel,
     );
     unawaited(SyncEngine.instance.push());
     if (context.mounted) {
