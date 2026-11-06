@@ -114,6 +114,13 @@ Future<int> conteoVisitasInvitado(String clave) async {
   return filas.length;
 }
 
+/// 1.25 T87: visitas de un invitado por su ID (para la
+/// lista, que no trae el carnet para derivar la clave).
+Future<int> conteoVisitasInvitadoPorId(String invitadoId) async {
+  return LocalDb.instance.conteoVisitasPorInvitado(
+      invitadoId, _desdeIso(diasVentanaVisitas));
+}
+
 /// Candidatos vigentes según el umbral editable.
 Future<List<Map<String, dynamic>>> candidatosInvitados() async {
   final umbral = await umbralVisitasInvitado();

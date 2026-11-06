@@ -3306,6 +3306,23 @@ class LocalDb {
         orderBy: 'ts DESC');
   }
 
+  /// 1.25 T87: visitas vinculadas a UN invitado (por su
+  /// invitado_id, la identidad fuerte) desde [desdeIso].
+  /// Para la lista de invitados: la clave de identidad
+  /// (ci/tel/nom) no se puede derivar sin el carnet, que
+  /// el resumen no trae; el vínculo por ID sí.
+  Future<int> conteoVisitasPorInvitado(
+      String invitadoId, String desdeIso) async {
+    final id = int.tryParse(invitadoId);
+    if (id == null) return 0;
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) AS n FROM visitas_invitados '
+        'WHERE invitado_id = ? AND ts >= ?',
+        [id, desdeIso]);
+    return (r.first['n'] as num?)?.toInt() ?? 0;
+  }
+
   /// Candidatos a cliente (W7): claves con al menos [umbral]
   /// visitas desde [desdeIso]. Devuelve clave, conteo, último
   /// nombre visto, invitado_id más reciente y última visita,

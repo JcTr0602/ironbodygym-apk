@@ -78,6 +78,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   String? _error;
   List<InvitadoResumen> _lista = [];
   Map<String, ConversionInvitado> _locales = {};
+  // 1.25 T87: visitas (30 días) por invitado, para la
+  // insignia de candidato SIN entrar uno a uno. Se
+  // cargan tras la lista, sin bloquear la pintura.
+  Map<String, int> _visitasLista = {};
+  int _umbralLista = umbralVisitasDefecto;
   // v1.6.0: ids de clientes de la base LOCAL, para contar la historia
   // completa del convertido (si su cliente ya no existe aquí, fue
   // eliminado después de la conversión).
@@ -220,6 +225,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         _reportesPlusPendientes = reportesPendientes;
         _cargando = false;
       });
+      _cargarVisitasLista(lista);
     } catch (e) {
       if (!mounted) return;
       // J3/G1: sin conexión, la caché manda en SOLO LECTURA y la
@@ -286,6 +292,27 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       _ => null,
     };
     return n == null ? f.etiqueta : '${f.etiqueta} · $n';
+  }
+
+  /// 1.25 T87: conteos de visitas de la lista cargada
+  /// (best-effort, en segundo plano): la insignia de
+  /// candidato se ve SIN abrir cada invitado.
+  Future<void> _cargarVisitasLista(
+      List<InvitadoResumen> lista) async {
+    try {
+      final umbral = await umbralVisitasInvitado();
+      final mapa = <String, int>{};
+      for (final inv in lista) {
+        if (inv.convertido) continue;
+        final n = await conteoVisitasInvitadoPorId(inv.id);
+        if (n > 0) mapa[inv.id] = n;
+      }
+      if (!mounted || !identical(_lista, lista)) return;
+      setState(() {
+        _visitasLista = mapa;
+        _umbralLista = umbral;
+      });
+    } catch (_) {}
   }
 
   /// Barra inferior del modo selección: SOLO las tres acciones de
@@ -888,6 +915,19 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                             AppColores.alertaOscuro),
                       if (badge != null)
                         _chip(badge, AppColores.infoOscuro),
+                      // 1.25 T87: las visitas y el
+                      // candidato se ven en la lista, no
+                      // solo dentro del detalle.
+                      if (!inv.convertido &&
+                          (_visitasLista[inv.id] ?? 0) > 0) ...[
+                        if ((_visitasLista[inv.id] ?? 0) >=
+                            _umbralLista)
+                          _chip('⭐ Candidato a cliente',
+                              _doradoPlus),
+                        _chip(
+                            '👣 ${_visitasLista[inv.id]} visitas (30 días)',
+                            AppColores.infoOscuro),
+                      ],
                       // v1.12.0 (B3/B4): estado del convertido por el
                       // resolver (3 estados). NUNCA «eliminado» por
                       // retraso del espejo: sin fila y sin registro
@@ -1647,11 +1687,21 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     final d = _d;
     if (d == null || _cargando) return null;
     final hayWa = normalizarTelefonoWaMe(d.telefono).isNotEmpty;
+    final reanudar = reanudarPara(
+        local: _local, enServidor: d.conversionPreparada);
     final puedeConvertir = !d.convertido &&
         !_offlineCache &&
-        reanudarPara(local: _local, enServidor: d.conversionPreparada) ==
-            ReanudarConversion.ninguna;
-    if (!hayWa && !puedeConvertir) return null;
+        reanudar == ReanudarConversion.ninguna;
+    // 1.25 T87: la acción DEL MOMENTO también es
+    // reanudar: si la conversión quedó preparada, la
+    // barra la ofrece a un toque (antes solo vivía en
+    // su tarjeta, tras el scroll).
+    final puedeReanudar =
+        reanudar == ReanudarConversion.abrirInscribir &&
+            !_offlineCache;
+    if (!hayWa && !puedeConvertir && !puedeReanudar) {
+      return null;
+    }
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -1666,7 +1716,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                   onPressed: _whatsapp,
                 ),
               ),
-            if (hayWa && puedeConvertir)
+            if (hayWa && (puedeConvertir || puedeReanudar))
               const SizedBox(width: AppEspacio.sm),
             if (puedeConvertir)
               Expanded(
@@ -1675,6 +1725,15 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                       size: 18),
                   label: const Text('Convertir en cliente'),
                   onPressed: _actuando ? null : _convertir,
+                ),
+              ),
+            if (puedeReanudar)
+              Expanded(
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.play_arrow_rounded,
+                      size: 18),
+                  label: const Text('Reanudar inscripción'),
+                  onPressed: _actuando ? null : _reanudar,
                 ),
               ),
           ],
