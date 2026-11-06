@@ -1,6 +1,8 @@
 /// Widgets compartidos.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -25,7 +27,15 @@ class SyncBanner extends StatefulWidget {
   /// a la categoría visible (v1.3.5, luz verde de Argón).
   final String? alcance;
 
-  const SyncBanner({super.key, this.compact = false, this.alcance});
+  /// 1.26 (auditoría de botones, BAJA): aviso al terminar
+  /// el ciclo que ESTE banner disparó. Antes el banner
+  /// sincronizaba «a la sorda» y la pantalla quedaba con
+  /// los datos viejos en pantalla (Suplementos era el
+  /// caso: el catálogo no se recargaba tras el banner).
+  final VoidCallback? alTerminarSync;
+
+  const SyncBanner(
+      {super.key, this.compact = false, this.alcance, this.alTerminarSync});
 
   @override
   State<SyncBanner> createState() => _SyncBannerState();
@@ -47,6 +57,19 @@ class _SyncBannerState extends State<SyncBanner>
   void dispose() {
     _giro.dispose();
     super.dispose();
+  }
+
+  /// Dispara el ciclo (por alcance o completo) y, si la
+  /// pantalla lo pidió, la avisa al terminar.
+  void _dispararSync() {
+    final alc = widget.alcance;
+    final Future<void> ciclo = alc != null
+        ? SyncEngine.instance.sincronizarScope(alc).then((_) {})
+        : SyncEngine.instance.run().then((_) {});
+    final cb = widget.alTerminarSync;
+    if (cb != null) {
+      unawaited(ciclo.whenComplete(cb));
+    }
   }
 
   String _etiqueta(String tipo, int n) {
@@ -211,12 +234,7 @@ class _SyncBannerState extends State<SyncBanner>
               borderRadius: BorderRadius.circular(AppRadio.md),
               onTap: () {
                 if (enProgreso) return;
-                final alc = widget.alcance;
-                if (alc != null) {
-                  SyncEngine.instance.sincronizarScope(alc);
-                } else {
-                  SyncEngine.instance.run();
-                }
+                _dispararSync();
               },
               // 1.23 B11: la píldora medía ~32 de alto; el área
               // tocable sube a 48 con la píldora (gradiente,
@@ -293,12 +311,7 @@ class _SyncBannerState extends State<SyncBanner>
                 // pantalla quedaba idéntica: «no ocurre nada».
                 setState(() => _expandido = !_expandido);
               } else {
-                final alc = widget.alcance;
-                if (alc != null) {
-                  SyncEngine.instance.sincronizarScope(alc);
-                } else {
-                  SyncEngine.instance.run();
-                }
+                _dispararSync();
               }
             },
             child: Padding(
@@ -403,15 +416,7 @@ class _SyncBannerState extends State<SyncBanner>
                           Align(
                             alignment: Alignment.centerLeft,
                             child: TextButton.icon(
-                              onPressed: () {
-                                final alc = widget.alcance;
-                                if (alc != null) {
-                                  SyncEngine.instance
-                                      .sincronizarScope(alc);
-                                } else {
-                                  SyncEngine.instance.run();
-                                }
-                              },
+                              onPressed: _dispararSync,
                               icon: const Icon(
                                   Icons.refresh_rounded,
                                   color: Colors.white,

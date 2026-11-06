@@ -100,6 +100,46 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     _cargar();
   }
 
+  bool _actualizando = false;
+
+  /// 1.26 (auditoría de botones, MEDIA 6): el gesto de
+  /// actualizar SINCRONIZA y después recarga — antes solo
+  /// releía el espejo local y el catálogo «actualizado»
+  /// podía seguir viejo (Servicios ya sincronizaba así).
+  /// Mismo patrón y mismos mensajes honestos que
+  /// Servicios._actualizar (1.22).
+  Future<void> _actualizar() async {
+    if (_actualizando) return;
+    setState(() => _actualizando = true);
+    var mensaje = 'Suplementos actualizados';
+    var esError = false;
+    try {
+      final r =
+          await SyncEngine.instance.sincronizarScopeDetallado('suplementos');
+      if (!r.corrio) {
+        mensaje = r.motivo == SyncMotivoNoCorrio.sinSesion
+            ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
+            : 'Ya hay una sincronización en curso';
+      } else if (r.error) {
+        mensaje = 'Sin conexión, mostrando datos locales';
+        esError = true;
+      } else if (r.bajados == 0) {
+        mensaje = 'Suplementos al día, sin cambios';
+      }
+    } catch (_) {
+      mensaje = 'Sin conexión, mostrando datos locales';
+      esError = true;
+    }
+    try {
+      await _cargar();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _actualizando = false);
+    mostrarSnack(context, mensaje,
+        significado:
+            esError ? SignificadoChip.error : SignificadoChip.exito);
+  }
+
   Future<void> _cargar() async {
     final items = await LocalDb.instance.allMirror('suplementos');
     final cats =
@@ -503,7 +543,12 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(compact: true, alcance: 'suplementos'),
+          // 1.26 (BAJA): al terminar el sync del banner,
+          // el catálogo se recarga (antes quedaba viejo).
+          SyncBanner(
+              compact: true,
+              alcance: 'suplementos',
+              alTerminarSync: _cargar),
           // v1.2.1: la promo la ven todos (el interruptor solo
           // el dueño). Rediseño 1.20: banda compacta; Servicios
           // vive ahora en el menú ⋮ del app bar.
@@ -704,7 +749,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         ),
         Expanded(
           child: RefreshIndicator(
-            onRefresh: _cargar,
+            onRefresh: _actualizar,
             child: _vistaLista
                 ? ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.md),
