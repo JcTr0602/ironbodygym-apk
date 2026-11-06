@@ -77,7 +77,9 @@ void main() {
         );
     await t.pumpWidget(app(const []));
     expect(find.text('Historial'), findsOneWidget);
-    expect(find.text('Sin movimientos en este filtro'),
+    // 1.25 T117 (F1-38): con el filtro en «Todo» el vacío ya no
+    // sugiere probar otro filtro: dice «Sin movimientos todavía».
+    expect(find.text('Sin movimientos todavía'),
         findsOneWidget);
 
     await t.pumpWidget(app([

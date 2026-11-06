@@ -48,6 +48,12 @@ class CabeceraFicha extends StatelessWidget {
   final VoidCallback? onFotoTap;
   final VoidCallback onCambiarFoto;
 
+  /// 1.25 T117 (F1-47): sin permiso de editar fichas, el
+  /// botón de foto se enseña DESHABILITADO con candado
+  /// (regla de Argón para edición secundaria) en vez de
+  /// prometer y denegar tras el toque.
+  final bool puedeCambiarFoto;
+
   const CabeceraFicha(
       {super.key,
       required this.nombre,
@@ -58,7 +64,8 @@ class CabeceraFicha extends StatelessWidget {
       this.congelado = false,
       required this.heroTag,
       required this.onFotoTap,
-      required this.onCambiarFoto});
+      required this.onCambiarFoto,
+      this.puedeCambiarFoto = true});
 
   @override
   Widget build(BuildContext context) {
@@ -136,11 +143,18 @@ class CabeceraFicha extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(height: AppEspacio.xs),
+                // 1.25 T117 (F1-47): sin foto, el botón dice
+                // «Añadir foto» (la pista que faltaba); sin
+                // permiso, candado y deshabilitado.
                 TextButton.icon(
-                  icon: const Icon(Icons.camera_alt_rounded,
+                  icon: Icon(
+                      puedeCambiarFoto
+                          ? Icons.camera_alt_rounded
+                          : Icons.lock_rounded,
                       size: 18),
-                  label: const Text('Cambiar foto'),
-                  onPressed: onCambiarFoto,
+                  label: Text(
+                      foto == null ? 'Añadir foto' : 'Cambiar foto'),
+                  onPressed: puedeCambiarFoto ? onCambiarFoto : null,
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                         horizontal: AppEspacio.sm),
@@ -280,7 +294,13 @@ class BarraMesFicha extends StatelessWidget {
                     ? 'Vencido hace ${-diasRest} día${-diasRest == 1 ? '' : 's'}'
                     : diasRest == 0
                         ? 'Vence hoy'
-                        : 'Quedan $diasRest días del mes pagado',
+                        // 1.25 T117 (F1-31): el texto dice
+                        // el período REAL por su duración
+                        // (la barra también sirve a la
+                        // semana de 7 y la quincena de 15:
+                        // antes todo era «del mes pagado»).
+                        : 'Quedan $diasRest días '
+                            '${total <= 7 ? 'de la semana pagada' : total <= 15 ? 'de la quincena pagada' : total <= 31 ? 'del mes pagado' : 'del período pagado'}',
             style: AppTexto.secundario,
           ),
         ],
@@ -355,7 +375,7 @@ class Resumen360Ficha extends StatelessWidget {
   }
 }
 
-class TarjetaHistorialFicha extends StatelessWidget {
+class TarjetaHistorialFicha extends StatefulWidget {
   final List<Map<String, dynamic>> entradas;
   final String filtro;
   final ValueChanged<String> onFiltro;
@@ -383,19 +403,57 @@ class TarjetaHistorialFicha extends StatelessWidget {
       required this.onConciliar});
 
   @override
+  State<TarjetaHistorialFicha> createState() =>
+      _TarjetaHistorialFichaState();
+}
+
+class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
+  // 1.25 T117 (F1-38): el historial ya no se pinta entero:
+  // tope inicial y «Ver todo»; al cambiar de filtro o de
+  // cliente, el tope vuelve.
+  bool _expandido = false;
+  static const _tope = 8;
+
+  @override
+  void didUpdateWidget(TarjetaHistorialFicha old) {
+    super.didUpdateWidget(old);
+    if (old.filtro != widget.filtro ||
+        old.clienteId != widget.clienteId) {
+      _expandido = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final entradas = this.entradas;
-    final visibles = switch (filtro) {
+    final entradas = widget.entradas;
+    final filtro = widget.filtro;
+    final todas = switch (filtro) {
       'pagos' => entradas.where((e) => e['tipo'] == 'pago').toList(),
       'ventas' => entradas.where((e) => e['tipo'] == 'venta').toList(),
       _ => entradas,
     };
+    // 1.25 T117 (F1-37): la deuda de fiado NO es un evento
+    // más del historial: va FIJADA arriba con cualquier
+    // filtro (antes se hundía al final por no tener fecha
+    // y desaparecía al filtrar por pagos o ventas). OJO: los
+    // fiados salen de `entradas`, NO de `todas` — extraerlos
+    // tras el filtro los volvía a esconder con «pagos» o
+    // «ventas» activos (lo cazó el test de T117).
+    final fiados = entradas.where((e) => e['tipo'] == 'fiado').toList();
+    final resto =
+        todas.where((e) => e['tipo'] != 'fiado').toList();
+    final visibles = [
+      ...fiados,
+      ...(_expandido || resto.length <= _tope
+          ? resto
+          : resto.take(_tope)),
+    ];
     Widget chipFiltro(String valor, String texto) {
       final activo = filtro == valor;
       return ChoiceChip(
         label: Text(texto),
         selected: activo,
-        onSelected: (_) => onFiltro(valor),
+        onSelected: (_) => widget.onFiltro(valor),
       );
     }
 
@@ -418,7 +476,7 @@ class TarjetaHistorialFicha extends StatelessWidget {
                   context,
                   RutaIron(
                     builder: (_) => EstadoCuentaScreen(
-                        clienteId: clienteId),
+                        clienteId: widget.clienteId),
                   ),
                 ),
               ),
@@ -435,10 +493,10 @@ class TarjetaHistorialFicha extends StatelessWidget {
           ),
           // v1.8.1 (idea de Jc): acumulado de servicios, solo
           // cuando se ven ventas.
-          if (serviciosHist.isNotEmpty && filtro != 'pagos')
+          if (widget.serviciosHist.isNotEmpty && filtro != 'pagos')
             Builder(builder: (_) {
               final r = servicios_svc
-                  .resumenServiciosDeCliente(serviciosHist);
+                  .resumenServiciosDeCliente(widget.serviciosHist);
               final partes = <String>[
                 if (r.dosis > 0) '${r.dosis} dosis',
                 if (r.pomos > 0) '${r.pomos} pomos de agua',
@@ -456,21 +514,37 @@ class TarjetaHistorialFicha extends StatelessWidget {
             }),
           const SizedBox(height: AppEspacio.sm),
           if (visibles.isEmpty)
-            const EstadoVacio(
+            EstadoVacio(
               icono: Icons.history_rounded,
-              titulo: 'Sin movimientos en este filtro',
-              subtitulo: 'Prueba con otro filtro.',
+              // F1-38: en «Todo» no hay «otro filtro» que
+              // probar: el vacío dice lo que es.
+              titulo: filtro == 'todo'
+                  ? 'Sin movimientos todavía'
+                  : 'Sin movimientos en este filtro',
+              subtitulo: filtro == 'todo'
+                  ? 'Cuando haya pagos o ventas, salen aquí.'
+                  : 'Prueba con otro filtro.',
             ),
           for (var i = 0; i < visibles.length; i++)
             FilaTimelineFicha(
                 e: visibles[i],
-                esUltima: i == visibles.length - 1,
-                esAdmin: esAdmin,
-                esOwner: esOwner,
-                onReenviarRecibo: onReenviarRecibo,
-                onVerComprobante: onVerComprobante,
-                onCorregirPago: onCorregirPago,
-                onConciliar: onConciliar),
+                esUltima: i == visibles.length - 1 &&
+                    (_expandido || resto.length <= _tope),
+                esAdmin: widget.esAdmin,
+                esOwner: widget.esOwner,
+                onReenviarRecibo: widget.onReenviarRecibo,
+                onVerComprobante: widget.onVerComprobante,
+                onCorregirPago: widget.onCorregirPago,
+                onConciliar: widget.onConciliar),
+          // F1-38: el resto del historial, a un toque, sin
+          // empujar medidas, acceso y acciones al fondo.
+          if (!_expandido && resto.length > _tope)
+            TextButton.icon(
+              icon: const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text(
+                  'Ver todo el historial (${resto.length - _tope} más)'),
+              onPressed: () => setState(() => _expandido = true),
+            ),
         ],
       ),
     );

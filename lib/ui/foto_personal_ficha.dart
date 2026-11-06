@@ -6,8 +6,11 @@
 /// que de todos modos es fail-closed con es_admin en el servidor.
 ///
 /// Triestado explícito (Argón):
-/// - con foto: imagen + «Retirar foto» (con confirmación previa).
+/// - con foto: imagen (tocable, abre el visor) + «Retirar foto»
+///   (con confirmación previa).
 /// - sin foto: no ocupa espacio (SizedBox.shrink).
+/// - cargando: línea compacta «verificando» (1.25 T117 F1-45:
+///   ya no se confunde con el estado sin foto).
 /// - sin conexión/error al consultar: aviso compacto de una línea.
 library;
 
@@ -17,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../fotos.dart';
+import '../negocio.dart' show fmtFecha;
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -110,7 +114,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red),
+                  backgroundColor: AppColores.error),
               child: const Text('Retirar')),
         ],
       ),
@@ -147,12 +151,53 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
     }
   }
 
+  // 1.25 T117 (F1-45): tocar la foto la abre grande, como la
+  // foto de la ficha (_verFotoGrande).
+  void _verGrande() {
+    final f = _archivo;
+    if (f == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(AppEspacio.lg),
+        child: GestureDetector(
+          onTap: () => Navigator.of(ctx).pop(),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadio.lg),
+            child: Image.file(f, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     switch (_estado) {
       case _EstadoFoto.cargando:
+        // 1.25 T117 (F1-45): cargando ya no se confunde con
+        // «sin foto» (antes ambos eran el mismo hueco vacío y
+        // la ficha saltaba al aparecer la foto): una línea
+        // compacta lo dice mientras se verifica.
+        return Tarjeta(
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: Text('Foto personal: verificando…',
+                    style: AppTexto.secundario),
+              ),
+            ],
+          ),
+        );
       case _EstadoFoto.sinFoto:
-        // Sin foto (o aún cargando): sin espacio muerto.
+        // Sin foto: sin espacio muerto.
         return const SizedBox.shrink();
       case _EstadoFoto.error:
         return Tarjeta(
@@ -182,12 +227,15 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   style: AppTexto.secundario),
               const SizedBox(height: AppEspacio.sm),
               if (_archivo != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadio.md),
-                  child: Image.file(_archivo!,
-                      height: 220,
-                      width: double.infinity,
-                      fit: BoxFit.cover),
+                GestureDetector(
+                  onTap: _verGrande,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(AppRadio.md),
+                    child: Image.file(_archivo!,
+                        height: 220,
+                        width: double.infinity,
+                        fit: BoxFit.cover),
+                  ),
                 )
               else
                 Container(
@@ -217,7 +265,8 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                 ),
               if (_actualizadaEn != null) ...[
                 const SizedBox(height: AppEspacio.xs),
-                Text('Actualizada: ${_actualizadaEn!.split('T').first}',
+                // F1-45: fecha legible (dd/mm/aaaa), no el ISO crudo.
+                Text('Actualizada: ${fmtFecha(_actualizadaEn)}',
                     style: AppTexto.secundario),
               ],
               const SizedBox(height: AppEspacio.sm),
@@ -228,7 +277,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   icon: const Icon(Icons.delete_outline_rounded, size: 18),
                   label: const Text('Retirar foto'),
                   style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red),
+                      foregroundColor: AppColores.error),
                 ),
               ),
             ],

@@ -42,6 +42,7 @@ import 'tarifas_especiales.dart';
 import 'estado_cuenta.dart';
 import 'diseno.dart';
 import 'ficha_secciones.dart';
+import 'foto_personal_ficha.dart';
 import 'editor_foto.dart';
 import 'modal_pin_acceso.dart';
 import 'medidas_cliente.dart';
@@ -128,6 +129,9 @@ class _FichaScreenState extends State<FichaScreen> {
   // 17/25 (1.19): Plus residual del convertido (solo dueño).
   // null = sin lectura (sin red, sin RPC, o no dueño): sin fila.
   ({bool activo, String? hasta})? _plusResidual;
+  // 1.25 T117 (F1-41): la consulta del Plus FALLÓ en esta
+  // visita (distinto de «no tiene Plus»): la fila lo dice.
+  bool _plusSinVerificar = false;
   List<Map<String, dynamic>> _pagos = [];
   List<Map<String, dynamic>> _suplementos = [];
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
@@ -249,6 +253,7 @@ class _FichaScreenState extends State<FichaScreen> {
       setState(() {
         _cargaLocalTerminada = true;
         _plusResidual = null;
+        _plusSinVerificar = false;
         _accesoSinConexion = false;
         _c = c;
         _pagos = pagos;
@@ -435,8 +440,13 @@ class _FichaScreenState extends State<FichaScreen> {
         setState(() => _plusResidual = plusResidualDe(res));
       }
     } catch (_) {
-      // Sin red o sin la RPC: la ficha sigue sin la fila,
-      // como siempre se diseñó (best-effort).
+      // 1.25 T117 (F1-41): sin red o sin la RPC, la fila
+      // Plus ya no «no existe»: la Membresía enseña «Sin
+      // verificar en esta visita» — no verificar no es lo
+      // mismo que no tener Plus.
+      if (mounted && gen == _cargaGen) {
+        setState(() => _plusSinVerificar = true);
+      }
     }
     // Caché de accesos (solo si aún no cargó en la sesión;
     // cargar() ya trae su propio timeout).
@@ -535,24 +545,29 @@ class _FichaScreenState extends State<FichaScreen> {
       await _cargar();
       if (!mounted) return;
       final despues = _c;
-      // Comparar campos clave
+      // Comparar campos clave — 1.25 T117 (F1-42): el
+      // aviso nombra las ETIQUETAS de la ficha, no las
+      // claves crudas de la BD («pagado_hasta, foto_storage»
+      // no le dice nada a quien está en el mostrador).
+      const etiquetasCampo = {
+        'pagado_hasta': 'Pagado hasta',
+        'estado': 'Estado',
+        'telefono': 'Teléfono',
+        'foto_storage': 'Foto',
+        'nombre': 'Nombre',
+      };
       final cambios = <String>[];
       if (antes != null && despues != null) {
-        for (final k in [
-          'pagado_hasta',
-          'estado',
-          'telefono',
-          'foto_storage',
-          'nombre'
-        ]) {
+        for (final k in etiquetasCampo.keys) {
           if ('${antes[k]}' != '${despues[k]}') {
-            cambios.add(k);
+            cambios.add(etiquetasCampo[k]!);
           }
         }
       }
       if (omitidoPorPendientes) {
         mostrarSnack(context,
-            'Hay cambios locales pendientes: no se pisó el espejo',
+            'Hay cambios locales pendientes de subir: '
+            'no se tocaron los datos de este teléfono',
             significado: SignificadoChip.alerta,
             duracion: const Duration(seconds: 3));
       } else if (cambios.isEmpty) {
@@ -1160,14 +1175,18 @@ class _FichaScreenState extends State<FichaScreen> {
                 Row(
                   children: [
                     const Text('Sexo: '),
+                    // 1.25 T117 (F1-48): la palabra
+                    // entera — «M»/«F» obligaban a saber
+                    // el código. El valor guardado no
+                    // cambia ('M'/'F').
                     ChoiceChip(
-                        label: const Text('M'),
+                        label: const Text('Masculino'),
                         selected: sexo == 'M',
                         onSelected: (_) =>
                             setS(() => sexo = 'M')),
                     const SizedBox(width: 8),
                     ChoiceChip(
-                        label: const Text('F'),
+                        label: const Text('Femenino'),
                         selected: sexo == 'F',
                         onSelected: (_) =>
                             setS(() => sexo = 'F')),
@@ -1942,8 +1961,13 @@ class _FichaScreenState extends State<FichaScreen> {
     // editar monto/fecha/método (v1.0.12: método incluido)
     final montoCtrl = TextEditingController(
         text: fmtMonto(p['monto']));
+    // 1.25 T117 (F1-43): corte con guarda — una fecha
+    // presente pero corta lanzaba RangeError al abrir.
+    final fechaCrudaP = (p['fecha'] as String? ?? '');
     final fechaCtrl = TextEditingController(
-        text: (p['fecha'] as String? ?? '').substring(0, 10));
+        text: fechaCrudaP.length >= 10
+            ? fechaCrudaP.substring(0, 10)
+            : fechaCrudaP);
     final motivoCtrl = TextEditingController();
     String metodo = '${p['metodo'] ?? 'efectivo'}';
     final datos = await showDialog<Map<String, String>>(
@@ -2183,6 +2207,11 @@ class _FichaScreenState extends State<FichaScreen> {
       ),
       // Bloque 1: UN único botón Cobrar, fijo abajo (el de
       // cuerpo se eliminó; _pagar ya bloquea Casa internamente).
+      // 1.25 T117 (F1-40): la barra inferior dice la
+      // verdad ANTES del toque — a la Casa no se le ofrece
+      // cobrar lo que no cobra (el botón llevaba a un
+      // bloqueo tras el toque), y el congelado rotula su
+      // estado en la propia barra.
       bottomNavigationBar: c == null
           ? null
           : SafeArea(
@@ -2192,14 +2221,47 @@ class _FichaScreenState extends State<FichaScreen> {
                     AppEspacio.sm,
                     AppEspacio.lg,
                     AppEspacio.sm),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: BotonPrimario(
-                    texto: 'Registrar pago',
-                    icono: Icons.payments_rounded,
-                    onPressed: _pagar,
-                  ),
-                ),
+                child: esCasa
+                    ? Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            vertical: AppEspacio.md),
+                        decoration: BoxDecoration(
+                          color: AppColores.alerta
+                              .withValues(alpha: 0.12),
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.md),
+                          border:
+                              Border.all(color: AppColores.alerta),
+                        ),
+                        child: const Text(
+                          'Cuenta a la Casa — no cobra mensualidad',
+                          textAlign: TextAlign.center,
+                          style: AppTexto.subtitulo,
+                        ),
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (congelado)
+                            const Padding(
+                              padding: EdgeInsets.only(
+                                  bottom: AppEspacio.xs),
+                              child: Text(
+                                'Membresía congelada · el vencimiento no corre',
+                                style: AppTexto.secundario,
+                              ),
+                            ),
+                          SizedBox(
+                            width: double.infinity,
+                            child: BotonPrimario(
+                              texto: 'Registrar pago',
+                              icono: Icons.payments_rounded,
+                              onPressed: _pagar,
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ),
       body: Column(
@@ -2231,6 +2293,12 @@ class _FichaScreenState extends State<FichaScreen> {
                             ? () => _verFotoGrande()
                             : null,
                         onCambiarFoto: _cambiarFoto,
+                        // 1.25 T117 (F1-47): la cabecera
+                        // enseña el candado si el rol no
+                        // puede editar fichas (el dueño
+                        // siempre puede).
+                        puedeCambiarFoto: AuthService().isOwner ||
+                            PermisosEntrenador().canEditarFichas,
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
@@ -2321,6 +2389,13 @@ class _FichaScreenState extends State<FichaScreen> {
                                     '${c['carnet'] ?? ''}') !=
                                 null)
                               FilaInfoFicha(icono: Icons.cake_rounded, etiqueta: 'Edad', valor: '${edadDeCarnet('${c['carnet']}')} años'),
+                            // 1.25 T117 (F1-44): el día del
+                            // cumpleaños visible todo el año
+                            // (antes solo salía la edad; la
+                            // fecha solo se infería el día
+                            // exacto por el banner).
+                            if (_textoCumple(c) != null)
+                              FilaInfoFicha(icono: Icons.celebration_rounded, etiqueta: 'Cumpleaños', valor: _textoCumple(c)!),
                             FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: '${c['sexo'] ?? '—'}'),
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
@@ -2412,6 +2487,17 @@ class _FichaScreenState extends State<FichaScreen> {
                           ],
                         ),
                       ),
+                      // 1.25 T117 (F1-45): la foto personal del
+                      // cliente también vive en la ficha principal,
+                      // bajo Información personal (antes solo en la
+                      // ficha de acceso, donde casi nadie la veía).
+                      // Solo dueño, igual que allí: con otro rol el
+                      // widget ni se construye ni se llama su RPC.
+                      if (AuthService().isOwner) ...[
+                        const SizedBox(height: AppEspacio.md),
+                        SeccionFotoPersonal(
+                            clienteId: widget.clienteId),
+                      ],
                       const SizedBox(
                           height: AppEspacio.md),
                       // Membresía
@@ -2434,6 +2520,12 @@ class _FichaScreenState extends State<FichaScreen> {
                                         ? 'Congelado ❄ · el vencimiento no corre'
                                         : textoEstado(c['pagado_hasta']
                                             as String?)),
+                            // 1.25 T117 (F1-44): el porqué de
+                            // la Casa no se pierde de vista —
+                            // el espejo ya trae motivo, fecha
+                            // y autor desde que se otorgó.
+                            if (esCasa && _textoDetalleCasa(c) != null)
+                              FilaInfoFicha(icono: Icons.home_rounded, etiqueta: 'Casa', valor: _textoDetalleCasa(c)!),
                             FilaInfoFicha(icono: Icons.payments_rounded, etiqueta: 'Último pago', valor: _ultimoPagoReal == null
                                     ? '—'
                                     : fmtFecha(_ultimoPagoReal!['fecha']
@@ -2451,7 +2543,14 @@ class _FichaScreenState extends State<FichaScreen> {
                             // 17/25: Plus residual del convertido
                             // (solo dueño; sin Plus no hay fila).
                             if (_textoPlus() != null)
-                              FilaInfoFicha(icono: Icons.star_rounded, etiqueta: 'Plus', valor: _textoPlus()!),
+                              FilaInfoFicha(icono: Icons.star_rounded, etiqueta: 'Plus', valor: _textoPlus()!)
+                            // 1.25 T117 (F1-41): la consulta
+                            // del Plus falló en esta visita:
+                            // la fila lo dice en vez de no
+                            // existir.
+                            else if (_plusSinVerificar &&
+                                AuthService().isOwner)
+                              const FilaInfoFicha(icono: Icons.star_rounded, etiqueta: 'Plus', valor: 'Sin verificar en esta visita'),
                             FilaInfoFicha(icono: Icons.date_range_rounded, etiqueta: 'Inscripción', valor: fmtFecha(c[
                                         'fecha_inscripcion']
                                     as String?)),
@@ -2536,7 +2635,12 @@ class _FichaScreenState extends State<FichaScreen> {
                                       overflow:
                                           TextOverflow.ellipsis),
                                   subtitle: Text(
-                                      '${_estadoIncidencia(i['estado'])} · ${fmtFecha((i['creada_en'] as String?)?.substring(0, 10))}',
+                                      // 1.25 T117 (F1-43): sin
+                                      // trocear antes de fmtFecha
+                                      // (que ya tolera cortos):
+                                      // un creada_en raro lanzaba
+                                      // RangeError en pleno build.
+                                      '${_estadoIncidencia(i['estado'])} · ${fmtFecha(i['creada_en'] as String?)}',
                                       style: AppTexto
                                           .secundario),
                                 ),
@@ -2605,8 +2709,14 @@ class _FichaScreenState extends State<FichaScreen> {
                                           ? 'Reenviar WhatsApp de regalo'
                                           : 'Regalar mensualidad',
                                       style: AppTexto.cuerpo),
+                                  // 1.25 T117 (F1-39): el
+                                  // rótulo dice la regla
+                                  // REAL — el regalo no
+                                  // exige que hoy sea el
+                                  // cumpleaños; el candado
+                                  // es anual.
                                   subtitle: const Text(
-                                      'Cumpleaños: regala un mes',
+                                      '1 mes gratis · 1 vez al año',
                                       style: AppTexto.secundario),
                                   onTap: _regalarMes,
                                 ),
@@ -2724,6 +2834,32 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
+  /// 1.25 T117 (F1-44): «5 de diciembre» desde el carnet,
+  /// o null si el carnet no trae una fecha válida.
+  String? _textoCumple(Map<String, dynamic> c) {
+    final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
+    if (nac == null) return null;
+    final iso = '${nac.year.toString().padLeft(4, '0')}-'
+        '${nac.month.toString().padLeft(2, '0')}-'
+        '${nac.day.toString().padLeft(2, '0')}';
+    return fechaLargaCorta(iso);
+  }
+
+  /// 1.25 T117 (F1-44): detalle de la Cuenta a la Casa —
+  /// «desde el 03/10/2026 · por Jc · hermana» con las
+  /// partes que el espejo traiga; null si no trae ninguna.
+  String? _textoDetalleCasa(Map<String, dynamic> c) {
+    final partes = <String>[
+      if ('${c['cuenta_casa_en'] ?? ''}'.trim().isNotEmpty)
+        'desde el ${fmtFecha(c['cuenta_casa_en'] as String?)}',
+      if ('${c['cuenta_casa_por'] ?? ''}'.trim().isNotEmpty)
+        'por ${c['cuenta_casa_por']}',
+      if ('${c['cuenta_casa_motivo'] ?? ''}'.trim().isNotEmpty)
+        '${c['cuenta_casa_motivo']}',
+    ];
+    return partes.isEmpty ? null : partes.join(' · ');
+  }
+
   /// Bloque 1: ¿el cliente cumple años hoy? Usa fechaNacDeCarnet,
   /// la misma fuente única que la edad (el carnet de 6 dígitos es
   /// la fecha de nacimiento; no hay otro campo que mande).
@@ -2790,9 +2926,6 @@ class _FichaScreenState extends State<FichaScreen> {
       contenido = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Acceso App',
-              style: AppTexto.titulo),
-          const SizedBox(height: AppEspacio.sm),
           const Text(
               'Sin conexión para verificar acceso.',
               style: AppTexto.secundario),
@@ -2809,9 +2942,6 @@ class _FichaScreenState extends State<FichaScreen> {
       contenido = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Acceso App',
-              style: AppTexto.titulo),
-          const SizedBox(height: AppEspacio.sm),
           const Text(
               'Este cliente aún no tiene acceso a la app.',
               style: AppTexto.secundario),
@@ -2828,15 +2958,12 @@ class _FichaScreenState extends State<FichaScreen> {
       contenido = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Acceso App',
-              style: AppTexto.titulo),
-          const SizedBox(height: AppEspacio.sm),
-          Chip(
-            avatar: const Icon(Icons.block_rounded,
-                size: 16, color: Colors.white),
-            label: const Text('Revocado',
-                style: TextStyle(color: Colors.white)),
-            backgroundColor: Colors.grey[600],
+          // 1.25 T117 (F1-46): chip semántico con tokens,
+          // fuera los Colors crudos por rama.
+          const ChipEstado.semantico(
+            texto: 'Revocado',
+            significado: SignificadoChip.neutral,
+            icono: Icons.block_rounded,
           ),
           const SizedBox(height: AppEspacio.sm),
           FilledButton.icon(
@@ -2851,15 +2978,10 @@ class _FichaScreenState extends State<FichaScreen> {
       contenido = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Acceso App',
-              style: AppTexto.titulo),
-          const SizedBox(height: AppEspacio.sm),
-          Chip(
-            avatar: const Icon(Icons.lock_rounded,
-                size: 16, color: Colors.white),
-            label: const Text('Bloqueado',
-                style: TextStyle(color: Colors.white)),
-            backgroundColor: Colors.amber[700],
+          const ChipEstado.semantico(
+            texto: 'Bloqueado',
+            significado: SignificadoChip.alerta,
+            icono: Icons.lock_rounded,
           ),
           const SizedBox(height: AppEspacio.sm),
           Text(
@@ -2881,15 +3003,10 @@ class _FichaScreenState extends State<FichaScreen> {
       contenido = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Acceso App',
-              style: AppTexto.titulo),
-          const SizedBox(height: AppEspacio.sm),
-          Chip(
-            avatar: const Icon(Icons.check_circle_rounded,
-                size: 16, color: Colors.white),
-            label: const Text('Activo',
-                style: TextStyle(color: Colors.white)),
-            backgroundColor: Colors.green[600],
+          const ChipEstado.semantico(
+            texto: 'Activo',
+            significado: SignificadoChip.exito,
+            icono: Icons.check_circle_rounded,
           ),
           const SizedBox(height: AppEspacio.sm),
           Text(ultimo, style: AppTexto.secundario),
@@ -2932,6 +3049,11 @@ class _FichaScreenState extends State<FichaScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 1.25 T117 (F1-46): el título «Acceso App» se
+              // pinta UNA sola vez aquí; antes lo repetía cada
+              // una de las 5 ramas de estado.
+              const Text('Acceso App', style: AppTexto.titulo),
+              const SizedBox(height: AppEspacio.sm),
               contenido,
               const SizedBox(height: AppEspacio.md),
               const Divider(height: 1),
@@ -3138,13 +3260,19 @@ class _FichaScreenState extends State<FichaScreen> {
       });
     }
     for (final s in _suplementos) {
+      // 1.25 T117 (F1-44): la venta FIADA se marca — antes
+      // se pintaba igual que una pagada y la deuda solo se
+      // descubría en el Estado de cuenta. Saldada, la marca
+      // desaparece (la deuda ya no existe).
+      final esFiado = (s['es_fiado'] as num?)?.toInt() == 1 &&
+          (s['fiado_saldado'] as num?)?.toInt() != 1;
       entradas.add({
         'tipo': 'venta',
         'fecha': '${s['fecha'] ?? ''}',
         'titulo':
             '${s['suplemento_nombre'] ?? s['nombre'] ?? 'Suplemento'} x${s['cantidad'] ?? 1}',
         'subtitulo':
-            '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}',
+            '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}${esFiado ? ' · FIADO' : ''}',
         'trailing':
             '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
         'icono': Icons.shopping_bag_rounded,
@@ -3162,9 +3290,17 @@ class _FichaScreenState extends State<FichaScreen> {
           'agua_suelta' => 'Pomo de agua',
           _ => 'Servicio',
         },
-        'subtitulo': '${fmtFecha(s['fecha'] as String?)} · '
-            '${casa ? 'Cuenta a la Casa' : (s['metodo'] ?? '')}'
-            ' · ${s['registrado_por_nombre'] ?? ''}',
+        // 1.25 T117 (F1-44): sin separadores colgando —
+        // solo entran las partes que traen dato.
+        'subtitulo': [
+          fmtFecha(s['fecha'] as String?),
+          if (casa)
+            'Cuenta a la Casa'
+          else if ('${s['metodo'] ?? ''}'.isNotEmpty)
+            '${s['metodo']}',
+          if ('${s['registrado_por_nombre'] ?? ''}'.isNotEmpty)
+            '${s['registrado_por_nombre']}',
+        ].join(' · '),
         'trailing': casa
             ? 'Casa'
             : '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
