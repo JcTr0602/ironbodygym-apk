@@ -10,7 +10,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
@@ -44,7 +43,7 @@ import 'ficha_que_falta.dart';
 import 'ficha_secciones.dart';
 import 'foto_personal_ficha.dart';
 import 'fotos_progreso_nube_ficha.dart';
-import 'editor_foto.dart';
+import 'foto_elegir.dart';
 import 'medidas_cliente.dart';
 import 'pestana_progreso.dart';
 import 'widgets.dart';
@@ -1933,23 +1932,12 @@ class _FichaScreenState extends State<FichaScreen> {
     final src = origen == 'camera'
         ? ImageSource.camera
         : ImageSource.gallery;
-    final img = await ImagePicker().pickImage(
-        source: src,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 75); // Gemini: compresión obligatoria para Cuba
-    if (img == null || !mounted) return;
-    final dir = await getApplicationDocumentsDirectory();
-    final destino = File('${dir.path}/foto_${widget.clienteId}_'
-        '${ahoraHabana().millisecondsSinceEpoch}.jpg');
-    await File(img.path).copy(destino.path);
-    if (!mounted) return;
-    // Editor simple: permite zoom/mover para centrar la cara
-    final editada = await mostrarEditorFoto(context, destino);
-    if (editada == null || !mounted) {
-      try { await destino.delete(); } catch (_) {}
-      return;
-    }
+    // 1.29 (fijo de campo): el flujo vive en el helper compartido
+    // elegirFotoEditada — esta copia no tenía try/catch y un error
+    // del selector (already_active por una petición colgada)
+    // mataba el toque en silencio, igual que en Inscribir.
+    final editada = await elegirFotoEditada(context, src);
+    if (editada == null || !mounted) return;
     // v1.2.9: usar la cola persistente (no fotos_pendientes).
     final opUuid = const Uuid().v4();
     await FotosColaService.instance.encolarFoto(

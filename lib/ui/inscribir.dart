@@ -9,7 +9,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -26,7 +25,7 @@ import 'componentes.dart';
 import 'dialogo_confirmar_inscripcion.dart';
 import 'diseno.dart';
 import 'permisos_ui.dart';
-import 'editor_foto.dart';
+import 'foto_elegir.dart';
 import 'widgets.dart';
 
 class InscribirScreen extends StatefulWidget {
@@ -215,64 +214,24 @@ class _InscribirScreenState extends State<InscribirScreen> {
   }
 
   Future<void> _tomarFoto(ImageSource origen) async {
-    final img =
-        await ImagePicker().pickImage(
-          source: origen,
-          maxWidth: 800,
-          maxHeight: 800,
-          imageQuality: 75); // Gemini: compresión obligatoria para Cuba
-    if (img == null) return;
-    // copia a almacenamiento propio (el temporal del picker puede borrarse)
-    final dir = await getApplicationDocumentsDirectory();
-    final destino =
-        File('${dir.path}/foto_${DateTime.now().millisecondsSinceEpoch}.jpg');
-    await File(img.path).copy(destino.path);
-    // Editor simple: permite zoom/mover para centrar la cara
+    // 1.29 (fijo de campo): el flujo vive en el helper compartido
+    // elegirFotoEditada — antes esta copia no tenía try/catch y un
+    // error del selector (already_active por una petición colgada)
+    // mataba el toque en silencio, sin cámara ni editor.
+    final editada = await elegirFotoEditada(context, origen);
+    if (editada == null) return; // cancelado o error ya anunciado
     if (!mounted) {
-      // Panel 1.15 (Luna MEDIO + Terra BAJO, R2): la pantalla pudo
-      // cerrarse entre la copia y este punto; sin borrar, destino
-      // quedaba huérfano.
       try {
-        await destino.delete();
+        await editada.delete();
       } catch (_) {}
       return;
     }
-    final editada = await mostrarEditorFoto(context, destino);
-    if (!mounted) {
-      // Panel Luna: la pantalla pudo cerrarse con el editor abierto;
-      // sin esta guarda, el setState de abajo caía sobre un estado
-      // desmontado y la copia temporal quedaba huérfana cuando el
-      // archivo editado era el propio destino. La foto anterior NO
-      // se toca: sigue siendo la vigente en _foto.
-      try {
-        await destino.delete();
-      } catch (_) {}
-      // R2 (Terra): el editor puede devolver otro temporal; si la
-      // pantalla se cerró, ese también quedaría huérfano.
-      if (editada != null && editada.path != destino.path) {
-        try {
-          await editada.delete();
-        } catch (_) {}
-      }
-      return;
-    }
-    if (editada == null) {
-      // usuario canceló: borra la copia temporal
-      try { await destino.delete(); } catch (_) {}
-      return;
-    }
-    // Argón #7A-5: sin huérfanos: la foto anterior sustituida y la
-    // copia temporal sobrante se borran cuando el editor devuelve
-    // otro archivo.
+    // Argón #7A-5: sin huérfanos: la foto anterior sustituida se
+    // borra.
     final anterior = _foto;
     if (anterior != null && anterior.path != editada.path) {
       try {
         await anterior.delete();
-      } catch (_) {}
-    }
-    if (editada.path != destino.path) {
-      try {
-        await destino.delete();
       } catch (_) {}
     }
     setState(() => _foto = editada);
