@@ -9,6 +9,7 @@
 /// (ajuste 5 de Argón).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -59,8 +60,19 @@ final _loteInvitados = AccionLoteInvitados();
 /// Dorado de la pastilla y la línea Plus (rango «Invitado Plus»).
 const _doradoPlus = Color(0xFF9A7B0A);
 
+/// 1.29 (FB-05 · D-B1-05): costuras de test (patrón de la casa,
+/// cf. leerNominaPermisosParaTest en panel_permisos.dart): el
+/// servicio de la bandeja y la fuente del conteo de reportes
+/// Plus, inyectables. En producción valen null y manda lo real.
+@visibleForTesting
+InvitadosService? servicioInvitadosParaTest;
+
+@visibleForTesting
+Future<int> Function()? conteoReportesPlusParaTest;
+
 class _InvitadosScreenState extends State<InvitadosScreen> {
-  final _svc = InvitadosService();
+  final _svcReal = InvitadosService();
+  InvitadosService get _svc => servicioInvitadosParaTest ?? _svcReal;
   static const _filtros = <({String id, String etiqueta})>[
     (id: 'todos', etiqueta: 'Todos'),
     (id: 'solicitudes', etiqueta: 'Solicitudes'),
@@ -203,12 +215,12 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       if (hayShellEliminada) {
         fechas = await LocalDb.instance.fechasClientesEliminados();
       }
-      // v1.12.0 (C5): reportes Plus por atender (best-effort).
-      int? reportesPendientes;
-      try {
-        reportesPendientes =
-            (await PlusReportesService().pendientes()).length;
-      } catch (_) {}
+      // 1.29 (FB-05 · D-B1-05): el conteo de reportes Plus ya
+      // NO se espera aquí: es una RPC con su propio timeout y
+      // la lista — que ya está disponible — pintaba tras ella
+      // (hasta 12 s de «cargando» con todo en local). Se pide
+      // en segundo plano tras pintar (ver
+      // _actualizarConteoReportes); la insignia aparece sola.
       if (!mounted || gen != _cargaGen) return;
       // G1: la caché guarda SOLO el par {resumen, lista «Todos»}.
       if (_filtro == 'todos') {
@@ -226,10 +238,12 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           for (final c in clientes) '${c['id']}': c,
         };
         _fechasEliminados = fechas;
-        _reportesPlusPendientes = reportesPendientes;
         _cargando = false;
       });
       _cargarVisitasLista(lista);
+      // 1.29 (FB-05): con la lista YA pintada, el conteo de
+      // reportes Plus se pide en segundo plano.
+      unawaited(_actualizarConteoReportes(gen));
     } catch (e) {
       if (!mounted || gen != _cargaGen) return;
       // 1.28 (M4-A11/R2M4-H6): si la pantalla YA enseña datos
@@ -270,6 +284,27 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         _cargando = false;
       });
     }
+  }
+
+  /// 1.29 (FB-05 · D-B1-05): el conteo de reportes Plus por
+  /// atender, en SEGUNDO PLANO tras pintar la lista (antes
+  /// _cargar lo esperaba y la pantalla quedaba en «cargando»
+  /// con la lista ya disponible). Best-effort con la semántica
+  /// de siempre: si la lectura falla, el conteo queda en null
+  /// y la insignia no sale. La guarda de generación descarta
+  /// el aterrizaje de una carga ya superada.
+  Future<void> _actualizarConteoReportes(int gen) async {
+    int? n;
+    try {
+      final fuente = conteoReportesPlusParaTest;
+      n = fuente != null
+          ? await fuente()
+          : (await PlusReportesService().pendientes()).length;
+    } catch (_) {
+      n = null;
+    }
+    if (!mounted || gen != _cargaGen) return;
+    setState(() => _reportesPlusPendientes = n);
   }
 
   String? _badgeLocal(ConversionInvitado? c) {
