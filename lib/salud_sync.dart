@@ -145,11 +145,15 @@ String _notaTabla({
 /// que no se pueda leer sale en gris con su nota.
 Future<SaludSyncDatos> cargarSaludSync() async {
   final db = LocalDb.instance;
-  // La foto única (M1-B5): el server_seq contra el que se
-  // mide cada watermark sale de ELLA, no de una lectura
-  // suelta por pantalla.
-  final foto = await SyncEngine.instance.fotoEstado();
-  final serverSeq = foto.serverSeq;
+  // Corrección A4-D3 (auditorías 1.28): el server_seq se
+  // lee de la meta LOCAL. Es exactamente el valor que la
+  // foto del motor calcula (su serverSeq también sale de
+  // esta meta); lo único que esperar a fotoEstado()
+  // añadía era el lookup DNS de enLinea (hasta 5 s con la
+  // red en negro), un dato que esta pantalla ni muestra.
+  // La Salud pinta ahora sin esperar a la red.
+  final serverSeq =
+      int.tryParse(await db.getMeta('server_seq') ?? '0') ?? 0;
 
   final tablas = <EstadoTablaSalud>[];
   var divergentes = 0;

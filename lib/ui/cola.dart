@@ -288,6 +288,12 @@ class _ColaScreenState extends State<ColaScreen> {
   final Set<String> _opsReintentando = {};
   final Set<int> _fotosReintentando = {};
   bool _reintentandoTodasFotos = false;
+  // Corrección A4-D2: ¿hay internet AHORA? (de la foto de
+  // estado del motor, refrescada sin bloquear la carga).
+  // Lo usa la explicación por op para no decir «No hay
+  // conexión a internet» cuando quien no responde es el
+  // servidor. null = aún no se sabe (traducción clásica).
+  bool? _hayInternet;
   List<Map<String, dynamic>> _ops = [];
   // v1.2.5 (D15): ops bloqueadas que necesitan revisión manual.
   List<Map<String, dynamic>> _bloqueadas = [];
@@ -403,6 +409,18 @@ class _ColaScreenState extends State<ColaScreen> {
   // un snack encadenado podían adelantarse a los datos.
   Completer<void>? _recargaCompleter;
 
+  /// Corrección A4-D2: refresca [_hayInternet] desde la
+  /// foto del motor (que reutiliza la suya si es fresca).
+  /// Nunca lanza ni bloquea: es un dato para el texto.
+  Future<void> _refrescarInternet() async {
+    try {
+      final f = await SyncEngine.instance.fotoEstado();
+      if (mounted && f.enLinea != _hayInternet) {
+        setState(() => _hayInternet = f.enLinea);
+      }
+    } catch (_) {}
+  }
+
   Future<void> _cargar() async {
     // D-03 (1.21): si ya hay una carga en curso, se marca y se
     // repite al terminar (no se solapan ni se pierde la última).
@@ -441,6 +459,11 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   Future<void> _cargarInterno() async {
+    // Corrección A4-D2: la foto de internet se refresca en
+    // segundo plano (nunca se espera antes de pintar: la
+    // cola es 100 % local); cuando aterriza, las filas se
+    // repintan con la explicación corregida.
+    unawaited(_refrescarInternet());
     // Ronda 17 M6-H1: actor de la sesión (fail-closed).
     try {
       _miActor = AuthService().displayName;
@@ -1654,7 +1677,8 @@ class _ColaScreenState extends State<ColaScreen> {
     final expl = explicacionOp(
         estado: estado,
         error: error,
-        codigoError: '${op['codigo_error'] ?? ''}');
+        codigoError: '${op['codigo_error'] ?? ''}',
+        hayInternet: _hayInternet);
     final mostrarExpl = error.isNotEmpty ||
         estado == 'rechazada' ||
         estado == 'necesita_revision';
@@ -2050,7 +2074,8 @@ class _ColaScreenState extends State<ColaScreen> {
                           final e = explicacionOp(
                               estado: '${b['estado'] ?? 'rechazada'}',
                               error: '${b['error'] ?? ''}',
-                              codigoError: '${b['codigo_error'] ?? ''}');
+                              codigoError: '${b['codigo_error'] ?? ''}',
+                              hayInternet: _hayInternet);
                           return Text(
                               e.accion.isEmpty
                                   ? e.motivo
@@ -2161,7 +2186,8 @@ class _ColaScreenState extends State<ColaScreen> {
                                   estado: estado,
                                   error: '${op['error']}',
                                   codigoError:
-                                      '${op['codigo_error'] ?? ''}');
+                                      '${op['codigo_error'] ?? ''}',
+                                  hayInternet: _hayInternet);
                               return Padding(
                                 padding:
                                     const EdgeInsets.only(

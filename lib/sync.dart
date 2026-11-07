@@ -106,6 +106,62 @@ Map<String, int> esperadosDesdeSeq(
   };
 }
 
+/// Corrección A4-D1 (auditorías 1.28): presupuesto y
+/// cortacircuitos de la pasada del manifiesto. Antes la
+/// pasada recorría las ~40 tablas en serie y CADA bucket
+/// podía quemar el timeout genérico de 60 s: con la
+/// conexión «en negro» (hay ruta pero los paquetes se
+/// pierden: datos congestionados o el túnel VPN a medio
+/// morir) la comprobación duraba hasta ~40 min, dentro
+/// del lock del ciclo en la pasada diaria y tras un
+/// spinner sin salida en Salud/Reparar.
+///
+/// La pasada se rige ahora por dos topes, lo primero
+/// que salte:
+/// - [presupuesto]: tiempo total de la pasada (reloj
+///   monótono, no la hora del teléfono).
+/// - [maxFallosTransporte]: fallos de transporte
+///   SEGUIDOS (sin ninguna respuesta HTTP): la red está
+///   caída y seguir quemando timeouts tabla a tabla no
+///   aporta nada.
+/// Al agotarse, el resto de tablas queda «sin verificar»
+/// SIN tocar la red (ver verificarManifiesto). Clase
+/// pura con el reloj inyectable para los tests.
+class CorteManifiesto {
+  CorteManifiesto({
+    this.presupuesto = const Duration(seconds: 150),
+    this.maxFallosTransporte = 3,
+    Duration Function()? reloj,
+  }) : _reloj = reloj ?? _relojMonotono();
+
+  final Duration presupuesto;
+  final int maxFallosTransporte;
+  final Duration Function() _reloj;
+  int _fallosSeguidos = 0;
+
+  static Duration Function() _relojMonotono() {
+    final sw = Stopwatch()..start();
+    return () => sw.elapsed;
+  }
+
+  /// Registra el desenlace de transporte de una tabla:
+  /// true si el servidor RESPONDIÓ (cualquier estado
+  /// HTTP: la red vive y la racha se reinicia); false si
+  /// la llamada murió sin respuesta (excepción/timeout).
+  void registrarTransporte(bool huboRespuesta) {
+    if (huboRespuesta) {
+      _fallosSeguidos = 0;
+    } else {
+      _fallosSeguidos++;
+    }
+  }
+
+  /// true cuando la pasada debe dejar de tocar la red:
+  /// presupuesto agotado o racha de fallos alcanzada.
+  bool get agotado =>
+      _reloj() >= presupuesto || _fallosSeguidos >= maxFallosTransporte;
+}
+
 class SyncStatus {
   final SyncPhase phase;
   final int pending;
@@ -5978,12 +6034,28 @@ class SyncEngine {
     // semanal; que UNA tabla vaya completa por no tener seq
     // previa o deberla no adelanta el reloj semanal.
     final corridaCompleta = forzarCompleta || completaVencida;
+    // Corrección A4-D1: presupuesto + cortacircuitos de
+    // la pasada (ver CorteManifiesto). La pasada diaria
+    // corre dentro del lock del ciclo: este tope es
+    // también el máximo que un sync forzado del usuario
+    // puede quedar esperando por su culpa.
+    final corte = CorteManifiesto();
     for (final entry in tablas.entries) {
       if (!esAdmin &&
           LocalDb.tablasProhibidasEntrenador.contains(entry.value)) {
         continue;
       }
       final local = entry.value;
+      if (corte.agotado) {
+        // Sin red ni tiempo: la tabla queda «sin
+        // verificar» SIN quemar un timeout entero, y lo
+        // mismo harán las siguientes.
+        sinVerificar.add(local);
+        try {
+          await _db.setMeta('manifiesto_tabla_$local', 'sin_verificar');
+        } catch (_) {}
+        continue;
+      }
       final seqPreviaTxt = await _db.getMeta('manifiesto_seq_$local');
       final seqPrevia =
           seqPreviaTxt == null ? null : int.tryParse(seqPreviaTxt);
@@ -5995,6 +6067,7 @@ class SyncEngine {
           completaDebida: debida);
       final r = await _verificarTablaManifiesto(entry.key, local, nBuckets,
           desdeSeq: modo == ModoChequeoManifiesto.rapido ? seqPrevia : null);
+      corte.registrarTransporte(r.huboRespuesta);
       if (!r.concluyente) {
         sinVerificar.add(local);
         try {
@@ -6050,9 +6123,10 @@ class SyncEngine {
   /// comparan las filas del servidor con sseq mayor que
   /// [desdeSeq] (la última comprobación concluyente de la
   /// tabla); null = pasada completa.
-  Future<({bool concluyente, bool divergente})> _verificarTablaManifiesto(
-      String supTabla, String localTabla, int nBuckets,
-      {bool reintentoSaturacion = false, int? desdeSeq}) async {
+  Future<({bool concluyente, bool divergente, bool huboRespuesta})>
+      _verificarTablaManifiesto(
+          String supTabla, String localTabla, int nBuckets,
+          {bool reintentoSaturacion = false, int? desdeSeq}) async {
     var divergente = false;
     for (var b = 0; b < nBuckets; b++) {
       try {
@@ -6063,21 +6137,38 @@ class SyncEngine {
                   'p_tabla': supTabla,
                   'p_bucket': b,
                   'p_n_buckets': nBuckets,
-                }));
+                }),
+                // Corrección A4-D1: timeout PROPIO de esta
+                // ruta (12 s, el de las RPC de pantalla) en
+                // vez del genérico de 60 s: es una lectura
+                // de hashes en serie, no una mutación.
+                timeout: const Duration(seconds: 12));
         if (r.statusCode == 404 || r.statusCode == 400) {
           // La RPC no conoce esta tabla (o no existe): tabla
           // sin verificar; el resto del manifiesto sigue.
-          return (concluyente: false, divergente: divergente);
+          return (
+            concluyente: false,
+            divergente: divergente,
+            huboRespuesta: true
+          );
         }
         if (r.statusCode != 200) {
           // SB-06 (auditoría sync 1.21): un 401/403/429/5xx en
           // un bucket NO es «sin divergencia»: es verificación
           // NO concluyente (como el error de red).
-          return (concluyente: false, divergente: divergente);
+          return (
+            concluyente: false,
+            divergente: divergente,
+            huboRespuesta: true
+          );
         }
         final decoded = jsonDecode(r.body);
         if (decoded is! List) {
-          return (concluyente: false, divergente: divergente);
+          return (
+            concluyente: false,
+            divergente: divergente,
+            huboRespuesta: true
+          );
         }
         final rows = decoded;
         // v1.2.5-rev2 (ChatGPT): protocolo de saturación. La RPC devuelve
@@ -6137,10 +6228,18 @@ class SyncEngine {
       } catch (_) {
         // Error de red: tabla NO concluyente (antes ignoraba
         // el bucket y se sellaba el día como si coincidiera).
-        return (concluyente: false, divergente: divergente);
+        // Corrección A4-D1: es el ÚNICO desenlace que cuenta
+        // como fallo de transporte para el cortacircuitos
+        // (huboRespuesta: false): la llamada murió sin que
+        // el servidor respondiera nada.
+        return (
+          concluyente: false,
+          divergente: divergente,
+          huboRespuesta: false
+        );
       }
     }
-    return (concluyente: true, divergente: divergente);
+    return (concluyente: true, divergente: divergente, huboRespuesta: true);
   }
 
   /// v1.2.5 (D18): verifica que el reloj del dispositivo no esté muy

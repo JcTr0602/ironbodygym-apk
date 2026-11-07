@@ -392,6 +392,7 @@ String resumenErrorDiagnostico(String crudo) {
   required String estado,
   String error = '',
   String codigoError = '',
+  bool? hayInternet,
 }) {
   final err = error.trim();
   final primeraLinea = err.split('\n').first.trim();
@@ -417,6 +418,22 @@ String resumenErrorDiagnostico(String crudo) {
         );
       }
       final t = traducirErrorSync(err);
+      // Corrección A4-D2 (auditorías 1.28): el contrafuerte
+      // que el ciclo SÍ aplica desde la v1.2.5
+      // (_describeErrorVisible en sync.dart): si la op
+      // quedó clasificada «sin conexión» pero el teléfono
+      // SÍ tiene internet, lo que no responde es el
+      // SERVIDOR — decir «No hay conexión a internet» es
+      // falso y es el síntoma que Jc reportó en campo el
+      // 2026-11-05 («operaciones pendientes dicen que no
+      // hay internet» con WhatsApp funcionando). Sin dato
+      // de internet (null), se conserva la traducción.
+      if (t.codigo == 'sin_conexion' && hayInternet == true) {
+        return (
+          motivo: 'No se pudo contactar el servidor.',
+          accion: 'Tus cambios están guardados en el teléfono.',
+        );
+      }
       return (motivo: t.mensaje, accion: t.accionTexto);
     case 'rechazada':
     case 'necesita_revision':

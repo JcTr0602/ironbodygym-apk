@@ -189,6 +189,16 @@ String mensajeErrorAnuncio(String? codigo) {
       return 'La fecha «hasta» debe ser posterior a «desde».';
     case 'NO_EXISTE':
       return 'Ese anuncio ya no existe en el servidor.';
+    case 'SIN_CONFIRMAR':
+      // Corrección A4-D4: la respuesta se perdió y ni
+      // recargando se pudo comprobar si el guardado
+      // aterrizó: no se afirma ni que se guardó ni que
+      // no — se pide mirar la lista antes de repetirlo
+      // (repetirlo a ciegas era el duplicado).
+      return 'La respuesta del servidor se perdió y no '
+          'se pudo comprobar si se guardó. Revisa la '
+          'lista: si el anuncio ya está, no lo crees '
+          'otra vez.';
     case null:
     case '':
       return 'El servidor no aplicó el cambio.';

@@ -392,6 +392,64 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     } catch (_) {}
   }
 
+  /// Corrección A4-D4 (auditorías 1.28): conceder con
+  /// comprobación tras un fallo de transporte. Un
+  /// timeout de la RPC puede esconder un vale YA creado
+  /// en el servidor (la respuesta se perdió), y el
+  /// diálogo abierto invitaba a reintentarlo y
+  /// duplicarlo en la Bandeja. Ante la excepción se
+  /// recarga el detalle del cliente:
+  /// - apareció un vale NUEVO con el mismo logro y días
+  ///   → se devuelve ok (el flujo sigue como éxito);
+  /// - el detalle cargó y no hay vale nuevo → se
+  ///   relanza la excepción (el «sin conexión» del
+  ///   diálogo ya es honesto);
+  /// - ni el detalle pudo cargar → se devuelve un
+  ///   mensaje SIN_CONFIRMAR: el diálogo dice que no se
+  ///   sabe y que se revise la Bandeja antes de repetir.
+  Future<Map<String, dynamic>> _concederVerificado(int clienteId,
+      String logroId, int premioDias, String nota) async {
+    try {
+      return await (widget.concederVale ?? _concederReal)(
+          clienteId, logroId, premioDias, nota);
+    } catch (_) {
+      final previos = {
+        for (final v in _detalle?.vales ?? const <ValeHistorial>[])
+          v.id,
+      };
+      final DetallePremiosCliente detalle;
+      try {
+        final json =
+            await (widget.cargarDetalle ?? _detalleReal)(clienteId);
+        if (json['ok'] != true) {
+          return {
+            'ok': false,
+            'mensaje': 'La respuesta del servidor se '
+                'perdió y no se pudo comprobar si el vale '
+                'se creó. Revisa la Bandeja: si ya está, '
+                'no lo concedas otra vez.',
+          };
+        }
+        detalle = parseDetallePremiosCliente(json);
+      } catch (_) {
+        return {
+          'ok': false,
+          'mensaje': 'La respuesta del servidor se '
+              'perdió y no se pudo comprobar si el vale '
+              'se creó. Revisa la Bandeja: si ya está, '
+              'no lo concedas otra vez.',
+        };
+      }
+      final nuevo = detalle.vales.any((v) =>
+          !previos.contains(v.id) &&
+          v.logroId == logroId &&
+          v.premioDias == premioDias &&
+          v.estado == 'reclamado');
+      if (nuevo) return {'ok': true};
+      rethrow;
+    }
+  }
+
   Future<void> _conceder() async {
     // H-01 (Argón 1.27): check-and-set síncrono ANTES
     // del primer await (patrón _resolviendo de la
@@ -419,8 +477,7 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           nombreCliente: _seleccionadoNombre,
           catalogo: catalogo,
           conceder: (logroId, dias, nota) =>
-              (widget.concederVale ?? _concederReal)(
-                  id, logroId, dias, nota),
+              _concederVerificado(id, logroId, dias, nota),
         ),
       );
       if (hecho == true && mounted) {

@@ -625,13 +625,21 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       final db = LocalDb.instance;
       final lastOk = await db.getMeta('last_sync_ok');
       final lastErr = await db.getMeta('last_sync_error');
-      // 1.28 (M1-B5): el watermark y el server_seq salen de
-      // la FOTO única del motor (fotoEstado), no de dos
-      // lecturas sueltas de esta pantalla: todas las
-      // superficies leen el mismo cálculo.
-      final foto = await SyncEngine.instance.fotoEstado();
-      final wm = foto.watermarkMinimo;
-      final ss = foto.serverSeq;
+      // Corrección A4-D3 (auditorías 1.28): el watermark y
+      // el server_seq salen de las metas LOCALES — los
+      // mismos valores que la foto del motor calcula con
+      // ellas (getWatermarkMinimo + meta server_seq). La
+      // foto además pagaba un lookup DNS de hasta 5 s por
+      // un enLinea que esta pantalla no muestra: el
+      // Diagnóstico ya no espera a la red para pintar.
+      var esAdminDiag = false;
+      try {
+        esAdminDiag = AuthService().isAdmin;
+      } catch (_) {}
+      final wm = await db.getWatermarkMinimo(
+          excluir: {'borrados'}, esAdmin: esAdminDiag);
+      final ss =
+          int.tryParse(await db.getMeta('server_seq') ?? '0') ?? 0;
       final datos = <String, String>{
         'Versión': '${AppConfig.appVersion} (${AuthService().username})',
         'Última sync correcta': _fmt(lastOk),

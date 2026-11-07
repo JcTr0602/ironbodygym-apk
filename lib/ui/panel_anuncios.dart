@@ -163,6 +163,67 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
     }
   }
 
+  /// Corrección A4-D4 (auditorías 1.28): guardar con
+  /// comprobación tras un fallo de transporte. Una
+  /// excepción de la RPC puede ser un timeout con la
+  /// escritura YA aplicada en el servidor (la respuesta
+  /// se perdió en la red): afirmar «no se guardó»
+  /// empujaba al dueño a crear el anuncio OTRA vez y
+  /// quedaban dos publicados. Ante la excepción se
+  /// recarga la lista y se comprueba:
+  /// - el guardado SÍ aterrizó → se devuelve ok (el
+  ///   flujo sigue como un éxito normal);
+  /// - la lista cargó y el guardado NO está → se
+  ///   relanza la excepción (el «no se guardó» del
+  ///   llamador ya es cierto);
+  /// - ni la comprobación pudo cargar → se devuelve el
+  ///   código SIN_CONFIRMAR: el aviso dice la verdad
+  ///   (no se sabe; revisa la lista antes de repetir).
+  Future<Map<String, dynamic>> _guardarVerificado(
+      DatosAnuncio d) async {
+    try {
+      return await (widget.guardarAnuncio ?? _guardarReal)(d);
+    } catch (_) {
+      final List<AnuncioAdmin> lista;
+      try {
+        final json =
+            await (widget.cargarAnuncios ?? _cargarReal)();
+        if (json['ok'] != true) {
+          return {'ok': false, 'error': 'SIN_CONFIRMAR'};
+        }
+        lista = parseAnunciosAdmin(json);
+      } catch (_) {
+        return {'ok': false, 'error': 'SIN_CONFIRMAR'};
+      }
+      if (_guardadoReflejado(lista, d)) return {'ok': true};
+      rethrow;
+    }
+  }
+
+  /// ¿La lista recién cargada ya refleja el guardado
+  /// [d]? En una edición: la fila con su id trae el
+  /// cuerpo y el estado nuevos. En una creación: hay un
+  /// anuncio con el mismo cuerpo/título/audiencia cuyo
+  /// id NO estaba en la lista que la pantalla tenía
+  /// (un duplicado idéntico preexistente no cuenta como
+  /// prueba: la prueba es que apareció uno nuevo).
+  bool _guardadoReflejado(List<AnuncioAdmin> lista, DatosAnuncio d) {
+    if (d.id != null) {
+      for (final a in lista) {
+        if (a.id == d.id) {
+          return a.cuerpoMd == d.cuerpoMd && a.activo == d.activo;
+        }
+      }
+      return false;
+    }
+    final previos = {for (final a in _anuncios) a.id};
+    return lista.any((a) =>
+        !previos.contains(a.id) &&
+        a.cuerpoMd == d.cuerpoMd &&
+        a.titulo == d.titulo &&
+        a.audiencia == d.audiencia);
+  }
+
   Future<void> _editar(AnuncioAdmin? inicial) async {
     if (_editando) return;
     _editando = true;
@@ -172,7 +233,7 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
         builder: (_) => _DialogoEditorAnuncio(
           inicial: inicial,
           buscarClientes: widget.buscarClientes ?? _buscarReal,
-          guardar: widget.guardarAnuncio ?? _guardarReal,
+          guardar: _guardarVerificado,
         ),
       );
       if (hecho == true && mounted) {
@@ -192,8 +253,8 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
     if (_resolviendo) return;
     setState(() => _resolviendo = true);
     try {
-      final res = await (widget.guardarAnuncio ?? _guardarReal)(
-          _datosDe(a, activo: !a.activo));
+      final res =
+          await _guardarVerificado(_datosDe(a, activo: !a.activo));
       if (!mounted) return;
       if (res['ok'] == true) {
         setState(() {
