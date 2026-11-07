@@ -372,8 +372,16 @@ class _InscribirScreenState extends State<InscribirScreen> {
       _fijarError('nombre', 'Escribe el nombre');
       return;
     }
-    final tel = _telefono.text.trim();
-    if (tel.isNotEmpty && !validarTelefono(tel)) {
+    // 1.29 (FB-07): lo tecleado o PEGADO se sanitiza a los 8
+    // dígitos limpios ANTES de validar y de cualquier payload
+    // («+53 5819 1577» y «5819 1577» acaban guardando
+    // 58191577; el 53 nunca se almacena: es solo para enlaces
+    // wa.me y la UI). Lo que no sanitiza a un móvil válido se
+    // rechaza con el aviso de siempre.
+    final telCrudo = _telefono.text.trim();
+    final tel =
+        telCrudo.isEmpty ? '' : (sanitizarTelefono(telCrudo) ?? '');
+    if (telCrudo.isNotEmpty && tel.isEmpty) {
       _fijarError(
           'telefono', 'Teléfono inválido: 8 dígitos empezando con 5 o 6');
       return;
@@ -695,8 +703,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
   /// defecto — en Casa cuenta como completa sin cobro.
   Widget _barraPasos() {
     final tel = _telefono.text.trim();
+    // 1.29 (FB-07): el paso «Datos» valida lo mismo que el
+    // guardado: vacío o sanitizable a 8 dígitos.
     final datosOk = _nombre.text.trim().isNotEmpty &&
-        (tel.isEmpty || validarTelefono(tel));
+        (tel.isEmpty || sanitizarTelefono(tel) != null);
     final pasos = <({String etiqueta, bool ok, GlobalKey clave})>[
       (etiqueta: 'Datos', ok: datosOk, clave: _claveDatos),
       (etiqueta: 'Membresía', ok: datosOk, clave: _claveMembresia),
@@ -929,8 +939,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           errorText: _errTelefono,
                           onChanged: (v) {
                             final t = v.trim();
+                            // 1.29 (FB-07): el aviso en vivo acepta
+                            // lo que el guardado sanitiza («+53 …»
+                            // pegado no se marca inválido: se
+                            // guardará como 8 dígitos limpios).
                             setState(() => _errTelefono =
-                                (t.isEmpty || validarTelefono(t))
+                                (t.isEmpty || sanitizarTelefono(t) != null)
                                     ? null
                                     : 'Teléfono inválido: 8 dígitos empezando con 5 o 6');
                           },
@@ -1321,7 +1335,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.camera_alt_rounded,
+                          // 1.29 (D-15): icono canónico de foto
+                          // de la tabla D-07 (photo_camera_rounded).
+                          Icon(Icons.photo_camera_rounded,
                               color: AppColores.textoSecundario(context)),
                           SizedBox(
                               width: AppEspacio.sm),

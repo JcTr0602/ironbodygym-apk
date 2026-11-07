@@ -204,6 +204,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
       r.sort(
           compararPorNombre);
     }
+    // 1.29 (FB-02 · D-B1-01): la BASE de los conteos de
+    // cabecera se captura AQUÍ — tras la fusión de notas y
+    // ANTES de todo filtro. Los filtros reasignan `r` a
+    // listas nuevas, así que la referencia queda intacta.
+    final baseConteos = r;
     // Filtros de estado de mensualidad.
     // v1.3.1: sin fecha = vencido (no "al día").
     if (_filtro != 'todos' && _filtro != 'sinfoto') {
@@ -310,41 +315,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // tras contar y la cabecera decía N enseñando N+1.
     // Bloque 1: contadores por estado (sobre la búsqueda,
     // ANTES del filtro de estado: siempre visibles).
-    final conteos = <String, int>{
-      'todos': r.length,
-      'aldia': 0,
-      'porvencer': 0,
-      'vencidos': 0,
-      'sinfoto': 0,
-    };
-    for (final c in r) {
-      // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
-      // de pago no alimenta los contadores (revelaría si pagó).
-      if (!esVistaProtegida(c)) {
-        // FIN-28 de Argón (1.20): una Cuenta a la Casa nunca
-        // vence — cuenta como al día (como clientesAlDia()).
-        // Sin continue: el conteo de «sin foto» de abajo también
-        // debe alimentarse de las cuentas Casa.
-        if (esCuentaCasa(c)) {
-          conteos['aldia'] = conteos['aldia']! + 1;
-        } else {
-          final dias = diasRestantes(c['pagado_hasta'] as String?);
-          if (dias != null && dias > 7) {
-            conteos['aldia'] = conteos['aldia']! + 1;
-          } else if (dias != null && dias >= 0 && dias <= 7) {
-            conteos['porvencer'] = conteos['porvencer']! + 1;
-          } else if (dias == null || dias < 0) {
-            conteos['vencidos'] = conteos['vencidos']! + 1;
-          }
-        }
-      }
-      final ref = c['foto_storage'] as String?;
-      // Ronda 17 M7-H2: el contador sinfoto tampoco se alimenta
-      // con protegidos (igual que aldia/porvencer/vencidos).
-      if ((ref == null || ref.isEmpty) && !esVistaProtegida(c)) {
-        conteos['sinfoto'] = conteos['sinfoto']! + 1;
-      }
-    }
+    // 1.29 (FB-02 · D-B1-01): esa promesa se cumple por fin
+    // del todo — el cálculo (puro, conteosDeBuscar) corre
+    // sobre la BASE capturada antes de los filtros cuando
+    // hay alguno activo; sin filtros, la lista final (con
+    // el rescate ya aplicado) ES la base y se cuenta ella,
+    // conservando la corrección de la 1.28.
+    final conteos =
+        conteosDeBuscar(sinFiltros ? r : baseConteos);
     // 1.25 T116 (F1-55): ids ya avisados hoy según el
     // registro del día (SQLite de la bandeja).
     final tocados =
@@ -867,9 +845,12 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                     esVistaProtegida(c);
                                 final diasFila = diasRestantes(
                                     c['pagado_hasta'] as String?);
-                                final telWaFila = normalizarTelefonoWaMe(
-                                        '${c['telefono'] ?? ''}')
-                                    .isNotEmpty;
+                                // 1.29 (FB-01): teléfono EFECTIVO
+                                // (movil primero) — el de `telefono`
+                                // a pelo dejaba sin WhatsApp al
+                                // migrado y «con teléfono» al carnet.
+                                final telWaFila =
+                                    telefonoEfectivoWa(c).isNotEmpty;
                                 // Bloque 1 (A1): cada fila es una
                                 // tarjeta; el tap abre la ficha.
                                 // v1.3.1: ValueKey por id.
@@ -1159,7 +1140,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
   /// cliente (o el chat pelado si no hace falta aviso).
   Future<void> _abrirWhatsapp(Map<String, dynamic> c,
       {bool conMensaje = true}) async {
-    final wa = normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+    // 1.29 (FB-01): teléfono efectivo (movil primero).
+    final wa = telefonoEfectivoWa(c);
     if (wa.isEmpty) {
       if (mounted) {
         mostrarSnack(
@@ -1186,8 +1168,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
   /// entrada a la selección múltiple.
   Future<void> _menuRapido(Map<String, dynamic> c) async {
     if (esVistaProtegida(c)) return;
-    final telOk =
-        normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty;
+    // 1.29 (FB-01): teléfono efectivo (movil primero).
+    final telOk = telefonoEfectivoWa(c).isNotEmpty;
     final accion = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -1266,11 +1248,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
             !esCuentaCasa(c) && (d == null || d <= 7);
         await _abrirWhatsapp(c, conMensaje: urgente);
       case 'llamar':
-        final digitos =
-            '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
-        if (digitos.length >= 8) {
-          await launchUrl(
-              Uri.parse('tel:+53${digitos.substring(digitos.length - 8)}'));
+        // 1.29 (FB-01): se llama al teléfono EFECTIVO (movil
+        // primero, 8 dígitos limpios): antes se tomaban los
+        // últimos 8 dígitos de `telefono` crudo — en un migrado
+        // eso era la cola de su carnet, no su número.
+        final telLocal = telefonoEfectivoLocal(c);
+        if (telLocal != '—') {
+          await launchUrl(Uri.parse('tel:+53$telLocal'));
         }
       case 'seleccionar':
         setState(() => _modoSeleccion = true);
@@ -1334,8 +1318,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
         nProtegidos++;
       } else if (esCuentaCasa(c)) {
         nCasa++;
-      } else if (normalizarTelefonoWaMe('${c['telefono'] ?? ''}')
-          .isEmpty) {
+      } else if (telefonoEfectivoWa(c).isEmpty) {
+        // 1.29 (FB-01): sin teléfono EFECTIVO (movil primero):
+        // el migrado con número en `movil` SÍ entra en la cadena.
         nSinTel++;
       } else if (tocados.contains(
           '${_tipoAvisoPorDias(diasRestantes(c['pagado_hasta'] as String?))}_$cid')) {
@@ -1486,8 +1471,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
       esCasa: esCuentaCasa(c),
       protegido: protegido,
       seleccion: _modoSeleccion,
-      tieneTelefonoWa:
-          normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty,
+      // 1.29 (FB-01): teléfono efectivo (movil primero).
+      tieneTelefonoWa: telefonoEfectivoWa(c).isNotEmpty,
     );
     return switch (cual) {
       'cobrar' => (
@@ -1622,6 +1607,15 @@ class FilaCliente extends StatelessWidget {
   final ({String texto, IconData icono, VoidCallback alTocar})?
       accionPrincipal;
 
+  /// 1.29 (D-13): el importe de la fila, en cifras TABULARES
+  /// alineadas a la derecha (la columna de importes no baila
+  /// entre filas). Es el hueco que le faltaba a la fila única
+  /// para servir también en «por cobrar», que componía su
+  /// propia fila con el importe a su manera. [importeEtiqueta]
+  /// es la palabra bajo el importe («tarifa mensual»).
+  final String? importeTexto;
+  final String? importeEtiqueta;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
@@ -1635,7 +1629,9 @@ class FilaCliente extends StatelessWidget {
       this.avisoChip,
       this.diasAtraso,
       this.accionPrincipal,
-      this.accionWhatsapp});
+      this.accionWhatsapp,
+      this.importeTexto,
+      this.importeEtiqueta});
 
   @override
   Widget build(BuildContext context) => _FilaCliente(
@@ -1651,7 +1647,9 @@ class FilaCliente extends StatelessWidget {
       avisoChip: avisoChip,
       diasAtraso: diasAtraso,
       accionPrincipal: accionPrincipal,
-      accionWhatsapp: accionWhatsapp);
+      accionWhatsapp: accionWhatsapp,
+      importeTexto: importeTexto,
+      importeEtiqueta: importeEtiqueta);
 }
 
 class _FilaCliente extends StatefulWidget {
@@ -1668,6 +1666,8 @@ class _FilaCliente extends StatefulWidget {
   final ({String texto, IconData icono, VoidCallback alTocar})?
       accionPrincipal;
   final VoidCallback? accionWhatsapp;
+  final String? importeTexto;
+  final String? importeEtiqueta;
   const _FilaCliente(
       {super.key,
       required this.cliente,
@@ -1681,7 +1681,9 @@ class _FilaCliente extends StatefulWidget {
       this.avisoChip,
       this.diasAtraso,
       this.accionPrincipal,
-      this.accionWhatsapp});
+      this.accionWhatsapp,
+      this.importeTexto,
+      this.importeEtiqueta});
 
   @override
   State<_FilaCliente> createState() => _FilaClienteState();
@@ -1834,12 +1836,16 @@ class _FilaClienteState extends State<_FilaCliente> {
     final textoDiasCasa = 'Cuenta a la Casa · sin vencimiento';
     // 1.25 T11: línea de contacto para desambiguar homónimos
     // (teléfono si hay; si no, la cola del carnet).
+    // 1.29 (FB-01 · D-B1-02): el teléfono que se pinta es el
+    // EFECTIVO (movil primero, 8 dígitos limpios): antes se
+    // tomaban los dígitos crudos de `telefono` y, en un
+    // migrado, la línea «📞» enseñaba la cola de su CARNET
+    // como si fuera su número.
     String? lineaContacto;
     if (widget.desambiguar) {
-      final tel =
-          '${c['telefono'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
-      if (tel.length >= 8) {
-        lineaContacto = '📞 ${tel.substring(tel.length - 8)}';
+      final telLocal = telefonoEfectivoLocal(c);
+      if (telLocal != '—') {
+        lineaContacto = '📞 $telLocal';
       } else {
         final carnet =
             '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1981,6 +1987,34 @@ class _FilaClienteState extends State<_FilaCliente> {
                 ],
               ),
             ),
+            // 1.29 (D-13): la columna de importe de la fila
+            // única — cifras tabulares alineadas a la derecha
+            // (no bailan entre filas) y su palabra debajo
+            // cuando el llamador la da («tarifa mensual»).
+            if (widget.importeTexto != null) ...[
+              const SizedBox(width: AppEspacio.sm),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    widget.importeTexto!,
+                    style: AppTexto.subtitulo.copyWith(
+                      fontFeatures: const [
+                        FontFeature.tabularFigures(),
+                      ],
+                    ),
+                  ),
+                  if (widget.importeEtiqueta != null)
+                    Text(
+                      widget.importeEtiqueta!,
+                      style: AppTexto.minuscula.copyWith(
+                          color:
+                              AppColores.textoSecundario(context)),
+                    ),
+                ],
+              ),
+            ],
             // Acción rápida, botón de WhatsApp (1.24.2) o chevron.
             widget.trailing ??
                 (widget.accionWhatsapp != null
@@ -2099,4 +2133,56 @@ String? accionPrincipalBuscar({
   if (dias == null || dias < 0) return 'cobrar';
   if (dias <= 7) return tieneTelefonoWa ? 'avisar' : null;
   return null;
+}
+
+/// 1.29 (Oleada 3, FB-02 · D-B1-01): los conteos de la
+/// cabecera de Buscar, como función PURA sobre la BASE de la
+/// búsqueda (el resultado tras la fusión de notas y ANTES de
+/// los filtros de estado, edad y sin-foto). Antes se contaba
+/// sobre la lista YA filtrada: con el chip «Vencidos» puesto,
+/// la cabecera enseñaba como total el propio subconjunto
+/// filtrado y los demás chips salían a cero o al resto
+/// filtrado — los conteos se movían al tocar un chip, cuando
+/// su promesa («sobre la búsqueda, antes del filtro») es que
+/// sean estables. Reglas vivas que se conservan: el protegido
+/// no alimenta ningún contador (su estado no se revela); la
+/// Cuenta a la Casa cuenta como al día y también alimenta
+/// «sin foto»; sin fecha = vencido.
+Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base) {
+  final conteos = <String, int>{
+    'todos': base.length,
+    'aldia': 0,
+    'porvencer': 0,
+    'vencidos': 0,
+    'sinfoto': 0,
+  };
+  for (final c in base) {
+    // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
+    // de pago no alimenta los contadores (revelaría si pagó).
+    if (!esVistaProtegida(c)) {
+      // FIN-28 de Argón (1.20): una Cuenta a la Casa nunca
+      // vence — cuenta como al día (como clientesAlDia()).
+      // Sin continue: el conteo de «sin foto» de abajo también
+      // debe alimentarse de las cuentas Casa.
+      if (esCuentaCasa(c)) {
+        conteos['aldia'] = conteos['aldia']! + 1;
+      } else {
+        final dias = diasRestantes(c['pagado_hasta'] as String?);
+        if (dias != null && dias > 7) {
+          conteos['aldia'] = conteos['aldia']! + 1;
+        } else if (dias != null && dias >= 0 && dias <= 7) {
+          conteos['porvencer'] = conteos['porvencer']! + 1;
+        } else if (dias == null || dias < 0) {
+          conteos['vencidos'] = conteos['vencidos']! + 1;
+        }
+      }
+    }
+    final ref = c['foto_storage'] as String?;
+    // Ronda 17 M7-H2: el contador sinfoto tampoco se alimenta
+    // con protegidos (igual que aldia/porvencer/vencidos).
+    if ((ref == null || ref.isEmpty) && !esVistaProtegida(c)) {
+      conteos['sinfoto'] = conteos['sinfoto']! + 1;
+    }
+  }
+  return conteos;
 }

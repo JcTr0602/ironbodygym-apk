@@ -3735,6 +3735,42 @@ String normalizarTelefonoWaMe(String tel) {
   return '';
 }
 
+/// 1.29 (Oleada 3, FB-01 · D-B1-02): el teléfono EFECTIVO de un
+/// cliente, ÚNICA regla de la app: el móvil primero — en los
+/// clientes migrados el celular vive en `movil` y `telefono`
+/// puede traer el carnet u otro dato — y `telefono` después.
+/// Forma wa.me ('53' + 8 dígitos); '' si ninguno de los dos
+/// campos normaliza a un móvil válido. Antes esta regla vivía
+/// solo dentro de la ficha y Buscar/Listas miraban `telefono`
+/// a pelo: al migrado se le pintaba el carnet como teléfono y
+/// sus avisos salían (o no) al número equivocado.
+String telefonoEfectivoWa(Map<String, dynamic> c) {
+  for (final campo in const ['movil', 'telefono']) {
+    final v = normalizarTelefonoWaMe('${c[campo] ?? ''}');
+    if (v.isNotEmpty) return v;
+  }
+  return '';
+}
+
+/// 1.29 (Oleada 3, FB-01): el teléfono efectivo en forma local
+/// (los 8 dígitos) para pintar; '—' si no hay válido.
+String telefonoEfectivoLocal(Map<String, dynamic> c) {
+  final wa = telefonoEfectivoWa(c);
+  return wa.length == 10 ? wa.substring(2) : '—';
+}
+
+/// 1.29 (Oleada 3, FB-07): sanitiza un teléfono TECLEADO o
+/// PEGADO a sus 8 dígitos limpios de almacenamiento (la regla
+/// de la casa: en `clientes.telefono` solo viven 8 dígitos; el
+/// 53 es solo para enlaces wa.me y la UI). Acepta «+53 5819
+/// 1577» y «5819 1577»; devuelve null si no es un móvil cubano
+/// válido (8 dígitos empezando en 5/6, con o sin prefijo 53).
+String? sanitizarTelefono(String crudo) {
+  var d = crudo.replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length == 10 && d.startsWith('53')) d = d.substring(2);
+  return validarTelefono(d) ? d : null;
+}
+
 /// Carnet: 6 a 11 dígitos (6 = fecha de nacimiento para menores sin carnet).
 bool validarCarnet(String v) {
   final d = v.replaceAll(RegExp(r'[^0-9]'), '');

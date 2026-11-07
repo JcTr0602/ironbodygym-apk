@@ -33,15 +33,25 @@ final _reNoDigitosListas = RegExp(r'[^0-9]');
 
 /// Buscador de Listas (16/25, PURO): coincide por nombre (sin
 /// mayúsculas) o por dígitos del teléfono.
+/// 1.29 (Oleada 3, FB-01 · D-B1-02): los dígitos se contrastan
+/// con el teléfono EFECTIVO (movil primero; ver
+/// telefonoEfectivoLocal en negocio.dart): antes solo se miraba
+/// `telefono`, así que un migrado — cuyo número real vive en
+/// `movil` y cuyo `telefono` puede traer el carnet — no se
+/// encontraba buscando su número, y buscar los dígitos de su
+/// carnet lo «encontraba» como si fueran su teléfono.
 bool coincideBusquedaListas(Map<String, dynamic> c, String texto) {
   final q = texto.trim().toLowerCase();
   if (q.isEmpty) return true;
   if ('${c['nombre'] ?? ''}'.toLowerCase().contains(q)) return true;
-  final digQ = q.replaceAll(_reNoDigitosListas, '');
+  var digQ = q.replaceAll(_reNoDigitosListas, '');
+  // Pegado con prefijo país: se contrasta por los 8 dígitos.
+  if (digQ.length == 10 && digQ.startsWith('53')) {
+    digQ = digQ.substring(2);
+  }
   if (digQ.isNotEmpty) {
-    final tel =
-        '${c['telefono'] ?? ''}'.replaceAll(_reNoDigitosListas, '');
-    if (tel.contains(digQ)) return true;
+    final tel = telefonoEfectivoLocal(c);
+    if (tel != '—' && tel.contains(digQ)) return true;
   }
   return false;
 }
@@ -865,9 +875,11 @@ class _ListasScreenState extends State<ListasScreen>
 
   /// v1.2.4 (C7): móvil cubano del cliente para wa.me (con prefijo
   /// 53) o null. Argón P3#5: normalizarTelefonoWaMe acepta 5 y 6.
+  /// 1.29 (Oleada 3, FB-01): es el teléfono EFECTIVO (movil
+  /// primero) — el de `telefono` a pelo dejaba sin aviso al
+  /// migrado cuyo número vive en `movil`.
   String? _movilCliente(Map<String, dynamic> c) {
-    final normalizado =
-        normalizarTelefonoWaMe('${c['telefono'] ?? ''}');
+    final normalizado = telefonoEfectivoWa(c);
     return normalizado.isEmpty ? null : normalizado;
   }
 
