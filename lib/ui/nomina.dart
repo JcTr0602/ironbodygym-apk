@@ -1,4 +1,10 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -14,9 +20,11 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'cierre_mes.dart';
+import 'cierre_nomina_imagen.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_nomina.dart';
+import 'skeleton.dart';
 
 /// v1.3.7 (Fase A, 6.1): pre-cálculo de nómina mensual.
 /// v1.3.9 Sprint 3 (#8): + bono manual editable por el dueño.
@@ -144,6 +152,103 @@ class _NominaScreenState extends State<NominaScreen> {
         _cargando = false;
       });
     }
+  }
+
+  /// 1.28 (M3-C3): la foto del cierre de mes como imagen con
+  /// marca. Las filas salen del MISMO estado que pinta la
+  /// pantalla (la foto única por entrenador: base, bono,
+  /// comisión, adelantos, deuda y neto por totalVivo), así
+  /// que la imagen nunca discrepa de lo que el dueño está
+  /// viendo. Se captura con RepaintBoundary y se comparte
+  /// como PNG.
+  Future<void> _mostrarFotoCierre() async {
+    final base = _clientesPagados * _tarifa;
+    final filas = <FilaCierreNomina>[];
+    for (final ent in ['duany', 'gabriel']) {
+      final persona = _personasAdelantos[ent];
+      if (persona == null) continue;
+      final bono = _bonoPara(ent);
+      final comision = _comisionDosis[ent]?.total ?? 0;
+      final libro = _libroMes[ent];
+      final adelantos = libro?.adelantos ?? 0;
+      final deuda = libro?.deudaEntrante ?? 0;
+      filas.add(FilaCierreNomina(
+        nombre: persona.nombre,
+        base: base,
+        bono: bono,
+        comision: comision,
+        adelantos: adelantos,
+        deuda: deuda,
+        neto: NominaCalc.totalVivo(
+          base: base,
+          bono: bono,
+          comision: comision,
+          adelantos: adelantos,
+          deudaEntrante: deuda,
+        ),
+        liquidada: _nominaLiquidadaMes[ent] ?? false,
+      ));
+    }
+    if (filas.isEmpty) {
+      mostrarSnack(context, 'Aún no hay nómina que fotografiar.');
+      return;
+    }
+    final ahora = ahoraHabana();
+    final mesEtiqueta = '${_nombreMes(ahora.month)} de ${ahora.year}';
+    final boundaryKey = GlobalKey();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Foto del cierre de mes'),
+        content: SingleChildScrollView(
+          child: RepaintBoundary(
+            key: boundaryKey,
+            child: ImagenCierreNomina(
+              mesEtiqueta: mesEtiqueta,
+              filas: filas,
+              generadoEtiqueta: 'Generada el ${ahora.day} de '
+                  '${_nombreMes(ahora.month).toLowerCase()} de '
+                  '${ahora.year} · Iron Body Gym',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.share_rounded, size: 18),
+            label: const Text('Compartir imagen'),
+            onPressed: () async {
+              try {
+                final boundary = boundaryKey.currentContext!
+                    .findRenderObject() as RenderRepaintBoundary;
+                final imagen =
+                    await boundary.toImage(pixelRatio: 3.0);
+                final datos = await imagen.toByteData(
+                    format: ui.ImageByteFormat.png);
+                if (datos == null) return;
+                final dir = await getTemporaryDirectory();
+                final f = await File(
+                        '${dir.path}/cierre_nomina_'
+                        '${hoyHabanaIso().substring(0, 7)}.png')
+                    .writeAsBytes(datos.buffer.asUint8List());
+                await Share.shareXFiles([XFile(f.path)],
+                    text: 'Cierre de nómina · $mesEtiqueta · '
+                        'Iron Body Gym');
+              } catch (_) {
+                if (mounted) {
+                  mostrarSnack(context,
+                      'No se pudo compartir la imagen',
+                      significado: SignificadoChip.error);
+                }
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   /// "20 de octubre, 12:40" a partir de un ISO guardado por el
@@ -498,6 +603,14 @@ class _NominaScreenState extends State<NominaScreen> {
         context,
         'Nómina del mes',
         acciones: [
+          // 1.28 (M3-C3): la foto del cierre como imagen con
+          // marca, lista para compartir (solo dueño).
+          if (esDueno && !_cargando)
+            IconButton(
+              icon: const Icon(Icons.image_rounded),
+              tooltip: 'Foto del cierre',
+              onPressed: _mostrarFotoCierre,
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
@@ -506,7 +619,8 @@ class _NominaScreenState extends State<NominaScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando nómina…')
+          // 1.28 (M3-C6): esqueleto espejo de la pantalla.
+          ? const SkeletonNomina()
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -862,8 +976,21 @@ class _NominaScreenState extends State<NominaScreen> {
             ],
           ),
           if (items.isEmpty)
-            const Text('Sin adelantos este mes.',
-                style: AppTexto.cuerpo)
+            // 1.28 (M3-C6): el vacío con su salida al lado
+            // (registrar el primer adelanto sin subir a la
+            // cabecera de la sección).
+            Row(
+              children: [
+                const Text('Sin adelantos este mes.',
+                    style: AppTexto.cuerpo),
+                if (esDueno && !liquidada)
+                  TextButton(
+                    onPressed: () =>
+                        _dialogoRegistrarAdelanto(context, ent),
+                    child: const Text('Registrar adelanto'),
+                  ),
+              ],
+            )
           else
             for (final e in items)
               _filaAdelanto(context, e, anulados, esDueno,
@@ -1034,8 +1161,59 @@ class _NominaScreenState extends State<NominaScreen> {
                       deudaEntrante: deudaF,
                     );
                     if (mounted) {
-                      mostrarSnack(context, 'Nómina marcada como pagada', significado: SignificadoChip.exito);
-                      _cargar();
+                      // 1.28 (M3-B1): el resumen LISTO PARA
+                      // ENVIAR, armado con las cifras FRESCAS
+                      // que se acaban de liquidar (las mismas
+                      // que entraron en liquidarNomina): el
+                      // dueño lo comparte al entrenador sin
+                      // reescribir ni una cifra. La deuda
+                      // saliente se deriva de esas mismas
+                      // cifras (el exceso de adelantos + deuda
+                      // sobre el bruto, la semántica del libro).
+                      final brutoF = baseF + bonoF + comisionF;
+                      final deudaSalienteF =
+                          (adelantosF + deudaF) > brutoF
+                              ? (adelantosF + deudaF) - brutoF
+                              : 0.0;
+                      final textoResumen = textoResumenNominaWhatsApp(
+                        nombre: personaF.nombre,
+                        mesEtiqueta:
+                            '${_nombreMes(int.parse(pref.substring(5, 7)))} '
+                            'de ${pref.substring(0, 4)}',
+                        clientesPagados: pagaronF,
+                        tarifa: fotoF.tarifa.toDouble(),
+                        base: baseF,
+                        bono: bonoF,
+                        comision: comisionF,
+                        adelantos: adelantosF,
+                        deudaEntrante: deudaF,
+                        deudaSaliente: deudaSalienteF,
+                        neto: netoF,
+                      );
+                      await showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Nómina pagada ✓'),
+                          content: SingleChildScrollView(
+                            child: SelectableText(textoResumen),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(ctx).pop(),
+                              child: const Text('Cerrar'),
+                            ),
+                            FilledButton.icon(
+                              icon: const Icon(Icons.share_rounded,
+                                  size: 18),
+                              label: const Text('Compartir resumen'),
+                              onPressed: () =>
+                                  Share.share(textoResumen),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (mounted) _cargar();
                     }
                   } finally {
                     _operando = false;

@@ -109,6 +109,17 @@ String horaCorta(String iso) {
   }
 }
 
+/// 1.28 (M3-B2): resultado de una comprobación de cierres
+/// contra el servidor. [ok] = false cuando la RPC no se pudo
+/// completar (sin conexión, timeout, RPC ausente): en ese
+/// caso ningún conteo significa nada y lo local no cambió.
+typedef ResultadoComprobacionCierres = ({
+  bool ok,
+  int recibidos,
+  int marcados,
+  int sinCasar,
+});
+
 class TurnoService {
   TurnoService._();
   static final TurnoService instance = TurnoService._();
@@ -252,7 +263,7 @@ class TurnoService {
   // el camino de pintar: dos disparos solapados comparten la
   // MISMA corrida en vez de reconciliar dos veces en paralelo.
   Future<void>? _reconciliacionEnVuelo;
-  Future<void>? _reconciliacionServidorEnVuelo;
+  Future<ResultadoComprobacionCierres>? _reconciliacionServidorEnVuelo;
 
   Future<void> reconciliarTurnos() {
     final enVuelo = _reconciliacionEnVuelo;
@@ -369,12 +380,19 @@ class TurnoService {
   /// SERVIDOR para el entrenador logueado (ver
   /// [reconciliarConServidorDe]). Sin sesión no hace nada.
   /// 1.28 (M3-A5): con vuelo único, como [reconciliarTurnos].
-  Future<void> reconciliarConServidor() {
+  /// 1.28 (M3-B2): devuelve el resultado de la comprobación
+  /// para que el botón a demanda («Comprobar cierres con el
+  /// servidor») enseñe su verdad; los llamadores de fondo lo
+  /// ignoran, como siempre.
+  Future<ResultadoComprobacionCierres> reconciliarConServidor() {
     final tid = _auth.telegramId;
-    if (tid == null) return Future.value();
+    if (tid == null) {
+      return Future.value(
+          (ok: false, recibidos: 0, marcados: 0, sinCasar: 0));
+    }
     final enVuelo = _reconciliacionServidorEnVuelo;
     if (enVuelo != null) return enVuelo;
-    late final Future<void> corrida;
+    late final Future<ResultadoComprobacionCierres> corrida;
     corrida = reconciliarConServidorDe(tid).whenComplete(() {
       if (identical(_reconciliacionServidorEnVuelo, corrida)) {
         _reconciliacionServidorEnVuelo = null;
@@ -452,7 +470,10 @@ class TurnoService {
   ///
   /// Offline-first: NUNCA lanza. Red caída, timeout, RPC aún
   /// no desplegada o respuesta rara = no-op con log.
-  Future<void> reconciliarConServidorDe(
+  /// 1.28 (M3-B2): devuelve el resultado de la comprobación
+  /// para el botón a demanda; `ok == false` si la RPC falló
+  /// (nada local se tocó en ese caso).
+  Future<ResultadoComprobacionCierres> reconciliarConServidorDe(
     int tid, {
     Future<List<Map<String, dynamic>>> Function()? traerCierres,
   }) async {
@@ -536,8 +557,15 @@ class TurnoService {
       AppLog.info('turnos', 'cierres_reconciliados_servidor',
           d: 'tid=$tid recibidos=${cierres.length} marcados=$marcados '
               'sin_casar=$sinCasar omitidos_fecha=$omitidosFecha');
+      return (
+        ok: true,
+        recibidos: cierres.length,
+        marcados: marcados,
+        sinCasar: sinCasar,
+      );
     } catch (e) {
       AppLog.aviso('turnos', 'reconciliacion_servidor_fallo', d: '$e');
+      return (ok: false, recibidos: 0, marcados: 0, sinCasar: 0);
     }
   }
 
@@ -857,6 +885,13 @@ class TurnoService {
   Future<Map<String, dynamic>> confirmarCierre({
     required String turnoId,
     required bool forzado,
+    // 1.28 (M3-B6): true SOLO desde el auto-cierre de turnos
+    // olvidados. El snapshot queda rotulado como cierre
+    // automático tardío (decisión de la 1.28: se mantiene
+    // «cerrar lo olvidado» y se le da cara visible en Mi
+    // Turno); un cierre manual forzado NO lleva la marca y
+    // jamás dispara el aviso.
+    bool automatico = false,
   }) async {
     final tid = _auth.telegramId;
     // Defensa en profundidad (Argón P1): el PK turno_id pudo
@@ -934,6 +969,9 @@ class TurnoService {
       final snapshot = jsonEncode({
         'hora_cierre': horaCierre,
         'forzado': forzado,
+        // 1.28 (M3-B6): rótulo del cierre automático tardío.
+        if (automatico) 'automatico': true,
+        if (automatico) 'tipo_cierre': 'automatico_tardio',
         'total_cobrado': cobrado,
         'total_incierto': totalIncierto,
         'pagos_count': pagosCount,
@@ -1034,5 +1072,58 @@ class TurnoService {
       'estado': estadoFinal,
       'tiene_incidencias': tieneIncidencias,
     };
+  }
+
+  // ----------------------------------------------------------
+  // 1.28 (M3-B6): aviso del auto-cierre de un turno olvidado.
+  // ----------------------------------------------------------
+
+  /// El turno PROPIO cerrado automáticamente (snapshot con
+  /// `automatico == true`, la marca que escribe
+  /// [confirmarCierre] a petición del auto-cierre) más
+  /// reciente que aún no se ha reconocido en Mi Turno.
+  /// Devuelve la fila del turno con el snapshot decodificado
+  /// bajo la clave 'snapshot'; null si no hay ninguno
+  /// pendiente de avisar. Los cierres automáticos ANTERIORES
+  /// a esta versión no llevan la marca: no se avisan
+  /// (aceptado en el diseño de la oleada). Si el auto-cierre
+  /// más reciente ya fue reconocido, los anteriores también
+  /// se dan por vistos: solo importa el último olvido.
+  Future<Map<String, dynamic>?> ultimoAutocierreSinAvisar() async {
+    final tid = _auth.telegramId;
+    if (tid == null) return null;
+    try {
+      final db = await _db.db;
+      final filas = await db.query('turnos',
+          where: "telegram_id=? AND estado IN "
+              "('cerrado_local','cerrado_sincronizado')",
+          whereArgs: [tid],
+          orderBy: 'fecha_turno DESC, hora_cierre DESC',
+          limit: 15);
+      final avisado = await _db.getMeta('autocierre_avisado_id');
+      for (final f in filas) {
+        Map<String, dynamic> snap;
+        try {
+          final d = jsonDecode('${f['cierre_snapshot'] ?? '{}'}');
+          if (d is! Map) continue;
+          snap = Map<String, dynamic>.from(d);
+        } catch (_) {
+          continue;
+        }
+        if (snap['automatico'] != true) continue;
+        if ('${f['turno_id']}' == (avisado ?? '')) return null;
+        return {...f, 'snapshot': snap};
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Marca el auto-cierre [turnoId] como reconocido (el
+  /// entrenador pulsó «Entendido» o vio su detalle en Mi
+  /// Turno): el aviso no vuelve a salir.
+  Future<void> marcarAutocierreAvisado(String turnoId) async {
+    try {
+      await _db.setMeta('autocierre_avisado_id', turnoId);
+    } catch (_) {}
   }
 }

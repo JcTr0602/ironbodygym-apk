@@ -8,13 +8,14 @@ import 'package:share_plus/share_plus.dart';
 import '../auth.dart';
 import '../estadisticas_servicios.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtMonto;
+import '../negocio.dart' show fmtMonto, fmtFecha;
 import '../servicios.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'reporte_margenes.dart';
+import 'servicios_admin.dart';
 import 'widgets.dart';
 
 /// v1.8.0: Estadísticas de servicios (SOLO DUEÑO), diseño 🟢 Argón
@@ -33,8 +34,31 @@ class ServiciosEstadisticasScreen extends StatefulWidget {
 class _ServiciosEstadisticasScreenState
     extends State<ServiciosEstadisticasScreen> {
   bool _cargando = true;
-  String _periodo = 'mes'; // 'mes' | 'todo'
+  String _periodo = 'mes'; // 'mes' | 'todo' | 'rango' (M3-B3)
+  // 1.28 (M3-B3): el rango a medida del período (ISO
+  // 'yyyy-mm-dd', ambos extremos incluidos). Nace en los
+  // últimos 30 días al elegir «Rango» por primera vez.
+  String? _desdeRango;
+  String? _hastaRango;
   String _tab = 'servicios'; // H6: 'servicios' | 'suplementos'
+  // 1.28 (M3-B3): los cortes del período (por vendedor y por
+  // pomo) y sus nombres ya resueltos.
+  List<({int? tid, int dosis, int unidades, double ingresos, double comision})>
+      _corteVendedor = const [];
+  List<({int? pomoId, int dosis, double ingresos, double comision, double margen})>
+      _cortePomo = const [];
+  Map<int, String> _nombreVendedor = const {};
+  Map<int, String> _nombrePomo = const {};
+  // 1.28 (M3-C1): las cifras de cabecera del período y las
+  // del período anterior equivalente (null = sin base
+  // comparable: «Todo» no tiene anterior). El neto anterior
+  // solo se calcula en modo mes (la inversión de 1B se acota
+  // por mes; en rango quedaría mezclada y el delta mentiría).
+  ({double ingresos, int dosis, double margen, double? neto})? _kpis;
+  ({double ingresos, int dosis, double margen, double? neto})? _kpisAnt;
+  // 1.28 (M3-B4): ventas del período aún en la cola de este
+  // teléfono (las estadísticas leen SOLO el espejo).
+  int _ventasColaPeriodo = 0;
   Map<String, dynamic> _a = const {}; // 1A rendimiento
   Map<String, dynamic> _b = const {}; // 1B inversión
   // v1.13.0 (Bloque 4): agrupaciones Habana, indicadores por bote
@@ -60,7 +84,29 @@ class _ServiciosEstadisticasScreenState
   bool _enPeriodo(String? fecha) {
     if (_periodo == 'todo') return true;
     if (fecha == null || fecha.length < 7) return false;
+    // 1.28 (M3-B3): el rango a medida compara el DÍA (con
+    // fecha válida: una imposible no entra en ningún rango).
+    if (_periodo == 'rango' &&
+        _desdeRango != null &&
+        _hastaRango != null) {
+      if (fecha.length < 10) return false;
+      final dia = fecha.substring(0, 10);
+      if (!esFechaIsoValida(dia)) return false;
+      return dia.compareTo(_desdeRango!) >= 0 &&
+          dia.compareTo(_hastaRango!) <= 0;
+    }
     return fecha.substring(0, 7) == hoyHabanaIso().substring(0, 7);
+  }
+
+  /// Los extremos ISO del período visible (para el sello de
+  /// frescura y el período anterior): 'todo' no acota.
+  ({String? desde, String? hasta}) _extremosPeriodo() {
+    final hoy = hoyHabanaIso();
+    return switch (_periodo) {
+      'todo' => (desde: null, hasta: null),
+      'rango' => (desde: _desdeRango, hasta: _hastaRango),
+      _ => (desde: '${hoy.substring(0, 7)}-01', hasta: hoy),
+    };
   }
 
   // Argón Estadísticas #3: espejos crudos cacheados en el
@@ -382,6 +428,94 @@ class _ServiciosEstadisticasScreenState
       comisiones: semCom,
     );
 
+    // ---- 1.28 (M3-B3/C1/B4): cortes, KPIs con delta y sello ----
+    final corteVendedor = agruparPorVendedor(ventasP);
+    final cortePomo = agruparPorPomo(ventasP);
+    final nombreVendedor = <int, String>{
+      for (final v in ventas)
+        if ((v['registrado_por'] as num?) != null &&
+            '${v['registrado_por_nombre'] ?? ''}'.trim().isNotEmpty)
+          (v['registrado_por'] as num).toInt():
+              '${v['registrado_por_nombre']}'.trim(),
+    };
+    final miTidEst = AuthService().telegramId;
+    if (miTidEst != null) {
+      nombreVendedor.putIfAbsent(miTidEst, () => 'Yo (dueño)');
+    }
+    final nombrePomo = <int, String>{
+      for (final p in pomosEspejo)
+        if ((p['id'] as num?) != null)
+          (p['id'] as num).toInt(): (nombreSup[
+                      suplementoDePomo[(p['id'] as num).toInt()]] ??
+                  'Pomo #${(p['id'] as num).toInt()}'),
+    };
+    final kpisAct = (
+      ingresos: (agg1B.b['ingresos'] as num?)?.toDouble() ?? 0,
+      dosis: nDosis,
+      margen: (agg1B.b['margen'] as num?)?.toDouble() ?? 0,
+      neto: (agg1B.b['neto_dueno'] as num?)?.toDouble(),
+    );
+    // El período anterior equivalente: el mes calendario
+    // anterior en modo mes; el rango de igual longitud justo
+    // antes en modo rango; en «Todo» no hay anterior.
+    ({double ingresos, int dosis, double margen, double? neto})?
+        kpisAnt;
+    final hoyD = ahoraHabana();
+    String? antDesde;
+    String? antHasta;
+    String? antMesInversion;
+    if (_periodo == 'mes') {
+      final pd = DateTime.utc(hoyD.year, hoyD.month - 1, 1);
+      final ph = DateTime.utc(hoyD.year, hoyD.month, 0);
+      String iso(DateTime x) =>
+          '${x.year.toString().padLeft(4, '0')}-'
+          '${x.month.toString().padLeft(2, '0')}-'
+          '${x.day.toString().padLeft(2, '0')}';
+      antDesde = iso(pd);
+      antHasta = iso(ph);
+      antMesInversion = antDesde.substring(0, 7);
+    } else if (_periodo == 'rango' &&
+        _desdeRango != null &&
+        _hastaRango != null) {
+      final r = rangoPeriodoAnterior(_desdeRango!, _hastaRango!);
+      antDesde = r?.desde;
+      antHasta = r?.hasta;
+    }
+    if (antDesde != null && antHasta != null) {
+      final ventasAnt = ventasEnRango(ventasSinReversos,
+          desde: antDesde, hasta: antHasta);
+      final salidasAnt = ventasEnRango(salidas,
+          desde: antDesde, hasta: antHasta);
+      final aggAnt = calcular1B(
+        ventas: ventasAnt,
+        salidas: salidasAnt,
+        botes: botes,
+        boteDeLote: boteDeLote,
+        boteDePomo: boteDePomo,
+        suplementoDePomo: suplementoDePomo,
+        mesInversion: antMesInversion,
+        movsAgua: movsAgua,
+      );
+      kpisAnt = (
+        ingresos: (aggAnt.b['ingresos'] as num?)?.toDouble() ?? 0,
+        dosis: aggAnt.nDosis,
+        margen: (aggAnt.b['margen'] as num?)?.toDouble() ?? 0,
+        // El neto anterior solo es comparable en modo mes
+        // (con la inversión acotada a SU mes).
+        neto: antMesInversion == null
+            ? null
+            : (aggAnt.b['neto_dueno'] as num?)?.toDouble(),
+      );
+    }
+    // El sello de frescura: las estadísticas leen solo el
+    // espejo; las ventas del período aún en la cola de este
+    // teléfono NO están en estas cifras y se dice cuántas.
+    final extremos = _extremosPeriodo();
+    final opsEst = await opsPendientesServicios();
+    final ventasColaPeriodo = contarOpsServiciosEnCola(opsEst,
+            desde: extremos.desde, hasta: extremos.hasta)
+        .ventas;
+
     // Argón Servicios #11: el simulador valora el agua al CPP
     // vigente (el mismo de las ventas reales y la tarjeta 1B),
     // no al costo de la última compra.
@@ -405,6 +539,14 @@ class _ServiciosEstadisticasScreenState
       _botes = botes;
       _nombreSup = nombreSup;
       _costoAgua = costoAguaCpp;
+      // 1.28 (M3-B3/C1/B4).
+      _corteVendedor = corteVendedor;
+      _cortePomo = cortePomo;
+      _nombreVendedor = nombreVendedor;
+      _nombrePomo = nombrePomo;
+      _kpis = kpisAct;
+      _kpisAnt = kpisAnt;
+      _ventasColaPeriodo = ventasColaPeriodo;
       _cargando = false;
     });
   }
@@ -480,12 +622,28 @@ class _ServiciosEstadisticasScreenState
                       ButtonSegment(
                           value: 'mes', label: Text('Este mes')),
                       ButtonSegment(
+                          value: 'rango', label: Text('Rango')),
+                      ButtonSegment(
                           value: 'todo', label: Text('Todo')),
                     ],
                     selected: {_periodo},
                     onSelectionChanged: (s) {
                       setState(() {
                         _periodo = s.first;
+                        // 1.28 (M3-B3): el rango nace en los
+                        // últimos 30 días la primera vez.
+                        if (_periodo == 'rango' &&
+                            (_desdeRango == null || _hastaRango == null)) {
+                          final h = ahoraHabana();
+                          final dU = DateTime.utc(
+                              h.year, h.month, h.day - 29);
+                          String iso(DateTime x) =>
+                              '${x.year.toString().padLeft(4, '0')}-'
+                              '${x.month.toString().padLeft(2, '0')}-'
+                              '${x.day.toString().padLeft(2, '0')}';
+                          _desdeRango = iso(dU);
+                          _hastaRango = hoyHabanaIso();
+                        }
                         _cargando = true;
                       });
                       // Argón Estadísticas #3: cambiar el
@@ -494,12 +652,56 @@ class _ServiciosEstadisticasScreenState
                       _cargar(releer: false);
                     },
                   ),
+                  // 1.28 (M3-B3): el selector de fechas del
+                  // rango a medida.
+                  if (_periodo == 'rango') ...[
+                    const SizedBox(height: AppEspacio.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _desdeRango == null
+                                ? 'Sin fechas elegidas'
+                                : 'Del ${fmtFecha(_desdeRango)} '
+                                    'al ${fmtFecha(_hastaRango)}',
+                            style: AppTexto.cuerpo,
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          icon: const Icon(
+                              Icons.date_range_rounded, size: 18),
+                          label: const Text('Elegir fechas'),
+                          onPressed: _elegirRango,
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: AppEspacio.md),
+                  _tarjetaKpis(),
+                  // 1.28 (M3-B4): el sello de frescura de las
+                  // estadísticas — estas cifras salen SOLO
+                  // del espejo; lo que sigue en la cola de
+                  // este teléfono no está dentro y se dice.
+                  if (_ventasColaPeriodo > 0) ...[
+                    const SizedBox(height: AppEspacio.sm),
+                    ChipEstado.semantico(
+                      texto: 'No incluye $_ventasColaPeriodo '
+                          'venta${_ventasColaPeriodo == 1 ? '' : 's'} '
+                          'por sincronizar: aún '
+                          '${_ventasColaPeriodo == 1 ? 'está' : 'están'} '
+                          'en este teléfono',
+                      significado: SignificadoChip.alerta,
+                      icono: Icons.sync_rounded,
+                    ),
+                  ],
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaRendimiento(),
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaInversion(),
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaAgrupaciones(),
+                  const SizedBox(height: AppEspacio.md),
+                  _tarjetaCortes(),
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaSemana(),
                   const SizedBox(height: AppEspacio.md),
@@ -813,6 +1015,173 @@ class _ServiciosEstadisticasScreenState
     );
   }
 
+  /// 1.28 (M3-B3): el selector de fechas del rango a medida.
+  Future<void> _elegirRango() async {
+    final ahora = ahoraHabana();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024, 1, 1),
+      lastDate: DateTime(ahora.year, ahora.month, ahora.day),
+      initialDateRange: _desdeRango != null && _hastaRango != null
+          ? DateTimeRange(
+              start: DateTime.parse(_desdeRango!),
+              end: DateTime.parse(_hastaRango!),
+            )
+          : null,
+    );
+    if (r == null || !mounted) return;
+    String iso(DateTime x) =>
+        '${x.year.toString().padLeft(4, '0')}-'
+        '${x.month.toString().padLeft(2, '0')}-'
+        '${x.day.toString().padLeft(2, '0')}';
+    setState(() {
+      _desdeRango = iso(r.start);
+      _hastaRango = iso(r.end);
+      _cargando = true;
+    });
+    _cargar(releer: false);
+  }
+
+  /// 1.28 (M3-C1): las cifras de cabecera como tarjetas KPI
+  /// con su delta contra el período anterior equivalente.
+  /// Sin base comparable (anterior en cero o «Todo») la
+  /// tarjeta enseña «sin base» en vez de un porcentaje
+  /// inventado. Las barras por día/franja ya viven en
+  /// _tarjetaAgrupaciones con el patrón de barras de la casa
+  /// (T94, _barra).
+  Widget _tarjetaKpis() {
+    final k = _kpis;
+    if (k == null) return const SizedBox.shrink();
+    final ant = _kpisAnt;
+    final etiquetaAnt = switch (_periodo) {
+      'mes' => 'vs mes anterior',
+      'rango' => 'vs rango anterior',
+      _ => '',
+    };
+    Widget kpi(String titulo, String valor, double? delta) {
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.all(AppEspacio.md),
+          decoration: BoxDecoration(
+            color: AppColores.superficie(context),
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            border: Border.all(color: AppColores.borde(context)),
+            boxShadow: AppSombra.tarjeta(context),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(titulo, style: AppTexto.metadato),
+              const SizedBox(height: 4),
+              Text(valor, style: AppTexto.titulo),
+              const SizedBox(height: 4),
+              if (delta == null)
+                Text(
+                    ant == null ? 'Sin período anterior' : 'Sin base',
+                    style: AppTexto.metadato)
+              else
+                Text(
+                  '${delta >= 0 ? '▲' : '▼'} '
+                  '${delta.abs().toStringAsFixed(0)} % $etiquetaAnt',
+                  style: AppTexto.metadato.copyWith(
+                    color: delta >= 0
+                        ? AppColores.exito
+                        : AppColores.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            kpi('Ingresos', '${fmtMonto(k.ingresos)} CUP',
+                ant == null ? null : deltaPct(k.ingresos, ant.ingresos)),
+            const SizedBox(width: AppEspacio.sm),
+            kpi('Dosis vendidas', '${k.dosis}',
+                ant == null
+                    ? null
+                    : deltaPct(k.dosis.toDouble(), ant.dosis.toDouble())),
+          ],
+        ),
+        const SizedBox(height: AppEspacio.sm),
+        Row(
+          children: [
+            kpi('Margen', '${fmtMonto(k.margen)} CUP',
+                ant == null ? null : deltaPct(k.margen, ant.margen)),
+            const SizedBox(width: AppEspacio.sm),
+            kpi(
+                'Neto del dueño',
+                k.neto == null ? '—' : '${fmtMonto(k.neto!)} CUP',
+                (ant == null || ant.neto == null || k.neto == null)
+                    ? null
+                    : deltaPct(k.neto!, ant.neto!)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 1.28 (M3-B3): los cortes del período — por vendedor y
+  /// por pomo/producto, con las mismas ventas ya filtradas
+  /// de la pantalla (sin reversos, en período). El margen
+  /// por pomo sale de los costos congelados en cada venta
+  /// (ver agruparPorPomo): es el margen al venderse, no el
+  /// revaluado de 1B.
+  Widget _tarjetaCortes() {
+    if (_corteVendedor.isEmpty && _cortePomo.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Tarjeta(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Cortes del período', style: AppTexto.titulo),
+          const SizedBox(height: 6),
+          Text('Por vendedor', style: AppTexto.subtitulo),
+          if (_corteVendedor.isEmpty)
+            const Text('Sin ventas comerciales en el período.',
+                style: AppTexto.secundario)
+          else
+            for (final c in _corteVendedor)
+              _fila(
+                c.tid == null
+                    ? 'Sin vendedor identificado'
+                    : (_nombreVendedor[c.tid] ?? 'Entrenador'),
+                '${c.dosis} dosis · ${fmtMonto(c.ingresos)} CUP'
+                '${c.comision > 0 ? ' · comisión ${fmtMonto(c.comision)}' : ''}',
+              ),
+          const Divider(height: 20),
+          Text('Por pomo / producto', style: AppTexto.subtitulo),
+          if (_cortePomo.isEmpty)
+            const Text('Sin ventas comerciales en el período.',
+                style: AppTexto.secundario)
+          else
+            for (final c in _cortePomo)
+              _fila(
+                c.pomoId == null
+                    ? 'Agua común (sin pomo)'
+                    : (_nombrePomo[c.pomoId] ?? 'Pomo'),
+                '${c.dosis} dosis · ${fmtMonto(c.ingresos)} CUP'
+                ' · margen ${fmtMonto(c.margen)}',
+              ),
+          const Text(
+            'El margen por pomo usa el costo congelado en cada '
+            'venta (el margen al venderse); el de 1B revalúa '
+            'al costo actual del bote.',
+            style: AppTexto.metadato,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _tarjetaRendimiento() {
     final porBote =
         (_a['porBote'] as Map<int, Map<String, dynamic>>?) ?? const {};
@@ -824,9 +1193,26 @@ class _ServiciosEstadisticasScreenState
           Text('1A · Rendimiento (físico)',
               style: AppTexto.titulo),
           if (porBote.isEmpty)
-            Text('Sin botes todavía.',
-                style: AppTexto.cuerpo.copyWith(
-                    color: AppColores.textoSecundario(context)))
+            // 1.28 (M3-C6): el vacío con salida — abrir el
+            // primer bote sin salir a buscar la pantalla.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Sin botes todavía.',
+                    style: AppTexto.cuerpo.copyWith(
+                        color: AppColores.textoSecundario(context))),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.science_rounded, size: 18),
+                  label: const Text('Abrir un bote'),
+                  onPressed: () => Navigator.push(
+                    context,
+                    RutaIron(
+                        builder: (_) => const ServiciosAdminScreen()),
+                  ).then((_) => _cargar()),
+                ),
+              ],
+            )
           else
             for (final e in porBote.entries) ...[
               const Divider(height: 20),

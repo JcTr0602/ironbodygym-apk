@@ -601,3 +601,56 @@ class NominaCalc {
     return nombres;
   }
 }
+
+/// 1.28 (M3-B1), PURO: el resumen de la liquidación de un
+/// entrenador, listo para enviar (WhatsApp / copiar). Sale
+/// de las CIFRAS FRESCAS que la pantalla recalcula al
+/// liquidar (la misma foto única de M3-A4 que alimenta
+/// `liquidarNomina`), nunca de lo que el diálogo enseñaba
+/// minutos antes. Cierra con la línea automática de la casa
+/// (regla de Jc para todo mensaje que compone el sistema).
+/// La deuda saliente solo aparece si quedó deuda para el
+/// mes siguiente (arrastre de adelantos).
+String textoResumenNominaWhatsApp({
+  required String nombre,
+  required String mesEtiqueta,
+  required int clientesPagados,
+  required double tarifa,
+  required double base,
+  required double bono,
+  required double comision,
+  required double adelantos,
+  required double deudaEntrante,
+  required double deudaSaliente,
+  required double neto,
+}) {
+  final b = StringBuffer()
+    ..writeln('💰 *Nómina de $mesEtiqueta — Iron Body Gym*')
+    ..writeln()
+    ..writeln('Hola, $nombre. Tu nómina quedó liquidada:')
+    ..writeln(
+        '• Clientes que pagaron el mes: $clientesPagados × '
+        '${fmtMonto(tarifa)} CUP = ${fmtMonto(base)} CUP')
+    ..writeln('• Bono: ${fmtMonto(bono)} CUP')
+    ..writeln('• Comisión por dosis: ${fmtMonto(comision)} CUP')
+    ..writeln('• Adelantos descontados: −${fmtMonto(adelantos)} CUP');
+  if (deudaEntrante > 0) {
+    b.writeln(
+        '• Deuda que venía del mes anterior: '
+        '−${fmtMonto(deudaEntrante)} CUP');
+  }
+  b
+    ..writeln()
+    ..writeln('✅ *Total a cobrar: ${fmtMonto(neto)} CUP*');
+  if (deudaSaliente > 0) {
+    b.writeln(
+        'Queda una deuda de ${fmtMonto(deudaSaliente)} CUP que '
+        'se descuenta de la próxima nómina.');
+  }
+  b
+    ..writeln()
+    ..writeln('🤖 _Mensaje automático de nuestro sistema de '
+        'gestión; no lo envía una persona. Si vas a responder, '
+        'escríbenos al 58191577._');
+  return b.toString().trimRight();
+}

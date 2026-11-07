@@ -13,6 +13,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
+import '../servicios.dart' as svc;
 import '../sync.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
@@ -72,6 +73,15 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   // del turno REAL de hoy (turnoVisible), no del reloj.
   bool _cargando = true;
   Map<String, dynamic>? _turnoVisible;
+  // 1.28 (M3-B6): el último turno propio cerrado
+  // automáticamente (olvidado) aún no reconocido: su aviso
+  // encabeza la pantalla hasta que el entrenador lo ve.
+  Map<String, dynamic>? _autocierre;
+  // 1.28 (M3-B8): la última venta de dosis de este teléfono
+  // (meta que guarda Servicios al vender), para el botón
+  // «Otra igual».
+  Map<String, dynamic>? _ultimaVenta;
+  bool _repitiendo = false;
   final _auth = AuthService();
 
   @override
@@ -236,6 +246,24 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     try {
       visible = await TurnoService.instance.turnoVisible();
     } catch (_) {}
+    // 1.28 (M3-B6): el aviso del auto-cierre pendiente de
+    // reconocer (si lo hay).
+    Map<String, dynamic>? autocierre;
+    try {
+      autocierre =
+          await TurnoService.instance.ultimoAutocierreSinAvisar();
+    } catch (_) {}
+    // 1.28 (M3-B8): la última venta registrada en este
+    // teléfono, para «Otra igual».
+    Map<String, dynamic>? ultimaVenta;
+    try {
+      final raw =
+          await LocalDb.instance.getMeta('ultima_venta_servicio');
+      if (raw != null && raw.isNotEmpty) {
+        final d = jsonDecode(raw);
+        if (d is Map) ultimaVenta = Map<String, dynamic>.from(d);
+      }
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _cobrado = t.$1;
@@ -259,7 +287,158 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
         _vencimientos = vencimientos;
         _cerrado = cerrado;
         _turnoVisible = visible;
+        _autocierre = autocierre;
+        _ultimaVenta = ultimaVenta;
       });
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 1.28 (M3-B6): aviso del auto-cierre de un turno olvidado.
+  // ----------------------------------------------------------
+
+  Future<void> _reconocerAutocierre() async {
+    final a = _autocierre;
+    if (a == null) return;
+    await TurnoService.instance
+        .marcarAutocierreAvisado('${a['turno_id']}');
+    if (mounted) setState(() => _autocierre = null);
+  }
+
+  Future<void> _verDetalleAutocierre() async {
+    final a = _autocierre;
+    if (a == null) return;
+    final snap = (a['snapshot'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final total = (snap['total_cobrado'] as num?)?.toDouble();
+    final pendN = (snap['pendientes_count'] as num?)?.toInt() ?? 0;
+    final pendCup = (snap['pendientes_cup'] as num?)?.toDouble() ?? 0;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cierre automático tardío'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Turno del ${fmtFecha('${a['fecha_turno']}')} '
+                '(${a['turno'] == 'tarde' ? 'tarde' : 'mañana'}).'),
+            Text(
+                'Se cerró a las '
+                '${horaCorta('${snap['hora_cierre'] ?? a['hora_cierre'] ?? ''}')}.'),
+            if (total != null)
+              Text('Total cobrado ese día: ${fmtMonto(total)} CUP.'),
+            if (pendN > 0)
+              Text('Quedaron $pendN cobros por entregar '
+                  '(${fmtMonto(pendCup)} CUP): siguen en tu '
+                  'pendiente, no se perdieron.'),
+            const SizedBox(height: 8),
+            const Text(
+              'El sistema cierra solo los turnos olvidados '
+              'para que el día no quede abierto. La próxima '
+              'vez, cierra tu turno al terminar.',
+              style: AppTexto.secundario,
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
+    await _reconocerAutocierre();
+  }
+
+  Widget _tarjetaAutocierre() {
+    final a = _autocierre!;
+    return Tarjeta(
+      color: AppColores.alerta.withValues(alpha: 0.10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.schedule_rounded,
+                  color: AppColores.alerta, size: 20),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: Text(
+                  'Tu turno del ${fmtFecha('${a['fecha_turno']}')} '
+                  'se cerró automáticamente porque no lo '
+                  'cerraste.',
+                  style: AppTexto.cuerpo
+                      .copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Row(
+            children: [
+              OutlinedButton(
+                onPressed: _verDetalleAutocierre,
+                child: const Text('Ver detalle'),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              TextButton(
+                onPressed: _reconocerAutocierre,
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------
+  // 1.28 (M3-B8): «Otra igual» — repetir la última venta.
+  // ----------------------------------------------------------
+
+  String _etiquetaUltimaVenta() {
+    final u = _ultimaVenta!;
+    final String base;
+    if ('${u['forma'] ?? 'simple'}' == 'multiple') {
+      final n = (u['dosis_n'] as num?)?.toInt() ?? 0;
+      final m = (u['pomos_m'] as num?)?.toInt() ?? 0;
+      base = '$n dosis${m > 0 ? ' ($m con agua)' : ''}';
+    } else {
+      final cant = (u['cantidad'] as num?)?.toInt() ?? 1;
+      base = switch ('${u['tipo'] ?? ''}') {
+        'dosis_con_agua' => cant > 1 ? '$cant dosis con agua' : 'Dosis con agua',
+        'agua_suelta' => cant > 1 ? '$cant pomos de agua' : 'Pomo de agua',
+        _ => cant > 1 ? '$cant dosis sin agua' : 'Dosis sin agua',
+      };
+    }
+    if (u['casa'] == true) return '$base · Casa';
+    return switch ('${u['metodo'] ?? ''}') {
+      'transferencia' => '$base · Transferencia',
+      'efectivo' => '$base · Efectivo',
+      _ => base,
+    };
+  }
+
+  Future<void> _repetirVenta() async {
+    final u = _ultimaVenta;
+    if (u == null || _repitiendo) return;
+    setState(() => _repitiendo = true);
+    try {
+      final agua = await svc.stockAguaLocal();
+      await svc.repetirUltimaVentaServicio(u,
+          topePomosAgua: agua.saldo);
+      if (!mounted) return;
+      mostrarSnack(context, 'Venta repetida: ${_etiquetaUltimaVenta()}');
+      await _cargar();
+    } catch (e) {
+      if (!mounted) return;
+      mostrarSnack(context,
+          '$e'.replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _repitiendo = false);
     }
   }
 
@@ -485,6 +664,17 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     // v1.2.6 (Gemini): desglose financiero de lo pendiente.
     final montoPendiente =
         await montoEfectivoOps([...pendientes, ...bloqueadas]);
+    // 1.28 (M3-B7): las ventas de servicios del turno entran
+    // en el diálogo: cerrar con el pendiente a la vista
+    // incluye QUÉ servicios se vendieron y cuánto efectivo
+    // de servicios queda en la mano (ya dentro del total).
+    Map<String, dynamic>? cuadreServ;
+    try {
+      final tidC = _auth.telegramId;
+      if (tidC != null) {
+        cuadreServ = await svc.cuadreServiciosDia(tidC, _hoy());
+      }
+    } catch (_) {}
     if (!mounted) return;
     final accion = await showDialog<String>(
       context: context,
@@ -501,10 +691,36 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             Text('   Efectivo: ${fmtMonto(_efectivoHoy)} CUP'),
             Text('   Transferencia: ${fmtMonto(_transferHoy)} CUP'),
             Text('   Operaciones: $nOps'),
+            // 1.28 (M3-B7): los servicios del turno, con su
+            // efectivo ya dentro del pendiente de abajo.
+            if (cuadreServ != null &&
+                (((cuadreServ['dosis_sin_agua'] as num?)?.toInt() ??
+                        0) +
+                    ((cuadreServ['dosis_con_agua'] as num?)
+                            ?.toInt() ??
+                        0) +
+                    ((cuadreServ['agua_suelta'] as num?)?.toInt() ??
+                        0) >
+                    0)) ...[
+              Text(
+                  'Servicios hoy: '
+                  '${((cuadreServ['dosis_sin_agua'] as num?)?.toInt() ?? 0) + ((cuadreServ['dosis_con_agua'] as num?)?.toInt() ?? 0)} dosis '
+                  '(${(cuadreServ['dosis_sin_agua'] as num?)?.toInt() ?? 0} sin agua · '
+                  '${(cuadreServ['dosis_con_agua'] as num?)?.toInt() ?? 0} con agua) y '
+                  '${(cuadreServ['agua_suelta'] as num?)?.toInt() ?? 0} pomos de agua'),
+              Text(
+                  '   Su efectivo: ${fmtMonto((cuadreServ['efectivo'] as num?)?.toDouble() ?? 0)} CUP '
+                  '(ya está dentro del total a entregar)'),
+            ],
             const Divider(),
             Text(
               'Total a entregar a Jc: ${fmtMonto(_pendiente)} CUP',
               style: AppTexto.titulo,
+            ),
+            Text(
+              'Es lo que quedará en tu mano al cerrar: cerrar '
+              'el turno no lo reinicia.',
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(ctx)),
             ),
             const SizedBox(height: 8),
             Text(
@@ -865,6 +1081,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    // 1.28 (M3-B6): el aviso del auto-cierre de
+                    // un turno olvidado, hasta reconocerlo.
+                    if (_autocierre != null) ...[
+                      _tarjetaAutocierre(),
+                      const SizedBox(height: AppEspacio.md),
+                    ],
                     // v1.0.16: qué tengo que entregar (idea 2)
                     // 1.25 T84: UNA sola tarjeta de
                     // «qué tengo que entregar» — antes la
@@ -933,6 +1155,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           const SizedBox(height: AppEspacio.sm),
                           Wrap(
                             spacing: AppEspacio.sm,
+                            runSpacing: AppEspacio.sm,
                             children: [
                               FilledButton.icon(
                                 icon: const Icon(Icons.local_drink_rounded,
@@ -956,6 +1179,28 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                                   ),
                                 ),
                               ),
+                              // 1.28 (M3-B8): «Otra igual» —
+                              // repite la última venta (mismo
+                              // producto, pomo, método y
+                              // cantidad) en un toque, para el
+                              // siguiente cliente del mostrador.
+                              if (_ultimaVenta != null)
+                                OutlinedButton.icon(
+                                  icon: _repitiendo
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child:
+                                              CircularProgressIndicator(
+                                                  strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.replay_rounded,
+                                          size: 18),
+                                  label: Text(
+                                      'Otra igual: ${_etiquetaUltimaVenta()}'),
+                                  onPressed:
+                                      _repitiendo ? null : _repetirVenta,
+                                ),
                             ],
                           ),
                         ],

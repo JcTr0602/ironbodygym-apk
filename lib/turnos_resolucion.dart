@@ -469,3 +469,162 @@ bool huboAperturaEnFranja({
   return aperturas.any((a) =>
       !a.aperturaEn.isBefore(desde) && a.aperturaEn.isBefore(hasta));
 }
+
+/// 1.28 (M3-B2), PURO: el texto del resultado de «Comprobar
+/// cierres con el servidor» (el botón a demanda del hub y de
+/// Mi Turno). Tres verdades posibles y ninguna otra: no se
+/// pudo comprobar (sin conexión: lo local NO cambia), bajaron
+/// cierres, o ya estaba todo cuadrado.
+String textoComprobacionCierres({
+  required bool ok,
+  required int marcados,
+}) {
+  if (!ok) {
+    return 'No se pudo comprobar con el servidor (sin '
+        'conexión). Tus turnos locales no cambian.';
+  }
+  if (marcados > 0) {
+    return 'Se bajó $marcados cierre${marcados == 1 ? '' : 's'} '
+        'del servidor: todo cuadrado.';
+  }
+  return 'Todo cuadrado: no había cierres pendientes de bajar.';
+}
+
+/// 'HH:mm' de un ISO o de un 'HH:mm' ya corto; '' si no se
+/// puede. Local a este archivo puro (horaCorta vive en
+/// turno_service, que importa este archivo: no al revés).
+String _hhmmTurno(String? iso) {
+  if (iso == null) return '';
+  final s = iso.trim();
+  if (s.length >= 16 && (s[10] == 'T' || s[10] == ' ')) {
+    return s.substring(11, 16);
+  }
+  if (s.length >= 5 && s[2] == ':') return s.substring(0, 5);
+  return '';
+}
+
+/// Franja normalizada de una fila de apertura/cierre del
+/// espejo ('manana' | 'tarde'): el token viaja como 'manana',
+/// 'mañana', 'ma' o 'tarde' según la época de la fila.
+String _franjaDeFilaTurno(Map<String, dynamic> fila) {
+  final t = '${fila['turno'] ?? ''}'.toLowerCase();
+  return t.contains('tard') ? 'tarde' : 'manana';
+}
+
+/// Una apertura real de un día, para el detalle del hub
+/// (M3-B5): quién abrió, a qué hora, si cerró (y a qué
+/// hora, si el cierre la trae) y a quién cubría.
+typedef EntradaDiaTurno = ({
+  String nombre,
+  String apertura,
+  String? cierre,
+  bool cerrado,
+  String? cubreA,
+});
+
+/// El detalle de una franja en el día del hub (M3-B5).
+typedef DetalleFranjaTurno = ({
+  String franja,
+  String? programado,
+  List<EntradaDiaTurno> entradas,
+});
+
+/// 1.28 (M3-B5), PURO: el detalle REAL de un día para el
+/// hub: por franja, el programado y las aperturas que de
+/// verdad ocurrieron (del espejo de ESE día, no las de
+/// hoy), con su cierre casado por [cierreCorrespondeApertura]
+/// y la marca de suplencia. Una apertura sin cierre que le
+/// corresponda queda `cerrado == false`: «sin cerrar».
+/// Domingo: sin franjas (lista vacía); sábado: solo mañana.
+List<DetalleFranjaTurno> detalleDiaTurnos({
+  required DateTime fecha,
+  required Map<int, Map<String, String?>> patron,
+  required Map<String, Map<String, String?>> excepciones,
+  required List<Map<String, dynamic>> aperturasDia,
+  required List<Map<String, dynamic>> cierres,
+}) {
+  if (fecha.weekday == 7) return const [];
+  final franjas = ['manana', if (fecha.weekday != 6) 'tarde'];
+  final out = <DetalleFranjaTurno>[];
+  for (final f in franjas) {
+    final entradas = <EntradaDiaTurno>[];
+    final delDia = [
+      for (final a in aperturasDia)
+        if (_franjaDeFilaTurno(a) == f) a,
+    ]..sort((a, b) =>
+        '${a['hora_apertura']}'.compareTo('${b['hora_apertura']}'));
+    for (final a in delDia) {
+      final nombre = '${a['entrenador_nombre'] ?? ''}'.trim();
+      if (nombre.isEmpty) continue;
+      Map<String, dynamic>? cierre;
+      for (final c in cierres) {
+        if (cierreCorrespondeApertura(c, a)) {
+          cierre = c;
+          break;
+        }
+      }
+      final horaCierre = cierre == null
+          ? ''
+          : _hhmmTurno(
+              '${cierre['hora_cierre'] ?? cierre['creada_en'] ?? ''}');
+      final cubre = '${a['cubre_a'] ?? ''}'.trim();
+      entradas.add((
+        nombre: nombre,
+        apertura: _hhmmTurno('${a['hora_apertura'] ?? ''}'),
+        cierre: horaCierre.isEmpty ? null : horaCierre,
+        cerrado: cierre != null,
+        cubreA: cubre.isEmpty ? null : cubre,
+      ));
+    }
+    out.add((
+      franja: f,
+      programado: programadoEn(
+          fecha: fecha, franja: f, patron: patron, excepciones: excepciones),
+      entradas: entradas,
+    ));
+  }
+  return out;
+}
+
+/// 1.28 (M3-C2), PURO: el resumen de una celda del mapa
+/// semanal del hub, con su LENGUAJE: los días pasados y hoy
+/// cuentan lo REAL (aperturas que ocurrieron: `esReal`), los
+/// futuros cuentan lo PROGRAMADO. Es la misma semántica que
+/// la oleada A7 fijó para el conteo; aquí se devuelve también
+/// la clase para que la celda se pinte sólido (real) o en
+/// contorno (programado) sin que la UI reimplemente la regla.
+({int asignadas, int total, bool esReal}) resumenCeldaSemana({
+  required DateTime dia,
+  required DateTime hoy,
+  required Map<int, Map<String, String?>> patron,
+  required Map<String, Map<String, String?>> excepciones,
+  required List<AperturaTurno> aperturasDia,
+  required List<Map<String, dynamic>> cierres,
+}) {
+  if (dia.weekday == 7) {
+    return (asignadas: 0, total: 0, esReal: true);
+  }
+  final franjas = ['manana', if (dia.weekday != 6) 'tarde'];
+  final yaPaso =
+      !dia.isAfter(DateTime(hoy.year, hoy.month, hoy.day));
+  var asignadas = 0;
+  for (final f in franjas) {
+    if (yaPaso) {
+      if (huboAperturaEnFranja(
+          fecha: dia, franja: f, aperturas: aperturasDia)) {
+        asignadas++;
+      }
+    } else {
+      final m = estadoFranjaCompleto(
+        fecha: dia,
+        franja: f,
+        patron: patron,
+        excepciones: excepciones,
+        aperturas: aperturasDia,
+        cierres: cierres,
+      ).mostrado;
+      if (m != null && m.isNotEmpty) asignadas++;
+    }
+  }
+  return (asignadas: asignadas, total: franjas.length, esReal: yaPaso);
+}

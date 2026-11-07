@@ -733,6 +733,142 @@ Future<Set<int>> reversosPendientesVentaIds() async {
 Future<List<Map<String, dynamic>>> opsPendientesServicios() =>
     _opsServicioPendientes();
 
+/// 1.28 (M3-B4), PURO: conteo del SELLO DE FRESCURA — cuántas
+/// ops de Servicios siguen en la cola con fecha de negocio
+/// dentro de [desde, hasta] (ISO; null = sin cota) y cuántas
+/// de ellas son VENTAS. Una op sin fecha cuenta como de hoy
+/// mismo (la regla del cuadre: el payload sin fecha es del
+/// día en curso). Lo usan el cuadre («incluye N operaciones
+/// por sincronizar», solo hoy) y las estadísticas («no
+/// incluye N ventas por sincronizar», el período visible):
+/// sin el sello, una cifra calculada solo del espejo parecía
+/// definitiva llevando ventas sin subir dentro.
+({int total, int ventas}) contarOpsServiciosEnCola(
+  List<Map<String, dynamic>> ops, {
+  String? desde,
+  String? hasta,
+}) {
+  var total = 0;
+  var ventas = 0;
+  for (final op in ops) {
+    final p = _payloadDeOp(op);
+    final fechaP = fechaNegocioHabana(p['fecha']);
+    if (fechaP.isNotEmpty) {
+      if (desde != null && fechaP.compareTo(desde) < 0) continue;
+      if (hasta != null && fechaP.compareTo(hasta) > 0) continue;
+    }
+    total++;
+    if ('${op['tipo']}' == 'venta_servicio') ventas++;
+  }
+  return (total: total, ventas: ventas);
+}
+
+/// 1.28 (M3-C5), PURO: las filas de «Ventas de hoy» que aún
+/// viven SOLO en la cola (la venta se cobró en este teléfono
+/// y el espejo todavía no la trae). Cada fila nace con la
+/// MISMA forma que una fila del espejo más la marca
+/// `'en_cola': true`, para que la lista la pinte con su chip
+/// «Por sincronizar» y el predicado de visibilidad de la
+/// pantalla la filtre con la misma regla que a las espejo.
+/// Se descartan las que ya bajaron al espejo (por op_uuid) y
+/// las de otro día. [nombresCliente] resuelve el nombre del
+/// cliente por id (la pantalla lo trae del espejo de
+/// clientes); [personas] nombra al que registró por su
+/// telegram id, como hace la pantalla con las filas espejo.
+List<Map<String, dynamic>> ventasHoyDesdeCola({
+  required List<Map<String, dynamic>> ops,
+  required Set<String> uuidsEspejo,
+  required String fechaIso,
+  required Map<int, String> nombresCliente,
+  required Map<int, String> personas,
+}) {
+  final out = <Map<String, dynamic>>[];
+  for (final op in ops) {
+    if ('${op['tipo']}' != 'venta_servicio') continue;
+    final uuid = '${op['op_uuid'] ?? ''}';
+    if (uuid.isNotEmpty && uuidsEspejo.contains(uuid)) continue;
+    final p = _payloadDeOp(op);
+    final fechaP = fechaNegocioHabana(p['fecha']);
+    if (fechaP.isNotEmpty && fechaP != fechaIso) continue;
+    final autor = (op['telegram_id'] as num?)?.toInt();
+    final clienteId = (p['cliente_id'] as num?)?.toInt();
+    out.add({
+      'id': null,
+      'en_cola': true,
+      'op_uuid': uuid,
+      'tipo': '${p['tipo'] ?? ''}',
+      'cantidad': (p['cantidad'] as num?)?.toInt() ?? 1,
+      'precio_unitario': (p['precio_unitario'] as num?)?.toDouble() ?? 0,
+      'metodo': p['metodo'],
+      'casa': p['casa'] == true ? 1 : 0,
+      'cliente_id': clienteId,
+      'cliente_nombre': clienteId == null
+          ? 'Sin identificar'
+          : (nombresCliente[clienteId] ?? 'Sin identificar'),
+      'pomo_id': (p['pomo_id'] as num?)?.toInt(),
+      'vendedor_id': (p['vendedor_id'] as num?)?.toInt() ?? autor,
+      'registrado_por': autor,
+      'registrado_por_nombre': personas[autor] ?? '',
+      'responsable_efectivo_id':
+          (p['responsable_efectivo_id'] as num?)?.toInt(),
+      'comision_unitaria':
+          (p['comision_unitaria'] as num?)?.toDouble() ?? 0,
+      'fecha': fechaP.isEmpty ? fechaIso : fechaP,
+      'hora': p['hora'],
+      'reverso_de': null,
+    });
+  }
+  return out;
+}
+
+/// 1.28 (M3-B8): repite la ÚLTIMA venta de dosis registrada
+/// en este teléfono (la meta `ultima_venta_servicio` que
+/// guarda la pantalla de Servicios tras cada venta): mismo
+/// producto, mismo pomo, mismo método y MISMA cantidad —
+/// para el siguiente cliente del mostrador, en un toque
+/// desde Mi Turno. Se repite también el cliente si la venta
+/// original lo llevaba (p. ej. una venta a la Casa con su
+/// cliente): sin él, la validación de la Casa la rechazaría.
+/// El pomo ya inactivo o sin saldo hace fallar la llamada
+/// con el error del servicio, que la UI enseña tal cual.
+/// Devuelve los op_uuid creados.
+Future<List<String>> repetirUltimaVentaServicio(
+  Map<String, dynamic> ultima, {
+  required int topePomosAgua,
+}) async {
+  final metodo = ultima['metodo'] as String?;
+  final pomoId = (ultima['pomo_id'] as num?)?.toInt();
+  final clienteId = (ultima['cliente_id'] as num?)?.toInt();
+  final casa = ultima['casa'] == true;
+  if ('${ultima['forma'] ?? 'simple'}' == 'multiple') {
+    return registrarVentaMultipleServicio(
+      pomoId: pomoId ?? 0,
+      dosisN: (ultima['dosis_n'] as num?)?.toInt() ?? 1,
+      pomosM: (ultima['pomos_m'] as num?)?.toInt() ?? 0,
+      metodo: metodo,
+      vendedorEsDueno: false,
+      clienteId: clienteId,
+      casa: casa,
+      // El entrenador no ve los saldos (regla dura): su tope
+      // local de dosis es el centinela, como en el diálogo de
+      // venta; el pomo valida lo suyo contra el espejo.
+      topeDosis: 999999,
+      topePomos: topePomosAgua,
+    );
+  }
+  return [
+    await registrarVentaServicio(
+      tipo: '${ultima['tipo'] ?? 'dosis_sin_agua'}',
+      pomoId: pomoId,
+      cantidad: (ultima['cantidad'] as num?)?.toInt() ?? 1,
+      metodo: metodo,
+      vendedorEsDueno: false,
+      clienteId: clienteId,
+      casa: casa,
+    ),
+  ];
+}
+
 Future<List<Map<String, dynamic>>> _opsServicioPendientes(
     {DatabaseExecutor? txn}) async {
   // 1.28 (M3-A2): lectura de DINERO (pendingOpsLectura:

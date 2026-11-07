@@ -122,9 +122,11 @@ Future<bool> verificarCierresAutomaticos() async {
         await TurnoService.instance.confirmarCierre(
           turnoId: turnoId,
           forzado: true,
+          // 1.28 (M3-B6): el snapshot nace rotulado como
+          // cierre automático tardío; Mi Turno lo enseña al
+          // entrenador («tu turno se cerró automáticamente»).
+          automatico: true,
         );
-        // Marcar como automático en la BD local
-        // (se hace vía el campo tipo_cierre si existe)
         ejecutoAlguno = true;
       } catch (e) {
         // Continuar con el siguiente turno, pero con señal

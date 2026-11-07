@@ -223,3 +223,176 @@ class _PulsoState extends State<_Pulso>
     );
   }
 }
+
+/// 1.28 (M3-C6): esqueleto de la pantalla de Servicios —
+/// espejo estructural de su contenido (tarjeta del pomo con
+/// su medidor, botones de venta, cuadre y primeras filas de
+/// ventas), con el mismo padding de la lista real para que
+/// la llegada del dato no mueva nada bajo el dedo.
+class SkeletonServicios extends StatelessWidget {
+  const SkeletonServicios({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: const [
+        // Tarjeta del pomo: etiqueta, nombre, saldo y medidor.
+        Tarjeta(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonLinea(ancho: 90, alto: 12),
+              SizedBox(height: 8),
+              SkeletonLinea(ancho: 190, alto: 24),
+              SizedBox(height: 10),
+              SkeletonLinea(ancho: 130, alto: 30),
+              SizedBox(height: 8),
+              SkeletonLinea(alto: 8),
+              SizedBox(height: 6),
+              SkeletonLinea(ancho: 150, alto: 13),
+            ],
+          ),
+        ),
+        SizedBox(height: AppEspacio.md),
+        // Botones de venta.
+        Row(
+          children: [
+            Expanded(child: SkeletonLinea(alto: 42)),
+            SizedBox(width: AppEspacio.sm),
+            Expanded(child: SkeletonLinea(alto: 42)),
+            SizedBox(width: AppEspacio.sm),
+            Expanded(child: SkeletonLinea(alto: 42)),
+          ],
+        ),
+        SizedBox(height: AppEspacio.md),
+        // Cuadre de hoy.
+        Tarjeta(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonLinea(ancho: 120, alto: 18),
+              SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: SkeletonLinea(ancho: 110, alto: 26)),
+                  SizedBox(width: AppEspacio.md),
+                  Expanded(child: SkeletonLinea(ancho: 110, alto: 26)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: AppEspacio.md),
+        SkeletonLinea(ancho: 140, alto: 18),
+        SizedBox(height: AppEspacio.sm),
+        Tarjeta(
+          child: Row(
+            children: [
+              SkeletonLinea(ancho: 36, alto: 36),
+              SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonLinea(ancho: 150, alto: 15),
+                    SizedBox(height: 6),
+                    SkeletonLinea(ancho: 210, alto: 13),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: AppEspacio.sm),
+        Tarjeta(
+          child: Row(
+            children: [
+              SkeletonLinea(ancho: 36, alto: 36),
+              SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonLinea(ancho: 130, alto: 15),
+                    SizedBox(height: 6),
+                    SkeletonLinea(ancho: 190, alto: 13),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.28 (M3-C6): esqueleto de la pantalla de Nómina —
+/// espejo de su estructura (tarjeta del cierre, cabecera del
+/// mes y las tarjetas de cada entrenador), mismo padding
+/// que la lista real.
+class SkeletonNomina extends StatelessWidget {
+  const SkeletonNomina({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: const [
+        Tarjeta(
+          child: Row(
+            children: [
+              SkeletonLinea(ancho: 42, alto: 42),
+              SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonLinea(ancho: 170, alto: 17),
+                    SizedBox(height: 6),
+                    SkeletonLinea(ancho: 230, alto: 13),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: AppEspacio.md),
+        SkeletonLinea(ancho: 150, alto: 20),
+        SizedBox(height: 6),
+        SkeletonLinea(ancho: 210, alto: 14),
+        SizedBox(height: AppEspacio.md),
+        Tarjeta(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonLinea(ancho: 130, alto: 18),
+              SizedBox(height: 10),
+              SkeletonLinea(ancho: 240, alto: 14),
+              SizedBox(height: 6),
+              SkeletonLinea(ancho: 200, alto: 14),
+              SizedBox(height: 10),
+              SkeletonLinea(ancho: 160, alto: 24),
+            ],
+          ),
+        ),
+        SizedBox(height: AppEspacio.md),
+        Tarjeta(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonLinea(ancho: 130, alto: 18),
+              SizedBox(height: 10),
+              SkeletonLinea(ancho: 240, alto: 14),
+              SizedBox(height: 6),
+              SkeletonLinea(ancho: 200, alto: 14),
+              SizedBox(height: 10),
+              SkeletonLinea(ancho: 160, alto: 24),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}

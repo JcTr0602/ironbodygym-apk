@@ -581,3 +581,201 @@ String csvEstadisticas(
   }
   return sb.toString();
 }
+
+// ------------------------------------------------------------
+// 1.28 (M3-B3/C1/C4): período a medida, cortes por vendedor y
+// por pomo, deltas contra el período anterior y autonomía.
+// ------------------------------------------------------------
+
+/// ¿[f] es una fecha ISO 'yyyy-mm-dd' REAL (con día válido
+/// en su mes)? La comparación lexicográfica engaña con
+/// fechas imposibles (2026-02-31 «cae» dentro de febrero):
+/// el filtro de período las deja fuera, como hace
+/// [diaSemanaHabana] con los agregados por día (M3-A9).
+bool esFechaIsoValida(String? f) {
+  if (f == null) return false;
+  return diaSemanaHabana(f) != null;
+}
+
+/// Filtra [ventas] a las cuya fecha cae en [desde, hasta]
+/// (ISO 'yyyy-mm-dd', ambos extremos INCLUIDOS; null = sin
+/// cota en ese extremo). Las filas sin fecha válida quedan
+/// fuera de cualquier rango: no se sabe cuándo pasaron.
+List<Map<String, dynamic>> ventasEnRango(
+  List<Map<String, dynamic>> ventas, {
+  String? desde,
+  String? hasta,
+}) {
+  return [
+    for (final v in ventas)
+      if (_fechaEnRango(v, desde, hasta)) v,
+  ];
+}
+
+bool _fechaEnRango(Map<String, dynamic> v, String? desde, String? hasta) {
+  final f = '${v['fecha'] ?? ''}';
+  final dia = f.length >= 10 ? f.substring(0, 10) : f;
+  if (!esFechaIsoValida(dia)) return false;
+  if (desde != null && dia.compareTo(desde) < 0) return false;
+  if (hasta != null && dia.compareTo(hasta) > 0) return false;
+  return true;
+}
+
+/// El rango de IGUAL longitud inmediatamente anterior a
+/// [desde, hasta]: para un rango de N días, el anterior va
+/// de (desde − N) a (desde − 1). Aritmética de calendario
+/// en UTC (regla de la casa: el DST no roba días). Si las
+/// fechas no son válidas devuelve null.
+({String desde, String hasta})? rangoPeriodoAnterior(
+    String desde, String hasta) {
+  final d = DateTime.tryParse(desde);
+  final h = DateTime.tryParse(hasta);
+  if (d == null || h == null) return null;
+  if (!esFechaIsoValida(desde) || !esFechaIsoValida(hasta)) {
+    return null;
+  }
+  final du = DateTime.utc(d.year, d.month, d.day);
+  final hu = DateTime.utc(h.year, h.month, h.day);
+  final dias = hu.difference(du).inDays + 1;
+  if (dias <= 0) return null;
+  final antH = du.subtract(const Duration(days: 1));
+  final antD = antH.subtract(Duration(days: dias - 1));
+  String iso(DateTime x) =>
+      '${x.year.toString().padLeft(4, '0')}-'
+      '${x.month.toString().padLeft(2, '0')}-'
+      '${x.day.toString().padLeft(2, '0')}';
+  return (desde: iso(antD), hasta: iso(antH));
+}
+
+/// Variación porcentual de [actual] contra [anterior]:
+/// null cuando no hay base comparable (anterior <= 0): la
+/// UI pinta «sin base» en vez de un porcentaje inventado.
+double? deltaPct(double actual, double anterior) {
+  if (anterior <= 0) return null;
+  return (actual - anterior) / anterior * 100;
+}
+
+int? _tidToleranteEst(dynamic v) {
+  if (v is num) return v.toInt();
+  return int.tryParse('${v ?? ''}'.trim());
+}
+
+/// Corte por vendedor (M3-B3): cuánto vendió cada quién en
+/// el período. Solo ventas COMERCIALES (la Cuenta a la Casa
+/// no es venta y no genera comisión). [dosis] cuenta solo
+/// dosis; [unidades] suma dosis + pomos de agua suelta;
+/// [ingresos] es todo lo comercial; [comision] la suma de
+/// `comision_monto` (o unitaria × cantidad cuando la fila
+/// no trae el monto). Orden: ingresos descendente. La
+/// entrada espera ventas ya sin reversos
+/// (ventasServicioSinReversos).
+List<
+    ({
+      int? tid,
+      int dosis,
+      int unidades,
+      double ingresos,
+      double comision
+    })> agruparPorVendedor(List<Map<String, dynamic>> ventas) {
+  final acc = <int?, ({int dosis, int u, double ing, double com})>{};
+  for (final v in ventas) {
+    if (esCasaTolerante(v['casa'])) continue;
+    final tipo = '${v['tipo'] ?? ''}';
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 1;
+    final esDosis = tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua';
+    if (!esDosis && tipo != 'agua_suelta') continue;
+    final tid = _tidToleranteEst(v['vendedor_id']) ??
+        _tidToleranteEst(v['registrado_por']);
+    final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
+    final com = (v['comision_monto'] as num?)?.toDouble() ??
+        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+    final a = acc[tid] ?? (dosis: 0, u: 0, ing: 0.0, com: 0.0);
+    acc[tid] = (
+      dosis: a.dosis + (esDosis ? cant : 0),
+      u: a.u + cant,
+      ing: a.ing + precio * cant,
+      com: a.com + com,
+    );
+  }
+  final out = [
+    for (final e in acc.entries)
+      (
+        tid: e.key,
+        dosis: e.value.dosis,
+        unidades: e.value.u,
+        ingresos: e.value.ing,
+        comision: e.value.com,
+      ),
+  ];
+  out.sort((a, b) => b.ingresos.compareTo(a.ingresos));
+  return out;
+}
+
+/// Corte por pomo/producto (M3-B3): cuánto vendió cada
+/// pomo. El MARGEN de cada pomo sale de los costos
+/// CONGELADOS en la propia venta (costo_dosis_snapshot +
+/// costo_agua_snapshot): es el margen que cada venta dejó
+/// AL VENDERSE, distinto a propósito del margen de
+/// [calcular1B], que revalúa todo al costo ACTUAL del bote.
+/// Sin pomo (el agua suelta es stock común) se agrupa bajo
+/// `tid == null` con la etiqueta de agua común en la UI.
+/// Orden: margen descendente.
+List<
+    ({
+      int? pomoId,
+      int dosis,
+      double ingresos,
+      double comision,
+      double margen
+    })> agruparPorPomo(List<Map<String, dynamic>> ventas) {
+  final acc = <int?, ({int dosis, double ing, double com, double mar})>{};
+  for (final v in ventas) {
+    if (esCasaTolerante(v['casa'])) continue;
+    final tipo = '${v['tipo'] ?? ''}';
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 1;
+    final esDosis = tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua';
+    if (!esDosis && tipo != 'agua_suelta') continue;
+    final pomo = _tidToleranteEst(v['pomo_id']);
+    final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
+    final costo = ((v['costo_dosis_snapshot'] as num?)?.toDouble() ?? 0) +
+        ((v['costo_agua_snapshot'] as num?)?.toDouble() ?? 0);
+    final com = (v['comision_monto'] as num?)?.toDouble() ??
+        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+    final a = acc[pomo] ?? (dosis: 0, ing: 0.0, com: 0.0, mar: 0.0);
+    acc[pomo] = (
+      dosis: a.dosis + (esDosis ? cant : 0),
+      ing: a.ing + precio * cant,
+      com: a.com + com,
+      mar: a.mar + (precio - costo) * cant - com,
+    );
+  }
+  final out = [
+    for (final e in acc.entries)
+      (
+        pomoId: e.key,
+        dosis: e.value.dosis,
+        ingresos: e.value.ing,
+        comision: e.value.com,
+        margen: e.value.mar,
+      ),
+  ];
+  out.sort((a, b) => b.margen.compareTo(a.margen));
+  return out;
+}
+
+/// Días de autonomía de UN pomo al ritmo de venta observado
+/// (M3-C4): saldo ÷ (dosis vendidas ÷ días de la ventana).
+/// null cuando no hay ritmo computable (sin ventas en la
+/// ventana): el nivel queda 'sin_dato', como en
+/// [nivelAutonomiaPomo]. Un saldo de 0 con ritmo da 0 días
+/// (se agota ya).
+int? autonomiaPomoDias({
+  required int saldo,
+  required int dosisVendidas,
+  required int diasVentana,
+}) {
+  if (diasVentana <= 0 || dosisVendidas <= 0) return null;
+  final ritmo = dosisVendidas / diasVentana;
+  if (ritmo <= 0) return null;
+  return (saldo / ritmo).floor();
+}

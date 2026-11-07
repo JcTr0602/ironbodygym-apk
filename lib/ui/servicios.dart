@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
+import '../estadisticas_servicios.dart';
 import '../etiqueta_producto.dart';
 import '../fotos.dart';
 import '../localdb.dart';
@@ -19,6 +20,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
 import 'servicios_estadisticas.dart';
@@ -81,6 +83,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   int? _desglosePomoId;
   Map<int, String> _personas = {};
   int? _miTid;
+  // 1.28 (M3-B4): ops de Servicios de HOY aún en la cola: el
+  // sello de frescura del cuadre («incluye N por
+  // sincronizar»). Las ventas en cola ya componen la lista
+  // de hoy (M3-C5); el sello cuenta TODAS las ops del día.
+  int _opsColaHoy = 0;
+  // 1.28 (M3-C4): autonomía del pomo seleccionado (solo se
+  // calcula para el dueño, en _cargarDesglose).
+  int? _autonomiaSelDias;
+  String? _nivelSel;
 
   @override
   void initState() {
@@ -229,6 +240,50 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       ..sort((a, b) =>
           ((b['id'] as num?)?.toInt() ?? 0)
               .compareTo((a['id'] as num?)?.toInt() ?? 0));
+    // 1.28 (M3-C5 + B4): la cola de Servicios de hoy compone
+    // la pantalla: las VENTAS aún sin espejar entran en la
+    // lista con su marca «en cola» (hasta hoy una venta
+    // offline no tenía fila: ni se veía ni se podía revisar),
+    // y el conteo de ops del día alimenta el sello de
+    // frescura del cuadre.
+    final opsCola = await opsPendientesServicios();
+    final opsColaHoy =
+        contarOpsServiciosEnCola(opsCola, desde: hoy, hasta: hoy).total;
+    final uuidsEspejo = <String>{
+      for (final v in ventasHoyEspejo)
+        if ('${v['op_uuid'] ?? ''}'.trim().isNotEmpty)
+          '${v['op_uuid']}'.trim(),
+    };
+    final idsClientesCola = <int>{};
+    for (final op in opsCola) {
+      if ('${op['tipo']}' != 'venta_servicio') continue;
+      try {
+        final p = jsonDecode(op['payload'] as String);
+        if (p is Map) {
+          final cid = (p['cliente_id'] as num?)?.toInt();
+          if (cid != null) idsClientesCola.add(cid);
+        }
+      } catch (_) {}
+    }
+    final nombresCliente = <int, String>{};
+    if (idsClientesCola.isNotEmpty) {
+      for (final c in await LocalDb.instance
+          .mirrorPorIds('clientes', idsClientesCola.toList())) {
+        final cid = (c['id'] as num?)?.toInt();
+        if (cid != null) {
+          nombresCliente[cid] = '${c['nombre'] ?? 'Sin identificar'}';
+        }
+      }
+    }
+    final enCola = ventasHoyDesdeCola(
+      ops: opsCola,
+      uuidsEspejo: uuidsEspejo,
+      fechaIso: hoy,
+      nombresCliente: nombresCliente,
+      personas: personas,
+    ).where(visibleParaMi).toList();
+    // Las de la cola van primero: son las más recientes.
+    final ventasHoy = [...enCola, ...deHoy];
     final cuadre = tid == null
         ? const <String, dynamic>{}
         : await cuadreServiciosDia(tid, hoy);
@@ -257,7 +312,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       }
       _cuadre = cuadre;
       _cuadreGym = cuadreGym;
-      _ventasHoy = deHoy;
+      _ventasHoy = ventasHoy;
+      _opsColaHoy = opsColaHoy;
       _reversadas = reversadas;
       _cargando = false;
       _errorCarga = false;
@@ -287,12 +343,47 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // Argón Servicios #4: el desglose compone espejo + cola,
     // igual que el saldo de la cabecera.
     final ops = await opsPendientesServicios();
+    // 1.28 (M3-C4): autonomía del pomo seleccionado al ritmo
+    // de los últimos 30 días (dosis comerciales del espejo).
+    // SOLO corre aquí, que ya es territorio del dueño: el
+    // entrenador jamás ve el nivel de su pomo (regla dura).
+    int? autoDias;
+    String? nivel;
+    final pomoFila = _misPomos
+        .where((l) => (l['id'] as num?)?.toInt() == pid)
+        .firstOrNull;
+    if (pomoFila != null) {
+      final hoyD = ahoraHabana();
+      final desdeU =
+          DateTime.utc(hoyD.year, hoyD.month, hoyD.day - 29);
+      final desdeIso = '${desdeU.year.toString().padLeft(4, '0')}-'
+          '${desdeU.month.toString().padLeft(2, '0')}-'
+          '${desdeU.day.toString().padLeft(2, '0')}';
+      var dosis30 = 0;
+      for (final v in ventas) {
+        final f = fechaNegocioHabana(v['fecha']);
+        if (f.isEmpty || f.compareTo(desdeIso) < 0) continue;
+        if (esCasaTolerante(v['casa'])) continue;
+        final tipo = '${v['tipo'] ?? ''}';
+        if (tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua') {
+          dosis30 += (v['cantidad'] as num?)?.toInt() ?? 1;
+        }
+      }
+      autoDias = autonomiaPomoDias(
+        saldo: (pomoFila['saldo_local'] as num?)?.toInt() ?? 0,
+        dosisVendidas: dosis30,
+        diasVentana: 30,
+      );
+      nivel = nivelAutonomiaPomo(autoDias);
+    }
     if (!mounted || _pomoSel != pid) return;
     setState(() {
       _desgloseVentas = ventas;
       _desgloseSalidas = salidas;
       _desgloseOps = ops;
       _desglosePomoId = pid;
+      _autonomiaSelDias = autoDias;
+      _nivelSel = nivel;
     });
   }
 
@@ -899,6 +990,35 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           ),
         ];
       }
+      // 1.28 (M3-B8): la última venta de este teléfono queda
+      // memorizada para el «Otra igual» de Mi Turno. Solo
+      // entrenador (la tarjeta de venta rápida es suya) y
+      // nunca con beneficiario «dueño» (esa forma no se
+      // repite sin su selector).
+      if (!_esDueno && !paraDuenoCasa) {
+        try {
+          await LocalDb.instance.setMeta(
+            'ultima_venta_servicio',
+            jsonEncode({
+              if (tipo != 'agua_suelta' && cantidad > 1) ...{
+                'forma': 'multiple',
+                'dosis_n': cantidad,
+                'pomos_m': tipo == 'dosis_con_agua' ? cantidad : 0,
+              } else ...{
+                'forma': 'simple',
+                'tipo': tipo,
+                'cantidad': cantidad,
+              },
+              'metodo': metodo,
+              'pomo_id': tipo == 'agua_suelta'
+                  ? null
+                  : (pomoVenta!['id'] as num).toInt(),
+              'cliente_id': (cliente?['id'] as num?)?.toInt(),
+              'casa': esCasaCliente,
+            }),
+          );
+        } catch (_) {}
+      }
       final cobradoEn = ahoraHabana();
       await _cargar();
       // v1.13.0 (E3): Deshacer 15 s exactos desde el cobro (solo
@@ -1470,6 +1590,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         topeDosis: topeFinal,
         topePomos: topePomos,
       );
+      // 1.28 (M3-B8): «Otra igual» también desde la múltiple.
+      if (!_esDueno && !paraDuenoCasa) {
+        try {
+          await LocalDb.instance.setMeta(
+            'ultima_venta_servicio',
+            jsonEncode({
+              'forma': 'multiple',
+              'dosis_n': n,
+              'pomos_m': m,
+              'metodo': metodo,
+              'pomo_id': (pomoFinal['id'] as num).toInt(),
+              'cliente_id': (cliente?['id'] as num?)?.toInt(),
+              'casa': esCasa,
+            }),
+          );
+        } catch (_) {}
+      }
       final cobradoEn = ahoraHabana();
       await _cargar();
       _mostrarDeshacer(opUuids, cobradoEn);
@@ -1782,7 +1919,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando servicios…')
+          // 1.28 (M3-C6): esqueleto espejo de la pantalla (la
+          // misma estructura y alturas que el contenido), no
+          // un spinner pelado.
+          ? const SkeletonServicios()
           : _errorCarga
               ? EstadoError(
                   titulo: 'No se pudieron cargar los servicios',
@@ -2001,11 +2141,31 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           // Ítem 6: el saldo del pomo solo lo ve el dueño; al
           // entrenador solo el agua común (pomo ciego).
           if (pomo == null)
-            Text(
-              _esDueno
-                  ? 'Abre un bote en Administración para tener principal.'
-                  : 'Pide al dueño que te rellene un pomo.',
-              style: AppTexto.cuerpo,
+            // 1.28 (M3-C6): el vacío con SALIDA: el dueño salta
+            // directo a abrir el bote, sin callejón de texto.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _esDueno
+                      ? 'Abre un bote en Administración para tener principal.'
+                      : 'Pide al dueño que te rellene un pomo.',
+                  style: AppTexto.cuerpo,
+                ),
+                if (_esDueno) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.science_rounded, size: 18),
+                    label: const Text('Abrir administración'),
+                    onPressed: () => Navigator.push(
+                      context,
+                      RutaIron(
+                          builder: (_) =>
+                              const ServiciosAdminScreen()),
+                    ).then((_) => _cargar()),
+                  ),
+                ],
+              ],
             )
           else if (_esDueno)
             Column(
@@ -2029,12 +2189,29 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                               ?.toInt(),
                     ),
                     minHeight: 8,
-                    color: AppColores.naranja,
+                    // 1.28 (M3-C4): la barra se tiñe por el
+                    // nivel de autonomía al ritmo actual
+                    // (verde holgada · ámbar justa · rojo
+                    // crítica); sin ritmo computable queda la
+                    // naranja de siempre. Rama SOLO del dueño.
+                    color: switch (_nivelSel) {
+                      'critica' => AppColores.error,
+                      'justa' => AppColores.alerta,
+                      'holgada' => AppColores.exito,
+                      _ => AppColores.naranja,
+                    },
                     backgroundColor:
                         AppColores.naranja.withValues(alpha: 0.12),
                   ),
                 ),
                 const SizedBox(height: 4),
+                // 1.28 (M3-C4): los días que el pomo aguanta
+                // al ritmo de venta de los últimos 30 días.
+                if (_autonomiaSelDias != null)
+                  Text(
+                    'Al ritmo actual: ~$_autonomiaSelDias días',
+                    style: AppTexto.metadato,
+                  ),
                 Text('Agua común: ${_agua.saldo} pomos',
                     style: AppTexto.secundario),
               ],
@@ -2362,6 +2539,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
             ],
           ),
+          // 1.28 (M3-B4): sello de frescura del cuadre. El
+          // cuadre YA compone espejo + cola (sus cifras
+          // incluyen estas ops); el sello lo dice para que
+          // nadie lo tome por definitivo mientras el teléfono
+          // aún no sube.
+          if (_opsColaHoy > 0) ...[
+            const SizedBox(height: 10),
+            ChipEstado.semantico(
+              texto: 'Incluye $_opsColaHoy '
+                  'operacion${_opsColaHoy == 1 ? '' : 'es'} por sincronizar',
+              significado: SignificadoChip.info,
+              icono: Icons.sync_rounded,
+            ),
+          ],
           // Rediseño 1.18 (Jc 2026-10-29): Estadísticas y
           // Ranking bajan del AppBar a enlaces con texto aquí.
           // Ranking: dueño siempre; entrenador solo con su
@@ -2425,6 +2616,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final yaReversada =
         _reversadas.contains((v['id'] as num?)?.toInt());
     final esCasa = (v['casa'] as num?)?.toInt() == 1;
+    // 1.28 (M3-C5): la fila en cola (aún solo en este
+    // teléfono) y los estados con su chip: la lista deja de
+    // mezclar en silencio lo firme con lo pendiente.
+    final enCola = v['en_cola'] == true;
+    final atenuada = esReverso || yaReversada;
     final monto = ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
         ((v['cantidad'] as num?)?.toDouble() ?? 0);
     final tipoTxt = switch ('${v['tipo']}') {
@@ -2461,7 +2657,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         insignia = 'Registrada por el dueño a tu nombre';
       }
     }
-    return Card(
+    final tarjeta = Card(
       margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         onTap: () => _detalleVenta(v),
@@ -2477,7 +2673,34 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ? AppColores.alerta
                   : AppColores.naranja,
         ),
-        title: Text(esReverso ? 'Reverso · $tipoTxt' : tipoTxt),
+        // 1.28 (M3-C5): el título lleva los chips de estado —
+        // el método ya viaja en el subtítulo y la Casa con su
+        // estrella; aquí van los estados que antes no se
+        // veían: por sincronizar y revertida.
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(esReverso ? 'Reverso · $tipoTxt' : tipoTxt,
+                  overflow: TextOverflow.ellipsis),
+            ),
+            if (enCola) ...[
+              const SizedBox(width: 6),
+              const ChipEstado.semantico(
+                texto: 'Por sincronizar',
+                significado: SignificadoChip.info,
+                icono: Icons.sync_rounded,
+              ),
+            ],
+            if (yaReversada && !esReverso) ...[
+              const SizedBox(width: 6),
+              const ChipEstado.semantico(
+                texto: 'Revertida',
+                significado: SignificadoChip.error,
+                icono: Icons.undo_rounded,
+              ),
+            ],
+          ],
+        ),
         subtitle: Text(
           '${v['cliente_nombre'] ?? 'Sin identificar'}'
           '${esCasa ? ' · Casa' : ' · ${v['metodo'] ?? ''}'}'
@@ -2491,7 +2714,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: esReverso ? AppColores.error : null)),
-            if (!esReverso && !yaReversada)
+            // Una venta en cola no tiene id de espejo: no se
+            // puede revertir hasta que sincronice (su salida
+            // es el Deshacer de los 15 s al vender).
+            if (!esReverso && !yaReversada && !enCola)
               IconButton(
                 tooltip: 'Revertir',
                 icon: const Icon(Icons.undo_rounded, size: 20),
@@ -2501,6 +2727,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ),
       ),
     );
+    // 1.28 (M3-C5): lo revertido se lee atenuado de un
+    // vistazo, sin abrir la ficha.
+    return atenuada ? Opacity(opacity: 0.55, child: tarjeta) : tarjeta;
   }
 
   /// 10/25: la venta original de un reverso, por PK.
@@ -2572,6 +2801,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               fila('Precio', '${fmtMonto(precio)} CUP'),
               fila('Total', '${fmtMonto(monto)} CUP'),
               fila('Método', '${v['metodo'] ?? '—'}'),
+              // 1.28 (M3-C5): la ficha de una venta en cola lo
+              // dice: aún vive solo en este teléfono.
+              if (v['en_cola'] == true)
+                fila('Estado', 'Por sincronizar'),
               fila('Registrado por',
                   '${v['registrado_por_nombre'] ?? '—'}'),
               if (esCasa) fila('Cuenta', 'Casa'),
@@ -2600,7 +2833,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           ),
         ),
         acciones: [
-          if (!esReverso && !yaReversada)
+          // 1.28 (M3-C5): una venta aún en cola no se revierte
+          // (no tiene id de espejo): se deshace al vender.
+          if (!esReverso && !yaReversada && v['en_cola'] != true)
             TextButton(
               onPressed: () async {
                 Navigator.pop(ctx);

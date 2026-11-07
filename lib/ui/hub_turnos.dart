@@ -10,14 +10,17 @@
 /// calendario de excepciones): ese configura, este opera el día.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
 import '../permisos_entrenador.dart';
 import '../negocio.dart';
+import '../sync.dart';
 import '../tiempo.dart';
 import '../turno_service.dart';
 import '../turnos_resolucion.dart';
@@ -60,6 +63,14 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   Map<String, Map<String, String?>> _excepciones = {};
   List<AperturaTurno> _aperturas = [];
   List<Map<String, dynamic>> _cierres = [];
+  // 1.28 (M3-B5): las filas CRUDAS del espejo de aperturas,
+  // para componer el detalle real de cualquier día al
+  // tocarlo (las resueltas de _aperturasPorDia no traen la
+  // hora de cierre ni el id de la fila).
+  List<Map<String, dynamic>> _aperturasEspejo = [];
+  // 1.28 (M3-B2): la comprobación de cierres a demanda va en
+  // curso (deshabilita el botón y enseña su progreso).
+  bool _comprobando = false;
   // 1.28 (M3-A7): aperturas resueltas por día de la semana
   // visible (clave: fecha ISO), para que el mapa de calor
   // cuente lo que de verdad pasó CADA día y no solo lo de hoy.
@@ -213,6 +224,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
         _patron = patron;
         _excepciones = excepciones;
         _aperturas = aperturas;
+        _aperturasEspejo = apMirror;
         _cierres = cierres;
         _aperturasPorDia = aperturasPorDia;
         _miTurnoVisible = miVisible;
@@ -472,6 +484,12 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   /// franjas con apertura REAL de ese día (lo que de verdad
   /// pasó); en días futuros, las franjas con entrenador
   /// programado (patrón + excepciones).
+  /// 1.28 (M3-C2): la celda lo DICE con dos lenguajes: SÓLIDA
+  /// cuando cuenta lo que pasó (real) y en CONTORNO cuando
+  /// cuenta lo programado, con la leyenda bajo la fila. El
+  /// conteo lo resuelve la función pura resumenCeldaSemana
+  /// (la misma semántica de A7). 1.28 (M3-B5): tocar la
+  /// celda abre el detalle real del día.
   Widget _semanaCalor() {
     final lunes = _hoy.subtract(Duration(days: _hoy.weekday - 1));
     const letras = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -488,6 +506,38 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 _celdaDia(lunes.add(Duration(days: i)), letras[i]),
             ],
           ),
+          const SizedBox(height: 10),
+          // 1.28 (M3-C2): la leyenda del doble lenguaje.
+          Row(
+            children: [
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppColores.naranja.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Text('Lo que pasó', style: AppTexto.metadato),
+              const SizedBox(width: 16),
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(
+                      color: AppColores.naranja, width: 1.5),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Text('Lo programado', style: AppTexto.metadato),
+              const Spacer(),
+              Text('Toca un día para verlo',
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context))),
+            ],
+          ),
         ],
       ),
     );
@@ -497,7 +547,8 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
     final esHoy = dia.year == _hoy.year &&
         dia.month == _hoy.month &&
         dia.day == _hoy.day;
-    Widget caja(Widget hijo, {Color? fondo, bool bordeHoy = false}) {
+    Widget caja(Widget hijo,
+        {Color? fondo, bool bordeHoy = false, bool contorno = false}) {
       return Container(
         width: 36,
         height: 36,
@@ -507,14 +558,16 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
           border: Border.all(
               color: bordeHoy
                   ? AppColores.naranja
-                  : AppColores.borde(context),
-              width: bordeHoy ? 1.5 : 1),
+                  : contorno
+                      ? AppColores.naranja.withValues(alpha: 0.75)
+                      : AppColores.borde(context),
+              width: bordeHoy || contorno ? 1.5 : 1),
         ),
         child: Center(child: hijo),
       );
     }
 
-    return Column(
+    final celda = Column(
       children: [
         Text(letra, style: AppTexto.metadato),
         const SizedBox(height: 4),
@@ -523,51 +576,211 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
               bordeHoy: esHoy)
         else
           Builder(builder: (_) {
-            final franjas = ['manana', if (dia.weekday != 6) 'tarde'];
-            var asignadas = 0;
-            // 1.28 (M3-A7): días pasados y hoy cuentan las
-            // franjas con apertura REAL de ese día (un suplente
-            // que abrió sin estar programado cuenta; un
-            // programado que no vino, no). Los días futuros no
-            // tienen aperturas: cuentan el programado, como
-            // siempre. Antes TODOS los días se resolvían con
-            // las aperturas de HOY: el mapa mentía en los dos
-            // sentidos.
-            final yaPaso = !dia.isAfter(
-                DateTime(_hoy.year, _hoy.month, _hoy.day));
-            final apsDia = _aperturasPorDia[isoFechaTurno(dia)] ??
-                const <AperturaTurno>[];
-            for (final f in franjas) {
-              if (yaPaso) {
-                if (huboAperturaEnFranja(
-                    fecha: dia, franja: f, aperturas: apsDia)) {
-                  asignadas++;
-                }
-              } else {
-                final m = estadoFranjaCompleto(
-                  fecha: dia,
-                  franja: f,
-                  patron: _patron,
-                  excepciones: _excepciones,
-                  aperturas: apsDia,
-                  cierres: _cierres,
-                ).mostrado;
-                if (m != null && m.isNotEmpty) asignadas++;
-              }
-            }
+            // 1.28 (M3-A7 + C2): el conteo lo resuelve la
+            // función pura (días pasados/hoy = aperturas
+            // reales de ESE día; futuros = programado) y la
+            // clase decide el lenguaje: sólido = real,
+            // contorno = programado.
+            final r = resumenCeldaSemana(
+              dia: dia,
+              hoy: _hoy,
+              patron: _patron,
+              excepciones: _excepciones,
+              aperturasDia: _aperturasPorDia[isoFechaTurno(dia)] ??
+                  const <AperturaTurno>[],
+              cierres: _cierres,
+            );
+            final cobertura =
+                r.total == 0 ? 0.0 : r.asignadas / r.total;
             return caja(
-              Text('$asignadas/${franjas.length}',
+              Text('${r.asignadas}/${r.total}',
                   style: AppTexto.etiqueta
                       .copyWith(fontWeight: FontWeight.bold)),
-              fondo: AppColores.naranja
-                  .withValues(alpha: 0.10 + 0.45 * (asignadas / franjas.length)),
+              fondo: r.esReal
+                  ? AppColores.naranja
+                      .withValues(alpha: 0.10 + 0.45 * cobertura)
+                  : null,
               bordeHoy: esHoy,
+              contorno: !r.esReal,
             );
           }),
         const SizedBox(height: 4),
         Text('${dia.day}', style: AppTexto.minuscula),
       ],
     );
+    // 1.28 (M3-B5): el día se abre al tocarlo.
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadio.sm),
+      onTap: () => _abrirDetalleDia(dia),
+      child: celda,
+    );
+  }
+
+  /// 1.28 (M3-B5): la hoja del día tocado en el mapa semanal:
+  /// por franja, lo programado y lo que DE VERDAD pasó (quién
+  /// abrió, a qué hora, si cerró, a quién cubría), compuesto
+  /// con la función pura detalleDiaTurnos sobre las filas
+  /// crudas del espejo de ESE día. El dueño puede además
+  /// registrar la suplencia o el cambio de programado de ese
+  /// día (la misma excepción que escribe el calendario).
+  Future<void> _abrirDetalleDia(DateTime dia) async {
+    final iso = isoFechaTurno(dia);
+    final apsDia = [
+      for (final a in _aperturasEspejo)
+        if ('${a['fecha_turno'] ?? ''}' == iso) a,
+    ];
+    final detalle = detalleDiaTurnos(
+      fecha: dia,
+      patron: _patron,
+      excepciones: _excepciones,
+      aperturasDia: apsDia,
+      cierres: _cierres,
+    );
+    final esFuturo =
+        dia.isAfter(DateTime(_hoy.year, _hoy.month, _hoy.day));
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                dia.weekday == 7
+                    ? 'Domingo ${dia.day}/${dia.month}/${dia.year}'
+                    : '${dia.day}/${dia.month}/${dia.year}',
+                style: AppTexto.subtitulo,
+              ),
+              const SizedBox(height: 10),
+              if (dia.weekday == 7)
+                const Text('El gym no abre los domingos.',
+                    style: AppTexto.cuerpo)
+              else
+                for (final d in detalle) ...[
+                  Text(
+                    d.franja == 'manana' ? '🌅 Mañana' : '🌇 Tarde',
+                    style: AppTexto.cuerpo
+                        .copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    d.programado == null
+                        ? 'Programado: sin asignar'
+                        : 'Programado: ${d.programado}',
+                    style: AppTexto.secundario,
+                  ),
+                  if (d.entradas.isEmpty && !esFuturo)
+                    const Text('No abrió nadie.',
+                        style: AppTexto.secundario),
+                  for (final e in d.entradas)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '✓ ${e.nombre} abrió ${e.apertura}'
+                        '${e.cerrado ? (e.cierre != null ? ' · cerró ${e.cierre}' : ' · cerrado') : ' · sin cerrar'}'
+                        '${e.cubreA != null ? ' · cubre a ${e.cubreA}' : ''}',
+                        style: AppTexto.cuerpo,
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                ],
+              if (_soyDueno && dia.weekday != 7) ...[
+                const SizedBox(height: 4),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Marcar suplencia de este día'),
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    await _marcarSuplencia(dia);
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 1.28 (M3-B5), solo dueño: registra la excepción del día
+  /// (quién trabaja una franja, o nadie) por la MISMA vía que
+  /// el calendario de excepciones: op `ajuste` con la clave
+  /// horario_excepciones + escritura local inmediata. La
+  /// suplencia queda visible al momento en todo el hub.
+  Future<void> _marcarSuplencia(DateTime dia) async {
+    final nombres = <String>{
+      for (final f in _patron.values) ...f.values.whereType<String>(),
+      for (final p in _pendientes) p.nombre,
+    }.toList()
+      ..sort();
+    if (nombres.isEmpty) {
+      _snack('No hay entrenadores conocidos para asignar.');
+      return;
+    }
+    final r = await showDialog<({String franja, String? nombre})>(
+      context: context,
+      builder: (_) => _DialogoSuplenciaDia(
+        nombres: nombres,
+        conTarde: dia.weekday != 6,
+      ),
+    );
+    if (r == null || !mounted) return;
+    final copia = <String, Map<String, String?>>{
+      for (final e in _excepciones.entries)
+        e.key: Map<String, String?>.from(e.value),
+    };
+    final delDia =
+        Map<String, String?>.from(copia[isoFechaTurno(dia)] ?? {});
+    delDia[r.franja] = r.nombre;
+    copia[isoFechaTurno(dia)] = delDia;
+    podarExcepciones(copia,
+        hoy: DateTime(_hoy.year, _hoy.month, _hoy.day));
+    try {
+      // La misma escritura que el calendario de excepciones:
+      // op ajuste con uuid propio + ajustes completos.
+      final mapa = <String, dynamic>{
+        for (final e in copia.entries)
+          e.key: {
+            for (final f in e.value.entries) f.key: f.value,
+          },
+      };
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'ajuste',
+        payload: {'clave': 'horario_excepciones', 'valor': mapa},
+      );
+      final aj = await LocalDb.instance.getAjustes();
+      aj['horario_excepciones'] = mapa;
+      await LocalDb.instance.setAjustes(aj);
+      unawaited(SyncEngine.instance.run());
+      _snack(r.nombre == null
+          ? 'Franja sin nadie ese día.'
+          : 'Suplencia registrada: ${r.nombre} ese día.');
+      await _cargar();
+    } catch (e) {
+      _snack('No se pudo registrar la suplencia.');
+    }
+  }
+
+  /// 1.28 (M3-B2): «Comprobar cierres con el servidor» a
+  /// demanda. La reconciliación ya corría sola en segundo
+  /// plano (M3-A5 la sacó del camino del Home); aquí el
+  /// entrenador la pide y VE su resultado en llano. La RPC
+  /// lleva su timeout de 12 s en el servicio; lo local no
+  /// cambia si la comprobación falla.
+  Future<void> _comprobarCierres() async {
+    if (_comprobando) return;
+    setState(() => _comprobando = true);
+    final r = await TurnoService.instance.reconciliarConServidor();
+    if (!mounted) return;
+    setState(() => _comprobando = false);
+    _snack(textoComprobacionCierres(ok: r.ok, marcados: r.marcados));
+    if (r.ok && r.marcados > 0) await _cargar();
   }
 
   @override
@@ -730,6 +943,41 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   );
                 }),
                 _semanaCalor(),
+                // 1.28 (M3-B2): comprobar los cierres con el
+                // servidor A DEMANDA (el entrenador la pide y
+                // ve el resultado; antes solo corría sola en
+                // segundo plano y su efecto era invisible).
+                if (!_soyDueno) ...[
+                  const SizedBox(height: 8),
+                  Tarjeta(
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '¿Un cierre no baja? Compruébalo '
+                            'con el servidor.',
+                            style: AppTexto.cuerpo,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          icon: _comprobando
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                )
+                              : const Icon(
+                                  Icons.cloud_sync_rounded),
+                          label: const Text('Comprobar'),
+                          onPressed:
+                              _comprobando ? null : _comprobarCierres,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 // Mi turno (entrenador).
                 if (!_soyDueno) ...[
@@ -972,6 +1220,94 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// 1.28 (M3-B5): el diálogo de la suplencia de un día desde
+/// el hub (franja + quién la trabaja, o nadie). Sin
+/// controladores de texto: la elección sale de listas, así
+/// que no hay nada que disponer.
+class _DialogoSuplenciaDia extends StatefulWidget {
+  const _DialogoSuplenciaDia({
+    required this.nombres,
+    required this.conTarde,
+  });
+
+  final List<String> nombres;
+  final bool conTarde;
+
+  @override
+  State<_DialogoSuplenciaDia> createState() =>
+      _DialogoSuplenciaDiaState();
+}
+
+class _DialogoSuplenciaDiaState extends State<_DialogoSuplenciaDia> {
+  String _franja = 'manana';
+  String? _nombre;
+
+  @override
+  void initState() {
+    super.initState();
+    _nombre = widget.nombres.first;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Suplencia de este día'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Franja', style: AppTexto.etiqueta),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('Mañana'),
+                selected: _franja == 'manana',
+                onSelected: (_) => setState(() => _franja = 'manana'),
+              ),
+              if (widget.conTarde)
+                ChoiceChip(
+                  label: const Text('Tarde'),
+                  selected: _franja == 'tarde',
+                  onSelected: (_) =>
+                      setState(() => _franja = 'tarde'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Text('Quién la trabaja', style: AppTexto.etiqueta),
+          const SizedBox(height: 6),
+          DropdownButton<String?>(
+            value: _nombre,
+            isExpanded: true,
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Sin nadie'),
+              ),
+              for (final n in widget.nombres)
+                DropdownMenuItem<String?>(value: n, child: Text(n)),
+            ],
+            onChanged: (v) => setState(() => _nombre = v),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context)
+              .pop((franja: _franja, nombre: _nombre)),
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

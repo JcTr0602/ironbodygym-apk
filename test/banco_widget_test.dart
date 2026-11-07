@@ -43,6 +43,7 @@ import 'package:ironbody_gym/ui/dashboard.dart';
 import 'package:ironbody_gym/ui/gympedia.dart';
 import 'package:ironbody_gym/ui/home.dart';
 import 'package:ironbody_gym/ui/servicios.dart';
+import 'package:ironbody_gym/ui/skeleton.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -207,7 +208,9 @@ void main() {
           .pumpWidget(const MaterialApp(home: ServiciosScreen()));
       await tester.pump();
       expect(find.text('Servicios ⚡'), findsOneWidget);
-      expect(find.text('Cargando servicios…'), findsOneWidget);
+      // 1.28 (M3-C6): la carga de Servicios ya no es un rótulo
+      // con spinner: es el esqueleto espejo de la pantalla.
+      expect(find.byType(SkeletonServicios), findsOneWidget);
     });
 
     testWidgets('Dashboard: sin cifras, muestra el aviso de permisos',
