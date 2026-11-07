@@ -5994,8 +5994,15 @@ Future<
   // como movimiento del día (misma regla que AT-12 aplicó a
   // cortesía/promo en este mismo bucle).
   final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
+  // Corrección A1-D3 (auditoría 1 de la 1.28): los pagos de
+  // Cuentas a la Casa quedan FUERA, como en la foto de las
+  // barras del gráfico (ingresosPorDia): sin esto, la burbuja
+  // del día sumaba la Casa y su total no cuadraba con la
+  // barra que el dueño acababa de tocar.
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosDelDia(fechaIso)) {
     if (esPagoAnulado(p, anuladosCola)) continue;
+    if (_esPagoCasa(p, casas)) continue;
     final m = (p['monto'] as num?)?.toDouble() ?? 0;
     if ('${p['metodo']}' == 'transferencia') {
       transferencia += m;

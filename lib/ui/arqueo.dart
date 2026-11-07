@@ -178,11 +178,15 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _cargar,
-              child: _cargando
-                  // (M2-BC C5) esqueleto estructural en vez
-                  // del spinner genérico.
-                  ? const SkeletonArqueo()
-                  : _entrenadores.isEmpty
+              child: CruceEstados(
+                // Corrección A1-D4: fundido esqueleto→contenido
+                // con el cruce de la casa (antes, ternario seco).
+                estado: _cargando ? 'cargando' : 'contenido',
+                child: _cargando
+                    // (M2-BC C5) esqueleto estructural en vez
+                    // del spinner genérico.
+                    ? const SkeletonArqueo()
+                    : _entrenadores.isEmpty
                       ? ListView(
                           children: [
                             Padding(
@@ -324,6 +328,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                             );
                           },
                         ),
+              ),
             ),
           ),
         ],

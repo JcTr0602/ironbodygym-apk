@@ -30,6 +30,10 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
   late String _pref;
   EstadoCierreMes? _estado;
   bool _cargando = true;
+  // Corrección A1-D2: si la evaluación falla (dato corrupto,
+  // BD…), la pantalla enseña el error con reintento en vez de
+  // quedarse en «cargando» para siempre.
+  bool _errorCarga = false;
 
   static const _meses = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -45,13 +49,24 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
-    final e = await evaluarCierreMes(_pref);
-    if (!mounted) return;
     setState(() {
-      _estado = e;
-      _cargando = false;
+      _cargando = true;
+      _errorCarga = false;
     });
+    try {
+      final e = await evaluarCierreMes(_pref);
+      if (!mounted) return;
+      setState(() {
+        _estado = e;
+        _cargando = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _cargando = false;
+        _errorCarga = true;
+      });
+    }
   }
 
   String get _nombreMes {
@@ -134,9 +149,31 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     final e = _estado;
     return Scaffold(
       appBar: appBarIron(context, 'Cierre de mes'),
-      body: _cargando || e == null
+      body: _cargando
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : e == null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppEspacio.lg),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _errorCarga
+                              ? 'No se pudo evaluar el cierre de este mes.'
+                              : 'Sin datos del cierre.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: AppEspacio.md),
+                        FilledButton(
+                          onPressed: _cargar,
+                          child: const Text('Reintentar'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

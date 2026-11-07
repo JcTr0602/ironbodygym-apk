@@ -763,17 +763,22 @@ class _PendienteScreenState extends State<PendienteScreen> {
           const SyncBanner(),
           if (!_cargando) _tarjetaTotal(),
           Expanded(
-            child: _cargando
-                // (M2-BC C5) esqueleto estructural de la
-                // pantalla (total + tarjetas) en vez del
-                // spinner genérico.
-                ? const SkeletonPendiente()
-                : RefreshIndicator(
-                    onRefresh: _cargar,
-                    child: _esDueno
-                        ? _listaDueno()
-                        : _listaEntrenador(),
-                  ),
+            child: CruceEstados(
+              // Corrección A1-D4: fundido esqueleto→contenido
+              // con el cruce de la casa (antes, ternario seco).
+              estado: _cargando ? 'cargando' : 'contenido',
+              child: _cargando
+                  // (M2-BC C5) esqueleto estructural de la
+                  // pantalla (total + tarjetas) en vez del
+                  // spinner genérico.
+                  ? const SkeletonPendiente()
+                  : RefreshIndicator(
+                      onRefresh: _cargar,
+                      child: _esDueno
+                          ? _listaDueno()
+                          : _listaEntrenador(),
+                    ),
+            ),
           ),
         ],
       ),

@@ -1169,9 +1169,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // (M2-BC C2) ahora selecciona el día y abre la
               // burbuja con su desglose bajo el gráfico (la
               // hoja completa vive en la burbuja).
-              onTap: monto > 0
-                  ? () => _seleccionarDia(d['fecha'] as String)
-                  : null,
+              // Corrección A1-D3: también los días en 0 son
+              // tocables — su detalle (todo a cero) se puede
+              // consultar igual; antes el toque estaba
+              // deshabilitado y el día parecía muerto.
+              onTap: () => _seleccionarDia(d['fecha'] as String),
               child: Padding(
                 padding:
                     EdgeInsets.symmetric(horizontal: es30 ? 3 : 8),
@@ -1564,11 +1566,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-      body: _cargando
-          // (M2-BC C5) esqueleto estructural en vez del
-          // spinner genérico.
-          ? const SkeletonDashboard()
-          : RefreshIndicator(
+      body: CruceEstados(
+        // Corrección A1-D4 (auditoría 1 de la 1.28): el paso
+        // esqueleto→contenido va con el fundido de la casa
+        // (CruceEstados, 220 ms), como en las pantallas ya
+        // migradas; el ternario directo cambiaba de golpe.
+        estado: _cargando ? 'cargando' : 'contenido',
+        child: _cargando
+            // (M2-BC C5) esqueleto estructural en vez del
+            // spinner genérico.
+            ? const SkeletonDashboard()
+            : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -1756,6 +1764,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

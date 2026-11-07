@@ -97,11 +97,22 @@ Future<void> _guardarProgreso(
   await LocalDb.instance.setMeta(_claveMeta(pref), jsonEncode(p));
 }
 
+/// Lectura tolerante del mapa de pasos manuales del progreso:
+/// si el dato guardado viene con un tipo inesperado (p. ej.
+/// una lista o un texto, escribible por fuera de la app), se
+/// degrada a «sin pasos confirmados» en vez de lanzar con el
+/// cast duro `as Map?` (corrección A1-D2: el cast dejaba la
+/// pantalla de cierre en «cargando» para siempre).
+Map<String, dynamic> _manualesDe(Map<String, dynamic> progreso) {
+  final crudo = progreso['manuales'];
+  if (crudo is Map) return Map<String, dynamic>.from(crudo);
+  return <String, dynamic>{};
+}
+
 /// Confirmación manual de un paso (nomina / respaldo).
 Future<void> confirmarPasoCierreMes(String pref, String pasoId) async {
   final p = await _progreso(pref);
-  final manuales = Map<String, dynamic>.from(
-      (p['manuales'] as Map?) ?? const {});
+  final manuales = _manualesDe(p);
   manuales[pasoId] = isoHabana(ahoraHabana());
   p['manuales'] = manuales;
   await _guardarProgreso(pref, p);
@@ -125,8 +136,7 @@ Future<bool> marcarMesCerrado(String pref) async {
 Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
   final db = LocalDb.instance;
   final progreso = await _progreso(pref);
-  final manuales =
-      Map<String, dynamic>.from((progreso['manuales'] as Map?) ?? const {});
+  final manuales = _manualesDe(progreso);
   bool manualOk(String id) => manuales[id] != null;
 
   // --- Paso 0: sincronización (cola local + teléfonos W5) ---

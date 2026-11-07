@@ -7499,8 +7499,20 @@ class SyncEngine {
         }
         final bytes =
             await file.readAsBytes();
+        // Corrección A1-D1 (auditoría 1 de la 1.28): esta
+        // subida monolítica era la ÚNICA que no recibía la
+        // guarda QoS — durante su PUT (y sus 3 reintentos
+        // internos de hasta 120 s) un cobro encolado no la
+        // pausaba, violando «las fotos nunca compiten con
+        // los cobros». Mismo callback que suplementos (:6375)
+        // y que el respaldo de la cola (:6422): la guarda se
+        // re-consulta antes de CADA intento dentro de
+        // _subirFotoSimple, y si manda parar la foto queda
+        // en 'retry' sin quemar el intento de red.
         final ok = await _subirFotoSimple(
-            storagePath, bytes);
+            storagePath, bytes,
+            debePausarPorCobro: () async =>
+                await _db.countPendingOpsNoFoto() > 0);
         if (ok) {
           // Fix #13: encolar metadatos ANTES de marcar synced,
           // todo en una transacción.

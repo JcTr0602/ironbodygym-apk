@@ -238,7 +238,12 @@ class _ListasScreenState extends State<ListasScreen>
     // el total sin filtrar mientras la cabecera contaba
     // solo los visibles, y con búsqueda activa las dos
     // cifras no cuadraban.
-    _estimadoMenos30 = _estimadoDe(_visMenos30);
+    // Corrección A1-D5: la pestaña «Atrasados -30d» cuenta y
+    // muestra TAMBIÉN el grupo sin fecha (contador de la
+    // pestaña y cola del cuerpo), así que su estimado suma
+    // ambos grupos: antes los sin-fecha no aportaban ni un
+    // peso al «≈ por cobrar» de su propia pestaña.
+    _estimadoMenos30 = _estimadoDe([..._visMenos30, ..._visSinFecha]);
     _estimadoMas30 = _estimadoDe(_visMas30);
   }
 
