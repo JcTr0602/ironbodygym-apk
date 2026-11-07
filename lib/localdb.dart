@@ -5153,6 +5153,26 @@ class LocalDb {
         unawaited(setMeta('mirror_corruptas_$tabla', '$corruptas')
             .catchError((_) {}));
       }
+    } else if (txn == null && _corruptasRegistradas[tabla] != 0) {
+      // Corrección A2-D1 (auditorías 1.28): la señal también
+      // se APAGA. Sin esta rama, una corrupción ya autocurada
+      // (la tabla se re-descargó y la lectura vuelve limpia)
+      // dejaba la meta con el conteo viejo para siempre y la
+      // Salud enseñaba la tabla en rojo eternamente. La
+      // caché nace vacía en cada arranque, así que no basta
+      // con ella: se confirma contra la meta persistida y
+      // solo se escribe el 0 si había un conteo previo.
+      _corruptasRegistradas[tabla] = 0;
+      unawaited(() async {
+        try {
+          final previo =
+              int.tryParse(await getMeta('mirror_corruptas_$tabla') ?? '') ??
+                  0;
+          if (previo > 0) {
+            await setMeta('mirror_corruptas_$tabla', '0');
+          }
+        } catch (_) {}
+      }());
     }
     return salida;
   }

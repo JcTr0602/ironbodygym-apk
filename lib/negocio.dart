@@ -1017,15 +1017,20 @@ double _montoUsdOp(Map<String, dynamic> op) {
 /// Precios vigentes (del espejo de ajustes).
 Future<Map<String, double>> preciosVigentes() async {
   final aj = await LocalDb.instance.getAjustes();
+  // Corrección A2-D2: TODOS los importes con el lector
+  // tolerante (la nota de la auditoría pedía normalizar
+  // 'mensualidad' junto a la fuente de menores; el resto
+  // de claves comparte el mismo blob editable fuera de la
+  // app y el mismo riesgo de llegar como texto).
   return {
-    'mensual': (aj['mensualidad'] as num?)?.toDouble() ?? 2000,
+    'mensual': montoAjusteTolerante(aj['mensualidad']) ?? 2000,
     // (M2-A A6) fuente ÚNICA del precio de menores: el tipo
     // 'menores' del blob manda; la clave fija es respaldo.
     'menores': precioMenoresDesdeAjustes(aj),
-    'transfer': (aj['transferencia'] as num?)?.toDouble() ?? 2500,
-    'diario': (aj['pago_diario'] as num?)?.toDouble() ?? 200,
-    'semanal': (aj['pago_semanal'] as num?)?.toDouble() ?? 600,
-    'quincenal': (aj['pago_quincenal'] as num?)?.toDouble() ?? 1200,
+    'transfer': montoAjusteTolerante(aj['transferencia']) ?? 2500,
+    'diario': montoAjusteTolerante(aj['pago_diario']) ?? 200,
+    'semanal': montoAjusteTolerante(aj['pago_semanal']) ?? 600,
+    'quincenal': montoAjusteTolerante(aj['pago_quincenal']) ?? 1200,
   };
 }
 
@@ -5790,10 +5795,15 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
   // necesita. Se alimenta en los mismos bucles que suman.
   final masViejaPorTid = <int, DateTime>{};
   void registraFecha(int tid, Object? cruda) {
-    final f = DateTime.tryParse('${cruda ?? ''}');
-    if (f == null) return;
-    final h = aHabana(f);
-    final dia = DateTime.utc(h.year, h.month, h.day);
+    // Corrección A2-D6 (auditorías 1.28): la fecha pasa
+    // por las puertas estrictas de la casa — tryParse a
+    // secas normalizaba las imposibles ('2026-02-31' →
+    // 3 de marzo) y el «lleva N días» del Panel se
+    // desviaba; fechaNegocioHabana devuelve '' ante una
+    // fecha inventada y fechaIsoEstricta entrega el día
+    // UTC.
+    final dia = fechaIsoEstricta(fechaNegocioHabana(cruda));
+    if (dia == null) return;
     final prev = masViejaPorTid[tid];
     if (prev == null || dia.isBefore(prev)) masViejaPorTid[tid] = dia;
   }

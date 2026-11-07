@@ -5,6 +5,8 @@
 /// solo se interpreta su jsonb, sin Flutter ni red.
 library;
 
+import 'tiempo.dart';
+
 /// Un vale reclamado, pendiente de decisión del dueño.
 class ValePendiente {
   final int id;
@@ -492,12 +494,13 @@ int diasQuitablesVale({
   // no de instantes. Con DateTime local, el cambio de
   // horario de Cuba (1-nov) roba una hora al sumar
   // días y difference().inDays recorta un día de más.
-  DateTime? fechaDe(String? iso) {
-    if (iso == null || iso.length < 10) return null;
-    final f = DateTime.tryParse(iso.substring(0, 10));
-    if (f == null) return null;
-    return DateTime.utc(f.year, f.month, f.day);
-  }
+  // Corrección A2-D4 (auditorías 1.28): la puerta
+  // estricta de la casa — DateTime.tryParse normaliza
+  // las fechas imposibles ('2026-02-31' → 3 de marzo)
+  // y el cálculo devolvía días como si la fecha fuera
+  // real; fechaIsoEstricta valida el calendario de ida
+  // y vuelta y la inventada cuenta como ilegible (0).
+  DateTime? fechaDe(String? iso) => fechaIsoEstricta(iso);
 
   final hasta = fechaDe(pagadoHasta);
   final resuelto = fechaDe(resueltoEn);

@@ -111,6 +111,21 @@ int _enteroPos(Object? v) {
 
 String _texto(Object? v) => v == null ? '' : '$v';
 
+/// Corrección A2-D3 (auditorías 1.28): la ventana del
+/// anuncio entra SANEADA al modelo. Un desde/hasta vacío
+/// o no-ISO (un anuncio viejo, editado por SQL o con el
+/// reloj cambiado) dejaba al panel con un DateTime.parse
+/// duro que lanzaba en el PRIMER frame: la pantalla de
+/// anuncios quedaba inabrible y el anuncio ni siquiera
+/// se podía borrar desde la app. Ventana ilegible =
+/// sin ventana (null); al editar y guardar, el dueño la
+/// repone con los selectores.
+String? _isoVentana(Object? v) {
+  final s = v?.toString().trim() ?? '';
+  if (s.isEmpty) return null;
+  return DateTime.tryParse(s) == null ? null : s;
+}
+
 /// Interpreta el jsonb de admin_anuncios_listar
 /// ({ok, anuncios:[...]}). Tolerante como el resto de
 /// paneles: una fila rara se salta; una fila sin id
@@ -144,8 +159,8 @@ List<AnuncioAdmin> parseAnunciosAdmin(Object? json) {
           : _texto(e['audiencia']),
       clienteIds: ids,
       descartable: e['descartable'] != false,
-      desde: e['desde']?.toString(),
-      hasta: e['hasta']?.toString(),
+      desde: _isoVentana(e['desde']),
+      hasta: _isoVentana(e['hasta']),
       activo: e['activo'] != false,
       creadoEn: _texto(e['creado_en']),
       actualizadoEn: _texto(e['actualizado_en']),

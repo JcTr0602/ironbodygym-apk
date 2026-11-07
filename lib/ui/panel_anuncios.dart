@@ -12,6 +12,18 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
+/// Corrección A2-D3 (auditorías 1.28): parseo tolerante
+/// de la ventana de un anuncio. El modelo ya entra
+/// saneado por parseAnunciosAdmin, pero un AnuncioAdmin
+/// armado a mano (o de una versión vieja) con un ISO
+/// ilegible no puede tumbar la pantalla con un
+/// DateTime.parse duro: degrada a «sin ventana».
+DateTime? _habanaDeIso(String? iso) {
+  if (iso == null) return null;
+  final f = DateTime.tryParse(iso);
+  return f == null ? null : aHabana(f);
+}
+
 /// 1.28 (M5, ítem fijo — Pieza G del diseño de
 /// Anuncios): compositor «Anuncio a clientes» del
 /// Panel (módulo «Clientes e invitados»). Crea, edita,
@@ -241,8 +253,6 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
   }
 
   DatosAnuncio _datosDe(AnuncioAdmin a, {required bool activo}) {
-    DateTime? habanaDe(String? iso) =>
-        iso == null ? null : aHabana(DateTime.parse(iso));
     return DatosAnuncio(
       id: a.id,
       titulo: a.titulo,
@@ -250,8 +260,8 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
       audiencia: a.audiencia,
       clienteIds: a.clienteIds,
       descartable: a.descartable,
-      desdeHabana: habanaDe(a.desde),
-      hastaHabana: habanaDe(a.hasta),
+      desdeHabana: _habanaDeIso(a.desde),
+      hastaHabana: _habanaDeIso(a.hasta),
       activo: activo,
     );
   }
@@ -262,8 +272,9 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
   }
 
   String _ventanaTexto(AnuncioAdmin a) {
-    String fmt(String iso) {
-      final h = aHabana(DateTime.parse(iso));
+    String? fmt(String iso) {
+      final h = _habanaDeIso(iso);
+      if (h == null) return null;
       return '${h.day}/${h.month}/${h.year} '
           '${h.hour.toString().padLeft(2, '0')}:'
           '${h.minute.toString().padLeft(2, '0')}';
@@ -272,11 +283,19 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
     if (a.desde == null && a.hasta == null) {
       return 'Sin ventana: visible hasta retirarlo';
     }
-    if (a.desde != null && a.hasta != null) {
-      return 'Del ${fmt(a.desde!)} al ${fmt(a.hasta!)}';
+    final d = a.desde == null ? null : fmt(a.desde!);
+    final h = a.hasta == null ? null : fmt(a.hasta!);
+    if ((a.desde != null && d == null) ||
+        (a.hasta != null && h == null)) {
+      // Corrección A2-D3: una ventana ilegible se DICE,
+      // no tumba la tarjeta (y el anuncio sigue pudiendo
+      // editarse o borrarse).
+      return 'Ventana con una fecha no válida: '
+          'edítalo para corregirla';
     }
-    if (a.desde != null) return 'Desde el ${fmt(a.desde!)}';
-    return 'Hasta el ${fmt(a.hasta!)}';
+    if (d != null && h != null) return 'Del $d al $h';
+    if (d != null) return 'Desde el $d';
+    return 'Hasta el $h';
   }
 
   @override
@@ -461,12 +480,8 @@ class _DialogoEditorAnuncioState extends State<_DialogoEditorAnuncio> {
     _descartable = a?.descartable ?? true;
     _activo = a?.activo ?? true;
     _vistaPrevia = false;
-    _desde = a?.desde == null
-        ? null
-        : aHabana(DateTime.parse(a!.desde!));
-    _hasta = a?.hasta == null
-        ? null
-        : aHabana(DateTime.parse(a!.hasta!));
+    _desde = _habanaDeIso(a?.desde);
+    _hasta = _habanaDeIso(a?.hasta);
     if (a != null) _elegidos.addAll(a.clienteIds);
     if (_audiencia == 'especificos') _cargarClientes();
   }

@@ -73,13 +73,22 @@ class PerfilComunidadAdmin {
 
 /// Quita acentos y pasa a minúsculas para comparar
 /// nombres sin que «José» y «jose» sean dos mundos.
+/// Corrección A2-D5 (auditorías 1.28): también pliega
+/// los acentos DESCOMPUESTOS (letra + marca combinante
+/// U+0301, como llegan de algunos teclados): sin esto,
+/// buscar «jose» no encontraba un «José» descompuesto
+/// porque la marca sobrevivía a la comparación.
 String _sinAcentos(String s) {
   const mapa = {
     'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
     'ü': 'u', 'ñ': 'n',
   };
   final b = StringBuffer();
-  for (final ch in s.toLowerCase().split('')) {
+  for (final r in s.toLowerCase().runes) {
+    // Marcas combinantes (U+0300–U+036F): se descartan;
+    // la letra base queda y pasa por el mapa igual.
+    if (r >= 0x0300 && r <= 0x036F) continue;
+    final ch = String.fromCharCode(r);
     b.write(mapa[ch] ?? ch);
   }
   return b.toString();

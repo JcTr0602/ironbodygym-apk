@@ -35,8 +35,12 @@ class TipoPago {
   static TipoPago desdeJson(Map<String, dynamic> j) => TipoPago(
         id: '${j['id'] ?? ''}',
         nombre: '${j['nombre'] ?? ''}',
-        monto: (j['monto'] as num?)?.toDouble() ?? 0,
-        dias: (j['dias'] as num?)?.toInt() ?? 30,
+        // Corrección A2-D2: lector tolerante — el blob puede
+        // traer el importe como texto (editado desde el bot
+        // o por SQL) y el cast duro `as num?` lanzaba
+        // TypeError en vez de degradar a 0.
+        monto: montoAjusteTolerante(j['monto']) ?? 0,
+        dias: montoAjusteTolerante(j['dias'])?.toInt() ?? 30,
         activo: j['activo'] != false,
         soloMenores: j['solo_menores'] == true,
       );
@@ -94,12 +98,18 @@ double precioMenoresDesdeAjustes(Map<String, dynamic> aj) {
   if (crudo is List) {
     for (final t in crudo) {
       if (t is Map && '${t['id']}' == 'menores') {
-        final m = (t['monto'] as num?)?.toDouble();
+        // Corrección A2-D2: con el importe como texto
+        // («1600», escribible desde el bot/SQL) el cast
+        // duro lanzaba TypeError y tumbaba preciosVigentes
+        // y el diálogo de cobro del menor; el lector
+        // tolerante degrada al respaldo, como la función
+        // promete.
+        final m = montoAjusteTolerante(t['monto']);
         if (m != null && m > 0) return m;
       }
     }
   }
-  final fijo = (aj['mensualidad_menores'] as num?)?.toDouble();
+  final fijo = montoAjusteTolerante(aj['mensualidad_menores']);
   if (fijo != null && fijo > 0) return fijo;
   return 1500;
 }
@@ -222,7 +232,7 @@ Future<List<TipoPago>> getTiposPago(
   } else {
     // Fallback: construir desde las claves fijas
     double valor(String k, double def) =>
-        (aj[k] as num?)?.toDouble() ?? def;
+        montoAjusteTolerante(aj[k]) ?? def;
     tipos = [
       TipoPago(
           id: 'mensual',
