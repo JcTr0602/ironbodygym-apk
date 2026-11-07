@@ -63,92 +63,175 @@ class NominaPrecalc {
     // pagado_hasta: sin él, un cambio de cobertura no invalidaba
     // la caché y la nómina servía el conteo viejo. El prefijo
     // nuevo invalida de una vez toda caché v4.
-    return 'v5|$pagosParte|${await _huellaPagosNegocio()}|${await _huellaClientes()}';
+    // v6 (1.28, M3-A11): los componentes por fila extraen los
+    // campos de negocio en SQL (json_extract) en vez de
+    // DECODIFICAR el JSON de cada pago/cliente (ver abajo).
+    return 'v6|$pagosParte|${await _huellaPagosNegocio()}|${await _huellaClientes()}';
   }
 
-  /// Componente de huella sobre el espejo `pagos`: hash canónico
-  /// determinista por pago (1.15, N6) con los campos de negocio
-  /// que usa [NominaCalc.esPagoMensualidad] (cliente, período,
-  /// método, monto, días, pagado_hasta) además de la fecha. Editar
-  /// cualquiera de ellos invalida la caché; cambiar otros campos
-  /// (p. ej. registrado_por) no la toca.
+  // ----------------------------------------------------------
+  // 1.28 (M3-A11) · Huella por extracción selectiva en SQL.
+  //
+  // La huella v5 DECODIFICABA en Dart el JSON de cada pago y
+  // cada cliente para extraer los campos de negocio, y
+  // [huella] se paga varias veces por asegurar() (leer + hasta
+  // 3 intentos de _recalcular × 2 componentes): con el
+  // historial crecido era el coste dominante del precálculo.
+  // Ahora UNA consulta con json_extract trae SOLO los campos
+  // de negocio como columnas primitivas — el espejo entero ya
+  // no se decodifica — y la tupla canónica se arma en Dart con
+  // las mismas reglas v5: (a) solo campos de negocio (un campo
+  // ajeno, p. ej. registrado_por, NO invalida); (b)
+  // representaciones equivalentes dan la misma huella (1 y
+  // «1» cuentan igual; 2000 y «2000» también); (c) la huella
+  // por fila sigue siendo canónica y ordenada por id, así que
+  // la colisión por sumas que cazó Terra en la ronda 2 no
+  // vuelve. El prefijo v6 invalida de una vez las cachés v5
+  // (la FORMA de la tupla cambió aunque el contrato no).
+  // ----------------------------------------------------------
+
+  /// Canoniza un número tolerante: 2000, 2000.0 y «2000» dan
+  /// la misma pieza; lo no numérico pasa como texto.
+  static String _canonNum(dynamic v) {
+    if (v == null) return '';
+    if (v is num) {
+      return v == v.roundToDouble()
+          ? v.toInt().toString()
+          : v.toString();
+    }
+    final n = num.tryParse('$v'.trim());
+    if (n != null) {
+      return n == n.roundToDouble()
+          ? n.toInt().toString()
+          : n.toString();
+    }
+    return '$v';
+  }
+
+  static String _canonInt(dynamic v) =>
+      NominaCalc.idTolerante(v)?.toString() ?? (v == null ? '' : '$v');
+
+  static String _canonStr(dynamic v) => v == null ? '' : '$v';
+
+  /// Bandera tolerante 0/1 (cuenta_casa, anulado): 1, true y
+  /// «1» son la misma representación.
+  static String _canonFlag(dynamic v) =>
+      (v == 1 || v == true || v == '1') ? '1' : '0';
+
+  static String _tuplaPago({
+    required dynamic id,
+    required dynamic clienteId,
+    required dynamic fecha,
+    required dynamic periodo,
+    required dynamic dias,
+    required dynamic metodo,
+    required dynamic monto,
+    required dynamic pagadoHasta,
+    required dynamic anulado,
+  }) =>
+      '${_canonInt(id)}:${_canonInt(clienteId)}:${_canonStr(fecha)}:'
+      '${_canonStr(periodo)}:${_canonInt(dias)}:${_canonStr(metodo)}:'
+      '${_canonNum(monto)}:${_canonStr(pagadoHasta)}:${_canonFlag(anulado)}';
+
+  static String _tuplaCliente({
+    required dynamic id,
+    required dynamic estado,
+    required dynamic pagadoHasta,
+    required dynamic cuentaCasa,
+  }) =>
+      '${_canonInt(id)}:${_canonStr(estado)}:${_canonStr(pagadoHasta)}:'
+      '${_canonFlag(cuentaCasa)}';
+
+  /// Componente de huella sobre el espejo `pagos` (solo los
+  /// campos que el conteo de NominaCalc lee).
   Future<String> _huellaPagosNegocio() async {
     final d = await LocalDb.instance.db;
-    final rows = await d.query('pagos', columns: ['id', 'data']);
-    final partes = <String>[];
-    for (final r in rows) {
-      String estado;
-      try {
-        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        final cliente = NominaCalc.idTolerante(data['cliente_id']) ?? 0;
-        var periodo = '${data['periodo'] ?? 'mensual'}';
-        if (periodo.isEmpty) periodo = 'mensual';
-        final metodo = '${data['metodo'] ?? ''}';
-        final monto = NominaCalc.montoTolerante(data['monto']);
-        final montoStr = monto == null
-            ? '<null>'
-            : (monto == monto.roundToDouble()
-                ? '${monto.toInt()}'
-                : '$monto');
-        final dias = NominaCalc.idTolerante(data['dias']);
-        final fecha = data['fecha'] == null ? '<null>' : '${data['fecha']}';
-        // #4 (Argón nómina): pagado_hasta entra en la huella (la
-        // regla del mes en curso depende de él).
-        final pagadoHasta = data['pagado_hasta'] == null
-            ? '<null>'
-            : '${data['pagado_hasta']}';
-        // N-1 (1.22): las marcas de anulado/eliminado también
-        // (esPagoMensualidad las descarta: si aparecen, la
-        // caché debe invalidarse). Panel Zen pieza 1: faltaba
-        // `anulada`, que esPagoMensualidad también descarta —
-        // sin ella, un pago que pasara a anulada no invalidaba
-        // el precálculo y seguía contando.
-        estado =
-            '$cliente|$periodo|$metodo|$montoStr|${dias ?? '<null>'}|$fecha|$pagadoHasta|${data['anulado'] ?? ''}|${data['anulada'] ?? ''}|${data['eliminado'] ?? ''}|${data['estado'] ?? ''}';
-      } catch (_) {
-        estado = '<ilegible>';
-      }
-      partes.add('${r['id']}:$estado');
+    try {
+      final rows = await d.rawQuery('''
+        SELECT id,
+          json_extract(data, '\$.cliente_id') AS cid,
+          json_extract(data, '\$.fecha') AS fecha,
+          json_extract(data, '\$.periodo') AS periodo,
+          json_extract(data, '\$.dias') AS dias,
+          json_extract(data, '\$.metodo') AS metodo,
+          json_extract(data, '\$.monto') AS monto,
+          json_extract(data, '\$.pagado_hasta') AS ph,
+          json_extract(data, '\$.anulado') AS anulado
+        FROM pagos ORDER BY id''');
+      final partes = <String>[
+        for (final r in rows)
+          _tuplaPago(
+            id: r['id'],
+            clienteId: r['cid'],
+            fecha: r['fecha'],
+            periodo: r['periodo'],
+            dias: r['dias'],
+            metodo: r['metodo'],
+            monto: r['monto'],
+            pagadoHasta: r['ph'],
+            anulado: r['anulado'],
+          ),
+      ];
+      return 'p${partes.length}:${_fnv1a64(partes.join('|'))}';
+    } catch (_) {
+      // Sin JSON1 (no esperado: media app lo usa): decodificar
+      // y armar LAS MISMAS tuplas — la huella no cambia de
+      // forma entre caminos.
+      final espejo = await LocalDb.instance.allMirror('pagos');
+      final partes = <String>[
+        for (final p in espejo)
+          _tuplaPago(
+            id: p['id'],
+            clienteId: p['cliente_id'],
+            fecha: p['fecha'],
+            periodo: p['periodo'],
+            dias: p['dias'],
+            metodo: p['metodo'],
+            monto: p['monto'],
+            pagadoHasta: p['pagado_hasta'],
+            anulado: p['anulado'],
+          ),
+      ];
+      partes.sort();
+      return 'p${partes.length}:${_fnv1a64(partes.join('|'))}';
     }
-    partes.sort();
-    return 'p${partes.length}:${_fnv1a64(partes.join('|'))}';
   }
 
-  /// Componente de huella sobre el espejo `clientes`: detecta altas,
-  /// bajas y cualquier cambio de `pagado_hasta` (la regla del mes en
-  /// curso depende de ese campo). Se calcula en Dart leyendo el JSON
-  /// de `data` (sin depender de funciones JSON de SQLite, ausentes
-  /// en Android viejos); con ~190 clientes es despreciable.
-  ///
-  /// Representación CANÓNICA por cliente, ordenada por id, hasheada
-  /// con FNV-1a de 64 bits (ronda 2, Terra, ALTA): la primera
-  /// versión resumía con sumas (nº de filas, suma de ids, suma de
-  /// días) y dos estados distintos con la misma suma —p. ej.
-  /// vencimientos (30 sep, 10 nov) frente a (10 oct, 31 oct)—
-  /// producían la MISMA huella con exclusiones opuestas: la caché
-  /// vieja se servía como fresca y la nómina salía mal sin ruido.
+  /// Componente de huella sobre el espejo `clientes` (estado,
+  /// cobertura y Cuenta a la Casa: lo que el conteo lee).
   Future<String> _huellaClientes() async {
     final d = await LocalDb.instance.db;
-    final rows = await d.query('clientes', columns: ['id', 'data']);
-    final partes = <String>[];
-    for (final r in rows) {
-      final id = (r['id'] as num?)?.toInt() ?? 0;
-      String estado;
-      try {
-        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        final h = data['pagado_hasta'];
-        // 1.15 (N2): cuenta_casa normalizado (1/true/'1' → 1;
-        // resto → 0, mismo punto único de verdad que el resto del
-        // código). Un cambio de Casa invalida la caché.
-        final casa = LocalDb.cuentaCasaDe(data) ? 1 : 0;
-        estado = '${h == null ? '<null>' : '$h'}:$casa';
-      } catch (_) {
-        estado = '<ilegible>';
-      }
-      partes.add('$id:$estado');
+    try {
+      final rows = await d.rawQuery('''
+        SELECT id,
+          json_extract(data, '\$.estado') AS estado,
+          json_extract(data, '\$.pagado_hasta') AS ph,
+          json_extract(data, '\$.cuenta_casa') AS casa
+        FROM clientes ORDER BY id''');
+      final partes = <String>[
+        for (final r in rows)
+          _tuplaCliente(
+            id: r['id'],
+            estado: r['estado'],
+            pagadoHasta: r['ph'],
+            cuentaCasa: r['casa'],
+          ),
+      ];
+      return 'c${partes.length}:${_fnv1a64(partes.join('|'))}';
+    } catch (_) {
+      final espejo = await LocalDb.instance.allMirror('clientes');
+      final partes = <String>[
+        for (final c in espejo)
+          _tuplaCliente(
+            id: c['id'],
+            estado: c['estado'],
+            pagadoHasta: c['pagado_hasta'],
+            cuentaCasa: c['cuenta_casa'],
+          ),
+      ];
+      partes.sort();
+      return 'c${partes.length}:${_fnv1a64(partes.join('|'))}';
     }
-    partes.sort();
-    return 'c${partes.length}:${_fnv1a64(partes.join('|'))}';
   }
 
   /// FNV-1a de 64 bits sobre UTF-8, en hex. Determinista entre

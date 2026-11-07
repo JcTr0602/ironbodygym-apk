@@ -106,7 +106,12 @@ void main() {
     final t = await LocalDb.instance.getTurno('t-srv-a');
     expect(t, isNotNull);
     expect(t!['estado'], 'cerrado_sincronizado');
-    expect(t['hora_cierre'], isNotNull);
+    // 1.28 (M3-A8): hora_cierre queda NULL — la RPC no trae la
+    // hora del cierre administrativo y rellenarla con la hora
+    // de reconciliar fabricaba duraciones falsas («turnos
+    // cortos» que nunca ocurrieron). Antes este test exigía
+    // isNotNull: fijaba el comportamiento corregido.
+    expect(t['hora_cierre'], isNull);
     // El origen queda anotado en el snapshot de auditoría.
     expect('${t['cierre_snapshot']}', contains('cierre_servidor'));
     expect(await _sinResolverIds(), isNot(contains('t-srv-a')));

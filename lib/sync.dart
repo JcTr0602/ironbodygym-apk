@@ -5767,11 +5767,24 @@ class SyncEngine {
     try {
       final hoy = hoyHabanaIso();
       if (await _db.getMeta('ultimo_manifiesto') == hoy) return;
+      // 1.28 (M3-A10): un intento FALLIDO hoy acota el reintento
+      // a UNA vez al día. Antes, ante un −1 global (p. ej. un
+      // dato sucio que tumba la RPC) la verificación se repetía
+      // en CADA ciclo de sync, martilleando la red y la batería
+      // sin posibilidad de concluir. El marcador es APARTE de
+      // ultimo_manifiesto: un fallo NUNCA se sella como OK
+      // (preocupación G4 de la v1.13 intacta — Salud sigue
+      // mostrando la tabla como «sin verificar»).
+      if (await _db.getMeta('manifiesto_intento_fallido') == hoy) {
+        return;
+      }
       if (await _db.countPendingOps() > 0) return; // cola no limpia
       final divergentes = await (verificar ?? verificarManifiesto)();
       if (divergentes < 0) {
         // Verificación no concluyente (RPC ausente o red caída):
-        // NO sella, se reintenta mañana (o en el próximo ciclo).
+        // NO sella como OK; se anota el intento y se reintenta
+        // mañana.
+        await _db.setMeta('manifiesto_intento_fallido', hoy);
         AppLog.aviso('sync', 'manifiesto_no_concluyente', d: 'dia=$hoy');
         return;
       }
@@ -6153,6 +6166,9 @@ class SyncEngine {
     required String turno,
     required String horaApertura,
     String? cubreA,
+    // 1.28 (M3-A12): ejecutor inyectable — la apertura atómica
+    // encola DENTRO de la transacción que inserta el turno.
+    DatabaseExecutor? txn,
   }) async {
     final id = const Uuid().v4();
     await _db.queueOp(
@@ -6167,6 +6183,7 @@ class SyncEngine {
         if (cubreA != null) 'cubre_a': cubreA,
         'telegram_id': _auth.telegramId,
       },
+      txn: txn,
     );
     return id;
   }
@@ -6196,6 +6213,9 @@ class SyncEngine {
     // v1.3.3 (auditoría ChatGPT #12): UUID estable para reintentos. Si se
     // provee, se reusa en vez de generar uno nuevo (idempotencia local).
     String? opUuid,
+    // 1.28 (M3-A1): ejecutor inyectable — confirmarCierre encola
+    // el cierre DENTRO de la transacción que reclama el turno.
+    DatabaseExecutor? txn,
   }) async {
     // v1.3.3 (auditoría ChatGPT #7): totalCobrado null = "no calculable",
     // se OMITE del payload (no se envía 0). El servidor lo guarda NULL.
@@ -6220,6 +6240,7 @@ class SyncEngine {
         if (pendientesUsd != null) 'pendientes_usd': pendientesUsd,
         if (revisionCount != null) 'revision_count': revisionCount,
       },
+      txn: txn,
     );
     return id;
   }

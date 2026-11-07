@@ -174,6 +174,20 @@ String? programadoEn({
   return patron[fecha.weekday]?[franja];
 }
 
+/// 1.28 (M3-A7), PURO: el instante de PARED de [minutos]
+/// contados desde la medianoche de [fecha] (puede ser negativo
+/// o pasar de 1440: cruza al día vecino). Se construye con
+/// hora/minuto explícitos en vez de sumar un Duration: sumar
+/// duraciones es aritmética de INSTANTES y los días de cambio
+/// de hora en Cuba (2026-03-08, 2026-11-01) la ventana de una
+/// franja salía desplazada una hora de la pared real.
+DateTime instanteParedDeMinutos(DateTime fecha, int minutos) {
+  final dias = (minutos / 1440).floor();
+  final resto = minutos - dias * 1440;
+  return DateTime(
+      fecha.year, fecha.month, fecha.day + dias, resto ~/ 60, resto % 60);
+}
+
 /// Lo que se MUESTRA como «entrenador de turno» (§4 + T1 + T2).
 ({String? nombre, bool cubriendo}) mostradoEn({
   required DateTime fecha,
@@ -186,9 +200,8 @@ String? programadoEn({
       fecha: fecha, franja: franja, patron: patron, excepciones: excepciones);
   final v = ventanaFranja(fecha, franja);
   if (v == null) return (nombre: programado, cubriendo: false);
-  final dia = DateTime(fecha.year, fecha.month, fecha.day);
-  final desde = dia.add(Duration(minutes: v.inicio - 45)); // T1
-  final hasta = dia.add(Duration(minutes: v.fin));
+  final desde = instanteParedDeMinutos(fecha, v.inicio - 45); // T1
+  final hasta = instanteParedDeMinutos(fecha, v.fin);
   // Aperturas ligadas a la franja (colchón incluido) y vivas.
   final vivas = [
     for (final a in aperturas)
@@ -240,6 +253,15 @@ String? resolverIdPorNombre(
   return hallados.length == 1 ? hallados.single : null;
 }
 
+/// Parseo tolerante de un telegram_id (num o texto numérico).
+/// Local a este archivo PURO: la normalización de LocalDb no se
+/// importa aquí para no crear un ciclo.
+int? _telegramTolerante(dynamic v) {
+  if (v == null) return null;
+  if (v is num) return v.toInt();
+  return int.tryParse(v.toString().trim());
+}
+
 /// 24/25, PURO: ¿un cierre del espejo corresponde a una apertura?
 /// Primero por turno_id (exacto, cuando ambos lo traen); si no,
 /// por fecha + franja + entrenador (telegram_id si ambos lo
@@ -265,10 +287,15 @@ bool cierreCorrespondeApertura(
       turnoCierre != turnoApertura) {
     return false;
   }
-  final tgCierre = cierre['telegram_id'];
-  final tgApertura = apertura['telegram_id'];
-  if (tgCierre is num && tgApertura is num) {
-    return tgCierre.toInt() == tgApertura.toInt();
+  final tgCierre = _telegramTolerante(cierre['telegram_id']);
+  final tgApertura = _telegramTolerante(apertura['telegram_id']);
+  // 1.28 (M3-A9): si AMBOS lados traen telegram (aunque uno
+  // venga como TEXTO), manda el telegram. Antes la comparación
+  // exigía `is num` en los dos: un lado en texto caía a
+  // comparar NOMBRES y una apertura podía quedar «viva para
+  // siempre» en el hub porque su cierre no le correspondía.
+  if (tgCierre != null && tgApertura != null) {
+    return tgCierre == tgApertura;
   }
   final nomCierre =
       '${cierre['entrenador_nombre'] ?? cierre['cerrado_por'] ?? ''}';
@@ -403,9 +430,8 @@ bool hayCierreFranja(
   final v = ventanaFranja(fecha, franja);
   var hayViva = false;
   if (v != null) {
-    final dia = DateTime(fecha.year, fecha.month, fecha.day);
-    final desde = dia.add(Duration(minutes: v.inicio - 45));
-    final hasta = dia.add(Duration(minutes: v.fin));
+    final desde = instanteParedDeMinutos(fecha, v.inicio - 45);
+    final hasta = instanteParedDeMinutos(fecha, v.fin);
     hayViva = aperturas.any((a) =>
         a.viva &&
         !a.aperturaEn.isBefore(desde) &&
@@ -423,4 +449,23 @@ bool hayCierreFranja(
         hayVivaEnVentana: hayViva,
         hayCierreFranja: hayCierreFranja(cierres, fechaIso, franja)),
   );
+}
+
+/// 1.28 (M3-A7), PURO: ¿hubo ALGUNA apertura (viva o ya
+/// cerrada) en la ventana de la franja ese día? Para el mapa
+/// de calor semanal del hub: la celda de un día pasado debe
+/// contar lo que de verdad pasó ese día — con las aperturas
+/// DEL DÍA, no con las de hoy. Ignora `viva` a propósito: una
+/// apertura que ya cerró también «pasó».
+bool huboAperturaEnFranja({
+  required DateTime fecha,
+  required String franja,
+  required List<AperturaTurno> aperturas,
+}) {
+  final v = ventanaFranja(fecha, franja);
+  if (v == null) return false;
+  final desde = instanteParedDeMinutos(fecha, v.inicio - 45);
+  final hasta = instanteParedDeMinutos(fecha, v.fin);
+  return aperturas.any((a) =>
+      !a.aperturaEn.isBefore(desde) && a.aperturaEn.isBefore(hasta));
 }

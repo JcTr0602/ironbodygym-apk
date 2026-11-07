@@ -29,6 +29,7 @@ import 'auth.dart';
 import 'localdb.dart';
 import 'nomina_bonos.dart';
 import 'nomina_calc.dart';
+import 'nomina_precalc.dart';
 import 'perfil.dart';
 import 'tiempo.dart';
 
@@ -145,11 +146,70 @@ Future<List<Map<String, dynamic>>> leerBonosMesConMigracion(
   return BonosNominaService.instance.leerBonos(pref);
 }
 
+/// Huella barata de los insumos de la foto (1.28, M3-A4):
+/// la huella del precálculo (pagos + clientes) + conteo y
+/// suma de sync_seq de los espejos que la foto lee (ventas de
+/// servicios, adelantos, bonos) + el tamaño de la cola de
+/// lectura + la meta de usuarios. Si un insumo se mueve
+/// DURANTE el ensamblado, la huella cambia.
+Future<String> _huellaInsumosFoto() async {
+  final partes = <String>[];
+  try {
+    partes.add(await NominaPrecalc.instance.huella());
+  } catch (_) {
+    partes.add('precalc:?');
+  }
+  final db = LocalDb.instance;
+  for (final tabla
+      in const ['servicio_ventas', 'adelantos', 'nomina_bonos']) {
+    try {
+      final d = await db.db;
+      final r = await d.rawQuery('SELECT COUNT(*) AS c, '
+          'COALESCE(SUM(sync_seq), 0) AS s FROM $tabla');
+      partes.add('$tabla:${r.first['c']}/${r.first['s']}');
+    } catch (_) {
+      partes.add('$tabla:sin');
+    }
+  }
+  try {
+    final ops = await db.pendingOpsLectura();
+    partes.add('ops:${ops.length}');
+  } catch (_) {
+    partes.add('ops:?');
+  }
+  try {
+    final u = await db.getMeta('usuarios_apk');
+    partes.add('usuarios:${u?.length ?? -1}');
+  } catch (_) {
+    partes.add('usuarios:?');
+  }
+  return partes.join('|');
+}
+
 /// Arma la foto del mes [pref] ('YYYY-MM'). Cuerpo movido
 /// verbatim desde _NominaScreenState._cargar (1.23): la
 /// pantalla lo consume para su estado y el panel para su
 /// tarjeta; no pueden divergir.
+///
+/// 1.28 (M3-A4): la foto se arma con GUARDIA DE HUELLA, como
+/// ya hacía el precálculo: se toma la huella de los insumos
+/// antes y después de ensamblar y, si cambió en medio (un
+/// sync bajó ventas o llegó un adelanto mientras se leía), se
+/// re-ensambla UNA vez y se devuelve la foto nueva. Antes las
+/// lecturas sucesivas del ensamblado podían componer una foto
+/// que nunca existió (comisiones de antes del sync con libro
+/// de después).
 Future<FotoNominaMes> fotoNominaMes(String pref) async {
+  final antes = await _huellaInsumosFoto();
+  var foto = await _armarFotoNominaMes(pref);
+  final despues = await _huellaInsumosFoto();
+  if (antes != despues) {
+    foto = await _armarFotoNominaMes(pref);
+  }
+  return foto;
+}
+
+Future<FotoNominaMes> _armarFotoNominaMes(String pref) async {
   // 1.23 (Delta Argón 4ª#4): precargas ÚNICAS de la foto —
   // usuarios_apk se leía y parseaba DOS veces (comisiones y
   // adelantos) y los ids de Cuentas a la Casa se re-escaneaban

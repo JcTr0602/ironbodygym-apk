@@ -410,6 +410,10 @@ class _NominaScreenState extends State<NominaScreen> {
     final monto = (b['monto'] as num?)?.toDouble() ?? 0;
     final nota = '${b['nota'] ?? ''}';
     final destino = _nombreDestino('${b['entrenador'] ?? 'ambos'}');
+    // 1.28 (M3-A4): un bono rechazado por el servidor se sigue
+    // MOSTRANDO (no se pierde en silencio) con su aviso, y no
+    // suma en ningún total (NominaCalc lo salta).
+    final rechazado = b['rechazado'] == true;
     return Card(
       margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
@@ -421,7 +425,20 @@ class _NominaScreenState extends State<NominaScreen> {
           '${monto > 0 ? '+' : ''}${fmtMonto(monto)} CUP — $destino',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        subtitle: nota.isNotEmpty ? Text(nota) : null,
+        subtitle: (nota.isEmpty && !rechazado)
+            ? null
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (nota.isNotEmpty) Text(nota),
+                  if (rechazado)
+                    Text(
+                      'Rechazado por el servidor: no cuenta en la nómina.',
+                      style: AppTexto.metadato
+                          .copyWith(color: AppColores.error),
+                    ),
+                ],
+              ),
         trailing: IconButton(
           icon: const Icon(Icons.delete_rounded, color: AppColores.error),
           tooltip: 'Eliminar bono',
@@ -957,18 +974,64 @@ class _NominaScreenState extends State<NominaScreen> {
                       ),
                     );
                     if (ok != true) return;
+                    // 1.28 (M3-A4): lo que se LIQUIDA se
+                    // recalcula FRESCO tras el «Sí, pagada». El
+                    // diálogo mostró la foto de pantalla (es lo
+                    // que el dueño leyó), pero entre la carga
+                    // de la pantalla y la confirmación pudo
+                    // entrar un sync, un adelanto o un bono: la
+                    // liquidación congelaba entonces una foto
+                    // VIEJA como si fuera la del momento de
+                    // pagar. Se rearma desde la foto compartida
+                    // (con su guardia de huella) + el conteo
+                    // asegurado del precálculo + los bonos por
+                    // el camino con migración. Si la persona ya
+                    // no está en la foto fresca, no se liquida
+                    // nada y se avisa: jamás liquidar a ciegas.
+                    final fotoF = await fotoNominaMes(pref);
+                    final personaF = fotoF.personas[ent];
+                    final libroF = fotoF.libroMes[ent];
+                    if (personaF == null) {
+                      if (mounted) {
+                        mostrarSnack(context,
+                            'No se pudo recalcular la nómina '
+                            'de ${persona.nombre}: inténtalo de nuevo',
+                            significado: SignificadoChip.error);
+                      }
+                      return;
+                    }
+                    final pagaronF =
+                        await NominaPrecalc.instance.asegurar(pref);
+                    final bonosF =
+                        await leerBonosMesConMigracion(pref);
+                    final bonoF = ent == 'mi'
+                        ? NominaCalc.bonoSoloAmbos(bonosF)
+                        : NominaCalc.bonosPara(bonosF, ent);
+                    final comisionF =
+                        fotoF.comisionDosis[ent]?.total ?? 0;
+                    final baseF =
+                        pagaronF * fotoF.tarifa.toDouble();
+                    final adelantosF = libroF?.adelantos ?? 0;
+                    final deudaF = libroF?.deudaEntrante ?? 0;
+                    final netoF = NominaCalc.totalVivo(
+                      base: baseF,
+                      bono: bonoF,
+                      comision: comisionF,
+                      adelantos: adelantosF,
+                      deudaEntrante: deudaF,
+                    );
                     await AdelantosService.instance.liquidarNomina(
                       mes: pref,
-                      entrenadorId: persona.id,
-                      entrenadorNombre: persona.nombre,
-                      entrenadorTelegramId: persona.telegramId,
-                      tarifaPorCliente: _tarifa,
-                      neto: netoLiq,
-                      base: baseLiq,
-                      bonos: bonoLiq,
-                      comisiones: comisionLiq,
-                      adelantos: adelantosLiq,
-                      deudaEntrante: deudaLiq,
+                      entrenadorId: personaF.id,
+                      entrenadorNombre: personaF.nombre,
+                      entrenadorTelegramId: personaF.telegramId,
+                      tarifaPorCliente: fotoF.tarifa.toDouble(),
+                      neto: netoF,
+                      base: baseF,
+                      bonos: bonoF,
+                      comisiones: comisionF,
+                      adelantos: adelantosF,
+                      deudaEntrante: deudaF,
                     );
                     if (mounted) {
                       mostrarSnack(context, 'Nómina marcada como pagada', significado: SignificadoChip.exito);

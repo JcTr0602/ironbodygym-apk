@@ -1,12 +1,7 @@
-import 'dart:convert';
-
 import 'adelantos.dart';
-import 'localdb.dart';
-import 'nomina_bonos.dart';
 import 'nomina_calc.dart';
+import 'nomina_foto.dart';
 import 'nomina_precalc.dart';
-import 'perfil.dart';
-import 'tiempo.dart';
 
 /// Total neto a pagar a los entrenadores (post-1.15, fix principal).
 ///
@@ -24,15 +19,16 @@ import 'tiempo.dart';
 /// entrenador no tiene fila en [libroMes], sus adelantos y su deuda
 /// son 0, igual que en la pantalla.
 ///
-/// El wrapper [totalNetoNominaMes] carga los mismos insumos que la
-/// pantalla de Nómina (tarifa, conteo de pagaron, bonos, comisiones
-/// por dosis con el fix 1.15 de ganadores, libro de adelantos mes a
-/// mes) y devuelve null si no se pudo calcular: la llamadora
-/// conserva entonces el valor anterior en vez de mostrar un neto
-/// inventado. Las comisiones fallidas se degradan a vacías, igual
-/// que en la pantalla; un fallo en el libro de adelantos anula el
-/// cálculo completo (mostrar base+comisión sin descontar adelantos
-/// sobreestimaría lo que hay que pagar).
+/// El wrapper [totalNetoNominaMes] (1.28, M3-A4) ya no
+/// ensambla insumos propios: delega en la foto compartida de
+/// nomina_foto.dart ([fotoNominaMes] + [netoTotalDueno]), la
+/// misma que consumen la pantalla de Nómina y el Panel, y
+/// devuelve null si la foto está incompleta: la llamadora
+/// conserva entonces el valor anterior en vez de mostrar un
+/// neto inventado. La función pura [totalNetoNomina] se
+/// conserva como réplica testeable de la fórmula por
+/// entrenador (sin la exclusión de liquidados, que vive en
+/// netoTotalDueno).
 double totalNetoNomina({
   required double base,
   required List<Map<String, dynamic>> bonos,
@@ -53,156 +49,28 @@ double totalNetoNomina({
   return total;
 }
 
-/// Usuarios APK desde el meta local (misma lectura que la pantalla
-/// de Nómina): lista vacía si el meta falta o no parsea.
-Future<List<Map<String, dynamic>>> _usuariosApk() async {
-  try {
-    final raw = await LocalDb.instance.getMeta('usuarios_apk');
-    if (raw == null || raw.isEmpty) return const [];
-    return (jsonDecode(raw) as List)
-        .map((u) => Map<String, dynamic>.from(u as Map))
-        .toList();
-  } catch (_) {
-    return const [];
-  }
-}
-
+/// 1.28 (M3-A4): el «a pagar» de Home y Dashboard sale de la
+/// MISMA foto que usan la pantalla de Nómina y el Panel
+/// ([fotoNominaMes] + [netoTotalDueno]). Antes esta función
+/// ensamblaba sus propios insumos en paralelo a la foto, con
+/// DOS divergencias reales: no excluía a los entrenadores ya
+/// LIQUIDADOS (Home/Dashboard decían «a pagar» un dinero ya
+/// pagado, mientras el Panel —que sí usa la foto— decía otra
+/// cifra) y llamaba a NominaCalc.clientesQuePagaronElMes
+/// directamente tras asegurar() el precálculo, DESCARTANDO el
+/// conteo asegurado que la pantalla sí usa. Ahora hay una
+/// sola definición: foto compartida (con su guardia de
+/// huella), conteo del precálculo y bonos por el camino con
+/// migración — exactamente lo que compone el Panel.
+/// Devuelve null si la foto está incompleta: la llamadora
+/// conserva el valor anterior, nunca muestra un neto
+/// inventado (misma regla que ya tenía el Panel).
 Future<double?> totalNetoNominaMes(String pref) async {
   try {
-    // #6 (Argón nómina): refrescar el pre-cálculo antes de
-    // componer (la pantalla ya lo hacía; el total del home no).
-    await NominaPrecalc.instance.asegurar(pref);
-    final tarifa = await PerfilService.instance.getPagoEntrenador();
-    final pagaron = await NominaCalc.clientesQuePagaronElMes(pref);
-    final base = pagaron * tarifa.toDouble();
-    final bonos = await BonosNominaService.instance.leerBonos(pref);
-    final usuariosApk = await _usuariosApk();
-    // Comisiones por dosis (igual que NominaScreen, fix 1.15:
-    // se itera a quienes GANARON comisión, no solo a quienes
-    // registraron; sin espejo, vacías). La lista se iza fuera
-    // del try para que el libro de abajo también la use (fix
-    // Argón post-1.15: comisiones mes a mes, no solo el mes).
-    final comisionDosis = <String, ({int dosis, double total})>{};
-    // Autoauditoría 1.22 #1: clave → TODOS sus telegram_id
-    // (comisiones POR MES del libro, ver NominaCalc).
-    var tidsPorClave = <String, List<int>>{};
-    var ventasServ = <Map<String, dynamic>>[];
-    try {
-      ventasServ =
-          await LocalDb.instance.allMirror('servicio_ventas');
-      final nombrePorTid =
-          NominaCalc.tidsConComisionServicio(ventasServ, usuariosApk);
-      tidsPorClave = {};
-      for (final e in nombrePorTid.entries) {
-        final clave = NominaCalc.claveEntrenador(e.value);
-        if (clave != null) {
-          tidsPorClave.putIfAbsent(clave, () => []).add(e.key);
-        }
-      }
-      for (final tid in nombrePorTid.keys) {
-        final r =
-            NominaCalc.comisionDosisDesdeVentas(ventasServ, tid, pref);
-        if (r.total == 0 && r.dosis == 0) continue;
-        // #6 (Argón nómina): llave única (antes contains inline
-        // aquí y filtro estricto en el libro).
-        // N-3 (1.22): ACUMULAR, no sobrescribir: dos telegram_id
-        // históricos pueden resolver a la misma clave y el
-        // segundo pisaba la comisión del primero.
-        final clave = NominaCalc.claveEntrenador(nombrePorTid[tid]);
-        if (clave != null) {
-          final prev = comisionDosis[clave];
-          comisionDosis[clave] = prev == null
-              ? r
-              : (
-                  dosis: prev.dosis + r.dosis,
-                  total: prev.total + r.total
-                );
-        }
-      }
-    } catch (_) {
-      // Sin espejo de servicios: comisiones en 0, como la pantalla.
-    }
-    // Libro de adelantos mes a mes (igual que NominaScreen). Un
-    // fallo aquí anula el cálculo: sin el libro no se puede
-    // descontar y el neto saldría sobreestimado.
-    final libroMes = <String, MesLibroAdelantos>{};
-    // #6 (Argón nómina): el conteo por mes se memoriza fuera del
-    // bucle (antes se recalculaba por entrenador: mismo mes, dos
-    // consultas al espejo).
-    final conteoCache = <String, int>{};
-    for (final u in usuariosApk) {
-      final username =
-          NominaCalc.claveEntrenador('${u['username'] ?? ''}') ??
-              NominaCalc.claveEntrenador('${u['nombre'] ?? ''}');
-      if (username == null) continue;
-      final id = '${u['id'] ?? ''}';
-      if (id.isEmpty) continue;
-      final telegramId = (u['telegram_id'] as num?)?.toInt() ??
-          int.tryParse('${u['telegram_id'] ?? ''}');
-      final eventos = await AdelantosService.instance
-          .eventosDe(id, telegramId: telegramId);
-      var primero = pref;
-      for (final ev in eventos) {
-        final mm = '${ev['mes_nomina'] ?? ''}';
-        if (mm.length == 7 && mm.compareTo(primero) < 0) primero = mm;
-      }
-      final brutoPorMes = <String, double>{};
-      var mes = primero;
-      while (mes.compareTo(pref) <= 0) {
-        conteoCache[mes] ??=
-            await NominaCalc.clientesQuePagaronElMes(mes);
-        brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
-        mes = mesSiguiente(mes);
-      }
-      // Fix Argón post-1.15 (MEDIO): el libro arrastra deuda mes
-      // a mes, así que necesita la comisión de CADA mes, no solo
-      // la del mes en curso. Antes, un mes anterior con adelantos
-      // por encima de su base pero cubiertos por sus dosis
-      // generaba una deuda entrante falsa en el mes en curso.
-      // Sin tid no se puede atribuir comisión: se degrada al
-      // mapa viejo (solo el mes en curso).
-      // Autoauditoría 1.22 #1: por mes se suman TODOS los tid
-      // de la clave (como el total N-3), no solo el vigente.
-      final tidsClave = tidsPorClave[username] ?? const <int>[];
-      final comisionesPorMes = tidsClave.isNotEmpty
-          ? NominaCalc.comisionesPorMesDesdeVentasMulti(
-              ventasServ, tidsClave, primero, pref)
-          : (telegramId == null
-              ? {pref: comisionDosis[username]?.total ?? 0}
-              : NominaCalc.comisionesPorMesDesdeVentas(
-                  ventasServ, telegramId, primero, pref));
-      // #2 (Argón nómina): los bonos suman a la capacidad del
-      // mes (sin esto, un adelanto cubierto por un bono dejaba
-      // deuda fantasma).
-      final bonosPorMes = await BonosNominaService.instance
-          .bonosPorMes(username, primero, pref);
-      // N-5 (1.22): los meses ya liquidados mandan por su foto,
-      // no por la tarifa viva (ver aplicarFotosLibro).
-      await AdelantosService.instance.aplicarFotosLibro(
-        brutoPorMes: brutoPorMes,
-        comisionesPorMes: comisionesPorMes,
-        bonosPorMes: bonosPorMes,
-        conteoPorMes: conteoCache,
-        entrenadorId: id,
-        telegramId: telegramId,
-      );
-      final libro = libroAdelantos(
-        eventos: eventos,
-        brutoPorMes: brutoPorMes,
-        comisionesPorMes: comisionesPorMes,
-        bonosPorMes: bonosPorMes,
-        hastaMes: pref,
-      );
-      for (final m in libro) {
-        if (m.mes == pref) libroMes[username] = m;
-      }
-    }
-    return totalNetoNomina(
-      base: base,
-      bonos: bonos,
-      comisionDosis: comisionDosis,
-      libroMes: libroMes,
-    );
+    final foto = await fotoNominaMes(pref);
+    final pagaron = await NominaPrecalc.instance.asegurar(pref);
+    final bonos = await leerBonosMesConMigracion(pref);
+    return netoTotalDueno(foto, clientesPagados: pagaron, bonos: bonos);
   } catch (_) {
     return null;
   }

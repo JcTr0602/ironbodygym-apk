@@ -65,18 +65,37 @@ const String kTipoOpEliminarBonoNomina = 'eliminar_bono_nomina';
 /// - Una op `eliminar_bono_nomina` pendiente oculta la fila (del
 ///   espejo o de otra op pendiente) hasta que el servidor la
 ///   aplique y la fila desaparezca del espejo.
-/// - Las filas del espejo marcadas `eliminada` (1/true) se
+/// - Las filas del espejo marcadas `eliminada` (1/true/'1') se
 ///   descartan (contrato alternativo al borrado físico).
 /// - La forma devuelta es la misma que usaban las preferencias
 ///   ({id, entrenador, monto, nota, creado_en, mes}), para que
 ///   [NominaCalc.bonosPara] no cambie.
+/// - 1.28 (M3-A4): [opsRechazadas] trae las ops registrar en
+///   estado 'rechazada' o 'necesita_revision'. Sin esto, un
+///   bono RECHAZADO por el servidor DESAPARECÍA de la nómina
+///   (su op sale de la lectura de pendientes y el espejo nunca
+///   lo tendrá), contra el contrato de la cabecera de este
+///   archivo («la UI la sigue mostrando; NO se pierde el
+///   bono»). Esas entradas llevan `'rechazado': true`: se
+///   MUESTRAN con el aviso, pero NominaCalc NO las suma (el
+///   dinero rechazado no se paga). Sin ventana de tiempo: un
+///   rechazo no caduca solo.
 List<Map<String, dynamic>> fusionarBonosNomina({
   required List<Map<String, dynamic>> espejo,
   required List<Map<String, dynamic>> opsPendientes,
+  List<Map<String, dynamic>> opsRechazadas = const [],
 }) {
   final porUuid = <String, Map<String, dynamic>>{};
   for (final e in espejo) {
-    if (e['eliminada'] == 1 || e['eliminada'] == true) continue;
+    // 1.28 (M3-A4): el flag puede llegar como TEXTO '1' (el
+    // espejo guarda el JSON del servidor): la misma tolerancia
+    // que NominaCalc (1/true/'1'). Con el cast estricto, una
+    // fila eliminada con '1' RESUCITABA en la nómina.
+    if (e['eliminada'] == 1 ||
+        e['eliminada'] == true ||
+        e['eliminada'] == '1') {
+      continue;
+    }
     final uuid = '${e['bono_uuid'] ?? e['id'] ?? ''}';
     if (uuid.isEmpty) continue;
     porUuid[uuid] = {
@@ -123,6 +142,29 @@ List<Map<String, dynamic>> fusionarBonosNomina({
   for (final uuid in eliminados) {
     porUuid.remove(uuid);
   }
+  // 1.28 (M3-A4): los rechazados que no tienen otra fuente se
+  // añaden MARCADOS (visibles, no sumables). Si el bono también
+  // está en el espejo o vivo en pendientes, manda esa fuente:
+  // el rechazo fue de un intento viejo ya superado.
+  for (final op in opsRechazadas) {
+    if (op['tipo'] != kTipoOpRegistrarBonoNomina) continue;
+    try {
+      final p = jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      final uuid = '${p['bono_uuid'] ?? ''}';
+      if (uuid.isEmpty || eliminados.contains(uuid)) continue;
+      if (porUuid.containsKey(uuid)) continue;
+      porUuid[uuid] = {
+        'id': uuid,
+        'bono_uuid': uuid,
+        'mes': '${p['mes'] ?? ''}',
+        'entrenador': '${p['entrenador'] ?? 'ambos'}',
+        'monto': NominaCalc.montoTolerante(p['monto']) ?? 0,
+        'nota': '${p['nota'] ?? ''}',
+        'creado_en': '${p['creado_en'] ?? ''}',
+        'rechazado': true,
+      };
+    } catch (_) {}
+  }
   final out = porUuid.values.toList()
     ..sort((a, b) => '${a['creado_en']}'.compareTo('${b['creado_en']}'));
   return out;
@@ -133,6 +175,49 @@ class BonosNominaService {
   BonosNominaService._();
   static final BonosNominaService instance = BonosNominaService._();
   final LocalDb _db = LocalDb.instance;
+
+  /// 1.28 (M3-A4): las ops de bonos en TODOS los estados que la
+  /// fusión necesita:
+  /// - vivas (pendiente/enviada/error) vía pendingOpsLectura;
+  /// - 'aplicada' de las últimas 48 h: cubren el hueco entre la
+  ///   aplicación en el servidor y la bajada al espejo — sin
+  ///   ellas el bono PARPADEABA (desaparecía de la nómina en
+  ///   cuanto su op se aplicaba y reaparecía con el pull). La
+  ///   ventana acota la resurrección de un bono borrado en el
+  ///   servidor que el espejo ya no trae (la deduplicación por
+  ///   bono_uuid hace que, si el espejo lo tiene, mande él);
+  /// - rechazadas/necesita_revision, aparte: la fusión las
+  ///   marca 'rechazado' (visibles, no sumables).
+  Future<
+      ({
+        List<Map<String, dynamic>> ops,
+        List<Map<String, dynamic>> rechazadas
+      })> _opsBonos() async {
+    final vivas = await _db.pendingOpsLectura();
+    var aplicadas = const <Map<String, dynamic>>[];
+    var rechazadas = const <Map<String, dynamic>>[];
+    try {
+      final d = await _db.db;
+      final corte =
+          isoHabana(ahoraHabana().subtract(const Duration(hours: 48)));
+      aplicadas = await d.query('ops_queue',
+          where: "tipo IN (?, ?) AND estado = 'aplicada' "
+              'AND creada_ts >= ?',
+          whereArgs: [
+            kTipoOpRegistrarBonoNomina,
+            kTipoOpEliminarBonoNomina,
+            corte,
+          ]);
+      rechazadas = await d.query('ops_queue',
+          where: "tipo IN (?, ?) AND estado IN "
+              "('rechazada', 'necesita_revision')",
+          whereArgs: [
+            kTipoOpRegistrarBonoNomina,
+            kTipoOpEliminarBonoNomina,
+          ]);
+    } catch (_) {}
+    return (ops: [...vivas, ...aplicadas], rechazadas: rechazadas);
+  }
 
   /// Bonos por mes para [entrenador] ('duany'/'gabriel'; 'ambos'
   /// cuenta para los dos), desde [desde] hasta [hasta] inclusive.
@@ -146,10 +231,13 @@ class BonosNominaService {
     try {
       todas = await _db.allMirror('nomina_bonos');
     } catch (_) {}
-    final ops = await _db.pendingOpsLectura();
-    final fusion =
-        fusionarBonosNomina(espejo: todas, opsPendientes: ops);
+    final (:ops, :rechazadas) = await _opsBonos();
+    final fusion = fusionarBonosNomina(
+        espejo: todas, opsPendientes: ops, opsRechazadas: rechazadas);
     for (final b in fusion) {
+      // 1.28 (M3-A4): un bono rechazado se MUESTRA en la
+      // pantalla de Nómina pero no suma capacidad ni neto.
+      if (b['rechazado'] == true) continue;
       final mes = '${b['mes'] ?? ''}';
       if (mes.length != 7 ||
           mes.compareTo(desde) < 0 ||
@@ -176,8 +264,11 @@ class BonosNominaService {
           if ('${e['mes'] ?? ''}' == mes) e,
       ];
     } catch (_) {}
-    final ops = await _db.pendingOpsLectura();
-    return fusionarBonosNomina(espejo: espejo, opsPendientes: ops)
+    final (:ops, :rechazadas) = await _opsBonos();
+    return fusionarBonosNomina(
+            espejo: espejo,
+            opsPendientes: ops,
+            opsRechazadas: rechazadas)
         .where((b) => '${b['mes']}' == mes)
         .toList();
   }

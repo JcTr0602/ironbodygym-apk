@@ -60,6 +60,10 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   Map<String, Map<String, String?>> _excepciones = {};
   List<AperturaTurno> _aperturas = [];
   List<Map<String, dynamic>> _cierres = [];
+  // 1.28 (M3-A7): aperturas resueltas por día de la semana
+  // visible (clave: fecha ISO), para que el mapa de calor
+  // cuente lo que de verdad pasó CADA día y no solo lo de hoy.
+  Map<String, List<AperturaTurno>> _aperturasPorDia = {};
   Map<String, dynamic>? _miTurnoVisible;
   // Pendientes: (nombre, telegramId, cup, usd).
   List<({String nombre, int tid, double cup, double usd})> _pendientes =
@@ -89,15 +93,36 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
       final excepciones =
           parseExcepcionesTurnos(ajustes['horario_excepciones']);
       final apMirror = await db.allMirror('turnos_apertura');
-      final cierres = await db.allMirror('turnos_cierre');
-      var aperturas = aperturasHoyConViva(
-          aperturas: apMirror, cierres: cierres, fechaIso: hoyIso);
+      final cierresEspejo = await db.allMirror('turnos_cierre');
       // Mi turno local es más fresco que el espejo: si tengo un
       // turno abierto hoy, cuenta como apertura viva aunque el
       // espejo aún no lo traiga.
       Map<String, dynamic>? miVisible;
       if (!_soyDueno) {
         miVisible = await TurnoService.instance.turnoVisible();
+      }
+      // 1.28 (M3-A7): y si CERRÉ hoy en este teléfono, mi
+      // apertura del espejo tampoco debe seguir «viva» hasta
+      // que baje el cierre por sync (antes la franja se pintaba
+      // «Abierto» con el turno ya cerrado). Se superpone un
+      // cierre SINTÉTICO local — sin turno_id a propósito: la
+      // correspondencia cae a fecha + franja + telegram/nombre,
+      // que es exactamente lo que se quiere casar.
+      final cierres = [...cierresEspejo];
+      if (!_soyDueno &&
+          miVisible != null &&
+          '${miVisible['fecha_turno']}' == hoyIso &&
+          '${miVisible['estado']}'.startsWith('cerrado')) {
+        cierres.add({
+          'fecha': hoyIso,
+          'turno': '${miVisible['turno']}',
+          'entrenador_nombre': AuthService().displayName,
+          'telegram_id': AuthService().telegramId,
+        });
+      }
+      var aperturas = aperturasHoyConViva(
+          aperturas: apMirror, cierres: cierres, fechaIso: hoyIso);
+      if (!_soyDueno) {
         final abierto =
             await TurnoService.instance.turnoActual();
         if (abierto != null) {
@@ -165,6 +190,22 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
           ));
         }
       }
+      // 1.28 (M3-A7): aperturas resueltas de CADA día de la
+      // semana visible, para el mapa de calor. El de hoy es la
+      // lista ya compuesta arriba (con la superposición de mi
+      // turno local); los demás días salen del espejo con los
+      // cierres efectivos.
+      final aperturasPorDia = <String, List<AperturaTurno>>{};
+      final lunes =
+          DateTime(hoy.year, hoy.month, hoy.day - (hoy.weekday - 1));
+      for (var i = 0; i < 7; i++) {
+        final dia = DateTime(lunes.year, lunes.month, lunes.day + i);
+        final iso = isoFechaTurno(dia);
+        aperturasPorDia[iso] = iso == hoyIso
+            ? aperturas
+            : aperturasHoyConViva(
+                aperturas: apMirror, cierres: cierres, fechaIso: iso);
+      }
       if (!mounted) return;
       setState(() {
         _hoy = hoy;
@@ -173,6 +214,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
         _excepciones = excepciones;
         _aperturas = aperturas;
         _cierres = cierres;
+        _aperturasPorDia = aperturasPorDia;
         _miTurnoVisible = miVisible;
         _pendientes = pendientes;
         _errorPendientes = pendientesParcial;
@@ -424,10 +466,12 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
 
   double _anchoLinea = 0;
 
-  /// M5 (1.20): mini mapa de calor de la semana — cuántas
-  /// franjas de cada día tienen entrenador asignado, resuelto
-  /// con la misma función que usa el hub (patrón + excepciones
-  /// + aperturas/cierres). Domingo cerrado; sábado sin tarde.
+  /// M5 (1.20): mini mapa de calor de la semana. Domingo
+  /// cerrado; sábado sin tarde.
+  /// 1.28 (M3-A7): en días pasados y hoy la celda cuenta las
+  /// franjas con apertura REAL de ese día (lo que de verdad
+  /// pasó); en días futuros, las franjas con entrenador
+  /// programado (patrón + excepciones).
   Widget _semanaCalor() {
     final lunes = _hoy.subtract(Duration(days: _hoy.weekday - 1));
     const letras = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -481,16 +525,35 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
           Builder(builder: (_) {
             final franjas = ['manana', if (dia.weekday != 6) 'tarde'];
             var asignadas = 0;
+            // 1.28 (M3-A7): días pasados y hoy cuentan las
+            // franjas con apertura REAL de ese día (un suplente
+            // que abrió sin estar programado cuenta; un
+            // programado que no vino, no). Los días futuros no
+            // tienen aperturas: cuentan el programado, como
+            // siempre. Antes TODOS los días se resolvían con
+            // las aperturas de HOY: el mapa mentía en los dos
+            // sentidos.
+            final yaPaso = !dia.isAfter(
+                DateTime(_hoy.year, _hoy.month, _hoy.day));
+            final apsDia = _aperturasPorDia[isoFechaTurno(dia)] ??
+                const <AperturaTurno>[];
             for (final f in franjas) {
-              final m = estadoFranjaCompleto(
-                fecha: dia,
-                franja: f,
-                patron: _patron,
-                excepciones: _excepciones,
-                aperturas: _aperturas,
-                cierres: _cierres,
-              ).mostrado;
-              if (m != null && m.isNotEmpty) asignadas++;
+              if (yaPaso) {
+                if (huboAperturaEnFranja(
+                    fecha: dia, franja: f, aperturas: apsDia)) {
+                  asignadas++;
+                }
+              } else {
+                final m = estadoFranjaCompleto(
+                  fecha: dia,
+                  franja: f,
+                  patron: _patron,
+                  excepciones: _excepciones,
+                  aperturas: apsDia,
+                  cierres: _cierres,
+                ).mostrado;
+                if (m != null && m.isNotEmpty) asignadas++;
+              }
             }
             return caja(
               Text('$asignadas/${franjas.length}',

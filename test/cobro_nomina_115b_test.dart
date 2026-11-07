@@ -366,7 +366,7 @@ void main() {
       final db = await LocalDb.instance.db;
       await _cliente(db, id: 10, pagadoHasta: '2026-12-15');
       final h1 = await NominaPrecalc.instance.huella();
-      expect(h1, startsWith('v5|'));
+      expect(h1, startsWith('v6|')); // 1.28 (M3-A11): prefijo v6, extracción selectiva en SQL
       await db.update('clientes', {
         'data': jsonEncode({
           'id': 10,
@@ -378,7 +378,7 @@ void main() {
       }, where: 'id = ?', whereArgs: [10]);
       final h2 = await NominaPrecalc.instance.huella();
       expect(h2, isNot(equals(h1)),
-          reason: 'cuenta_casa normalizado forma parte de la huella v5');
+          reason: 'cuenta_casa normalizado forma parte de la huella (v5; v6 conserva el contrato)');
       // Representaciones equivalentes dan la misma huella.
       await db.update('clientes', {
         'data': jsonEncode({

@@ -40,6 +40,27 @@ String fechaIsoDe(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
+/// 1.28 (M3-A8): normaliza una fecha para comparar claves
+/// naturales de turno: los 10 primeros caracteres si tienen
+/// forma de fecha (YYYY-MM-DD); si no, el texto recortado tal
+/// cual. El respaldo de la reconciliación comparaba textos
+/// CRUDOS: '2026-11-01T00:00:00' contra '2026-11-01' jamás
+/// casaban y el respaldo moría en silencio.
+String _normFechaTurno(String s) {
+  final t = s.trim();
+  if (t.length >= 10) {
+    final f = t.substring(0, 10);
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(f)) return f;
+  }
+  return t;
+}
+
+/// 1.28 (M3-A8): normaliza una franja para la misma
+/// comparación: minúsculas y 'mañana' → 'manana' (la grafía
+/// canónica interna no lleva ñ).
+String _normFranjaTurno(String s) =>
+    s.trim().toLowerCase().replaceAll('ñ', 'n');
+
 /// Franja del turno según la hora.
 ///
 /// 1.23 (Delta Argón 5ª#5, decisión de Jc «sin franja de
@@ -165,14 +186,31 @@ class TurnoService {
     final ahora = ahoraHabana();
     final fechaTurno = fechaIsoDe(ahora);
     final turno = turnoIdDe(ahora);
+    final idNuevo = const Uuid().v4();
+    final horaApertura = isoHabana(ahora);
 
-    final (canonico, creado) = await _db.insertarTurno(
-      turnoId: const Uuid().v4(),
+    // 1.28 (M3-A12): inserción + no_cerrado de los anteriores +
+    // encolado de la apertura en UNA transacción
+    // (LocalDb.abrirTurnoAtomico). Antes eran tres pasos con
+    // awaits: morir entre la inserción y el marcado dejaba dos
+    // turnos abiertos el mismo día. Si la transacción falla, la
+    // reconciliación de huérfanas sigue siendo la red (re-encola
+    // la apertura de un abierto_local sin op).
+    final (canonico, creado) = await _db.abrirTurnoAtomico(
+      turnoId: idNuevo,
       fechaTurno: fechaTurno,
       turno: turno,
-      horaApertura: isoHabana(ahora),
+      horaApertura: horaApertura,
       telegramId: tid,
       cubreA: cubreA,
+      encolarApertura: (txn) => SyncEngine.instance.registrarAperturaTurno(
+        turnoId: idNuevo,
+        fechaTurno: fechaTurno,
+        turno: turno,
+        horaApertura: horaApertura,
+        cubreA: cubreA,
+        txn: txn,
+      ),
     );
     if (!creado) {
       // Ya existía (abierto o cerrado): no duplicar ni
@@ -195,25 +233,6 @@ class TurnoService {
       }
       return canonico;
     }
-    // Nuevo: marcar anteriores como no_cerrado (el usuario está
-    // abriendo explícitamente el siguiente).
-    for (final t in await turnosSinResolver()) {
-      final id = '${t['turno_id']}';
-      if (id != canonico) {
-        await _db.marcarEstadoTurno(id, 'no_cerrado');
-      }
-    }
-    // Encolar la apertura. Si falla o la app muere, reconciliarTurnos()
-    // la re-encola (solo si no hay registro de la op: ver #3).
-    try {
-      await SyncEngine.instance.registrarAperturaTurno(
-        turnoId: canonico,
-        fechaTurno: fechaTurno,
-        turno: turno,
-        horaApertura: isoHabana(ahora),
-        cubreA: cubreA,
-      );
-    } catch (_) {}
     return canonico;
   }
 
@@ -227,7 +246,28 @@ class TurnoService {
   /// - (v25, Argón P2): promueve cierres huérfanos: turno en
   ///   cerrado_local cuya op de cierre ya está 'aplicada' (el sync del
   ///   paso 3 de confirmarCierre falló y se completó después).
-  Future<void> reconciliarTurnos() async {
+  // 1.28 (M3-A5): vuelo único de la reconciliación. El Home la
+  // disparaba desde dos sitios (carga principal y refresco al
+  // volver del fondo) y cada llamada esperaba la RPC de 12 s en
+  // el camino de pintar: dos disparos solapados comparten la
+  // MISMA corrida en vez de reconciliar dos veces en paralelo.
+  Future<void>? _reconciliacionEnVuelo;
+  Future<void>? _reconciliacionServidorEnVuelo;
+
+  Future<void> reconciliarTurnos() {
+    final enVuelo = _reconciliacionEnVuelo;
+    if (enVuelo != null) return enVuelo;
+    late final Future<void> corrida;
+    corrida = _reconciliarTurnosInterno().whenComplete(() {
+      if (identical(_reconciliacionEnVuelo, corrida)) {
+        _reconciliacionEnVuelo = null;
+      }
+    });
+    _reconciliacionEnVuelo = corrida;
+    return corrida;
+  }
+
+  Future<void> _reconciliarTurnosInterno() async {
     final tid = _auth.telegramId;
     if (tid == null) return;
     try {
@@ -239,7 +279,10 @@ class TurnoService {
         final turnoId = t['turno_id'] as String;
         final estOp = await _db.estadoOpTurno('apertura_turno', turnoId);
         if (estOp == 'aplicada') {
-          await _db.marcarEstadoTurno(turnoId, 'abierto_sincronizado');
+          // 1.28 (M3-A1): marca guardada — solo si la fila sigue
+          // abierto_local al escribir.
+          await _db.marcarEstadoTurnoSi(turnoId, 'abierto_sincronizado',
+              desde: {'abierto_local'});
         } else if (estOp == null) {
           // Sin rastro de la op: realmente huérfana → re-encolar.
           try {
@@ -260,13 +303,51 @@ class TurnoService {
         // como está; el ciclo normal de sync la procesará.
       }
       final cerrados = await db.query('turnos',
-          columns: ['turno_id'],
           where: 'telegram_id=? AND estado=?',
           whereArgs: [tid, 'cerrado_local']);
       for (final t in cerrados) {
         final turnoId = t['turno_id'] as String;
-        if (await _db.estadoOpTurno('cierre_turno', turnoId) == 'aplicada') {
-          await _db.marcarEstadoTurno(turnoId, 'cerrado_sincronizado');
+        final estOp = await _db.estadoOpTurno('cierre_turno', turnoId);
+        if (estOp == 'aplicada') {
+          await _db.marcarEstadoTurnoSi(turnoId, 'cerrado_sincronizado',
+              desde: {'cerrado_local'});
+        } else if (estOp == null) {
+          // 1.28 (M3-A1): cierre HUÉRFANO — la fila quedó
+          // cerrado_local pero su op no existe (el proceso murió
+          // entre el reclamo y el encolado del cierre, hueco que
+          // el reclamo atómico de confirmarCierre acota pero no
+          // puede hacer imposible si el encolado mismo falla).
+          // Se re-encola desde el snapshot persistido con el
+          // cierre_op_uuid guardado: el servidor deduplica por
+          // op_uuid, así que re-encolar es seguro.
+          try {
+            final uuidGuardado = t['cierre_op_uuid'] as String?;
+            if (uuidGuardado != null && uuidGuardado.isNotEmpty) {
+              final snap = jsonDecode('${t['cierre_snapshot'] ?? '{}'}')
+                  as Map<String, dynamic>;
+              await SyncEngine.instance.registrarCierreTurno(
+                opUuid: uuidGuardado,
+                fecha: '${t['fecha_turno']}',
+                turno: '${t['turno']}',
+                totalCobrado:
+                    (snap['total_cobrado'] as num?)?.toDouble(),
+                pagosCount: (snap['pagos_count'] as num?)?.toInt() ?? 0,
+                turnoId: turnoId,
+                horaApertura: t['hora_apertura'] as String?,
+                horaCierre: t['hora_cierre'] as String?,
+                pendientesCount:
+                    (snap['pendientes_count'] as num?)?.toInt(),
+                pendientesCup:
+                    (snap['pendientes_cup'] as num?)?.toDouble(),
+                pendientesUsd:
+                    (snap['pendientes_usd'] as num?)?.toDouble(),
+                revisionCount:
+                    (snap['revision_count'] as num?)?.toInt(),
+              );
+              AppLog.info('turnos', 'cierre_huerfano_reencolado',
+                  d: 'turno=$turnoId');
+            }
+          } catch (_) {}
         }
       }
     } catch (_) {}
@@ -287,10 +368,20 @@ class TurnoService {
   /// Reconcilia la lista local con los cierres que constan en el
   /// SERVIDOR para el entrenador logueado (ver
   /// [reconciliarConServidorDe]). Sin sesión no hace nada.
-  Future<void> reconciliarConServidor() async {
+  /// 1.28 (M3-A5): con vuelo único, como [reconciliarTurnos].
+  Future<void> reconciliarConServidor() {
     final tid = _auth.telegramId;
-    if (tid == null) return;
-    await reconciliarConServidorDe(tid);
+    if (tid == null) return Future.value();
+    final enVuelo = _reconciliacionServidorEnVuelo;
+    if (enVuelo != null) return enVuelo;
+    late final Future<void> corrida;
+    corrida = reconciliarConServidorDe(tid).whenComplete(() {
+      if (identical(_reconciliacionServidorEnVuelo, corrida)) {
+        _reconciliacionServidorEnVuelo = null;
+      }
+    });
+    _reconciliacionServidorEnVuelo = corrida;
+    return corrida;
   }
 
   /// Trae los cierres PROPIOS desde el servidor: RPC
@@ -332,11 +423,32 @@ class TurnoService {
   /// El estado cerrado_sincronizado es honesto: el cierre YA
   /// consta en el servidor (la fila de la RPC es la evidencia
   /// positiva, el mismo criterio que la op 'aplicada' del
-  /// flujo propio). hora_cierre se rellena con la hora Habana
-  /// del momento de reconciliar (la RPC no devuelve la hora
-  /// del cierre administrativo) y el origen queda anotado en
-  /// cierre_snapshot. cierre_op_uuid queda null a propósito:
-  /// no hubo op local de cierre.
+  /// flujo propio). El origen queda anotado en cierre_snapshot.
+  /// cierre_op_uuid queda null a propósito: no hubo op local
+  /// de cierre.
+  ///
+  /// 1.28 (M3-A8): hora_cierre queda NULL en estos cierres. La
+  /// RPC no devuelve la hora del cierre administrativo y antes
+  /// se rellenaba con la hora de RECONCILIAR: un dato fabricado
+  /// que la auditoría silenciosa de turnos usaba para calcular
+  /// duraciones, inventando «turnos cortos» que nunca
+  /// ocurrieron. Cuándo y por qué se reconcilió ya lo dice el
+  /// snapshot ('reconciliado_en').
+  ///
+  /// 1.28 (M3-A5/A8): las filas locales sin resolver se cargan
+  /// UNA vez y los cierres se casan en memoria (antes: una
+  /// consulta por cierre). Solo se procesan cierres con fecha
+  /// >= hoy − 92 días (ventana generosa frente a los 11 turnos
+  /// fantasma del caso Duany; los más viejos se omiten y se
+  /// cuentan). El respaldo por clave natural compara textos
+  /// NORMALIZADOS en ambos extremos (fecha: los 10 primeros
+  /// caracteres con forma de fecha; franja: minúsculas y
+  /// 'mañana'→'manana') y NO se aplica a una apertura local
+  /// del mismo día: un cierre de hoy sin turno_id casable es
+  /// presumiblemente del flujo propio, no un cierre
+  /// administrativo que rescatar por la puerta de atrás. La
+  /// línea de log resume recibidos/marcados/sin casar/omitidos
+  /// para que el respaldo sea observable.
   ///
   /// Offline-first: NUNCA lanza. Red caída, timeout, RPC aún
   /// no desplegada o respuesta rara = no-op con log.
@@ -350,47 +462,80 @@ class TurnoService {
       const sinResolver =
           "estado IN ('abierto_local','abierto_sincronizado',"
           "'no_cerrado')";
+      final locales = await db.query('turnos',
+          where: 'telegram_id=? AND $sinResolver', whereArgs: [tid]);
+      final porId = <String, Map<String, dynamic>>{
+        for (final f in locales) '${f['turno_id']}': f,
+      };
+      final porClave = <String, Map<String, dynamic>>{};
+      for (final f in locales) {
+        porClave.putIfAbsent(
+            '${_normFechaTurno('${f['fecha_turno']}')}|'
+            '${_normFranjaTurno('${f['turno']}')}',
+            () => f);
+      }
+      final ahora = ahoraHabana();
+      final hoyIso = hoyHabanaIso();
+      // Aritmética de CALENDARIO en UTC (regla de la casa: el
+      // DST cubano roba una hora si se resta por Duration).
+      final limiteUtc =
+          DateTime.utc(ahora.year, ahora.month, ahora.day - 92);
+      final limiteIso = '${limiteUtc.year.toString().padLeft(4, '0')}-'
+          '${limiteUtc.month.toString().padLeft(2, '0')}-'
+          '${limiteUtc.day.toString().padLeft(2, '0')}';
       var marcados = 0;
+      var sinCasar = 0;
+      var omitidosFecha = 0;
       for (final c in cierres) {
         final turnoIdSrv = '${c['turno_id'] ?? ''}'.trim();
-        final fechaSrv = '${c['fecha'] ?? ''}'.trim();
-        final turnoSrv = '${c['turno'] ?? ''}'.trim();
+        final fechaSrv = _normFechaTurno('${c['fecha'] ?? ''}');
+        final franjaSrv = _normFranjaTurno('${c['turno'] ?? ''}');
+        if (fechaSrv.isNotEmpty && fechaSrv.compareTo(limiteIso) < 0) {
+          omitidosFecha++;
+          continue;
+        }
         Map<String, dynamic>? fila;
-        if (turnoIdSrv.isNotEmpty) {
-          final r = await db.query('turnos',
-              columns: ['turno_id'],
-              where: 'turno_id=? AND telegram_id=? AND $sinResolver',
-              whereArgs: [turnoIdSrv, tid],
-              limit: 1);
-          if (r.isNotEmpty) fila = r.first;
+        if (turnoIdSrv.isNotEmpty) fila = porId[turnoIdSrv];
+        if (fila == null &&
+            fechaSrv.isNotEmpty &&
+            franjaSrv.isNotEmpty &&
+            fechaSrv != hoyIso) {
+          fila = porClave['$fechaSrv|$franjaSrv'];
         }
-        if (fila == null && fechaSrv.isNotEmpty && turnoSrv.isNotEmpty) {
-          final r = await db.query('turnos',
-              columns: ['turno_id'],
-              where: 'fecha_turno=? AND turno=? AND telegram_id=? '
-                  'AND $sinResolver',
-              whereArgs: [fechaSrv, turnoSrv, tid],
-              limit: 1);
-          if (r.isNotEmpty) fila = r.first;
+        if (fila == null) {
+          sinCasar++;
+          continue;
         }
-        if (fila == null) continue;
-        final ahora = ahoraHabana();
-        await _db.marcarEstadoTurno(
+        // 1.28 (M3-A1): marca guardada — solo si la fila sigue
+        // sin resolver al escribir (otro camino pudo cerrarla
+        // en medio: no se pisa su evidencia).
+        final n = await _db.marcarEstadoTurnoSi(
           '${fila['turno_id']}',
           'cerrado_sincronizado',
-          horaCierre: isoHabana(ahora),
+          desde: const {
+            'abierto_local',
+            'abierto_sincronizado',
+            'no_cerrado'
+          },
           snapshot: jsonEncode({
             'origen': 'cierre_servidor',
             'reconciliado_en': isoHabana(ahora),
             'turno_id_servidor': turnoIdSrv,
           }),
         );
-        marcados++;
+        if (n > 0) {
+          marcados++;
+          porId.remove('${fila['turno_id']}');
+          porClave.remove(
+              '${_normFechaTurno('${fila['fecha_turno']}')}|'
+              '${_normFranjaTurno('${fila['turno']}')}');
+        } else {
+          sinCasar++;
+        }
       }
-      if (marcados > 0) {
-        AppLog.info('turnos', 'cierres_reconciliados_servidor',
-            d: 'tid=$tid marcados=$marcados');
-      }
+      AppLog.info('turnos', 'cierres_reconciliados_servidor',
+          d: 'tid=$tid recibidos=${cierres.length} marcados=$marcados '
+              'sin_casar=$sinCasar omitidos_fecha=$omitidosFecha');
     } catch (e) {
       AppLog.aviso('turnos', 'reconciliacion_servidor_fallo', d: '$e');
     }
@@ -440,7 +585,10 @@ class TurnoService {
         final turnoId = t['turno_id'] as String;
         if (await _db.estadoOpTurno('apertura_turno', turnoId) ==
             'aplicada') {
-          await _db.marcarEstadoTurno(turnoId, 'abierto_sincronizado');
+          // 1.28 (M3-A1): marca guardada por el estado exacto
+          // leído: si el turno se movió en medio, no se pisa.
+          await _db.marcarEstadoTurnoSi(turnoId, 'abierto_sincronizado',
+              desde: {'abierto_local'});
         }
       }
       final cerrados = await db.query('turnos',
@@ -450,7 +598,8 @@ class TurnoService {
       for (final t in cerrados) {
         final turnoId = t['turno_id'] as String;
         if (await _db.estadoOpTurno('cierre_turno', turnoId) == 'aplicada') {
-          await _db.marcarEstadoTurno(turnoId, 'cerrado_sincronizado');
+          await _db.marcarEstadoTurnoSi(turnoId, 'cerrado_sincronizado',
+              desde: {'cerrado_local'});
         }
       }
     } catch (_) {}
@@ -553,8 +702,12 @@ class TurnoService {
                 '${t['estado']}' == 'cerrado_sincronizado'
                     ? 'cerrado_local'
                     : '${t['estado']}';
-            await _db.marcarEstadoTurno(canonico, estadoTras,
-                cierreOpUuid: nuevoUuid);
+            // 1.28 (M3-A1): marca guardada — solo si la fila del
+            // canónico sigue en el estado que se leyó al
+            // empezar el paso (la promoción pudo moverla en
+            // medio).
+            await _db.marcarEstadoTurnoSi(canonico, estadoTras,
+                desde: {'${t['estado']}'}, cierreOpUuid: nuevoUuid);
           } catch (_) {}
         }
         try {
@@ -749,44 +902,91 @@ class TurnoService {
     var cierreOpUuid = actual['cierre_op_uuid'] as String?;
     cierreOpUuid ??= const Uuid().v4();
 
-    // 1) Encolar el cierre (con turno_id estable + desglose fresco).
-    await SyncEngine.instance.registrarCierreTurno(
-      opUuid: cierreOpUuid,
-      fecha: fechaTurno,
-      turno: turno,
-      totalCobrado: cobrado,
-      pagosCount: pagosCount,
-      turnoId: idEfectivo,
-      horaApertura: horaApertura,
-      horaCierre: horaCierre,
-      pendientesCount: d['count'] as int,
-      pendientesCup: (d['cup'] as num).toDouble(),
-      pendientesUsd: (d['usd'] as num).toDouble(),
-      revisionCount: d['revisionCount'] as int,
-    );
-    // 2) Estado local + snapshot de auditoría + marca legacy.
     // (v25, Argón P2): el estado solo describe el ciclo de red;
     // tiene_incidencias es la propiedad de negocio.
     final tieneIncidencias = (forzado || totalIncierto) ? 1 : 0;
-    final snapshot = jsonEncode({
-      'hora_cierre': horaCierre,
-      'forzado': forzado,
-      'total_cobrado': cobrado,
-      'total_incierto': totalIncierto,
-      'pagos_count': pagosCount,
-      'pendientes_count': d['count'],
-      'pendientes_cup': d['cup'],
-      'pendientes_usd': d['usd'],
-      'revision_count': d['revisionCount'],
-      'incompleto': d['incompleto'],
-      'no_calculados': d['noCalculados'],
-      'cierre_op_uuid': cierreOpUuid,
-    });
-    await _db.marcarEstadoTurno(idEfectivo, 'cerrado_local',
+
+    // 1) RECLAMO ATÓMICO + encolado, en UNA transacción
+    // (1.28, M3-A1). Antes: encolar (await) y DESPUÉS marcar
+    // cerrado_local incondicionalmente — entre la lectura del
+    // estado y la marca, la reconciliación con el servidor
+    // podía marcar cerrado_sincronizado (cierre administrativo
+    // del dueño) y el paso 2 lo pisaba, borrando la evidencia;
+    // la op encolada sobrescribía después el cierre del dueño
+    // en el servidor. Y dos confirmarCierre concurrentes
+    // (diálogo + auto-cierre) generaban DOS op_uuid distintos
+    // para el mismo turno. Ahora el UPDATE guardado ES el
+    // reclamo: solo el primer llamador pasa de un estado sin
+    // resolver a cerrado_local y encola con el uuid reclamado
+    // (el persistido en la fila si ya existía); el segundo ve
+    // 0 filas y sale como duplicado SIN encolar nada.
+    final connCierre = await _db.db;
+    var reclamado = false;
+    await connCierre.transaction((txn) async {
+      final filas = await txn.query('turnos',
+          where: 'turno_id=?', whereArgs: [idEfectivo], limit: 1);
+      if (filas.isEmpty) return;
+      final fila = filas.first;
+      final uuidFila = fila['cierre_op_uuid'] as String?;
+      if (uuidFila != null && uuidFila.isNotEmpty) {
+        cierreOpUuid = uuidFila;
+      }
+      final snapshot = jsonEncode({
+        'hora_cierre': horaCierre,
+        'forzado': forzado,
+        'total_cobrado': cobrado,
+        'total_incierto': totalIncierto,
+        'pagos_count': pagosCount,
+        'pendientes_count': d['count'],
+        'pendientes_cup': d['cup'],
+        'pendientes_usd': d['usd'],
+        'revision_count': d['revisionCount'],
+        'incompleto': d['incompleto'],
+        'no_calculados': d['noCalculados'],
+        'cierre_op_uuid': cierreOpUuid,
+      });
+      final n = await _db.marcarEstadoTurnoSi(
+        idEfectivo,
+        'cerrado_local',
+        desde: const {
+          'abierto_local',
+          'abierto_sincronizado',
+          'no_cerrado'
+        },
         horaCierre: horaCierre,
         cierreOpUuid: cierreOpUuid,
         snapshot: snapshot,
-        tieneIncidencias: tieneIncidencias);
+        tieneIncidencias: tieneIncidencias,
+        txn: txn,
+      );
+      if (n == 0) return;
+      reclamado = true;
+      await SyncEngine.instance.registrarCierreTurno(
+        opUuid: cierreOpUuid,
+        fecha: fechaTurno,
+        turno: turno,
+        totalCobrado: cobrado,
+        pagosCount: pagosCount,
+        turnoId: idEfectivo,
+        horaApertura: horaApertura,
+        horaCierre: horaCierre,
+        pendientesCount: d['count'] as int,
+        pendientesCup: (d['cup'] as num).toDouble(),
+        pendientesUsd: (d['usd'] as num).toDouble(),
+        revisionCount: d['revisionCount'] as int,
+        txn: txn,
+      );
+    });
+    if (!reclamado) {
+      // Alguien movió el turno en medio: si quedó cerrado, es
+      // el duplicado de siempre; si no, no se finge un cierre.
+      final re = await _db.getTurno(idEfectivo);
+      final estRe = '${re?['estado'] ?? ''}';
+      if (estRe == 'cerrado_local' || estRe == 'cerrado_sincronizado') {
+        return {'ok': true, 'estado': estRe, 'duplicado': true};
+      }
+      return {'ok': false, 'error': 'cierre_en_curso'};
+    }
     try {
       await _db.setMeta(
           'cierre_turno_${fechaTurno}_${turno}_$tid', horaCierre);
@@ -811,8 +1011,22 @@ class TurnoService {
     try {
       final estOp = await _db.estadoOpTurno('cierre_turno', idFinal);
       if (estOp == 'aplicada') {
-        estadoFinal = 'cerrado_sincronizado';
-        await _db.marcarEstadoTurno(idFinal, estadoFinal);
+        // 1.28 (M3-A1): promoción GUARDADA: solo si la fila
+        // sigue cerrado_local. Si la reconciliación ya la
+        // marcó cerrado_sincronizado, el estado reportado es
+        // el real de la fila, no el que este paso intentaba.
+        final n = await _db.marcarEstadoTurnoSi(
+            idFinal, 'cerrado_sincronizado',
+            desde: {'cerrado_local'});
+        if (n > 0) {
+          estadoFinal = 'cerrado_sincronizado';
+        } else {
+          final reFin = await _db.getTurno(idFinal);
+          final estFin = '${reFin?['estado'] ?? ''}';
+          if (estFin == 'cerrado_sincronizado') {
+            estadoFinal = estFin;
+          }
+        }
       }
     } catch (_) {}
     return {

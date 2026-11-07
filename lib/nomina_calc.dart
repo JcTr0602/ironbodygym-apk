@@ -19,15 +19,22 @@ import 'tiempo.dart';
 /// no por `pagado_hasta`: un cliente que solo pagó semanal en un
 /// mes cerrado contaba antes y ya no cuenta.
 ///
-/// Excepción del MES EN CURSO (Jc, 2026-10-21): un cliente cuyo
-/// `pagado_hasta` cae DENTRO del propio mes en curso NO entra en la
-/// base de ese mes (ese pago todavía no corresponde a la nómina del
-/// mes; p. ej. un semanal pagado el 13 que vence el 20). La excepción
-/// NO se aplica a meses pasados: el `pagado_hasta` actual no
-/// reconstruye la cobertura que el cliente tenía al cierre de un mes
-/// anterior, así que los meses cerrados conservan la regla histórica
-/// (panel de revisión 2026-10-21). La excepción se aplica DESPUÉS
-/// del filtro de tipo: nunca se usa como filtro de tipo.
+/// Excepción de vencimiento dentro del mes (Jc, 2026-10-21;
+/// alcance corregido por M4c-01 y verificado en la 1.28): un
+/// cliente cuyo `pagado_hasta` cae DENTRO del propio mes NO
+/// entra en la base de ese mes (ese pago todavía no corresponde
+/// a la nómina del mes; p. ej. un semanal pagado el 13 que
+/// vence el 20). La excepción se aplica a CUALQUIER mes que se
+/// calcule, también a los pasados: aplicarla solo al mes en
+/// curso hacía que la base de un mes cerrado CAMBIARA al
+/// cruzar la medianoche del día 1 (un cliente contado el 31
+/// dejaba de contar el 1 sin que su pago cambiara). Lo que
+/// protege a un mes ya liquidado no es una regla distinta,
+/// sino el snapshot congelado de la liquidación. La excepción
+/// se aplica DESPUÉS del filtro de tipo: nunca se usa como
+/// filtro de tipo. (Esta cabecera decía lo contrario hasta la
+/// 1.28 — «NO se aplica a meses pasados» — contradiciendo el
+/// código aplicado desde M4c-01; manda el código.)
 ///
 /// 1.19 (#2, #6 Argón nómina): el libro de adelantos suma los bonos
 /// a la capacidad de cada mes (sin esto, un adelanto cubierto por
@@ -387,6 +394,10 @@ class NominaCalc {
       List<Map<String, dynamic>> bonos, String entrenador) {
     double total = 0;
     for (final b in bonos) {
+      // 1.28 (M3-A4): un bono RECHAZADO por el servidor se
+      // muestra (la fusión lo marca 'rechazado') pero NO se
+      // paga: el dinero rechazado no entra en ningún neto.
+      if (b['rechazado'] == true) continue;
       final para = '${b['entrenador'] ?? 'ambos'}';
       if (para == 'ambos' || para == entrenador) {
         // 1.15 (N5): monto tolerante (String numérico también vale).
@@ -401,6 +412,7 @@ class NominaCalc {
   static double bonoSoloAmbos(List<Map<String, dynamic>> bonos) {
     double total = 0;
     for (final b in bonos) {
+      if (b['rechazado'] == true) continue; // 1.28 (M3-A4)
       final para = '${b['entrenador'] ?? 'ambos'}';
       if (para == 'ambos') {
         // 1.15 (N5): monto tolerante (String numérico también vale).

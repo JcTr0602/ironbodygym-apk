@@ -60,12 +60,25 @@ int? diaSemanaHabana(String? fecha) {
   final m = int.tryParse(fecha.substring(5, 7));
   final d = int.tryParse(fecha.substring(8, 10));
   if (y == null || m == null || d == null) return null;
-  try {
-    return DateTime.utc(y, m, d).weekday;
-  } catch (_) {
-    return null;
-  }
+  final f = DateTime.utc(y, m, d);
+  // 1.28 (M3-A9): validación de ida y vuelta. DateTime NORMALIZA
+  // las fechas imposibles en vez de fallar (2026-02-31 → 3 de
+  // marzo): una fecha sucia caía en el día de semana de OTRA
+  // fecha sin que nadie lo notara. Si los componentes no
+  // coinciden tras construir, la fecha no existe → null.
+  if (f.year != y || f.month != m || f.day != d) return null;
+  return f.weekday;
 }
+
+/// 1.28 (M3-A9), PURO: ¿la fila de venta es Cuenta a la Casa?
+/// Tolerante con el dato sucio: acepta 1, true y '1'. El cast
+/// directo `(v as num?)` reventaba con un bool true (una fila
+/// Casa dejaba de contar como Casa o tumbaba la agrupación) y
+/// perdía el '1' en texto. Es la misma tolerancia que NominaCalc
+/// aplica a su flag eliminada (1 / true / '1'). Lo usan las
+/// agrupaciones de estadísticas y las derivaciones de
+/// servicios.dart: UN solo punto de verdad.
+bool esCasaTolerante(dynamic v) => v == 1 || v == true || v == '1';
 
 const Map<int, String> kNombresDiaSemana = {
   1: 'Lunes',
@@ -114,7 +127,7 @@ Map<int, ({int dosis, double ingresos})> agruparPorDiaSemana(
   for (final v in ventas) {
     final tipo = '${v['tipo']}';
     if (!tipo.startsWith('dosis')) continue;
-    if ((v['casa'] as num?)?.toInt() == 1) continue;
+    if (esCasaTolerante(v['casa'])) continue;
     final dia = diaSemanaHabana('${v['fecha'] ?? ''}');
     if (dia == null) continue;
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
@@ -160,7 +173,7 @@ Map<String, int> agruparPorFranja(List<Map<String, dynamic>> ventas) {
   for (final v in ventas) {
     final tipo = '${v['tipo']}';
     if (!tipo.startsWith('dosis')) continue;
-    if ((v['casa'] as num?)?.toInt() == 1) continue;
+    if (esCasaTolerante(v['casa'])) continue;
     final franja = franjaDeHora('${v['hora'] ?? ''}');
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     out[franja] = (out[franja] ?? 0) + cant;
@@ -348,7 +361,7 @@ String textoResumenSemanal({
   for (final v in ventas) {
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
-    final esCasa = (v['casa'] as num?)?.toInt() == 1;
+    final esCasa = esCasaTolerante(v['casa']);
     final tipo = '${v['tipo']}';
     switch (tipo) {
       case 'dosis_sin_agua':
@@ -406,7 +419,7 @@ String textoResumenSemanal({
   }
   var casaCosto = 0.0, casaN = 0;
   for (final v in ventas) {
-    if ((v['casa'] as num?)?.toInt() != 1) continue;
+    if (!esCasaTolerante(v['casa'])) continue;
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     casaN += cant;
     final boteId = boteDe(v);

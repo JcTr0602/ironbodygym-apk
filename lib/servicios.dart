@@ -5,8 +5,10 @@ import 'package:sqflite/sqflite.dart' show DatabaseExecutor;
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
+import 'estadisticas_servicios.dart' show esCasaTolerante;
 import 'localdb.dart';
 import 'negocio.dart' show fechaNacDeCarnet;
+import 'nomina_calc.dart' show NominaCalc;
 import 'sync.dart';
 import 'tiempo.dart';
 
@@ -85,7 +87,13 @@ Future<({
   double comision
 })> preciosServicios({DatabaseExecutor? txn}) async {
   final aj = await LocalDb.instance.getAjustes(txn: txn);
-  double v(String k, double d) => (aj[k] as num?)?.toDouble() ?? d;
+  // 1.28 (M3-A9): parseo tolerante de la casa. Un precio como
+  // TEXTO en los ajustes ('600' de un ajuste editado a mano o
+  // de una migración vieja) lanzaba TypeError con el cast
+  // directo y la pantalla de Servicios se quedaba en
+  // «Cargando…» para siempre. montoTolerante acepta num y
+  // texto numérico y devuelve null ante basura (→ default).
+  double v(String k, double d) => NominaCalc.montoTolerante(aj[k]) ?? d;
   return (
     sinAgua: v('servicio_precio_sin_agua', 600),
     conAgua: v('servicio_precio_con_agua', 900),
@@ -114,11 +122,14 @@ double precioServicioMetodo(
   if (pub is Map) {
     final prod = pub[kStemServicio[tipo]];
     if (prod is Map) {
-      final v = prod[metodo];
-      if (v is num) return v.toDouble();
+      // 1.28 (M3-A9): también el precio por método puede venir
+      // como texto: montoTolerante en vez de exigir `is num`.
+      final v = NominaCalc.montoTolerante(prod[metodo]);
+      if (v != null) return v;
     }
   }
-  double v(String k, double d) => (ajustes[k] as num?)?.toDouble() ?? d;
+  double v(String k, double d) =>
+      NominaCalc.montoTolerante(ajustes[k]) ?? d;
   return switch (tipo) {
     'dosis_sin_agua' => v('servicio_precio_sin_agua', 600),
     'dosis_con_agua' => v('servicio_precio_con_agua', 900),
@@ -135,8 +146,12 @@ bool metodoServicioActivo(
     final prod = pub[kStemServicio[tipo]];
     if (prod is Map) {
       final v = prod['activo_$metodo'];
-      if (v is num) return v.toInt() != 0;
       if (v is bool) return v;
+      // 1.28 (M3-A9): la bandera también puede venir como
+      // texto ('0'/'1'): un '0' en texto caía al «todo
+      // habilitado» de abajo y el método se ofrecía igual.
+      final n = NominaCalc.montoTolerante(v);
+      if (n != null) return n != 0;
     }
   }
   return true;
@@ -197,7 +212,7 @@ List<Map<String, dynamic>> entradasHistorialServicios({
       'monto': ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
           ((v['cantidad'] as num?)?.toDouble() ?? 0),
       'metodo': '${v['metodo'] ?? ''}',
-      'casa': (v['casa'] as num?)?.toInt() == 1,
+      'casa': esCasaTolerante(v['casa']),
       'esReverso': (v['reverso_de'] as num?) != null,
       'yaReversada': reversadas.contains(id),
     });
@@ -493,7 +508,7 @@ int saldoPomoDesde({
     } else if (tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua') {
       dosis += cant;
     }
-    if ((v['casa'] as num?)?.toInt() != 1) {
+    if (!esCasaTolerante(v['casa'])) {
       importe +=
           ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant;
     }
@@ -720,7 +735,17 @@ Future<List<Map<String, dynamic>>> opsPendientesServicios() =>
 
 Future<List<Map<String, dynamic>>> _opsServicioPendientes(
     {DatabaseExecutor? txn}) async {
-  final ops = await LocalDb.instance.pendingOps(txn: txn);
+  // 1.28 (M3-A2): lectura de DINERO (pendingOpsLectura:
+  // pendiente + enviada + error), no la del push. Con
+  // pendingOps, una op en estado 'enviada' (subida, aún sin
+  // espejar) desaparecía de TODOS los derivados — saldos de
+  // pomo/lote, stock de agua, cuadre — y la app dejaba vender
+  // dosis que ya no quedaban (sobreventa «enviada» cazada por
+  // las auditorías de la 1.28). La deduplicación por op_uuid
+  // contra el espejo ya vive en las derivaciones puras
+  // (saldoPomoDesde/saldoLoteDesde/aguaDesde/cuadre), así que
+  // una op enviada que ya bajó al espejo no cuenta dos veces.
+  final ops = await LocalDb.instance.pendingOpsLectura(txn: txn);
   const tipos = {
     'venta_servicio',
     'salida_servicio',
@@ -739,12 +764,13 @@ Future<int> saldoLoteLocal(int loteId) async {
   final lotes = await LocalDb.instance.allMirror('servicio_lotes');
   final lote = lotes.where((l) => (l['id'] as num?)?.toInt() == loteId);
   if (lote.isEmpty) return 0;
-  final ventas = (await LocalDb.instance.allMirror('servicio_ventas'))
-      .where((v) => (v['lote_id'] as num?)?.toInt() == loteId)
-      .toList();
-  final salidas = (await LocalDb.instance.allMirror('servicio_salidas'))
-      .where((s) => (s['lote_id'] as num?)?.toInt() == loteId)
-      .toList();
+  // 1.28 (M3-A11): filas del lote vía mirrorPorCampo (filtradas
+  // en SQLite) en vez de decodificar los espejos enteros de
+  // ventas y salidas para quedarse con un lote.
+  final ventas = await LocalDb.instance
+      .mirrorPorCampo('servicio_ventas', 'lote_id', loteId);
+  final salidas = await LocalDb.instance
+      .mirrorPorCampo('servicio_salidas', 'lote_id', loteId);
   return saldoLoteDesde(
     lote: lote.first,
     ventasEspejo: ventas,
@@ -757,11 +783,26 @@ Future<({int saldo, double cpp})> stockAguaLocal(
     {DatabaseExecutor? txn}) async {
   final movs = await LocalDb.instance
       .allMirror('servicio_agua_movimientos', txn: txn);
+  final ops = await _opsServicioPendientes(txn: txn);
+  // 1.28 (M3-A11): aguaDesde solo usa el espejo de ventas para
+  // resolver los reversos PENDIENTES por venta_id: se traen
+  // solo esas ventas por PK en vez de decodificar el espejo
+  // entero en cada lectura de stock.
+  final idsReversos = <int>{
+    for (final op in ops)
+      if ('${op['tipo']}' == 'revertir_venta_servicio')
+        if ((_payloadDeOp(op)['venta_id'] as num?)?.toInt() != null)
+          (_payloadDeOp(op)['venta_id'] as num).toInt(),
+  };
+  final ventas = idsReversos.isEmpty
+      ? const <Map<String, dynamic>>[]
+      : await LocalDb.instance.mirrorPorIds(
+          'servicio_ventas', idsReversos.toList(),
+          txn: txn);
   return aguaDesde(
     movimientosEspejo: movs,
-    opsPendientes: await _opsServicioPendientes(txn: txn),
-    ventasEspejo:
-        await LocalDb.instance.allMirror('servicio_ventas', txn: txn),
+    opsPendientes: ops,
+    ventasEspejo: ventas,
   );
 }
 
@@ -803,14 +844,15 @@ Future<int> saldoPomoLocal(int pomoId, {DatabaseExecutor? txn}) async {
       await LocalDb.instance.allMirror('servicio_pomos', txn: txn);
   final pomo = pomos.where((l) => (l['id'] as num?)?.toInt() == pomoId);
   if (pomo.isEmpty) return 0;
-  final ventas =
-      (await LocalDb.instance.allMirror('servicio_ventas', txn: txn))
-          .where((v) => (v['pomo_id'] as num?)?.toInt() == pomoId)
-          .toList();
-  final salidas =
-      (await LocalDb.instance.allMirror('servicio_salidas', txn: txn))
-          .where((s) => (s['pomo_id'] as num?)?.toInt() == pomoId)
-          .toList();
+  // 1.28 (M3-A11): ventas/salidas del pomo vía mirrorPorCampo
+  // (filtradas en SQLite, con el mismo ejecutor) en vez de
+  // decodificar los espejos enteros: esta lectura corre dentro
+  // de la transacción de cada venta y con el historial crecido
+  // el coste era lineal en TODAS las ventas del gym.
+  final ventas = await LocalDb.instance
+      .mirrorPorCampo('servicio_ventas', 'pomo_id', pomoId, txn: txn);
+  final salidas = await LocalDb.instance
+      .mirrorPorCampo('servicio_salidas', 'pomo_id', pomoId, txn: txn);
   return saldoPomoDesde(
     pomo: pomo.first,
     ventasEspejo: ventas,
@@ -1030,7 +1072,7 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
         (v['comision_unitaria'] as num?)?.toDouble() ?? 0,
         (v['comision_monto'] as num?)?.toDouble(),
         v['metodo'] as String?,
-        (v['casa'] as num?)?.toInt() == 1,
+        esCasaTolerante(v['casa']),
         rol(v['vendedor_id']),
         rol(v['responsable_efectivo_id']),
         rol(v['comision_entrenador_id']),
@@ -1103,7 +1145,7 @@ Future<Map<String, dynamic>> _cuadreServiciosDia(
     }
     if (orig == null) continue;
     final oMetodo = orig['metodo'] as String?;
-    final oCasa = (orig['casa'] as num?)?.toInt() == 1;
+    final oCasa = esCasaTolerante(orig['casa']);
     final int? responsable;
     if (oCasa || oMetodo == 'transferencia') {
       responsable = null;
@@ -1168,9 +1210,12 @@ Future<String> _encolar(String tipo, Map<String, dynamic> payload,
 
 /// v1.13.0 (E3): Deshacer de una venta de dosis (simple o múltiple).
 /// Borra TODAS las ops del grupo de la cola si y solo si: no pasaron
-/// 15 s exactos desde el cobro Y cada op sigue 'pendiente'
-/// (synced == 0: aún no subió; la retención de 15 s lo garantiza
-/// salvo «Subir ahora» forzado). Si alguna ya subió, no se toca
+/// 15 s exactos desde el cobro Y cada op sigue sin enviar
+/// ('pendiente' o 'error': 1.28 M3-A3 — la comprobación exigía
+/// 'pendiente' pero el borrado aceptaba también 'error', y la
+/// discrepancia hacía el Deshacer imposible justo en el caso
+/// del error recuperable; 'enviada' NUNCA: puede estar ya
+/// aplicada en el servidor). Si alguna ya subió, no se toca
 /// nada y solo cabe Reversión (D3). Devuelve true si deshizo.
 Future<bool> deshacerVentaServicio(
     List<String> opUuids, DateTime cobradoEn) async {
@@ -1191,7 +1236,8 @@ Future<bool> deshacerVentaServicio(
             columns: ['estado'],
             where: 'op_uuid = ?',
             whereArgs: [uuid]);
-        if (rows.isEmpty || '${rows.first['estado']}' != 'pendiente') {
+        final estOp = rows.isEmpty ? '' : '${rows.first['estado']}';
+        if (estOp != 'pendiente' && estOp != 'error') {
           throw StateError('deshacer: op no pendiente');
         }
       }
@@ -1754,19 +1800,31 @@ Future<List<String>> revertirVentaServicio({
       throw Exception('Esta venta ya tiene una reversión en cola');
     }
     // El espejo guarda cada fila como JSON en `data` (sin
-    // columnas por campo): el reverso espejado se busca
-    // decodificando, como hace el resto del módulo.
-    final filasEspejo =
-        await txn.query('servicio_ventas', columns: ['data']);
-    final yaEspejado = filasEspejo.any((f) {
-      try {
-        final m =
-            jsonDecode(f['data'] as String) as Map<String, dynamic>;
-        return (m['reverso_de'] as num?)?.toInt() == ventaId;
-      } catch (_) {
-        return false;
-      }
-    });
+    // columnas por campo). 1.28 (M3-A11): el reverso espejado
+    // se busca con el filtro en SQLite (mirrorPorCampo por
+    // reverso_de, con el mismo ejecutor): antes se decodificaba
+    // el espejo ENTERO dentro de la transacción de escritura
+    // para encontrar una fila. Si JSON1 no estuviera en el
+    // teléfono, se cae al escaneo decodificando, como antes.
+    bool yaEspejado;
+    try {
+      final reversos = await LocalDb.instance.mirrorPorCampo(
+          'servicio_ventas', 'reverso_de', ventaId,
+          txn: txn);
+      yaEspejado = reversos.isNotEmpty;
+    } catch (_) {
+      final filasEspejo =
+          await txn.query('servicio_ventas', columns: ['data']);
+      yaEspejado = filasEspejo.any((f) {
+        try {
+          final m =
+              jsonDecode(f['data'] as String) as Map<String, dynamic>;
+          return (m['reverso_de'] as num?)?.toInt() == ventaId;
+        } catch (_) {
+          return false;
+        }
+      });
+    }
     if (yaEspejado) {
       throw Exception('Esta venta ya fue revertida');
     }
@@ -2012,7 +2070,7 @@ List<Map<String, dynamic>> rankingServicios(
     // raciones/combos: un cliente con compras + cortesías veía sus
     // cortesías inflando el ranking. (resumenServiciosDeCliente sí
     // las cuenta como consumo recibido; aquí no.)
-    if ((v['casa'] as num?)?.toInt() == 1) continue;
+    if (esCasaTolerante(v['casa'])) continue;
     if (desde != null && '${v['fecha'] ?? ''}'.compareTo(desde) < 0) {
       continue;
     }

@@ -155,15 +155,16 @@ void main() {
     await db.close();
   });
 
-  test('precalc v5: cambiar solo pagado_hasta invalida la caché', () async {
+  test('precalc v6: cambiar solo pagado_hasta invalida la caché', () async {
     final db = await _abrirDbVacia();
     final pref = NominaCalc.prefMesActual();
     await _pago(db, id: 1, clienteId: 10, fecha: '$pref-05');
     await _cliente(db, id: 10, pagadoHasta: '${_mesSiguiente(pref)}-05');
     expect(await NominaPrecalc.instance.asegurar(pref), 1);
     final filas = await db.query('nomina_precalc');
-    expect(filas.first['huella'], startsWith('v5|'),
-        reason: 'toda caché nueva nace con la huella v5');
+    expect(filas.first['huella'], startsWith('v6|'),
+        reason: 'toda caché nueva nace con la huella v6 '
+            '(1.28 M3-A11: extracción selectiva en SQL, sin decodificar el espejo)');
 
     // Cambia SOLO el vencimiento (entra al mes): sin tocar pagos.
     await db.update(

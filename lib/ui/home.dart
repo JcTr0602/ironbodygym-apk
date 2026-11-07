@@ -382,6 +382,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// Sección "Turnos pendientes" (auditoría ChatGPT #2).
   List<Map<String, dynamic>> _turnosPendientes = [];
 
+  /// 1.28 (M3-A5): generación del estado de turno pintado. La
+  /// reconciliación con el servidor corre EN SEGUNDO PLANO (su
+  /// RPC puede tardar 12 s sin conexión: jamás se espera antes
+  /// de pintar); al terminar refresca el turno SOLO si ninguna
+  /// carga más nueva lo pintó ya.
+  int _genTurno = 0;
+
   /// v1.3.3: evita dobles taps mientras se abre/cierra el turno.
   bool _procesandoTurno = false;
 
@@ -563,20 +570,50 @@ class _HomeScreenState extends State<HomeScreen>
   /// v1.3.3: recarga solo el estado del turno (ligero, sin bypass de caché).
   /// Usa turnoVisible() (cualquier estado) para no volver a ofrecer
   /// "Abrir turno" tras cerrar (auditoría ChatGPT #1).
+  ///
+  /// 1.28 (M3-A5): pinta PRIMERO con el espejo local y dispara
+  /// la reconciliación en segundo plano. Antes se esperaba
+  /// `reconciliarTurnos()` — con su RPC de hasta 12 s — antes
+  /// de leer el turno: sin conexión, el Home del entrenador
+  /// tardaba eso en mostrar su turno (contra la regla
+  /// offline-first de la casa: ninguna RPC con await antes de
+  /// pintar).
   Future<void> _refrescarTurno() async {
     if (_auth.isOwner || !mounted) return;
+    final gen = ++_genTurno;
     try {
-      await TurnoService.instance.reconciliarTurnos();
       final t = await TurnoService.instance.turnoVisible();
       final pendientes =
           await TurnoService.instance.turnosSinResolver();
-      if (mounted) {
+      if (mounted && gen == _genTurno) {
         setState(() {
           _turnoActual = t;
           _turnosPendientes = pendientes;
         });
       }
     } catch (_) {}
+    _reconciliarTurnosEnFondo(gen);
+  }
+
+  /// 1.28 (M3-A5): reconciliación de turnos en segundo plano;
+  /// al terminar, refresca el turno pintado si la generación
+  /// [gen] sigue vigente (nadie pintó algo más nuevo) y la
+  /// pantalla sigue montada.
+  void _reconciliarTurnosEnFondo(int gen) {
+    unawaited(TurnoService.instance.reconciliarTurnos().then((_) async {
+      if (!mounted || gen != _genTurno) return;
+      try {
+        final t = await TurnoService.instance.turnoVisible();
+        final pendientes =
+            await TurnoService.instance.turnosSinResolver();
+        if (mounted && gen == _genTurno) {
+          setState(() {
+            _turnoActual = t;
+            _turnosPendientes = pendientes;
+          });
+        }
+      } catch (_) {}
+    }).catchError((_) {}));
   }
 
   Future<void> _revisarBloqueo({bool alAbrir = false}) async {
@@ -793,9 +830,13 @@ class _HomeScreenState extends State<HomeScreen>
       // mostrar el chip correcto tras cerrar (auditoría ChatGPT #1).
       Map<String, dynamic>? turnoAct;
       List<Map<String, dynamic>> turnosPend = [];
+      // 1.28 (M3-A5): la carga principal pinta el turno con el
+      // espejo LOCAL; la reconciliación (RPC de hasta 12 s) se
+      // dispara tras el setState, en segundo plano, y refresca
+      // el turno al terminar si esta generación sigue vigente.
+      final genTurnoCarga = ++_genTurno;
       if (!_auth.isOwner) {
         try {
-          await TurnoService.instance.reconciliarTurnos();
           turnoAct = await TurnoService.instance.turnoVisible();
           turnosPend = await TurnoService.instance.turnosSinResolver();
         } catch (_) {}
@@ -872,6 +913,9 @@ class _HomeScreenState extends State<HomeScreen>
             .asegurar(hoyHabanaIso().substring(0, 7))
             .catchError((_) => 0));
       }
+      // 1.28 (M3-A5): la reconciliación de turnos corre tras
+      // pintar, en segundo plano (ver _reconciliarTurnosEnFondo).
+      if (!_auth.isOwner) _reconciliarTurnosEnFondo(genTurnoCarga);
       // v1.8.0: señal de atención del dueño en segundo pase (las
       // RPC no bloquean el pintado local; ver _cargarAtencionDueno).
       if (_auth.isOwner) unawaited(_cargarAtencionDueno());

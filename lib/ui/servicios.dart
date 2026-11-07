@@ -88,7 +88,28 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     _cargar();
   }
 
+  // 1.28 (M3-A9): red de error de la carga. Cualquier fallo
+  // leyendo ajustes/espejos (un precio con un tipo inesperado
+  // era el caso cazado: TypeError y la pantalla se quedaba en
+  // «Cargando…» PARA SIEMPRE, sin salida) apaga el spinner y
+  // ofrece el error con Reintentar, en vez de un colgado
+  // silencioso.
+  bool _errorCarga = false;
+
   Future<void> _cargar() async {
+    try {
+      await _cargarInterno();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _errorCarga = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _cargarInterno() async {
     final auth = AuthService();
     final tid = auth.telegramId;
     final hoy = hoyHabanaIso();
@@ -239,6 +260,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _ventasHoy = deHoy;
       _reversadas = reversadas;
       _cargando = false;
+      _errorCarga = false;
     });
     // 10/25: desglose del pomo seleccionado (dueño) tras la carga.
     _cargarDesglose();
@@ -811,40 +833,78 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       }
     }
     try {
-      final opUuid = await registrarVentaServicio(
-        tipo: tipo,
-        pomoId: tipo == 'agua_suelta'
-            ? null
-            : (pomoVenta!['id'] as num).toInt(),
-        cantidad: cantidad,
-        clienteId: (cliente?['id'] as num?)?.toInt(),
-        metodo: metodo,
-        casa: esCasaCliente || paraDuenoCasa,
-        beneficiario: paraDuenoCasa ? 'dueno' : null,
-        // Ítem 8: el vendedor es el dueño solo si vende a su nombre.
-        vendedorEsDueno: _esDueno && vendedorSel == _miTid,
-        vendedorId: _esDueno ? vendedorSel : null,
-        responsableEfectivoId: _esDueno &&
-                !esCasaCliente &&
-                !paraDuenoCasa &&
-                metodo == 'efectivo'
-            ? responsableSel
-            : null,
-        comisionUnitaria: _esDueno &&
-                vendedorSel != _miTid &&
-                !esCasaCliente &&
-                !paraDuenoCasa
-            ? (double.tryParse(
-                    comisionCtrl.text.trim().replaceAll(',', '.')) ??
-                _precios?.comision)
-            : null,
-      );
+      // 1.28 (M3-A3): una dosis con cantidad > 1 va por la vía
+      // MÚLTIPLE (grupo). La simple lanzaba «La dosis se vende
+      // de una en una; para varias usa venta múltiple» aunque
+      // el propio diálogo dejaba subir el contador (el dueño,
+      // hasta el saldo de su pomo): la venta principal de un
+      // mostrador —varias dosis de una vez— era imposible sin
+      // abrir el otro diálogo. La múltiple compone el mismo
+      // plan (sin agua → todas sin agua; con agua → todas con
+      // agua) y devuelve la lista de ops para el mismo
+      // Deshacer de grupo.
+      final comisionForm = _esDueno &&
+              vendedorSel != _miTid &&
+              !esCasaCliente &&
+              !paraDuenoCasa
+          ? (double.tryParse(
+                  comisionCtrl.text.trim().replaceAll(',', '.')) ??
+              _precios?.comision)
+          : null;
+      final responsableForm = _esDueno &&
+              !esCasaCliente &&
+              !paraDuenoCasa &&
+              metodo == 'efectivo'
+          ? responsableSel
+          : null;
+      final List<String> opUuidsVenta;
+      if (tipo != 'agua_suelta' && cantidad > 1) {
+        opUuidsVenta = await registrarVentaMultipleServicio(
+          pomoId: (pomoVenta!['id'] as num).toInt(),
+          dosisN: cantidad,
+          pomosM: tipo == 'dosis_con_agua' ? cantidad : 0,
+          clienteId: (cliente?['id'] as num?)?.toInt(),
+          metodo: metodo,
+          casa: esCasaCliente || paraDuenoCasa,
+          beneficiario: paraDuenoCasa ? 'dueno' : null,
+          vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+          vendedorId: _esDueno ? vendedorSel : null,
+          responsableEfectivoId: responsableForm,
+          comisionUnitaria: comisionForm,
+          // Mismos topes que el diálogo múltiple: el dueño,
+          // contra el saldo del pomo de la venta; el
+          // entrenador, sin tope local (el servidor manda).
+          topeDosis: _esDueno
+              ? ((pomoVenta['saldo_local'] as num?)?.toInt() ?? 0)
+              : 999999,
+          topePomos: _agua.saldo,
+        );
+      } else {
+        opUuidsVenta = [
+          await registrarVentaServicio(
+            tipo: tipo,
+            pomoId: tipo == 'agua_suelta'
+                ? null
+                : (pomoVenta!['id'] as num).toInt(),
+            cantidad: cantidad,
+            clienteId: (cliente?['id'] as num?)?.toInt(),
+            metodo: metodo,
+            casa: esCasaCliente || paraDuenoCasa,
+            beneficiario: paraDuenoCasa ? 'dueno' : null,
+            // Ítem 8: el vendedor es el dueño solo si vende a su nombre.
+            vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+            vendedorId: _esDueno ? vendedorSel : null,
+            responsableEfectivoId: responsableForm,
+            comisionUnitaria: comisionForm,
+          ),
+        ];
+      }
       final cobradoEn = ahoraHabana();
       await _cargar();
       // v1.13.0 (E3): Deshacer 15 s exactos desde el cobro (solo
       // dosis; el agua suelta sube de inmediato y no tiene Deshacer).
       if (tipo != 'agua_suelta') {
-        _mostrarDeshacer([opUuid], cobradoEn);
+        _mostrarDeshacer(opUuidsVenta, cobradoEn);
       } else {
         _aviso('Venta registrada');
       }
@@ -1723,7 +1783,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando servicios…')
-          : RefreshIndicator(
+          : _errorCarga
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los servicios',
+                  detalle:
+                      'Revisa la conexión o vuelve a intentarlo.',
+                  onReintentar: _cargar,
+                )
+              : RefreshIndicator(
               onRefresh: _actualizar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -2378,8 +2445,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       if (pomoEsMio && vendTid != _miTid) {
         final respTid = LocalDb.normalizarTelegramId(
             v['responsable_efectivo_id']);
+        // 1.28 (M3-A9): la comisión de la insignia cae a
+        // unitaria × cantidad cuando la columna agregada
+        // falta, como ya hacían la ficha y el diálogo de
+        // reversión. Antes la fila pintaba «Comisión: 0 CUP»
+        // en ventas cuya comisión SÍ existía por la otra vía.
+        final comInsignia =
+            (v['comision_monto'] as num?)?.toDouble() ??
+                ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
+                    ((v['cantidad'] as num?)?.toInt() ?? 0);
         insignia = 'Vendida por el dueño de tu pomo · '
-            'Comisión: ${fmtMonto((v['comision_monto'] as num?)?.toDouble() ?? 0)} CUP · '
+            'Comisión: ${fmtMonto(comInsignia)} CUP · '
             'Efectivo: ${v['metodo'] == 'transferencia' ? '—' : (respTid == _miTid ? 'Tú' : 'Dueño')}';
       } else if (vendTid == _miTid && regTid != _miTid) {
         insignia = 'Registrada por el dueño a tu nombre';

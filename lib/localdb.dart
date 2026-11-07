@@ -6211,8 +6211,11 @@ class LocalDb {
   /// sirve para el desglose por pomo (pocas filas por pomo) sin
   /// traer el espejo completo.
   Future<List<Map<String, dynamic>>> mirrorPorCampo(
-      String tabla, String campo, Object? valor) async {
-    final d = await db;
+      String tabla, String campo, Object? valor,
+      {DatabaseExecutor? txn}) async {
+    // 1.28 (M3-A11): ejecutor inyectable — los saldos de Servicios
+    // la usan dentro de la transacción de registro.
+    final d = txn ?? await db;
     final rows = await d.rawQuery(
         "SELECT id, data FROM $tabla WHERE json_extract(data, '\$.$campo') = ?",
         [valor]);
@@ -7578,6 +7581,125 @@ class LocalDb {
         where: 'turno_id=?', whereArgs: [turnoId]);
   }
 
+  /// 1.28 (M3-A1): como [marcarEstadoTurno] pero GUARDADO: solo
+  /// escribe si el estado actual está en [desde]. Devuelve las
+  /// filas afectadas (0 = otro camino ya movió el turno: el
+  /// llamador NO debe pisar ese estado). Nace de la carrera del
+  /// cierre: confirmarCierre leía el estado, encolaba y marcaba
+  /// cerrado_local incondicionalmente — si la reconciliación con
+  /// el servidor marcaba cerrado_sincronizado en medio, el paso
+  /// local lo pisaba, borraba la evidencia del cierre
+  /// administrativo y la op encolada sobrescribía en el servidor
+  /// el cierre del dueño.
+  Future<int> marcarEstadoTurnoSi(String turnoId, String estado,
+      {required Set<String> desde,
+      String? horaCierre,
+      String? cierreOpUuid,
+      String? snapshot,
+      int? tieneIncidencias,
+      DatabaseExecutor? txn}) async {
+    if (desde.isEmpty) return 0;
+    final d = txn ?? await db;
+    final vals = <String, dynamic>{'estado': estado};
+    if (horaCierre != null) vals['hora_cierre'] = horaCierre;
+    if (cierreOpUuid != null) vals['cierre_op_uuid'] = cierreOpUuid;
+    if (snapshot != null) vals['cierre_snapshot'] = snapshot;
+    if (tieneIncidencias != null) {
+      vals['tiene_incidencias'] = tieneIncidencias;
+    }
+    final ph = List.filled(desde.length, '?').join(',');
+    return d.update('turnos', vals,
+        where: 'turno_id=? AND estado IN ($ph)',
+        whereArgs: [turnoId, ...desde]);
+  }
+
+  /// 1.28 (M3-A12): apertura de turno en UNA transacción:
+  /// inserción del turno + marcado no_cerrado de los anteriores
+  /// sin resolver (con marca guardada) + encolado de la op de
+  /// apertura (vía [encolarApertura], que recibe el ejecutor).
+  /// Antes eran tres pasos con awaits separados: morir entre la
+  /// inserción y el marcado dejaba DOS turnos abiertos el mismo
+  /// día, y morir antes del encolado dejaba la apertura sin op
+  /// (la re-encolaba la reconciliación, pero el hueco existía).
+  /// Idempotente por (fecha_turno, turno, telegram_id) como
+  /// [insertarTurno]: devuelve (turno_id, creado); con
+  /// creado=false el llamador NO encola (la apertura no se
+  /// encoló aquí tampoco) y conserva la vía cubreA de siempre.
+  Future<(String, bool)> abrirTurnoAtomico({
+    required String turnoId,
+    required String fechaTurno,
+    required String turno,
+    required String horaApertura,
+    required int telegramId,
+    String? cubreA,
+    required Future<void> Function(DatabaseExecutor txn) encolarApertura,
+  }) async {
+    final d = await db;
+    return d.transaction((txn) async {
+      final existente = await txn.query('turnos',
+          columns: ['turno_id'],
+          where: 'fecha_turno=? AND turno=? AND telegram_id=?',
+          whereArgs: [fechaTurno, turno, telegramId],
+          limit: 1);
+      if (existente.isNotEmpty) {
+        final idExistente = existente.first['turno_id'] as String;
+        // F9: marcar el suplente sobre un turno ya abierto
+        // (misma semántica que insertarTurno).
+        if (cubreA != null) {
+          await txn.update('turnos', {'cubre_a': cubreA},
+              where: 'turno_id=?', whereArgs: [idExistente]);
+        }
+        return (idExistente, false);
+      }
+      try {
+        await txn.insert('turnos', {
+          'turno_id': turnoId,
+          'fecha_turno': fechaTurno,
+          'turno': turno,
+          'hora_apertura': horaApertura,
+          'hora_cierre': null,
+          'telegram_id': telegramId,
+          'estado': 'abierto_local',
+          'cubre_a': cubreA,
+        });
+      } catch (_) {
+        // Carrera entre dos llamadas: el índice único ganó la otra.
+        final otro = await txn.query('turnos',
+            columns: ['turno_id'],
+            where: 'fecha_turno=? AND turno=? AND telegram_id=?',
+            whereArgs: [fechaTurno, turno, telegramId],
+            limit: 1);
+        if (otro.isNotEmpty) {
+          return (otro.first['turno_id'] as String, false);
+        }
+        rethrow;
+      }
+      // Anteriores ABIERTOS sin resolver → no_cerrado, con el
+      // mismo criterio de «anterior» de turnosSinResolver
+      // (fecha menor, o misma fecha y franja de orden menor) y
+      // marca guardada: una fila que la reconciliación acaba de
+      // cerrar en el servidor no resucita a no_cerrado.
+      final ordenActual = _ordenTurno(turno);
+      final candidatos = await txn.query('turnos',
+          columns: ['turno_id', 'estado', 'fecha_turno', 'turno'],
+          where: "telegram_id=? AND estado IN "
+              "('abierto_local','abierto_sincronizado') "
+              'AND fecha_turno<=?',
+          whereArgs: [telegramId, fechaTurno]);
+      for (final t in candidatos) {
+        final f = '${t['fecha_turno']}';
+        final esAnterior = f.compareTo(fechaTurno) < 0 ||
+            (f == fechaTurno &&
+                _ordenTurno('${t['turno']}') < ordenActual);
+        if (!esAnterior) continue;
+        await marcarEstadoTurnoSi('${t['turno_id']}', 'no_cerrado',
+            desde: {'${t['estado']}'}, txn: txn);
+      }
+      await encolarApertura(txn);
+      return (turnoId, true);
+    });
+  }
+
   /// UUID de la op (apertura_turno/cierre_turno) más reciente para este
   /// turno_id, o null si no hay registro. Para leer el `resultado` que
   /// guarda el puente (p. ej. conflicto de turno_id canónico, Argón P1).
@@ -8826,8 +8948,12 @@ class LocalDb {
   /// op_uuid contra el espejo (patrón B-03/FIN-09) para no
   /// duplicar cuando el pull ya bajó la fila. NO usar para la
   /// selección del push (eso es pendientesParaEnvio).
-  Future<List<Map<String, dynamic>>> pendingOpsLectura() async {
-    final d = await db;
+  Future<List<Map<String, dynamic>>> pendingOpsLectura(
+      {DatabaseExecutor? txn}) async {
+    // 1.28 (M3-A2): ejecutor inyectable, como pendingOps — los
+    // derivados de Servicios la leen también DENTRO de la
+    // transacción de registro (PF-6), sin abrir otra conexión.
+    final d = txn ?? await db;
     return d.query('ops_queue',
         where: "estado IN ('pendiente', 'enviada', 'error')",
         orderBy: 'creada_ts ASC');
