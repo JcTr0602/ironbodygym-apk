@@ -2,16 +2,14 @@
 /// adeudado (mayor primero). El dinero dormido, visible.
 library;
 
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../cliente_protegido.dart';
-import '../fotos.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
+import 'buscar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -201,46 +199,33 @@ class _CuentasCobrarScreenState
                             bottom: AppEspacio.sm),
                         child: Tarjeta(
                           padding: EdgeInsets.zero,
-                          child: ListTile(
-                            leading: _FotoConDias(
-                              fotoStorage: c['foto_storage']
-                                  as String?,
-                              dias: c['dias'] as int,
-                            ),
-                            title:
-                                Text('${c['nombre']}'),
-                            subtitle: Text(
-                              (c['pagado_hasta'] as String).isEmpty
-                                  ? 'Sin fecha de vencimiento'
-                                  : (c['dias'] as int) == 0
-                                      ? 'Vence hoy'
-                                      : 'Vencido hace ${c['dias']} días\n'
-                                          'Venció: ${fmtFecha(c['pagado_hasta'] as String?)}',
-                            ),
-                            isThreeLine: true,
-                            trailing: Column(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.center,
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '${fmtMonto(c['monto'])} CUP',
-                                  style: AppTexto.subtitulo
-                                      .copyWith(
-                                          color: AppColores
-                                              .naranja),
-                                ),
-                                Text('tarifa mensual',
-                                    style: AppTexto.minuscula
-                                        .copyWith(
-                                            color: AppColores
-                                                .textoSecundario(
-                                                    context))),
-                              ],
-                            ),
-                            // P2#5: tocar abre la ficha (desde donde
-                            // se cobra); antes la fila no tenía onTap.
+                          // 1.29 (D-13): la fila es LA fila única
+                          // de la casa (FilaCliente), como en
+                          // Buscar y Listas — foto, nombre,
+                          // insignia con palabra, barra de
+                          // antigüedad y el importe tabular con
+                          // su palabra. Antes esta pantalla
+                          // componía la suya con ListTile y un
+                          // avatar propio con los días dentro.
+                          child: FilaCliente(
+                            cliente: {
+                              'id': c['cliente_id'],
+                              'nombre': c['nombre'],
+                              'pagado_hasta':
+                                  (c['pagado_hasta'] as String)
+                                          .isEmpty
+                                      ? null
+                                      : c['pagado_hasta'],
+                              'foto_storage': c['foto_storage'],
+                            },
+                            diasAtraso: (c['dias'] as int) > 0
+                                ? c['dias'] as int
+                                : null,
+                            importeTexto:
+                                '${fmtMonto(c['monto'])} CUP',
+                            importeEtiqueta: 'tarifa mensual',
+                            // P2#5: tocar abre la ficha (desde
+                            // donde se cobra).
                             onTap: () {
                               final cid = c['cliente_id'] as int?;
                               if (cid == null || cid == 0) return;
@@ -303,97 +288,5 @@ class _CuentasCobrarScreenState
       res.add((titulo, filas, subtotal));
     }
     return res;
-  }
-}
-
-/// Miniatura de foto con insignia de días de atraso (v1.0.11).
-class _FotoConDias extends StatefulWidget {
-  final String? fotoStorage;
-  final int dias;
-  const _FotoConDias(
-      {required this.fotoStorage, required this.dias});
-
-  @override
-  State<_FotoConDias> createState() => _FotoConDiasState();
-}
-
-class _FotoConDiasState extends State<_FotoConDias> {
-  File? _foto;
-
-  @override
-  void initState() {
-    super.initState();
-    _cargar();
-  }
-
-  @override
-  void didUpdateWidget(covariant _FotoConDias oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.fotoStorage != widget.fotoStorage) {
-      setState(() => _foto = null);
-      _cargar();
-    }
-  }
-
-  Future<void> _cargar() async {
-    final rutaObjetivo = widget.fotoStorage;
-    final f = await FotoCache.instance.enCache(rutaObjetivo);
-    if (mounted && widget.fotoStorage == rutaObjetivo) {
-      setState(() => _foto = f);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final oscuro =
-        Theme.of(context).brightness == Brightness.dark;
-    final base = widget.dias > 30
-        ? AppColores.errorOscuro
-        : AppColores.alertaOscuro;
-    // En modo oscuro se aclara el frente para mantener contraste.
-    final frente = oscuro
-        ? (Color.lerp(base, Colors.white, 0.35) ?? base)
-        : base;
-    final insignia =
-        widget.dias > 30 ? AppColores.error : AppColores.alerta;
-    return Stack(
-      children: [
-        CircleAvatar(
-          radius: 24,
-          backgroundColor:
-              frente.withValues(alpha: 0.15),
-          backgroundImage:
-              _foto != null ? FileImage(_foto!) : null,
-          child: _foto == null
-              ? Text(
-                  '${widget.dias}d',
-                  style: AppTexto.etiqueta
-                      .copyWith(color: frente),
-                )
-              : null,
-        ),
-        // Insignia con días
-        Positioned(
-          right: 0,
-          bottom: 0,
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(
-              color: insignia,
-              borderRadius:
-                  BorderRadius.circular(AppRadio.sm),
-            ),
-            child: Text(
-              '${widget.dias}d',
-              style: AppTexto.minuscula.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
   }
 }
