@@ -25,6 +25,7 @@ import '../nomina_calc.dart';
 import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
+import '../servicios.dart' as servicios_lib;
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -179,13 +180,44 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     var dosis = 0;
     var comision = 0.0;
     List<Map<String, dynamic>> ventasServicio = [];
+    // Autoauditoría 1.22 #1: TODOS mis telegram_id (el
+    // histórico y el actual si cambié de cuenta). Se
+    // resuelven ANTES de la foto porque la comisión
+    // titular también los necesita (D-B2-05, más abajo).
+    final misTids = tid == null ? const <int>[] : await _misTids();
     if (tid != null) {
-      ventasServicio =
+      final espejo =
           await LocalDb.instance.allMirror('servicio_ventas');
-      final c = NominaCalc.comisionDosisDesdeVentas(
-          ventasServicio, tid, pref);
-      dosis = c.dosis;
-      comision = c.total;
+      // 1.29 (Oleada 2, D-B2-01): la foto suma espejo +
+      // cola — las ventas que ESTE teléfono ya cobró y
+      // aún no bajan al espejo entran en la comisión, y
+      // los reversos pendientes cancelan su venta antes
+      // de sumar (filasNominaDesdeCola, con deduplicación
+      // por op_uuid). Sin esto la foto era solo-espejo y
+      // una venta sin sincronizar no existía para la
+      // nómina hasta que el sync la bajara.
+      final ops = await servicios_lib.opsPendientesServicios();
+      ventasServicio = [
+        ...espejo,
+        ...servicios_lib.filasNominaDesdeCola(
+          ventasEspejo: espejo,
+          ops: ops,
+          tidSesion: tid,
+        ),
+      ];
+      // 1.29 (Oleada 2, D-B2-05): la comisión del mes se
+      // calcula con el conjunto COMPLETO de mis
+      // telegram_id (histórico + actual), igual que el
+      // libro de más abajo y que la pantalla del dueño
+      // con N-3: con un solo tid, quien cambió de cuenta
+      // de Telegram veía su comisión partida.
+      final tidsFoto = misTids.isNotEmpty ? misTids : [tid];
+      for (final t in tidsFoto) {
+        final c = NominaCalc.comisionDosisDesdeVentas(
+            ventasServicio, t, pref);
+        dosis += c.dosis;
+        comision += c.total;
+      }
     }
     final miId = await _miIdUsuarioApk();
     final eventos = miId.isEmpty
@@ -225,7 +257,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       // identidad atribuible.
       // Autoauditoría 1.22 #1: por mes se suman TODOS mis tid
       // (histórico + actual), no solo el de la sesión.
-      final misTids = tid == null ? const <int>[] : await _misTids();
+      // (misTids se resolvió arriba, antes de la foto.)
       final comisionesPorMes = tid == null
           ? {pref: comision}
           : NominaCalc.comisionesPorMesDesdeVentasMulti(

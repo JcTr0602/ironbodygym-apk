@@ -821,6 +821,161 @@ List<Map<String, dynamic>> ventasHoyDesdeCola({
   return out;
 }
 
+/// 1.29 (Oleada 2, D-B2-01 + reglas H-05 de Argón), PURO:
+/// las filas EXTRA que la foto de nómina suma al espejo de
+/// ventas de servicios para no esperar a que el sync baje
+/// lo que este teléfono ya vendió:
+///
+/// - Cada op `venta_servicio` aún en cola se convierte a
+///   una fila con la MISMA forma que una del espejo, para
+///   que pase por LA MISMA función de atribución del
+///   espejo (`NominaCalc.comisionDosisDesdeVentas`): la
+///   comisión es de quien la GANÓ. El payload de la venta
+///   no trae comision_entrenador_id: quien gana es el
+///   vendedor del payload y, si falta, el autor de la op
+///   (su columna telegram_id; en su defecto [tidSesion],
+///   porque las ops en cola son del usuario de ESTE
+///   dispositivo — la regla S-4 del cuadre).
+/// - Deduplicación por op_uuid (P-13): una venta que ya
+///   bajó al espejo (su op_uuid está entre las filas del
+///   espejo) NO se suma otra vez desde la cola.
+/// - Cada op `revertir_venta_servicio` pendiente CANCELA
+///   su venta objetivo antes de sumar: si el objetivo es
+///   una venta del espejo, se emite la fila sintética del
+///   reverso (cantidad y comisión negadas, fechada el día
+///   de la op: el reverso resta en el mes en que ocurre,
+///   la regla de `comisionDosisDesdeVentas`), con la
+///   atribución copiada de la original. Si el reverso ya
+///   bajó al espejo (hay fila con reverso_de = venta_id)
+///   no se duplica, y dos reversos pendientes de la misma
+///   venta netean una sola vez (el servidor rechaza el
+///   segundo). Los reversos solo apuntan a ventas del
+///   espejo (su payload trae el venta_id del espejo; una
+///   venta aún en cola se retira con Deshacer, que borra
+///   la op, no con reverso).
+///
+/// La VENTANA de mes no se aplica aquí: la aplica la
+/// función de atribución sobre la fecha de cada fila con
+/// su regla de calendario Habana — la fecha del payload
+/// viaja cruda a propósito, para que la fila de cola y la
+/// del espejo pasen por la MISMA conversión.
+List<Map<String, dynamic>> filasNominaDesdeCola({
+  required List<Map<String, dynamic>> ventasEspejo,
+  required List<Map<String, dynamic>> ops,
+  int? tidSesion,
+}) {
+  final uuidsEspejo = <String>{
+    for (final v in ventasEspejo) '${v['op_uuid'] ?? ''}',
+  };
+  final espejoPorId = <int, Map<String, dynamic>>{
+    for (final v in ventasEspejo)
+      if ((v['id'] as num?) != null) (v['id'] as num).toInt(): v,
+  };
+  final yaReversadas = <int>{
+    for (final v in ventasEspejo)
+      if ((v['reverso_de'] as num?) != null)
+        (v['reverso_de'] as num).toInt(),
+  };
+  final out = <Map<String, dynamic>>[];
+  // Primero los reversos: su neteo no depende de las
+  // ventas en cola (solo apuntan al espejo).
+  for (final op in ops) {
+    if ('${op['tipo']}' != 'revertir_venta_servicio') continue;
+    final uuid = '${op['op_uuid'] ?? ''}';
+    if (uuid.isNotEmpty && uuidsEspejo.contains(uuid)) continue;
+    final ventaId = (_payloadDeOp(op)['venta_id'] as num?)?.toInt();
+    if (ventaId == null || yaReversadas.contains(ventaId)) continue;
+    yaReversadas.add(ventaId);
+    final orig = espejoPorId[ventaId];
+    if (orig == null) continue;
+    final comMonto = (orig['comision_monto'] as num?)?.toDouble();
+    out.add({
+      'id': null,
+      'en_cola': true,
+      'op_uuid': uuid,
+      'tipo': '${orig['tipo'] ?? ''}',
+      'cantidad': -((orig['cantidad'] as num?)?.toInt() ?? 0),
+      'precio_unitario':
+          (orig['precio_unitario'] as num?)?.toDouble() ?? 0,
+      'metodo': orig['metodo'],
+      'casa': orig['casa'],
+      'cliente_id': (orig['cliente_id'] as num?)?.toInt(),
+      'vendedor_id': (orig['vendedor_id'] as num?)?.toInt(),
+      'registrado_por': orig['registrado_por'],
+      'comision_entrenador_id': orig['comision_entrenador_id'],
+      'comision_unitaria':
+          (orig['comision_unitaria'] as num?)?.toDouble() ?? 0,
+      if (comMonto != null) 'comision_monto': -comMonto,
+      // La fecha del reverso es la de su op (creada_ts):
+      // resta en el mes en que se revierte, no en el de
+      // la venta.
+      'fecha': '${op['creada_ts'] ?? ''}',
+      'reverso_de': ventaId,
+    });
+  }
+  // Después las ventas que aún viven solo en la cola.
+  for (final op in ops) {
+    if ('${op['tipo']}' != 'venta_servicio') continue;
+    final uuid = '${op['op_uuid'] ?? ''}';
+    if (uuid.isNotEmpty && uuidsEspejo.contains(uuid)) continue;
+    final p = _payloadDeOp(op);
+    final autor = (op['telegram_id'] as num?)?.toInt() ?? tidSesion;
+    final vendedor = (p['vendedor_id'] as num?)?.toInt() ?? autor;
+    out.add({
+      'id': null,
+      'en_cola': true,
+      'op_uuid': uuid,
+      'tipo': '${p['tipo'] ?? ''}',
+      'cantidad': (p['cantidad'] as num?)?.toInt() ?? 1,
+      'precio_unitario':
+          (p['precio_unitario'] as num?)?.toDouble() ?? 0,
+      'metodo': p['metodo'],
+      'casa': p['casa'] == true ? 1 : 0,
+      'cliente_id': (p['cliente_id'] as num?)?.toInt(),
+      'vendedor_id': vendedor,
+      'registrado_por': autor,
+      // Quien gana la comisión de una venta en cola es su
+      // vendedor (el payload no trae comision_entrenador_id;
+      // es lo que el servidor fijará al aplicar la op).
+      'comision_entrenador_id': vendedor,
+      'comision_unitaria':
+          (p['comision_unitaria'] as num?)?.toDouble() ?? 0,
+      'fecha': '${p['fecha'] ?? ''}',
+      'reverso_de': null,
+    });
+  }
+  return out;
+}
+
+/// 1.29 (Oleada 2, FB-14), PURO: cuántas ventas de
+/// servicio en cola son atribuibles a [telegramId] con la
+/// atribución de la foto de nómina (la de
+/// [filasNominaDesdeCola]: gana el vendedor del payload;
+/// si falta, el autor de la op; si falta, [tidSesion]).
+/// Las ya espejadas no cuentan (por op_uuid). Es el N del
+/// aviso honesto al liquidar la nómina: «en ESTE teléfono
+/// quedan N ventas sin subir».
+int ventasEnColaDeEntrenador({
+  required List<Map<String, dynamic>> ops,
+  required Set<String> uuidsEspejo,
+  required int telegramId,
+  int? tidSesion,
+}) {
+  var n = 0;
+  for (final op in ops) {
+    if ('${op['tipo']}' != 'venta_servicio') continue;
+    final uuid = '${op['op_uuid'] ?? ''}';
+    if (uuid.isNotEmpty && uuidsEspejo.contains(uuid)) continue;
+    final p = _payloadDeOp(op);
+    final autor = (op['telegram_id'] as num?)?.toInt() ?? tidSesion;
+    final gana = LocalDb.normalizarTelegramId(p['comision_entrenador_id']) ??
+        (p['vendedor_id'] as num?)?.toInt() ??
+        autor;
+    if (gana == telegramId) n++;
+  }
+  return n;
+}
+
 /// 1.28 (M3-B8): repite la ÚLTIMA venta de dosis registrada
 /// en este teléfono (la meta `ultima_venta_servicio` que
 /// guarda la pantalla de Servicios tras cada venta): mismo

@@ -16,6 +16,7 @@ import '../nomina_foto.dart';
 import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
+import '../servicios.dart' as servicios_lib;
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
@@ -1043,6 +1044,35 @@ class _NominaScreenState extends State<NominaScreen> {
                       adelantos: adelantosLiq,
                       deudaEntrante: deudaLiq,
                     );
+                    // 1.29 (Oleada 2, FB-14): aviso honesto
+                    // ANTES de confirmar el pago — si en
+                    // ESTE teléfono quedan ventas de
+                    // servicio de esta persona aún en cola,
+                    // su comisión no está en el neto de la
+                    // foto (la foto del dueño es del
+                    // espejo): liquidar sin decirlo pagaba
+                    // de menos en silencio. El conteo es el
+                    // de la foto espejo+cola (atribuidas a
+                    // ella, sin las ya espejadas).
+                    var ventasSinSubir = 0;
+                    final tidPersona = persona.telegramId;
+                    if (tidPersona != null) {
+                      try {
+                        final espejoVentas = await LocalDb.instance
+                            .allMirror('servicio_ventas');
+                        ventasSinSubir = servicios_lib
+                            .ventasEnColaDeEntrenador(
+                          ops: await servicios_lib
+                              .opsPendientesServicios(),
+                          uuidsEspejo: {
+                            for (final v in espejoVentas)
+                              '${v['op_uuid'] ?? ''}',
+                          },
+                          telegramId: tidPersona,
+                          tidSesion: AuthService().telegramId,
+                        );
+                      } catch (_) {}
+                    }
                     if (!context.mounted) return;
                     final ok = await showDialog<bool>(
                       context: context,
@@ -1084,6 +1114,24 @@ class _NominaScreenState extends State<NominaScreen> {
                                 'mes pagado no se reescribe). El '
                                 'entrenador verá este resumen y '
                                 'podrá confirmar que la recibió.'),
+                            // 1.29 (FB-14): el aviso de ventas
+                            // sin subir, DENTRO del diálogo y
+                            // antes del «Sí, pagada».
+                            if (ventasSinSubir > 0) ...[
+                              const SizedBox(height: AppEspacio.sm),
+                              Text(
+                                'Ojo: en ESTE teléfono quedan '
+                                '$ventasSinSubir '
+                                'venta${ventasSinSubir == 1 ? '' : 's'} '
+                                'de ${persona.nombre} sin subir. '
+                                'Su comisión entrará cuando se '
+                                'sincronicen; el neto de arriba '
+                                'aún no la trae.',
+                                style: AppTexto.secundario.copyWith(
+                                    color: AppColores.alertaTexto(ctx),
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
                           ],
                         ),
                         actions: [
