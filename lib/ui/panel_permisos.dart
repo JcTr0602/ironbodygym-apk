@@ -2,6 +2,7 @@
 // v1.3.9 Sprint 1 (#14): panel de permisos para entrenadores.
 // Solo el dueño (Jc) puede acceder.
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -102,6 +103,124 @@ class EntrenadorPermiso {
   };
 }
 
+/// 1.29 (fijo de campo): clave de la meta con la foto
+/// local de la nómina (la última lista buena que el
+/// servidor devolvió). La pantalla la pinta al instante
+/// al abrir y la refresca en segundo plano: la red deja
+/// de ser la puerta del primer pintado.
+const kMetaCachePermisos = 'panel_permisos_cache';
+
+/// Serializa la nómina tal como se muestra (email =
+/// identidad de la fila, activo y el mapa de permisos
+/// ya resuelto) con su marca de frescura en hora Habana.
+/// El nombre real y el telegram_id NO se duplican aquí:
+/// viven en la meta usuarios_apk y se cruzan al pintar,
+/// igual que con la lista del servidor.
+String codificarCachePermisos(
+    List<EntrenadorPermiso> lista, DateTime ahora) {
+  return jsonEncode({
+    'guardada_en': isoHabana(ahora),
+    'filas': [
+      for (final e in lista)
+        {
+          'email': e.email,
+          'activo': e.activo,
+          'permisos': e.permisos,
+        },
+    ],
+  });
+}
+
+/// Decodifica la foto local a filas crudas (misma forma
+/// que devuelve el servidor) para construir la lista con
+/// el mismo constructor. null = no hay foto (meta ausente
+/// o ilegible). Degradación fila a fila (patrón 1.28
+/// M5-A5): una fila rara se salta, no tumba la foto.
+List<Map<String, dynamic>>? decodificarCachePermisos(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  try {
+    final dec = jsonDecode(raw);
+    if (dec is! Map) return null;
+    final filas = dec['filas'];
+    if (filas is! List) return null;
+    return [
+      for (final f in filas)
+        if (f is Map) Map<String, dynamic>.from(f),
+    ];
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Construye la lista pintable desde las filas crudas
+/// (del servidor o de la foto local: misma forma) y la
+/// identidad local de usuarios_apk. PURO.
+List<EntrenadorPermiso> construirListaPermisos(
+  List<dynamic> filas,
+  List<Map<String, dynamic>> usuarios,
+) {
+  final lista = filas.map((e) {
+    final m = Map<String, dynamic>.from(e as Map);
+    final email = m['email']?.toString() ?? '';
+    final perms = m['permisos'];
+    final map = <String, bool>{};
+    if (perms is Map) {
+      for (final k in EntrenadorPermiso.permisosDisponibles) {
+        map[k.$1] = perms[k.$1] == true;
+      }
+    }
+    // Nombre bonito del email
+    final nombre = email.split('@').first;
+    final nombreCap = nombre.isNotEmpty
+        ? nombre[0].toUpperCase() + nombre.substring(1)
+        : email;
+    return EntrenadorPermiso(
+      email: email,
+      nombre: nombreCap,
+      activo: m['activo'] == true,
+      permisos: map,
+    );
+  }).toList();
+  // 1.25 T101: el nombre REAL y el telegram_id salen
+  // de usuarios_apk (por el username del correo); el
+  // nombre fabricado del correo queda solo de
+  // respaldo cuando la meta no lo resuelve.
+  for (var i = 0; i < lista.length; i++) {
+    final id = identidadPorEmail(lista[i].email, usuarios);
+    if (id != null) {
+      lista[i] = EntrenadorPermiso(
+        email: lista[i].email,
+        nombre: id.nombre,
+        activo: lista[i].activo,
+        permisos: lista[i].permisos,
+        telegramId: id.telegramId,
+      );
+    }
+  }
+  return lista;
+}
+
+/// La lectura de la nómina en el servidor (la única
+/// dependencia de red de la pantalla), aislada como
+/// función para que el test la sustituya por
+/// [leerNominaPermisosParaTest].
+Future<List<dynamic>> _leerNominaServidor() async {
+  // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
+  // tope, una conexión colgada dejaba el panel en «cargando»
+  // eterno (un cuelgue no es un error; el catch no corría).
+  final res = await Supabase.instance.client
+      .from('entrenadores_autorizados')
+      .select('email, activo, permisos')
+      .order('email')
+      .timeout(const Duration(seconds: 12));
+  return res as List<dynamic>;
+}
+
+/// Costura de test: si no es null, sustituye a la
+/// lectura real de la nómina en el servidor.
+@visibleForTesting
+Future<List<dynamic>> Function()? leerNominaPermisosParaTest;
+
 class PanelPermisos extends StatefulWidget {
   /// v1.4.0 Paso 2: [embebido] = true cuando vive dentro de la pestaña
   /// "Entrenadores" de Control de Acceso (sin Scaffold/AppBar propios).
@@ -115,6 +234,16 @@ class PanelPermisos extends StatefulWidget {
 class _PanelPermisosState extends State<PanelPermisos> {
   List<EntrenadorPermiso> _entrenadores = [];
   bool _cargando = true;
+  // 1.29 (fijo de campo): el error de carga como estado
+  // PROPIO, separado del vacío: un fallo de red ya no se
+  // pinta como «No hay entrenadores registrados» (eso
+  // solo se afirma con una lectura OK de cero filas).
+  String? _errorCarga;
+
+  // 1.29 (fijo de campo): generación del refresco en
+  // curso: una respuesta que llega tras un refresco más
+  // nuevo (o tras dispose) se descarta, no pisa.
+  int _generacion = 0;
   // 1.25 T101: la foto viva del equipo (espejo local, sin
   // red): última sync por telegram_id, quién tiene el
   // turno abierto hoy y el pendiente a entregar. Si la
@@ -153,7 +282,54 @@ class _PanelPermisosState extends State<PanelPermisos> {
   @override
   void initState() {
     super.initState();
-    _cargar();
+    unawaited(_inicio());
+  }
+
+  @override
+  void dispose() {
+    // Una respuesta en vuelo tras dispose se descarta
+    // por generación (y por mounted al aplicarla).
+    _generacion++;
+    super.dispose();
+  }
+
+  /// 1.29 (fijo de campo): arranque offline-first — la
+  /// foto local pinta AL INSTANTE (sin spinner bloqueante
+  /// ni espera de red) y el refresco va detrás, en
+  /// segundo plano. Sin foto local, manda _cargar().
+  Future<void> _inicio() async {
+    // P-1: guarda de método (ver _cargar).
+    if (!AuthService().isOwner) {
+      if (mounted) setState(() => _cargando = false);
+      return;
+    }
+    await _pintarFotoLocal();
+    await _cargar();
+  }
+
+  /// Pinta la última nómina buena guardada en la meta
+  /// local (si existe), cruzando la identidad con
+  /// usuarios_apk en local. Tolerante: una foto ilegible
+  /// equivale a no tener foto.
+  Future<void> _pintarFotoLocal() async {
+    final gen = _generacion;
+    try {
+      final raw =
+          await LocalDb.instance.getMeta(kMetaCachePermisos);
+      final filas = decodificarCachePermisos(raw);
+      if (filas == null) return;
+      final usuarios = await usuariosApk();
+      // Si un refresco arrancó mientras leíamos (o la
+      // pantalla murió), la foto ya no manda.
+      if (!mounted || gen != _generacion) return;
+      setState(() {
+        _entrenadores = construirListaPermisos(filas, usuarios);
+        _cargando = false;
+      });
+      unawaited(_cargarDatosVivos());
+    } catch (_) {
+      // Sin foto pintable: el refresco de red manda.
+    }
   }
 
   Future<void> _cargar() async {
@@ -165,7 +341,13 @@ class _PanelPermisosState extends State<PanelPermisos> {
       setState(() => _cargando = false);
       return;
     }
-    setState(() => _cargando = true);
+    final gen = ++_generacion;
+    if (mounted) {
+      setState(() {
+        _cargando = true;
+        _errorCarga = null;
+      });
+    }
     try {
       // 1.28 (M5-A1/R2M5-H06): un refresco con guardados
       // en vuelo dejaba las relecturas y reversiones de
@@ -181,64 +363,48 @@ class _PanelPermisosState extends State<PanelPermisos> {
           } catch (_) {}
         }
       }
-      // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
-      // tope, una conexión colgada dejaba el panel en «cargando»
-      // eterno (un cuelgue no es un error; el catch no corría).
-      final res = await Supabase.instance.client
-          .from('entrenadores_autorizados')
-          .select('email, activo, permisos')
-          .order('email')
-          .timeout(const Duration(seconds: 12));
-      final usuarios = await usuariosApk();
-      final lista = (res as List).map((e) {
-        final m = Map<String, dynamic>.from(e as Map);
-        final email = m['email']?.toString() ?? '';
-        final perms = m['permisos'];
-        final map = <String, bool>{};
-        if (perms is Map) {
-          for (final k in EntrenadorPermiso.permisosDisponibles) {
-            map[k.$1] = (perms as Map)[k.$1] == true;
-          }
-        }
-        // Nombre bonito del email
-        final nombre = email.split('@').first;
-        final nombreCap = nombre.isNotEmpty
-            ? nombre[0].toUpperCase() + nombre.substring(1)
-            : email;
-        return EntrenadorPermiso(
-          email: email,
-          nombre: nombreCap,
-          activo: m['activo'] == true,
-          permisos: map,
-        );
-      }).toList();
-      // 1.25 T101: el nombre REAL y el telegram_id salen
-      // de usuarios_apk (por el username del correo); el
-      // nombre fabricado del correo queda solo de
-      // respaldo cuando la meta no lo resuelve.
-      for (var i = 0; i < lista.length; i++) {
-        final id = identidadPorEmail(lista[i].email, usuarios);
-        if (id != null) {
-          lista[i] = EntrenadorPermiso(
-            email: lista[i].email,
-            nombre: id.nombre,
-            activo: lista[i].activo,
-            permisos: lista[i].permisos,
-            telegramId: id.telegramId,
-          );
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _entrenadores = lista;
-          _cargando = false;
-        });
-        unawaited(_cargarDatosVivos());
-      }
+      // 1.29 (fijo de campo): la identidad local se lee
+      // EN PARALELO con la lectura de red, no detrás de
+      // su await: antes, un timeout de la lectura dejaba
+      // también sin leer lo que ya estaba en el teléfono.
+      final futuroUsuarios = usuariosApk();
+      final res = await (leerNominaPermisosParaTest ??
+          _leerNominaServidor)();
+      final usuarios = await futuroUsuarios;
+      // Guarda de generación: una respuesta vieja no
+      // pisa a la del refresco más nuevo.
+      if (!mounted || gen != _generacion) return;
+      final lista = construirListaPermisos(res, usuarios);
+      setState(() {
+        _entrenadores = lista;
+        _cargando = false;
+        _errorCarga = null;
+      });
+      // La foto local se renueva con cada lista buena
+      // (si el guardado falla, queda la anterior: la
+      // pantalla ya pintó la verdad del servidor).
+      try {
+        await LocalDb.instance.setMeta(kMetaCachePermisos,
+            codificarCachePermisos(lista, ahoraHabana()));
+      } catch (_) {}
+      unawaited(_cargarDatosVivos());
     } catch (e) {
-      if (mounted) {
-        setState(() => _cargando = false);
-        mostrarSnack(context, 'Error al cargar: $e', significado: SignificadoChip.error);
+      if (!mounted || gen != _generacion) return;
+      setState(() => _cargando = false);
+      if (_entrenadores.isNotEmpty) {
+        // 1.29 (fijo de campo): con la lista ya pintada
+        // (foto local o un refresco anterior), el fallo
+        // se anuncia discreto y la lista QUEDA: jamás se
+        // convierte en el falso vacío.
+        mostrarSnack(context,
+            'No se pudo actualizar. Se muestra la última lista guardada.',
+            significado: SignificadoChip.alerta);
+      } else {
+        // Sin nada que mostrar: el error es el estado
+        // (patrón de las pantallas hermanas), con vía de
+        // reintento; nunca «No hay entrenadores».
+        setState(() => _errorCarga =
+            'Sin conexión. No se pudo cargar la lista.');
       }
     }
   }
@@ -531,17 +697,24 @@ class _PanelPermisosState extends State<PanelPermisos> {
       );
     }
 
-    final contenido = _cargando
+    // 1.29 (fijo de campo): el spinner solo bloquea
+    // cuando no hay NADA pintado; con la lista en
+    // pantalla, un refresco en curso no la tapa. Y el
+    // vacío solo se afirma sin error de carga detrás:
+    // error sin datos = estado de error con reintento.
+    final contenido = _cargando && _entrenadores.isEmpty
         ? const EstadoCargando(texto: 'Cargando permisos…')
-        : _entrenadores.isEmpty
-            ? const Center(
-                child: Text('No hay entrenadores registrados.'))
-            : ListView.builder(
-                padding: const EdgeInsets.all(AppEspacio.lg),
-                itemCount: _entrenadores.length,
-                itemBuilder: (ctx, i) =>
-                    _buildEntrenadorCard(_entrenadores[i]),
-              );
+        : _errorCarga != null && _entrenadores.isEmpty
+            ? _estadoErrorCarga()
+            : _entrenadores.isEmpty
+                ? const Center(
+                    child: Text('No hay entrenadores registrados.'))
+                : ListView.builder(
+                    padding: const EdgeInsets.all(AppEspacio.lg),
+                    itemCount: _entrenadores.length,
+                    itemBuilder: (ctx, i) =>
+                        _buildEntrenadorCard(_entrenadores[i]),
+                  );
 
     if (widget.embebido) return contenido;
 
@@ -557,6 +730,33 @@ class _PanelPermisosState extends State<PanelPermisos> {
         ],
       ),
       body: contenido,
+    );
+  }
+
+  /// 1.29 (fijo de campo): el estado de error de la
+  /// carga (patrón de Control de Acceso): mensaje +
+  /// «Reintentar». Solo se pinta cuando no hay NADA que
+  /// mostrar: con lista pintada, el fallo va por SnackBar
+  /// y la lista queda.
+  Widget _estadoErrorCarga() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_errorCarga!,
+                style: AppTexto.secundario,
+                textAlign: TextAlign.center),
+            const SizedBox(height: AppEspacio.md),
+            FilledButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Reintentar'),
+              onPressed: _cargar,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
