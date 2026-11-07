@@ -448,9 +448,9 @@ void main() {
 
   group('B5/C5 — novedades de mi versión, en vitrina', () {
     test('instalada + la anterior inmediata', () {
-      final mias = novedadesDeMiVersion('1.27.0');
+      final mias = novedadesDeMiVersion('1.28.0');
       expect(mias.map((n) => n.version).toList(),
-          ['1.27.0', '1.26.1']);
+          ['1.28.0', '1.27.0']);
     });
 
     test('la última de la lista va sola; una desconocida '
@@ -470,12 +470,12 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: DialogoNovedades(
-              lista: novedadesDeMiVersion('1.27.0')),
+              lista: novedadesDeMiVersion('1.28.0')),
         ),
       ));
+      expect(find.text('Versión 1.28.0'), findsOneWidget);
       expect(find.text('Versión 1.27.0'), findsOneWidget);
-      expect(find.text('Versión 1.26.1'), findsOneWidget);
-      // La instalada (1.27.0+88 en AppConfig) lleva «Nuevo».
+      // La instalada (1.28.0+89 en AppConfig) lleva «Nuevo».
       expect(find.text('Nuevo'), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_rounded),
           findsWidgets);
