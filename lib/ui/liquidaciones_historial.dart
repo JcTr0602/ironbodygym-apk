@@ -1,0 +1,266 @@
+/// (M2-BC B5) «Últimas liquidaciones»: vista ÚNICA del
+/// historial de liquidaciones de caja de todos los
+/// entrenadores (antes vivía solo dentro del detalle de
+/// cada uno), con búsqueda por entrenador y filtro por mes.
+/// Responder «¿cuándo liquidó Gabriel lo de la semana
+/// pasada?» deja de exigir entrar entrenador por entrenador.
+/// Solo lectura: tocar una fila abre el arqueo de ese
+/// entrenador, donde vive el detalle y la acción.
+library;
+
+import 'package:flutter/material.dart';
+
+import '../auth.dart';
+import '../negocio.dart';
+import 'app_bar.dart';
+import 'arqueo.dart';
+import 'componentes.dart';
+import 'diseno.dart';
+import 'widgets.dart';
+
+class LiquidacionesHistorialScreen extends StatefulWidget {
+  const LiquidacionesHistorialScreen({super.key});
+
+  @override
+  State<LiquidacionesHistorialScreen> createState() =>
+      _LiquidacionesHistorialScreenState();
+}
+
+class _LiquidacionesHistorialScreenState
+    extends State<LiquidacionesHistorialScreen> {
+  bool _cargando = true;
+  List<Map<String, dynamic>> _todas = [];
+  final _busquedaCtrl = TextEditingController();
+  String _mes = ''; // '' = todos los meses
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final filas = await todasLasLiquidaciones();
+      if (mounted) {
+        setState(() {
+          _todas = filas;
+          _cargando = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  /// Meses presentes en el historial (yyyy-MM, descendente).
+  List<String> get _meses {
+    final s = <String>{
+      for (final h in _todas)
+        if ('${h['creada_en'] ?? ''}'.length >= 7)
+          '${h['creada_en']}'.substring(0, 7),
+    }.toList()
+      ..sort((a, b) => b.compareTo(a));
+    return s;
+  }
+
+  List<Map<String, dynamic>> get _visibles {
+    final q = _busquedaCtrl.text.trim().toLowerCase();
+    return [
+      for (final h in _todas)
+        if ((_mes.isEmpty ||
+                '${h['creada_en'] ?? ''}'.startsWith(_mes)) &&
+            (q.isEmpty ||
+                '${h['entrenador_nombre'] ?? ''}'
+                    .toLowerCase()
+                    .contains(q)))
+          h,
+    ];
+  }
+
+  String _etiquetaMes(String mes) {
+    // yyyy-MM → «MM/yyyy» sin depender de intl.
+    if (mes.length < 7) return mes;
+    return '${mes.substring(5, 7)}/${mes.substring(0, 4)}';
+  }
+
+  Widget _fila(Map<String, dynamic> h) {
+    final entregado =
+        (h['monto_entregado'] as num?)?.toDouble() ?? 0;
+    final esperado =
+        (h['monto_esperado'] as num?)?.toDouble() ?? 0;
+    final arrastre =
+        (h['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+    final moneda = '${h['moneda'] ?? 'CUP'}';
+    final parcial = h['estado'] == 'parcial';
+    final tid =
+        int.tryParse('${h['entrenador_telegram_id'] ?? ''}');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+      child: Tarjeta(
+        onTap: tid == null
+            ? null
+            : () async {
+                await Navigator.of(context).push(
+                  RutaIron(
+                    builder: (_) => DetalleArqueoScreen(
+                      telegramId: tid,
+                      nombre: '${h['entrenador_nombre'] ?? ''}',
+                    ),
+                  ),
+                );
+                _cargar();
+              },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${h['entrenador_nombre'] ?? 'Entrenador'}',
+                    style: AppTexto.subtitulo,
+                  ),
+                ),
+                Text(
+                  '${fmtMonto(entregado)} $moneda',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.sm, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: (parcial
+                            ? AppColores.alerta
+                            : Colors.green)
+                        .withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(AppRadio.md),
+                  ),
+                  child: Text(
+                    parcial ? 'Parcial' : 'Liquidado',
+                    style: AppTexto.metadato
+                        .copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Esperado: ${fmtMonto(esperado)} $moneda'
+              '${arrastre > 0 ? ' · Arrastre: ${fmtMonto(arrastre)} $moneda' : ''}',
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context)),
+            ),
+            Text(
+              '${fmtFecha('${h['creada_en'] ?? ''}')}'
+              '${(h['nota'] as String?)?.isNotEmpty == true ? ' · ${h['nota']}' : ''}',
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Últimas liquidaciones'),
+        body: const Center(
+            child: Text(
+                'Solo el dueño puede ver el historial de liquidaciones.')),
+      );
+    }
+    final visibles = _visibles;
+    return Scaffold(
+      appBar: appBarIron(context, 'Últimas liquidaciones'),
+      body: Column(
+        children: [
+          const SyncBanner(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.md, AppEspacio.lg, 0),
+            child: TextField(
+              controller: _busquedaCtrl,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Buscar por entrenador',
+                prefixIcon: Icon(Icons.search_rounded),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          if (_meses.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                  AppEspacio.sm, AppEspacio.lg, 0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(right: AppEspacio.sm),
+                      child: ChoiceChip(
+                        label: const Text('Todos'),
+                        selected: _mes.isEmpty,
+                        onSelected: (_) => setState(() => _mes = ''),
+                      ),
+                    ),
+                    for (final m in _meses)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            right: AppEspacio.sm),
+                        child: ChoiceChip(
+                          label: Text(_etiquetaMes(m)),
+                          selected: _mes == m,
+                          onSelected: (_) =>
+                              setState(() => _mes = m),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: _cargando
+                ? const EstadoCargando(
+                    texto: 'Cargando liquidaciones…')
+                : RefreshIndicator(
+                    onRefresh: _cargar,
+                    child: visibles.isEmpty
+                        ? ListView(
+                            children: const [
+                              Padding(
+                                padding:
+                                    EdgeInsets.all(AppEspacio.xxl),
+                                child: Text(
+                                  'Sin liquidaciones que mostrar.',
+                                  textAlign: TextAlign.center,
+                                  style: AppTexto.secundario,
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(AppEspacio.lg),
+                            itemCount: visibles.length,
+                            itemBuilder: (_, i) => _fila(visibles[i]),
+                          ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -6,18 +6,26 @@
 /// saldo de arrastre sin partir ops.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
 import '../diferencias_caja.dart';
+import '../localdb.dart';
+import '../models/pendiente.dart';
 import '../negocio.dart';
 import '../sync.dart';
-import '../tiempo.dart' show hoyHabanaIso;
+import '../tiempo.dart' show ahoraHabana, hoyHabanaIso;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diferencias_caja.dart';
 import 'diseno.dart';
+import 'hoja_liquidar.dart';
+import 'liquidaciones_historial.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 
 class ArqueoScreen extends StatefulWidget {
@@ -33,6 +41,10 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
   // T5 (1.20): expedientes de diferencia abiertos (badge de
   // la entrada a la bandeja).
   int _difAbiertas = 0;
+  // (M2-BC C3) antigüedad del pendiente por entrenador
+  // (telegram_id en texto → días/nivel), de la foto canónica
+  // agrupada que ya usa Pendiente.
+  Map<String, EntrenadorPendiente> _antiguedad = {};
 
   @override
   void initState() {
@@ -49,10 +61,19 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
         difAbiertas =
             await DiferenciasCajaService.instance.conteoAbiertas();
       } catch (_) {}
+      var antiguedad = _antiguedad;
+      try {
+        final agrupados =
+            procesarPendientes(await pagosPendientesDetalle());
+        antiguedad = {
+          for (final e in agrupados) e.trainerTelegramId: e,
+        };
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _entrenadores = lista;
           _difAbiertas = difAbiertas;
+          _antiguedad = antiguedad;
           _cargando = false;
         });
       }
@@ -123,11 +144,44 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
               ),
             ),
           ),
+          // (M2-BC B5) entrada a la vista única de
+          // liquidaciones (todos los entrenadores, con
+          // búsqueda por nombre y por mes).
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.sm, AppEspacio.lg, 0),
+            child: Tarjeta(
+              onTap: () async {
+                await Navigator.of(context).push(
+                  RutaIron(
+                    builder: (_) =>
+                        const LiquidacionesHistorialScreen(),
+                  ),
+                );
+                _cargar();
+              },
+              child: Row(
+                children: [
+                  Icon(Icons.receipt_long_rounded,
+                      color: AppColores.textoSecundario(context),
+                      size: 28),
+                  const SizedBox(width: AppEspacio.sm),
+                  const Expanded(
+                    child: Text('Últimas liquidaciones',
+                        style: AppTexto.subtitulo),
+                  ),
+                  const Icon(Icons.chevron_right_rounded),
+                ],
+              ),
+            ),
+          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _cargar,
               child: _cargando
-                  ? const EstadoCargando(texto: 'Cargando arqueo…')
+                  // (M2-BC C5) esqueleto estructural en vez
+                  // del spinner genérico.
+                  ? const SkeletonArqueo()
                   : _entrenadores.isEmpty
                       ? ListView(
                           children: [
@@ -161,6 +215,29 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                             final e = _entrenadores[i];
                             final cup = (e['cup'] as num).toDouble();
                             final usd = (e['usd'] as num).toDouble();
+                            // (M2-BC C3) porción del total a
+                            // recoger que le toca a este
+                            // entrenador y color por antigüedad
+                            // de su día más viejo sin entregar.
+                            final totalGeneral = _entrenadores.fold<double>(
+                                0,
+                                (s, x) =>
+                                    s +
+                                    (x['cup'] as num).toDouble() +
+                                    (x['usd'] as num).toDouble());
+                            final porcion = totalGeneral > 0
+                                ? (cup + usd) / totalGeneral
+                                : 0.0;
+                            final ant =
+                                _antiguedad['${e['telegram_id']}'];
+                            final nivel = ant?.nivelAlertaMax ?? 0;
+                            final diasViejo = ant?.diasMasViejo ?? 0;
+                            final colorAntiguedad = nivel == 2
+                                ? AppColores.error
+                                : nivel == 1
+                                    ? AppColores.alerta
+                                    : AppColores.exito;
+                            final nombre = '${e['nombre']}';
                             return Padding(
                               padding:
                                   const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -170,7 +247,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                     RutaIron(
                                       builder: (_) => DetalleArqueoScreen(
                                         telegramId: e['telegram_id'] as int,
-                                        nombre: '${e['nombre']}',
+                                        nombre: nombre,
                                       ),
                                     ),
                                   );
@@ -178,15 +255,26 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                 },
                                 child: Row(
                                   children: [
-                                    Icon(Icons.person_rounded,
-                                        color: AppColores.textoSecundario(context), size: 28),
+                                    CircleAvatar(
+                                      backgroundColor: AppColores
+                                          .naranja
+                                          .withValues(alpha: 0.15),
+                                      child: Text(
+                                        nombre.isNotEmpty
+                                            ? nombre[0].toUpperCase()
+                                            : '?',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColores.naranja),
+                                      ),
+                                    ),
                                     const SizedBox(width: AppEspacio.sm),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          Text('${e['nombre']}',
+                                          Text(nombre,
                                               style: AppTexto.subtitulo),
                                           if (cup > 0)
                                             Text(
@@ -200,6 +288,32 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                                 style: const TextStyle(
                                                     fontWeight:
                                                         FontWeight.w600)),
+                                          if (diasViejo > 0) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Día más viejo: hace $diasViejo día${diasViejo == 1 ? '' : 's'}',
+                                              style: AppTexto.metadato.copyWith(
+                                                  color: colorAntiguedad,
+                                                  fontWeight:
+                                                      FontWeight.w600),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 6),
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            child: LinearProgressIndicator(
+                                              value: porcion.clamp(0.0, 1.0),
+                                              minHeight: 5,
+                                              backgroundColor: AppColores
+                                                  .borde(context)
+                                                  .withValues(alpha: 0.3),
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<
+                                                          Color>(
+                                                      colorAntiguedad),
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -245,6 +359,16 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
   // T5 (1.20): expedientes por liquidación (chip o botón
   // «Abrir expediente» en el historial).
   Map<String, Map<String, dynamic>> _expedientes = {};
+  // (M2-BC B2/C4) UUID de la liquidación de la moneda
+  // elegida que sigue EN COLA en este teléfono: mientras
+  // exista, la tarjeta lleva el sello «Liquidado» y el
+  // panel de acciones (resumen B1 + Deshacer B2).
+  String? _uuidEnCola;
+  // (M2-BC B1) resumen de la última liquidación de la
+  // moneda elegida, para enviarlo por WhatsApp; se compone
+  // al liquidar y se persiste en meta para sobrevivir a
+  // la recarga de la pantalla.
+  String? _resumenReciente;
   final _entregadoCtrl = TextEditingController();
   final _notaCtrl = TextEditingController();
 
@@ -299,6 +423,90 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     } catch (_) {
       if (mounted) setState(() => _cargando = false);
     }
+    unawaited(_refrescarEnCola());
+  }
+
+  /// (M2-BC B2/C4) refresca el estado «liquidación en cola»
+  /// de la moneda elegida (sello, resumen y Deshacer).
+  Future<void> _refrescarEnCola() async {
+    final uuid =
+        await uuidLiquidacionEnCola(widget.telegramId, _moneda);
+    String? resumen;
+    try {
+      resumen = await LocalDb.instance
+          .getMeta('resumen_liq_${widget.telegramId}_$_moneda');
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _uuidEnCola = uuid;
+        _resumenReciente = resumen;
+      });
+    }
+  }
+
+  /// (M2-BC B1) abre WhatsApp con el resumen de la
+  /// liquidación para enviárselo al entrenador (sin número
+  /// fijo: el dueño elige su chat; el espejo de usuarios no
+  /// trae un teléfono fiable del entrenador).
+  Future<void> _enviarResumen() async {
+    final r = _resumenReciente;
+    if (r == null) return;
+    final uri =
+        Uri.parse('https://wa.me/?text=${Uri.encodeComponent(r)}');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// (M2-BC B1) copia el resumen al portapapeles.
+  Future<void> _copiarResumen() async {
+    final r = _resumenReciente;
+    if (r == null) return;
+    await Clipboard.setData(ClipboardData(text: r));
+    if (!mounted) return;
+    mostrarSnack(context, 'Resumen copiado, pégalo en WhatsApp');
+  }
+
+  /// (M2-BC B2) Deshacer desde el panel «en cola» (la misma
+  /// vía que la barra de aviso): solo si la op sigue en el
+  /// teléfono; si ya sincronizó, se dice y no se toca nada.
+  Future<void> _deshacerEnCola() async {
+    final uuid = _uuidEnCola;
+    if (uuid == null) return;
+    final ok = await deshacerLiquidacion(uuid);
+    if (!mounted) return;
+    if (ok) {
+      mostrarSnack(context, 'Liquidación deshecha',
+          significado: SignificadoChip.exito);
+    } else {
+      mostrarSnack(context,
+          'Ya no se puede deshacer: la liquidación ya sincronizó.',
+          significado: SignificadoChip.error);
+    }
+    await _cargar();
+  }
+
+  /// (M2-BC C4) fila del recibo de confirmación de
+  /// liquidación: etiqueta a la izquierda, cifra tabular a
+  /// la derecha (destacada en el entregado).
+  Widget _filaRecibo(String etiqueta, String valor,
+      {bool destacado = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(etiqueta, style: AppTexto.secundario),
+          Text(
+            valor,
+            style: AppTexto.cuerpo.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: destacado ? 18 : null,
+              color: color,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // (M2-A A1) guarda SÍNCRONA al entrar: antes el setState de
@@ -377,20 +585,44 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Entrenador: ${widget.nombre}'),
-            const SizedBox(height: 8),
-            Text('Esperado: ${fmtMonto(esperado)} $_moneda',
-                style: AppTexto.secundario),
-            Text('Entregado: ${fmtMonto(entregado)} $_moneda',
-                style: AppTexto.cuerpo.copyWith(
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: const [
-                      FontFeature.tabularFigures()
-                    ])),
-            // C3 (estéticas 1.19): comparación visual en vez de
-            // dos textos planos — barra de cuánto se entregó y
-            // diferencia destacada (verde si cuadra, rojo si
-            // falta; lo parcial queda como arrastre).
+            // (M2-BC C4) el diálogo como RECIBO: filas
+            // claras esperado / entregado / diferencia o
+            // arrastre dentro de una tarjeta con borde, en
+            // vez de textos sueltos.
+            Container(
+              padding: const EdgeInsets.all(AppEspacio.md),
+              decoration: BoxDecoration(
+                color: AppColores.superficie(ctx),
+                border: Border.all(color: AppColores.borde(ctx)),
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+              child: Column(
+                children: [
+                  _filaRecibo('Entrenador', widget.nombre),
+                  _filaRecibo('Esperado',
+                      '${fmtMonto(esperado)} $_moneda'),
+                  _filaRecibo(
+                    'Entregado',
+                    '${fmtMonto(entregado)} $_moneda',
+                    destacado: true,
+                  ),
+                  const Divider(height: 16),
+                  _filaRecibo(
+                    parcial ? 'Queda de arrastre' : 'Diferencia',
+                    parcial
+                        ? '${fmtMonto(esperado - entregado)} $_moneda'
+                        : 'Sin diferencia',
+                    color: parcial
+                        ? AppColores.error
+                        : AppColores.exito,
+                  ),
+                ],
+              ),
+            ),
+            // C3 (estéticas 1.19): comparación visual — barra
+            // de cuánto se entregó y diferencia destacada
+            // (verde si cuadra, rojo si falta; lo parcial
+            // queda como arrastre).
             const SizedBox(height: 12),
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadio.circular),
@@ -468,8 +700,22 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     final explicacionExpediente = expCtrl.text;
     expCtrl.dispose();
     if (ok != true || !mounted) return;
+    // (M2-BC B1) el resumen para el entrenador se compone
+    // con la MISMA foto (opIds frescos) antes de encolar.
+    final resumen = resumenLiquidacionTexto(
+      nombre: widget.nombre,
+      fecha: ahoraHabana(),
+      moneda: _moneda,
+      esperado: esperado,
+      entregado: entregado,
+      opIds: opIds,
+      nota: _notaCtrl.text.trim().isEmpty
+          ? null
+          : _notaCtrl.text.trim(),
+    );
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await crearLiquidacion(
+      final liqId = await crearLiquidacion(
         entrenadorTelegramId: widget.telegramId,
         entrenadorNombre: widget.nombre,
         montoEsperado: esperado,
@@ -482,11 +728,24 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
         abrirExpediente: quiereExpediente,
         explicacionExpediente: explicacionExpediente,
       );
+      try {
+        await LocalDb.instance.setMeta(
+            'resumen_liq_${widget.telegramId}_$_moneda', resumen);
+      } catch (_) {}
       if (mounted) {
-        mostrarSnack(context, parcial
-                  ? 'Liquidación parcial registrada. Arrastre: '
-                      '${fmtMonto(esperado - entregado)} $_moneda.'
-                  : 'Liquidación registrada. Se sincronizará en breve.', significado: SignificadoChip.exito);
+        // (M2-BC B2) el aviso de éxito lleva «Deshacer»
+        // mientras la op siga en el teléfono.
+        mostrarAvisoLiquidacionConDeshacer(
+          messenger,
+          mensaje: parcial
+              ? 'Liquidación parcial registrada. Arrastre: '
+                  '${fmtMonto(esperado - entregado)} $_moneda.'
+              : 'Liquidación registrada. Se sincronizará en breve.',
+          liqId: liqId,
+          alDeshacer: () async {
+            if (mounted) await _cargar();
+          },
+        );
         _notaCtrl.clear();
         await _cargar();
       }
@@ -509,7 +768,12 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
           const SyncBanner(),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando arqueo…')
+                // (M2-BC C5) esqueleto estructural en vez del
+                // spinner genérico.
+                ? ListView(
+                    padding: const EdgeInsets.all(AppEspacio.lg),
+                    children: const [SkeletonLista(items: 3)],
+                  )
                 : ListView(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     children: [
@@ -537,6 +801,7 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                             : 2)
                                     : '';
                               });
+                              unawaited(_refrescarEnCola());
                             },
                           ),
                         ),
@@ -544,8 +809,59 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Pendiente confirmado',
-                                style: AppTexto.subtitulo),
+                            Row(
+                              children: [
+                                const Text('Pendiente confirmado',
+                                    style: AppTexto.subtitulo),
+                                const Spacer(),
+                                if (_uuidEnCola != null)
+                                  // (M2-BC C4) sello «LIQUIDADO»
+                                  // con micro-animación (escala +
+                                  // fundido en 350 ms) mientras la
+                                  // liquidación de esta moneda sigue
+                                  // en cola en este teléfono.
+                                  TweenAnimationBuilder<double>(
+                                    tween:
+                                        Tween(begin: 0.0, end: 1.0),
+                                    duration: const Duration(
+                                        milliseconds: 350),
+                                    builder: (ctx, t, _) => Opacity(
+                                      opacity: t,
+                                      child: Transform.scale(
+                                        scale: 1.5 - 0.5 * t,
+                                        child: Transform.rotate(
+                                          angle: -0.18,
+                                          child: Container(
+                                            padding: const EdgeInsets
+                                                .symmetric(
+                                                horizontal: 8,
+                                                vertical: 3),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(
+                                                  color:
+                                                      AppColores.exito,
+                                                  width: 1.6),
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      AppRadio.sm),
+                                            ),
+                                            child: Text('LIQUIDADO',
+                                                style: AppTexto.metadato
+                                                    .copyWith(
+                                                        color: AppColores
+                                                            .exito,
+                                                        fontWeight:
+                                                            FontWeight
+                                                                .w800,
+                                                        letterSpacing:
+                                                            1.2)),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                             const SizedBox(height: 4),
                             Text(
                               '${fmtMonto(_esperado)} $_moneda',
@@ -578,6 +894,72 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                           ],
                         ),
                       ),
+                      // (M2-BC B1/B2) panel de la liquidación
+                      // EN COLA de esta moneda: enviar el
+                      // resumen al entrenador o deshacerla
+                      // mientras no haya sincronizado.
+                      if (_uuidEnCola != null) ...[
+                        const SizedBox(height: AppEspacio.md),
+                        Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Liquidación en cola de '
+                                'sincronización',
+                                style: AppTexto.cuerpo.copyWith(
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                'Aún está en este teléfono: puedes '
+                                'enviar el resumen o deshacerla. '
+                                'Cuando sincronice, el pendiente '
+                                'bajará y ya no se podrá deshacer '
+                                'desde aquí.',
+                                style: AppTexto.metadato.copyWith(
+                                    color: AppColores.textoSecundario(
+                                        context)),
+                              ),
+                              const SizedBox(height: AppEspacio.sm),
+                              Wrap(
+                                spacing: AppEspacio.sm,
+                                children: [
+                                  if (_resumenReciente != null)
+                                    OutlinedButton.icon(
+                                      icon: const Icon(
+                                          Icons.chat_rounded,
+                                          size: 18),
+                                      label: const Text(
+                                          'Resumen por WhatsApp'),
+                                      onPressed: _enviarResumen,
+                                    ),
+                                  if (_resumenReciente != null)
+                                    TextButton.icon(
+                                      icon: const Icon(
+                                          Icons.copy_rounded,
+                                          size: 18),
+                                      label:
+                                          const Text('Copiar resumen'),
+                                      onPressed: _copiarResumen,
+                                    ),
+                                  TextButton.icon(
+                                    icon: const Icon(
+                                        Icons.undo_rounded,
+                                        size: 18),
+                                    label: const Text(
+                                        'Deshacer liquidación'),
+                                    onPressed: _deshacerEnCola,
+                                    style: TextButton.styleFrom(
+                                        foregroundColor:
+                                            AppColores.error),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: AppEspacio.md),
                       const Text('Nueva liquidación', style: AppTexto.subtitulo),
                       const SizedBox(height: AppEspacio.sm),

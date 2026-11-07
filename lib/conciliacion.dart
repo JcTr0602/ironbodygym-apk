@@ -116,6 +116,38 @@ class ConciliacionService {
     SyncEngine.instance.pushEnSegundoPlano();
   }
 
+  /// (M2-BC B4) Conciliación EN LOTE: marca como
+  /// «comprobada» una lista de filas de la bandeja en una
+  /// sola pasada. Cada fila se marca por la vía normal
+  /// ([marcar], con su CAS por el estado CRUDO del espejo y
+  /// su anti-duplicado): la que ya tenía marca en cola o
+  /// falla por cualquier causa se OMITE y se cuenta, sin
+  /// tumbar el lote entero. Devuelve cuántas se marcaron y
+  /// cuántas se omitieron.
+  Future<({int marcadas, int omitidas})> marcarLoteComprobadas(
+      List<Map<String, dynamic>> filas) async {
+    var marcadas = 0;
+    var omitidas = 0;
+    for (final f in filas) {
+      final id = (f['id'] as num?)?.toInt();
+      if (id == null) {
+        omitidas++;
+        continue;
+      }
+      try {
+        await marcar(
+          pagoId: id,
+          estado: 'comprobada',
+          estadoEsperado: estadoConciliacion(f),
+        );
+        marcadas++;
+      } catch (_) {
+        omitidas++;
+      }
+    }
+    return (marcadas: marcadas, omitidas: omitidas);
+  }
+
   /// Pagos por transferencia del espejo con su estado ya
   /// resuelto, ordenados por fecha descendente.
   /// (M2-A A10) Overlay de la cola: si hay una marca

@@ -274,6 +274,71 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
   List<Map<String, dynamic>> _porComprobar = [];
   List<Map<String, dynamic>> _resueltas = [];
   Map<int, String> _nombres = {};
+  // (M2-BC B4) conciliación en lote: modo selección sobre
+  // las «por comprobar» y el conjunto de ids elegidos.
+  bool _seleccionando = false;
+  final Set<int> _seleccion = {};
+
+  void _alternarSeleccion(int id, bool? v) {
+    setState(() {
+      if (v == true) {
+        _seleccion.add(id);
+      } else {
+        _seleccion.remove(id);
+      }
+    });
+  }
+
+  /// (M2-BC B4) marca las seleccionadas como comprobadas
+  /// en una sola pasada (servicio: [marcarLoteComprobadas])
+  /// y reporta marcadas/omitidas con honestidad.
+  Future<void> _marcarLote() async {
+    final filas = [
+      for (final p in _porComprobar)
+        if (_seleccion.contains((p['id'] as num?)?.toInt())) p,
+    ];
+    if (filas.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Conciliar en lote'),
+        content: Text(
+            '¿Marcar ${filas.length} transferencia(s) como '
+            'comprobadas? Solo entran las que siguen «por '
+            'comprobar»; las que ya tengan marca en cola se '
+            'omiten.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          BotonPrimario(
+            texto: 'Marcar comprobadas',
+            onPressed: () => Navigator.pop(ctx, true),
+            expandido: false,
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final r =
+        await ConciliacionService.instance.marcarLoteComprobadas(filas);
+    if (!mounted) return;
+    setState(() {
+      _seleccion.clear();
+      _seleccionando = false;
+    });
+    mostrarSnack(
+      context,
+      r.omitidas == 0
+          ? '${r.marcadas} transferencias marcadas como comprobadas'
+          : '${r.marcadas} marcadas · ${r.omitidas} omitidas '
+              '(ya tenían marca en cola)',
+      significado: r.omitidas == 0
+          ? SignificadoChip.exito
+          : SignificadoChip.alerta,
+    );
+    _cargar();
+  }
 
   @override
   void initState() {
@@ -324,6 +389,7 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
     final nota = '${p['conciliacion_nota'] ?? ''}'.trim();
     final cobradoPor =
         '${p['registrado_por_nombre'] ?? p['registrado_por'] ?? ''}';
+    final idFila = (p['id'] as num?)?.toInt();
     return Padding(
       padding: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: Tarjeta(
@@ -332,6 +398,16 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
           children: [
             Row(
               children: [
+                // (M2-BC B4) casilla del lote: solo en modo
+                // selección y solo en las accionables (las
+                // resueltas no entran al lote).
+                if (_seleccionando &&
+                    conciliacionAccionable(estado) &&
+                    idFila != null)
+                  Checkbox(
+                    value: _seleccion.contains(idFila),
+                    onChanged: (v) => _alternarSeleccion(idFila, v),
+                  ),
                 Expanded(
                   child: Text(_nombreDe(p),
                       style: AppTexto.subtitulo),
@@ -414,6 +490,21 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
         context,
         'Transferencias por comprobar',
         acciones: [
+          // (M2-BC B4) entrar/salir del modo de conciliación
+          // en lote (solo si hay algo por comprobar).
+          if (_porComprobar.isNotEmpty)
+            IconButton(
+              icon: Icon(_seleccionando
+                  ? Icons.close_rounded
+                  : Icons.checklist_rounded),
+              tooltip: _seleccionando
+                  ? 'Salir del lote'
+                  : 'Conciliar en lote',
+              onPressed: () => setState(() {
+                _seleccionando = !_seleccionando;
+                if (!_seleccionando) _seleccion.clear();
+              }),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
@@ -422,30 +513,63 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando transferencias…')
-          : RefreshIndicator(
-              onRefresh: _cargar,
-              child: ListView(
-                padding: const EdgeInsets.all(AppEspacio.lg),
-                children: [
-                  EncabezadoSeccion(
-                      titulo:
-                          'Por comprobar (${_porComprobar.length})'),
-                  if (_porComprobar.isEmpty)
-                    const Tarjeta(
-                      child: Text(
-                          'No hay transferencias esperando '
-                          'comprobación.'),
-                    )
-                  else
-                    for (final p in _porComprobar) _fila(p),
-                  if (_resueltas.isNotEmpty) ...[
-                    const SizedBox(height: AppEspacio.lg),
-                    const EncabezadoSeccion(
-                        titulo: 'Resueltas recientes'),
-                    for (final p in _resueltas) _fila(p),
-                  ],
-                ],
-              ),
+          : Column(
+              children: [
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _cargar,
+                    child: ListView(
+                      padding: const EdgeInsets.all(AppEspacio.lg),
+                      children: [
+                        EncabezadoSeccion(
+                            titulo:
+                                'Por comprobar (${_porComprobar.length})'),
+                        if (_seleccionando)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                bottom: AppEspacio.sm),
+                            child: Text(
+                              'Toca las casillas de las que ya '
+                              'comprobaste en tu cuenta y márcalas '
+                              'todas de una vez.',
+                              style: AppTexto.metadato.copyWith(
+                                  color: AppColores.textoSecundario(
+                                      context)),
+                            ),
+                          ),
+                        if (_porComprobar.isEmpty)
+                          const Tarjeta(
+                            child: Text(
+                                'No hay transferencias esperando '
+                                'comprobación.'),
+                          )
+                        else
+                          for (final p in _porComprobar) _fila(p),
+                        if (_resueltas.isNotEmpty) ...[
+                          const SizedBox(height: AppEspacio.lg),
+                          const EncabezadoSeccion(
+                              titulo: 'Resueltas recientes'),
+                          for (final p in _resueltas) _fila(p),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                // (M2-BC B4) barra del lote con la selección.
+                if (_seleccionando && _seleccion.isNotEmpty)
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppEspacio.md),
+                      child: BotonPrimario(
+                        texto: 'Marcar comprobadas '
+                            '(${_seleccion.length})',
+                        icono: Icons.fact_check_rounded,
+                        onPressed: _marcarLote,
+                      ),
+                    ),
+                  ),
+              ],
             ),
     );
   }

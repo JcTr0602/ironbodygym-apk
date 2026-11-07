@@ -23,8 +23,10 @@ import '../sync.dart';
 import 'app_bar.dart';
 import 'arqueo.dart';
 import 'hoja_cobrar_parcial.dart';
+import 'hoja_liquidar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 
 class PendienteScreen extends StatefulWidget {
@@ -514,8 +516,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
       return;
     }
     setState(() => _confirmando = true);
+    String liqIdParcial;
     try {
-      await crearLiquidacion(
+      liqIdParcial = await crearLiquidacion(
         entrenadorTelegramId: tid,
         entrenadorNombre: ent.nombre,
         montoEsperado: comp.montoEsperado,
@@ -556,7 +559,18 @@ class _PendienteScreenState extends State<PendienteScreen> {
     });
     unawaited(SyncEngine.instance.push());
     if (!mounted) return;
-    mostrarSnack(context, 'Cobro parcial de ${fmtMonto(monto)} CUP de ${ent.nombre} registrado (se aplicará al sincronizar)', significado: SignificadoChip.exito);
+    // (M2-BC B2) el aviso del cobro parcial (una
+    // liquidación) también lleva «Deshacer» mientras la op
+    // siga en el teléfono.
+    mostrarAvisoLiquidacionConDeshacer(
+      ScaffoldMessenger.of(context),
+      mensaje: 'Cobro parcial de ${fmtMonto(monto)} CUP de '
+          '${ent.nombre} registrado (se aplicará al sincronizar)',
+      liqId: liqIdParcial,
+      alDeshacer: () async {
+        if (mounted) await _cargar();
+      },
+    );
   }
 
   /// 1.26.1 (Argón, punto 1 del veredicto): «Cobrar
@@ -615,9 +629,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
     }
     esperado = fresco;
     setState(() => _confirmando = true);
+    String liqIdTotal;
     try {
       final opIds = await idsPendienteArqueo(tid, moneda: 'CUP');
-      await crearLiquidacion(
+      liqIdTotal = await crearLiquidacion(
         entrenadorTelegramId: tid,
         entrenadorNombre: ent.nombre,
         montoEsperado: esperado,
@@ -659,7 +674,81 @@ class _PendienteScreenState extends State<PendienteScreen> {
     });
     unawaited(SyncEngine.instance.push());
     if (!mounted) return;
-    mostrarSnack(context, 'Recibido de ${ent.nombre} confirmado (se aplicará al sincronizar)', significado: SignificadoChip.exito);
+    // (M2-BC B2) «Deshacer» también aquí (es una
+    // liquidación): mientras la op siga en el teléfono.
+    mostrarAvisoLiquidacionConDeshacer(
+      ScaffoldMessenger.of(context),
+      mensaje: 'Recibido de ${ent.nombre} confirmado '
+          '(se aplicará al sincronizar)',
+      liqId: liqIdTotal,
+      alDeshacer: () async {
+        if (mounted) await _cargar();
+      },
+    );
+  }
+
+  /// (M2-BC B6) «Liquidar con arrastre» sin salir de
+  /// Pendiente: abre la hoja con la liquidación completa
+  /// del entrenador (la misma del Arqueo) y, al éxito,
+  /// aplica la actualización optimista de la tarjeta y el
+  /// aviso con «Deshacer» (B2).
+  Future<void> _liquidarConArrastre(EntrenadorPendiente ent) async {
+    if (!_esDueno || _confirmando) return;
+    final tid = int.tryParse(ent.trainerTelegramId);
+    if (tid == null) {
+      mostrarSnack(context,
+          'No se pudo liquidar a ${ent.nombre}.',
+          significado: SignificadoChip.error);
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    final res = await showModalBottomSheet<ResultadoLiquidacion>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => HojaLiquidar(telegramId: tid, nombre: ent.nombre),
+    );
+    if (res == null || !mounted) return;
+    // Optimista (mismo criterio que _cobrarTodoConArrastre):
+    // salen los pagos cubiertos por la liquidación y el
+    // arrastre CUP pasa a ser esperado − entregado.
+    const tipoPorTabla = {
+      'pagos': 'mensual',
+      'pagos_diarios': 'diario',
+      'ventas_suplementos': 'suplemento',
+      'servicio_ventas': 'servicio',
+    };
+    final uids = <String>{
+      for (final e in res.opIds.entries)
+        if (tipoPorTabla[e.key] != null)
+          for (final id in e.value) '${tipoPorTabla[e.key]}_$id',
+    };
+    setState(() {
+      _crudos.removeWhere(
+          (p) => uids.contains('${p['tipo']}_${p['id']}'));
+      if (res.moneda == 'CUP') {
+        _arrastresCup[ent.trainerTelegramId] =
+            (res.esperado - res.entregado)
+                .clamp(0.0, double.infinity);
+        if (_totalAutoritativoCup != null) {
+          _totalAutoritativoCup =
+              (_totalAutoritativoCup! - res.entregado)
+                  .clamp(0.0, double.infinity);
+        }
+      }
+      _entrenadores = _reconstruirEntrenadores(_crudos, _arrastresCup,
+          nombresPrevios: _nombresActuales);
+      _totalUsd = _entrenadores.fold(
+          0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
+    });
+    mostrarAvisoLiquidacionConDeshacer(
+      messenger,
+      mensaje: 'Liquidación de ${ent.nombre} registrada '
+          '(${fmtMonto(res.entregado)} ${res.moneda})',
+      liqId: res.liqId,
+      alDeshacer: () async {
+        if (mounted) await _cargar();
+      },
+    );
   }
 
   @override
@@ -675,7 +764,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
           if (!_cargando) _tarjetaTotal(),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando pendientes…')
+                // (M2-BC C5) esqueleto estructural de la
+                // pantalla (total + tarjetas) en vez del
+                // spinner genérico.
+                ? const SkeletonPendiente()
                 : RefreshIndicator(
                     onRefresh: _cargar,
                     child: _esDueno
@@ -905,9 +997,20 @@ class _PendienteScreenState extends State<PendienteScreen> {
       padding:
           const EdgeInsets.symmetric(horizontal: AppEspacio.lg, vertical: AppEspacio.xs),
       itemCount: _entrenadores.length,
-      itemBuilder: (ctx, i) =>
-          _EntrenadorCard(
+      itemBuilder: (ctx, i) {
+        // (M2-BC C3) porción del total CUP a recoger (con
+        // arrastres) que le corresponde a este entrenador.
+        final totalGeneral = _entrenadores.fold<double>(
+            0,
+            (s, e) =>
+                s +
+                e.totalPorMoneda('CUP') +
+                (_arrastresCup[e.trainerTelegramId] ?? 0));
+        final mio = _entrenadores[i].totalPorMoneda('CUP') +
+            (_arrastresCup[_entrenadores[i].trainerTelegramId] ?? 0);
+        return _EntrenadorCard(
         entrenador: _entrenadores[i],
+        porcion: totalGeneral > 0 ? mio / totalGeneral : 0,
         confirmando: _confirmando,
         // v1.3.4 (C2d): detalle de ventas para el badge de precio.
         detalleVentas: _detalleVentasSup,
@@ -990,7 +1093,12 @@ class _PendienteScreenState extends State<PendienteScreen> {
           );
           if (mounted) _cargar();
         },
-      ),
+        // (M2-BC B6) liquidar con arrastre sin salir de
+        // Pendiente (hoja con la liquidación completa).
+        onLiquidarArrastre: () =>
+            _liquidarConArrastre(_entrenadores[i]),
+        );
+      },
     );
   }
 
@@ -1049,6 +1157,15 @@ class _EntrenadorCard extends StatelessWidget {
   /// sin salir a buscar la pantalla (el paso final del
   /// flujo único «Efectivo por entregar»).
   final VoidCallback onLiquidar;
+
+  /// (M2-BC B6) liquidar con arrastre SIN salir de
+  /// Pendiente: la hoja con la liquidación completa.
+  final VoidCallback onLiquidarArrastre;
+
+  /// (M2-BC C3) porción del total a recoger que le
+  /// corresponde a este entrenador (0..1): la barra de
+  /// su tarjeta.
+  final double porcion;
   // v1.3.4 (C2d): ventas de suplementos por id (badge precio modificado).
   final Map<int, Map<String, dynamic>> detalleVentas;
 
@@ -1059,7 +1176,9 @@ class _EntrenadorCard extends StatelessWidget {
     required this.onConfirmarTodo,
     required this.onWhatsApp,
     required this.onLiquidar,
+    required this.onLiquidarArrastre,
     required this.onCobrarParcial,
+    this.porcion = 0,
     this.arrastreCup = 0,
     this.detalleVentas = const {},
   });
@@ -1108,9 +1227,64 @@ class _EntrenadorCard extends StatelessWidget {
             ],
           ],
         ),
-        subtitle: Text(n == 0
-            ? 'Solo saldo de cobros parciales'
-            : '$n pago${n == 1 ? '' : 's'} sin entregar'),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(n == 0
+                ? 'Solo saldo de cobros parciales'
+                : '$n pago${n == 1 ? '' : 's'} sin entregar'),
+            // (M2-BC C3) urgencia visible: la antigüedad del
+            // día más viejo sin entregar, coloreada por nivel
+            // (ámbar 2–3 días, rojo 4+; la regla de
+            // PendienteDia.nivelAlerta).
+            if (entrenador.diasMasViejo > 0) ...[
+              const SizedBox(height: 2),
+              Text(
+                'Día más viejo: hace ${entrenador.diasMasViejo} '
+                'día${entrenador.diasMasViejo == 1 ? '' : 's'}',
+                style: AppTexto.metadato.copyWith(
+                  color: entrenador.nivelAlertaMax == 2
+                      ? AppColores.error
+                      : entrenador.nivelAlertaMax == 1
+                          ? AppColores.alerta
+                          : AppColores.textoSecundario(context),
+                  fontWeight: entrenador.nivelAlertaMax > 0
+                      ? FontWeight.w600
+                      : null,
+                ),
+              ),
+            ],
+            // (M2-BC C3) barra de porción: qué parte del
+            // total a recoger le corresponde a este
+            // entrenador.
+            if (porcion > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: porcion.clamp(0.0, 1.0),
+                        minHeight: 5,
+                        backgroundColor: AppColores.borde(context)
+                            .withValues(alpha: 0.3),
+                        valueColor:
+                            const AlwaysStoppedAnimation<Color>(
+                                AppColores.naranja),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('${(porcion * 100).round()}% del total',
+                      style: AppTexto.metadato.copyWith(
+                          color:
+                              AppColores.textoSecundario(context))),
+                ],
+              ),
+            ],
+          ],
+        ),
         trailing: Text(
           totalTxt,
           style: AppTexto.subtitulo.copyWith(
@@ -1189,6 +1363,22 @@ class _EntrenadorCard extends StatelessWidget {
                       backgroundColor: AppColores.exito,
                       foregroundColor: Colors.white,
                     ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                // (M2-BC B6) liquidar con arrastre AQUÍ
+                // mismo: la hoja trae la liquidación
+                // completa (esperado canónico, entregado,
+                // moneda) sin navegar al Arqueo.
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(
+                        Icons.point_of_sale_rounded,
+                        size: 16),
+                    label: const Text('Liquidar con arrastre…'),
+                    onPressed:
+                        confirmando ? null : onLiquidarArrastre,
                   ),
                 ),
                 const SizedBox(height: 4),

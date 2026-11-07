@@ -169,6 +169,18 @@ class EntrenadorPendiente {
   bool get tieneRetraso =>
       dias.any((d) => d.nivelAlerta > 0);
 
+  /// (M2-BC C3) días del pago pendiente más viejo del
+  /// entrenador (0 si no tiene días): la antigüedad que
+  /// colorea su tarjeta (verde → ámbar → rojo).
+  int get diasMasViejo => dias.fold(
+      0, (m, d) => d.diasDeAntiguedad > m ? d.diasDeAntiguedad : m);
+
+  /// (M2-BC C3) peor nivel de alerta entre sus días
+  /// (0 normal, 1 aviso, 2 crítico): el color de urgencia
+  /// de la tarjeta sale de aquí, no de un día suelto.
+  int get nivelAlertaMax =>
+      dias.fold(0, (m, d) => d.nivelAlerta > m ? d.nivelAlerta : m);
+
   List<int> get todosLosIds =>
       dias.expand((d) => d.ids).toList();
 }

@@ -17,10 +17,12 @@ import '../permisos_entrenador.dart';
 import '../permisos_visibilidad.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
+import 'arqueo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'buscar.dart';
 import 'conciliacion.dart';
+import 'skeleton.dart';
 import 'cumpleanos.dart';
 import 'diferencias_caja.dart';
 import 'listas.dart';
@@ -103,6 +105,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // T5 (1.20): expedientes de diferencia del entrenador
   // (su vista de transparencia en «Mi dashboard»).
   List<Map<String, dynamic>> _misDiferencias = [];
+  // (M2-BC C2) día seleccionado en el gráfico de ingresos
+  // y su desglose para la burbuja (null = calculando).
+  String? _diaSel;
+  ({
+    double efectivo,
+    double transferencia,
+    double diario,
+    double suplementos,
+    double servicios,
+    double total,
+    int movimientos,
+  })? _detalleSel;
 
   // Vista por rol (v1.2): el entrenador ve solo sus propios números.
   final _auth = AuthService();
@@ -370,6 +384,100 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// (M2-BC C1) Tarjeta héroe del Dashboard: la foto del
+  /// mes de un vistazo en la tarjeta con el gradiente de la
+  /// marca — ingresos del mes, utilidad (con la etiqueta
+  /// honesta de [filaUtilidadBalance]) y pendiente a
+  /// entregar — con las cifras animadas de la casa.
+  Widget _tarjetaHeroe() {
+    final utilidad = filaUtilidadBalance(
+        ingresos: _mes, gastos: _gastosMes, nominaProy: _nominaProy);
+    var pendCup = 0.0;
+    var pendUsd = 0.0;
+    for (final t in _pend) {
+      pendCup += (t['total'] as double?) ?? 0;
+      pendUsd += (t['total_usd'] as double?) ?? 0;
+    }
+    return Container(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      decoration: BoxDecoration(
+        gradient: AppColores.gradienteNaranja,
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        boxShadow: [
+          BoxShadow(
+            color: AppColores.naranja.withValues(alpha: 0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('ESTE MES',
+              style: AppTexto.metadato.copyWith(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1)),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              MontoAnimado(
+                  valor: _mes,
+                  formato: fmtMonto,
+                  style: AppTexto.display.copyWith(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 6),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('CUP de ingresos',
+                    style: AppTexto.secundario
+                        .copyWith(color: Colors.white)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                  child: _heroeCifra(utilidad.etiqueta, utilidad.valor,
+                      'CUP')),
+              Expanded(
+                  child: _heroeCifra(
+                      'Pendiente a entregar',
+                      pendCup,
+                      pendUsd > 0
+                          ? 'CUP + ${fmtMonto(pendUsd)} USD'
+                          : 'CUP')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroeCifra(String etiqueta, double valor, String sufijo) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(etiqueta,
+            style:
+                AppTexto.metadato.copyWith(color: Colors.white70)),
+        const SizedBox(height: 2),
+        MontoAnimado(
+            valor: valor,
+            formato: fmtMonto,
+            style: AppTexto.subtitulo.copyWith(
+                color: Colors.white, fontWeight: FontWeight.bold)),
+        Text(sufijo,
+            style:
+                AppTexto.minuscula.copyWith(color: Colors.white70)),
+      ],
+    );
+  }
+
   /// Detalle de ingresos por período (v1.0.11).
   /// Muestra desglose por método de pago.
   Future<void> _detalleIngresos(String periodo) async {
@@ -522,7 +630,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando panel…')
+          // (M2-BC C5) esqueleto estructural también en la
+          // vista del entrenador.
+          ? ListView(
+              padding: const EdgeInsets.all(AppEspacio.lg),
+              children: const [
+                SyncBanner(),
+                SizedBox(height: 8),
+                SkeletonLista(items: 3),
+              ],
+            )
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
@@ -912,6 +1029,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// (M2-BC C2) selecciona un día del gráfico y carga su
+  /// desglose para la burbuja (la hoja completa sigue en
+  /// [_detalleDia]).
+  Future<void> _seleccionarDia(String fecha) async {
+    setState(() {
+      _diaSel = fecha;
+      _detalleSel = null;
+    });
+    final r = await resumenIngresosDia(fecha);
+    if (mounted && _diaSel == fecha) {
+      setState(() => _detalleSel = r);
+    }
+  }
+
+  /// (M2-BC C2) burbuja del día tocado: total y desglose
+  /// sin salir del Dashboard, con la puerta a la hoja
+  /// completa de [_detalleDia].
+  Widget _burbujaDia() {
+    final fecha = _diaSel!;
+    final d = _detalleSel;
+    return Container(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      decoration: BoxDecoration(
+        color: AppColores.superficie(context),
+        border: Border.all(color: AppColores.borde(context)),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                  child: Text(fmtFecha(fecha),
+                      style: AppTexto.subtitulo)),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: 'Cerrar detalle del día',
+                onPressed: () => setState(() {
+                  _diaSel = null;
+                  _detalleSel = null;
+                }),
+              ),
+            ],
+          ),
+          if (d == null)
+            const Text('Calculando…', style: AppTexto.secundario)
+          else ...[
+            Text(
+              'Total: ${fmtMonto(d.total)} CUP · '
+              '${d.movimientos} movimientos',
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Efectivo ${fmtMonto(d.efectivo)} · '
+              'Transferencia ${fmtMonto(d.transferencia)} · '
+              'Diario ${fmtMonto(d.diario)}'
+              '${d.suplementos > 0 ? ' · Suplementos ${fmtMonto(d.suplementos)}' : ''}'
+              '${d.servicios > 0 ? ' · Servicios ${fmtMonto(d.servicios)}' : ''}',
+              style: AppTexto.secundario,
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => _detalleDia(fecha),
+                child: const Text('Detalle completo'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   /// v1.0.15: gráfico de días (7 o 30 según selector).
   /// D1 (estéticas 1.19): etiquetas legibles (11 px), día de hoy
   /// destacado en verde y mejor día en ámbar. Sin esto el monto
@@ -931,7 +1124,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 .map((e) => (e['monto'] as num).toDouble())
                 .reduce((a, b) => a + b) /
             datos.length;
-    return Container(
+    return Column(
+      children: [
+        Container(
       height: 150,
       padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
@@ -970,9 +1165,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ? AppColores.alerta
                     : AppColores.naranja;
             return GestureDetector(
-              // v1.0.15: tocar barra muestra el detalle
+              // v1.0.15: tocar barra muestra el detalle.
+              // (M2-BC C2) ahora selecciona el día y abre la
+              // burbuja con su desglose bajo el gráfico (la
+              // hoja completa vive en la burbuja).
               onTap: monto > 0
-                  ? () => _detalleDia(d['fecha'] as String)
+                  ? () => _seleccionarDia(d['fecha'] as String)
                   : null,
               child: Padding(
                 padding:
@@ -990,12 +1188,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700),
                       ),
                     const SizedBox(height: 2),
-                    Container(
-                      width: es30 ? 12 : 28,
-                      height: altura,
-                      decoration: BoxDecoration(
-                        color: colorBarra,
-                        borderRadius: BorderRadius.circular(4),
+                    // (M2-BC C2) animación de entrada: la
+                    // barra crece de 0 a su altura al aparecer
+                    // (la clave por fecha+período la relanza
+                    // al cambiar el selector 7/30).
+                    TweenAnimationBuilder<double>(
+                      key: ValueKey(
+                          'barra-$fecha-$_periodoGrafico'),
+                      tween: Tween(begin: 0.0, end: 1.0),
+                      duration:
+                          const Duration(milliseconds: 450),
+                      curve: Curves.easeOut,
+                      builder: (ctx, f, _) => Container(
+                        width: es30 ? 12 : 28,
+                        height: altura * f,
+                        decoration: BoxDecoration(
+                          color: colorBarra,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -1038,6 +1248,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
       ),
+        ),
+        // (M2-BC C2) la burbuja del día tocado, bajo el
+        // gráfico.
+        if (_diaSel != null) ...[
+          const SizedBox(height: 8),
+          _burbujaDia(),
+        ],
+      ],
     );
   }
 
@@ -1174,6 +1392,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final cup = (t['total'] as double?) ?? 0;
       final usd = (t['total_usd'] as double?) ?? 0;
       final n = (t['n'] as int?) ?? 0;
+      // (M2-BC B3) alerta de pendiente acumulado: si el
+      // entrenador pasa el umbral de días o de monto, su
+      // fila se vuelve de urgencia («lleva N días sin
+      // entregar») y el toque va DIRECTO a su Arqueo, que
+      // es donde se liquida.
+      final dias = (t['dias_pendiente'] as int?) ?? 0;
+      if (pendienteAcumuladoEnAlerta(dias: dias, cup: cup, usd: usd)) {
+        filas.add(_filaUrgencia(
+          icono: Icons.warning_amber_rounded,
+          color: dias >= kDiasAlertaPendiente
+              ? AppColores.error
+              : AppColores.alerta,
+          texto: dias > 0
+              ? '${t['nombre']} lleva $dias días sin entregar'
+              : 'Pendiente acumulado: ${t['nombre']}',
+          detalle: '${fmtMonto(cup)} CUP'
+              '${usd > 0 ? ' · ${fmtMonto(usd)} USD' : ''}'
+              ' · $n movimientos · toca para liquidar',
+          onTap: () => _ir(DetalleArqueoScreen(
+              telegramId: t['id'] as int, nombre: '${t['nombre']}')),
+        ));
+        continue;
+      }
       var det = '$n movimientos sin entregar · ${fmtMonto(cup)} CUP';
       if (usd > 0) det += ' · ${fmtMonto(usd)} USD';
       filas.add(_filaUrgencia(
@@ -1324,7 +1565,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando panel…')
+          // (M2-BC C5) esqueleto estructural en vez del
+          // spinner genérico.
+          ? const SkeletonDashboard()
           : RefreshIndicator(
               onRefresh: _cargar,
               child: ListView(
@@ -1332,6 +1575,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const SyncBanner(),
                   const SizedBox(height: 8),
+                  // (M2-BC C1) la foto del mes abre el panel.
+                  _tarjetaHeroe(),
+                  const SizedBox(height: 16),
                   // H1 (Argón): el bloque de urgencias abre el panel.
                   const EncabezadoSeccion(titulo: 'Hoy hay que…'),
                   const SizedBox(height: 8),
@@ -1370,8 +1616,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               value: '30', label: Text('30 días')),
                         ],
                         selected: {_periodoGrafico},
-                        onSelectionChanged: (s) => setState(
-                            () => _periodoGrafico = s.first),
+                        onSelectionChanged: (s) => setState(() {
+                          _periodoGrafico = s.first;
+                          // (M2-BC C2) la burbuja es del
+                          // período anterior: se cierra.
+                          _diaSel = null;
+                          _detalleSel = null;
+                        }),
                         style: SegmentedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
                         ),

@@ -2536,6 +2536,149 @@ Future<String> crearLiquidacion({
   return liqId;
 }
 
+/// (M2-BC B2) Deshacer una liquidación RECIÉN creada: borra su
+/// op `liquidar_caja` de la cola si y solo si sigue en el
+/// teléfono (estado pendiente/error: nunca subió). Es el patrón
+/// del Deshacer del cobro y de la venta de servicios: la
+/// comprobación y el borrado van en UNA transacción y se lee y
+/// se borra SOLO por txn (leer por LocalDb.instance.db dentro
+/// de una transacción bloquea sqflite). Si la op ya se aplicó,
+/// NO se toca nada y devuelve false: una liquidación confirmada
+/// por el servidor jamás se «deshace» en local a la ligera (su
+/// corrección es otra liquidación/expediente, no un borrado).
+/// El expediente de diferencia, si la op lo abría, nace en el
+/// servidor con la MISMA op: borrarla lo borra todo atómico.
+Future<bool> deshacerLiquidacion(String opUuid) async {
+  final raw = await LocalDb.instance.db;
+  try {
+    return await raw.transaction((txn) async {
+      final rows = await txn.query('ops_queue',
+          columns: ['tipo', 'estado'],
+          where: 'op_uuid = ?',
+          whereArgs: [opUuid]);
+      if (rows.isEmpty) throw StateError('deshacer: sin op');
+      if ('${rows.first['tipo']}' != 'liquidar_caja') {
+        throw StateError('deshacer: no es liquidación');
+      }
+      final estado = '${rows.first['estado']}';
+      if (estado != 'pendiente' && estado != 'error') {
+        throw StateError('deshacer: ya sincronizada');
+      }
+      final n = await txn.delete('ops_queue',
+          where: "op_uuid = ? AND estado IN ('pendiente','error')",
+          whereArgs: [opUuid]);
+      if (n == 0) throw StateError('deshacer: borrado en 0');
+      return true;
+    });
+  } on StateError {
+    return false;
+  }
+}
+
+/// (M2-BC B2) UUID de la liquidación EN COLA de un
+/// entrenador+moneda (la pareja de [liquidacionEnCola], que
+/// solo dice si existe): la UI lo necesita para ofrecer el
+/// Deshacer y el sello «Liquidado» mientras la op no sube.
+Future<String?> uuidLiquidacionEnCola(
+    int entrenadorTelegramId, String moneda) async {
+  final monedaNorm = moneda.trim().toUpperCase();
+  for (final op in await LocalDb.instance.pendingOpsLectura()) {
+    if ('${op['tipo']}' != 'liquidar_caja') continue;
+    try {
+      final p = jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      if (LocalDb.normalizarTelegramId(p['entrenador_telegram_id']) !=
+          entrenadorTelegramId) {
+        continue;
+      }
+      final m = '${p['moneda'] ?? 'CUP'}'.trim().toUpperCase();
+      if (m == monedaNorm) return '${op['op_uuid']}';
+    } catch (_) {}
+  }
+  return null;
+}
+
+/// (M2-BC B1) Texto del resumen de una liquidación, listo para
+/// enviar por WhatsApp al entrenador (constancia para ambas
+/// partes): qué entregó, qué quedó de arrastre y de qué pagos
+/// salió (conteo por categoría de los op_ids liquidados). Es
+/// PURO: se compone ANTES de encolar la liquidación, con la
+/// misma foto que viaja en la op.
+String resumenLiquidacionTexto({
+  required String nombre,
+  required DateTime fecha,
+  required String moneda,
+  required double esperado,
+  required double entregado,
+  required Map<String, List<int>> opIds,
+  String? nota,
+}) {
+  const etiquetas = {
+    'pagos': 'mensualidades',
+    'pagos_diarios': 'pagos diarios',
+    'ventas_suplementos': 'ventas de suplementos',
+    'servicio_ventas': 'servicios',
+    'adelantos': 'adelantos saldados',
+  };
+  String dos(int n) => n.toString().padLeft(2, '0');
+  final f = '${dos(fecha.day)}/${dos(fecha.month)}/${fecha.year}';
+  final diferencia = esperado - entregado;
+  final partes = <String>[
+    for (final e in etiquetas.entries)
+      if ((opIds[e.key]?.length ?? 0) > 0)
+        '${opIds[e.key]!.length} ${e.value}',
+  ];
+  final buf = StringBuffer()
+    ..writeln('🧾 *Liquidación de caja — Iron Body Gym*')
+    ..writeln('Entrenador: $nombre')
+    ..writeln('Fecha: $f')
+    ..writeln('Esperado: ${fmtMonto(esperado)} $moneda')
+    ..writeln('Entregado: ${fmtMonto(entregado)} $moneda')
+    ..writeln(diferencia > 0.01
+        ? 'Queda de arrastre: ${fmtMonto(diferencia)} $moneda'
+        : 'Sin diferencia: todo entregado.')
+    ..write(partes.isEmpty
+        ? 'Salió del saldo de arrastre anterior.'
+        : 'Salió de: ${partes.join(' · ')}.');
+  if (nota != null && nota.trim().isNotEmpty) {
+    buf.write('\nNota: ${nota.trim()}');
+  }
+  return buf.toString();
+}
+
+/// (M2-BC B5) TODAS las liquidaciones del espejo, más
+/// recientes primero: la materia prima de la vista única
+/// «Últimas liquidaciones» (el historial por entrenador de
+/// [liquidacionesDeEntrenador] sigue siendo el detalle).
+Future<List<Map<String, dynamic>>> todasLasLiquidaciones() async {
+  final res = <Map<String, dynamic>>[
+    ...await LocalDb.instance.allMirror('liquidaciones_caja'),
+  ];
+  res.sort((a, b) =>
+      '${b['creada_en']}'.compareTo('${a['creada_en']}'));
+  return res;
+}
+
+/// (M2-BC B3) Umbrales de la alerta de pendiente acumulado
+/// del Panel: un entrenador «lleva días sin entregar» cuando
+/// su pago pendiente más viejo pasa de [kDiasAlertaPendiente]
+/// días o el monto pasa de [kMontoAlertaPendienteCup] /
+/// [kMontoAlertaPendienteUsd]. Decisión de esta oleada (el
+/// estudio no fijaba cifras): 3 días o 5 000 CUP o 100 USD.
+const int kDiasAlertaPendiente = 3;
+const double kMontoAlertaPendienteCup = 5000;
+const double kMontoAlertaPendienteUsd = 100;
+
+/// (M2-BC B3) ¿El pendiente de un entrenador merece la fila
+/// de urgencia en «Hoy hay que…»? PURO.
+bool pendienteAcumuladoEnAlerta({
+  required int dias,
+  required double cup,
+  required double usd,
+}) =>
+    dias >= kDiasAlertaPendiente ||
+    cup >= kMontoAlertaPendienteCup ||
+    usd >= kMontoAlertaPendienteUsd;
+
 /// Incidencias de sync pendientes de revisión (solo dueño).
 Future<List<Map<String, dynamic>>> incidenciasSyncPendientes() async {
   final res = <Map<String, dynamic>>[];
@@ -5603,6 +5746,20 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     e['n'] = (e['n'] as int) + 1;
   }
 
+  // (M2-BC B3) fecha (día de calendario) del ítem pendiente
+  // más viejo por entrenador: la alerta de pendiente
+  // acumulado del Panel («lleva N días sin entregar») la
+  // necesita. Se alimenta en los mismos bucles que suman.
+  final masViejaPorTid = <int, DateTime>{};
+  void registraFecha(int tid, Object? cruda) {
+    final f = DateTime.tryParse('${cruda ?? ''}');
+    if (f == null) return;
+    final h = aHabana(f);
+    final dia = DateTime.utc(h.year, h.month, h.day);
+    final prev = masViejaPorTid[tid];
+    if (prev == null || dia.isBefore(prev)) masViejaPorTid[tid] = dia;
+  }
+
   // 1.15 (Panel A1): excluir lo ya liquidado (misma regla que
   // pendienteArqueo): un ítem en otra liquidación no vuelve a contar.
   // Caché por entrenador para no repetir la consulta por ítem.
@@ -5628,6 +5785,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (tid == null) continue;
     if (excluirTid != null && tid == excluirTid) continue;
     if ((await cubiertosDe(tid)).contains('pagos:${p['id']}')) continue;
+    registraFecha(tid, p['fecha']);
     suma(tid, '${p['registrado_por'] ?? 'Entrenador $tid'}',
         (p['monto'] as num?)?.toDouble() ?? 0);
   }
@@ -5642,6 +5800,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if ((await cubiertosDe(tid)).contains('pagos_diarios:${d['id']}')) {
       continue;
     }
+    registraFecha(tid, d['fecha']);
     suma(tid, '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         (d['total'] as num?)?.toDouble() ?? 0);
   }
@@ -5655,6 +5814,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
         .contains('ventas_suplementos:${v['id']}')) {
       continue;
     }
+    registraFecha(tid, v['creada_en']);
     suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         totalVentaCup(v));
   }
@@ -5670,6 +5830,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
         .contains('ventas_suplementos:${v['id']}')) {
       continue;
     }
+    registraFecha(tid, v['creada_en']);
     sumaUsd(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         totalVentaUsd(v));
   }
@@ -5690,6 +5851,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if ((await cubiertosDe(tid)).contains('servicio_ventas:${v['id']}')) {
       continue;
     }
+    registraFecha(tid, v['fecha']);
     suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
         ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
             ((v['cantidad'] as num?)?.toDouble() ?? 0));
@@ -5735,6 +5897,18 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
   // información financiera que el dueño debe ver.
   mapa.removeWhere((_, e) =>
       (e['total'] as double) == 0 && (e['total_usd'] as double) == 0);
+  // (M2-BC B3) antigüedad del pendiente por entrenador: días
+  // de calendario desde su ítem más viejo hasta hoy (Habana).
+  // Sin ítems con fecha (solo arrastre), queda 0: el arrastre
+  // no trae fecha de pago en esta foto.
+  final hoyA = ahoraHabana();
+  final hoyUtc = DateTime.utc(hoyA.year, hoyA.month, hoyA.day);
+  for (final e in mapa.values) {
+    final mv = masViejaPorTid[e['id']];
+    e['dias_pendiente'] =
+        mv == null ? 0 : hoyUtc.difference(mv).inDays;
+    e['fecha_mas_vieja'] = mv?.toIso8601String().substring(0, 10);
+  }
   final l = mapa.values.toList()
     ..sort((a, b) {
       final c = (b['total'] as double).compareTo(a['total'] as double);
