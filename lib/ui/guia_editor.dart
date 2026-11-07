@@ -56,6 +56,12 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   final _regresion = TextEditingController();
 
   List<String> _sinonimos = [];
+  // Colisión de slug (2026-11-07): si la ficha publicada
+  // declara «idCanonico» (viaja con slug alias porque otra
+  // ficha comparte su slug), se conserva tal cual en el
+  // payload y en el borrador: reeditar la ficha no debe
+  // perder su identidad exacta de Clientes.
+  String _idCanonico = '';
   String? _equipoId;
   String _silueta = 'pecho';
   bool _esencial = false;
@@ -203,6 +209,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     }
     _titulo.text = '${d['titulo'] ?? ''}';
     if (_slug.text.isEmpty) _slug.text = '${d['id'] ?? ''}';
+    _idCanonico = '${d['idCanonico'] ?? ''}';
     _sinonimos = [for (final s in (d['sinonimos'] as List?) ?? []) '$s'];
     _equipoId = '${d['equipoId'] ?? ''}';
     _silueta = '${d['siluetaId'] ?? 'pecho'}';
@@ -270,6 +277,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         .toList();
     return {
       'id': _slug.text.trim(),
+      if (_idCanonico.isNotEmpty) 'idCanonico': _idCanonico,
       'titulo': _titulo.text.trim(),
       'sinonimos': _sinonimos,
       'equipoId': _equipoId ?? '',

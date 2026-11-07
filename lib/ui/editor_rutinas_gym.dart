@@ -186,13 +186,35 @@ class FichaCatalogo {
   const FichaCatalogo({required this.id, required this.titulo});
 }
 
-Future<List<FichaCatalogo>> _cargarCatalogo() async {
-  // 1.24.1 (Argón G-07): la fuente son las fichas PUBLICADAS
-  // de la Guía (guiaPublicadas ya decodifica el espejo y
-  // deja el slug en 'id'; el equipoId viaja en el data). Una
-  // ficha sin equipoId no tiene id canónico: no entra (el
-  // cliente tampoco podría cruzarla).
-  final filas = await LocalDb.instance.guiaPublicadas();
+/// La identidad canónica con la que una ficha del espejo
+/// entra en las rutinas: '${equipoId}_$slug', EXCEPTO cuando
+/// el documento declara `idCanonico`. Dos fichas del
+/// catálogo de Clientes comparten slug con distinto equipo
+/// (peso-muerto-rumano con barra y con mancuernas) y la PK
+/// de la tubería es el slug a secas: la segunda viaja con un
+/// slug alias y su `idCanonico` es el id EXACTO que la app
+/// de clientes cruza contra su catálogo embebido. Un
+/// idCanonico cuyo prefijo no sea el equipoId de la propia
+/// fila NO se honra (defensa contra un documento cruzado o
+/// corrupto): se cae al compuesto de siempre.
+String idCanonicoFichaGuia(
+    String slug, String equipoId, dynamic declarado) {
+  final compuesto = '${equipoId}_$slug';
+  final d = '${declarado ?? ''}'.trim();
+  if (d.isEmpty || d == compuesto) return compuesto;
+  final prefijo = '${equipoId}_';
+  if (!d.startsWith(prefijo)) return compuesto;
+  final resto = d.substring(prefijo.length);
+  if (resto.isEmpty || resto.contains('_')) return compuesto;
+  return d;
+}
+
+/// Convierte las filas del espejo (guiaPublicadas) en el
+/// catálogo del editor de rutinas. Función pura: la usa
+/// _cargarCatalogo y la congelan los tests de colisión de
+/// slug (guia_id_canonico_test.dart).
+List<FichaCatalogo> fichasCatalogoDesdeEspejo(
+    List<Map<String, dynamic>> filas) {
   final out = <FichaCatalogo>[];
   for (final f in filas) {
     final slug = '${f['id'] ?? ''}'.trim();
@@ -200,12 +222,22 @@ Future<List<FichaCatalogo>> _cargarCatalogo() async {
     if (slug.isEmpty || equipoId.isEmpty) continue;
     final titulo = '${f['titulo'] ?? ''}'.trim();
     out.add(FichaCatalogo(
-      id: '${equipoId}_$slug',
+      id: idCanonicoFichaGuia(slug, equipoId, f['idCanonico']),
       titulo: titulo.isEmpty ? slug : titulo,
     ));
   }
   out.sort((a, b) => a.titulo.compareTo(b.titulo));
   return out;
+}
+
+Future<List<FichaCatalogo>> _cargarCatalogo() async {
+  // 1.24.1 (Argón G-07): la fuente son las fichas PUBLICADAS
+  // de la Guía (guiaPublicadas ya decodifica el espejo y
+  // deja el slug en 'id'; el equipoId viaja en el data). Una
+  // ficha sin equipoId no tiene id canónico: no entra (el
+  // cliente tampoco podría cruzarla).
+  final filas = await LocalDb.instance.guiaPublicadas();
+  return fichasCatalogoDesdeEspejo(filas);
 }
 
 class EditorRutinasGymScreen extends StatefulWidget {

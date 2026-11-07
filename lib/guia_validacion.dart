@@ -146,6 +146,28 @@ class GuiaValidacion {
     } else if (!equiposVigentes.contains(equipoId)) {
       errores.add('El equipo «$equipoId» no está en la lista vigente.');
     }
+    // Colisión de slug (2026-11-07): una ficha con slug alias
+    // puede declarar su id canónico exacto de Clientes en
+    // «idCanonico». Aquí solo se espeja la FORMA (prefijo =
+    // equipoId, resto = slug válido, distinto del compuesto
+    // por defecto); la necesidad (colisión real) y la
+    // unicidad las exige el servidor, que es la autoridad
+    // (ver _validar_ficha_guia en sync.py).
+    final idCanonico = a['idCanonico'];
+    if (idCanonico != null) {
+      var formaOk = false;
+      if (idCanonico is String &&
+          idCanonico.length <= 161 &&
+          equipoId.isNotEmpty &&
+          idCanonico.startsWith('${equipoId}_')) {
+        final resto = idCanonico.substring(equipoId.length + 1);
+        formaOk =
+            slugValido(resto) && idCanonico != '${equipoId}_$slug';
+      }
+      if (!formaOk) {
+        errores.add('El id canónico declarado no es válido.');
+      }
+    }
     _listaTextos(errores, a['musculosPrincipales'],
         'músculos principales', 50, 1, 6);
     _listaTextos(errores, a['musculosSecundarios'],
