@@ -23,7 +23,10 @@ void main() {
 
   group('M2: frecuencia de recordatorios (patrón G-08)', () {
     test('el select del pull pide frecuencia', () {
-      expect(sync, contains('fecha_fija,frecuencia,activa'),
+      // Corrección A5-D1 (auditorías 1.28): el pin crece
+      // con pausada_hasta — sin ella en el select, la
+      // pausa del recordatorio no viajaba en el pull.
+      expect(sync, contains('fecha_fija,frecuencia,pausada_hasta,activa'),
           reason: 'sin frecuencia en el select, el recordatorio '
               'recurrente llega degradado a disparo único');
     });

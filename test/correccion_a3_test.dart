@@ -75,6 +75,15 @@ void main() {
       } catch (_) {}
     });
 
+    // La BD con nombre forzado NO se borra entre corridas:
+    // cada test arranca con la cola vacía para no heredar
+    // las ops de una corrida anterior (en la suite
+    // completa, la primera corrida dejó la op del pago 42
+    // y ambos marcar() rebotaban contra ella).
+    setUp(() async {
+      await (await LocalDb.instance.db).delete('ops_queue');
+    });
+
     Future<int> opsConciliacion() async {
       final ops = await LocalDb.instance.pendingOpsLectura();
       return ops.where((o) => o['tipo'] == 'marcar_conciliacion').length;
@@ -115,8 +124,7 @@ void main() {
       ]);
       expect(rs[0].marcadas + rs[1].marcadas, 3);
       expect(rs[0].omitidas + rs[1].omitidas, 3);
-      // 1 del test anterior + 3 de este lote.
-      expect(await opsConciliacion(), 4);
+      expect(await opsConciliacion(), 3);
     });
 
     group('X1 · AccesoAppCache', () {
