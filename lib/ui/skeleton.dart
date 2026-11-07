@@ -453,3 +453,190 @@ class SkeletonNomina extends StatelessWidget {
     );
   }
 }
+
+/// (M5-BC C3) Esqueleto estructural del Panel: espejo de
+/// AdminScreen — cabecera con avatar, tarjeta de
+/// atención, la estación diaria en 2×2, el pulso del mes
+/// con sus 3 cifras y las 6 filas de módulo con su
+/// pastilla de icono. Sustituye al «Cargando
+/// administración…» genérico para que nada salte cuando
+/// llegan las cifras.
+class SkeletonPanel extends StatelessWidget {
+  const SkeletonPanel({super.key});
+
+  Widget _filaModulo() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          SkeletonLinea(ancho: 38, alto: 38),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonLinea(ancho: 150, alto: 16),
+                SizedBox(height: 6),
+                SkeletonLinea(ancho: 210, alto: 13),
+              ],
+            ),
+          ),
+          SizedBox(width: 8),
+          SkeletonLinea(ancho: 16, alto: 16),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: [
+        // Cabecera: avatar + nombre + chip.
+        const Row(
+          children: [
+            SkeletonLinea(ancho: 52, alto: 52),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonLinea(ancho: 170, alto: 18),
+                  SizedBox(height: 6),
+                  SkeletonLinea(ancho: 120, alto: 13),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        // Tarjeta de atención.
+        const SkeletonTarjeta(),
+        const SizedBox(height: 20),
+        // Estación diaria: encabezado + rejilla 2×2.
+        const SkeletonLinea(ancho: 140, alto: 16),
+        const SizedBox(height: 8),
+        const Row(
+          children: [
+            Expanded(child: SkeletonTarjeta()),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonTarjeta()),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Row(
+          children: [
+            Expanded(child: SkeletonTarjeta()),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonTarjeta()),
+          ],
+        ),
+        const SizedBox(height: 20),
+        // Pulso del mes: encabezado + 3 cifras.
+        const SkeletonLinea(ancho: 150, alto: 16),
+        const SizedBox(height: 8),
+        const Row(
+          children: [
+            Expanded(child: SkeletonTarjeta()),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonTarjeta()),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonTarjeta()),
+          ],
+        ),
+        const SizedBox(height: 20),
+        // Los 6 módulos.
+        for (var i = 0; i < 6; i++) _filaModulo(),
+      ],
+    );
+  }
+}
+
+/// (M5-BC C3) Esqueleto de la Bandeja de Premios: el
+/// texto de intro y dos tarjetas de vale con su fila de
+/// botones, como las reales.
+class SkeletonPremiosBandeja extends StatelessWidget {
+  const SkeletonPremiosBandeja({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: const [
+        SkeletonLinea(ancho: double.infinity, alto: 13),
+        SizedBox(height: 6),
+        SkeletonLinea(ancho: 280, alto: 13),
+        SizedBox(height: 6),
+        SkeletonLinea(ancho: 240, alto: 13),
+        SizedBox(height: 16),
+        Tarjeta(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  SkeletonLinea(ancho: 40, alto: 40),
+                  SizedBox(width: 10),
+                  SkeletonLinea(ancho: 150, alto: 16),
+                ],
+              ),
+              SizedBox(height: 10),
+              SkeletonLinea(ancho: 230),
+              SizedBox(height: 6),
+              SkeletonLinea(ancho: 190),
+              SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  SkeletonLinea(ancho: 80, alto: 36),
+                  SizedBox(width: 8),
+                  SkeletonLinea(ancho: 130, alto: 36),
+                ],
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: 12),
+        SkeletonTarjeta(),
+      ],
+    );
+  }
+}
+
+/// (M5-BC C3) Esqueleto del detalle de Premios por
+/// cliente: botones de acción, bloque de progreso con su
+/// barra y dos tarjetas de historial.
+class SkeletonPremiosDetalle extends StatelessWidget {
+  const SkeletonPremiosDetalle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: const [
+        Row(
+          children: [
+            Expanded(child: SkeletonLinea(alto: 40)),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonLinea(alto: 40)),
+          ],
+        ),
+        SizedBox(height: 16),
+        SkeletonLinea(ancho: 150, alto: 16),
+        SizedBox(height: 10),
+        SkeletonLinea(ancho: 230),
+        SizedBox(height: 8),
+        SkeletonLinea(alto: 10),
+        SizedBox(height: 8),
+        SkeletonLinea(ancho: 200),
+        SizedBox(height: 16),
+        SkeletonLinea(ancho: 150, alto: 16),
+        SizedBox(height: 8),
+        SkeletonTarjeta(),
+        SizedBox(height: 8),
+        SkeletonTarjeta(),
+      ],
+    );
+  }
+}

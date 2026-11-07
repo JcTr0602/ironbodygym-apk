@@ -1997,6 +1997,21 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       : const Icon(Icons.refresh_rounded),
                   onTap: _buscarActualizaciones,
                 ),
+                // 1.28 (M5-B5): releer SOLO lo de mi
+                // versión (la instalada y la anterior) en
+                // la vitrina de tarjetas; «Lo nuevo»
+                // conserva el historial completo.
+                _opcion(
+                  icono: Icons.auto_awesome_rounded,
+                  titulo: 'Novedades de mi versión',
+                  subtitulo:
+                      'Lo que trajo tu versión y la anterior',
+                  onTap: () => mostrarVitrinaNovedades(
+                    context,
+                    novedadesDeMiVersion(),
+                    titulo: 'Novedades de mi versión',
+                  ),
+                ),
                 _opcion(
                   icono: Icons.new_releases_rounded,
                   titulo: 'Lo nuevo',

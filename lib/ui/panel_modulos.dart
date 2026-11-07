@@ -1,0 +1,253 @@
+/// 1.28 (M5-C1 ★ ÍTEM FIJO): los 6 módulos del Panel con
+/// sus NOMBRES CORTOS definitivos — «Caja y dinero»,
+/// «Clientes e invitados», «Equipo y turnos»,
+/// «Suplementos y contenido», «Configuración y datos» y
+/// «Control y sistema». Decisión tomada: los módulos NO
+/// se fusionan y ni las tarjetas ni los contadores se
+/// mueven; solo cambian los títulos, y cada módulo
+/// estrena ICONO y COLOR de identidad propios y una
+/// LÍNEA DE ESTADO VIVA bajo el título (la cifra que
+/// importa de ese módulo, derivada de la foto ya
+/// cargada — no el catálogo estático de contenidos).
+///
+/// La lista de descriptores es una función PURA de los
+/// conteos: la pantalla la pinta y los tests la
+/// verifican sin montar el Panel entero.
+library;
+
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../negocio.dart' show fmtMonto;
+import 'componentes.dart';
+import 'diseno.dart';
+
+/// Un módulo del Panel: identidad + estado vivo +
+/// contador (badge) en su sitio de siempre.
+class DatoModuloPanel {
+  final IconData icono;
+  final Color tinte;
+  final String titulo;
+  final String estado;
+  final int? badge;
+
+  const DatoModuloPanel({
+    required this.icono,
+    required this.tinte,
+    required this.titulo,
+    required this.estado,
+    required this.badge,
+  });
+}
+
+String _conteo(int n, String uno, String varios) =>
+    n == 1 ? '1 $uno' : '$n $varios';
+
+/// Los 6 módulos, en su orden, con el badge de cada
+/// contador EN SU MÓDULO (el de Caja sigue siendo
+/// «entrenadores por liquidar»; el de Clientes suma
+/// solicitudes + reportes + vales de Premios por
+/// aprobar — M5-B2 —; el de Equipo, los cierres sin
+/// reporte de hoy y ayer; el de Suplementos, las
+/// reservas; el de Configuración, los precios sin
+/// fijar; el de Control, las incidencias).
+List<DatoModuloPanel> modulosPanel({
+  required int pendCaja,
+  required double pendCajaTotal,
+  required double cajaHoyTotal,
+  required int solicitudes,
+  required int reportes,
+  required int valesPorAprobar,
+  required int clientesActivos,
+  required int sinReporteHoy,
+  required int sinReporteAyer,
+  required int reservas,
+  required int stockCritico,
+  required int preciosSinFijar,
+  required int incidencias,
+  required int pendientesSubir,
+}) {
+  final badgeClientes = solicitudes + reportes + valesPorAprobar;
+  final sinReporte = sinReporteHoy + sinReporteAyer;
+  return [
+    DatoModuloPanel(
+      icono: Icons.attach_money_rounded,
+      tinte: AppColores.exito,
+      titulo: 'Caja y dinero',
+      estado: cajaHoyTotal > 0 || pendCajaTotal > 0
+          ? 'Hoy \$${fmtMonto(cajaHoyTotal)} cobrado'
+              '${pendCaja > 0 ? ' · \$${fmtMonto(pendCajaTotal)} por liquidar' : ''}'
+          : 'Sin cobros registrados hoy',
+      badge: pendCaja > 0 ? pendCaja : null,
+    ),
+    DatoModuloPanel(
+      icono: Icons.people_rounded,
+      tinte: AppColores.info,
+      titulo: 'Clientes e invitados',
+      estado: '$clientesActivos clientes activos'
+          '${valesPorAprobar > 0 ? ' · ${_conteo(valesPorAprobar, 'vale por aprobar', 'vales por aprobar')}' : ''}',
+      badge: badgeClientes > 0 ? badgeClientes : null,
+    ),
+    DatoModuloPanel(
+      icono: Icons.groups_rounded,
+      tinte: AppColores.naranja,
+      titulo: 'Equipo y turnos',
+      estado: sinReporte > 0
+          ? _conteo(sinReporte, 'cierre sin reporte',
+              'cierres sin reporte')
+          : 'Cierres de turno al día',
+      badge: sinReporte > 0 ? sinReporte : null,
+    ),
+    DatoModuloPanel(
+      icono: Icons.inventory_2_rounded,
+      tinte: const Color(0xFFA855F7),
+      titulo: 'Suplementos y contenido',
+      estado: [
+        if (reservas > 0)
+          _conteo(reservas, 'reserva por confirmar',
+              'reservas por confirmar'),
+        if (stockCritico > 0)
+          _conteo(stockCritico, 'producto en stock crítico',
+              'productos en stock crítico'),
+      ].join(' · ').ifEmpty('Reservas y stock al día'),
+      badge: reservas > 0 ? reservas : null,
+    ),
+    DatoModuloPanel(
+      // El icono pasa de «precios» a «ajustes»: el
+      // módulo ya no se llama «Precios…» y su identidad
+      // es la configuración (decisión de la oleada,
+      // a revisión de Argón).
+      icono: Icons.settings_rounded,
+      tinte: const Color(0xFF9AA3B2),
+      titulo: 'Configuración y datos',
+      estado: preciosSinFijar > 0
+          ? _conteo(preciosSinFijar, 'precio sin fijar',
+              'precios sin fijar')
+          : 'Precios y ajustes al día',
+      badge: preciosSinFijar > 0 ? preciosSinFijar : null,
+    ),
+    DatoModuloPanel(
+      icono: Icons.bar_chart_rounded,
+      tinte: const Color(0xFF14B8A6),
+      titulo: 'Control y sistema',
+      estado: incidencias > 0
+          ? _conteo(incidencias, 'incidencia por revisar',
+              'incidencias por revisar')
+          : pendientesSubir > 0
+              ? _conteo(pendientesSubir, 'cambio por subir',
+                  'cambios por subir')
+              : 'Sistema al día',
+      badge: incidencias > 0 ? incidencias : null,
+    ),
+  ];
+}
+
+extension on String {
+  String ifEmpty(String otro) => isEmpty ? otro : this;
+}
+
+/// La pastilla del contador de un módulo. Con [pulso],
+/// late tres veces al montarse (el contador SUBIÓ
+/// desde la última visita al Panel); respeta «reducir
+/// movimiento».
+class BadgeModuloPanel extends StatelessWidget {
+  final int valor;
+  final bool pulso;
+
+  const BadgeModuloPanel({
+    super.key,
+    required this.valor,
+    this.pulso = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // La misma pastilla roja de siempre de los módulos;
+    // lo nuevo es solo el pulso.
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColores.error,
+        borderRadius: BorderRadius.circular(AppRadio.circular),
+      ),
+      child: Text(
+        '$valor',
+        style: AppTexto.minuscula
+            .copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+      ),
+    );
+    if (!pulso || MediaQuery.of(context).disableAnimations) {
+      return chip;
+    }
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 1350),
+      builder: (context, t, child) {
+        final escala = 1 + 0.18 * math.sin(t * math.pi * 3).abs();
+        return Transform.scale(scale: escala, child: child);
+      },
+      child: chip,
+    );
+  }
+}
+
+/// La fila de un módulo en la lista del Panel (y, con el
+/// mismo dato, la cabecera de su pantalla): pastilla de
+/// icono en su color, título corto, línea de estado
+/// viva, contador y chevron.
+class FilaModuloPanel extends StatelessWidget {
+  final DatoModuloPanel dato;
+  final bool pulso;
+  final VoidCallback onTap;
+
+  const FilaModuloPanel({
+    super.key,
+    required this.dato,
+    this.pulso = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: AppEspacio.md),
+        child: Row(
+          children: [
+            IconoModuloBadge(
+              icono: dato.icono,
+              tinte: dato.tinte,
+              iconoOscuro: dato.tinte,
+              iconoClaro: dato.tinte,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(dato.titulo, style: AppTexto.subtitulo),
+                  const SizedBox(height: 2),
+                  Text(
+                    dato.estado,
+                    style: AppTexto.secundario,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            if (dato.badge != null) ...[
+              BadgeModuloPanel(valor: dato.badge!, pulso: pulso),
+              const SizedBox(width: 8),
+            ],
+            Icon(Icons.chevron_right_rounded,
+                color: AppColores.textoSecundario(context)),
+          ],
+        ),
+      ),
+    );
+  }
+}

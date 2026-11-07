@@ -33,6 +33,8 @@ enum DestinoAtencion {
   incidencias,
   diagnostico,
   suplementos,
+  premios,
+  reintentarVales,
 }
 
 /// Una fila del bloque de atención, ya redactada y sin acción:
@@ -96,6 +98,14 @@ class FotoAtencion {
   /// (sin Casa): la fila «vence hoy» de la bandeja única.
   final List<String> vencenHoyNombres;
 
+  /// 1.28 (M5-B2): vales de Premios esperando la
+  /// decisión PERSONAL del dueño, contados sin entrar a
+  /// Premios. 0 con [valesSinCargar] en true NO es «no
+  /// hay vales»: es «no se pudo saber» (la fila de sin
+  /// cargar lo dice, con la disciplina de siempre).
+  final int valesPorAprobar;
+  final bool valesSinCargar;
+
   const FotoAtencion({
     required this.solicitudes,
     required this.reportes,
@@ -108,6 +118,8 @@ class FotoAtencion {
     required this.syncError,
     required this.stockCritico,
     this.vencenHoyNombres = const [],
+    this.valesPorAprobar = 0,
+    this.valesSinCargar = false,
   });
 }
 
@@ -255,6 +267,40 @@ List<PendienteAtencionDato> pendientesAtencion(FotoAtencion f) {
       boton: 'Reintentar',
       primario: false,
       gravedad: 3,
+    ));
+  }
+
+  // 1.28 (M5-B2): vales de Premios por aprobar — decisión
+  // personal del dueño (gravedad 1, con el dinero
+  // detenido): se ven SIN entrar a Premios.
+  if (f.valesPorAprobar > 0) {
+    final n = f.valesPorAprobar;
+    pendientes.add(PendienteAtencionDato(
+      destino: DestinoAtencion.premios,
+      icono: Icons.emoji_events_rounded,
+      tinte: AppColores.naranja,
+      titulo:
+          n == 1 ? '1 vale por aprobar' : '$n vales por aprobar',
+      detalle: 'Premios: días gratis esperando tu decisión',
+      boton: 'Revisar',
+      primario: false,
+    ));
+  }
+
+  // M5-B2: la bandeja de Premios no se pudo consultar —
+  // se declara sin cargar (gravedad 0, como las demás
+  // bandejas), jamás un silencio que parezca «sin
+  // vales».
+  if (f.valesSinCargar) {
+    pendientes.add(const PendienteAtencionDato(
+      destino: DestinoAtencion.reintentarVales,
+      icono: Icons.cloud_off_rounded,
+      tinte: AppColores.error,
+      titulo: 'Vales de Premios sin cargar',
+      detalle: 'Sin conexión para consultar la bandeja',
+      boton: 'Reintentar',
+      primario: false,
+      gravedad: 0,
     ));
   }
 

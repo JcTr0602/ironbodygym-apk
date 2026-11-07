@@ -104,6 +104,118 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
     await _cargar();
   }
 
+  /// 1.28 (M5-B3): el estado legible de la config: la
+  /// pausa CON FECHA se nombra con su último día («en
+  /// pausa hasta el…»); vencida la fecha, vuelve a
+  /// «activo» sin tocar nada (la reactivación es por
+  /// lectura, no por escritura).
+  String _estadoLegible(Map<String, dynamic> c) {
+    if ((c['activa'] as num?)?.toInt() != 1) return 'pausado';
+    if (recordatorioEnPausaConFecha(c, hoyHabanaIso())) {
+      final hasta = '${c['pausada_hasta']}';
+      return 'en pausa hasta el '
+          '${fmtFecha(hasta.length >= 10 ? hasta.substring(0, 10) : hasta)}';
+    }
+    return 'activo';
+  }
+
+  /// 1.28 (M5-B3): conmutar la pausa. Activo sin pausa →
+  /// elegir el alcance (con fecha o sin fecha); en pausa
+  /// con fecha → reanudar ahora; pausado sin fecha →
+  /// reactivar. Los rechazos del servicio se avisan, como
+  /// en el resto de la pantalla (M5-A6).
+  Future<void> _conmutarPausa(Map<String, dynamic> c) async {
+    final id = '${c['id']}';
+    final activa = (c['activa'] as num?)?.toInt() == 1;
+    try {
+      if (!activa) {
+        await RecordatoriosService.instance.cambiarActiva(id, true);
+      } else if (recordatorioEnPausaConFecha(c, hoyHabanaIso())) {
+        await RecordatoriosService.instance.pausarHasta(id, null);
+        if (mounted) mostrarSnack(context, 'Recordatorio reanudado');
+      } else {
+        final hasta = await _elegirPausa();
+        if (hasta == null) return; // canceló el diálogo
+        if (hasta.isEmpty) {
+          await RecordatoriosService.instance.cambiarActiva(id, false);
+        } else {
+          await RecordatoriosService.instance.pausarHasta(id, hasta);
+          if (mounted) {
+            mostrarSnack(context,
+                'En pausa hasta el ${fmtFecha(hasta)}; se reactiva solo');
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(
+            context, e.toString().replaceFirst('Exception: ', ''),
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
+    await _cargar();
+  }
+
+  /// Diálogo de alcance de la pausa: devuelve la fecha ISO
+  /// del ÚLTIMO día de pausa, '' para la pausa sin fecha
+  /// de siempre, o null si se cancela. La aritmética de
+  /// calendario va en UTC (regla de la casa).
+  Future<String?> _elegirPausa() {
+    String sumar(int dias) {
+      final hoy = hoyHabanaIso();
+      final p = hoy.split('-');
+      final d = DateTime.utc(
+              int.parse(p[0]), int.parse(p[1]), int.parse(p[2]))
+          .add(Duration(days: dias));
+      String dos(int n) => n.toString().padLeft(2, '0');
+      return '${d.year}-${dos(d.month)}-${dos(d.day)}';
+    }
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        Widget opcion(String titulo, String detalle, String valor) {
+          return ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(titulo, style: AppTexto.cuerpo),
+            subtitle: Text(detalle, style: AppTexto.secundario),
+            onTap: () => Navigator.of(ctx).pop(valor),
+          );
+        }
+
+        return DialogoApp(
+          titulo: 'Pausar recordatorio',
+          iconoTitulo: Icons.pause_circle_outline_rounded,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // La fecha elegida es el ÚLTIMO día de
+              // pausa: la opción y el subtítulo de la
+              // lista («en pausa hasta el…») dicen lo
+              // mismo.
+              opcion('Hasta mañana',
+                  'Hoy y mañana no dispara; vuelve solo '
+                      'pasado mañana.',
+                  sumar(1)),
+              opcion('7 días',
+                  'Vuelve solo el ${fmtFecha(sumar(8))}.',
+                  sumar(7)),
+              opcion('Sin fecha',
+                  'Pausado hasta que lo reactives a mano.', ''),
+            ],
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // 1.25 T122 (F6-05/F6-18): los subtítulos enseñaban el
   // enum crudo («personalizado · solo_mio · …»).
   String _tipoLegible(String tipo) =>
@@ -386,7 +498,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                         subtitle: Text(
                             '${_tipoLegible('${c['tipo']}')} · '
                             '${_alcanceLegible('${c['alcance']}')} · '
-                            '${(c['activa'] as num?)?.toInt() == 1 ? 'activo' : 'pausado'}'
+                            '${_estadoLegible(c)}'
                             '${'${c['frecuencia'] ?? 'ninguna'}' == 'semanal' ? ' · cada semana' : '${c['frecuencia'] ?? 'ninguna'}' == 'mensual' ? ' · cada mes' : ''}',
                             style: AppTexto.secundario),
                         // 1.28 (M5-A6/R1M5-H1): sin permiso
@@ -402,30 +514,13 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                           children: [
                             IconButton(
                               icon: Icon(
-                                  (c['activa'] as num?)?.toInt() == 1
+                                  (c['activa'] as num?)?.toInt() == 1 &&
+                                          !recordatorioEnPausaConFecha(
+                                              c, hoyHabanaIso())
                                       ? Icons.pause_rounded
                                       : Icons.play_arrow_rounded,
                                   size: 20),
-                              onPressed: () async {
-                                try {
-                                  await RecordatoriosService.instance
-                                      .cambiarActiva('${c['id']}',
-                                          (c['activa'] as num?)?.toInt() != 1);
-                                } catch (e) {
-                                  if (mounted) {
-                                    mostrarSnack(
-                                        context,
-                                        e
-                                            .toString()
-                                            .replaceFirst(
-                                                'Exception: ', ''),
-                                        significado:
-                                            SignificadoChip.error);
-                                  }
-                                  return;
-                                }
-                                await _cargar();
-                              },
+                              onPressed: () => _conmutarPausa(c),
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete_outline_rounded,

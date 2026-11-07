@@ -13,6 +13,8 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'logros_premio_ui.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 
 /// 1.28 (M5-A4/C-R2M5-H2): señal entre pestañas del hub
@@ -22,6 +24,60 @@ import 'widgets.dart';
 /// el dueño saliera y volviera a entrar al hub.
 final ValueNotifier<int> premiosAvisosExternos =
     ValueNotifier<int>(0);
+
+/// 1.28 (M5-B6): reconcilia las marcas locales de la
+/// bandeja EN LOTE — una lectura de metas por prefijo y
+/// una consulta de estados por todas las ops (antes:
+/// marca y estado vale a vale, en serie). La regla vive
+/// en reconciliarMarcasVales (pura). Devuelve los ids
+/// que deben seguir ocultos; las marcas de ops
+/// rechazadas se borran aquí.
+Future<Set<int>> ocultosPorMarcasLocales(
+    BandejaPremios bandeja) async {
+  final marcas = await LocalDb.instance
+      .metasValoresConPrefijo('premio_vale_resuelto_');
+  final opUuids = <String>[
+    for (final v in bandeja.vales)
+      if (marcas['premio_vale_resuelto_${v.id}'] != null)
+        marcas['premio_vale_resuelto_${v.id}']!,
+  ];
+  final estados = await LocalDb.instance.estadosOps(opUuids);
+  final rec = reconciliarMarcasVales(
+    valeIds: bandeja.vales.map((v) => v.id),
+    marcas: marcas,
+    estados: estados,
+  );
+  for (final id in rec.marcasABorrar) {
+    await LocalDb.instance.borrarMeta('premio_vale_resuelto_$id');
+  }
+  return rec.ocultos;
+}
+
+/// 1.28 (M5-B2): cuántos vales esperan decisión, para
+/// enseñar el conteo FUERA de Premios (contador del
+/// Panel y pastilla de la pestaña del hub) sin obligar
+/// a entrar a la bandeja. null = no se pudo saber (sin
+/// conexión o respuesta degradada): quien llama NO
+/// enseña un 0 mentiroso.
+Future<int?> contarValesPorAprobar() async {
+  try {
+    final res = await Supabase.instance.client
+        .rpc('admin_premios_vales')
+        .timeout(const Duration(seconds: 12));
+    if (res is! Map) return null;
+    final json = Map<String, dynamic>.from(res);
+    if (json['ok'] == false ||
+        json['vales'] is! List ||
+        json['recientes'] is! List) {
+      return null;
+    }
+    final bandeja = parseBandejaPremios(json);
+    final ocultos = await ocultosPorMarcasLocales(bandeja);
+    return valesVisibles(bandeja.vales, ocultos).length;
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Premios (Pieza G, 1.26): bandeja «Premios por
 /// aprobar» del Panel — los vales que los clientes
@@ -133,19 +189,12 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       // op sigue en vuelo o ya se aplicó, sigue oculto;
       // si la op ya se purgó (sin estado), la marca se
       // conserva (conservador).
-      final locales = <int>{};
-      for (final v in bandeja.vales) {
-        final marca = await LocalDb.instance
-            .getMeta('premio_vale_resuelto_${v.id}');
-        if (marca == null) continue;
-        final estado = await LocalDb.instance.estadoOp(marca);
-        if (estado == 'rechazada') {
-          await LocalDb.instance
-              .borrarMeta('premio_vale_resuelto_${v.id}');
-          continue;
-        }
-        locales.add(v.id);
-      }
+      // 1.28 (M5-B6): la misma reconciliación, en LOTE
+      // (ver ocultosPorMarcasLocales): la regla no
+      // cambia — rechazada libera el vale, el resto
+      // sigue oculto — pero deja de costar una consulta
+      // por vale en cada carga.
+      final locales = await ocultosPorMarcasLocales(bandeja);
       if (!mounted || gen != _genCarga) return;
       setState(() {
         _bandeja = bandeja;
@@ -297,6 +346,9 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       // carga en vuelo: su foto vieja (sin este vale en
       // _resueltosLocales) no puede pisar el estado.
       _genCarga++;
+      // 1.28 (M5-B2): la pestaña del hub refresca su
+      // contador de pendientes al oír el aviso.
+      premiosAvisosExternos.value++;
       setState(() => _resueltosLocales = {..._resueltosLocales, v.id});
       mostrarSnack(
           context, 'Premio aplicado a ${v.nombre}: se sincroniza solo',
@@ -329,6 +381,8 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       if (res['ok'] == true) {
         mostrarSnack(context, 'Vale de ${v.nombre} rechazado',
             significado: SignificadoChip.exito);
+        // 1.28 (M5-B2): el contador del hub se refresca.
+        premiosAvisosExternos.value++;
         await _cargar();
       } else {
         mostrarSnack(
@@ -378,7 +432,9 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const EstadoCargando(texto: 'Cargando premios…');
+      // 1.28 (M5-C3): esqueleto con la forma de la
+      // bandeja (intro + tarjetas de vale).
+      return const SkeletonPremiosBandeja();
     }
     if (_falloCarga) {
       return EstadoVacio(
@@ -392,74 +448,105 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
     }
     final visibles = valesVisibles(_bandeja.vales, _resueltosLocales);
     final enCurso = _bandeja.vales.length - visibles.length;
+    final recientes = _bandeja.recientes;
+    // 1.28 (M5-B6): la lista se construye PEREZOSA
+    // (builder): con el historial creciendo, montar
+    // todas las tarjetas de golpe ya no hace falta.
+    // Tramos: intro · nota en curso · vacío o vales ·
+    // encabezado de recientes · recientes.
+    final nVales = visibles.isEmpty ? 1 : visibles.length;
+    final total = 1 +
+        (enCurso > 0 ? 1 : 0) +
+        nVales +
+        (recientes.isNotEmpty ? 1 + recientes.length : 0);
     return RefreshIndicator(
       onRefresh: _cargar,
-      child: ListView(
+      child: ListView.builder(
         padding: const EdgeInsets.all(AppEspacio.lg),
-        children: [
-          const Text(
-            'Los clientes reclaman vales en su app al cumplir '
-            'un logro. El conteo de días lo verificó el '
-            'servidor con sus sesiones subidas. Al aprobar, '
-            'el premio se aplica como pago de cortesía y el '
-            'vale queda marcado una sola vez.',
-            style: AppTexto.secundario,
-          ),
-          const SizedBox(height: 12),
-          if (enCurso > 0)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+        itemCount: total,
+        itemBuilder: (context, i) {
+          var idx = i;
+          if (idx == 0) {
+            return const Padding(
+              padding: EdgeInsets.only(bottom: 12),
               child: Text(
-                '⏳ $enCurso vale(s) aprobado(s) aquí, '
-                'terminando de sincronizarse.',
+                'Los clientes reclaman vales en su app al cumplir '
+                'un logro. El conteo de días lo verificó el '
+                'servidor con sus sesiones subidas. Al aprobar, '
+                'el premio se aplica como pago de cortesía y el '
+                'vale queda marcado una sola vez.',
                 style: AppTexto.secundario,
               ),
-            ),
-          if (visibles.isEmpty)
-            const EstadoVacio(
-              icono: Icons.emoji_events_rounded,
-              titulo: 'Sin vales pendientes.',
-              subtitulo:
-                  'Cuando un cliente cumpla un logro con premio, su vale llega aquí.',
-            )
-          else
-            for (final v in visibles) ...[
-              _tarjetaVale(v),
-              const SizedBox(height: 12),
-            ],
-          if (_bandeja.recientes.isNotEmpty) ...[
-            const EncabezadoSeccion(titulo: 'Resueltos recientes'),
-            for (final r in _bandeja.recientes)
-              // H-05 (Argón 1.27): switch por el ESTADO
-              // real del vale, no por el booleano canjeado:
-              // un vale 'anulado' (S7) se pintaba como
-              // «Rechazado». Mismo patrón de
-              // _tarjetaValeHistorial (clientes).
-              ListTile(
-                leading: Icon(
-                    switch (r.estado) {
-                      'canjeado' => Icons.emoji_events_rounded,
-                      'anulado' => Icons.undo_rounded,
-                      _ => Icons.block_rounded,
-                    },
-                    color: switch (r.estado) {
-                      'canjeado' => AppColores.naranja,
-                      'anulado' => AppColores.alerta,
-                      _ => AppColores.textoSecundario(context),
-                    }),
-                title: Text(
-                    '${r.nombre} · ${r.premioDias} días'),
-                subtitle: Text(
-                    '${switch (r.estado) {
-                      'canjeado' => 'Canjeado',
-                      'anulado' => 'Anulado',
-                      _ => 'Rechazado',
-                    }}'
-                    '${r.resueltoEn.length >= 10 ? ' el ${fmtFecha(r.resueltoEn.substring(0, 10))}' : ''}'
-                    '${r.resueltoNota.isNotEmpty ? ' · ${r.resueltoNota}' : ''}'),
-              ),
-          ],
-        ],
+            );
+          }
+          idx--;
+          if (enCurso > 0) {
+            if (idx == 0) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '⏳ $enCurso vale(s) aprobado(s) aquí, '
+                  'terminando de sincronizarse.',
+                  style: AppTexto.secundario,
+                ),
+              );
+            }
+            idx--;
+          }
+          if (idx < nVales) {
+            if (visibles.isEmpty) {
+              return const EstadoVacio(
+                icono: Icons.emoji_events_rounded,
+                titulo: 'Sin vales pendientes.',
+                subtitulo:
+                    'Cuando un cliente cumpla un logro con premio, su vale llega aquí.',
+              );
+            }
+            final v = visibles[idx];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _tarjetaVale(v),
+            );
+          }
+          idx -= nVales;
+          if (idx == 0) {
+            return const EncabezadoSeccion(
+                titulo: 'Resueltos recientes');
+          }
+          idx--;
+          final r = recientes[idx];
+          // H-05 (Argón 1.27): switch por el ESTADO
+          // real del vale, no por el booleano canjeado:
+          // un vale 'anulado' (S7) se pintaba como
+          // «Rechazado». Mismo patrón de
+          // _tarjetaValeHistorial (clientes).
+          // 1.28 (M5-C4): si la RPC trae el logro, la
+          // fila lo nombra (pendiente de servidor: hoy
+          // «recientes» aún no lo devuelve).
+          return ListTile(
+            leading: Icon(
+                switch (r.estado) {
+                  'canjeado' => Icons.emoji_events_rounded,
+                  'anulado' => Icons.undo_rounded,
+                  _ => Icons.block_rounded,
+                },
+                color: switch (r.estado) {
+                  'canjeado' => AppColores.naranja,
+                  'anulado' => AppColores.alerta,
+                  _ => AppColores.textoSecundario(context),
+                }),
+            title: Text('${r.nombre} · ${r.premioDias} días'),
+            subtitle: Text(
+                '${switch (r.estado) {
+                  'canjeado' => 'Canjeado',
+                  'anulado' => 'Anulado',
+                  _ => 'Rechazado',
+                }}'
+                '${r.logroId.isNotEmpty ? ' · ${tituloLogroPremio(r.logroId)}' : ''}'
+                '${r.resueltoEn.length >= 10 ? ' el ${fmtFecha(r.resueltoEn.substring(0, 10))}' : ''}'
+                '${r.resueltoNota.isNotEmpty ? ' · ${r.resueltoNota}' : ''}'),
+          );
+        },
       ),
     );
   }
@@ -471,9 +558,10 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.emoji_events_rounded,
-                  color: AppColores.naranja),
-              const SizedBox(width: 8),
+              // 1.28 (M5-C4): la medalla del logro del
+              // vale, no un trofeo genérico.
+              MedallaLogroPremio(logroId: v.logroId),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(v.nombre, style: AppTexto.subtitulo),
               ),

@@ -50,6 +50,13 @@ class ValeReciente {
   /// 1.27 (S4): motivo de creación (vales manuales).
   final String creadoNota;
 
+  /// 1.28 (M5-C4): el logro del vale, para nombrarlo en
+  /// «Resueltos recientemente». La RPC viva aún NO lo
+  /// devuelve en «recientes» (pendiente de servidor
+  /// documentado): el parseo lo lee si viene y la fila
+  /// lo enseña cuando exista.
+  final String logroId;
+
   const ValeReciente({
     required this.id,
     required this.clienteId,
@@ -59,6 +66,7 @@ class ValeReciente {
     required this.resueltoEn,
     required this.resueltoNota,
     this.creadoNota = '',
+    this.logroId = '',
   });
 
   bool get canjeado => estado == 'canjeado';
@@ -139,25 +147,60 @@ BandejaPremios parseBandejaPremios(Object? json) {
         resueltoEn: _texto(e['resuelto_en']),
         resueltoNota: _texto(e['resuelto_nota']),
         creadoNota: _texto(e['creado_nota']),
+        logroId: _texto(e['logro_id']),
       ));
     }
   }
   return BandejaPremios(vales: vales, recientes: recientes);
 }
 
+/// 1.28 (M5-C4): nombre humano de CADA logro del
+/// catálogo vivo de Clientes (core/logros.dart). Antes
+/// solo dos se nombraban y el resto salía crudo
+/// («dueno_tarde») en la bandeja, el historial y el
+/// sello de medallas del cliente.
+const Map<String, String> nombresLogrosPremio = {
+  'primer_paso': 'Primer paso',
+  'semana_completa': 'Semana completa',
+  'imparable': 'Imparable',
+  'leyenda': 'Leyenda Iron',
+  'constancia_real': 'Constancia real',
+  'sesiones_hito': 'Acumulando sesiones',
+  'veterano': 'Veterano',
+  'toneladas': 'Toneladas levantadas',
+  'mananero': 'Mañanero',
+  'dueno_tarde': 'Dueño de la tarde',
+  'madrugador': 'Madrugador',
+  'nocturno': 'Nocturno',
+  'primera_medicion': 'Conócete',
+  'control_total': 'Control total',
+  'primera_marca': 'Primera marca',
+  'cinco_marcas': 'Coleccionista de marcas',
+  'club100_press': 'Club 100 · Press banca',
+  'club100_sentadilla': 'Club 100 · Sentadilla',
+  'club100_muerto': 'Club 100 · Peso muerto',
+  'diez_ejercicios': 'Explorador',
+  'primera_rutina': 'Mi primera rutina',
+  'arquitecto': 'Arquitecto',
+  'alumno_gym': 'Alumno del gym',
+  'semana_planificada': 'Semana planificada',
+  'secreto_alba': 'El alba es tuya',
+  'secreto_trasnochador': 'El último en salir',
+  'reto_del_mes': 'Reto del mes',
+  'manual': 'Vale manual',
+};
+
+/// El id BASE de un logro: las claves del sello de
+/// medallas del reto mensual llevan el mes pegado
+/// («reto_del_mes@2026-11»); el nombre y el icono salen
+/// de la base.
+String logroBasePremio(String logroId) => logroId.split('@').first;
+
 /// Título humano del logro de un vale (el catálogo de
-/// Premios vive en la app de Clientes; aquí solo se
-/// nombran los que Gestión puede recibir).
-String tituloLogroPremio(String logroId) {
-  switch (logroId) {
-    case 'constancia_real':
-      return 'Constancia real';
-    case 'manual':
-      return 'Vale manual';
-    default:
-      return logroId;
-  }
-}
+/// Premios vive en la app de Clientes; aquí se nombra
+/// entero — ver [nombresLogrosPremio]).
+String tituloLogroPremio(String logroId) =>
+    nombresLogrosPremio[logroBasePremio(logroId)] ?? logroId;
 
 /// Los pendientes que la pantalla debe mostrar: fuera
 /// los ya resueltos EN ESTE teléfono (la op de canje
@@ -168,6 +211,42 @@ List<ValePendiente> valesVisibles(
     List<ValePendiente> vales, Set<int> resueltosLocales) {
   if (resueltosLocales.isEmpty) return vales;
   return vales.where((v) => !resueltosLocales.contains(v.id)).toList();
+}
+
+/// 1.28 (M5-B6): reconciliación en LOTE de las marcas
+/// locales «premio_vale_resuelto_<id>» → op_uuid contra
+/// el estado de su op. Antes la pantalla leía marca y
+/// estado vale a vale, en serie (una consulta por
+/// pieza); ahora las lecturas van en lote (LocalDb) y
+/// la regla vive aquí, pura y testeable:
+///
+/// - op RECHAZADA por el servidor → la marca se BORRA y
+///   el vale vuelve a ser accionable (reintentar).
+/// - op en vuelo, aplicada, o sin estado conocido
+///   (purgada de la cola: null) → el vale SIGUE OCULTO:
+///   lo conservador es no ofrecer aprobar dos veces.
+///
+/// [marcas] trae TODAS las metas con el prefijo (clave
+/// completa → op_uuid); solo importan las de los vales
+/// de [valeIds]. Devuelve los ids a ocultar y los ids
+/// cuya marca hay que borrar.
+({Set<int> ocultos, List<int> marcasABorrar}) reconciliarMarcasVales({
+  required Iterable<int> valeIds,
+  required Map<String, String> marcas,
+  required Map<String, String?> estados,
+}) {
+  final ocultos = <int>{};
+  final borrar = <int>[];
+  for (final id in valeIds) {
+    final opUuid = marcas['premio_vale_resuelto_$id'];
+    if (opUuid == null) continue;
+    if (estados[opUuid] == 'rechazada') {
+      borrar.add(id);
+    } else {
+      ocultos.add(id);
+    }
+  }
+  return (ocultos: ocultos, marcasABorrar: borrar);
 }
 
 /// Orden del catálogo de logros tal como vive en la app

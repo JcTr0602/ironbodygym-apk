@@ -48,6 +48,55 @@ class PerfilComunidadAdmin {
       );
 }
 
+/// 1.28 (M5-B4): los conteos de cabecera de la lista de
+/// Comunidad. «Con vitrina» = el CLIENTE la encendió
+/// (su decisión; el dueño nunca la enciende por él);
+/// «visibles» = los que hoy salen en el directorio
+/// (vitrina encendida y no ocultos por el dueño);
+/// «ocultos por ti» = los que el dueño retiró.
+({int conVitrina, int visibles, int ocultosPorTi}) conteosComunidad(
+    List<PerfilComunidadAdmin> perfiles) {
+  var conVitrina = 0;
+  var visibles = 0;
+  var ocultos = 0;
+  for (final p in perfiles) {
+    if (p.visible) conVitrina++;
+    if (p.visible && !p.ocultoAdmin) visibles++;
+    if (p.ocultoAdmin) ocultos++;
+  }
+  return (
+    conVitrina: conVitrina,
+    visibles: visibles,
+    ocultosPorTi: ocultos,
+  );
+}
+
+/// Quita acentos y pasa a minúsculas para comparar
+/// nombres sin que «José» y «jose» sean dos mundos.
+String _sinAcentos(String s) {
+  const mapa = {
+    'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+    'ü': 'u', 'ñ': 'n',
+  };
+  final b = StringBuffer();
+  for (final ch in s.toLowerCase().split('')) {
+    b.write(mapa[ch] ?? ch);
+  }
+  return b.toString();
+}
+
+/// 1.28 (M5-B4): el buscador de la lista de Comunidad —
+/// filtra por nombre, sin acentos ni mayúsculas.
+/// Consulta vacía = la lista entera.
+List<PerfilComunidadAdmin> filtrarPerfilesComunidad(
+    List<PerfilComunidadAdmin> perfiles, String consulta) {
+  final q = _sinAcentos(consulta.trim());
+  if (q.isEmpty) return perfiles;
+  return perfiles
+      .where((p) => _sinAcentos(p.nombre).contains(q))
+      .toList();
+}
+
 /// Interpreta {ok, perfiles:[...]} de
 /// admin_comunidad_perfiles. Si ok no es true o la
 /// forma no es la esperada, devuelve lista vacía.

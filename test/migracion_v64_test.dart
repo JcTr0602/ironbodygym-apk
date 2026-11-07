@@ -2,7 +2,8 @@
 /// 2026-11-05):
 ///
 /// 1. Instalación limpia: la BD nace en la versión vigente
-///    (64 cuando se escribió; 65 desde la 1.28/M1-A5) y
+///    (64 cuando se escribió; 65 desde la 1.28/M1-A5; 66
+///    desde M5-B3, por pausada_hasta) y
 ///    comprobantes_pago trae la columna proximo_intento_en.
 /// 2. Upgrade 63→64: el watermark de espejo_recordatorio_config
 ///    vuelve a 0 — la columna 'frecuencia' nunca bajó (el
@@ -52,10 +53,12 @@ void main() {
     await _init();
     final db = await _abrirDbVacia();
     // 1.28 (M1-A5): la versión vigente pasó a 65 (columna
-    // reclamada_en); lo que este test fija de v64 es que la
-    // instalación limpia trae su columna de backoff.
-    expect(LocalDb.versionActual, 65);
-    expect(await db.getVersion(), 65);
+    // reclamada_en); 1.28 (M5-B3): a 66 (pausada_hasta en
+    // recordatorio_config). Lo que este test fija de v64
+    // es que la instalación limpia trae su columna de
+    // backoff.
+    expect(LocalDb.versionActual, 66);
+    expect(await db.getVersion(), 66);
     expect(
         await _tieneColumna(db, 'comprobantes_pago', 'proximo_intento_en'),
         isTrue,
@@ -77,9 +80,10 @@ void main() {
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    // La apertura corre la cadena 63→64→65: el destino es la
-    // versión vigente y los efectos de v64 quedan aplicados.
-    expect(await db.getVersion(), 65);
+    // La apertura corre la cadena 63→64→65→66: el destino
+    // es la versión vigente y los efectos de v64 quedan
+    // aplicados.
+    expect(await db.getVersion(), 66);
     expect(
         await LocalDb.instance
             .getWatermarkTabla('espejo_recordatorio_config'),

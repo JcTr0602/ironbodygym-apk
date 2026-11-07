@@ -8,10 +8,12 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
@@ -38,6 +40,9 @@ import 'config_precios_bancarios.dart';
 import 'panel_anuncios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
+import 'panel_cache.dart';
+import 'panel_modulos.dart';
+import 'skeleton.dart';
 import 'bandeja_whatsapp.dart';
 import 'ficha.dart';
 import 'panel_buscador.dart';
@@ -53,7 +58,6 @@ import 'guia.dart';
 import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'categorias_suplemento.dart';
-import 'cuentas_por_cobrar.dart';
 import 'por_cobrar.dart';
 import 'historial_ventas.dart';
 import 'auditoria_silenciosa.dart';
@@ -173,6 +177,30 @@ class _AdminScreenState extends State<AdminScreen> {
   int _cuentasCasa = 0;
   final PlusReportesService _plusSvc = PlusReportesService();
 
+  // 1.28 (M5-B2): vales de Premios por aprobar, contados
+  // sin entrar a Premios (tarjeta del módulo y fila de
+  // atención). _valesCargados distingue «sabemos que son
+  // 0» de «aún no se pudo saber»; _valesError marca el
+  // último intento fallido (con _valesCargados en false,
+  // la atención enseña la fila «sin cargar»).
+  int _valesPorAprobar = 0;
+  bool _valesCargados = false;
+  bool _valesError = false;
+  int _valesGen = 0;
+
+  // 1.28 (M5-B1): la foto de cifras de la visita anterior
+  // pinta AL INSTANTE al abrir (con su hora) mientras la
+  // carga real refresca en segundo plano. _horaCache no
+  // es null solo mientras lo pintado ES la foto guardada
+  // (la carga fresca la limpia); _cargaFrescaLista evita
+  // que una foto que llega tarde pise cifras ya frescas.
+  DateTime? _horaCache;
+  bool _cargaFrescaLista = false;
+
+  // 1.28 (M5-C1): los badges de la última visita: un
+  // contador que SUBIÓ desde entonces late al pintar.
+  Map<String, int> _badgesPrevios = {};
+
   List<TipoPago> _tipos = [];
   // v1.3.1: pago por cliente a entrenadores (movido desde Ajustes, solo dueño).
   int _pagoEntrenador = 150;
@@ -185,6 +213,10 @@ class _AdminScreenState extends State<AdminScreen> {
   void initState() {
     super.initState();
     _cargar();
+    // 1.28 (M5-B1): la foto guardada se restaura SIN
+    // esperar a la carga (que corre en paralelo); si la
+    // carga fresca llega antes, la foto ya no se aplica.
+    unawaited(_restaurarCachePanel());
   }
 
   @override
@@ -405,12 +437,21 @@ class _AdminScreenState extends State<AdminScreen> {
         // la configuración (ver la lectura aislada arriba).
         if (ajOk != null) _aplicarConfig(aj, tipos, pagoEnt);
         _cargando = false;
+        // 1.28 (M5-B1): lo pintado ya es fresco: la foto
+        // guardada deja de mandar (su sello se apaga).
+        _cargaFrescaLista = true;
+        _horaCache = null;
       });
     }
     // La fila de solicitudes se rellena en segundo plano, sin
     // bloquear el pintado que acaba de ocurrir.
     unawaited(_cargarSolicitudesInvitados());
     unawaited(_cargarReportesPlus());
+    // 1.28 (M5-B1/B2): la foto fresca se guarda para la
+    // próxima apertura y los vales se cuentan en segundo
+    // plano (su RPC no retrasa el pintado).
+    unawaited(_guardarCachePanel());
+    unawaited(_cargarValesPremios());
   }
 
 
@@ -568,7 +609,195 @@ class _AdminScreenState extends State<AdminScreen> {
     });
     unawaited(_cargarSolicitudesInvitados());
     unawaited(_cargarReportesPlus());
+    // 1.28 (M5-B1/B2): la foto se refresca con los
+    // contadores nuevos y los vales se cuentan (el hub
+    // de Premios pudo resolver alguno por el camino).
+    unawaited(_guardarCachePanel());
+    unawaited(_cargarValesPremios());
   }
+
+  /// 1.28 (M5-B2): cuenta los vales por aprobar en
+  /// segundo plano. Un fallo NO pone el contador a 0:
+  /// conserva el último conteo bueno y, si nunca se
+  /// supo, la atención enseña la fila «sin cargar».
+  Future<void> _cargarValesPremios() async {
+    final gen = ++_valesGen;
+    final n = await contarValesPorAprobar();
+    if (!mounted || gen != _valesGen) return;
+    setState(() {
+      if (n != null) {
+        _valesPorAprobar = n;
+        _valesCargados = true;
+        _valesError = false;
+      } else {
+        _valesError = true;
+      }
+    });
+  }
+
+  /// 1.28 (M5-B1): el mapa de cifras que se guarda como
+  /// foto de la próxima apertura (solo valores JSON
+  /// seguros: escalares y listas de mapas del espejo).
+  Map<String, dynamic> _cifrasParaCache() => {
+        'ingresos': _ingresos,
+        'pagosMes': _pagosMes,
+        'pagosMesAnt': _pagosMesAnt,
+        'ingresosMesAnt': _ingresosMesAnt,
+        'clientesActivos': _clientesActivos,
+        'caja': _caja,
+        'gastosHoy': _gastosHoy,
+        'gastos': _gastos,
+        'netoNominaMes': _netoNominaMes,
+        'preciosSinFijar': _preciosSinFijar,
+        'incidenciasPend': _incidenciasPend,
+        'cuentasCasa': _cuentasCasa,
+        'pendientesSubir': _pendientesSubir,
+        'pend': _pend,
+        'sinReporteHoy': _sinReporteHoy,
+        'sinReporteAyer': _sinReporteAyer,
+        'vencenHoyNombres': _vencenHoyNombres,
+        'reservasSolicitadas': _reservasSolicitadas,
+        'nombreSupl': _nombreSupl,
+        'stockCritico': _stockCritico,
+        'serie7Panel': _serie7Panel,
+        'syncError': _syncDet.error,
+        'valesPorAprobar': _valesPorAprobar,
+      };
+
+  /// Guarda la foto de cifras y los badges vistos, por
+  /// usuario. Un fallo aquí es invisible a propósito: la
+  /// caché es una cortesía de apertura, no un dato.
+  Future<void> _guardarCachePanel() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final tid = AuthService().telegramId;
+      await prefs.setString(
+        claveCachePanel(tid),
+        FotoPanelCache(ahoraHabana(), _cifrasParaCache())
+            .codificar(),
+      );
+      final badges = <String, String>{
+        for (final d in _datosModulos())
+          if (d.badge != null) d.titulo: '${d.badge}',
+      };
+      await prefs.setString(
+          claveBadgesPanel(tid), jsonEncode(badges));
+    } catch (_) {}
+  }
+
+  /// 1.28 (M5-B1): restaura la foto guardada y los badges
+  /// vistos. La foto solo se aplica si es de HOY (hora
+  /// Habana): las cifras «de hoy» y «del mes» de ayer
+  /// serían una mentira con sello fresco. Y solo si la
+  /// carga real aún no pintó lo fresco.
+  Future<void> _restaurarCachePanel() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final tid = AuthService().telegramId;
+      final badgesTxt = prefs.getString(claveBadgesPanel(tid));
+      if (badgesTxt != null) {
+        final j = jsonDecode(badgesTxt);
+        if (j is Map) {
+          _badgesPrevios = {
+            for (final e in j.entries)
+              '${e.key}': int.tryParse('${e.value}') ?? 0,
+          };
+        }
+      }
+      final foto = FotoPanelCache.decodificar(
+          prefs.getString(claveCachePanel(tid)));
+      if (foto == null || !mounted || _cargaFrescaLista) return;
+      final hoy = ahoraHabana();
+      final h = foto.hora;
+      if (h.year != hoy.year ||
+          h.month != hoy.month ||
+          h.day != hoy.day) {
+        return;
+      }
+      _aplicarCifrasCache(foto.cifras);
+      if (!mounted) return;
+      setState(() {
+        _horaCache = foto.hora;
+        _cargando = false;
+      });
+    } catch (_) {}
+  }
+
+  /// Aplica una foto de cifras a los campos (lecturas
+  /// tolerantes: lo degradado degrada a su valor en
+  /// curso, nunca revienta). Sin setState propio: la
+  /// llama la restauración dentro del suyo.
+  void _aplicarCifrasCache(Map<String, dynamic> c) {
+    _ingresos = cifraDoble(c, 'ingresos', _ingresos);
+    _pagosMes = cifraEntera(c, 'pagosMes', _pagosMes);
+    _pagosMesAnt = c['pagosMesAnt'] == null
+        ? _pagosMesAnt
+        : cifraEntera(c, 'pagosMesAnt');
+    _ingresosMesAnt = c['ingresosMesAnt'] == null
+        ? _ingresosMesAnt
+        : cifraDoble(c, 'ingresosMesAnt');
+    _clientesActivos =
+        cifraEntera(c, 'clientesActivos', _clientesActivos);
+    final caja = cifraMapa(c, 'caja');
+    if (caja.isNotEmpty) {
+      _caja = {
+        'efectivo': cifraDoble(caja, 'efectivo'),
+        'transferencia': cifraDoble(caja, 'transferencia'),
+      };
+    }
+    _gastosHoy = cifraDoble(c, 'gastosHoy', _gastosHoy);
+    _gastos = cifraLista(c, 'gastos');
+    _netoNominaMes = c['netoNominaMes'] == null
+        ? _netoNominaMes
+        : cifraDoble(c, 'netoNominaMes');
+    _preciosSinFijar =
+        cifraEntera(c, 'preciosSinFijar', _preciosSinFijar);
+    _incidenciasPend =
+        cifraEntera(c, 'incidenciasPend', _incidenciasPend);
+    _cuentasCasa = cifraEntera(c, 'cuentasCasa', _cuentasCasa);
+    _pendientesSubir =
+        cifraEntera(c, 'pendientesSubir', _pendientesSubir);
+    _pend = cifraLista(c, 'pend');
+    _sinReporteHoy = cifraListaTextos(c, 'sinReporteHoy');
+    _sinReporteAyer = cifraListaTextos(c, 'sinReporteAyer');
+    _vencenHoyNombres = cifraListaTextos(c, 'vencenHoyNombres');
+    _reservasSolicitadas = cifraLista(c, 'reservasSolicitadas');
+    _nombreSupl = {
+      for (final e in cifraMapa(c, 'nombreSupl').entries)
+        e.key: '${e.value}',
+    };
+    _stockCritico = cifraLista(c, 'stockCritico');
+    _serie7Panel = cifraLista(c, 'serie7Panel');
+    final err = c['syncError'];
+    _syncDet = SyncDetalle(error: err is String ? err : null);
+    if (c['valesPorAprobar'] != null) {
+      _valesPorAprobar = cifraEntera(c, 'valesPorAprobar');
+      _valesCargados = true;
+    }
+  }
+
+  /// 1.28 (M5-C1): los descriptores de los 6 módulos con
+  /// el estado vivo de la foto actual (función pura en
+  /// panel_modulos.dart; aquí solo se le pasa la foto).
+  List<DatoModuloPanel> _datosModulos() => modulosPanel(
+        pendCaja:
+            _pend.where((e) => (e['total'] as double? ?? 0) > 0).length,
+        pendCajaTotal: _pend.fold<double>(
+            0, (s, e) => s + (e['total'] as double? ?? 0)),
+        cajaHoyTotal:
+            (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0),
+        solicitudes: _swrSolicitudes.datos.length,
+        reportes: _swrReportes.datos.length,
+        valesPorAprobar: _valesPorAprobar,
+        clientesActivos: _clientesActivos,
+        sinReporteHoy: _sinReporteHoy.length,
+        sinReporteAyer: _sinReporteAyer.length,
+        reservas: _reservasSolicitadas.length,
+        stockCritico: _stockCritico.length,
+        preciosSinFijar: _preciosSinFijar,
+        incidencias: _incidenciasPend,
+        pendientesSubir: _pendientesSubir,
+      );
 
   void _ir(Widget w) {
     Navigator.of(context)
@@ -679,6 +908,10 @@ class _AdminScreenState extends State<AdminScreen> {
         _irLigera(const SaludSyncScreen());
       case DestinoAtencion.suplementos:
         _ir(const SuplementosScreen());
+      case DestinoAtencion.premios:
+        _ir(const PremiosHubScreen());
+      case DestinoAtencion.reintentarVales:
+        unawaited(_cargarValesPremios());
     }
   }
 
@@ -1659,7 +1892,11 @@ class _AdminScreenState extends State<AdminScreen> {
           const SyncBanner(),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando administración…')
+                // 1.28 (M5-C3): esqueleto con la forma
+                // real del Panel (con foto guardada, B1,
+                // ni siquiera se llega aquí: se pinta la
+                // foto al instante).
+                ? const SkeletonPanel()
                 : RefreshIndicator(
                     // 1.24 Bloque 5 (B-01): el gesto de actualizar
                     // del Panel ahora sincroniza DE VERDAD antes
@@ -1830,6 +2067,10 @@ class _AdminScreenState extends State<AdminScreen> {
         syncError: _syncDet.error,
         stockCritico: _stockCritico,
         vencenHoyNombres: _vencenHoyNombres,
+        // 1.28 (M5-B2): vales por aprobar (o su «sin
+        // cargar» si nunca se supo y el intento falló).
+        valesPorAprobar: _valesPorAprobar,
+        valesSinCargar: _valesError && !_valesCargados,
       )))
         _PendientePanel(
           icono: d.icono,
@@ -2146,6 +2387,12 @@ class _AdminScreenState extends State<AdminScreen> {
   /// (los datos son del espejo local; el panel de diseño pidió que se
   /// vea cuándo se actualizaron).
   String? _textoActualizado() {
+    // 1.28 (M5-B1): mientras lo pintado es la foto
+    // guardada, el sello lo dice con su hora: nadie cree
+    // fresco lo que aún se está actualizando.
+    if (_horaCache != null) {
+      return 'Datos de ${_fechaHora(_horaCache!)} · actualizando…';
+    }
     final u = _syncDet.ultimaPull ?? _syncDet.ultimaPush;
     if (u == null) return null;
     return 'Actualizado ${_fechaHora(u)}';
@@ -2385,74 +2632,25 @@ class _AdminScreenState extends State<AdminScreen> {
   Widget _tarjetasModulos() {
     // 1.25 T121 (F5-10): UNA sola semántica para los badges —
     // número de DECISIONES pendientes de ese dominio (sin
-    // pendientes, sin badge). Antes solo Clientes (solicitudes
-    // de invitados) y Suplementos (reservas) tenían badge, con
-    // significados distintos, y la ausencia en Caja o Control
-    // se leía como «todo bien» aunque hubiera efectivo por
-    // liquidar o incidencias de sync esperando.
-    final pendCaja = _pend
-        .where((e) => (e['total'] as double? ?? 0) > 0)
-        .length;
-    final pendClientes = _swrSolicitudes.datos.length +
-        _swrReportes.datos.length;
-    final modulos =
-        <({IconData icono, Color tinte, String titulo, String resumen, int? badge, List<Widget> Function() tarjetas})>[
-      (
-        icono: Icons.attach_money_rounded,
-        tinte: AppColores.exito,
-        titulo: 'Caja, Cobros y Nómina',
-        resumen: 'Arqueo · Cierre · Nómina · Adelantos',
-        badge: pendCaja == 0 ? null : pendCaja,
-        tarjetas: _tarjetasModuloCaja,
-      ),
-      (
-        icono: Icons.people_rounded,
-        tinte: AppColores.info,
-        titulo: 'Clientes, Invitados y Comunicación',
-        resumen: 'Clientes · Invitados · Plantillas · Avisos',
-        badge: pendClientes == 0 ? null : pendClientes,
-        tarjetas: _tarjetasModuloClientes,
-      ),
-      (
-        icono: Icons.groups_rounded,
-        tinte: AppColores.naranja,
-        titulo: 'Equipo, Turnos y Permisos',
-        resumen: 'Entrenadores · Turnos · Permisos',
-        // 1.25 Panel 10: los reportes de turno que faltan
-        // (hoy + ayer) son las decisiones pendientes de
-        // este módulo — el mismo conteo de la bandeja.
-        badge: (_sinReporteHoy.length + _sinReporteAyer.length) == 0
-            ? null
-            : _sinReporteHoy.length + _sinReporteAyer.length,
-        tarjetas: _tarjetasModuloEquipo,
-      ),
-      (
-        icono: Icons.inventory_2_rounded,
-        tinte: const Color(0xFFA855F7),
-        titulo: 'Suplementos, Dosis y App Plus',
-        resumen: 'Suplementos · Botes y lotes · Plus · GymPedia',
-        badge:
-            _reservasSolicitadas.isEmpty ? null : _reservasSolicitadas.length,
-        tarjetas: _tarjetasModuloSuplementos,
-      ),
-      (
-        icono: Icons.price_change_rounded,
-        tinte: const Color(0xFF9AA3B2),
-        titulo: 'Precios, Tarifas y Configuración',
-        resumen: 'Precios · Tarifas · Ajustes · Pago base',
-        // 1.25 Panel 10: precios sin fijar = decisión
-        // pendiente del dueño en este módulo.
-        badge: _preciosSinFijar == 0 ? null : _preciosSinFijar,
-        tarjetas: _tarjetasModuloPrecios,
-      ),
-      (
-        icono: Icons.bar_chart_rounded,
-        tinte: const Color(0xFF14B8A6),
-        titulo: 'Control, Auditoría y Sistema',
-        resumen: 'Estadísticas · Auditoría · Sync · Sistema',
-        badge: _incidenciasPend == 0 ? null : _incidenciasPend,
-        tarjetas: _tarjetasModuloControl,
-      ),
+    // pendientes, sin badge).
+    // 1.28 (M5-C1 ★ ÍTEM FIJO): los títulos pasan a los
+    // NOMBRES CORTOS («Caja y dinero», «Clientes e
+    // invitados», «Equipo y turnos», «Suplementos y
+    // contenido», «Configuración y datos», «Control y
+    // sistema») y el resumen estático cede el sitio a la
+    // LÍNEA DE ESTADO VIVA de cada módulo. Los
+    // descriptores (icono, color, título, estado, badge)
+    // salen de la función pura modulosPanel
+    // (panel_modulos.dart); las TARJETAS de cada módulo
+    // no se mueven: se emparejan por índice, como antes.
+    final datos = _datosModulos();
+    final tarjetasPorModulo = <List<Widget> Function()>[
+      _tarjetasModuloCaja,
+      _tarjetasModuloClientes,
+      _tarjetasModuloEquipo,
+      _tarjetasModuloSuplementos,
+      _tarjetasModuloPrecios,
+      _tarjetasModuloControl,
     ];
     return Container(
       decoration: BoxDecoration(
@@ -2462,59 +2660,18 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       child: Column(
         children: [
-          for (var i = 0; i < modulos.length; i++) ...[
+          for (var i = 0; i < datos.length; i++) ...[
             if (i > 0)
               Divider(height: 1, color: AppColores.borde(context)),
-            InkWell(
+            FilaModuloPanel(
+              dato: datos[i],
+              // Pulso sutil si el contador SUBIÓ desde
+              // la última visita (M5-C1).
+              pulso: datos[i].badge != null &&
+                  datos[i].badge! > (_badgesPrevios[datos[i].titulo] ?? 0),
               onTap: () => _ir(_ModuloAdminScreen(
-                  titulo: modulos[i].titulo,
-                  tarjetas: modulos[i].tarjetas())),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: AppEspacio.md),
-                child: Row(
-                  children: [
-                    IconoModuloBadge(
-                      icono: modulos[i].icono,
-                      tinte: modulos[i].tinte,
-                      iconoOscuro: modulos[i].tinte,
-                      iconoClaro: modulos[i].tinte,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(modulos[i].titulo,
-                              style: AppTexto.subtitulo),
-                          const SizedBox(height: 2),
-                          Text(
-                            modulos[i].resumen,
-                            style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (modulos[i].badge != null) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColores.error,
-                          borderRadius: BorderRadius.circular(AppRadio.circular),
-                        ),
-                        child: Text('${modulos[i].badge}',
-                            style: AppTexto.minuscula.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Icon(Icons.chevron_right_rounded,
-                        color: AppColores.textoSecundario(context)),
-                  ],
-                ),
-              ),
+                  titulo: datos[i].titulo,
+                  tarjetas: tarjetasPorModulo[i]())),
             ),
           ],
         ],
@@ -2706,7 +2863,14 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.emoji_events_rounded,
         'Premios',
-        'Vales por aprobar y catálogo de premios por logro',
+        // 1.28 (M5-B2): el conteo de vales se ve en la
+        // propia tarjeta, sin entrar al hub.
+        _valesPorAprobar > 0
+            ? (_valesPorAprobar == 1
+                ? '1 vale por aprobar · catálogo de premios'
+                : '$_valesPorAprobar vales por aprobar · '
+                    'catálogo de premios')
+            : 'Vales por aprobar y catálogo de premios por logro',
         () => _ir(const PremiosHubScreen()),
       ),
       // 1.27 (Comunidad MVP, Pieza G): los perfiles

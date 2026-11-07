@@ -102,6 +102,22 @@ void _sincronizarAvisos() {
   );
 }
 
+/// 1.28 (M5-B3): ¿la config está en PAUSA CON FECHA hoy?
+/// La pausa con fecha deja `activa` en 1 y guarda el
+/// ÚLTIMO día de pausa (inclusive) en `pausada_hasta`
+/// ('YYYY-MM-DD'): ese día el recordatorio no dispara;
+/// al día siguiente se reactiva solo, sin tocar nada.
+/// Una pausa sin fecha es la de siempre (`activa` = 0) y
+/// no pasa por aquí. PURO, testeable.
+bool recordatorioEnPausaConFecha(
+    Map<String, dynamic> cfg, String hoyIso) {
+  if ((cfg['activa'] as num?)?.toInt() != 1) return false;
+  final hasta = '${cfg['pausada_hasta'] ?? ''}';
+  if (hasta.length < 10 || hoyIso.length < 10) return false;
+  return hoyIso.substring(0, 10).compareTo(hasta.substring(0, 10)) <=
+      0;
+}
+
 /// F4 (1.20): ¿un recordatorio personalizado toca hoy?
 /// Sin frecuencia (o 'ninguna'): solo su fecha fija. Con
 /// 'semanal': el mismo día de semana de la fecha fija,
@@ -165,6 +181,7 @@ class RecordatoriosService {
       'fecha_fija': fechaFija,
       'frecuencia': frecuencia,
       'activa': 1,
+      'pausada_hasta': null,
       'creado_por': _yo,
       'disparado_en_fecha_habana': null,
       'creada_ts': ahora,
@@ -221,8 +238,57 @@ class RecordatoriosService {
       final fila = {
         ...filas.first,
         'activa': activa ? 1 : 0,
+        // 1.28 (M5-B3): conmutar a mano limpia cualquier
+        // pausa con fecha: pausar sin fecha y reactivar
+        // son decisiones explícitas, no restos de otra.
+        'pausada_hasta': null,
         // Argón #10-6: sin sellar actualizada_ts, un pull con la fila
         // vieja podía pisar el cambio de estado (Last-Write-Wins).
+        'actualizada_ts': isoHabana(ahoraHabana()),
+      };
+      await LocalDb.instance.guardarRecordatorio(fila, txn: txn);
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: kTipoOpUpsertRecordatorio,
+        payload: {'recordatorio': fila},
+        txn: txn,
+      );
+    });
+    _empujarRecordatorios();
+    _sincronizarAvisos();
+  }
+
+  /// 1.28 (M5-B3): pausa CON FECHA. [hastaIso] es el ÚLTIMO
+  /// día de pausa ('YYYY-MM-DD', inclusive): la config
+  /// sigue `activa` pero no dispara hasta que la fecha
+  /// pasa, y entonces se reactiva sola por lógica de
+  /// lectura (ver [recordatorioEnPausaConFecha]).
+  /// [hastaIso] null = quitar la pausa con fecha
+  /// (reanudar ahora). Mismos guardas de rol que
+  /// [cambiarActiva] y mismo patrón de transacción.
+  Future<void> pausarHasta(String id, String? hastaIso) async {
+    final configs = await LocalDb.instance.listarRecordatorios();
+    final cfg = configs.firstWhere((c) => c['id'] == id, orElse: () => {});
+    if (cfg.isEmpty) throw Exception('Recordatorio no encontrado');
+    if ('${cfg['alcance']}' != 'solo_mio' && !_soyDueno) {
+      throw Exception('Solo el dueño puede pausar recordatorios de otros');
+    }
+    if ('${cfg['alcance']}' == 'solo_mio' &&
+        cfg['creado_por'] != _yo &&
+        !_soyDueno) {
+      throw Exception('Ese recordatorio no es tuyo');
+    }
+    final d = await LocalDb.instance.db;
+    await d.transaction((txn) async {
+      final filas = await txn.query('recordatorio_config',
+          where: 'id = ?', whereArgs: [id]);
+      if (filas.isEmpty) {
+        throw Exception('Recordatorio no encontrado');
+      }
+      final fila = {
+        ...filas.first,
+        'activa': 1,
+        'pausada_hasta': hastaIso,
         'actualizada_ts': isoHabana(ahoraHabana()),
       };
       await LocalDb.instance.guardarRecordatorio(fila, txn: txn);
@@ -297,6 +363,9 @@ class RecordatoriosService {
     final out = <RecordatorioDebido>[];
     for (final cfg in configs) {
       if ((cfg['activa'] as num?)?.toInt() != 1) continue;
+      // 1.28 (M5-B3): en pausa CON FECHA hoy no dispara
+      // (se reactiva sola cuando la fecha pasa).
+      if (recordatorioEnPausaConFecha(cfg, hoy)) continue;
       final alcance = '${cfg['alcance'] ?? 'solo_mio'}';
       // Solo para mí: solo en el teléfono del creador.
       if (alcance == 'solo_mio' && cfg['creado_por'] != _yo) continue;

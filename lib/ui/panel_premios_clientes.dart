@@ -11,7 +11,9 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'logros_premio_ui.dart';
 import 'panel_premios.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 
 /// Premios (1.27, S3/G3): pestaña «Clientes» del hub —
@@ -69,6 +71,10 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   bool _falloDetalle = false;
   String? _pagadoHasta;
   Set<int> _anulacionesEnCurso = {};
+
+  /// 1.28 (M5-B6): cuántos vales del historial se
+  /// enseñan (el resto llega con «Ver más»).
+  int _historialLimite = 15;
 
   // H-01 (Argón 1.27): candado anti doble-toque de las
   // acciones del detalle (patrón _resolviendo de la
@@ -318,6 +324,9 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
       _detalle = null;
       _pagadoHasta = null;
       _anulacionesEnCurso = {};
+      // 1.28 (M5-B6): el historial vuelve a su primera
+      // página al abrir otro cliente.
+      _historialLimite = 15;
     });
     try {
       final json =
@@ -571,7 +580,9 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         SyncBanner(alTerminarSync: _recargarDetalle),
         Expanded(
           child: _cargandoDetalle
-              ? const EstadoCargando(texto: 'Cargando detalle…')
+              // 1.28 (M5-C3): esqueleto con la forma del
+              // detalle (cabecera, barra, tarjetas).
+              ? const SkeletonPremiosDetalle()
               : _falloDetalle
                   ? EstadoVacio(
                       icono: Icons.cloud_off_rounded,
@@ -664,11 +675,26 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         if (d.vales.isEmpty)
           const Text('Sin vales todavía.',
               style: AppTexto.secundario)
-        else
-          for (final v in d.vales) ...[
+        else ...[
+          // 1.28 (M5-B6): el historial crece sin freno;
+          // se enseñan los primeros y el resto llega con
+          // «Ver más», sin cargar la pantalla entera.
+          for (final v in d.vales.take(_historialLimite)) ...[
             _tarjetaValeHistorial(v),
             const SizedBox(height: 8),
           ],
+          if (d.vales.length > _historialLimite)
+            Center(
+              child: TextButton.icon(
+                onPressed: () =>
+                    setState(() => _historialLimite += 15),
+                icon: const Icon(Icons.expand_more_rounded,
+                    size: 18),
+                label: Text(
+                    'Ver más (${d.vales.length - _historialLimite} restantes)'),
+              ),
+            ),
+        ],
         const SizedBox(height: 8),
         const EncabezadoSeccion(titulo: 'Medallas (sello)'),
         if (d.sello.isEmpty)
@@ -683,9 +709,12 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
             runSpacing: 8,
             children: [
               for (final e in d.sello.entries)
+                // 1.28 (M5-C4): cada medalla con SU icono
+                // y su nombre (las claves del reto llevan
+                // «@<mes>»: tituloLogroPremio ya nombra
+                // por la base).
                 Chip(
-                  avatar: const Icon(
-                      Icons.emoji_events_rounded, size: 16),
+                  avatar: Icon(iconoLogroPremio(e.key), size: 16),
                   label: Text(
                       '${tituloLogroPremio(e.key)} · ${fmtFecha(e.value.length >= 10 ? e.value.substring(0, 10) : e.value)}'),
                 ),
@@ -727,6 +756,10 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         children: [
           Row(
             children: [
+              // 1.28 (M5-C4): la medalla del logro junto
+              // al icono de su estado.
+              MedallaLogroPremio(logroId: v.logroId, tamano: 30),
+              const SizedBox(width: 8),
               Icon(icono, size: 18, color: color),
               const SizedBox(width: 8),
               Expanded(

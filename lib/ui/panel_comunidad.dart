@@ -38,12 +38,24 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
   bool _resolviendo = false;
   List<PerfilComunidadAdmin> _perfiles = const [];
 
+  // 1.28 (M5-B4): el buscador de la lista (con dispose,
+  // regla de la casa para controladores en diálogos y
+  // pantallas).
+  final _busquedaCtrl = TextEditingController();
+  String _consulta = '';
+
   @override
   void initState() {
     super.initState();
     // Sin sesión de dueño ni siquiera se dispara la
     // RPC de administración (ver la guarda en build).
     if (AuthService().isOwner) _cargar();
+  }
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
   }
 
   Future<Map<String, dynamic>> _cargarReal() async {
@@ -158,27 +170,79 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                   ? _mensaje('Ningún cliente ha creado su '
                       'vitrina todavía. Cuando alguien la '
                       'encienda en su app, aparecerá aquí.')
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                      itemCount: _perfiles.length + 1,
-                      itemBuilder: (context, i) {
-                        if (i == 0) {
-                          return const Padding(
-                            padding: EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              'El cliente manda sobre sus datos: '
-                              'desde aquí solo puedes ocultar un '
-                              'perfil del directorio (y deshacerlo). '
-                              'Lo que cada cliente apagó no se ve '
-                              'ni aquí.',
-                              style: TextStyle(
-                                  fontSize: 13, height: 1.4),
-                            ),
-                          );
-                        }
-                        return _tarjeta(_perfiles[i - 1]);
-                      },
-                    ),
+                  : _listaConBuscador(),
+    );
+  }
+
+  /// 1.28 (M5-B4): cabecera con los CONTEOS de la
+  /// comunidad y el buscador por nombre; debajo, la
+  /// lista filtrada. Los conteos son de la lista
+  /// COMPLETA (no del filtro): dicen cómo está el
+  /// directorio, no la búsqueda.
+  Widget _listaConBuscador() {
+    final conteos = conteosComunidad(_perfiles);
+    final visibles =
+        filtrarPerfilesComunidad(_perfiles, _consulta);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'El cliente manda sobre sus datos: '
+                'desde aquí solo puedes ocultar un '
+                'perfil del directorio (y deshacerlo). '
+                'Lo que cada cliente apagó no se ve '
+                'ni aquí.',
+                style: TextStyle(fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${conteos.conVitrina} con vitrina · '
+                '${conteos.visibles} visibles en el directorio · '
+                '${conteos.ocultosPorTi} ocultos por ti',
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _busquedaCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por nombre…',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _consulta.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear_rounded),
+                          onPressed: () {
+                            _busquedaCtrl.clear();
+                            setState(() => _consulta = '');
+                          },
+                        ),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: (v) => setState(() => _consulta = v),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        ),
+        Expanded(
+          child: visibles.isEmpty
+              ? _mensaje('Ningún perfil coincide con '
+                  '«$_consulta».')
+              : ListView.builder(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  itemCount: visibles.length,
+                  itemBuilder: (context, i) =>
+                      _tarjeta(visibles[i]),
+                ),
+        ),
+      ],
     );
   }
 

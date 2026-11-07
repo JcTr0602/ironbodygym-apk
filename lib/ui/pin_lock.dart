@@ -4,6 +4,8 @@
 /// en "Bloqueo automático" y el usuario tiene PIN configurado.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
@@ -12,6 +14,21 @@ import '../perfil.dart';
 import 'cierre_sesion.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+
+/// 1.28 (M5-C6): la cuenta atrás del bloqueo en texto
+/// «M:SS» (o «H:MM:SS» si pasa de la hora). Redondea
+/// HACIA ARRIBA: con 400 ms restantes enseña «0:01»,
+/// nunca un «0:00» que prometa un desbloqueo que aún
+/// no llegó. PURO, testeable.
+String formatoCuentaAtrasPin(Duration d) {
+  if (d <= Duration.zero) return '0:00';
+  final totalSeg = (d.inMilliseconds / 1000).ceil();
+  final h = totalSeg ~/ 3600;
+  final m = (totalSeg % 3600) ~/ 60;
+  final s = totalSeg % 60;
+  String dos(int n) => n.toString().padLeft(2, '0');
+  return h > 0 ? '$h:${dos(m)}:${dos(s)}' : '$m:${dos(s)}';
+}
 
 class PinLockScreen extends StatefulWidget {
   const PinLockScreen({super.key});
@@ -25,6 +42,15 @@ class _PinLockScreenState extends State<PinLockScreen> {
   String? _error;
   bool _verificando = false;
 
+  // 1.28 (M5-C6): la cuenta atrás VIVA del bloqueo: el
+  // tiempo restante se relee del servicio cada segundo
+  // (su ancla monotónica manda) y al llegar a cero la
+  // pantalla se desbloquea sola.
+  Duration _restante = Duration.zero;
+  Timer? _temporizador;
+
+  bool get _bloqueado => _restante > Duration.zero;
+
   @override
   void initState() {
     super.initState();
@@ -35,20 +61,41 @@ class _PinLockScreenState extends State<PinLockScreen> {
     _avisarSiBloqueado();
   }
 
-  /// Muestra el aviso honesto de espera si hay un
-  /// bloqueo por intentos vigente; devuelve si lo había.
+  @override
+  void dispose() {
+    _temporizador?.cancel();
+    super.dispose();
+  }
+
+  void _arrancarTemporizador() {
+    _temporizador?.cancel();
+    _temporizador =
+        Timer.periodic(const Duration(seconds: 1), (_) async {
+      final r = await PerfilService.instance.pinBloqueoRestante();
+      if (!mounted) return;
+      setState(() => _restante = r);
+      if (r <= Duration.zero) {
+        _temporizador?.cancel();
+        setState(() => _error = null);
+      }
+    });
+  }
+
+  /// Muestra la cuenta atrás honesta si hay un bloqueo
+  /// por intentos vigente; devuelve si lo había.
   Future<bool> _avisarSiBloqueado() async {
-    final min = await PerfilService.instance
-        .pinBloqueoMinutosRestantes();
-    if (!mounted || min <= 0) return false;
-    setState(() => _error =
-        'Demasiados intentos. Espera $min min antes de '
-        'intentarlo de nuevo.');
+    final r = await PerfilService.instance.pinBloqueoRestante();
+    if (!mounted || r <= Duration.zero) return false;
+    setState(() {
+      _restante = r;
+      _error = null;
+    });
+    _arrancarTemporizador();
     return true;
   }
 
   Future<void> _tecla(String d) async {
-    if (_verificando || _pin.length >= 4) return;
+    if (_verificando || _bloqueado || _pin.length >= 4) return;
     setState(() {
       _pin += d;
       _error = null;
@@ -129,13 +176,42 @@ class _PinLockScreenState extends State<PinLockScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.lock_outline_rounded,
-                  size: 64, color: AppColores.textoSecundario(context)),
+              // 1.28 (M5-C6): el candado con la identidad
+              // del gym (gradiente de la casa), no un
+              // icono gris suelto.
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppColores.naranja,
+                      AppColores.naranjaOscuro,
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                          AppColores.naranja.withValues(alpha: 0.35),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.lock_rounded,
+                    size: 40, color: Colors.white),
+              ),
               const SizedBox(height: 16),
               const Text('App bloqueada',
                   style: AppTexto.displayPequeno),
               const SizedBox(height: 8),
-              Text('Escribe tu PIN para continuar',
+              Text(
+                  _bloqueado
+                      ? 'Demasiados intentos fallidos'
+                      : 'Escribe tu PIN para continuar',
                   style: AppTexto.secundario.copyWith(
                       color: AppColores.textoSecundario(context))),
               const SizedBox(height: 24),
@@ -157,7 +233,26 @@ class _PinLockScreenState extends State<PinLockScreen> {
                   );
                 }),
               ),
-              if (_error != null) ...[
+              if (_bloqueado) ...[
+                // 1.28 (M5-C6): la cuenta atrás, grande y
+                // honesta, en vez del «espera N min»
+                // congelado.
+                const SizedBox(height: 4),
+                Text(
+                  formatoCuentaAtrasPin(_restante),
+                  style: AppTexto.displayPequeno.copyWith(
+                    color: AppColores.naranja,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Podrás intentarlo de nuevo cuando llegue a cero.',
+                  textAlign: TextAlign.center,
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
+              ] else if (_error != null) ...[
                 const SizedBox(height: 12),
                 Text(_error!,
                     style: const TextStyle(color: AppColores.error)),
@@ -166,7 +261,15 @@ class _PinLockScreenState extends State<PinLockScreen> {
               if (_verificando)
                 const CircularProgressIndicator()
               else
-                _teclado(),
+                // Durante la espera el teclado se ve
+                // atenuado y no responde.
+                Opacity(
+                  opacity: _bloqueado ? 0.35 : 1,
+                  child: IgnorePointer(
+                    ignoring: _bloqueado,
+                    child: _teclado(),
+                  ),
+                ),
               const SizedBox(height: 16),
               // Recuperación: si olvidó el PIN, cerrar sesión.
               // Para volver a entrar necesita su contraseña de la cuenta.

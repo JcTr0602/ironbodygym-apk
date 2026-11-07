@@ -16,6 +16,11 @@ class Novedad {
 }
 
 const novedades = [
+  // NOTA 1.28 (M5-B5): la entrada de la 1.28.0 se añade
+  // JUNTO con el bump del pubspec — el test guardián
+  // (novedades_version_guard_test) exige que la primera
+  // entrada sea la versión del pubspec. Texto listo en
+  // el informe de la oleada M5-BC.
   Novedad('1.27.0', [
     'Premios con control total: el catálogo de premios se edita desde la app (días, meta y activo), puedes crear un vale manual para cualquier cliente con su motivo, ver el historial completo de cada uno y anular un vale ya canjeado eligiendo si quitas el pago completo o solo los días no usados',
     'Gastos para el equipo: un entrenador con tu permiso ya puede registrar gastos desde su teléfono (nueva sección «Gastos»); sin permiso, ni siquiera puede encolarlos',
@@ -542,6 +547,136 @@ int compararVersiones(String a, String b) {
   return 0;
 }
 
+/// 1.28 (M5-B5): las novedades «de mi versión» — la
+/// instalada y la inmediatamente anterior — para
+/// volver a leerlas desde Ajustes sin arrastrar el
+/// historial entero. Si la instalada no está en la
+/// lista (una versión intermedia), se devuelven las
+/// dos más recientes que no la superen. PURO.
+List<Novedad> novedadesDeMiVersion([String? instalada]) {
+  final v = instalada ?? AppConfig.appVersion;
+  final i =
+      novedades.indexWhere((n) => compararVersiones(n.version, v) == 0);
+  if (i >= 0) {
+    return [
+      novedades[i],
+      if (i + 1 < novedades.length) novedades[i + 1],
+    ];
+  }
+  return novedades
+      .where((n) => compararVersiones(n.version, v) <= 0)
+      .take(2)
+      .toList();
+}
+
+/// 1.28 (M5-C5): la VITRINA de novedades — tarjetas por
+/// versión (icono, versión, sello «Nuevo» en la
+/// instalada y viñetas cortas con su marca), en vez del
+/// muro de texto corrido. La usan el diálogo automático
+/// tras actualizar y la relectura desde Ajustes (B5).
+class DialogoNovedades extends StatelessWidget {
+  final List<Novedad> lista;
+  final String titulo;
+
+  const DialogoNovedades({
+    super.key,
+    required this.lista,
+    this.titulo = 'Lo nuevo en esta versión',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(titulo),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: lista.length,
+          itemBuilder: (context, i) {
+            final n = lista[i];
+            final esInstalada =
+                compararVersiones(n.version, AppConfig.appVersion) ==
+                    0;
+            return Card(
+              margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+              child: Padding(
+                padding: const EdgeInsets.all(AppEspacio.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.new_releases_rounded,
+                            color: AppColores.naranja, size: 20),
+                        const SizedBox(width: AppEspacio.sm),
+                        Text('Versión ${n.version}',
+                            style: AppTexto.subtitulo),
+                        if (esInstalada) ...[
+                          const SizedBox(width: AppEspacio.sm),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppEspacio.sm, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColores.naranja,
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.circular),
+                            ),
+                            child: const Text('Nuevo',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: AppEspacio.sm),
+                    for (final c in n.cambios)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            bottom: AppEspacio.xs),
+                        child: Row(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.check_circle_rounded,
+                                size: 15, color: AppColores.exito),
+                            const SizedBox(width: 6),
+                            Expanded(
+                                child: Text(c,
+                                    style: AppTexto.secundario)),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Entendido')),
+      ],
+    );
+  }
+}
+
+/// Abre la vitrina de novedades con la lista dada.
+Future<void> mostrarVitrinaNovedades(
+  BuildContext context,
+  List<Novedad> lista, {
+  String titulo = 'Lo nuevo en esta versión',
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (_) => DialogoNovedades(lista: lista, titulo: titulo),
+  );
+}
+
 /// Muestra "Lo Nuevo" una sola vez tras actualizar. Devuelve true si la mostró.
 Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
   final perfil = PerfilService.instance;
@@ -570,38 +705,9 @@ Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
   // 1.28 (M5-A9/R3M5-H07): sin contexto montado NO se
   // marca: la oferta se repite en el próximo arranque.
   if (!context.mounted) return false;
-  await showDialog<void>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Lo nuevo en esta versión'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final n in nuevas) ...[
-              Text('Versión ${n.version}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              for (final c in n.cambios)
-                Padding(
-                  padding:
-                      const EdgeInsets.only(bottom: AppEspacio.xs),
-                  child: Text('• $c', style: AppTexto.secundario),
-                ),
-              const SizedBox(height: 8),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        ElevatedButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Entendido')),
-      ],
-    ),
-  );
+  // 1.28 (M5-C5): el diálogo automático también es la
+  // vitrina de tarjetas, no el muro de texto.
+  await mostrarVitrinaNovedades(context, nuevas);
   // 1.28 (M5-A9/R3M5-H07): «visto» se marca SOLO tras
   // cerrar el diálogo: si el proceso muere con el
   // diálogo abierto, las notas se reofrecen al volver

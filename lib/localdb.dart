@@ -112,7 +112,7 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 65;
+  static const int versionActual = 66;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1550,6 +1550,14 @@ class LocalDb {
           await _addColumnIfMissing(db, 'incidencias_fotos',
               'reclamada_en', 'TEXT');
         }
+        if (oldV < 66) {
+          // 1.28 (M5-B3): pausa CON FECHA de un recordatorio
+          // («en pausa hasta el…»): la config sigue activa
+          // pero no dispara hasta que la fecha pasa, y se
+          // reactiva sola. NULL = sin pausa con fecha.
+          await _addColumnIfMissing(db, 'recordatorio_config',
+              'pausada_hasta', 'TEXT');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2936,6 +2944,7 @@ class LocalDb {
         'fecha_fija TEXT, '
         'frecuencia TEXT NOT NULL DEFAULT \'ninguna\', '
         'activa INTEGER NOT NULL DEFAULT 1, '
+        'pausada_hasta TEXT, '
         'creado_por INTEGER, '
         'disparado_en_fecha_habana TEXT, '
         'creada_ts TEXT NOT NULL, '
@@ -8569,6 +8578,15 @@ class LocalDb {
         'activa': e['activa'] == true || e['activa'] == 1
             ? 1
             : (e['activa'] is num ? (e['activa'] as num).toInt() : 0),
+        // 1.28 (M5-B3): la pausa con fecha viaja en la fila;
+        // si el espejo aún no la trae (el servidor todavía
+        // no la publica), manda la LOCAL: un pull no puede
+        // borrar una pausa que este teléfono fijó. Cuando
+        // el espejo la traiga (clave presente, aunque sea
+        // null), manda el espejo.
+        'pausada_hasta': e.containsKey('pausada_hasta')
+            ? e['pausada_hasta']
+            : local?['pausada_hasta'],
         'creado_por': e['creado_por'],
         'disparado_en_fecha_habana': e['disparado_en_fecha_habana'],
         'creada_ts': '${e['creada_ts'] ?? ''}',
@@ -9394,6 +9412,27 @@ class LocalDb {
     final rows = await d.query('ops_queue',
         columns: ['estado'], where: 'op_uuid=?', whereArgs: [opUuid]);
     return rows.isEmpty ? null : rows.first['estado'] as String?;
+  }
+
+  /// 1.28 (M5-B6): estados de MUCHAS ops en UNA consulta
+  /// (mapa op_uuid → estado; la op ausente no entra en el
+  /// mapa y el llamador la lee como null = sin estado).
+  /// Antes, reconciliar las marcas de la Bandeja de
+  /// Premios hacía una consulta por vale, en serie, tras
+  /// cada carga: con el historial creciendo, abrir
+  /// Premios se resentía sin necesidad.
+  Future<Map<String, String?>> estadosOps(
+      List<String> opUuids) async {
+    if (opUuids.isEmpty) return const {};
+    final d = await db;
+    final huecos = List.filled(opUuids.length, '?').join(',');
+    final rows = await d.rawQuery(
+        'SELECT op_uuid, estado FROM ops_queue '
+        'WHERE op_uuid IN ($huecos)',
+        opUuids);
+    return {
+      for (final r in rows) '${r['op_uuid']}': r['estado'] as String?,
+    };
   }
 
   /// 1.21 (candado, Opción B): retiene una op pausada por el

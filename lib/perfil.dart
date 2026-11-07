@@ -386,9 +386,22 @@ class PerfilService {
   /// Minutos restantes de bloqueo del PIN (0 si no está bloqueado).
   /// v1.2.5-rev6: usa el reloj monotónico si hay ancla (inmune a adelantos).
   Future<int> pinBloqueoMinutosRestantes() async {
+    final restante = await pinBloqueoRestante();
+    if (restante <= Duration.zero) return 0;
+    return (restante.inMilliseconds / 60000).ceil();
+  }
+
+  /// 1.28 (M5-C6): el tiempo restante de bloqueo con
+  /// precisión de milisegundos, para la cuenta atrás
+  /// VIVA de la pantalla de bloqueo (la de minutos
+  /// redondeaba a «espera 5 min» durante un minuto
+  /// entero). Misma lógica monotónica/wall que
+  /// [pinBloqueoMinutosRestantes], que ahora deriva de
+  /// esta con el mismo redondeo de siempre.
+  Future<Duration> pinBloqueoRestante() async {
     final p = await _p;
     final hasta = p.getInt(_key('seg_pin_bloqueado_hasta')) ?? 0;
-    if (hasta <= 0) return 0;
+    if (hasta <= 0) return Duration.zero;
     final durMs = p.getInt(_key('seg_pin_duracion_ms')) ?? 0;
     final ancla = p.getInt(_key('seg_pin_mono_ancla')) ?? 0;
     if (durMs > 0 && ancla > 0) {
@@ -396,16 +409,16 @@ class PerfilService {
       if (transcurrido < 0) {
         // Reinicio: fallback al wall clock.
         final ahora = DateTime.now().millisecondsSinceEpoch;
-        if (ahora >= hasta) return 0;
-        return ((hasta - ahora) / 60000).ceil();
+        if (ahora >= hasta) return Duration.zero;
+        return Duration(milliseconds: hasta - ahora);
       }
       final restante = durMs - transcurrido;
-      if (restante <= 0) return 0;
-      return (restante / 60000).ceil();
+      if (restante <= 0) return Duration.zero;
+      return Duration(milliseconds: restante);
     }
     final ahora = DateTime.now().millisecondsSinceEpoch;
-    if (ahora >= hasta) return 0;
-    return ((hasta - ahora) / 60000).ceil();
+    if (ahora >= hasta) return Duration.zero;
+    return Duration(milliseconds: hasta - ahora);
   }
 
   /// Compara un PIN en claro contra un hash guardado (v1 o v2).
