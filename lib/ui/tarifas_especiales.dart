@@ -111,15 +111,38 @@ class _TarifasScreenState extends State<TarifasScreen> {
                         ),
                     ],
                   ),
-                  // T14 (1.20): aviso de tarifas por revisar
-                  // (su fecha pasó o está cerca): siguen
-                  // aplicando hasta que el dueño decida.
+                  // T14 (1.20): aviso de tarifas por revisar.
+                  // 1.29 (FB-06 · D-B1-06): el texto distingue la
+                  // VERDAD de cada estado — la VENCIDA ya no se
+                  // aplica (el motor cobra la tarifa normal,
+                  // T14-A); la que está por vencer sí sigue
+                  // aplicando. Antes un solo texto decía «sigue
+                  // aplicando» de ambas y era falso para las
+                  // vencidas.
                   Builder(builder: (_) {
                     final hoy = hoyHabanaIso();
-                    final n = _especiales
-                        .where((e) => tarifaPorRevisar(e, hoy))
+                    final vencidas = _especiales
+                        .where((e) =>
+                            estadoRevisionTarifa(e, hoy) == 'vencida')
                         .length;
-                    if (n == 0) return const SizedBox.shrink();
+                    final porVencer = _especiales
+                        .where((e) =>
+                            estadoRevisionTarifa(e, hoy) ==
+                            'por_vencer')
+                        .length;
+                    if (vencidas == 0 && porVencer == 0) {
+                      return const SizedBox.shrink();
+                    }
+                    final frases = <String>[
+                      if (vencidas > 0)
+                        vencidas == 1
+                            ? '1 tarifa vencida: ya no se aplica; se cobra la tarifa normal hasta renovarla.'
+                            : '$vencidas tarifas vencidas: ya no se aplican; se cobra la tarifa normal hasta renovarlas.',
+                      if (porVencer > 0)
+                        porVencer == 1
+                            ? '1 vence pronto: sigue aplicando; revísala antes de que caduque.'
+                            : '$porVencer vencen pronto: siguen aplicando; revísalas antes de que caduquen.',
+                    ];
                     return Padding(
                       padding:
                           const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -131,9 +154,7 @@ class _TarifasScreenState extends State<TarifasScreen> {
                             const SizedBox(width: AppEspacio.sm),
                             Expanded(
                               child: Text(
-                                n == 1
-                                    ? '1 tarifa por revisar: su fecha ya pasó o está cerca. Sigue aplicando hasta que decidas renovarla o terminarla.'
-                                    : '$n tarifas por revisar: su fecha ya pasó o está cerca. Siguen aplicando hasta que decidas renovarlas o terminarlas.',
+                                frases.join(' '),
                                 style: AppTexto.cuerpo,
                               ),
                             ),
@@ -186,8 +207,10 @@ class _TarifasScreenState extends State<TarifasScreen> {
                           padding: const EdgeInsets.fromLTRB(
                               16, 0, 16, 12),
                           child: ChipEstado.semantico(
+                            // 1.29 (FB-06): la vencida dice la
+                            // verdad operativa — ya no se aplica.
                             texto: est == 'vencida'
-                                ? 'Vencida — por revisar'
+                                ? 'Vencida — ya no se aplica'
                                 : 'Vence pronto — por revisar',
                             significado: est == 'vencida'
                                 ? SignificadoChip.error

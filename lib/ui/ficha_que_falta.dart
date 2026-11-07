@@ -35,12 +35,18 @@ enum PendienteFicha {
 /// PURO: los pendientes de un cliente según los datos que
 /// la ficha ya conoce. [tieneAccesoApp] null = no
 /// verificado: el pendiente de acceso NO se afirma.
+/// [tieneFoto] también es nullable desde la 1.29 (FB-04 ·
+/// D-B1-03) con la MISMA regla: null = aún no verificado y
+/// el pendiente «sin foto» NO se afirma — antes la ficha
+/// pasaba solo «hay archivo local en memoria» y un cliente
+/// con foto registrada en el servidor pero sin descargar en
+/// este teléfono salía marcado «Sin foto» por error.
 /// [ultimaMedicionEn] null = nunca se midió: también es
 /// pendiente. La ventana son 60 días de CALENDARIO (la
 /// comparación se hace por días UTC, sin que el cambio de
 /// hora robe o regale un día).
 List<PendienteFicha> pendientesDeFicha({
-  required bool tieneFoto,
+  required bool? tieneFoto,
   required bool telefonoValido,
   required bool? tieneAccesoApp,
   required DateTime? ultimaMedicionEn,
@@ -48,7 +54,7 @@ List<PendienteFicha> pendientesDeFicha({
   int diasSinMedicion = 60,
 }) {
   final r = <PendienteFicha>[];
-  if (!tieneFoto) r.add(PendienteFicha.sinFoto);
+  if (tieneFoto == false) r.add(PendienteFicha.sinFoto);
   if (!telefonoValido) r.add(PendienteFicha.telefonoInvalido);
   if (tieneAccesoApp == false) r.add(PendienteFicha.sinAccesoApp);
   if (ultimaMedicionEn == null) {
@@ -69,7 +75,12 @@ List<PendienteFicha> pendientesDeFicha({
 /// Sin pendientes verificados, no ocupa espacio.
 class SeccionQueFaltaFicha extends StatefulWidget {
   final int clienteId;
-  final bool tieneFoto;
+
+  /// 1.29 (FB-04): foto VERIFICADA con el criterio completo
+  /// de la ficha (intención registrada, foto en el servidor
+  /// o archivo local). null = aún no verificado: el
+  /// pendiente «sin foto» no se afirma.
+  final bool? tieneFoto;
   final bool telefonoValido;
   final DateTime? ultimaMedicionEn;
 

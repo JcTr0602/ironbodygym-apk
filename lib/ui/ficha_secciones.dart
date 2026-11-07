@@ -171,28 +171,38 @@ class CabeceraFicha extends StatelessWidget {
                 else if (!esCasa)
                   BadgeEstado.desdeDias(dias!)
                 else
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppEspacio.md, vertical: 5),
-                    decoration: BoxDecoration(
-                      color:
-                          AppColores.alerta.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadio.circular),
-                      border: Border.all(color: AppColores.alerta),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.home_rounded,
-                            size: 15, color: AppColores.alerta),
-                        const SizedBox(width: 8),
-                        Text('Cuenta a la Casa',
-                            style: AppTexto.etiqueta.copyWith(
-                                color: AppColores.alerta,
-                                fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
+                  // 1.29 (D-15): la insignia de Casa se pinta con
+                  // los roles de la fundación — el par de tinta
+                  // alertaTexto resuelto por tema sobre su propio
+                  // tinte. Con el ámbar brillante crudo en ambos
+                  // temas, en claro el texto se lavaba y la
+                  // insignia se leía mal.
+                  Builder(builder: (_) {
+                    final tinta = AppColores.alertaTexto(context);
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppEspacio.md, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: tinta.withValues(alpha: 0.13),
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.circular),
+                        border: Border.all(
+                            color: tinta.withValues(alpha: 0.6)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.home_rounded,
+                              size: 15, color: tinta),
+                          const SizedBox(width: 8),
+                          Text('Cuenta a la Casa',
+                              style: AppTexto.etiqueta.copyWith(
+                                  color: tinta,
+                                  fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    );
+                  }),
                 const SizedBox(height: AppEspacio.xs),
                 // 1.25 T117 (F1-47): sin foto, el botón dice
                 // «Añadir foto» (la pista que faltaba); sin
@@ -200,7 +210,10 @@ class CabeceraFicha extends StatelessWidget {
                 TextButton.icon(
                   icon: Icon(
                       puedeCambiarFoto
-                          ? Icons.camera_alt_rounded
+                          // 1.29 (D-15): icono canónico de foto de
+                          // la tabla D-07 (photo_camera_rounded);
+                          // camera_alt_rounded se extingue.
+                          ? Icons.photo_camera_rounded
                           : Icons.lock_rounded,
                       size: 18),
                   label: Text(
@@ -493,6 +506,12 @@ class TarjetaHistorialFicha extends StatefulWidget {
   final void Function(Map<String, dynamic>) onCorregirPago;
   final void Function(Map<String, dynamic>) onConciliar;
 
+  /// 1.29 (FB-03 · D-B1-04): pie «Ver pagos anteriores». No
+  /// nulo SOLO mientras la tarjeta enseña la muestra reciente
+  /// (10 pagos / 20 ventas): el pie lo dice y el botón pide a
+  /// la ficha la historia completa del espejo local.
+  final VoidCallback? onVerAnteriores;
+
   const TarjetaHistorialFicha(
       {super.key,
       required this.entradas,
@@ -505,7 +524,8 @@ class TarjetaHistorialFicha extends StatefulWidget {
       required this.onReenviarRecibo,
       required this.onVerComprobante,
       required this.onCorregirPago,
-      required this.onConciliar});
+      required this.onConciliar,
+      this.onVerAnteriores});
 
   @override
   State<TarjetaHistorialFicha> createState() =>
@@ -702,6 +722,27 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
                     onVerComprobante: widget.onVerComprobante,
                     onCorregirPago: widget.onCorregirPago,
                     onConciliar: widget.onConciliar),
+          ],
+          // 1.29 (FB-03): el pie de la muestra — la tarjeta
+          // declara que enseña una muestra y ofrece la
+          // historia completa sin salir de la ficha.
+          if (widget.onVerAnteriores != null) ...[
+            const SizedBox(height: AppEspacio.sm),
+            const Divider(height: 1),
+            const SizedBox(height: AppEspacio.sm),
+            const Text(
+              'Se muestran los últimos 10 pagos y las últimas '
+              '20 ventas de suplementos.',
+              style: AppTexto.secundario,
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                icon: const Icon(Icons.history_rounded, size: 18),
+                label: const Text('Ver pagos anteriores'),
+                onPressed: widget.onVerAnteriores,
+              ),
+            ),
           ],
         ],
       ),

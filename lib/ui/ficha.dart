@@ -224,6 +224,17 @@ class _FichaScreenState extends State<FichaScreen> {
   List<Map<String, dynamic>> _serviciosHist = [];
   // Bloque 1: filtro de la línea de tiempo ('todo' | 'pagos' | 'ventas').
   String _filtroHistorial = 'todo';
+  // 1.29 (FB-03 · D-B1-04): el historial abre con la muestra
+  // reciente (10 pagos / 20 ventas de suplementos); «Ver pagos
+  // anteriores» lo amplía a todo el espejo local. La bandera
+  // forma parte de la versión memoizada de la tarjeta.
+  bool _historialCompleto = false;
+  bool _cargandoHistorialCompleto = false;
+  // 1.29 (FB-04 · D-B1-03): foto VERIFICADA para «qué le
+  // falta» con el criterio completo (intención registrada,
+  // foto en el servidor o archivo en pantalla); null = aún
+  // no verificado y el pendiente «sin foto» no se afirma.
+  bool? _tieneFotoVerificado;
   // D-13 (1.21): entradas del historial y resumen de pagos,
   // precalculados en _cargar (antes se reconstruían, ordenaban
   // y recorrían en CADA build de la ficha).
@@ -377,6 +388,32 @@ class _FichaScreenState extends State<FichaScreen> {
         }
       }
     } catch (_) {}
+    // 1.29 (FB-04 · D-B1-03): la foto VERIFICADA de «qué le
+    // falta», resuelta con lecturas locales ANTES de pintar
+    // y con el criterio completo (la intención registrada
+    // manda; si no, el foto_storage del espejo). El archivo
+    // en memoria por sí solo ya no es el criterio: marcaba
+    // «Sin foto» a quien la tenía registrada en el servidor
+    // sin descargar en este teléfono.
+    bool? tieneFotoVerificado;
+    if (c != null) {
+      // Semántica de _tieneFoto() con la fila fresca: la
+      // intención manda; si no hay intención, manda el
+      // foto_storage; sin ninguna fuente con foto, no hay
+      // foto (false, y el pendiente SÍ se afirma). Sin
+      // resolver solo queda el null de antes de cargar.
+      final storageOk =
+          '${c['foto_storage'] ?? ''}'.trim().isNotEmpty;
+      try {
+        final intencion = await LocalDb.instance
+            .ultimaIntencionFoto(widget.clienteId);
+        tieneFotoVerificado = intencion == 'eliminar'
+            ? false
+            : (intencion == 'poner' || storageOk);
+      } catch (_) {
+        tieneFotoVerificado = storageOk;
+      }
+    }
     // v1.3.9 (F1): el caché de accesos también se carga en
     // _enriquecerDesdeServidor (era el segundo await de red
     // sin timeout antes de pintar; misma causa del cuelgue).
@@ -402,6 +439,8 @@ class _FichaScreenState extends State<FichaScreen> {
         _serviciosHist = serviciosHist;
         _incidencias = incidencias;
         _foto = null;
+        // 1.29 (FB-04): foto verificada de esta foto de datos.
+        _tieneFotoVerificado = tieneFotoVerificado;
         _regaloAnio = regaloAnio;
         _ultimaMedida = ultimaMedida;
         _medicionesFicha = medicionesFicha;
@@ -411,6 +450,9 @@ class _FichaScreenState extends State<FichaScreen> {
         _tieneRegistroTarifa = tieneRegistro;
         // D-13: con _pagos/_suplementos/_serviciosHist ya
         // asignados, se precalculan entradas y resumen.
+        // 1.29 (FB-03): cada recarga vuelve a la muestra
+        // reciente del historial.
+        _historialCompleto = false;
         _entradasCache = _construirEntradas();
         final pagosReales =
             _pagos.where((p) => p['metodo'] != 'cortesia').toList();
@@ -538,7 +580,11 @@ class _FichaScreenState extends State<FichaScreen> {
         // Si mientras descargaba se eliminó o se puso otra foto,
         // el resultado ya es viejo: no resucitarla.
         if (mounted && gen == _fotoGen && foto != null) {
-          setState(() => _foto = foto);
+          setState(() {
+            _foto = foto;
+            // 1.29 (FB-04): foto en pantalla = foto verificada.
+            _tieneFotoVerificado = true;
+          });
         }
       }
     }
@@ -631,9 +677,13 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// v1.2.2: historial de suplementos comprados por el cliente.
   /// La tabla usa columna data (JSON), se filtra con json_extract.
-  Future<List<Map<String, dynamic>>> _suplementosDe(int clienteId) async {
+  /// 1.29 (FB-03): [sinLimite] levanta el tope de 20 ventas
+  /// cuando la ficha amplía el historial a petición.
+  Future<List<Map<String, dynamic>>> _suplementosDe(int clienteId,
+      {bool sinLimite = false}) async {
     try {
       final db = await LocalDb.instance.db;
+      final limite = sinLimite ? 100000 : 20;
       // Argón Clientes #6: también las ventas FIADAS a este
       // cliente (fiado_cliente_id sin cliente_id): el Estado
       // de cuenta sí las muestra y la ficha las escondía.
@@ -643,7 +693,7 @@ class _FichaScreenState extends State<FichaScreen> {
           OR json_extract(data, '\$.fiado_cliente_id') = ?)
           AND json_extract(data, '\$.anulado') IS NULL
         ORDER BY json_extract(data, '\$.fecha') DESC
-        LIMIT 20
+        LIMIT $limite
       ''', [clienteId, clienteId]);
       return rows.map((r) {
         try {
@@ -658,6 +708,30 @@ class _FichaScreenState extends State<FichaScreen> {
       }).where((m) => m.isNotEmpty).toList();
     } catch (_) {
       return [];
+    }
+  }
+
+  /// 1.29 (FB-03 · D-B1-04): amplía el historial a TODO el
+  /// espejo local (pagos sin el tope de 10 y ventas sin el
+  /// LIMIT 20) y reconstruye SOLO las entradas. El resumen
+  /// (método preferido) y la serie del mini-gráfico NO se
+  /// recomputan: salen de la muestra reciente por diseño.
+  Future<void> _verHistorialCompleto() async {
+    if (_historialCompleto || _cargandoHistorialCompleto) return;
+    _cargandoHistorialCompleto = true;
+    try {
+      final pagos = await pagosDe(widget.clienteId, limit: 100000);
+      final suplementos =
+          await _suplementosDe(widget.clienteId, sinLimite: true);
+      if (!mounted) return;
+      setState(() {
+        _pagos = pagos;
+        _suplementos = suplementos;
+        _historialCompleto = true;
+        _entradasCache = _construirEntradas();
+      });
+    } finally {
+      _cargandoHistorialCompleto = false;
     }
   }
 
@@ -891,7 +965,16 @@ class _FichaScreenState extends State<FichaScreen> {
         partes.add('transferencia ${fmtMonto(tr)} CUP');
       }
       if (partes.isEmpty) return null;
-      return '${partes.join(' · ')} (${e['periodo'] ?? 'mensual'})';
+      // 1.29 (FB-06 · D-B1-06): la especial CADUCADA se marca
+      // en la propia fila. El motor de cobro ya no la aplica
+      // (T14-A: vencida no aplica y se cobra la tarifa
+      // normal), pero la fila la enseñaba como si viviera —
+      // la verdad única es: especial vencida = «VENCIDA» aquí
+      // y «ya no se aplica» en la pantalla de Tarifas.
+      final vencida =
+          estadoRevisionTarifa(e, hoyHabanaIso()) == 'vencida';
+      return '${partes.join(' · ')} (${e['periodo'] ?? 'mensual'})'
+          '${vencida ? ' · VENCIDA' : ''}';
     }
     if (!_tieneRegistroTarifa) {
       final legacy = (c['tarifa_especial_transferencia'] as num?)
@@ -1253,21 +1336,18 @@ class _FichaScreenState extends State<FichaScreen> {
   /// el regalo y el reenvío del recibo: lo que se ve es lo
   /// que se abre (antes cada camino derivaba el suyo y la
   /// fila podía enseñar un número que no era el móvil).
-  String _telefonoEfectivoWa(Map<String, dynamic>? c) {
-    for (final raw in ['${c?['movil'] ?? ''}', '${c?['telefono'] ?? ''}']) {
-      final norm = _normalizarTelefono(raw);
-      if (norm.isNotEmpty) return norm;
-    }
-    return '';
-  }
+  /// 1.29 (Oleada 3, FB-01): la regla vive ahora en la capa
+  /// de datos (negocio.dart: telefonoEfectivoWa) y la
+  /// comparten Buscar y Listas; este método queda como
+  /// envoltorio con la firma histórica de la ficha.
+  String _telefonoEfectivoWa(Map<String, dynamic>? c) =>
+      telefonoEfectivoWa(c ?? const {});
 
   /// El teléfono efectivo en forma local (8 dígitos) para
   /// enseñarlo en la ficha; '—' si no hay ninguno válido.
-  String _telefonoEfectivoVisible(Map<String, dynamic>? c) {
-    final wa = _telefonoEfectivoWa(c);
-    if (wa.isEmpty) return '—';
-    return wa.length == 10 ? wa.substring(2) : wa;
-  }
+  /// 1.29 (FB-01): delega en telefonoEfectivoLocal.
+  String _telefonoEfectivoVisible(Map<String, dynamic>? c) =>
+      telefonoEfectivoLocal(c ?? const {});
 
   Future<void> _editar() async {
     final c = _c;
@@ -1861,7 +1941,11 @@ class _FichaScreenState extends State<FichaScreen> {
     // pantalla YA (etapa 4 · F2): feedback inmediato, ANTES de
     // los await de caché y BD (corrección del panel).
     _fotoGen++;
-    setState(() => _foto = null);
+    setState(() {
+      _foto = null;
+      // 1.29 (FB-04): eliminada = verificado sin foto.
+      _tieneFotoVerificado = false;
+    });
     // Limpia el caché local
     await FotoCache.instance.invalidar('bot/${widget.clienteId}.jpg');
     await FotoCache.instance.invalidar('apk/${widget.clienteId}.jpg');
@@ -1950,7 +2034,11 @@ class _FichaScreenState extends State<FichaScreen> {
     LocalDb.limpiarFotoEliminadaSesion(widget.clienteId);
     if (!mounted) return;
     _fotoGen++;
-    setState(() => _foto = editada);
+    setState(() {
+      _foto = editada;
+      // 1.29 (FB-04): foto recién puesta = verificado con foto.
+      _tieneFotoVerificado = true;
+    });
     mostrarSnack(context, 'Foto actualizada (se sincronizará)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
@@ -2844,7 +2932,9 @@ class _FichaScreenState extends State<FichaScreen> {
                       // cuenta sin afirmar lo no verificado).
                       SeccionQueFaltaFicha(
                         clienteId: widget.clienteId,
-                        tieneFoto: _foto != null,
+                        // 1.29 (FB-04): foto VERIFICADA (criterio
+                        // completo), no solo el archivo en memoria.
+                        tieneFoto: _tieneFotoVerificado,
                         telefonoValido:
                             _telefonoEfectivoWa(c).length >= 10,
                         ultimaMedicionEn: _ultimaMedicionFecha,
@@ -3114,6 +3204,12 @@ class _FichaScreenState extends State<FichaScreen> {
                         onVerComprobante: _verComprobante,
                         onCorregirPago: _corregirPago,
                         onConciliar: _conciliarDesdeHistorial,
+                        // 1.29 (FB-03): pie con «Ver pagos
+                        // anteriores» mientras el historial
+                        // enseñe la muestra reciente.
+                        onVerAnteriores: _historialCompleto
+                            ? null
+                            : _verHistorialCompleto,
                       ),
                       const SizedBox(
                           height: AppEspacio.md),
@@ -3456,7 +3552,10 @@ class _FichaScreenState extends State<FichaScreen> {
       return Object.hash(versionBase, versionFoto);
     }
     if (w is TarjetaHistorialFicha) {
-      return Object.hash(versionBase, _filtroHistorial);
+      // 1.29 (FB-03): la ampliación del historial también
+      // invalida la tarjeta memoizada.
+      return Object.hash(
+          versionBase, _filtroHistorial, _historialCompleto);
     }
     return versionBase;
   }
