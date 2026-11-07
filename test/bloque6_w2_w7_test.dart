@@ -188,7 +188,7 @@ void main() {
       // Una visita vieja (fuera de la ventana) no cuenta.
       await LocalDb.instance.registrarVisitaInvitado(
         clave: clave,
-        invitadoId: 7,
+        invitadoId: '7',
         nombre: 'Ana Vieja',
         tsIso: ahoraUtcReal()
             .subtract(const Duration(days: 40))
@@ -197,7 +197,7 @@ void main() {
       expect(await conteoVisitasInvitado(clave), 0);
       for (var i = 0; i < 3; i++) {
         await registrarVisitaInvitadoAhora(
-            clave: clave, invitadoId: 7, nombre: 'Ana');
+            clave: clave, invitadoId: '7', nombre: 'Ana');
       }
       expect(await conteoVisitasInvitado(clave), 3);
       // Con el umbral por defecto (8) aún no es candidata.
@@ -208,7 +208,7 @@ void main() {
       expect(c.length, 1);
       expect(c.first['clave'], clave);
       expect(c.first['visitas'], 3);
-      expect(c.first['invitado_id'], 7);
+      expect(c.first['invitado_id'], '7');
       expect(c.first['nombre'], 'Ana');
     });
 
@@ -224,12 +224,12 @@ void main() {
       // 3 visitas registradas solo con teléfono.
       for (var i = 0; i < 3; i++) {
         await registrarVisitaInvitadoAhora(
-            clave: 'tel:58191577', invitadoId: 9, nombre: 'Luis');
+            clave: 'tel:58191577', invitadoId: '9', nombre: 'Luis');
       }
       // Aparece el carnet: la siguiente visita reasigna las
       // previas de la ficha a la clave fuerte.
       final n = await registrarVisitaInvitadoAhora(
-          clave: 'ci:95010112345', invitadoId: 9, nombre: 'Luis');
+          clave: 'ci:95010112345', invitadoId: '9', nombre: 'Luis');
       expect(n, 4);
       expect(await conteoVisitasInvitado('tel:58191577'), 0);
       expect(await conteoVisitasInvitado('ci:95010112345'), 4);
@@ -241,7 +241,7 @@ void main() {
       // Fila vieja con ficha y nombre antiguos.
       await LocalDb.instance.registrarVisitaInvitado(
         clave: clave,
-        invitadoId: 42,
+        invitadoId: '42',
         nombre: 'Nombre Viejo',
         tsIso: ahoraUtcReal()
             .subtract(const Duration(days: 40))

@@ -74,7 +74,13 @@ String _hoyIso() {
 }
 
 String _hace(int dias) {
-  final d = ahoraHabana().subtract(Duration(days: dias));
+  // 1.28 (M4-A3/R1M4-B4): aritmética de CALENDARIO en UTC.
+  // Restar un Duration al wall-clock habanero cruzaba el
+  // retroceso de hora y podía devolver las 23:xx del día
+  // anterior: la ventana «hace N días» se corría un día.
+  final h = ahoraHabana();
+  final d = DateTime.utc(h.year, h.month, h.day)
+      .subtract(Duration(days: dias));
   return '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
@@ -115,9 +121,27 @@ Future<List<Map<String, dynamic>>> _activos() async {
   return LocalDb.instance.mirrorPorEstado('clientes', 'activo');
 }
 
+/// 1.28 (M4-A2): lectura pública del padrón activo para
+/// pantallas que derivan VARIAS listas de la misma foto
+/// (Listas): una sola lectura y `activosPre` compartido en
+/// todas las consultas, en vez de releer el padrón entero
+/// una vez por pestaña.
+Future<List<Map<String, dynamic>>> clientesActivos() => _activos();
+
 /// v1.7.0: ¿el cliente (mapa del espejo) es Cuenta a la Casa?
 /// Delega en el punto único de verdad de LocalDb.
 bool esCuentaCasa(Map<String, dynamic> c) => LocalDb.cuentaCasaDe(c);
+
+/// 1.28 (M4-A17/R3M4-H10): nombre VISIBLE de un cliente. Una
+/// fila sin nombre (o con el literal 'null' de una
+/// interpolación vieja) se pintaba como «null» en el título
+/// de la ficha y en las filas de Buscar: aquí cae a
+/// «Sin nombre».
+String nombreVisibleCliente(Map<String, dynamic> c) {
+  final n = '${c['nombre'] ?? ''}'.trim();
+  if (n.isEmpty || n.toLowerCase() == 'null') return 'Sin nombre';
+  return n;
+}
 
 /// v1.7.0: payload EXACTO de la op `cuenta_casa` (contrato con el
 /// servidor B2): {cliente_id, activar, motivo?} — el motivo solo
@@ -353,8 +377,11 @@ Future<List<Map<String, dynamic>>> clientesAlDia(
 /// y en «Al día», con los conteos sumando de más. Cada
 /// cliente sale en UNA sola pestaña; la Casa (que nunca
 /// vence) queda en «Al día», como manda el predicado.
-Future<List<Map<String, dynamic>>> clientesAlDiaPestana() async {
-  final rows = await _activos();
+Future<List<Map<String, dynamic>>> clientesAlDiaPestana(
+    {List<Map<String, dynamic>>? activosPre}) async {
+  // 1.28 (M4-A2): [activosPre] permite derivarla de la MISMA
+  // foto del padrón que las demás pestañas de Listas.
+  final rows = activosPre ?? await _activos();
   final alDia = await clientesAlDia(activosPre: rows);
   final excluidos = <int>{
     for (final c in await vencenHoy(activosPre: rows))
@@ -481,9 +508,15 @@ Future<({int n, double total})> totalesPagosCliente(
 }
 
 String fmtFecha(String? iso) {
-  if (iso == null || iso.length < 10) return '—';
-  final p = iso.substring(0, 10).split('-');
-  return '${p[2]}/${p[1]}/${p[0]}';
+  // 1.28 (M4-A3): fecha ilegible o inventada → '—'. Antes se
+  // partía el string sin comprobar: '2026/11/05' lanzaba
+  // RangeError en pleno build (ficha inabrible, rejilla de
+  // fotos rota) y '05-11-2026' se pintaba cruzada como
+  // 2026/11/05.
+  final d = fechaIsoEstricta(iso);
+  if (d == null) return '—';
+  String dos(int n) => n.toString().padLeft(2, '0');
+  return '${dos(d.day)}/${dos(d.month)}/${d.year}';
 }
 
 /// "2026-12-27" → "27 de diciembre" (formato de los mensajes de
@@ -505,12 +538,11 @@ String fechaLargaCorta(String? iso) {
     'noviembre',
     'diciembre',
   ];
-  try {
-    final d = DateTime.parse(iso.substring(0, 10));
-    return '${d.day} de ${meses[d.month]}';
-  } catch (_) {
-    return fmtFecha(iso);
-  }
+  // 1.28 (M4-A3): parser estricto — DateTime.parse normalizaba
+  // fechas inventadas ('2026-02-31' → «3 de marzo»).
+  final d = fechaIsoEstricta(iso);
+  if (d == null) return '—';
+  return '${d.day} de ${meses[d.month]}';
 }
 
 /// Regalo de cumpleaños del año en curso guardado al regalar
@@ -742,8 +774,13 @@ String previewHasta(String? pagadoHasta, int meses) =>
 /// se corre un día (ventanas de «por vencer» que perdían el día
 /// límite). Mismo patrón que previewHastaDias ya usaba.
 String sumarDiasIso(String fechaIso, int dias) {
-  final p = fechaIso.substring(0, 10).split('-').map(int.parse).toList();
-  final d = DateTime.utc(p[0], p[1], p[2]).add(Duration(days: dias));
+  // 1.28 (M4-A3): entrada ilegible → se devuelve SIN tocar
+  // (patrón de mesSiguiente). Antes int.parse lanzaba y el
+  // llamador (p. ej. el preview de un vale de Premios) lo
+  // convertía en un «no se pudo» permanente.
+  final base = fechaIsoEstricta(fechaIso);
+  if (base == null) return fechaIso;
+  final d = base.add(Duration(days: dias));
   return '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
       '${d.day.toString().padLeft(2, '0')}';
@@ -753,18 +790,16 @@ String sumarDiasIso(String fechaIso, int dias) {
 String previewHastaDias(String? pagadoHasta, int dias,
     {String? fechaPago, String? base}) {
   final fp = fechaPago ?? _hoyIso();
-  final b = base ??
+  var b = base ??
       ((pagadoHasta != null && pagadoHasta.compareTo(fp) > 0)
           ? pagadoHasta
           : fp);
-  // v1.3.2 (Argón #3): UTC para que el cambio de horario (DST) de Cuba
-  // no reste un día al cruzar noviembre.
-  final p = b.substring(0, 10).split('-').map(int.parse).toList();
-  final d =
-      DateTime.utc(p[0], p[1], p[2]).add(Duration(days: dias));
-  return '${d.year.toString().padLeft(4, '0')}-'
-      '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
+  // 1.28 (M4-A3): una base ilegible (pagado_hasta legado mal
+  // formado) ya no lanza: se cae a la fecha del pago/hoy, que
+  // es la otra base legítima del cálculo. v1.3.2 (Argón #3):
+  // la suma va en UTC para que el DST no reste un día.
+  if (fechaIsoEstricta(b) == null) b = fp;
+  return sumarDiasIso(b, dias);
 }
 
 /// Pendiente a entregar salvo entrega EXPLÍCITA. 1.24 Bloque 1
@@ -2731,15 +2766,18 @@ Future<void> descartarIncidenciaSync(String incidenciaId,
 }
 
 /// Días restantes de vigencia (negativo si vencido, null si sin pagos).
-int? diasRestantes(String? pagadoHasta) {  if (pagadoHasta == null || pagadoHasta.length < 10) return null;
-  // v1.3.2 (Argón post-fix): NO usar .toUtc() antes de extraer la fecha.
-  // En Cuba (UTC-4/UTC-5), a las 8pm local ya es medianoche UTC del día
-  // siguiente y restaría 1 día a todas las membresías por la noche.
-  // Se extrae la fecha local y se compara en UTC.
+int? diasRestantes(String? pagadoHasta) {
+  // 1.28 (M4-A3): fecha ilegible o inventada → null («sin
+  // pagos»), nunca una excepción en pleno build ni un «al día»
+  // fantasma: antes int.parse lanzaba con texto no numérico y
+  // DateTime.utc(2026, 13, 1) normalizaba el mes 13 a enero
+  // del año siguiente. v1.3.2 (Argón post-fix): la fecha se
+  // extrae tal cual y se compara en UTC (nada de .toUtc()
+  // previo, que por la noche restaba 1 día a todas).
+  final ph = fechaIsoEstricta(pagadoHasta);
+  if (ph == null) return null;
   final hoy = ahoraHabana();
   final hoyDia = DateTime.utc(hoy.year, hoy.month, hoy.day);
-  final p = pagadoHasta.substring(0, 10).split('-').map(int.parse).toList();
-  final ph = DateTime.utc(p[0], p[1], p[2]);
   return ph.difference(hoyDia).inDays;
 }
 

@@ -14,7 +14,9 @@ import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
 import '../precio_cobro.dart';
+import '../tarifa_especial.dart';
 import 'buscar.dart';
+import 'skeleton.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
@@ -174,6 +176,37 @@ class _ListasScreenState extends State<ListasScreen>
   // 1.25 Panel 14: la última carga falló — los vacíos de
   // las pestañas deben decir ESO, no «nadie vence».
   bool _falloCarga = false;
+  // 1.28 (M4-A2): estado «cargando» honesto — hasta que la
+  // primera foto del espejo aterriza, la pantalla enseña el
+  // esqueleto y NO afirma «Todo al día» con pestañas en (0).
+  bool _cargando = true;
+  // 1.28 (M4-A2): generación de carga — una carga vieja que
+  // termina tarde no pinta su foto sobre una más nueva.
+  int _cargaGen = 0;
+  // 1.28 (M4-A2): precios y tarifas especiales de la foto
+  // vigente, para recalcular los estimados SÍNCRONOS sobre
+  // los visibles cada vez que cambia la búsqueda.
+  Map<String, double> _preciosFoto = {};
+  Map<int, Map<String, dynamic>> _especialesFoto = {};
+
+  /// 1.28 (M4-A2/R3M4-H5): estimado SÍNCRONO de una lista
+  /// con las tarifas ya resueltas EN LOTE — antes cada
+  /// cliente disparaba su propia resolución de tarifa, que
+  /// recargaba TODAS las tarifas por llamada (N lecturas
+  /// completas para N clientes).
+  double _estimadoDe(List<Map<String, dynamic>> lista) {
+    var total = 0.0;
+    for (final c in lista) {
+      total += precioCobroConEspecial(
+        cliente: c,
+        periodo: 'mensual',
+        metodo: 'efectivo',
+        precios: _preciosFoto,
+        especial: _especialesFoto[(c['id'] as num?)?.toInt()],
+      ).monto;
+    }
+    return total;
+  }
 
   void _recalcularVisibles() {
     _visHoy = _visibles(_hoy);
@@ -187,6 +220,13 @@ class _ListasScreenState extends State<ListasScreen>
     _visMas30 = _visibles(_mas30);
     _visPorVencer = _visibles(_porVencer);
     _visAlDia = _visibles(_alDia);
+    // 1.28 (M4-A2/R1M4-M3): el estimado de la cabecera se
+    // calcula sobre los VISIBLES de la pestaña — antes era
+    // el total sin filtrar mientras la cabecera contaba
+    // solo los visibles, y con búsqueda activa las dos
+    // cifras no cuadraban.
+    _estimadoMenos30 = _estimadoDe(_visMenos30);
+    _estimadoMas30 = _estimadoDe(_visMas30);
   }
 
   @override
@@ -357,19 +397,35 @@ class _ListasScreenState extends State<ListasScreen>
   /// pudo cargar» con Reintentar) en vez de pintar cinco
   /// vacíos falsos de «nadie vence».
   Future<void> _cargar() async {
+    // 1.28 (M4-A2): cada carga nace con su generación; si
+    // otra carga la supera, la vieja no pinta ni marca fallo.
+    final gen = ++_cargaGen;
     try {
-      await _cargarInterno();
-      if (_falloCarga && mounted) {
+      await _cargarInterno(gen);
+      if (_falloCarga && mounted && gen == _cargaGen) {
         setState(() => _falloCarga = false);
       }
     } catch (_) {
-      if (mounted) setState(() => _falloCarga = true);
+      if (mounted && gen == _cargaGen) {
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
+      }
     }
   }
 
-  Future<void> _cargarInterno() async {
-    final h = await vencenHoy();
-    final m30crudo = await atrasados(masDe30: false);
+  Future<void> _cargarInterno(int gen) async {
+    // 1.28 (M4-A2/R1M4-A2 + R3M4-H5): UNA sola foto del
+    // espejo — el padrón activo se lee una vez y se comparte
+    // (activosPre) en las cinco derivaciones; antes cada
+    // pestaña releía el padrón entero y, sin guarda de
+    // generación, un cobro o un pull a mitad de carga dejaba
+    // pintar la foto vieja sobre la nueva.
+    final activos = await clientesActivos();
+    final h = await vencenHoy(activosPre: activos);
+    final m30crudo =
+        await atrasados(masDe30: false, activosPre: activos);
     // 1.25 T09: atrasados(masDe30:false) incluye a los sin
     // pagado_hasta (nunca pagaron); aquí se separan: no son
     // «atrasados de hace X días», son otro grupo.
@@ -380,12 +436,13 @@ class _ListasScreenState extends State<ListasScreen>
         .where((c) => c['pagado_hasta'] == null)
         .toList()
       ..sort(compararPorNombre);
-    final p30 = await atrasados(masDe30: true);
-    final pv = await porVencer(dias: 3);
+    final p30 = await atrasados(masDe30: true, activosPre: activos);
+    final pv = await porVencer(dias: 3, activosPre: activos);
     // 1.25 T03: la pestaña usa la variante SIN los de hoy
     // ni los por vencer (clientesAlDia a secas es el
     // predicado de acceso y los incluye: duplicaba).
-    final ad = await clientesAlDiaPestana();
+    final ad = await clientesAlDiaPestana(activosPre: activos);
+    if (!mounted || gen != _cargaGen) return;
     // Cliente protegido (2026-10-26, Protegido 2 H6): estas listas
     // muestran teléfono y botón de WhatsApp; un no-dueño no ve
     // protegidos en ninguna.
@@ -397,35 +454,27 @@ class _ListasScreenState extends State<ListasScreen>
     // cliente de la lista de por avisar.
     final avisados =
         await LocalDb.instance.avisadosVigentesConFecha();
-    // 1.25 T46: estimados de las pestañas de atrasados,
-    // calculados sobre las listas ya sin protegidos.
+    // 1.25 T46: estimados de las pestañas de atrasados.
+    // 1.28 (M4-A2): precios una vez y tarifas resueltas EN
+    // LOTE; el estimado se deriva de los visibles en
+    // _recalcularVisibles (síncrono).
     final pr = await preciosVigentes();
-    Future<double> estimadoDe(
-            List<Map<String, dynamic>> lista) async =>
-        (await Future.wait(lista.map((c) async =>
-            (await precioCobroParaCliente(
-                    cliente: c,
-                    periodo: 'mensual',
-                    metodo: 'efectivo',
-                    precios: pr))
-                .monto))).fold<double>(0, (a, b) => a + b);
-    final estMenos = await estimadoDe(sinProtegidos(m30));
-    final estMas = await estimadoDe(sinProtegidos(p30));
-    if (mounted) {
-      setState(() {
-        _hoy = sinProtegidos(h);
-        _menos30 = sinProtegidos(m30);
-        _sinFecha = sinProtegidos(sinFecha);
-        _mas30 = sinProtegidos(p30);
-        _porVencer = sinProtegidos(pv);
-        _alDia = sinProtegidos(ad);
-        _estimadoMenos30 = estMenos;
-        _estimadoMas30 = estMas;
-        _avisadoEl = avisados;
-        _avisados = avisados.keys.toSet();
-        _recalcularVisibles();
-      });
-    }
+    final especiales = await tarifasActivasPorCliente('mensual');
+    if (!mounted || gen != _cargaGen) return;
+    setState(() {
+      _hoy = sinProtegidos(h);
+      _menos30 = sinProtegidos(m30);
+      _sinFecha = sinProtegidos(sinFecha);
+      _mas30 = sinProtegidos(p30);
+      _porVencer = sinProtegidos(pv);
+      _alDia = sinProtegidos(ad);
+      _preciosFoto = pr;
+      _especialesFoto = especiales;
+      _avisadoEl = avisados;
+      _avisados = avisados.keys.toSet();
+      _cargando = false;
+      _recalcularVisibles();
+    });
   }
 
   /// Ordena una lista según el criterio elegido (punto 26).
@@ -626,7 +675,12 @@ class _ListasScreenState extends State<ListasScreen>
           ),
           _filaVistas(),
           Expanded(
-            child: TabBarView(
+            // 1.28 (M4-A2/R1M4-M2): mientras la primera foto
+            // carga, esqueleto honesto en vez de las pestañas
+            // vacías afirmando «Todo al día».
+            child: _cargando
+                ? const SkeletonLista(items: 6)
+                : TabBarView(
               controller: _tab,
               children: [
                 _lista(_visHoy, Icons.celebration_rounded,

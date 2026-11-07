@@ -28,6 +28,9 @@ class TarjetaMedidas extends StatefulWidget {
 class _TarjetaMedidasState extends State<TarjetaMedidas> {
   List<Map<String, dynamic>> _medidas = [];
   bool _cargando = true;
+  // 1.28 (M4-A12): registro en curso — dos toques abrían
+  // dos diálogos y registraban la fila dos veces.
+  bool _registrando = false;
 
   @override
   void initState() {
@@ -50,6 +53,16 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
       PermisosEntrenador().canRecordMeasurements;
 
   Future<void> _registrar() async {
+    if (_registrando) return;
+    _registrando = true;
+    try {
+      await _registrarFlujo();
+    } finally {
+      _registrando = false;
+    }
+  }
+
+  Future<void> _registrarFlujo() async {
     final ctrls = <String, TextEditingController>{
       for (final k in kMetricasMedicion.keys) k: TextEditingController(),
     };

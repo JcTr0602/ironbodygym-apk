@@ -17,7 +17,6 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../permisos_entrenador.dart';
-import '../plus_residual.dart';
 import '../mediciones_cliente.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
@@ -31,7 +30,6 @@ import '../negocio.dart';
 import '../servicios.dart' as servicios_svc;
 import '../sync.dart';
 import '../cliente_protegido.dart';
-import '../acceso_app_cache.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
@@ -42,14 +40,13 @@ import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'estado_cuenta.dart';
 import 'diseno.dart';
+import 'ficha_acceso_app.dart';
 import 'ficha_secciones.dart';
 import 'foto_personal_ficha.dart';
 import 'fotos_progreso_nube_ficha.dart';
 import 'editor_foto.dart';
-import 'modal_pin_acceso.dart';
 import 'medidas_cliente.dart';
 import 'pestana_progreso.dart';
-import 'vista_previa_cliente.dart';
 import 'widgets.dart';
 
 /// Payload de la renovación rápida (1 mes en efectivo).
@@ -101,6 +98,33 @@ bool mostrarFotoFicha({
   return true;
 }
 
+/// 1.28 (ítem fijo «ficha perezosa»): caché de secciones de
+/// la ficha por (clave, versión). La lista de la ficha es un
+/// ListView.builder y cada sección se crea SOLO si su versión
+/// cambió; si no, se devuelve la INSTANCIA IDÉNTICA y el
+/// framework ni la visita. Así, un enriquecimiento que solo
+/// afecta a una sección (la foto que llega, el filtro del
+/// historial) no reconstruye las demás — antes la ficha era
+/// un ListView(children:) envuelto en FadeEntrada y CADA
+/// setState asíncrono recomponía la lista entera: el scroll
+/// avanzaba a tirones y regresaba (diagnóstico en
+/// investigacion_lag_scroll.md).
+class CacheSeccionesFicha {
+  final Map<String, ({Object version, Widget widget})> _cache = {};
+
+  /// Devuelve la instancia cacheada si la versión coincide
+  /// (el framework ni visita esa sección); si no, adopta y
+  /// devuelve [candidato].
+  Widget obtener(String clave, Object version, Widget candidato) {
+    final previa = _cache[clave];
+    if (previa != null && previa.version == version) return previa.widget;
+    _cache[clave] = (version: version, widget: candidato);
+    return candidato;
+  }
+
+  void limpiar() => _cache.clear();
+}
+
 class FichaScreen extends StatefulWidget {
   final int clienteId;
 
@@ -128,12 +152,14 @@ class _FichaScreenState extends State<FichaScreen> {
   // ALGÚN registro en tarifa_especial (para el fallback legacy).
   Map<String, dynamic>? _especialActiva;
   bool _tieneRegistroTarifa = false;
-  // 17/25 (1.19): Plus residual del convertido (solo dueño).
-  // null = sin lectura (sin red, sin RPC, o no dueño): sin fila.
-  ({bool activo, String? hasta})? _plusResidual;
-  // 1.25 T117 (F1-41): la consulta del Plus FALLÓ en esta
-  // visita (distinto de «no tiene Plus»): la fila lo dice.
-  bool _plusSinVerificar = false;
+  // 1.28 (ítem fijo): versión de los datos locales de la
+  // ficha. Sube en cada _cargar: es la versión base de TODAS
+  // las secciones memoizadas (ver CacheSeccionesFicha). El
+  // Plus residual y el acceso App ya NO viven aquí: son
+  // widgets con estado propio (ficha_acceso_app.dart) y sus
+  // respuestas ya no hacen setState de la pantalla entera.
+  int _datosVersion = 0;
+  final CacheSeccionesFicha _cacheSecciones = CacheSeccionesFicha();
   List<Map<String, dynamic>> _pagos = [];
   List<Map<String, dynamic>> _suplementos = [];
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
@@ -164,10 +190,6 @@ class _FichaScreenState extends State<FichaScreen> {
   // Argón Clientes #6: deuda de fiado del cliente (la ficha no
   // la mostraba en ningún lado; el Estado de cuenta sí).
   Map<String, double> _fiadoPendiente = const {};
-  // v1.3.9 (F1): estado del acceso a la App de Clientes.
-  // null = sin acceso o caché no cargado; _accesoSinConexion = true si
-  // no se pudo verificar por falta de red.
-  bool _accesoSinConexion = false;
   // v1.8.0: historial de servicios por dosis del cliente.
   List<Map<String, dynamic>> _serviciosHist = [];
   // Bloque 1: filtro de la línea de tiempo ('todo' | 'pagos' | 'ventas').
@@ -269,9 +291,11 @@ class _FichaScreenState extends State<FichaScreen> {
     if (mounted) {
       setState(() {
         _cargaLocalTerminada = true;
-        _plusResidual = null;
-        _plusSinVerificar = false;
-        _accesoSinConexion = false;
+        // 1.28 (ítem fijo): nueva foto de datos locales —
+        // todas las secciones memoizadas se recrean UNA vez
+        // con ella; los enriquecimientos posteriores ya no
+        // pasan por aquí.
+        _datosVersion++;
         _c = c;
         _pagos = pagos;
         _ultimoPagoReal = ultimoReal;
@@ -319,8 +343,9 @@ class _FichaScreenState extends State<FichaScreen> {
       });
     }
     // La ficha YA pintó con datos locales: la red enriquece
-    // en segundo plano (Plus residual y caché de accesos).
-    _enriquecerDesdeServidor(gen);
+    // en segundo plano DENTRO de cada sección (el Plus y el
+    // Acceso App son widgets con estado propio desde la
+    // 1.28: ya no hay enriquecimiento con setState global).
     // Bloque 1: abrir directo en Editar (deslizar en Buscar).
     // Post-frame: _c ya está cargado y la ficha ya se dibujó.
     // Ronda 3-9 #1 (CRÍTICO): un protegido nunca abre el editor
@@ -377,8 +402,23 @@ class _FichaScreenState extends State<FichaScreen> {
         eliminadaEnSesion:
             LocalDb.fotoEliminadaEnSesion(widget.clienteId),
       )) {
-        final gen = _fotoGen;
-        final foto = await FotoCache.instance
+        // 1.28 (M4-A7/R1M4-B5): la rama INCREMENTA la
+        // generación al arrancar. Antes la capturaba sin
+        // incrementar y una descarga de una carga anterior
+        // podía resucitar la foto vieja si foto_storage
+        // cambiaba entre cargas.
+        final gen = ++_fotoGen;
+        // 1.28 (M4-A7/R2M4-H4): si el espejo ya trae la foto
+        // recién puesta en este teléfono (foto_local, la
+        // escribe encolarFoto), se enseña ESA sin esperar a
+        // que suba y baje por sync.
+        File? foto;
+        final local = c['foto_local'] as String?;
+        if (local != null && local.isNotEmpty) {
+          final f = File(local);
+          if (await f.exists()) foto = f;
+        }
+        foto ??= await FotoCache.instance
             .obtener(c['foto_storage'] as String?);
         // Si mientras descargaba se eliminó o se puso otra foto,
         // el resultado ya es viejo: no resucitarla.
@@ -453,38 +493,11 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
-  Future<void> _enriquecerDesdeServidor(int gen) async {
-    if (!AuthService().isOwner) return;
-    // Plus residual (solo dueño; la RPC devuelve
-    // {activo:false} a quien no lo sea, pero ni se llama).
-    try {
-      final res = await Supabase.instance.client
-          .rpc(
-            'cliente_plus_residual_staff',
-            params: {'p_cliente_id': widget.clienteId},
-          )
-          .timeout(const Duration(seconds: 8));
-      if (mounted && gen == _cargaGen) {
-        setState(() => _plusResidual = plusResidualDe(res));
-      }
-    } catch (_) {
-      // 1.25 T117 (F1-41): sin red o sin la RPC, la fila
-      // Plus ya no «no existe»: la Membresía enseña «Sin
-      // verificar en esta visita» — no verificar no es lo
-      // mismo que no tener Plus.
-      if (mounted && gen == _cargaGen) {
-        setState(() => _plusSinVerificar = true);
-      }
-    }
-    // Caché de accesos (solo si aún no cargó en la sesión;
-    // cargar() ya trae su propio timeout).
-    if (!AccesoAppCache.instance.cargado) {
-      final ok = await AccesoAppCache.instance.cargar();
-      if (mounted && gen == _cargaGen && !ok) {
-        setState(() => _accesoSinConexion = true);
-      }
-    }
-  }
+  // 1.28 (ítem fijo): _enriquecerDesdeServidor YA NO EXISTE.
+  // El Plus residual y el caché de accesos se consultan
+  // dentro de sus propios widgets (ficha_acceso_app.dart):
+  // sus respuestas repintan solo su sección, no la ficha
+  // entera.
 
   /// Regalo de cumpleaños del año en curso (Argón spec 2): candado anual.
   /// Retorna {'anterior': ..., 'nuevo': ...} o null si no se ha regalado.
@@ -750,15 +763,6 @@ class _FichaScreenState extends State<FichaScreen> {
     _cargar();
   }
 
-  /// 17/25 (1.19): texto de la fila «Plus» de Membresía.
-  /// Null = no mostrar la fila.
-  String? _textoPlus() {
-    final p = _plusResidual;
-    if (p == null) return null;
-    return textoPlusResidual(
-        activo: p.activo, hasta: p.hasta, hoyIso: hoyHabanaIso());
-  }
-
   /// v1.10.0 (Bloque 2, D6): texto de la fila «Tarifa especial» de
   /// Membresía. Null = no mostrar la fila.
   String? _textoTarifaEspecial(Map<String, dynamic> c) {
@@ -784,7 +788,26 @@ class _FichaScreenState extends State<FichaScreen> {
     return null;
   }
 
+  /// 1.28 (M4-A5/R2M4-H7): guarda COMPARTIDA de los dos
+  /// caminos que abren un diálogo de cobro (_pagar y
+  /// _renovar). La guarda vieja (_cobroEnCurso) vivía DENTRO
+  /// de cobrarConPreviewYRecibo: el diálogo de _pagar y los
+  /// awaits previos de _renovar quedaban FUERA, y dos toques
+  /// apilaban dos diálogos de cobro. Patrón de _regaloEnCurso:
+  /// bandera síncrona antes del primer await, try/finally.
+  bool _cobroDialogoEnCurso = false;
+
   Future<void> _pagar({bool repetir = false}) async {
+    if (_cobroDialogoEnCurso) return;
+    _cobroDialogoEnCurso = true;
+    try {
+      await _pagarFlujo(repetir: repetir);
+    } finally {
+      _cobroDialogoEnCurso = false;
+    }
+  }
+
+  Future<void> _pagarFlujo({bool repetir = false}) async {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: permiso operativo al tocar.
@@ -1079,7 +1102,11 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// "2026-12-05" → "5 de diciembre".
   String _fmtFechaLarga(String? iso) {
-    if (iso == null || iso.length < 10) return '—';
+    // 1.28 (M4-A3): parser estricto — antes p[1]/p[2] tras un
+    // split('-') lanzaban RangeError con una fecha legada
+    // mal formada ('2026/11/05') en pleno build.
+    final d = fechaIsoEstricta(iso);
+    if (d == null) return '—';
     const meses = [
       '',
       'enero',
@@ -1095,9 +1122,7 @@ class _FichaScreenState extends State<FichaScreen> {
       'noviembre',
       'diciembre'
     ];
-    final p = iso.substring(0, 10).split('-');
-    final m = int.tryParse(p[1]) ?? 0;
-    return '${int.tryParse(p[2]) ?? p[2]} de ${m >= 1 && m <= 12 ? meses[m] : p[1]}';
+    return '${d.day} de ${meses[d.month]}';
   }
 
   /// Normaliza un teléfono cubano para wa.me (Argón spec 3).
@@ -1257,7 +1282,14 @@ class _FichaScreenState extends State<FichaScreen> {
       // "TextEditingController was used after being disposed".
       return;
     }
-    final tel = telefono.text.trim();
+    // 1.28 (M4-A17/R3M4-H8): el teléfono se limpia a DÍGITOS
+    // antes de validar y guardar. El formatter digitsOnly
+    // solo corre al TECLEAR: el valor inicial legado o el de
+    // un contacto elegido entraban con espacios («5812
+    // 3456»), pasaban la validación (que limpia) y se
+    // GUARDABAN sucios. La comparación de cambios también
+    // usa el valor limpio.
+    final tel = telefono.text.replaceAll(RegExp(r'[^0-9]'), '');
     final car = carnet.text.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
       mostrarSnack(context, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
@@ -1807,6 +1839,19 @@ class _FichaScreenState extends State<FichaScreen> {
   /// pasa por preview + recibo con deshacer como todo cobro, y
   /// bloquea Cuenta a la Casa igual que _pagar.
   Future<void> _renovar() async {
+    // 1.28 (M4-A5/R2M4-H7): misma guarda compartida que
+    // _pagar — renovar también termina en un diálogo de
+    // cobro y sus awaits previos quedaban desprotegidos.
+    if (_cobroDialogoEnCurso) return;
+    _cobroDialogoEnCurso = true;
+    try {
+      await _renovarFlujo();
+    } finally {
+      _cobroDialogoEnCurso = false;
+    }
+  }
+
+  Future<void> _renovarFlujo() async {
     final c = _c;
     if (c == null) return;
     // 1.24 Bloque 3: permiso operativo al tocar.
@@ -2215,7 +2260,9 @@ class _FichaScreenState extends State<FichaScreen> {
                     : dias <= 7
                         ? AppColores.alerta
                         : AppColores.exito;
-    final nombre = c == null ? '…' : '${c['nombre']}';
+    // 1.28 (M4-A17/R3M4-H10): una fila sin nombre se pinta
+    // «Sin nombre», nunca el literal «null».
+    final nombre = c == null ? '…' : nombreVisibleCliente(c);
     // Cliente protegido (2026-10-26, diseño Argón): el entrenador
     // solo ve foto y nombre. Sin datos, sin botones, sin panel y
     // sin botón Cobrar abajo. Ver la foto en grande sí está
@@ -2261,6 +2308,25 @@ class _FichaScreenState extends State<FichaScreen> {
         ),
       );
     }
+    // 1.28 (ítem fijo «ficha perezosa»): las secciones se
+    // calculan UNA vez por build como (clave, versión,
+    // widget); la lista perezosa de abajo solo CONSTRUYE las
+    // visibles y la caché devuelve la instancia idéntica de
+    // las que no cambiaron de versión.
+    final items = c == null
+        ? const <({String clave, Object version, Widget widget})>[]
+        : _itemsFicha(
+            context,
+            c: c,
+            esCasa: esCasa,
+            congelado: congelado,
+            vencido: vencido,
+            dias: dias,
+            colorMarco: colorMarco,
+            nombre: nombre,
+            protegido: protegido,
+          );
+
     return Scaffold(
       appBar: appBarIron(
         context,
@@ -2373,12 +2439,46 @@ class _FichaScreenState extends State<FichaScreen> {
                     child: CircularProgressIndicator())
                 : c == null
                     ? _clienteNoEncontrado()
-                    : FadeEntrada(
-                    child: ListView(
+                    : ListView.builder(
                     padding: const EdgeInsets.all(
                         AppEspacio.lg),
-                    children: [
-                      CabeceraFicha(
+                    itemCount: items.length,
+                    itemBuilder: (ctx, i) {
+                      final it = items[i];
+                      return RepaintBoundary(
+                        key: ValueKey('ficha_${it.clave}'),
+                        child: _cacheSecciones.obtener(
+                            it.clave, it.version, it.widget),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  /// 1.28 (ítem fijo «ficha perezosa»): las secciones de la
+  /// ficha, VERBATIM de la lista histórica — lo único que
+  /// cambia es CÓMO se construye la lista (ver _itemsFicha),
+  /// no el contenido ni el orden. Los enriquecimientos que
+  /// antes hacían setState de pantalla (Plus, Acceso App)
+  /// ahora son widgets con estado propio dentro de la lista.
+  List<Widget> _seccionesCrudas(
+    BuildContext context, {
+    required Map<String, dynamic> c,
+    required bool esCasa,
+    required bool congelado,
+    required bool vencido,
+    required int? dias,
+    required Color colorMarco,
+    required String nombre,
+    required bool protegido,
+  }) {
+    return [
+                      FadeEntrada(
+                        child: CabeceraFicha(
                         nombre: nombre,
                         foto: _foto,
                         colorMarco: colorMarco,
@@ -2413,6 +2513,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                     '${_c?['pagado_hasta'] ?? ''}',
                               )?.frac,
                         periodoPausado: congelado,
+                        ),
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
@@ -2669,15 +2770,14 @@ class _FichaScreenState extends State<FichaScreen> {
                               FilaInfoFicha(icono: Icons.local_offer_rounded, etiqueta: 'Tarifa especial', valor: _textoTarifaEspecial(c)!),
                             // 17/25: Plus residual del convertido
                             // (solo dueño; sin Plus no hay fila).
-                            if (_textoPlus() != null)
-                              FilaInfoFicha(icono: Icons.star_rounded, etiqueta: 'Plus', valor: _textoPlus()!)
-                            // 1.25 T117 (F1-41): la consulta
-                            // del Plus falló en esta visita:
-                            // la fila lo dice en vez de no
-                            // existir.
-                            else if (_plusSinVerificar &&
-                                AuthService().isOwner)
-                              const FilaInfoFicha(icono: Icons.star_rounded, etiqueta: 'Plus', valor: 'Sin verificar en esta visita'),
+                            // 17/25 + 1.28 (ítem fijo): la fila
+                            // Plus es un widget con estado
+                            // propio (FilaPlusResidualFicha):
+                            // consulta el residual y se repinta
+                            // sola, sin reconstruir la ficha.
+                            if (AuthService().isOwner)
+                              FilaPlusResidualFicha(
+                                  clienteId: widget.clienteId),
                             FilaInfoFicha(icono: Icons.date_range_rounded, etiqueta: 'Inscripción', valor: fmtFecha(c[
                                         'fecha_inscripcion']
                                     as String?)),
@@ -2784,7 +2884,12 @@ class _FichaScreenState extends State<FichaScreen> {
                       // v1.3.9 Sprint 1 (#14): también si tiene permiso can_generate_pin.
                       if (AuthService().isOwner ||
                           PermisosEntrenador().canGeneratePin)
-                        _seccionAccesoApp(),
+                        SeccionAccesoAppFicha(
+                          clienteId: widget.clienteId,
+                          nombreCliente: nombre,
+                          telefonoEfectivoWa:
+                              _telefonoEfectivoWa(c),
+                        ),
                       // Etapa 4 · F3: tarjeta «Acciones» (antes
                       // botones sueltos): mismas acciones, mismas
                       // condiciones y mismos callbacks.
@@ -3010,13 +3115,69 @@ class _FichaScreenState extends State<FichaScreen> {
                             height: AppEspacio.md),
                       const SizedBox(
                           height: AppEspacio.lg),
-                    ],
-                    ),
-                  ),
-          ),
-        ],
-      ),
+    ];
+  }
+
+  /// 1.28 (ítem fijo): empareja cada sección con su clave
+  /// estable y su versión. La clave es el tipo del widget +
+  /// su ordinal entre los de su tipo (estable mientras la
+  /// composición no cambie; y si la composición cambia es
+  /// porque _cargar subió _datosVersion y TODAS las versiones
+  /// cambian a la vez). La versión base lleva la foto de
+  /// datos y el brillo del tema (Gestión puede cambiar de
+  /// tema en caliente y las secciones hornean colores al
+  /// construirse); la cabecera y la foto personal suman la
+  /// identidad de _foto, y el historial el filtro vigente.
+  List<({String clave, Object version, Widget widget})> _itemsFicha(
+    BuildContext context, {
+    required Map<String, dynamic> c,
+    required bool esCasa,
+    required bool congelado,
+    required bool vencido,
+    required int? dias,
+    required Color colorMarco,
+    required String nombre,
+    required bool protegido,
+  }) {
+    final crudos = _seccionesCrudas(
+      context,
+      c: c,
+      esCasa: esCasa,
+      congelado: congelado,
+      vencido: vencido,
+      dias: dias,
+      colorMarco: colorMarco,
+      nombre: nombre,
+      protegido: protegido,
     );
+    final versionBase =
+        Object.hash(_datosVersion, Theme.of(context).brightness);
+    final versionFoto =
+        Object.hash(versionBase, identityHashCode(_foto));
+    final conteo = <String, int>{};
+    return [
+      for (final w in crudos)
+        (
+          clave: _claveSeccion(w, conteo),
+          version: _versionSeccion(w, versionBase, versionFoto),
+          widget: w,
+        ),
+    ];
+  }
+
+  String _claveSeccion(Widget w, Map<String, int> conteo) {
+    final tipo = w.runtimeType.toString();
+    final n = (conteo[tipo] ?? 0) + 1;
+    conteo[tipo] = n;
+    return '${tipo}_$n';
+  }
+
+  Object _versionSeccion(Widget w, Object versionBase, Object versionFoto) {
+    if (w is FadeEntrada || w is SeccionFotoPersonal) return versionFoto;
+    if (w is TarjetaHistorialFicha) {
+      return Object.hash(versionBase, _filtroHistorial);
+    }
+    return versionBase;
   }
 
   /// 1.25 T117 (F1-44): «5 de diciembre» desde el carnet,
@@ -3099,292 +3260,11 @@ class _FichaScreenState extends State<FichaScreen> {
   // ============================================================
   // v1.3.9 (F1): Acceso a la App de Clientes
   // ============================================================
-
-  /// Sección "Acceso App" en la ficha (solo dueño).
-  /// 4 estados: sin acceso, activo, revocado, bloqueado.
-  Widget _seccionAccesoApp() {
-    final acceso =
-        AccesoAppCache.instance.obtener(widget.clienteId);
-
-    Widget contenido;
-    if (_accesoSinConexion && !AccesoAppCache.instance.cargado) {
-      contenido = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-              'Sin conexión para verificar acceso.',
-              style: AppTexto.secundario),
-          const SizedBox(height: AppEspacio.sm),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Reintentar'),
-            onPressed: _reintentarCargaAcceso,
-          ),
-        ],
-      );
-    } else if (acceso == null) {
-      // Sin acceso.
-      contenido = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-              'Este cliente aún no tiene acceso a la app.',
-              style: AppTexto.secundario),
-          const SizedBox(height: AppEspacio.sm),
-          FilledButton.icon(
-            icon: const Icon(Icons.key_rounded, size: 18),
-            label: const Text('Generar PIN para App'),
-            onPressed: () => _generarPin(esRegeneracion: false),
-          ),
-        ],
-      );
-    } else if (!acceso.activo) {
-      // Revocado.
-      contenido = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 1.25 T117 (F1-46): chip semántico con tokens,
-          // fuera los Colors crudos por rama.
-          const ChipEstado.semantico(
-            texto: 'Revocado',
-            significado: SignificadoChip.neutral,
-            icono: Icons.block_rounded,
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          FilledButton.icon(
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Reactivar / Generar PIN'),
-            onPressed: () => _generarPin(esRegeneracion: true),
-          ),
-        ],
-      );
-    } else if (acceso.estaBloqueado) {
-      // Bloqueado por intentos fallidos.
-      contenido = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const ChipEstado.semantico(
-            texto: 'Bloqueado',
-            significado: SignificadoChip.alerta,
-            icono: Icons.lock_rounded,
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          Text(
-              'Intentos fallidos: ${acceso.intentosFallidos}',
-              style: AppTexto.secundario),
-          const SizedBox(height: AppEspacio.sm),
-          FilledButton.icon(
-            icon: const Icon(Icons.lock_open_rounded, size: 18),
-            label: const Text('Desbloquear (Nuevo PIN)'),
-            onPressed: () => _generarPin(esRegeneracion: true),
-          ),
-        ],
-      );
-    } else {
-      // Activo.
-      final ultimo = acceso.ultimoAccesoEn == null
-          ? 'Nunca ha entrado'
-          : 'Último acceso: ${fmtFecha(acceso.ultimoAccesoEn!.toIso8601String().substring(0, 10))}';
-      contenido = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const ChipEstado.semantico(
-            texto: 'Activo',
-            significado: SignificadoChip.exito,
-            icono: Icons.check_circle_rounded,
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          Text(ultimo, style: AppTexto.secundario),
-          const SizedBox(height: AppEspacio.sm),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('Regenerar PIN'),
-                  onPressed: () =>
-                      _confirmarRegenerar(acceso),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.block_rounded,
-                      size: 18, color: AppColores.error),
-                  label: const Text('Revocar',
-                      style: TextStyle(color: AppColores.error)),
-                  onPressed: () =>
-                      _confirmarRevocar(acceso),
-                ),
-              ),
-            ],
-          ),
-        ],
-      );
-    }
-
-    // Etapa 4 · F3: «Vista previa» y «Avisar» van DENTRO de la
-    // tarjeta, al final y FUERA de las ramas de estado: se siguen
-    // mostrando exactamente en los estados de hoy (v1.3.9: la
-    // vista previa en TODOS, el RPC no requiere PIN activo).
-    return Column(
-      children: [
-        Tarjeta(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1.25 T117 (F1-46): el título «Acceso App» se
-              // pinta UNA sola vez aquí; antes lo repetía cada
-              // una de las 5 ramas de estado.
-              const Text('Acceso App', style: AppTexto.titulo),
-              const SizedBox(height: AppEspacio.sm),
-              contenido,
-              const SizedBox(height: AppEspacio.md),
-              const Divider(height: 1),
-              const SizedBox(height: AppEspacio.md),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.preview_rounded, size: 18),
-                  label: const Text('Vista previa App'),
-                  onPressed: _abrirVistaPrevia,
-                ),
-              ),
-              // Bloque 1 (decisión de Jc, 2026-10-24): el botón
-              // «Avisar por WhatsApp» se quitó de la ficha. El
-              // teléfono tocable sigue abriendo WhatsApp, y los
-              // avisos viven en «Avisos WhatsApp de hoy».
-            ],
-          ),
-        ),
-        const SizedBox(height: AppEspacio.md),
-      ],
-    );
-  }
-
-  // Bloque 1 (Jc, 2026-10-24): _mostrarAvisosWhatsApp y
-  // _limpiarTelefonoCuba se eliminaron con el botón «Avisar».
-
-  Future<void> _reintentarCargaAcceso() async {
-    final ok = await AccesoAppCache.instance.cargar();
-    if (mounted) {
-      setState(() => _accesoSinConexion = !ok);
-    }
-  }
-
-  Future<void> _confirmarRegenerar(AccesoCliente acceso) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Regenerar PIN'),
-        content: const Text(
-            'Se invalidará el PIN anterior y se cerrará la sesión del cliente en su app. ¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Regenerar')),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      _generarPin(esRegeneracion: true);
-    }
-  }
-
-  Future<void> _confirmarRevocar(AccesoCliente acceso) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Revocar acceso'),
-        content: Text(
-            'Se desactivará el acceso de ${acceso.nombre} a la app y se cerrará su sesión. ¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              style: FilledButton.styleFrom(
-                  backgroundColor: AppColores.error),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Revocar')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    try {
-      await Supabase.instance.client
-          .rpc('revocar_acceso_cliente', params: {
-            'p_cliente_id': widget.clienteId,
-          })
-          // 1.24 Bloque 4: timeout de escritura (12 s).
-          .timeout(const Duration(seconds: 12));
-      // v1.3.9 (ajuste Argón): recargar en vez de eliminar del caché —
-      // el servidor pone activo=false, no borra el registro.
-      await AccesoAppCache.instance.cargar();
-      if (mounted) {
-        setState(() {});
-        mostrarSnack(context, 'Acceso revocado', significado: SignificadoChip.exito);
-      }
-    } catch (e) {
-      if (mounted) {
-        mostrarSnack(context, 'Error al revocar: $e', significado: SignificadoChip.error);
-      }
-    }
-  }
-
-  // 1.26 (auditoría de botones, BAJA): guarda del PIN —
-  // un doble toque lanzaba dos RPC y el segundo PIN
-  // invalidaba al primero, pudiendo compartirse el
-  // inválido, con dos modales apilados.
-  bool _generandoPin = false;
-
-  /// Genera (o regenera) el PIN vía RPC y muestra el modal.
-  Future<void> _generarPin({required bool esRegeneracion}) async {
-    if (_generandoPin) return;
-    _generandoPin = true;
-    final nombre = '${_c?['nombre'] ?? 'Cliente'}';
-    final telefono = '${_c?['telefono'] ?? ''}';
-    try {
-      final res = await Supabase.instance.client
-          .rpc('generar_acceso_cliente', params: {
-            'p_cliente_id': widget.clienteId,
-            'p_creado_por': AuthService().username,
-          })
-          // 1.24 Bloque 4: timeout de escritura (12 s).
-          .timeout(const Duration(seconds: 12));
-      final data = Map<String, dynamic>.from(res as Map);
-      final pin = '${data['pin_temporal'] ?? ''}';
-      if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
-      // Invalidación inmediata: recargar el caché para reflejar el cambio.
-      await AccesoAppCache.instance.cargar();
-      if (mounted) {
-        setState(() => _accesoSinConexion = false);
-        mostrarModalPin(context, pin, telefono, nombre);
-      }
-    } catch (e) {
-      if (mounted) {
-        mostrarSnack(context, 'Error al generar PIN: $e', significado: SignificadoChip.error);
-      }
-    } finally {
-      _generandoPin = false;
-    }
-  }
-
-  /// Abre la vista previa de la app del cliente (F6).
-  void _abrirVistaPrevia() {
-    Navigator.of(context).push(
-      RutaIron(
-        builder: (_) => VistaPreviaClienteScreen(
-          clienteId: widget.clienteId,
-          nombreCliente: '${_c?['nombre'] ?? ''}',
-        ),
-      ),
-    );
-  }
+  // 1.28 (ítem fijo + A8): la sección vive ahora en
+  // ficha_acceso_app.dart como SeccionAccesoAppFicha, con su
+  // carga y sus acciones locales. Aquí ya no queda nada de
+  // ella: ni su setState global ni sus ramas que mentían
+  // («sin acceso» mientras el caché aún cargaba).
 
   /// Resumen 360: totales del cliente.
   /// Bloque 1: línea de tiempo única de la ficha (pagos + ventas de

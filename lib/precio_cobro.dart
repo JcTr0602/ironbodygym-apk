@@ -240,6 +240,33 @@ Future<PrecioCobro> precioCobroParaCliente({
   );
 }
 
+/// 1.28 (M4-A2): gemela SINcrónica de [precioCobroParaCliente]
+/// para listas: la tarifa especial llega YA resuelta en lote
+/// ([especial], vía `tarifasActivasPorCliente`) y los precios
+/// vigentes se cargan una sola vez. Misma cascada de precio,
+/// cero consultas por cliente.
+PrecioCobro precioCobroConEspecial({
+  required Map<String, dynamic> cliente,
+  required String periodo,
+  required String metodo,
+  required Map<String, double> precios,
+  Map<String, dynamic>? especial,
+  double? montoOferta,
+}) {
+  final esCasa = cliente['cuenta_casa'] == 1 || cliente['cuenta_casa'] == true;
+  final menor = esMenor(cliente['carnet']?.toString());
+  return calcularPrecioCobro(
+    periodo: periodo,
+    metodo: metodo,
+    esCasa: esCasa,
+    esMenor: menor,
+    precios: precios,
+    especial: especial,
+    montoOferta: montoOferta,
+    hoyHabana: hoyHabanaIso(),
+  );
+}
+
 /// --- Split B1 (Argón ajuste 4): payloads por dominio -----------.
 ///
 /// BÁSICO (op 'editar_cliente', la de siempre, pero YA sin campos
@@ -260,7 +287,13 @@ Map<String, dynamic> payloadBasico({
 }) {
   final p = <String, dynamic>{'cliente_id': clienteId};
   if (nombre != null) p['nombre'] = nombre;
-  if (telefono != null) p['telefono'] = telefono;
+  // 1.28 (M4-A17): normalización EN LA FRONTERA — el teléfono
+  // viaja SIEMPRE como dígitos limpios, venga de donde venga
+  // (un contacto elegido o un valor legado con espacios no
+  // puede colarse a la op ni al espejo).
+  if (telefono != null) {
+    p['telefono'] = telefono.replaceAll(RegExp(r'[^0-9]'), '');
+  }
   if (carnet != null) p['carnet'] = carnet;
   if (sexo != null) p['sexo'] = sexo;
   if (notas != null) p['notas'] = notas;

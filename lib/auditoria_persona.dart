@@ -42,6 +42,26 @@ int? _comoEntero(dynamic v) {
   return null;
 }
 
+/// 1.28 (M4-A4/B14 + R3M4-H9): tolerancia de tipos — un
+/// flag que llega como bool o un número como texto NO puede
+/// tumbar la auditoría a pantalla en blanco (los casts duros
+/// `as num?`/`as int?` lanzaban con datos sucios del espejo).
+double _numTolerante(dynamic v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v.trim()) ?? 0;
+  return 0;
+}
+
+bool _flagUno(dynamic v) => v == 1 || v == true || v == '1';
+
+/// Total de una venta de suplementos con la regla histórica:
+/// la columna `total` si la fila la trae; si no, precio ×
+/// cantidad. Todo tolerante a tipos.
+double _totalVentaSuplemento(Map<String, dynamic> v) {
+  if (v['total'] != null) return _numTolerante(v['total']);
+  return _numTolerante(v['precio']) * _numTolerante(v['cantidad']);
+}
+
 /// Resolver P4: ¿la fila pertenece a la persona?
 /// - Si la fila trae id de usuario (uuid) → decide el uuid.
 /// - Si trae telegram_id → decide el telegram_id.
@@ -128,13 +148,18 @@ List<TurnoAuditado> auditarTurnosPersona({
       (id: u.id, nombre: u.nombre, activo: u.activo),
   ];
   final out = <TurnoAuditado>[];
-  var dia = DateTime(desde.year, desde.month, desde.day);
-  final ultimo = DateTime(hasta.year, hasta.month, hasta.day);
+  // 1.28 (M4-A4/R1M4-A3): la iteración del período va en
+  // UTC, como _diasDelPeriodo — con DateTime local + add de
+  // 24 h, el día del cambio de hora de primavera quedaba
+  // FUERA del período (amanecía a la 01:00 y `ultimo` a las
+  // 00:00 lo daba por pasado) y el de otoño se procesaba
+  // DOS veces con sus horas sumadas doble.
+  var dia = DateTime.utc(desde.year, desde.month, desde.day);
+  final ultimo = DateTime.utc(hasta.year, hasta.month, hasta.day);
   while (!dia.isAfter(ultimo)) {
     final fechaIso = isoFechaTurno(dia);
     for (final franja in const ['manana', 'tarde']) {
       final ventana = ventanaFranja(dia, franja);
-      if (ventana == null) continue;
       final progNombre = programadoEn(
           fecha: dia,
           franja: franja,
@@ -154,37 +179,71 @@ List<TurnoAuditado> auditarTurnosPersona({
               filaEsDePersona(a, persona))
             a,
       ];
-      final cierreSuyo = cierres.where((c) {
-        return '${c['fecha'] ?? ''}' == fechaIso &&
-            '${c['turno'] ?? ''}'.toLowerCase().contains(
-                franja == 'manana' ? 'ma' : 'tarde') &&
-            filaEsDePersona(c, persona);
-      }).firstOrNull;
+      final cierresSuyos = [
+        for (final c in cierres)
+          if ('${c['fecha'] ?? ''}' == fechaIso &&
+              '${c['turno'] ?? ''}'.toLowerCase().contains(
+                  franja == 'manana' ? 'ma' : 'tarde') &&
+              filaEsDePersona(c, persona))
+            c,
+      ];
+      // 1.28 (M4-A4/M15): antes la franja sin ventana se
+      // saltaba ANTES de mirar las aperturas — un turno REAL
+      // de domingo o sábado tarde no contaba ni como día
+      // trabajado. Ahora: sin ventana y sin actividad real
+      // no hay nada que auditar; con apertura real, el turno
+      // entra (su tardanza queda null: no hay ventana contra
+      // la que medirla).
       if (suyas.isEmpty && !eraSuyo) continue;
       final ap = suyas.isEmpty ? null : suyas.first;
+      // 1.28 (M4-A4/B15): el cierre que CORRESPONDE a la
+      // apertura elegida (turno_id exacto, o fecha+franja+
+      // actor), no «el primero que aparezca»; si ninguno
+      // corresponde, el primero, como antes.
+      Map<String, dynamic>? cierreSuyo;
+      if (cierresSuyos.isNotEmpty) {
+        cierreSuyo = ap == null
+            ? cierresSuyos.first
+            : (cierresSuyos
+                    .where((c) => cierreCorrespondeApertura(c, ap))
+                    .firstOrNull ??
+                cierresSuyos.first);
+      }
       final aperturaEn = _instante(ap?['hora_apertura']);
       int? tardanza;
-      if (aperturaEn != null) {
+      if (aperturaEn != null && ventana != null) {
         final inicio = DateTime(dia.year, dia.month, dia.day)
             .add(Duration(minutes: ventana.inicio));
         final dif = aperturaEn.difference(inicio).inMinutes;
         tardanza = dif > 0 ? dif : 0;
       }
       final cierreEn = _instante(cierreSuyo?['cerrado_en']);
+      final duracionCruda =
+          (aperturaEn != null && cierreEn != null)
+              ? cierreEn.difference(aperturaEn).inMinutes
+              : null;
       out.add(TurnoAuditado(
         fecha: dia,
         franja: franja,
         eraSuyo: eraSuyo,
         aperturaEn: aperturaEn,
         tardanzaMin: aperturaEn == null ? null : tardanza,
-        noApertura: eraSuyo && suyas.isEmpty,
+        // Sin ventana no se juzga la NO apertura (la franja
+        // no opera ese día); con ventana, como siempre.
+        noApertura:
+            ventana != null && eraSuyo && suyas.isEmpty,
         cubrioFueraDePlan: !eraSuyo && suyas.isNotEmpty,
         cierreEn: cierreEn,
-        duracionMin: (aperturaEn != null && cierreEn != null)
-            ? cierreEn.difference(aperturaEn).inMinutes
-            : null,
-        diferenciaArqueo:
-            (cierreSuyo?['diferencia'] as num?)?.toDouble(),
+        // 1.28 (M4-A4/R3M4-H9): suelo 0 — un cierre anterior
+        // a la apertura (datos sucios) daba duración
+        // NEGATIVA que marcaba «corto» falso y restaba
+        // horas del resumen.
+        duracionMin: duracionCruda == null
+            ? null
+            : (duracionCruda < 0 ? 0 : duracionCruda),
+        diferenciaArqueo: cierreSuyo == null
+            ? null
+            : _numTolerante(cierreSuyo['diferencia']),
       ));
     }
     dia = dia.add(const Duration(days: 1));
@@ -239,7 +298,7 @@ DineroAuditado auditarDineroPersona({
   for (final p in pagos) {
     if (!_enPeriodo(p, desdeIso, hastaIso)) continue;
     if (!filaEsDePersona(p, persona)) continue;
-    final monto = (p['monto'] as num?)?.toDouble() ?? 0;
+    final monto = _numTolerante(p['monto']);
     d.pagosMes++;
     if ('${p['metodo']}' == 'transferencia') {
       d.mensualTransferencia += monto;
@@ -247,7 +306,7 @@ DineroAuditado auditarDineroPersona({
       d.mensualEfectivo += monto;
       // «Pendiente a entregar»: solo el efectivo (las
       // transferencias van directo a la cuenta del dueño).
-      if ((p['entregado'] as int? ?? 0) == 1) {
+      if (_flagUno(p['entregado'])) {
         d.entregadoConfirmado += monto;
       } else {
         d.pendienteGenerado += monto;
@@ -258,7 +317,7 @@ DineroAuditado auditarDineroPersona({
     if (!_enPeriodo(p, desdeIso, hastaIso)) continue;
     if (!filaEsDePersona(p, persona)) continue;
     d.pagosDiarios++;
-    d.diarioTotal += (p['total'] as num?)?.toDouble() ?? 0;
+    d.diarioTotal += _numTolerante(p['total']);
   }
   for (final v in ventasSuplementos) {
     if (!_enPeriodo(v, desdeIso, hastaIso)) continue;
@@ -267,38 +326,30 @@ DineroAuditado auditarDineroPersona({
     // es de servicio_ventas); solo CUP; anuladas fuera por estado
     // o por las claves anulada/anulado.
     if ('${v['estado'] ?? ''}' == 'anulada') continue;
-    if ((v['anulada'] as num?)?.toInt() == 1 ||
-        (v['anulado'] as num?)?.toInt() == 1 ||
-        v['anulada'] == true ||
-        v['anulado'] == true) {
+    if (_flagUno(v['anulada']) || _flagUno(v['anulado'])) {
       continue;
     }
-    if ((v['moneda'] as String?) != null &&
-        (v['moneda'] as String?) != 'CUP') {
+    final moneda = '${v['moneda'] ?? ''}';
+    if (moneda.isNotEmpty && moneda != 'CUP') {
       continue;
     }
     d.ventasSuplementos++;
-    d.suplementosTotal +=
-        ((v['total'] as num?)?.toDouble() ??
-                ((v['precio'] as num?)?.toDouble() ?? 0) *
-                    ((v['cantidad'] as num?)?.toDouble() ?? 0));
+    d.suplementosTotal += _totalVentaSuplemento(v);
   }
   for (final v in ventasServicios) {
     if (!_enPeriodo(v, desdeIso, hastaIso)) continue;
     if (!filaEsDePersona(v, persona)) continue;
-    if ((v['casa'] as int? ?? 0) == 1) continue; // Casa no es dinero
-    final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
+    if (_flagUno(v['casa'])) continue; // Casa no es dinero
+    final cant = _numTolerante(v['cantidad']);
     d.ventasDosis += cant >= 0 ? 1 : 0;
-    d.dosisTotal +=
-        ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant;
-    d.comisionDosis +=
-        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+    d.dosisTotal += _numTolerante(v['precio_unitario']) * cant;
+    d.comisionDosis += _numTolerante(v['comision_unitaria']) * cant;
   }
   for (final c in cierres) {
     if (!_enPeriodo(c, desdeIso, hastaIso)) continue;
     if (!filaEsDePersona(c, persona)) continue;
     d.arqueos++;
-    d.diferenciaArqueos += (c['diferencia'] as num?)?.toDouble() ?? 0;
+    d.diferenciaArqueos += _numTolerante(c['diferencia']);
   }
   return d;
 }
@@ -431,33 +482,26 @@ List<Map<String, dynamic>> serieCobrosPorDia({
   }
 
   for (final p in pagos) {
-    suma(p, (p['monto'] as num?)?.toDouble() ?? 0);
+    suma(p, _numTolerante(p['monto']));
   }
   for (final p in pagosDiarios) {
-    suma(p, (p['total'] as num?)?.toDouble() ?? 0);
+    suma(p, _numTolerante(p['total']));
   }
   for (final v in ventasSuplementos) {
     if ('${v['estado'] ?? ''}' == 'anulada') continue;
-    if ((v['anulada'] as num?)?.toInt() == 1 ||
-        (v['anulado'] as num?)?.toInt() == 1 ||
-        v['anulada'] == true ||
-        v['anulado'] == true) {
+    if (_flagUno(v['anulada']) || _flagUno(v['anulado'])) {
       continue;
     }
-    if ((v['moneda'] as String?) != null &&
-        (v['moneda'] as String?) != 'CUP') {
+    final moneda = '${v['moneda'] ?? ''}';
+    if (moneda.isNotEmpty && moneda != 'CUP') {
       continue;
     }
-    suma(
-        v,
-        ((v['total'] as num?)?.toDouble() ??
-            ((v['precio'] as num?)?.toDouble() ?? 0) *
-                ((v['cantidad'] as num?)?.toDouble() ?? 0)));
+    suma(v, _totalVentaSuplemento(v));
   }
   for (final v in ventasServicios) {
-    if ((v['casa'] as int? ?? 0) == 1) continue;
-    final cant = (v['cantidad'] as num?)?.toDouble() ?? 0;
-    suma(v, ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant);
+    if (_flagUno(v['casa'])) continue;
+    final cant = _numTolerante(v['cantidad']);
+    suma(v, _numTolerante(v['precio_unitario']) * cant);
   }
   for (final d in dias) {
     d['total'] = (sumas['${d['fecha']}'] ?? 0).round();

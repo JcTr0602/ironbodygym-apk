@@ -344,6 +344,32 @@ Future<Map<String, dynamic>?> tarifaActivaPara(
   return activas.first;
 }
 
+/// 1.28 (M4-A2/R3M4-H5): la tarifa activa de MUCHOS clientes
+/// de una vez. `tarifaActivaPara` recarga TODAS las tarifas
+/// fusionadas en cada llamada: resolver los precios de una
+/// lista cliente a cliente eran N lecturas completas. Aquí la
+/// fusión se lee UNA vez y se reparte por cliente con la
+/// misma regla (activa del período; si hay dos, la más
+/// reciente). Devuelve solo los clientes CON tarifa.
+Future<Map<int, Map<String, dynamic>>> tarifasActivasPorCliente(
+    String periodo) async {
+  final todas = await _todasFusionadas();
+  final porCliente = <int, List<Map<String, dynamic>>>{};
+  for (final f in todas) {
+    final cid = (f['cliente_id'] as num?)?.toInt();
+    if (cid == null) continue;
+    if ('${f['periodo']}' != periodo) continue;
+    if (((f['activa'] as num?)?.toInt() ?? 0) != 1) continue;
+    porCliente.putIfAbsent(cid, () => []).add(f);
+  }
+  return {
+    for (final e in porCliente.entries)
+      e.key: (e.value..sort((a, b) =>
+              cmpTsTarifa(b['actualizada_ts'], a['actualizada_ts'])))
+          .first,
+  };
+}
+
 /// T14 (1.20): estado de revisión de una tarifa por su
 /// `vigente_hasta`: 'sin_fecha' | 'vigente' | 'por_vencer'
 /// (7 días o menos) | 'vencida'. La superficie de T14 es el

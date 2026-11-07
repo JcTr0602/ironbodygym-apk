@@ -218,6 +218,49 @@ bool esFechaCalendarioReal(int anio, int mes, int dia) {
   return d.year == anio && d.month == mes && d.day == dia;
 }
 
+/// 1.28 (M4-A3): parser ESTRICTO de fecha ISO 'AAAA-MM-DD'.
+/// Acepta el valor tal cual o con sufijo (timestamp): manda la
+/// fecha ESCRITA en los 10 primeros caracteres, que debe tener
+/// la forma exacta con guiones Y existir en el calendario.
+/// Devuelve el día en UTC (medianoche) o null si el valor es
+/// ilegible o inventado ('2026/11/05', '05-11-2026',
+/// '2026-02-31', texto suelto). Es la ÚNICA puerta por la que
+/// las pantallas y los cálculos deben leer una fecha guardada:
+/// antes cada sitio partía el string a mano y un dato legado
+/// mal formado lanzaba en pleno build (ficha inabrible) o se
+/// cruzaba ('05-11-2026' se pintaba como 2026/11/05).
+DateTime? fechaIsoEstricta(String? iso) {
+  if (iso == null) return null;
+  final s = iso.trim();
+  if (s.length < 10) return null;
+  final frente = s.substring(0, 10);
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(frente)) return null;
+  final y = int.parse(frente.substring(0, 4));
+  final m = int.parse(frente.substring(5, 7));
+  final d = int.parse(frente.substring(8, 10));
+  if (!esFechaCalendarioReal(y, m, d)) return null;
+  return DateTime.utc(y, m, d);
+}
+
+/// 1.28 (M4-A5): suma [dias] de CALENDARIO a un instante de
+/// pared habanero conservando la hora del día. Sumar un
+/// `Duration(days: n)` cruza el cambio de hora con 23/25 h
+/// reales y la hora resultante se corre (un bloqueo «de 1 día»
+/// duraba 23 o 25 horas según la época). La aritmética de
+/// días va en UTC y la hora se repone intacta.
+DateTime sumarDiasCalendario(DateTime habana, int dias) {
+  final d = DateTime.utc(habana.year, habana.month, habana.day)
+      .add(Duration(days: dias));
+  return DateTime(
+    d.year,
+    d.month,
+    d.day,
+    habana.hour,
+    habana.minute,
+    habana.second,
+  );
+}
+
 String fechaNegocioHabana(dynamic cruda) {
   final s = '${cruda ?? ''}'.trim();
   if (s.length < 10) return '';

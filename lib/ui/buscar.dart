@@ -171,7 +171,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
     } else if (digitos.length == 8 && q != digitos) {
       qBusqueda = digitos;
     }
-    var r = await listaClientes(qBusqueda);
+    // 1.28 (M4-A9): con texto, la búsqueda es la tolerante
+    // de la casa (buscarClientes: multi-token insensible a
+    // tildes, FTS5 y respaldo de typos en isolate) —
+    // listaClientes(q) era subcadena simple y «jose perez»
+    // no encontraba a «José Pérez». Sin texto se conserva
+    // la foto completa del padrón (buscarClientes('') = []).
+    var r = qBusqueda.isEmpty
+        ? await listaClientes('')
+        : await buscarClientes(qBusqueda);
     if (gen != _gen) return;
     // D-09 (1.21): la lista completa se carga UNA vez por
     // búsqueda aunque la pidan dos rutas (notas e id exacto).
@@ -193,43 +201,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
       r = [...r, ...extra];
       r.sort(
           compararPorNombre);
-    }
-    // Bloque 1: contadores por estado (sobre la búsqueda,
-    // ANTES del filtro de estado: siempre visibles).
-    final conteos = <String, int>{
-      'todos': r.length,
-      'aldia': 0,
-      'porvencer': 0,
-      'vencidos': 0,
-      'sinfoto': 0,
-    };
-    for (final c in r) {
-      // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
-      // de pago no alimenta los contadores (revelaría si pagó).
-      if (!esVistaProtegida(c)) {
-        // FIN-28 de Argón (1.20): una Cuenta a la Casa nunca
-        // vence — cuenta como al día (como clientesAlDia()).
-        // Sin continue: el conteo de «sin foto» de abajo también
-        // debe alimentarse de las cuentas Casa.
-        if (esCuentaCasa(c)) {
-          conteos['aldia'] = conteos['aldia']! + 1;
-        } else {
-          final dias = diasRestantes(c['pagado_hasta'] as String?);
-          if (dias != null && dias > 7) {
-            conteos['aldia'] = conteos['aldia']! + 1;
-          } else if (dias != null && dias >= 0 && dias <= 7) {
-            conteos['porvencer'] = conteos['porvencer']! + 1;
-          } else if (dias == null || dias < 0) {
-            conteos['vencidos'] = conteos['vencidos']! + 1;
-          }
-        }
-      }
-      final ref = c['foto_storage'] as String?;
-      // Ronda 17 M7-H2: el contador sinfoto tampoco se alimenta
-      // con protegidos (igual que aldia/porvencer/vencidos).
-      if ((ref == null || ref.isEmpty) && !esVistaProtegida(c)) {
-        conteos['sinfoto'] = conteos['sinfoto']! + 1;
-      }
     }
     // Filtros de estado de mensualidad.
     // v1.3.1: sin fecha = vencido (no "al día").
@@ -331,6 +302,47 @@ class _BuscarScreenState extends State<BuscarScreen> {
         }
       }
     }
+    // 1.28 (M4-A9/R1M4-B1): los conteos se calculan AQUÍ,
+    // DESPUÉS del rescate por id exacto y de la fusión
+    // de notas — antes el rescate podía AÑADIR un cliente
+    // tras contar y la cabecera decía N enseñando N+1.
+    // Bloque 1: contadores por estado (sobre la búsqueda,
+    // ANTES del filtro de estado: siempre visibles).
+    final conteos = <String, int>{
+      'todos': r.length,
+      'aldia': 0,
+      'porvencer': 0,
+      'vencidos': 0,
+      'sinfoto': 0,
+    };
+    for (final c in r) {
+      // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
+      // de pago no alimenta los contadores (revelaría si pagó).
+      if (!esVistaProtegida(c)) {
+        // FIN-28 de Argón (1.20): una Cuenta a la Casa nunca
+        // vence — cuenta como al día (como clientesAlDia()).
+        // Sin continue: el conteo de «sin foto» de abajo también
+        // debe alimentarse de las cuentas Casa.
+        if (esCuentaCasa(c)) {
+          conteos['aldia'] = conteos['aldia']! + 1;
+        } else {
+          final dias = diasRestantes(c['pagado_hasta'] as String?);
+          if (dias != null && dias > 7) {
+            conteos['aldia'] = conteos['aldia']! + 1;
+          } else if (dias != null && dias >= 0 && dias <= 7) {
+            conteos['porvencer'] = conteos['porvencer']! + 1;
+          } else if (dias == null || dias < 0) {
+            conteos['vencidos'] = conteos['vencidos']! + 1;
+          }
+        }
+      }
+      final ref = c['foto_storage'] as String?;
+      // Ronda 17 M7-H2: el contador sinfoto tampoco se alimenta
+      // con protegidos (igual que aldia/porvencer/vencidos).
+      if ((ref == null || ref.isEmpty) && !esVistaProtegida(c)) {
+        conteos['sinfoto'] = conteos['sinfoto']! + 1;
+      }
+    }
     // 1.25 T116 (F1-55): ids ya avisados hoy según el
     // registro del día (SQLite de la bandeja).
     final tocados =
@@ -423,9 +435,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
     switch (_orden) {
       case 'venceAntes':
         r.sort((a, b) {
-          String clave(Map<String, dynamic> c) => esVistaProtegida(c)
-              ? '~~~~'
-              : '${c['pagado_hasta'] ?? ''}';
+          // 1.28 (M4-A9/R1M4-B2): la Cuenta a la Casa tampoco
+          // «vence antes» — no vence nunca; con clave '' (sin
+          // fecha) encabezaba la lista. Va al final, como el
+          // protegido, desempatando por nombre.
+          String clave(Map<String, dynamic> c) =>
+              (esVistaProtegida(c) || esCuentaCasa(c))
+                  ? '~~~~'
+                  : '${c['pagado_hasta'] ?? ''}';
           final cmp = clave(a).compareTo(clave(b));
           return cmp != 0 ? cmp : compararPorNombre(a, b);
         });
@@ -1677,7 +1694,9 @@ class _FilaClienteState extends State<_FilaCliente> {
     final ph = c['pagado_hasta'] as String?;
     final d = diasRestantes(ph);
     // Iniciales para el placeholder (ej: "Juan Pérez" -> "JP")
-    final nombre = '${c['nombre']}';
+    // 1.28 (M4-A9/R3M4-H10): nombre visible de la casa — una
+    // fila sin nombre se pinta «Sin nombre», no «null».
+    final nombre = nombreVisibleCliente(c);
     final partes = nombre.trim().split(RegExp(r'\s+'));
     String iniciales = '';
     if (partes.isNotEmpty) {

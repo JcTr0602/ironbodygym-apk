@@ -6361,7 +6361,9 @@ class SyncEngine {
     // Ante reintentable tampoco: el reintento lo gestiona la cola
     // (TUS reanuda en el offset guardado), no un PUT monolítico.
     if (res.estado != EstadoSubida.permitirFallback) return null;
-    final ok = await _subirFotoSimple(path, comprimida);
+    final ok = await _subirFotoSimple(path, comprimida,
+        debePausarPorCobro: () async =>
+            await _db.countPendingOpsNoFoto() > 0);
     return ok ? path : null;
   }
 
@@ -6406,7 +6408,8 @@ class SyncEngine {
       // tus == false: fallo reintentable (el offset quedó guardado).
       // tus == null: TUS no disponible → fallback permitido.
       if (tus == null) {
-        final ok = await _subirFotoSimple(objectPath, bytes);
+        final ok = await _subirFotoSimple(objectPath, bytes,
+            debePausarPorCobro: debePausarPorCobro);
         if (ok) {
           // Luna #3: tras fallback PUT exitoso, invalidar estado TUS
           // para que un reintento no reanude el upload viejo.
@@ -6420,7 +6423,7 @@ class SyncEngine {
         }
         return const ResultadoSubidaFoto(
           estado: EstadoSubida.permitirFallback,
-          error: 'TUS no disponible y PUT falló',
+          error: 'TUS no disponible y PUT falló o pausó por cobro',
         );
       }
       return const ResultadoSubidaFoto(
@@ -6695,12 +6698,21 @@ class SyncEngine {
   }
 
   /// Método simple (un solo PUT): respaldo si tus no está disponible.
-  Future<bool> _subirFotoSimple(String path, Uint8List bytes) async {
+  /// 1.28 (M4-A16/R1M4-M7): la guarda QoS se consulta antes
+  /// de CADA intento — este PUT monolítico (hasta 120 s × 3)
+  /// era la única vía de subida que no cedía ante un cobro
+  /// pendiente. Si la guarda manda parar, devuelve false
+  /// sin reintentar: el llamador lo trata como reintentable.
+  Future<bool> _subirFotoSimple(String path, Uint8List bytes,
+      {Future<bool> Function()? debePausarPorCobro}) async {
     // v1.2.4 (Hark): antes no se enviaba el cuerpo y quedaban fotos de 0 bytes.
     if (bytes.isEmpty) return false;
     // Fix Gemini: MIME correcto según extensión del path.
     final mime = path.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
     for (var intento = 0; intento < 3; intento++) {
+      if (debePausarPorCobro != null && await debePausarPorCobro()) {
+        return false;
+      }
       try {
         final r = await _postAuth(
             Uri.parse('$_base/storage/v1/object/'

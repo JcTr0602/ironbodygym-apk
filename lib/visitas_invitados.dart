@@ -90,10 +90,15 @@ String _desdeIso(int dias) =>
 /// las visitas previas de la ficha (identidad fortalecida).
 Future<int> registrarVisitaInvitadoAhora({
   required String clave,
-  required int? invitadoId,
+  required String? invitadoId,
   required String? nombre,
 }) async {
-  if (invitadoId != null) {
+  // 1.28 (M4-A1): el id es el UUID crudo del invitado; con
+  // id presente, primero se reasignan a esta clave las
+  // visitas previas de la ficha (identidad fortalecida) —
+  // antes el int.tryParse de la llamada lo dejaba en null y
+  // la reasignación NUNCA corría.
+  if (invitadoId != null && invitadoId.isNotEmpty) {
     await LocalDb.instance.reasignarClaveVisitas(invitadoId, clave);
   }
   await LocalDb.instance.registrarVisitaInvitado(

@@ -24,8 +24,16 @@ void main() {
 
   test('plus_cortesia: excluye convertido y en_conversion', () {
     final p = partirLote(sel, 'plus_cortesia');
-    expect(p.aplicables.map((i) => i.id), ['a', 'd']);
-    expect(p.excluidos.map((e) => e.$1.id), ['b', 'c']);
+    // 1.28 (M4-A11/R1M4-B20): 'd' (activo CON Plus) también
+    // se excluye desde esta oleada — dar cortesía a quien ya
+    // tiene Plus activo pisaba el Plus pagado; la ficha de
+    // detalle ya lo impedía y el lote no. Motivo:
+    // «ya tiene Plus activo».
+    expect(p.aplicables.map((i) => i.id), ['a']);
+    expect(p.excluidos.map((e) => e.$1.id), ['b', 'c', 'd']);
+    expect(
+        p.excluidos.firstWhere((e) => e.$1.id == 'd').$2,
+        'ya tiene Plus activo');
   });
 
   test('vida_extender: la conversión en curso NO excluye', () {

@@ -328,6 +328,10 @@ class FotosColaService {
 
     // v1.2.9 (nota Gemini): persistir foto_uuid en el cliente al encolar,
     // para que _actualizarMirrorFoto pueda verificar precedencia.
+    // 1.28 (M4-A7/R2M4-H4): también foto_local, como en
+    // suplementos — sin ella la foto nueva desaparecía de la
+    // ficha al recargar hasta que subía y bajaba por sync.
+    // El pull reemplaza data y la clave desaparece sola.
     if (clienteId != null) {
       try {
         final rows = await db.query(
@@ -343,6 +347,9 @@ class FotosColaService {
           data = Map<String, dynamic>.from(
               raw is String ? jsonDecode(raw) : raw as Map);
           data['foto_uuid'] = opUuid;
+          data['foto_local'] = variantes['display'] ??
+              variantes['thumb'] ??
+              variantes['original'];
           await db.update(
             'clientes',
             {'data': jsonEncode(data)},
@@ -1150,6 +1157,14 @@ class FotosColaService {
       // (heurística de QoS agnóstica a VPN; sin connectivity_plus).
       // Solo cuenta si la subida fue exitosa: un fallo descalifica al
       // 'original' (red degradada → la variante pesada espera).
+      // 1.28 (M4-A16/R1M4-B10): el offset TUS previo — la
+      // medición «display rápido» solo puede acreditar los
+      // bytes del TRAMO subido en esta pasada; antes
+      // acreditaba el archivo ENTERO aunque TUS reanudara
+      // al 90 % (el tiempo era del tramo, los bytes no).
+      final offsetInicial = int.tryParse(
+              await LocalDb.instance.getMeta(claveTusOffset) ?? '') ??
+          0;
       final inicioChunk = ahoraHabana();
       final res = await SyncEngine.instance.subirFotoCola(
         opUuid: opUuid,
@@ -1168,8 +1183,10 @@ class FotosColaService {
       if (tipo == 'display' && res.estado != EstadoSubida.pausadaPorQos) {
         // Una pausa no es una muestra de velocidad (ni rápida ni
         // lenta): no toca la medición.
+        final bytesTramo = bytes.length - offsetInicial;
         await _guardarDisplayRapido(res.estado == EstadoSubida.subida &&
-            chunkDisplayRapido(bytes.length, inicioChunk, finChunk));
+            chunkDisplayRapido(
+                bytesTramo < 0 ? 0 : bytesTramo, inicioChunk, finChunk));
       }
 
       switch (res.estado) {
@@ -1272,6 +1289,24 @@ class FotosColaService {
     final ahora = isoHabana(ahoraHabana());
 
     if (permanente) {
+      // 1.28 (M4-A16/B11): si la que muere es 'display', la
+      // 'original' ya completada debe vincularse — este era
+      // el único camino de muerte de display que no lo
+      // hacía (el de red con 5 intentos y el de vinculación
+      // fallida ya llamaban a _vincularOriginalCompletada);
+      // sin esto, la original quedaba huérfana de enlace
+      // para siempre con sus bytes ya subidos.
+      String? opUuidDisplay;
+      try {
+        final filas = await db.query('fotos_cola',
+            columns: ['op_uuid', 'tipo'],
+            where: 'id = ?',
+            whereArgs: [id],
+            limit: 1);
+        if (filas.isNotEmpty && filas.first['tipo'] == 'display') {
+          opUuidDisplay = filas.first['op_uuid'] as String?;
+        }
+      } catch (_) {}
       await db.update(
         'fotos_cola',
         {
@@ -1284,6 +1319,9 @@ class FotosColaService {
         where: "id = ? AND estado != 'completada'",
         whereArgs: [id],
       );
+      if (opUuidDisplay != null) {
+        await _vincularOriginalCompletada(db, opUuidDisplay);
+      }
     } else {
       // v1.2.9+44 (Gemini): en errores transitorios NO limpiar worker_id
       // ni lease_hasta aquí. Si lo hacemos, el backoff de procesarCola

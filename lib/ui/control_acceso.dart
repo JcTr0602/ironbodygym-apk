@@ -374,6 +374,35 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
     return Column(
       children: [
+        // 1.28 (M4-A14): si lo que se enseña es la foto
+        // PERSISTIDA (la red no respondió en esta sesión), la
+        // lista lleva su sello honesto con la hora de la
+        // última verificación — antes, sin caché en memoria
+        // y sin red, la pestaña solo sabía decir «Sin
+        // conexión» y no enseñaba nada.
+        if (AccesoAppCache.instance.esPersistido &&
+            AccesoAppCache.instance.verificadoEn != null)
+          Container(
+            width: double.infinity,
+            color: AppColores.alerta.withValues(alpha: 0.12),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_off_rounded,
+                    size: 16, color: AppColores.alerta),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Text(
+                    'Lista guardada · verificada '
+                    '${tiempoRelativo(AccesoAppCache.instance.verificadoEn!.toIso8601String())}'
+                    ' · sin conexión ahora',
+                    style: AppTexto.secundario,
+                  ),
+                ),
+              ],
+            ),
+          ),
         // v1.4.1 (Pieza 9): estadísticas de adopción y campaña WA.
         Padding(
           padding: const EdgeInsets.fromLTRB(

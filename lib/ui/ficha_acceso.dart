@@ -32,6 +32,37 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
   Map<String, dynamic>? _acceso;
   List<dynamic> _historial = [];
   List<dynamic> _auditoria = [];
+  // 1.28 (M4-A14): lo pintado viene del caché de accesos
+  // (la RPC aún no volvió o falló sin red).
+  bool _desdeCache = false;
+
+  /// Mapa con la forma que consume _seccionDatos, desde el
+  /// modelo del caché de accesos.
+  Map<String, dynamic> _mapaDesdeCache(AccesoCliente a) => {
+        'nombre': a.nombre,
+        'telefono': a.telefono,
+        'activo': a.activo,
+        'revocado': a.revocado,
+        'esta_bloqueado': a.estaBloqueado,
+        'bloqueo_manual_vigente': a.bloqueoManualVigente,
+        'ultimo_acceso_en': a.ultimoAccesoEn?.toIso8601String(),
+        'total_accesos': a.totalAccesos,
+        'ultimo_dispositivo': a.ultimoDispositivo,
+        'ultima_app_version': a.ultimaAppVersion,
+        'created_at': a.createdAt?.toIso8601String(),
+        'creado_por': a.creadoPor,
+        'pin_cambiado_en': a.pinCambiadoEn?.toIso8601String(),
+        'debe_cambiar_pin': a.debeCambiarPin,
+        'forzar_cambio_pin': a.forzarCambioPin,
+        'intentos_fallidos': a.intentosFallidos,
+        'ultimo_intento_fallido_en':
+            a.ultimoIntentoFallidoEn?.toIso8601String(),
+        'motivo_bloqueo': a.motivoBloqueo,
+        'bloqueado_hasta': a.bloqueadoHasta?.toIso8601String(),
+        'revocado_en': a.revocadoEn?.toIso8601String(),
+        'tiene_sesion': a.tieneSesion,
+        'sesion_expira_en': null,
+      };
 
   @override
   void initState() {
@@ -60,7 +91,19 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
       if (mounted) setState(() => _cargando = false);
       return;
     }
-    setState(() => _cargando = true);
+    // 1.28 (M4-A14): primera pintura desde el caché de
+    // accesos (en memoria o el persistido de A14): la ficha
+    // enseña los datos básicos al instante y la RPC los
+    // sustituye al volver; si la red falla, la ficha se
+    // queda con esos datos sellados, no con un error pelado.
+    final cacheado = AccesoAppCache.instance.obtener(widget.clienteId);
+    setState(() {
+      _cargando = true;
+      if (cacheado != null && _acceso == null) {
+        _acceso = _mapaDesdeCache(cacheado);
+        _desdeCache = true;
+      }
+    });
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
       // tope, una conexión colgada dejaba «Cargando acceso…»
@@ -77,13 +120,20 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
           _acceso = Map<String, dynamic>.from(data['acceso'] as Map);
           _historial = (data['historial'] as List?) ?? [];
           _auditoria = (data['auditoria'] as List?) ?? [];
+          _desdeCache = false;
           _cargando = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        mostrarSnack(context, 'Error al cargar la ficha: $e', significado: SignificadoChip.error);
+        if (_acceso == null) {
+          mostrarSnack(context, 'Error al cargar la ficha: $e', significado: SignificadoChip.error);
+        } else if (_desdeCache) {
+          mostrarSnack(context,
+              'Sin conexión: se muestran los datos guardados del acceso.',
+              significado: SignificadoChip.alerta);
+        }
       }
     }
   }
@@ -129,13 +179,39 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
           ),
         ],
       ),
-      body: _cargando
+      body: _cargando && _acceso == null
           ? const EstadoCargando(texto: 'Cargando acceso…')
           : _acceso == null
               ? const Center(child: Text('No se pudo cargar la ficha.'))
               : ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
+                    // 1.28 (M4-A14): sello cuando lo pintado
+                    // es la foto guardada del caché.
+                    if (_desdeCache) ...[
+                      Row(
+                        children: [
+                          Icon(Icons.wifi_off_rounded,
+                              size: 16, color: AppColores.alerta),
+                          const SizedBox(width: AppEspacio.sm),
+                          const Expanded(
+                            child: Text(
+                              'Datos guardados del acceso · el '
+                              'historial necesita conexión.',
+                              style: AppTexto.secundario,
+                            ),
+                          ),
+                          if (_cargando)
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: AppEspacio.md),
+                    ],
                     _seccionDatos(),
                     // Ítem 12: foto personal del cliente — SOLO el
                     // dueño: con otro rol el widget ni se construye.
@@ -172,11 +248,20 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
 
   Widget _seccionDatos() {
     final a = _acceso!;
-    final estado = a['revocado'] == true || a['activo'] != true
+    // 1.28 (M4-A14/R1M4-M13): el bloqueo manual vigente
+    // cuenta como bloqueado (la lista ya lo decía y esta
+    // ficha pintaba «Activo»), y «Revocado» es SOLO el
+    // revocado de verdad — un acceso inactivo sin revocar
+    // se lee «Inactivo», como en el caché (A6).
+    final bloqueado =
+        a['esta_bloqueado'] == true || a['bloqueo_manual_vigente'] == true;
+    final estado = a['revocado'] == true
         ? 'Revocado'
-        : a['esta_bloqueado'] == true
+        : bloqueado
             ? 'Bloqueado'
-            : 'Activo';
+            : a['activo'] != true
+                ? 'Inactivo'
+                : 'Activo';
     final colorEstado = estado == 'Activo'
         ? AppColores.exitoOscuro
         : estado == 'Bloqueado'
@@ -249,8 +334,12 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
 
   Widget _seccionAcciones() {
     final a = _acceso!;
+    // La compuerta de acciones conserva el criterio histórico
+    // (revocado O inactivo = sin acciones plenas); el
+    // bloqueado suma el bloqueo manual vigente (M13).
     final revocado = a['revocado'] == true || a['activo'] != true;
-    final bloqueado = a['esta_bloqueado'] == true;
+    final bloqueado =
+        a['esta_bloqueado'] == true || a['bloqueo_manual_vigente'] == true;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.lg),

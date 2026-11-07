@@ -127,6 +127,12 @@ class AccesoBloqueoService {
 
   bool _iniciado = false;
   bool _despertando = false;
+  // 1.28 (M4-A15): serialización de reevaluar() — la
+  // evaluación en curso, la petición que llegó mientras
+  // tanto y el contador de secuencia.
+  bool _evaluando = false;
+  bool _otraPedida = false;
+  int _secuencia = 0;
   DateTime? _anclaServer;
   DateTime? _anclaPared;
   Stopwatch? _reloj;
@@ -238,18 +244,64 @@ class AccesoBloqueoService {
   /// Reevalúa el espejo contra la sesión actual. Si el candado
   /// cae (transición bloqueado → libre), despierta las ops
   /// retenidas por la pausa y dispara un ciclo inmediato (CD-01).
+  ///
+  /// 1.28 (M4-A15): SERIALIZADA. Los tres disparadores (sync,
+  /// auth, arranque) lanzaban evaluaciones CONCURRENTES que
+  /// se entrelazaban: una evaluación vieja que terminaba
+  /// tarde pisaba el resultado de una nueva (parpadeo del
+  /// candado) y una evaluación de la sesión ANTERIOR podía
+  /// aplicar su candado sobre la sesión nueva. Ahora: una
+  /// sola evaluación a la vez; si llega otra petición en
+  /// curso, al terminar corre UNA pasada más con el estado
+  /// fresco (no se encolan infinitas); y el resultado solo
+  /// se aplica si la sesión capturada al inicio sigue
+  /// siendo la sesión al final.
   Future<void> reevaluar() async {
+    _secuencia++;
+    if (_evaluando) {
+      _otraPedida = true;
+      return;
+    }
+    _evaluando = true;
+    try {
+      do {
+        _otraPedida = false;
+        await _evaluarUnaVez();
+      } while (_otraPedida);
+    } finally {
+      _evaluando = false;
+    }
+  }
+
+  Future<void> _evaluarUnaVez() async {
+    final secuencia = _secuencia;
     try {
       final auth = AuthService();
+      // Identidad de la sesión al INICIO de la pasada.
+      final telegramAlInicio = auth.telegramId;
+      final duenoAlInicio = auth.isOwner;
+      final sesionAlInicio = auth.loggedIn;
       BloqueoVigente? nuevo;
-      if (auth.loggedIn && !auth.isOwner) {
+      if (sesionAlInicio && !duenoAlInicio) {
         final filas = await LocalDb.instance.allMirror('acceso_bloqueos');
         _refrescarAncla(filas);
         nuevo = evaluarBloqueoLocal(
           filas,
-          telegramId: auth.telegramId,
+          telegramId: telegramAlInicio,
           ahoraServidor: ahoraServidorEstimada(),
         );
+      }
+      // Antes de aplicar: si llegó una petición más nueva o
+      // la sesión cambió durante la pasada, este resultado
+      // está viejo — se descarta y la pasada extra que ya
+      // quedó pedida decide con el estado fresco.
+      final authAhora = AuthService();
+      if (secuencia != _secuencia ||
+          authAhora.telegramId != telegramAlInicio ||
+          authAhora.isOwner != duenoAlInicio ||
+          authAhora.loggedIn != sesionAlInicio) {
+        _otraPedida = true;
+        return;
       }
       final anterior = vigente.value;
       if (anterior != null || nuevo != null) {

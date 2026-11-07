@@ -26,7 +26,11 @@ class GraficoPesoEntrenador extends StatelessWidget {
       unidad: 'kg',
       puntos: [
         for (final m in mediciones)
-          if (m.pesoKg > 0) PuntoSerie(m.createdAt, m.pesoKg),
+          // 1.28 (M4-A12): peso nullable — las mediciones sin
+          // peso no entran en la serie (antes entraban como 0
+          // inventado desde el modelo).
+          if (m.pesoKg != null && m.pesoKg! > 0)
+            PuntoSerie(m.createdAt, m.pesoKg!),
       ],
     );
   }

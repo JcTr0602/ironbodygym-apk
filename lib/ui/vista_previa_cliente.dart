@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth.dart';
 import '../config.dart';
+import '../negocio.dart' show clientePorId, esCuentaCasa;
 import 'diseno.dart';
 import 'horario_gym.dart';
 
@@ -34,10 +35,24 @@ class SemaforoVistaPrevia {
 /// (meta.fecha_servidor_cuba de la RPC), nunca contra el reloj local.
 /// Réplica fiel de `_evaluarVencimiento` de Clientes.
 SemaforoVistaPrevia semaforoVistaPrevia(
-    String? pagadoHasta, String? fechaServidor) {
+    String? pagadoHasta, String? fechaServidor,
+    {bool esCasa = false}) {
   const rojo = Color(0xFFEF5350);
   const ambar = Color(0xFFFFB300);
   const verde = Color(0xFF66BB6A);
+  // 1.28 (M4-A10/R1M4-M6): la Cuenta a la Casa NO vence —
+  // la app de Clientes real la respeta y esta vista previa
+  // enseñaba «MEMBRESÍA VENCIDA» o «SIN FECHA REGISTRADA»
+  // de un cliente de la casa. Dorado, como en el resto de
+  // la casa.
+  if (esCasa) {
+    return const SemaforoVistaPrevia(
+      titulo: 'CUENTA A LA CASA',
+      subtitulo: 'Cliente de la casa: su membresía no vence.',
+      badge: 'Casa',
+      color: Color(0xFFB8860B),
+    );
+  }
   if (pagadoHasta == null || pagadoHasta.trim().isEmpty) {
     return const SemaforoVistaPrevia(
       titulo: 'SIN FECHA REGISTRADA',
@@ -159,6 +174,10 @@ class _VistaPreviaClienteScreenState
   Map<String, dynamic>? _datos;
   bool _cargando = true;
   String? _error;
+  // 1.28 (M4-A10): foto LOCAL del cliente (espejo) para la
+  // primera pintura y para saber si es Cuenta a la Casa sin
+  // depender de que la RPC lo traiga.
+  Map<String, dynamic>? _clienteLocal;
   // 1.25 T20: el detalle técnico del fallo, en pequeño
   // bajo el mensaje en sencillo (antes la excepción cruda
   // ERA todo el mensaje y no había cómo reintentar).
@@ -177,7 +196,33 @@ class _VistaPreviaClienteScreenState
   void initState() {
     super.initState();
     _tabs = TabController(length: 5, vsync: this);
+    _leerEspejoLocal();
     _cargar();
+  }
+
+  /// 1.28 (M4-A10/R1M4-B3): lectura local inmediata — la
+  /// vista previa pintaba SOLO un spinner hasta que la RPC
+  /// volvía (hasta 12 s sin red para ver un nombre que el
+  /// teléfono ya tiene). El espejo da la primera pintura; la
+  /// RPC la sustituye al llegar.
+  Future<void> _leerEspejoLocal() async {
+    try {
+      final c = await clientePorId(widget.clienteId);
+      if (c != null && mounted) {
+        setState(() => _clienteLocal = c);
+      }
+    } catch (_) {}
+  }
+
+  /// ¿Cuenta a la Casa? Manda la RPC si lo trae; si no, el
+  /// espejo local (que siempre lo trae).
+  bool get _esCasa {
+    if (_cliente['cuenta_casa'] == true ||
+        _cliente['cuenta_casa'] == 1) {
+      return true;
+    }
+    final local = _clienteLocal;
+    return local != null && esCuentaCasa(local);
   }
 
   @override
@@ -362,6 +407,49 @@ class _VistaPreviaClienteScreenState
   }
 
   Widget _contenidoTelefono() {
+    // 1.28 (M4-A10/R1M4-B3): con la foto local ya leída, la
+    // primera pintura enseña el nombre (y la Casa, que no
+    // necesita fecha del servidor) mientras la RPC resuelve;
+    // sin foto local, el spinner de siempre.
+    if (_cargando && _clienteLocal != null) {
+      final semaforo = semaforoVistaPrevia(null, null, esCasa: _esCasa);
+      return ListView(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        children: [
+          Text(
+              '${_clienteLocal!['nombre'] ?? widget.nombreCliente}',
+              style: AppTexto.titulo.copyWith(color: Colors.white)),
+          const SizedBox(height: AppEspacio.md),
+          if (_esCasa)
+            Container(
+              padding: const EdgeInsets.all(AppEspacio.md),
+              decoration: BoxDecoration(
+                color: semaforo.color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(AppRadio.md),
+                border: Border.all(color: semaforo.color),
+              ),
+              child: Text(
+                '${semaforo.titulo} · ${semaforo.subtitulo}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            )
+          else
+            const Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      color: _naranja, strokeWidth: 2),
+                ),
+                SizedBox(width: AppEspacio.sm),
+                Text('Verificando el estado con el servidor…',
+                    style: TextStyle(color: Colors.white54)),
+              ],
+            ),
+        ],
+      );
+    }
     return _cargando
                 ? const Center(
                     child: CircularProgressIndicator(color: _naranja))
@@ -430,6 +518,7 @@ class _VistaPreviaClienteScreenState
     final semaforo = semaforoVistaPrevia(
       textoSeguro(c['pagado_hasta']),
       textoSeguro(_meta['fecha_servidor_cuba']),
+      esCasa: _esCasa,
     );
     final turno = mapaSeguro(_meta['entrenador_turno']);
     final abierto = _meta['gimnasio_abierto_horario'] == true;

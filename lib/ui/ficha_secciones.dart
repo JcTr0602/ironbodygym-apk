@@ -900,14 +900,15 @@ class FilaTimelineFicha extends StatelessWidget {
   required String? fechaInicioRaw,
   required String? pagadoHastaRaw,
 }) {
-  final iniRaw = fechaInicioRaw ?? '';
-  final finRaw = pagadoHastaRaw ?? '';
-  if (iniRaw.length < 10 || finRaw.length < 10) return null;
-  final ini = DateTime.tryParse(iniRaw.substring(0, 10));
-  final fin = DateTime.tryParse(finRaw.substring(0, 10));
+  // 1.28 (M4-A3/R3M4-H4): fechas por el parser estricto y
+  // conteo en UTC. tryParse normalizaba fechas inventadas y
+  // el hoy LOCAL hacía que la barra discrepara un día de
+  // diasRestantes/Plus en los días de cambio de hora.
+  final ini = fechaIsoEstricta(fechaInicioRaw);
+  final fin = fechaIsoEstricta(pagadoHastaRaw);
   if (ini == null || fin == null || !fin.isAfter(ini)) return null;
   final hoy = ahoraHabana();
-  final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
+  final hoyDia = DateTime.utc(hoy.year, hoy.month, hoy.day);
   final total = fin.difference(ini).inDays;
   var usado = hoyDia.difference(ini).inDays;
   if (usado < 0) usado = 0;

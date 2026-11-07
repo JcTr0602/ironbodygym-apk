@@ -16,6 +16,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../acceso_app_cache.dart';
 import '../auth.dart';
+import '../negocio.dart' show validarTelefono;
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -24,6 +25,36 @@ import 'modal_pin_acceso.dart';
 void _snack(BuildContext ctx, String mensaje) {
   if (!ctx.mounted) return;
   mostrarSnack(ctx, mensaje);
+}
+
+/// 1.28 (M4-A5/R2M4-H1): guarda «en curso» del helper
+/// COMPARTIDO (patrón de reportes_plus). Las acciones de un
+/// mismo cliente se ejecutan DE UNA EN UNA: un segundo toque
+/// con la confirmación o la RPC de la primera aún en vuelo se
+/// rechaza con aviso, en vez de apilar dos diálogos o dos
+/// mutaciones sobre el mismo acceso. La guarda cubre el flujo
+/// ENTERO (confirmación incluida) y se libera en finally.
+final Set<int> _accesoEnCurso = <int>{};
+
+/// ¿Hay una acción de acceso en curso para este cliente?
+bool accesoAccionEnCurso(int clienteId) =>
+    _accesoEnCurso.contains(clienteId);
+
+Future<void> _conGuardaAcceso(
+  BuildContext ctx,
+  int clienteId,
+  Future<void> Function() accion,
+) async {
+  if (!_accesoEnCurso.add(clienteId)) {
+    _snack(ctx,
+        'Ya hay una acción en curso para este cliente; espera a que termine.');
+    return;
+  }
+  try {
+    await accion();
+  } finally {
+    _accesoEnCurso.remove(clienteId);
+  }
 }
 
 /// Autoauditoría 1.22 #2 (P-3): guarda de dueño COMPARTIDA.
@@ -88,6 +119,32 @@ Future<void> accionSimpleAcceso(
   bool confirmarAntes = false,
   String titulo = '',
   String texto = '',
+}) =>
+    // 1.28 (M4-A5): guarda compartida anti-doble-acción.
+    _conGuardaAcceso(
+      ctx,
+      clienteId,
+      () => _accionSimpleAccesoInterna(
+        ctx,
+        clienteId: clienteId,
+        rpc: rpc,
+        mensajeOk: mensajeOk,
+        alTerminar: alTerminar,
+        confirmarAntes: confirmarAntes,
+        titulo: titulo,
+        texto: texto,
+      ),
+    );
+
+Future<void> _accionSimpleAccesoInterna(
+  BuildContext ctx, {
+  required int clienteId,
+  required String rpc,
+  required String mensajeOk,
+  required Future<void> Function() alTerminar,
+  bool confirmarAntes = false,
+  String titulo = '',
+  String texto = '',
 }) async {
   if (!_soloDueno(ctx)) return;
   if (confirmarAntes) {
@@ -115,6 +172,30 @@ Future<void> accionSimpleAcceso(
 /// Resetear PIN (también es "reenviar credenciales": PIN nuevo + modal
 /// con botón de WhatsApp). El PIN viejo queda invalidado.
 Future<void> resetearPinAcceso(
+  BuildContext ctx, {
+  required int clienteId,
+  required String nombre,
+  required String telefono,
+  required bool? esReenvio,
+  required Future<void> Function() alTerminar,
+  String? titulo,
+}) =>
+    // 1.28 (M4-A5): guarda compartida anti-doble-acción.
+    _conGuardaAcceso(
+      ctx,
+      clienteId,
+      () => _resetearPinAccesoInterna(
+        ctx,
+        clienteId: clienteId,
+        nombre: nombre,
+        telefono: telefono,
+        esReenvio: esReenvio,
+        alTerminar: alTerminar,
+        titulo: titulo,
+      ),
+    );
+
+Future<void> _resetearPinAccesoInterna(
   BuildContext ctx, {
   required int clienteId,
   required String nombre,
@@ -203,6 +284,22 @@ Future<void> bloquearAcceso(
   BuildContext ctx, {
   required int clienteId,
   required Future<void> Function() alTerminar,
+}) =>
+    // 1.28 (M4-A5): guarda compartida anti-doble-acción.
+    _conGuardaAcceso(
+      ctx,
+      clienteId,
+      () => _bloquearAccesoInterna(
+        ctx,
+        clienteId: clienteId,
+        alTerminar: alTerminar,
+      ),
+    );
+
+Future<void> _bloquearAccesoInterna(
+  BuildContext ctx, {
+  required int clienteId,
+  required Future<void> Function() alTerminar,
 }) async {
   if (!_soloDueno(ctx)) return;
   if (!ctx.mounted) return;
@@ -272,9 +369,13 @@ Future<void> bloquearAcceso(
           'bloquear_acceso_cliente',
           params: {
             'p_cliente_id': clienteId,
+            // 1.28 (M4-A5/R1M4-B16): la duración es de
+            // CALENDARIO (misma hora, N días después), no
+            // 24 h × N sobre el reloj: cruzando el cambio de
+            // hora, «1 día» duraba 23 o 25 horas reales.
             'p_hasta': dias < 0
                 ? null
-                : isoHabana(ahoraHabana().add(Duration(days: dias))),
+                : isoHabana(sumarDiasCalendario(ahoraHabana(), dias)),
             'p_motivo': motivo,
           },
         )
@@ -291,6 +392,24 @@ Future<void> bloquearAcceso(
 /// Cambiar el teléfono de entrada a la app (no el de la ficha del
 /// cliente, que se edita en su ficha).
 Future<void> cambiarTelefonoAcceso(
+  BuildContext ctx, {
+  required int clienteId,
+  required String telefonoActual,
+  required Future<void> Function() alTerminar,
+}) =>
+    // 1.28 (M4-A5): guarda compartida anti-doble-acción.
+    _conGuardaAcceso(
+      ctx,
+      clienteId,
+      () => _cambiarTelefonoAccesoInterna(
+        ctx,
+        clienteId: clienteId,
+        telefonoActual: telefonoActual,
+        alTerminar: alTerminar,
+      ),
+    );
+
+Future<void> _cambiarTelefonoAccesoInterna(
   BuildContext ctx, {
   required int clienteId,
   required String telefonoActual,
@@ -336,6 +455,16 @@ Future<void> cambiarTelefonoAcceso(
   if (ok != true) return;
   if (!ctx.mounted) return;
   final nuevoTelefono = ctrl.text.trim();
+  // 1.28 (M4-A5/R1M4-B18): validación LOCAL de la casa (8
+  // dígitos empezando por 5 o 6) ANTES de la RPC — el campo
+  // solo limitaba el largo al teclear (maxLength) y un valor
+  // pegado o corto llegaba al servidor y rebotaba como un
+  // error genérico sin decir qué estaba mal.
+  if (!validarTelefono(nuevoTelefono)) {
+    _snack(ctx,
+        'Teléfono inválido: 8 dígitos empezando con 5 o 6.');
+    return;
+  }
   try {
     await Supabase.instance.client
         .rpc(
@@ -367,6 +496,10 @@ Future<void> mostrarMenuAccionesAcceso(
 }) async {
   if (!ctx.mounted) return;
   final revocado = a.estado == 'revocado';
+  // 1.28 (M4-A6): un acceso INACTIVO (no revocado) también
+  // ofrece «Reactivar acceso»; antes la etiqueta única
+  // 'revocado' lo escondía en esa misma rama.
+  final inactivo = a.estado == 'inactivo';
   final bloqueado = a.estado == 'bloqueado';
 
   // Panel R2 (Luna): la hoja solo ANOTA la opción elegida y se
@@ -505,7 +638,7 @@ Future<void> mostrarMenuAccionesAcceso(
               ),
               peligro: true,
             ),
-          if (revocado)
+          if (revocado || inactivo)
             item(
               Icons.restore_rounded,
               'Reactivar acceso',
@@ -514,6 +647,13 @@ Future<void> mostrarMenuAccionesAcceso(
                 clienteId: a.clienteId,
                 rpc: 'reactivar_acceso_cliente',
                 mensajeOk: 'Acceso reactivado.',
+                // 1.28 (M4-A5/R1M4-M14): reactivar también
+                // confirma — era la única acción del menú
+                // que entraba sin preguntar.
+                confirmarAntes: true,
+                titulo: 'Reactivar acceso',
+                texto:
+                    '¿Reactivar el acceso de ${a.nombre}? Podrá entrar a la app con su PIN actual.',
                 alTerminar: alTerminar,
               ),
             ),

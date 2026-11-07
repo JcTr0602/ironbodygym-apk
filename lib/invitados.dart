@@ -86,7 +86,41 @@ InvitadoError mapearErrorInvitado(Object e) {
 // Modelos (formas EXACTAS que devuelven las RPC en producción)
 // ---------------------------------------------------------------------------
 
-double? _num(dynamic v) => v is num ? v.toDouble() : null;
+double? _num(dynamic v) {
+  if (v is num) return v.toDouble();
+  // 1.28 (M4-A11): un número como texto también vale.
+  if (v is String) return double.tryParse(v.trim());
+  return null;
+}
+
+/// 1.28 (M4-A11/R3M4-H2): tolerancia de tipos en los modelos
+/// de invitados. Los casts duros (`as num?`, `as String?`)
+/// lanzaban con una fila sucia y tumbaban la lista ENTERA.
+int? _enteroTolerante(dynamic v) {
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v.trim());
+  return null;
+}
+
+String? _textoTolerante(dynamic v) {
+  if (v == null) return null;
+  if (v is String) return v;
+  return '$v';
+}
+
+/// 1.28 (M4-A11): parsea UNA fila de resumen; si la fila
+/// está sucia, se SALTA (lista vacía) en vez de tumbar la
+/// lista completa.
+List<InvitadoResumen> _resumenSeguro(dynamic j) {
+  try {
+    if (j is! Map) return const [];
+    return [
+      InvitadoResumen.fromJson(j.map((k, v) => MapEntry('$k', v))),
+    ];
+  } catch (_) {
+    return const [];
+  }
+}
 
 /// G5 (panel Bloque G): los instantes que devuelve el servidor se
 /// expresan en hora de La Habana con `aHabana` (lib/tiempo.dart),
@@ -133,7 +167,7 @@ class MedidaInvitado {
   factory MedidaInvitado.fromJson(Map<String, dynamic> j) {
     return MedidaInvitado(
       id: '${j['id'] ?? ''}',
-      fecha: j['fecha'] as String?,
+      fecha: _textoTolerante(j['fecha']),
       pesoKg: _num(j['peso_kg']),
       grasaPct: _num(j['grasa_pct']),
       pechoCm: _num(j['pecho_cm']),
@@ -141,7 +175,7 @@ class MedidaInvitado {
       cinturaCm: _num(j['cintura_cm']),
       caderaCm: _num(j['cadera_cm']),
       musloCm: _num(j['muslo_cm']),
-      notas: j['notas'] as String?,
+      notas: _textoTolerante(j['notas']),
     );
   }
 
@@ -225,15 +259,15 @@ class InvitadoResumen {
       estado: '${j['estado'] ?? 'activo'}',
       creadoEn: _ts(j['creado_en']),
       caducaEn: _ts(j['caduca_en']),
-      diasRestantes: (j['dias_restantes'] as num?)?.toInt() ?? 0,
+      diasRestantes: _enteroTolerante(j['dias_restantes']) ?? 0,
       tieneSolicitudPendiente: j['tiene_solicitud_pendiente'] == true,
       solicitudDesde: _ts(j['solicitud_desde']),
       convertidoEn: _ts(j['convertido_en']),
-      clienteId: (j['cliente_id'] as num?)?.toInt(),
+      clienteId: _enteroTolerante(j['cliente_id']),
       plusActivo: j['plus_activo'] == true,
       plusHasta: _ts(j['plus_hasta']),
-      plusDiasRestantes: (j['plus_dias_restantes'] as num?)?.toInt(),
-      plusOrigen: j['plus_origen'] as String?,
+      plusDiasRestantes: _enteroTolerante(j['plus_dias_restantes']),
+      plusOrigen: _textoTolerante(j['plus_origen']),
       telefonoYaCliente: j['telefono_ya_cliente'] == true,
     );
   }
@@ -595,17 +629,17 @@ class InvitadoDetalle {
       id: '${invM['id'] ?? ''}',
       nombre: '${invM['nombre'] ?? ''}',
       telefono: '${invM['telefono'] ?? ''}',
-      fechaNac: invM['fecha_nac'] as String?,
-      carnet: invM['carnet'] as String?,
+      fechaNac: _textoTolerante(invM['fecha_nac']),
+      carnet: _textoTolerante(invM['carnet']),
       estado: '${invM['estado'] ?? 'activo'}',
       creadoEn: _ts(invM['creado_en']),
       caducaEn: _ts(invM['caduca_en']),
       caducado: invM['caducado'] == true,
       convertidoEn: _ts(invM['convertido_en']),
-      clienteId: (invM['cliente_id'] as num?)?.toInt(),
+      clienteId: _enteroTolerante(invM['cliente_id']),
       ultimaSync: _ts(j['ultima_sync']),
       medicionesSincronizadas:
-          (j['mediciones_sincronizadas'] as num?)?.toInt() ?? meds.length,
+          _enteroTolerante(j['mediciones_sincronizadas']) ?? meds.length,
       mediciones: [
         for (final m in meds)
           if (m is Map)
@@ -1340,10 +1374,11 @@ class InvitadosService {
       'p_desde': desde,
     });
     final lista = res is Map ? res['invitados'] : null;
+    // 1.28 (M4-A11): fila a fila con red de seguridad — una
+    // fila sucia se salta; la lista sobrevive.
     return [
       for (final j in (lista as List? ?? const []))
-        if (j is Map)
-          InvitadoResumen.fromJson(j.map((k, v) => MapEntry('$k', v))),
+        ..._resumenSeguro(j),
     ];
   }
 
@@ -1461,10 +1496,7 @@ class InvitadosService {
                 resJ.map((k, v) => MapEntry('$k', v)))
             : null,
         lista: [
-          for (final r in listaJ)
-            if (r is Map)
-              InvitadoResumen.fromJson(
-                  r.map((k, v) => MapEntry('$k', v))),
+          for (final r in listaJ) ..._resumenSeguro(r),
         ],
         cachedAt: instanteServidorHabana(j['cached_at']),
       );

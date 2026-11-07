@@ -30,6 +30,12 @@ const Map<String, ({double min, double max, String unidad})>
   'pecho_cm': (min: 40, max: 200, unidad: 'cm'),
   'muslo_cm': (min: 20, max: 120, unidad: 'cm'),
   'grasa_pct': (min: 1, max: 60, unidad: '%'),
+  // 1.28 (M4-A12/B22): la cadera se leía del espejo y el
+  // servidor la admite y persiste (sync.py: rango 10–300),
+  // pero la lista cerrada de la app NO la traía:
+  // validarMedicion la rechazaba como «Métrica no admitida»
+  // si alguien la pasaba. Entra con el rango del servidor.
+  'cadera_cm': (min: 10, max: 300, unidad: 'cm'),
 };
 
 /// Valida un mapa de medidas. null = válido; si no, el motivo en

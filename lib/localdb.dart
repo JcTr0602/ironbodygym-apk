@@ -3331,11 +3331,19 @@ class LocalDb {
   /// ESTE teléfono (decisión de Jc, ruta 1).
   static Future<void> _crearTablaVisitasInvitados(
       DatabaseExecutor db) async {
+    // 1.28 (M4-A1): invitado_id pasa a TEXT — el id del
+    // invitado es un UUID (texto) y con la columna INTEGER el
+    // int.tryParse de la llamada dejaba SIEMPRE null: las
+    // visitas morían sin dueño y las insignias de la lista no
+    // aparecían jamás. Las instalaciones existentes conservan
+    // la columna INTEGER (sin migración): SQLite guarda el
+    // UUID como TEXT de facto por afinidad, y las lecturas
+    // comparan con CAST (ver conteoVisitasPorInvitado).
     await db.execute(
         'CREATE TABLE IF NOT EXISTS visitas_invitados ('
         'id INTEGER PRIMARY KEY AUTOINCREMENT, '
         'clave TEXT NOT NULL, '
-        'invitado_id INTEGER, '
+        'invitado_id TEXT, '
         'nombre TEXT, '
         'ts TEXT NOT NULL)');
     await db.execute('CREATE INDEX IF NOT EXISTS '
@@ -3343,9 +3351,11 @@ class LocalDb {
   }
 
   /// Registra una visita de invitado (W7, local).
+  /// 1.28 (M4-A1): [invitadoId] es el id CRUDO del invitado
+  /// (UUID de texto), no un entero.
   Future<void> registrarVisitaInvitado({
     required String clave,
-    required int? invitadoId,
+    required String? invitadoId,
     required String? nombre,
     required String tsIso,
   }) async {
@@ -3376,13 +3386,16 @@ class LocalDb {
   /// el resumen no trae; el vínculo por ID sí.
   Future<int> conteoVisitasPorInvitado(
       String invitadoId, String desdeIso) async {
-    final id = int.tryParse(invitadoId);
-    if (id == null) return 0;
+    // 1.28 (M4-A1): antes esto hacía int.tryParse y devolvía
+    // 0 SIEMPRE para los UUID reales. El CAST cubre filas
+    // legadas guardadas como INTEGER (ids de juguete) y como
+    // TEXT (UUID).
+    if (invitadoId.isEmpty) return 0;
     final d = await db;
     final r = await d.rawQuery(
         'SELECT COUNT(*) AS n FROM visitas_invitados '
-        'WHERE invitado_id = ? AND ts >= ?',
-        [id, desdeIso]);
+        'WHERE CAST(invitado_id AS TEXT) = ? AND ts >= ?',
+        [invitadoId, desdeIso]);
     return (r.first['n'] as num?)?.toInt() ?? 0;
   }
 
@@ -3419,10 +3432,10 @@ class LocalDb {
   /// partido en dos claves. La ficha (invitado_id) es el
   /// ancla: todas sus visitas pasan a la clave vigente.
   Future<void> reasignarClaveVisitas(
-      int invitadoId, String claveNueva) async {
+      String invitadoId, String claveNueva) async {
     final d = await db;
     await d.update('visitas_invitados', {'clave': claveNueva},
-        where: 'invitado_id = ? AND clave <> ?',
+        where: 'CAST(invitado_id AS TEXT) = ? AND clave <> ?',
         whereArgs: [invitadoId, claveNueva]);
   }
 
@@ -9815,8 +9828,14 @@ class LocalDb {
     // v1.2.9+40: usa fotos_cola (la tabla nueva), no fotos_pendientes (obsoleta).
     // v1.2.9+40 (Gemini): SIN filtro IS NOT NULL temporalmente para revelar
     // filas huérfanas (suplemento_id null) que antes eran invisibles.
-    var where = "estado IN ('pendiente', 'error', 'subiendo')";
-    // Nota: se incluye 'subiendo' por la carrera con unawaited(push()).
+    // 1.28 (M4-A16/R1M4-M11): 'subiendo' SALE del conjunto.
+    // Incluirla reseteaba worker_id/lease de una subida VIVA
+    // y el ciclo siguiente re-subía los mismos bytes; la
+    // carrera citada (unawaited(push())) no la justifica:
+    // una fila 'subiendo' con lease vivo es del despachador
+    // en curso, y una 'subiendo' huérfana la rescata el
+    // propio despachador por vencimiento de lease.
+    var where = "estado IN ('pendiente', 'error')";
     final filas = await d.query('fotos_cola',
         columns: ['id', 'ruta_local', 'cliente_id', 'suplemento_id', 'estado'],
         where: where);

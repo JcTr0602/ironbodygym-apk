@@ -57,6 +57,11 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
   String? _actualizadaEn;
   bool _retirando = false;
 
+  /// 1.28 (M4-A7): generación de la consulta en curso. Una
+  /// respuesta tardía del cliente anterior no puede pintar
+  /// (ni invalidar) sobre la ficha del cliente visible.
+  int _consultaGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -81,6 +86,17 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
   }
 
   Future<void> _consultar() async {
+    // 1.28 (M4-A7): se captura el cliente y la generación al
+    // arrancar; tras CADA await se verifica que la sección
+    // sigue montada, que no hay una consulta más nueva y que
+    // el cliente visible sigue siendo este. Sin esto, la
+    // respuesta del cliente A podía pintar su foto en la
+    // ficha de B (y «Retirar» retiraba con el RPC de B
+    // habiendo invalidado el path de A).
+    final id = widget.clienteId;
+    final gen = ++_consultaGen;
+    bool vigente() =>
+        mounted && gen == _consultaGen && widget.clienteId == id;
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s): la
       // sección quedaba en «cargando» para siempre si la RPC
@@ -89,20 +105,21 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
       final res = await Supabase.instance.client
           .rpc(
             'admin_foto_personal_de',
-            params: {'p_cliente_id': widget.clienteId},
+            params: {'p_cliente_id': id},
           )
           .timeout(const Duration(seconds: 12));
+      if (!vigente()) return;
       final data = Map<String, dynamic>.from(res as Map);
       if (data['ok'] != true) {
         throw Exception('${data['codigo'] ?? 'ERROR'}');
       }
       final path = data['foto_personal'] as String?;
       if (path == null || path.isEmpty) {
-        if (mounted) setState(() => _estado = _EstadoFoto.sinFoto);
+        setState(() => _estado = _EstadoFoto.sinFoto);
         return;
       }
       final archivo = await FotoCache.instance.obtener(path);
-      if (!mounted) return;
+      if (!vigente()) return;
       setState(() {
         _path = path;
         _archivo = archivo;
@@ -110,7 +127,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
         _estado = _EstadoFoto.conFoto;
       });
     } catch (_) {
-      if (mounted) setState(() => _estado = _EstadoFoto.error);
+      if (vigente()) setState(() => _estado = _EstadoFoto.error);
     }
   }
 

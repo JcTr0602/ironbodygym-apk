@@ -76,6 +76,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   String _filtro = 'todos';
   bool _cargando = true;
   String? _error;
+  // 1.28 (M4-A11): generación de carga de la lista — una
+  // carga vieja que termina tarde no pisa la foto nueva.
+  int _cargaGen = 0;
   List<InvitadoResumen> _lista = [];
   Map<String, ConversionInvitado> _locales = {};
   // 1.25 T87: visitas (30 días) por invitado, para la
@@ -171,6 +174,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   }
 
   Future<void> _cargar() async {
+    final gen = ++_cargaGen;
     setState(() {
       _cargando = true;
       _error = null;
@@ -205,7 +209,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         reportesPendientes =
             (await PlusReportesService().pendientes()).length;
       } catch (_) {}
-      if (!mounted) return;
+      if (!mounted || gen != _cargaGen) return;
       // G1: la caché guarda SOLO el par {resumen, lista «Todos»}.
       if (_filtro == 'todos') {
         await _svc.guardarCacheInvitados(
@@ -227,12 +231,24 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       });
       _cargarVisitasLista(lista);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _cargaGen) return;
+      // 1.28 (M4-A11/R2M4-H6): si la pantalla YA enseña datos
+      // frescos, un fallo de red de una recarga NO los pisa
+      // con la caché vieja ni resetea el filtro elegido: se
+      // conserva la vista y se avisa. La caché solo manda
+      // cuando no hay nada fresco que conservar.
+      if (e is InvitadoError && e.codigo == 'RED' && _lista.isNotEmpty) {
+        setState(() => _cargando = false);
+        mostrarSnack(context,
+            'Sin conexión: se mantiene la última lista cargada.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
       // J3/G1: sin conexión, la caché manda en SOLO LECTURA y la
       // vista se clava en «Todos» (sin chips, búsqueda ni acciones).
       if (e is InvitadoError && e.codigo == 'RED') {
         final cache = await _svc.leerCacheInvitados();
-        if (!mounted) return;
+        if (!mounted || gen != _cargaGen) return;
         if (cache != null && cache.lista.isNotEmpty) {
           setState(() {
             _lista = cache.lista;
@@ -1097,6 +1113,11 @@ String _n(double v) => v == v.roundToDouble() ? '${v.toInt()}' : '$v';
       excluidos.add((inv, 'conversión en curso'));
     } else if (accion == 'plus_quitar' && !inv.plusActivo) {
       excluidos.add((inv, 'no tiene Plus activo'));
+    } else if (accion == 'plus_cortesia' && inv.plusActivo) {
+      // 1.28 (M4-A11/R1M4-B20): dar cortesía a quien YA tiene
+      // Plus activo era aplicable en el lote (el detalle sí
+      // lo impedía): la cortesía pisaba el Plus pagado.
+      excluidos.add((inv, 'ya tiene Plus activo'));
     } else {
       aplicables.add(inv);
     }
@@ -1405,6 +1426,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   int _visitas30 = 0;
   int _umbralVisitas = umbralVisitasDefecto;
   String _claveVisitas = '';
+  // 1.28 (M4-A1/R2M4-H8): registro de visita en curso.
+  bool _registrandoVisita = false;
 
   @override
   void initState() {
@@ -2366,11 +2389,22 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   Future<void> _registrarVisita() async {
     final d = _d;
     if (d == null || _claveVisitas.isEmpty || _offlineCache) return;
-    final n = await registrarVisitaInvitadoAhora(
-      clave: _claveVisitas,
-      invitadoId: int.tryParse(d.id),
-      nombre: d.nombre,
-    );
+    // 1.28 (M4-A1/R2M4-H8): guarda síncrona anti-doble-toque
+    // (dos toques contaban dos visitas) y el id viaja CRUDO:
+    // es un UUID; el int.tryParse anterior lo dejaba en null
+    // y la visita quedaba sin ficha.
+    if (_registrandoVisita) return;
+    _registrandoVisita = true;
+    int n;
+    try {
+      n = await registrarVisitaInvitadoAhora(
+        clave: _claveVisitas,
+        invitadoId: d.id,
+        nombre: d.nombre,
+      );
+    } finally {
+      _registrandoVisita = false;
+    }
     if (!mounted) return;
     setState(() => _visitas30 = n);
     // 1.24 Bloque 5 (B-12): por el helper de la casa, no una
@@ -2431,7 +2465,9 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             BotonSecundario(
               texto: 'Registrar visita',
               icono: Icons.how_to_reg_rounded,
-              onPressed: _registrarVisita,
+              // 1.28 (M4-A1/R2M4-H8): deshabilitado mientras
+              // el registro anterior sigue en curso.
+              onPressed: _registrandoVisita ? null : _registrarVisita,
             ),
           ],
         ],

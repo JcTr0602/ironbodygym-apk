@@ -15,10 +15,26 @@ import 'grafico_metrica.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
+/// 1.28 (M4-A12): número tolerante para el modelo — un
+/// número como texto no tumba la pestaña.
+double? _numTol(dynamic v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v.trim().replaceAll(',', '.'));
+  return null;
+}
+
 class Medicion {
   final int id;
+  // 1.28 (M4-A12/R1M4-M16): el id CRUDO de la medición. Las
+  // filas nacidas de la vía de ops llevan un UUID por
+  // medicion_id y el `int.tryParse` de la reconstrucción
+  // offline lo dejaba en 0: editar/borrar esa fila llamaba
+  // a la RPC con p_medicion_id = 0. El UUID viaja aquí.
+  final String? idCrudo;
   final String clienteId;
-  final double pesoKg;
+  // 1.28 (M4-A12/R1M4-B19): nullable — una medición sin peso
+  // (solo cintura, p. ej.) se pintaba «0.0 kg» inventado.
+  final double? pesoKg;
   final double? grasaPct;
   final double? pechoCm;
   final double? cinturaCm;
@@ -31,6 +47,7 @@ class Medicion {
 
   Medicion({
     required this.id,
+    this.idCrudo,
     required this.clienteId,
     required this.pesoKg,
     this.grasaPct,
@@ -46,18 +63,26 @@ class Medicion {
 
   factory Medicion.fromJson(Map<String, dynamic> j) {
     return Medicion(
-      id: (j['id'] as num?)?.toInt() ?? 0,
+      id: (j['id'] as num?)?.toInt() ??
+          int.tryParse('${j['id'] ?? ''}') ??
+          0,
+      idCrudo: (j['medicion_id'] is String &&
+              (j['medicion_id'] as String).isNotEmpty)
+          ? j['medicion_id'] as String
+          : (j['id'] is String && (j['id'] as String).isNotEmpty)
+              ? j['id'] as String
+              : null,
       clienteId: '${j['cliente_id'] ?? ''}',
-      pesoKg: (j['peso_kg'] as num?)?.toDouble() ?? 0,
-      grasaPct: (j['grasa_pct'] as num?)?.toDouble(),
-      pechoCm: (j['pecho_cm'] as num?)?.toDouble(),
-      cinturaCm: (j['cintura_cm'] as num?)?.toDouble(),
-      caderaCm: (j['cadera_cm'] as num?)?.toDouble(),
-      brazoCm: (j['brazo_cm'] as num?)?.toDouble(),
+      pesoKg: _numTol(j['peso_kg']),
+      grasaPct: _numTol(j['grasa_pct']),
+      pechoCm: _numTol(j['pecho_cm']),
+      cinturaCm: _numTol(j['cintura_cm']),
+      caderaCm: _numTol(j['cadera_cm']),
+      brazoCm: _numTol(j['brazo_cm']),
       // La clave canónica es muslo_cm; 'pierna_cm' solo es lectura
       // defensiva por si un origen futuro la renombra (nunca se
       // escribe: el RPC sigue recibiendo p_muslo_cm).
-      musloCm: ((j['muslo_cm'] ?? j['pierna_cm']) as num?)?.toDouble(),
+      musloCm: _numTol(j['muslo_cm'] ?? j['pierna_cm']),
       notas: j['notas']?.toString(),
       registradoPor: '${j['registrado_por'] ?? ''}',
       // Autoauditoría 1.22 #2 (D-1): el respaldo NO puede ser
@@ -93,6 +118,9 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   List<Medicion> _mediciones = [];
   bool _cargando = true;
   String? _error;
+  // 1.28 (M4-A12): diálogos de medición en curso — dos
+  // toques apilaban dos formularios/confirmaciones.
+  bool _dialogoMedicionAbierto = false;
 
   @override
   void initState() {
@@ -140,7 +168,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           _mediciones = locales.map((r) {
             final m = (r['medidas'] as Map?) ?? {};
             return Medicion.fromJson({
+              // 1.28 (M4-A12): el medicion_id viaja CRUDO
+              // (puede ser UUID de la vía de ops): el modelo
+              // lo conserva en idCrudo para editar/borrar;
+              // el int queda solo como respaldo de orden.
               'id': int.tryParse('${r['medicion_id'] ?? ''}') ?? 0,
+              'medicion_id': '${r['medicion_id'] ?? ''}',
               'cliente_id': widget.clienteId,
               'peso_kg': m['peso_kg'],
               'grasa_pct': m['grasa_pct'],
@@ -278,7 +311,9 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Último: ${_mediciones.first.pesoKg.toStringAsFixed(1)} kg',
+                      _mediciones.first.pesoKg == null
+                          ? 'Último: sin peso registrado'
+                          : 'Último: ${_mediciones.first.pesoKg!.toStringAsFixed(1)} kg',
                       style:
                           AppTexto.displayPequeno,
                     ),
@@ -350,18 +385,24 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     // reconstruido desde la fecha plana, la ventana se cerraba
     // horas antes de tiempo (o se abría de más, según la zona
     // del teléfono).
+    // 1.28 (M4-A12/R1M4-B21): la ventana exige diferencia
+    // NO negativa — un created_at FUTURO (reloj corrido)
+    // daba diferencia negativa < 24 y la fila quedaba
+    // editable «para siempre» para el entrenador.
+    final difHorasVentana =
+        ahoraUtcReal().difference(m.createdAt.toUtc()).inHours;
     final puedeEditar = AuthService().isOwner ||
         (PermisosEntrenador().canRecordMeasurements &&
-            ahoraUtcReal()
-                    .difference(m.createdAt.toUtc())
-                    .inHours <
-                24);
+            difHorasVentana >= 0 &&
+            difHorasVentana < 24);
 
     return Card(
       margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
         title: Text(
-          '${m.pesoKg.toStringAsFixed(1)} kg',
+          m.pesoKg == null
+              ? 'Sin peso registrado'
+              : '${m.pesoKg!.toStringAsFixed(1)} kg',
           style: AppTexto.titulo,
         ),
         subtitle: Column(
@@ -426,7 +467,9 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     showDialog(
       context: context,
       builder: (ctx) => DialogoApp(
-        titulo: '${m.pesoKg.toStringAsFixed(1)} kg',
+        titulo: m.pesoKg == null
+            ? 'Medición sin peso'
+            : '${m.pesoKg!.toStringAsFixed(1)} kg',
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -460,13 +503,24 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
 
   Future<void> _mostrarFormulario(
       BuildContext context, Medicion? existente) async {
+    if (_dialogoMedicionAbierto) return;
+    _dialogoMedicionAbierto = true;
+    try {
+      await _mostrarFormularioFlujo(context, existente);
+    } finally {
+      _dialogoMedicionAbierto = false;
+    }
+  }
+
+  Future<void> _mostrarFormularioFlujo(
+      BuildContext context, Medicion? existente) async {
     // v1.4.0 (Paso 3, diseño de Argón): el formulario solo muestra
     // Peso, Cintura, Brazo y Pierna. % grasa, pecho y cadera quedan
     // en la BD: al EDITAR se reenvían los valores previos de la
     // medición (el RPC es de reemplazo completo y no puede cambiar
     // de firma); al CREAR van en null, como hasta ahora.
     final pesoCtrl = TextEditingController(
-        text: existente?.pesoKg.toString() ?? '');
+        text: existente?.pesoKg?.toString() ?? '');
     final cinturaCtrl = TextEditingController(
         text: existente?.cinturaCm?.toString() ?? '');
     final brazoCtrl = TextEditingController(
@@ -572,9 +626,29 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     if (guardar != true || !mounted) return;
 
     final peso = _parseNum(pesoStr);
-    if (peso == null || peso <= 0) {
+    if (peso == null) {
       if (mounted) {
         mostrarSnack(context, 'El peso es requerido', significado: SignificadoChip.alerta);
+      }
+      return;
+    }
+    // 1.28 (M4-A12/R1M4-M17): el formulario aplica los
+    // RANGOS cerrados de la casa (kMetricasMedicion) antes
+    // de llamar a la RPC — antes solo exigía peso > 0 y un
+    // peso de 900 kg o una cintura de 3 cm viajaban al
+    // servidor y reventaban allí (o quedaban guardados).
+    final medidasForm = <String, double>{
+      'peso_kg': peso,
+      if (_parseNum(cinturaStr) != null)
+        'cintura_cm': _parseNum(cinturaStr)!,
+      if (_parseNum(brazoStr) != null) 'brazo_cm': _parseNum(brazoStr)!,
+      if (_parseNum(musloStr) != null) 'muslo_cm': _parseNum(musloStr)!,
+    };
+    final errorRango = validarMedicion(medidasForm);
+    if (errorRango != null) {
+      if (mounted) {
+        mostrarSnack(context, errorRango,
+            significado: SignificadoChip.alerta);
       }
       return;
     }
@@ -593,7 +667,10 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         'p_brazo_cm': _parseNum(brazoStr),
         'p_muslo_cm': _parseNum(musloStr),
         'p_notas': notasStr.trim().isEmpty ? null : notasStr.trim(),
-        'p_medicion_id': existente?.id,
+        // 1.28 (M4-A12): el id CRUDO (UUID de la vía de ops)
+        // cuando existe; el entero solo es el respaldo de
+        // las filas del servidor.
+        'p_medicion_id': existente?.idCrudo ?? existente?.id,
           })
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
@@ -613,14 +690,26 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   }
 
   Future<void> _confirmarEliminar(Medicion m) async {
+    if (_dialogoMedicionAbierto) return;
+    _dialogoMedicionAbierto = true;
+    try {
+      await _confirmarEliminarFlujo(m);
+    } finally {
+      _dialogoMedicionAbierto = false;
+    }
+  }
+
+  Future<void> _confirmarEliminarFlujo(Medicion m) async {
     // F6-08: confirmación compartida (antes AlertDialog
     // crudo con el botón en Colors.red).
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Eliminar medición',
-      mensaje: 'Se elimina la medición de '
-          '${m.pesoKg.toStringAsFixed(1)} kg. No se puede '
-          'deshacer.',
+      mensaje: m.pesoKg == null
+          ? 'Se elimina esta medición. No se puede deshacer.'
+          : 'Se elimina la medición de '
+              '${m.pesoKg!.toStringAsFixed(1)} kg. No se puede '
+              'deshacer.',
       aceptar: 'Eliminar',
       peligro: true,
     );
@@ -628,7 +717,8 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     try {
       await Supabase.instance.client
           .rpc('eliminar_medicion', params: {
-            'p_medicion_id': m.id,
+            // 1.28 (M4-A12): id crudo (UUID) si lo hay.
+            'p_medicion_id': m.idCrudo ?? m.id,
           })
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));

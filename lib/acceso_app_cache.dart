@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'localdb.dart';
 import 'tiempo.dart';
 
 /// v1.3.9 (F1/F2): caché en memoria de los accesos a la App de Clientes.
@@ -70,6 +74,25 @@ class AccesoCliente {
     this.creadoPor,
   });
 
+  /// 1.28 (M4-A6/R1M4-B8): parseo TOLERANTE por fila. Antes
+  /// `(j['cliente_id'] as num)` lanzaba si el id venía como
+  /// texto y UNA fila mala tumbaba la carga ENTERA (las
+  /// pantallas lo traducían como «sin conexión»). Devuelve
+  /// null si la fila no trae un cliente_id utilizable: el
+  /// llamador la salta y sigue con las demás.
+  static AccesoCliente? intentarDesdeJson(Map<String, dynamic> j) {
+    final crudo = j['cliente_id'];
+    final id = crudo is num
+        ? crudo.toInt()
+        : (crudo is String ? int.tryParse(crudo.trim()) : null);
+    if (id == null || id <= 0) return null;
+    try {
+      return AccesoCliente.fromJson(j);
+    } catch (_) {
+      return null;
+    }
+  }
+
   factory AccesoCliente.fromJson(Map<String, dynamic> j) {
     DateTime? parseFecha(dynamic v) {
       if (v == null) return null;
@@ -78,8 +101,13 @@ class AccesoCliente {
       return parsed == null ? null : aHabana(parsed);
     }
 
+    // 1.28 (M4-A6): el id acepta num o texto numérico (la
+    // guarda dura vive en intentarDesdeJson).
+    final crudoId = j['cliente_id'];
     return AccesoCliente(
-      clienteId: (j['cliente_id'] as num).toInt(),
+      clienteId: crudoId is num
+          ? crudoId.toInt()
+          : (int.tryParse('${crudoId ?? ''}') ?? 0),
       nombre: '${j['nombre'] ?? ''}',
       telefono: '${j['telefono'] ?? ''}',
       activo: j['activo'] == true,
@@ -125,10 +153,15 @@ class AccesoCliente {
   }
 
   /// Estado principal para chips y filtros del panel.
-  /// revocado > bloqueado > pin pendiente > activo.
+  /// revocado > bloqueado > inactivo > activo.
+  /// 1.28 (M4-A6): «revocado» es SOLO el revocado de verdad.
+  /// Antes todo acceso simplemente inactivo se etiquetaba
+  /// 'revocado' y las pantallas ofrecían «reactivar» lo que
+  /// nunca se revocó (y lo contaban como revocado).
   String get estado {
-    if (revocado || !activo) return 'revocado';
+    if (revocado) return 'revocado';
     if (estaBloqueado || bloqueoManualVigente) return 'bloqueado';
+    if (!activo) return 'inactivo';
     return 'activo';
   }
 
@@ -149,8 +182,36 @@ class AccesoAppCache {
   /// error (panel Terra por Zen, 2026-11-02).
   Future<bool>? _enCurso;
 
+  /// 1.28 (M4-A6): generación de los DATOS. Sube con cada
+  /// mutación ([actualizar], [invalidar], [limpiar]). Un
+  /// vuelo de carga captura la suya: si al aterrizar ya no
+  /// coincide, su foto es ANTERIOR a una mutación y se
+  /// descarta — antes una recarga pedida tras generar un PIN
+  /// podía unirse al vuelo previo y aplicar la foto vieja, y
+  /// la pantalla enseñaba el acceso como si nada hubiera
+  /// cambiado. Y [cargar] solo se une al vuelo en curso si
+  /// su generación sigue vigente.
+  int _genDatos = 0;
+  int _genEnCurso = -1;
+
+  /// 1.28 (M4-A14): persistencia de la última lista VERIFICADA
+  /// en la meta de LocalDb, para pintar Control de Acceso y
+  /// las fichas en frío y sin conexión, con su sello.
+  static const String _kMeta = 'acceso_app_cache_v1';
+  DateTime? _verificadoEn;
+  bool _esPersistido = false;
+
   /// true si el caché ya se cargó en esta sesión (aunque esté vacío).
   bool get cargado => _porCliente != null;
+
+  /// Cuándo se verificó la lista contra el servidor (de esta
+  /// sesión o de la persistida). null si nunca.
+  DateTime? get verificadoEn => _verificadoEn;
+
+  /// true si lo cargado es la foto persistida y aún no se ha
+  /// verificado en esta sesión: la UI lo rotula («verificado
+  /// hace X») en vez de presentarlo como dato fresco.
+  bool get esPersistido => _esPersistido && _porCliente != null;
 
   /// Todos los accesos (para el panel F2/F8). null si no cargado.
   List<AccesoCliente>? get todos =>
@@ -160,16 +221,23 @@ class AccesoAppCache {
   /// Si falla (offline), deja el caché como estaba y retorna false.
   Future<bool> cargar() {
     final enCurso = _enCurso;
-    if (enCurso != null) return enCurso;
-    final f = _cargarInterno();
+    if (enCurso != null && _genEnCurso == _genDatos) return enCurso;
+    final gen = _genDatos;
+    final f = _cargarInterno(gen);
     _enCurso = f;
+    _genEnCurso = gen;
     f.whenComplete(() {
       if (identical(_enCurso, f)) _enCurso = null;
     });
     return f;
   }
 
-  Future<bool> _cargarInterno() async {
+  Future<bool> _cargarInterno(int gen) async {
+    // A14: en frío (sin foto en memoria), la persistida pinta
+    // ya; la red refresca encima en esta misma llamada.
+    if (_porCliente == null) {
+      await _restaurarPersistido();
+    }
     try {
       // Timeout propio (10 s): sin conexión, una RPC sin
       // timeout puede no devolver nunca, y hay llamadores que
@@ -179,15 +247,69 @@ class AccesoAppCache {
       final res = await Supabase.instance.client
           .rpc('listar_accesos_clientes')
           .timeout(const Duration(seconds: 10));
-      final lista = (res as List)
-          .map((e) => AccesoCliente.fromJson(
-              Map<String, dynamic>.from(e as Map)))
-          .toList();
+      // A6/R1M4-B8: fila a fila tolerante — una fila mala se
+      // salta; no tumba la carga ni se disfraza de «sin
+      // conexión».
+      final lista = <AccesoCliente>[];
+      for (final e in (res as List)) {
+        try {
+          final a = AccesoCliente.intentarDesdeJson(
+              Map<String, dynamic>.from(e as Map));
+          if (a != null) lista.add(a);
+        } catch (_) {}
+      }
+      // A6: si una mutación ganó la carrera mientras esta
+      // carga volaba, la foto es vieja: se descarta y este
+      // llamador recibe false (el llamador post-mutación ya
+      // lanzó su propio vuelo con la generación nueva).
+      if (gen != _genDatos) return false;
       _porCliente = {for (final a in lista) a.clienteId: a};
+      _verificadoEn = ahoraHabana();
+      _esPersistido = false;
+      unawaited(_persistir(res));
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  /// A14: guarda la respuesta cruda verificada + su instante.
+  Future<void> _persistir(dynamic resCrudo) async {
+    try {
+      await LocalDb.instance.setMeta(
+        _kMeta,
+        jsonEncode({
+          'verificado_en': isoHabana(ahoraHabana()),
+          'filas': resCrudo,
+        }),
+      );
+    } catch (_) {}
+  }
+
+  /// A14: restaura la última lista verificada (arranque en
+  /// frío). Nunca lanza: sin meta o con meta sucia, el caché
+  /// queda como estaba.
+  Future<void> _restaurarPersistido() async {
+    try {
+      final crudo = await LocalDb.instance.getMeta(_kMeta);
+      if (crudo == null || crudo.isEmpty) return;
+      final j = jsonDecode(crudo);
+      if (j is! Map) return;
+      final filas = j['filas'];
+      if (filas is! List) return;
+      final mapa = <int, AccesoCliente>{};
+      for (final e in filas) {
+        try {
+          final a = AccesoCliente.intentarDesdeJson(
+              Map<String, dynamic>.from(e as Map));
+          if (a != null) mapa[a.clienteId] = a;
+        } catch (_) {}
+      }
+      _porCliente = mapa;
+      final v = j['verificado_en'];
+      _verificadoEn = v is String ? DateTime.tryParse(v) : null;
+      _esPersistido = true;
+    } catch (_) {}
   }
 
   /// Obtiene el acceso de un cliente. null = sin acceso o no cargado.
@@ -196,6 +318,7 @@ class AccesoAppCache {
   /// Invalidación inmediata tras generar/revocar (Argón).
   /// Si se pasa el acceso actualizado, lo reemplaza; si es null, lo elimina.
   void actualizar(int clienteId, AccesoCliente? acceso) {
+    _genDatos++;
     final m = _porCliente;
     if (m == null) return;
     if (acceso == null) {
@@ -205,8 +328,29 @@ class AccesoAppCache {
     }
   }
 
-  /// Limpia el caché (al cerrar sesión).
+  /// 1.28 (M4-A6): invalida sin tocar la foto en memoria —
+  /// para DESPUÉS de una mutación (generar/revocar PIN,
+  /// bloquear…): el próximo [cargar] NO se une a un vuelo
+  /// anterior a la mutación ni aplica su resultado.
+  void invalidar() {
+    _genDatos++;
+  }
+
+  /// Limpia el caché (al cerrar sesión): memoria, foto
+  /// persistida y vuelos en curso quedan invalidados — la
+  /// sesión siguiente no hereda un aterrizaje zombi como
+  /// dato suyo (A6).
   void limpiar() {
+    _genDatos++;
     _porCliente = null;
+    _enCurso = null;
+    _genEnCurso = -1;
+    _verificadoEn = null;
+    _esPersistido = false;
+    unawaited(() async {
+      try {
+        await LocalDb.instance.setMeta(_kMeta, '');
+      } catch (_) {}
+    }());
   }
 }
