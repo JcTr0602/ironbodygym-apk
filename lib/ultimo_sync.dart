@@ -44,18 +44,31 @@ Future<List<Map<String, dynamic>>> ultimoSyncPorTelefono() async {
     final raw = await LocalDb.instance.getMeta('usuarios_apk');
     if (raw != null && raw.isNotEmpty) {
       for (final u in jsonDecode(raw) as List) {
-        final m = Map<String, dynamic>.from(u as Map);
-        final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
-        if (tid == null || conFila.contains(tid)) continue;
-        final nombre = (m['nombre'] as String?)?.trim().isNotEmpty == true
-            ? m['nombre'] as String
-            : '${m['username'] ?? ''}';
-        if (nombre.isEmpty) continue;
-        todas.add({
-          'telegram_user_id': tid,
-          'nombre': nombre,
-          'ultimo_sync_at': null,
-        });
+        // 1.28 (M1-A11/F7): fusión POR ELEMENTO. Antes UN try
+        // envolvía todo el bucle con casts duros: un solo
+        // elemento sucio de usuarios_apk (p. ej. nombre que no
+        // sea String) abortaba la fusión ENTERA y todos los
+        // entrenadores sin fila de sync desaparecían de la
+        // pantalla — la reintroducción por dato sucio del
+        // defecto corregido en 1.13. Ahora el elemento sucio
+        // se salta solo y los demás se fusionan igual.
+        try {
+          final m = Map<String, dynamic>.from(u as Map);
+          final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
+          if (tid == null || conFila.contains(tid)) continue;
+          final nombreCrudo = m['nombre']?.toString().trim() ?? '';
+          final nombre = nombreCrudo.isNotEmpty
+              ? nombreCrudo
+              : '${m['username'] ?? ''}';
+          if (nombre.isEmpty) continue;
+          todas.add({
+            'telegram_user_id': tid,
+            'nombre': nombre,
+            'ultimo_sync_at': null,
+          });
+        } catch (_) {
+          continue;
+        }
       }
     }
   } catch (e) {
@@ -133,7 +146,11 @@ String etiquetaUltimoSync(Map<String, dynamic>? fila, DateTime ahora) {
 ///   operando sin que su trabajo llegue al servidor.
 /// - inactivo: sin turno y más de 24 h sin sincronizar.
 /// - sinRegistro: nunca sincronizó (sin fila en el espejo).
-enum EstadoSyncTelefono { alDia, atrasado, inactivo, sinRegistro }
+/// - sinVerificar: hay registro pero NO hay hora del servidor
+///   capturada para medir su antigüedad (1.28, M1-A11/F8): no
+///   se afirma ni «al día» ni «atrasado» — el reloj del
+///   dispositivo jamás sustituye a la referencia del servidor.
+enum EstadoSyncTelefono { alDia, atrasado, inactivo, sinRegistro, sinVerificar }
 
 /// En turno, media jornada sin una sola operación aplicada ya
 /// es señal de problema (la sync efectiva solo se mueve con
@@ -145,9 +162,14 @@ const umbralInactividad = Duration(hours: 24);
 
 /// Clasificación PURA: trabaja con instantes UTC (la edad es
 /// una diferencia de instantes; las zonas no intervienen).
+/// [ahoraServidorUtc] puede ser null (aún no se capturó la
+/// hora del servidor): con registro presente el resultado es
+/// sinVerificar — medir la edad contra el reloj del
+/// dispositivo fabricaría u ocultaría alertas (1.28, M1-A11/F8;
+/// antes evaluarTelefonosSync caía a DateTime.now()).
 EstadoSyncTelefono clasificarSyncTelefono({
   required String? ultimoSyncAt,
-  required DateTime ahoraServidorUtc,
+  required DateTime? ahoraServidorUtc,
   required bool enTurno,
 }) {
   if (ultimoSyncAt == null || ultimoSyncAt.isEmpty) {
@@ -155,6 +177,7 @@ EstadoSyncTelefono clasificarSyncTelefono({
   }
   final u = DateTime.tryParse(ultimoSyncAt)?.toUtc();
   if (u == null) return EstadoSyncTelefono.sinRegistro;
+  if (ahoraServidorUtc == null) return EstadoSyncTelefono.sinVerificar;
   var edad = ahoraServidorUtc.toUtc().difference(u);
   if (edad.isNegative) edad = Duration.zero;
   if (enTurno) {
@@ -189,8 +212,11 @@ Future<
   String dos(int n) => n.toString().padLeft(2, '0');
   final enTurno = await db.telegramIdsConTurnoAbierto(
       '${h.year}-${dos(h.month)}-${dos(h.day)}');
-  final ahoraSrv =
-      await ahoraServidorUltimoSync() ?? DateTime.now().toUtc();
+  // 1.28 (M1-A11/F8): SIN hora del servidor capturada NO se
+  // sustituye por el reloj del dispositivo (eso fabricaba u
+  // ocultaba alertas, lo que el propio módulo W5 prohíbe):
+  // los teléfonos con registro quedan sinVerificar.
+  final ahoraSrv = await ahoraServidorUltimoSync();
   final salida = <({
     int? telegramId,
     Map<String, dynamic>? fila,

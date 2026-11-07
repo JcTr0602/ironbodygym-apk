@@ -207,11 +207,34 @@ String hoyHabanaIso() => isoHabana(ahoraHabana()).substring(0, 10);
 /// string crudo (substring(0, 10)) y un pago de madrugada UTC
 /// caía en el día/mes equivocado. Devuelve '' si el valor no
 /// trae una fecha válida al frente.
+/// 1.28 (M1-A10): ¿(año, mes, día) es una fecha de calendario
+/// REAL? `DateTime` normaliza en silencio (2026-02-31 → 3 de
+/// marzo), así que la forma con regex no basta: se valida por
+/// round-trip en UTC (la aritmética de calendario va en UTC,
+/// regla de la casa).
+bool esFechaCalendarioReal(int anio, int mes, int dia) {
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return false;
+  final d = DateTime.utc(anio, mes, dia);
+  return d.year == anio && d.month == mes && d.day == dia;
+}
+
 String fechaNegocioHabana(dynamic cruda) {
   final s = '${cruda ?? ''}'.trim();
   if (s.length < 10) return '';
   final frente = s.substring(0, 10);
   if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(frente)) return '';
+  // 1.28 (M1-A10): la fecha ESCRITA debe existir en el
+  // calendario. Sin zona, '2026-02-31' se devolvía tal cual;
+  // con zona, DateTime.tryParse la normalizaba a otro día:
+  // la misma fila caía en días distintos según el sufijo.
+  // Fecha inventada = sin fecha de negocio ('').
+  if (!esFechaCalendarioReal(
+    int.parse(frente.substring(0, 4)),
+    int.parse(frente.substring(5, 7)),
+    int.parse(frente.substring(8, 10)),
+  )) {
+    return '';
+  }
   if (s.length == 10) return frente;
   // ¿Trae designador de zona (Z o ±hh:mm al final)? Solo
   // entonces es un instante convertible; sin zona, la fecha
@@ -233,9 +256,17 @@ String fechaNegocioHabana(dynamic cruda) {
 /// la hora local no afecta (el cambio de año en diciembre lo
 /// resuelve DateTime solo). #7 (Argón nómina).
 String mesSiguiente(String mes) {
+  // 1.28 (M1-A10): entrada validada. Antes `int.parse` lanzaba
+  // ante un mes malformado (tumbando el cálculo que lo llamara)
+  // y un mes imposible ('2026-13') se normalizaba en silencio
+  // a enero del año siguiente. Ahora: formato estricto y mes
+  // real; si no, se devuelve la entrada SIN tocar (no se
+  // inventa un mes ni se lanza).
+  if (!RegExp(r'^\d{4}-\d{2}$').hasMatch(mes)) return mes;
   final y = int.parse(mes.substring(0, 4));
   final m = int.parse(mes.substring(5, 7));
-  final f = DateTime(y, m + 1);
+  if (m < 1 || m > 12) return mes;
+  final f = DateTime.utc(y, m + 1);
   return '${f.year.toString().padLeft(4, '0')}-'
       '${f.month.toString().padLeft(2, '0')}';
 }
@@ -254,11 +285,21 @@ bool esAnioBisiesto(int anio) =>
 String? mesHabanaDe(dynamic v) {
   final s = '${v ?? ''}';
   if (s.length < 7) return null;
+  // 1.28 (M1-A10): el prefijo 'YYYY-MM' debe ser un mes REAL
+  // (01-12). Antes '2026-13' se devolvía tal cual y los
+  // cálculos del mes agrupaban contra un mes que no existe.
+  String? prefijoValido() {
+    final p = s.substring(0, 7);
+    if (!RegExp(r'^\d{4}-\d{2}$').hasMatch(p)) return null;
+    final m = int.parse(p.substring(5, 7));
+    return (m >= 1 && m <= 12) ? p : null;
+  }
+
   final conZona = s.length > 10 &&
       (s.endsWith('Z') || s.contains('+') || s.lastIndexOf('-') > 9);
-  if (!conZona) return s.substring(0, 7);
+  if (!conZona) return prefijoValido();
   final d = DateTime.tryParse(s);
-  if (d == null) return s.substring(0, 7);
+  if (d == null) return prefijoValido();
   final h = d.isUtc ? aHabana(d) : d;
   return '${h.year.toString().padLeft(4, '0')}-'
       '${h.month.toString().padLeft(2, '0')}';

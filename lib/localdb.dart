@@ -5,6 +5,7 @@
 /// se hacen en Dart sobre los mapas decodificados.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -111,7 +112,7 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 64;
+  static const int versionActual = 65;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -350,11 +351,45 @@ class LocalDb {
       final indexados = (await db.rawQuery('SELECT id FROM clientes_fts'))
           .map((r) => r['id'] as int)
           .toSet();
-      return indexados.length == esperados.length &&
-          indexados.containsAll(esperados);
+      if (indexados.length != esperados.length ||
+          !indexados.containsAll(esperados)) {
+        return false;
+      }
+      // 1.28 (M1-A3/R2M1-F9): correspondencia de CONTENIDO.
+      // La sonda de IDs no veía un índice con el nombre o el
+      // teléfono VIEJOS (la fila existe, con el mismo id): la
+      // búsqueda por el nombre nuevo no encontraba al cliente.
+      // Se compara la firma (nombre_norm + teléfonos) que el
+      // índice debería tener según el espejo decodificable.
+      final firmas = await _firmasFtsEsperadas(db);
+      final filasFts = await db.rawQuery(
+          'SELECT id, nombre_norm, telefonos FROM clientes_fts');
+      for (final r in filasFts) {
+        final id = r['id'] as int;
+        if (firmas[id] != '${r['nombre_norm']}\u0001${r['telefonos']}') {
+          return false;
+        }
+      }
+      return true;
     } catch (_) {
       return false;
     }
+  }
+
+  /// Firma de contenido FTS esperada por cliente decodificable:
+  /// id → `nombre_norm` + separador + `telefonos`, calculada
+  /// con los mismos normalizadores que escriben el índice.
+  static Future<Map<int, String>> _firmasFtsEsperadas(Database db) async {
+    final firmas = <int, String>{};
+    final rows = await db.query('clientes', columns: ['id', 'data']);
+    for (final r in rows) {
+      try {
+        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
+        firmas[r['id'] as int] =
+            '${_normTexto('${data['nombre'] ?? ''}')}\u0001${_telefonosNorm(data)}';
+      } catch (_) {}
+    }
+    return firmas;
   }
 
   /// Reconstruye el índice FTS desde cero. Si algo falla a la mitad, se
@@ -419,6 +454,14 @@ class LocalDb {
         // v1.3.1 (M3): activar FKs para que ON DELETE CASCADE funcione.
         try {
           await db.execute('PRAGMA foreign_keys = ON;');
+        } catch (_) {}
+        // 1.28 (M1-A4/R2M1-F7): busy_timeout — sin él, dos
+        // escritores entre isolates (UI + FGS/WorkManager) se
+        // estrellaban con SQLITE_BUSY inmediato en vez de
+        // esperar unos segundos a que el otro termine (la
+        // clase 'database is locked' ya se veía en campo).
+        try {
+          await db.execute('PRAGMA busy_timeout = 5000;');
         } catch (_) {}
       },
       onCreate: (db, _) async {
@@ -793,6 +836,7 @@ class LocalDb {
               storage_path TEXT,
               tipo TEXT NOT NULL DEFAULT 'evidencia',
               sync_estado TEXT NOT NULL DEFAULT 'pending',
+              reclamada_en TEXT,
               creado_en TEXT NOT NULL
             )
           ''');
@@ -1495,6 +1539,17 @@ class LocalDb {
           await _addColumnIfMissing(db, 'comprobantes_pago',
               'proximo_intento_en', 'INTEGER NOT NULL DEFAULT 0');
         }
+        if (oldV < 65) {
+          // 1.28 (M1-A5/R2M1-F2): lease de reclamo de las fotos
+          // de incidencias. Sin marca de reclamo, el reset de
+          // _doPush devolvía TODAS las 'uploading' a 'retry' al
+          // arrancar cada push y un segundo isolate podía subir
+          // la misma foto en paralelo (op duplicada con UUID
+          // nuevo). Con reclamada_en, el rescate solo toca los
+          // reclamos viejos (huérfanos de un proceso muerto).
+          await _addColumnIfMissing(db, 'incidencias_fotos',
+              'reclamada_en', 'TEXT');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2103,8 +2158,12 @@ class LocalDb {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     if (activar) {
       data['cuenta_casa'] = 1;
       if (motivo != null && motivo.isNotEmpty) {
@@ -2140,8 +2199,12 @@ class LocalDb {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     data['protegido'] = activar ? 1 : 0;
     await d.update(
         'clientes',
@@ -3521,6 +3584,7 @@ class LocalDb {
       local_path TEXT NOT NULL, storage_path TEXT,
       tipo TEXT NOT NULL DEFAULT 'evidencia',
       sync_estado TEXT NOT NULL DEFAULT 'pending',
+      reclamada_en TEXT,
       intentos INTEGER NOT NULL DEFAULT 0,
       creado_en TEXT NOT NULL
     )''');
@@ -3773,11 +3837,21 @@ class LocalDb {
   /// fuera de la transacción (el índice es derivado y reconstruible).
   /// Recibe oldFoto directamente porque la fila ya fue reemplazada
   /// en el batch (fix revisión Gemini).
+  ///
+  /// 1.28 (M1-A3/R2M1-F9): con [txn], la actualización corre
+  /// DENTRO de la transacción de página del pull: antes corría
+  /// después del commit y si la app moría entre ambos, el
+  /// espejo quedaba nuevo y el índice viejo (invisible para la
+  /// sonda de IDs; la sonda de contenido de arriba es la
+  /// segunda red). Con txn se omite el chequeo de
+  /// disponibilidad (necesita Database; el intento va
+  /// protegido, mismo criterio que deleteMirror).
   Future<void> actualizarFtsCliente(
-      int id, String dataJson, String? oldFoto) async {
-    final d = await db;
+      int id, String dataJson, String? oldFoto,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor d = txn ?? await db;
     try {
-      if (!await _ftsDisponible(d)) return;
+      if (txn == null && !await _ftsDisponible(d as Database)) return;
       final data = jsonDecode(dataJson) as Map<String, dynamic>;
       // Invalidar caché si cambió la foto (oldFoto capturado pre-batch)
       try {
@@ -3837,13 +3911,16 @@ class LocalDb {
     final rows =
         await d.query(tabla, where: 'id IN ($ph)', whereArgs: ids);
     // FIX (Gemini): garantizar id desde la columna SQL, no solo del JSON.
-    return [
-      for (final r in rows)
-        {
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        }
-    ];
+    // 1.28 (M1-A3/R3M1-F4): red POR FILA como en allMirror
+    // (SB-08): una fila con el JSON dañado se omite y no tumba
+    // la lectura entera de las demás.
+    final salida = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      final data = _decodificarDataGuardada(r['data']);
+      if (data == null) continue;
+      salida.add({...data, 'id': r['id']});
+    }
+    return salida;
   }
 
   Future<void> deleteMirror(String tabla, int id,
@@ -4468,13 +4545,29 @@ class LocalDb {
   /// corren sobre esa transacción (mismo patrón que [queueOp]),
   /// para que marcado + encolado sean atómicos.
   Future<void> updateMirrorEstado(int clienteId, String estado,
-      {DatabaseExecutor? txn}) async {
+      {DatabaseExecutor? txn, bool estricto = false}) async {
     final DatabaseExecutor ex = txn ?? await db;
     final rows = await ex.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    // EXCEPCIÓN [estricto]: el marcado que forma parte de una
+    // transacción atómica con encolado (queueOpYMarcarEliminado,
+    // contrato 1.23) NO puede degradar en silencio: si la fila
+    // no se puede marcar, la transacción entera revierte y la
+    // op no queda encolada sin su marca.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) {
+      if (estricto) {
+        throw StateError(
+            'updateMirrorEstado: espejo de clientes $clienteId '
+            'ilegible; se revierte la operación atómica');
+      }
+      return;
+    }
     data['estado'] = estado;
     // Argón P2#6: propagar las columnas dedicadas para no dejar
     // cuenta_casa/protegido desfasados respecto al JSON.
@@ -4504,8 +4597,12 @@ class LocalDb {
     final rows = await ex.query('pagos',
         where: 'id=?', whereArgs: [pagoId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     data['anulado'] = 1;
     await ex.update('pagos', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [pagoId]);
@@ -4529,8 +4626,12 @@ class LocalDb {
     final rows = await ex.query('pagos',
         where: 'id=?', whereArgs: [pagoId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     if (monto != null) data['monto'] = monto;
     if (fecha != null && fecha.isNotEmpty) {
       // 1.23 (delta Argón H2, endurecimiento de frontera): el
@@ -4572,8 +4673,12 @@ class LocalDb {
     final rows = await ex.query('pagos',
         where: 'id=?', whereArgs: [pagoId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     if (data.remove('anulado') == null) return;
     await ex.update('pagos', {'data': jsonEncode(data)},
         where: 'id=?', whereArgs: [pagoId]);
@@ -4613,8 +4718,12 @@ class LocalDb {
     final rows = await d.query('ventas_suplementos',
         where: 'id=?', whereArgs: [ventaId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     data['es_fiado'] = 0;
     data['fecha'] = fechaCobro;
     // v61 (P1): la fecha nueva también va a la columna dedicada;
@@ -4634,8 +4743,12 @@ class LocalDb {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     data['telefono'] = telefono;
     final nuevoJson = jsonEncode(data);
     await d.update('clientes', {'data': nuevoJson},
@@ -4656,8 +4769,12 @@ class LocalDb {
     final rows = await ex.query('servicio_lotes',
         where: 'id=?', whereArgs: [loteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     final actual = (data['dosis_repuestas'] as num?)?.toInt() ?? 0;
     data['dosis_repuestas'] = actual + delta;
     await ex.update('servicio_lotes', {'data': jsonEncode(data)},
@@ -4788,8 +4905,12 @@ class LocalDb {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     for (final e in campos.entries) {
       if (e.value == null) {
         data.remove(e.key);
@@ -4887,8 +5008,12 @@ class LocalDb {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     if (tarifa == null) {
       data.remove('tarifa_especial_transferencia');
     } else {
@@ -4916,8 +5041,12 @@ class LocalDb {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
-    final data =
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F4): decodificación con red — una fila
+    // espejo con el JSON dañado OMITE la actualización
+    // optimista (el próximo pull reescribe la fila entera)
+    // en vez de reventar el flujo que la llamó.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
     data['pagado_hasta'] = pagadoHasta;
     // Argón P2#6: propagar las columnas dedicadas.
     await d.update('clientes',
@@ -4976,8 +5105,61 @@ class LocalDb {
     if (corruptas > 0) {
       debugPrint('[allMirror] $tabla: $corruptas fila(s) con JSON '
           'dañado omitidas de la lectura');
+      // 1.28 (M1-A3/R3M1-F1): señal PERSISTENTE, no solo
+      // debugPrint (que nadie ve en producción): el conteo de
+      // filas corruptas queda en meta para el diagnóstico.
+      // Solo se escribe si cambió (caché por isolate) para no
+      // añadir una escritura a cada lectura caliente.
+      if (txn == null && _corruptasRegistradas[tabla] != corruptas) {
+        _corruptasRegistradas[tabla] = corruptas;
+        unawaited(setMeta('mirror_corruptas_$tabla', '$corruptas')
+            .catchError((_) {}));
+      }
     }
     return salida;
+  }
+
+  /// Caché por isolate del último conteo de filas corruptas
+  /// registrado por tabla (ver [allMirror]).
+  static final Map<String, int> _corruptasRegistradas = {};
+
+  /// 1.28 (M1-A3/R3M1-F1): conteo de filas de un espejo
+  /// distinguiendo las DECODIFICABLES de las corruptas.
+  /// [contarFilasMirror] cuenta crudo (COUNT(*)): con JSON
+  /// dañado, las pantallas leen 0 filas pero el diagnóstico
+  /// W1 veía la tabla «llena» y no disparaba. Este conteo es
+  /// el que alimenta el testigo y la evaluación del W1.
+  Future<({int total, int legibles, int corruptas})> conteoMirrorLegible(
+      String tabla) async {
+    final d = await db;
+    final rows = await d.query(tabla, columns: ['data']);
+    var legibles = 0;
+    var corruptas = 0;
+    for (final r in rows) {
+      // Mismo criterio que los lectores: legible = decodifica
+      // como MAPA. Un JSON válido que no es objeto (p. ej. una
+      // lista) revienta igual a todo lector del espejo; si
+      // contara como legible, el W1 no vería el espejo vacío
+      // que la UI sí está viendo.
+      if (_decodificarDataGuardada(r['data']) != null) {
+        legibles++;
+      } else {
+        corruptas++;
+      }
+    }
+    return (total: rows.length, legibles: legibles, corruptas: corruptas);
+  }
+
+  /// 1.28 (M1-A3/R3M1-F4): decodifica el JSON de una fila espejo
+  /// GUARDADA con red: null si está dañado (o no es un mapa),
+  /// para que los escritores optimistas (familia updateMirror*)
+  /// degraden omitiendo su toque en vez de reventar.
+  static Map<String, dynamic>? _decodificarDataGuardada(Object? cruda) {
+    try {
+      return jsonDecode(cruda as String) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Arma el mapa de una fila espejo: JSON decodificado + columnas
@@ -6034,13 +6216,14 @@ class LocalDb {
     final rows = await d.rawQuery(
         "SELECT id, data FROM $tabla WHERE json_extract(data, '\$.$campo') = ?",
         [valor]);
-    return [
-      for (final r in rows)
-        {
-          ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-          'id': r['id'],
-        }
-    ];
+    // 1.28 (M1-A3/R3M1-F4): red por fila, como mirrorPorIds.
+    final salida = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      final data = _decodificarDataGuardada(r['data']);
+      if (data == null) continue;
+      salida.add({...data, 'id': r['id']});
+    }
+    return salida;
   }
 
   // -- incidencias v1.2.4 (diseño ChatGPT) -------------------------------
@@ -6516,6 +6699,18 @@ class LocalDb {
         limit: limit);
   }
 
+  /// 1.28 (M1-A6/R2M1-F3): UNA fila de auditoría por su id
+  /// (null si no existe). [SyncEngine.registrarAuditoria] lee
+  /// por aquí los hashes de la fila que ACABA de insertar:
+  /// antes tomaba «la pendiente más vieja» y la op viajaba
+  /// con el hash_previo/hash_propio de OTRA auditoría.
+  Future<Map<String, dynamic>?> auditoriaPorId(String id) async {
+    final d = await db;
+    final rows = await d.query('auditoria_local',
+        where: 'id=?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   Future<void> marcarAuditoriaSincronizada(String id) async {
     final d = await db;
     await d.update('auditoria_local', {'sincronizada': 1},
@@ -6731,10 +6926,47 @@ class LocalDb {
       final rows = await d.query(tabla,
           columns: ['sync_seq'], where: 'id=?', whereArgs: [id], limit: 1);
       if (rows.isEmpty) return null;
-      return (rows.first['sync_seq'] as int?) ?? 0;
+      // 1.28 (M1-A9): cast tolerante (un sync_seq que llegue
+      // como double/String no debe tumbar la lectura).
+      return (rows.first['sync_seq'] as num?)?.toInt() ??
+          int.tryParse('${rows.first['sync_seq']}') ??
+          0;
     } catch (_) {
       return null;
     }
+  }
+
+  /// 1.28 (M1-A2/R3M1-F2): versión POR LOTE de [seqFilaMirror]
+  /// para el manifiesto: UNA consulta por lote de ids en vez
+  /// de una por fila (el manifiesto diario recorría el 100 %
+  /// de las filas de 13 tablas con una query por fila; con
+  /// `pagos` creciendo sin poda, cada día costaba más).
+  /// Devuelve mapa rid (como texto) → sync_seq local; los ids
+  /// ausentes NO salen en el mapa (el llamador los lee como
+  /// «falta local», igual que el null de [seqFilaMirror]).
+  Future<Map<String, int>> seqsFilasMirror(
+      String tabla, List<String> rids) async {
+    final d = await db;
+    final salida = <String, int>{};
+    // Mismo criterio de llave que seqFilaMirror: id numérico
+    // si el rid parsea como entero; si no, el texto (UUID).
+    final claves = <Object>[
+      for (final rid in rids) int.tryParse(rid) ?? rid,
+    ];
+    for (var i = 0; i < claves.length; i += 400) {
+      final lote = claves.sublist(
+          i, i + 400 > claves.length ? claves.length : i + 400);
+      final ph = List.filled(lote.length, '?').join(',');
+      final rows = await d.query(tabla,
+          columns: ['id', 'sync_seq'],
+          where: 'id IN ($ph)',
+          whereArgs: lote);
+      for (final r in rows) {
+        salida['${r['id']}'] =
+            (r['sync_seq'] as num?)?.toInt() ?? 0;
+      }
+    }
+    return salida;
   }
 
   /// v1.2.5 (2.5): historial de cierres de turno (para admin).
@@ -6822,6 +7054,22 @@ class LocalDb {
     }
   }
 
+  /// 1.28 (M1-A11): como [metasConPrefijo] pero con los
+  /// VALORES (mapa clave → valor en UNA consulta): para los
+  /// lectores que antes hacían un getMeta por clave (N+1).
+  Future<Map<String, String>> metasValoresConPrefijo(String prefijo) async {
+    final d = await db;
+    try {
+      final rows = await d.query('meta',
+          columns: ['k', 'v'],
+          where: 'k LIKE ? AND v != ?',
+          whereArgs: ['$prefijo%', '']);
+      return {for (final r in rows) '${r['k']}': '${r['v']}'};
+    } catch (_) {
+      return {};
+    }
+  }
+
   // -- meta (watermark + ajustes) --------------------------------------
   Future<void> setMeta(String k, String v,
       {DatabaseExecutor? executor}) async {
@@ -6833,6 +7081,24 @@ class LocalDb {
     final d = txn ?? await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
+  }
+
+  /// 1.28 (M1-A4/R2M1-F8): la pareja de calibración de la hora
+  /// del servidor (server_timestamp_ultimo_sync +
+  /// server_timestamp_recibido_en) se escribe en UNA
+  /// transacción. Antes eran dos setMeta separados: morir
+  /// entre ambos dejaba marca nueva con recepción vieja y el
+  /// «ahora del servidor» de W5 saltaba adelante (un teléfono
+  /// atrasado se veía al día).
+  Future<void> guardarCalibracionServidor(
+      String servidorIso, String recibidoIso) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await setMeta('server_timestamp_ultimo_sync', servidorIso,
+          executor: txn);
+      await setMeta('server_timestamp_recibido_en', recibidoIso,
+          executor: txn);
+    });
   }
 
   /// H-08 (1.23): borra una meta por completo. setMeta con ''
@@ -7646,6 +7912,63 @@ class LocalDb {
     } catch (_) {}
   }
 
+  /// 1.28 (M1-A12/R2M1-F10): ejecuta [fn] manteniendo VIVO el
+  /// sync lock [owner] con el mismo latido que usa el motor
+  /// (renovación cada minuto contra la ventana de 3 min) y
+  /// VERIFICA la propiedad al terminar: si el lock se perdió
+  /// durante la operación, lanza StateError para que el
+  /// llamador NO entregue el resultado (una copia de la BD
+  /// hecha a dos tiempos no es una copia válida). Para los
+  /// dueños del lock FUERA del motor (copia fría, exportar
+  /// respaldo), que antes lo tomaban sin latido: pasados los
+  /// 3 min otro isolate lo robaba y podía hacer checkpoint a
+  /// media copia. [intervalo] es costura de testeo.
+  Future<T> conLatidoSyncLock<T>(
+    String owner,
+    Future<T> Function() fn, {
+    Duration intervalo = const Duration(seconds: 60),
+  }) async {
+    var perdido = false;
+    final latido = Timer.periodic(intervalo, (_) async {
+      if (!await renovarSyncLock(owner)) perdido = true;
+    });
+    try {
+      final r = await fn();
+      if (perdido || !await renovarSyncLock(owner)) {
+        throw StateError('Se perdió el candado de '
+            'sincronización durante la operación; reintenta');
+      }
+      return r;
+    } finally {
+      latido.cancel();
+    }
+  }
+
+  /// 1.28 (M1-A5/R2M1-F2): rescate de fotos de incidencias
+  /// atascadas en 'uploading' SIN pisar reclamos vivos. Solo
+  /// vuelven a 'retry' las cuyo reclamo (columna reclamada_en)
+  /// es más viejo que [antiguedad] o no existe
+  /// (filas de versiones anteriores: huérfanas por definición).
+  /// La comparación va por epoch ENTERO (regla de la casa:
+  /// ligar el epoch como texto rompe el orden por tipo).
+  /// Devuelve cuántas se rescataron. [ahoraEpochSeg] es
+  /// costura de testeo.
+  Future<int> rescatarFotosIncidenciasAtascadas({
+    Duration antiguedad = const Duration(minutes: 10),
+    int? ahoraEpochSeg,
+  }) async {
+    final d = await db;
+    final ahora = ahoraEpochSeg ??
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final corte = ahora - antiguedad.inSeconds;
+    return d.rawUpdate(
+        "UPDATE incidencias_fotos SET sync_estado = 'retry', "
+        'reclamada_en = NULL '
+        "WHERE sync_estado = 'uploading' AND (reclamada_en IS NULL "
+        "OR CAST(strftime('%s', reclamada_en) AS INTEGER) < ?)",
+        [corte]);
+  }
+
   /// Marca un cliente como avisado DE UN VENCIMIENTO
   /// concreto (v1.0.8; 1.25 T02). Solo local, no sincroniza.
   ///
@@ -7756,10 +8079,14 @@ class LocalDb {
         if (c['id'] != null)
           (c['id'] as num).toInt(): c['pagado_hasta'] as String?,
     };
+    // 1.28 (M1-A11/F9): las marcas se leen en UNA consulta
+    // por prefijo; antes era un getMeta por avisado (N+1) en
+    // el camino de carga de Listas.
+    final marcas = await metasValoresConPrefijo('avisado_');
     final vigentes = <int, DateTime>{};
     for (final id in ids) {
       if (!hastaPorId.containsKey(id)) continue;
-      final crudo = await getMeta('avisado_$id');
+      final crudo = marcas['avisado_$id'];
       final corte = crudo?.indexOf('|') ?? -1;
       if (corte < 0) continue; // marca vieja: caducada
       final avisado = crudo!.substring(0, corte);
@@ -8018,7 +8345,11 @@ class LocalDb {
     }
     final raw = await getMeta('ajustes', txn: txn);
     if (raw == null) return {};
-    final out = jsonDecode(raw) as Map<String, dynamic>;
+    // 1.28 (M1-A3/R3M1-F5): un JSON de ajustes dañado no debe
+    // tumbar media app (getAjustes se lee en todas partes):
+    // se degrada al mismo {} que ya se devuelve sin meta.
+    final out = _decodificarDataGuardada(raw);
+    if (out == null) return {};
     if (txn == null) {
       _sellarCacheAjustes(out);
     }
@@ -8345,7 +8676,11 @@ class LocalDb {
           tipo: 'eliminar_cliente',
           payload: payload,
           txn: txn);
-      await updateMirrorEstado(clienteId, 'eliminado', txn: txn);
+      // Estricto: si el marcado no puede aplicarse, revienta
+      // y la transacción revierte el encolado (contrato 1.23;
+      // la tolerancia A3 no aplica a este camino atómico).
+      await updateMirrorEstado(clienteId, 'eliminado',
+          txn: txn, estricto: true);
     });
   }
 
@@ -8717,9 +9052,18 @@ class LocalDb {
         final rows = await txn.query('ops_queue',
             columns: ['tipo', 'payload'],
             where: 'op_uuid=?', whereArgs: [opUuid]);
-        await txn.update('ops_queue', update,
-            where: 'op_uuid=?', whereArgs: [opUuid]);
-        if (rows.isNotEmpty && rows.first['tipo'] == 'anular_pago') {
+        // 1.28 (M1-A1): una op ya 'aplicada' NO regresa a
+        // 'rechazada' (mismo candado que el camino genérico).
+        // La compensación solo corre si la transición OCURRIÓ:
+        // si el UPDATE tocó 0 filas (ya aplicada), la anulación
+        // SÍ se aplicó en el servidor y desmarcar el pago lo
+        // resucitaría localmente.
+        final tocadas = await txn.update('ops_queue', update,
+            where: "op_uuid=? AND estado != 'aplicada'",
+            whereArgs: [opUuid]);
+        if (tocadas > 0 &&
+            rows.isNotEmpty &&
+            rows.first['tipo'] == 'anular_pago') {
           try {
             final p = jsonDecode(rows.first['payload'] as String)
                 as Map<String, dynamic>;
@@ -8732,8 +9076,72 @@ class LocalDb {
       });
       return;
     }
-    await d.update('ops_queue', update,
-        where: 'op_uuid=?', whereArgs: [opUuid]);
+    // 1.28 (M1-A1/R2M1-F1): 'aplicada' es TERMINAL para los
+    // estados no terminales. Un ciclo zombi (perdió el lock y
+    // siguió escribiendo) podía regresar una op aplicada a
+    // 'enviada' y re-subirla; la guarda vive en el UPDATE para
+    // que valga aunque el llamador sea el zombi.
+    if (estado == 'aplicada') {
+      await d.update('ops_queue', update,
+          where: 'op_uuid=?', whereArgs: [opUuid]);
+    } else {
+      await d.update('ops_queue', update,
+          where: "op_uuid=? AND estado != 'aplicada'",
+          whereArgs: [opUuid]);
+    }
+  }
+
+  /// 1.28 (M1-A4/R2M1-F4): confirmación de una op APLICADA en
+  /// UNA transacción: estado + resultado del servidor +
+  /// incidencia sincronizada + limpieza de la fila optimista.
+  /// Antes eran 4 escrituras separadas desde sync.dart: morir
+  /// entre markOp y la limpieza dejaba la fila optimista (id
+  /// negativo) conviviendo con la real para siempre (duplicado
+  /// permanente en ventas/categorías: la purga solo borra
+  /// sync_seq > 0 y no existía barrido de optimistas).
+  /// [tablaOptimista] es la tabla espejo de la fila temporal
+  /// ('ventas_suplementos' / 'categorias_suplemento') o null.
+  Future<void> confirmarOpAplicada(
+    String opUuid, {
+    String? resultadoJson,
+    String? incidenciaId,
+    String? tablaOptimista,
+  }) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await txn.update(
+          'ops_queue', {'estado': 'aplicada', 'error': null},
+          where: 'op_uuid=?', whereArgs: [opUuid]);
+      if (resultadoJson != null) {
+        await txn.update(
+            'ops_queue', {'resultado_servidor': resultadoJson},
+            where: 'op_uuid=?', whereArgs: [opUuid]);
+      }
+      if (incidenciaId != null) {
+        // Réplica sobre txn de marcarIncidenciaSincronizada.
+        await txn.update(
+            'incidencias_local',
+            {'sincronizada': 1, 'sync_estado': 'synced'},
+            where: 'id=?',
+            whereArgs: [incidenciaId]);
+      }
+      if (tablaOptimista != null) {
+        // Réplica sobre txn de limpiarOptimista.
+        final filas = await txn.query(tablaOptimista,
+            where: 'id < 0 AND data LIKE ?',
+            whereArgs: ['%$opUuid%']);
+        for (final r in filas) {
+          try {
+            final data = jsonDecode(r['data'] as String)
+                as Map<String, dynamic>;
+            if (data['op_uuid'] == opUuid) {
+              await txn.delete(tablaOptimista,
+                  where: 'id=?', whereArgs: [r['id']]);
+            }
+          } catch (_) {}
+        }
+      }
+    });
   }
 
   /// Elimina una operación de la cola local (v1.0.15: deshacer pago).
@@ -8806,10 +9214,15 @@ class LocalDb {
     // legítimo al caer el candado, reintentándola al momento.
     // La resolución de ids (clienteDeOp) cae a su GET de
     // respaldo cuando no hay caché, como está diseñada.
+    // 1.28 (M1-A1/R2M1-F1): el bump solo toca ops VIVAS. Sin
+    // la guarda, un ciclo zombi que perdió el lock podía
+    // «re-fallar» una op que el dueño nuevo ya confirmó
+    // 'aplicada' y devolverla a error/necesita_revision.
     await d.rawUpdate(
         'UPDATE ops_queue SET intentos=?, estado=?, error=?, '
         'codigo_error=?, proximo_reintento=?, '
-        'resultado_servidor=NULL WHERE op_uuid=?',
+        'resultado_servidor=NULL WHERE op_uuid=? '
+        "AND estado IN ('pendiente', 'enviada', 'error')",
         [intentos, estado, error.toString(), ec.codigo, proximo, opUuid]);
     return ec.codigo;
   }
@@ -8915,8 +9328,17 @@ class LocalDb {
       }
       args.add(userId);
     }
+    // 1.28 (M1-A8/R1M1-H3): el ORDEN también va por INSTANTE
+    // (epoch entero vía strftime), no lexicográfico: en la
+    // hora repetida del fall-back, dos ops a ambos lados de
+    // la transición salían en orden inverso (el pago antes
+    // que el alta de su cliente). rowid desempata: es el
+    // orden real de inserción en la cola.
     return d.query('ops_queue',
-        where: where.toString(), whereArgs: args, orderBy: 'creada_ts ASC');
+        where: where.toString(),
+        whereArgs: args,
+        orderBy: "CAST(strftime('%s', creada_ts) AS INTEGER) ASC, "
+            'rowid ASC');
   }
 
   /// v1.3.4 Ítem 5 (Argón): incluye 'enviada' — una op enviada pero no

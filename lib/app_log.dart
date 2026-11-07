@@ -872,7 +872,17 @@ class AppLog {
           'OJO: quedan registros sin exportar tras este corte de 5000.');
     }
     sb.writeln('');
-    sb.writeln('## Resumen últimas 24h');
+    // 1.28 (M1-A11/F9): el resumen se calcula sobre el
+    // CONJUNTO EXPORTADO (las filas de arriba), que puede ser
+    // solo el delta o el corte de 5000 — el rótulo lo dice,
+    // para que nadie lo lea como el total real de la bitácora.
+    if (soloNovedades || quedanMas) {
+      sb.writeln('## Resumen últimas 24h '
+          '(sobre el conjunto exportado${soloNovedades ? ', solo novedades' : ''}'
+          '${quedanMas ? ', corte de 5000 con más registros detrás' : ''})');
+    } else {
+      sb.writeln('## Resumen últimas 24h');
+    }
     sb.writeln('');
     sb.writeln('- Críticos: $nCrit');
     sb.writeln('- Errores: $nErr');

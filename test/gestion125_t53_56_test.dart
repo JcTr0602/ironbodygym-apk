@@ -10,11 +10,21 @@ String iso(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
+/// Fecha de calendario [dias] antes/después de [hoy] (aritmética
+/// de CALENDARIO, no de instantes). Con `subtract(Duration)` el
+/// instante cae en la fecha vecina cuando el intervalo cruza el
+/// cambio de hora (1 nov: el reloj se atrasa) y la hora del día
+/// es tardía: el 2026-11-06 a las 23:27, hoy−15d caía en el 23
+/// oct en vez del 22 y el período «de 30 días» medía 29. La
+/// fragilidad era de estas fixtures, no del cálculo T53.
+DateTime _fechaCalendario(DateTime hoy, int dias) =>
+    DateTime(hoy.year, hoy.month, hoy.day + dias);
+
 void main() {
   test('T53: progreso del período a mitad de camino', () {
     final hoy = ahoraHabana();
-    final ini = hoy.subtract(const Duration(days: 15));
-    final fin = hoy.add(const Duration(days: 15));
+    final ini = _fechaCalendario(hoy, -15);
+    final fin = _fechaCalendario(hoy, 15);
     final p = progresoPeriodoFicha(
         fechaInicioRaw: iso(ini), pagadoHastaRaw: iso(fin));
     expect(p, isNotNull);
@@ -40,8 +50,8 @@ void main() {
   test('T53: vencido se acota a fracción 1 y días negativos', () {
     final hoy = ahoraHabana();
     final p = progresoPeriodoFicha(
-        fechaInicioRaw: iso(hoy.subtract(const Duration(days: 40))),
-        pagadoHastaRaw: iso(hoy.subtract(const Duration(days: 10))));
+        fechaInicioRaw: iso(_fechaCalendario(hoy, -40)),
+        pagadoHastaRaw: iso(_fechaCalendario(hoy, -10)));
     expect(p!.frac, 1.0);
     expect(p.diasRest, -10);
   });

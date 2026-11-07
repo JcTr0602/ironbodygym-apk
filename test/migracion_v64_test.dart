@@ -1,7 +1,8 @@
 /// Prueba de migración v63 → v64 (1.24.2, auditoría sync
 /// 2026-11-05):
 ///
-/// 1. Instalación limpia: la BD nace en la versión 64 y
+/// 1. Instalación limpia: la BD nace en la versión vigente
+///    (64 cuando se escribió; 65 desde la 1.28/M1-A5) y
 ///    comprobantes_pago trae la columna proximo_intento_en.
 /// 2. Upgrade 63→64: el watermark de espejo_recordatorio_config
 ///    vuelve a 0 — la columna 'frecuencia' nunca bajó (el
@@ -46,12 +47,15 @@ Future<bool> _tieneColumna(Database db, String tabla, String col) async {
 }
 
 void main() {
-  test('v64 limpia: la BD nace en 64 con proximo_intento_en',
-      () async {
+  test('v64 limpia: la BD nace en la versión vigente con '
+      'proximo_intento_en', () async {
     await _init();
     final db = await _abrirDbVacia();
-    expect(LocalDb.versionActual, 64);
-    expect(await db.getVersion(), 64);
+    // 1.28 (M1-A5): la versión vigente pasó a 65 (columna
+    // reclamada_en); lo que este test fija de v64 es que la
+    // instalación limpia trae su columna de backoff.
+    expect(LocalDb.versionActual, 65);
+    expect(await db.getVersion(), 65);
     expect(
         await _tieneColumna(db, 'comprobantes_pago', 'proximo_intento_en'),
         isTrue,
@@ -73,7 +77,9 @@ void main() {
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 64);
+    // La apertura corre la cadena 63→64→65: el destino es la
+    // versión vigente y los efectos de v64 quedan aplicados.
+    expect(await db.getVersion(), 65);
     expect(
         await LocalDb.instance
             .getWatermarkTabla('espejo_recordatorio_config'),

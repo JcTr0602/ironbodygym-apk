@@ -14,14 +14,17 @@
 ///    `forzar_redescarga_<local>` en _download y el que
 ///    usa seqFilaMirror contra la BD local).
 /// 2. Las 8 entradas históricas no se mueven.
-/// 3. Los 5 nombres locales son tablas que el pull baja
-///    de verdad para AMBOS roles: están en el scope
-///    «servicios» resuelto para dueño y para entrenador
-///    (ninguna es tabla prohibida del entrenador: la fila
+/// 3. Los nombres locales son tablas que el pull baja de
+///    verdad: las 5 históricas para AMBOS roles (scope
+///    «servicios» de dueño y entrenador) y, desde la 1.28,
+///    lotes y compras SOLO para el dueño (prohibidas del
+///    entrenador por diseño: de ellas se deriva el conteo
+///    de dosis que no debe ver; la fila
 ///    del pomo es operativa, D-01 del cierre 1.23).
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
 
 void main() {
@@ -32,9 +35,14 @@ void main() {
       'sync_servicio_salidas': 'servicio_salidas',
       'sync_servicio_botes': 'servicio_botes',
       'sync_servicio_agua_movimientos': 'servicio_agua_movimientos',
+      // 1.28 (M1-A2/C-R1M3-H3): lotes y compras entran en la
+      // vigilancia (ya bajaban y eran purgables sin estar en
+      // el manifiesto).
+      'sync_servicio_lotes': 'servicio_lotes',
+      'sync_servicio_compras': 'servicio_compras',
     };
 
-    test('incluye las 5 tablas de servicios con su nombre local', () {
+    test('incluye las tablas de servicios con su nombre local', () {
       for (final e in esperadasServicios.entries) {
         expect(SyncEngine.tablasManifiesto[e.key], e.value,
             reason: 'falta ${e.key} → ${e.value} en el manifiesto');
@@ -63,12 +71,26 @@ void main() {
     test(
         'los nombres locales de servicios son tablas que el '
         'scope «servicios» baja para dueño y entrenador', () {
-      final locales = esperadasServicios.values.toSet();
+      // Las 5 históricas bajan para AMBOS roles.
+      const ambosRoles = {
+        'servicio_pomos',
+        'servicio_ventas',
+        'servicio_salidas',
+        'servicio_botes',
+        'servicio_agua_movimientos',
+      };
+      // 1.28: lotes y compras bajan SOLO para el dueño. Están
+      // en tablasProhibidasEntrenador a propósito (de sus
+      // filas se deriva el conteo de dosis que el entrenador
+      // no debe ver); su vigilancia del manifiesto aplica al
+      // teléfono del dueño, y verificarManifiesto las salta
+      // para el entrenador.
+      const soloDueno = {'servicio_lotes', 'servicio_compras'};
       final scopeDueno =
           SyncScope.resolver('servicios', esAdmin: true).toSet();
       final scopeEntrenador =
           SyncScope.resolver('servicios', esAdmin: false).toSet();
-      for (final local in locales) {
+      for (final local in ambosRoles) {
         expect(scopeDueno, contains(local),
             reason: '$local no baja en el scope del dueño: la '
                 'bandera forzar_redescarga_$local nunca se '
@@ -76,6 +98,18 @@ void main() {
         expect(scopeEntrenador, contains(local),
             reason: '$local no baja en el scope del entrenador: '
                 'es justo el espejo que hay que autocurar');
+      }
+      for (final local in soloDueno) {
+        expect(scopeDueno, contains(local),
+            reason: '$local no baja en el scope del dueño: la '
+                'bandera forzar_redescarga_$local nunca se '
+                'consumiría en su pull');
+        expect(scopeEntrenador, isNot(contains(local)),
+            reason: '$local NO debe bajar al entrenador: es '
+                'tabla prohibida por diseño (conteo de dosis)');
+        expect(LocalDb.tablasProhibidasEntrenador, contains(local),
+            reason: '$local debe seguir en la lista de '
+                'prohibidas del entrenador');
       }
     });
   });

@@ -31,6 +31,24 @@ Future<File> exportarCopiaFria() async {
         'espera a que termine y reintenta');
   }
   try {
+    // 1.28 (M1-A12/R2M1-F10): la copia corre con el LATIDO
+    // del lock (conLatidoSyncLock): antes el candado se tomaba
+    // sin renovar y, si el volcado+copia superaban los 3 min
+    // de expiración, otro isolate robaba el lock y un
+    // checkpoint automático a media copia mezclaba páginas de
+    // dos instantes. Si el lock se pierde, la copia se aborta.
+    return await LocalDb.instance.conLatidoSyncLock(
+        candado, () => _copiarConCandado());
+  } finally {
+    try {
+      await LocalDb.instance.liberarSyncLock(candado);
+    } catch (_) {}
+  }
+}
+
+/// El volcado del WAL y la copia del archivo, ya con el
+/// candado de sync tomado (ver [exportarCopiaFria]).
+Future<File> _copiarConCandado() async {
     final d = await LocalDb.instance.db;
     // Panel 1.14 (Luna + Kimi): si el WAL no se puede volcar (otra
     // conexión leyendo), NO se comparte una copia sin los últimos
@@ -70,9 +88,4 @@ Future<File> exportarCopiaFria() async {
     final destino = File(p.join(tmp.path, 'ironbody_backup.db'));
     await origen.copy(destino.path);
     return destino;
-  } finally {
-    try {
-      await LocalDb.instance.liberarSyncLock(candado);
-    } catch (_) {}
-  }
 }

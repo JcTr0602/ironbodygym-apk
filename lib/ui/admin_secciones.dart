@@ -581,7 +581,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
     final tid = LocalDb.normalizarTelegramId(f['telegram_user_id']);
     final estado = clasificarSyncTelefono(
       ultimoSyncAt: f['ultimo_sync_at'] as String?,
-      ahoraServidorUtc: _ahoraServidor ?? DateTime.now().toUtc(),
+      ahoraServidorUtc: _ahoraServidor, // 1.28 M1-A11/F8: sin hora del servidor, sinVerificar (no reloj del dispositivo)
       enTurno: tid != null && _enTurnoHoy.contains(tid),
     );
     final etiqueta = etiquetaUltimoSync(f, ahoraHabana());
@@ -949,8 +949,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                             clasificarSyncTelefono(
                               ultimoSyncAt:
                                   f['ultimo_sync_at'] as String?,
-                              ahoraServidorUtc: _ahoraServidor ??
-                                  DateTime.now().toUtc(),
+                              ahoraServidorUtc: _ahoraServidor,
                               enTurno: _enTurnoHoy.contains(
                                   LocalDb.normalizarTelegramId(
                                       f['telegram_user_id'])),

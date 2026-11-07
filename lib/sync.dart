@@ -616,6 +616,25 @@ int topePaginaSeguro(int paginaMax, int pageWm, int? minSinVerificar) {
   return tope < paginaMax ? tope : paginaMax;
 }
 
+/// 1.28 (M1-A8/R1M1-H1, alcance rebajado tras verificar el
+/// puente): destino del SALTO del watermark al cerrar una
+/// tabla. El salto a serverSeq solo es válido si la pasada
+/// llegó al FIN de la tabla (página vacía o página corta:
+/// [finTabla]); si la pasada se cortó por otra vía, el cursor
+/// se topa al máximo REALMENTE descargado de esa tabla
+/// ([tablaMax]) — el mismo arreglo que ya se aplicó a los
+/// borrados en la v1.3.5. Nunca retrocede bajo el watermark
+/// actual. Pura: testeable sin motor.
+int topeSaltoWatermark({
+  required bool finTabla,
+  required int serverSeq,
+  required int tablaMax,
+  required int wmActual,
+}) {
+  final destino = finTabla ? serverSeq : tablaMax;
+  return destino > wmActual ? destino : wmActual;
+}
+
 /// 1.23 PL-7 (banco de pruebas, 2026-11-03): ¿la respuesta de una
 /// página del pull es utilizable? 200 = la página cubre todo el
 /// resultado; 206 = página parcial VÁLIDA: PostgREST la devuelve
@@ -932,6 +951,26 @@ class SyncEngine {
     _emit(_current.phase, error: _current.lastError);
   }
   bool _running = false;
+
+  /// 1.28 (M1-A1/R2M1-F1): el ciclo en curso PERDIÓ el lock de
+  /// sincronización (el latido de [_conLock] no pudo renovarlo:
+  /// otro isolate lo tomó). El ciclo debe DETENERSE en el
+  /// próximo punto de control ([_exigirLockVivo]) en vez de
+  /// seguir escribiendo como zombi junto al dueño nuevo
+  /// (markOp regresando ops aplicadas, watermarks pisados,
+  /// contadores RMW mezclados). Lo pone el latido; lo limpia
+  /// _conLock al arrancar cada ciclo.
+  bool _lockPerdido = false;
+
+  /// Punto de control del ciclo zombi: si el latido detectó
+  /// la pérdida del lock, aborta el ciclo en curso lanzando
+  /// [_CicloSinLock] (los puntos de entrada la capturan y
+  /// cierran SIN sellar éxito: el dueño nuevo ya está
+  /// trabajando y el próximo ciclo reintenta lo que falte).
+  void _exigirLockVivo() {
+    if (_lockPerdido) throw const _CicloSinLock();
+  }
+
   // Cliente protegido (2026-10-26, A4 Argón): se marca cuando en
   // este ciclo se descartó una op por CLIENTE_PROTEGIDO. Se consume
   // al final de cada punto de entrada (run/pull/push/
@@ -1099,6 +1138,16 @@ class SyncEngine {
               body: body)
           .timeout(timeout));
 
+  /// Número de secuencia de emisiones: la emisión completa
+  /// (no ligera) hace varios awaits antes de tocar el estado
+  /// y dos emisiones solapadas podían aplicar FUERA DE ORDEN
+  /// (1.28, M1-A7/R2M1-F5): la más vieja, al terminar tarde,
+  /// pintaba sobre la nueva. Cada emisión toma un número al
+  /// nacer; al aplicar, si ya se aplicó una MÁS NUEVA, esta
+  /// se descarta.
+  int _emitSeq = 0;
+  int _emitAplicada = 0;
+
   /// [ligero] (auditoría 1.21 A-10): emisión de solo progreso —
   /// reutiliza los valores ya calculados de [_current] sin
   /// rehacer el conteo de pendientes, el mínimo de watermarks
@@ -1110,6 +1159,7 @@ class SyncEngine {
       String? detalle,
       String? resumen,
       bool ligero = false}) async {
+    final seqEmision = ++_emitSeq;
     if (ligero) {
       final resL = resumen ?? _current.ultimoResumen;
       final resHoraL =
@@ -1127,6 +1177,7 @@ class SyncEngine {
           enLinea: _current.enLinea,
           ultimoGuardado: _current.ultimoGuardado,
           ultimoSincronizado: _current.ultimoSincronizado);
+      _emitAplicada = seqEmision;
       _status.add(_current);
       return;
     }
@@ -1166,6 +1217,11 @@ class SyncEngine {
       final s = await _db.getMeta('ultimo_sincronizado');
       if (s != null) sincronizado = DateTime.tryParse(s);
     } catch (_) {}
+    // 1.28 (M1-A7/R2M1-F5): si mientras esta emisión esperaba
+    // ya se aplicó una más nueva, esta llega tarde: se
+    // descarta en vez de pintar su fase vieja sobre la actual.
+    if (seqEmision < _emitAplicada) return;
+    _emitAplicada = seqEmision;
     _current = SyncStatus(
         phase: phase,
         pending: pending,
@@ -1315,29 +1371,38 @@ class SyncEngine {
   Future<int> _forzarAtascadas() async {
     try {
       final db = await _db.db;
-      // Corte en hora de La Habana: enviada_ts se guarda con
-      // isoHabana() y la comparación en SQLite es lexicográfica.
-      final corte =
-          isoHabana(ahoraHabana().subtract(const Duration(minutes: 2)));
+      // 1.28 (M1-A8/R1M1-H3): el corte va por INSTANTE (epoch
+      // ENTERO vía strftime, que honra el offset del texto),
+      // no lexicográfico: en la hora repetida del fall-back,
+      // el texto ISO con -04:00 ordena DESPUÉS que el de
+      // -05:00 y una op recién enviada parecía llevar 1 h
+      // atascada (o una vieja, ninguno). Es el mismo patrón
+      // que pendientesParaEnvio ya usa para su filtro (A-05).
+      // El instante de corte sale del reloj real (DateTime.now),
+      // como en pendientesParaEnvio (AA2 H-1): es un instante,
+      // no una fecha de negocio.
+      final corteEpoch =
+          DateTime.now().millisecondsSinceEpoch ~/ 1000 - 120;
       // Argón P1#3: no reactivar ops de otro usuario en este teléfono
       // (el conteo anunciado debe coincidir con lo que esta corrida
       // realmente puede enviar, que ya filtra por usuario).
       final uidF = _auth.userId;
       final filtroF =
           uidF == null ? '' : ' AND (user_id = ? OR user_id IS NULL)';
-      final argsF = <Object?>[corte, if (uidF != null) uidF];
+      final argsF = <Object?>[corteEpoch, if (uidF != null) uidF];
+      const filtroTiempo =
+          "estado = 'enviada' AND (enviada_ts IS NULL OR "
+          "CAST(strftime('%s', enviada_ts) AS INTEGER) < ?)";
       return await db.transaction((txn) async {
         final filas = await txn.query('ops_queue',
             columns: ['op_uuid'],
-            where:
-                "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)$filtroF",
+            where: '$filtroTiempo$filtroF',
             whereArgs: argsF);
         if (filas.isEmpty) return 0;
         await txn.update(
           'ops_queue',
           {'estado': 'pendiente', 'error': null},
-          where:
-              "estado = 'enviada' AND (enviada_ts IS NULL OR enviada_ts < ?)$filtroF",
+          where: '$filtroTiempo$filtroF',
           whereArgs: argsF,
         );
         return filas.length;
@@ -1416,6 +1481,9 @@ class SyncEngine {
             subidos += (await barridoConfirmacion()).confirmadas;
           } catch (_) {}
         }
+        // 1.28 (M1-A1): punto de control del ciclo zombi —
+        // si el push perdió el lock, no se sigue al pull.
+        _exigirLockVivo();
         // v1.2.4: perfil (móvil/carnet) que no pudo subirse sin conexión.
         // Argón Acceso #5 (residual): con el candado vigente
         // para un no-dueño, el perfil TAMPOCO sube (es un canal
@@ -1433,12 +1501,18 @@ class SyncEngine {
         // Pull repetido: si llegan cambios durante la descarga, seguir.
         bool completo = false;
         for (var i = 0; i < 3; i++) {
+          // 1.28 (M1-A1): cada intento de pull verifica que el
+          // ciclo sigue siendo el dueño del lock.
+          _exigirLockVivo();
           try {
             // v1.8.0: sumar lo bajado en CADA intento (un intento
             // que avanza el watermark y falla después ya bajó
             // filas reales).
             bajados += await _doPull();
           } catch (e) {
+            // 1.28 (M1-A1): la pérdida del lock no es un fallo
+            // de pull reintentable: aborta el ciclo entero.
+            if (e is _CicloSinLock) rethrow;
             errPull = (await _describeErrorVisible(e)).mensaje;
             AppLog.error(
                 'sync', 'pull_fallo', d: 'intento=$i error=$e');
@@ -1461,9 +1535,15 @@ class SyncEngine {
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
           // v1.3.4 (Ítem 6 Capa 1, Argón): reconciliación silenciosa
-          // diaria por manifiesto, en background: 1 vez/día, solo con
-          // la cola limpia; nunca bloquea ni lanza.
-          unawaited(manifiestoDiarioSiToca());
+          // diaria por manifiesto: 1 vez/día, solo con la cola limpia;
+          // nunca bloquea ni lanza.
+          // 1.28 (M1-A2/MANIFIESTO-SF): se ESPERA dentro del
+          // candado (antes salía con unawaited y seguía corriendo
+          // tras liberarse el lock, comparando contra un espejo
+          // en movimiento: divergencias falsas y re-descargas
+          // caras). Dentro del ciclo, el espejo está quieto y el
+          // latido mantiene el lock vivo; es 1 vez al día.
+          await manifiestoDiarioSiToca();
         } else if (errPush != null) {
           await _db.setMeta('last_sync_error', errPush);
           _emit(SyncPhase.error,
@@ -1474,9 +1554,19 @@ class SyncEngine {
           await _db.setMeta('last_sync_error', errPull);
           errorCorrida = errPull;
         } else {
-          // Push OK y pull sin excepciones: limpiar error y marcar OK.
-          await _marcarOk();
-          await _db.setMeta('last_sync_error', '');
+          // 1.28 (M1-A7/R1M1-H2): push OK y pull SIN
+          // excepciones pero INCOMPLETO (el watermark no
+          // alcanzó al server_seq tras los 3 intentos): NO se
+          // sella OK. Antes este camino marcaba _marcarOk y
+          // borraba last_sync_error igual que un ciclo
+          // completo, y el sello «última sync buena» mentía
+          // con la descarga a medias. Los sellos estrictos de
+          // _doPull (last_pull_ok/ultimo_pull_ts) no se tocan:
+          // ellos ya solo se escriben con la bajada limpia.
+          const msgIncompleto = 'La descarga quedó incompleta; '
+              'se reintentará en el próximo ciclo.';
+          await _db.setMeta('last_sync_error', msgIncompleto);
+          errorCorrida = msgIncompleto;
         }
         // v1.0.17: resumen discreto de lo que realmente cambió.
         // v1.8.0: sale de los conteos de ESTA corrida (los que
@@ -1495,6 +1585,16 @@ class SyncEngine {
         // v1.5.0 (Bloque G): ciclo completo sin error de push →
         // avisar al gancho (confirmación de conversiones).
         _avisarSyncExitoso();
+      } on _CicloSinLock {
+        // 1.28 (M1-A1): ciclo zombi detenido — no es un error
+        // del usuario ni se sella nada: el dueño nuevo del
+        // lock está sincronizando y lo que falte lo retoma el
+        // próximo ciclo.
+        AppLog.aviso('sync', 'ciclo_detenido_sin_lock');
+        _emit(SyncPhase.idle);
+        errorCorrida = 'La sincronización se interrumpió '
+            'porque otro proceso tomó el relevo; se reintentará '
+            'en el próximo ciclo.';
       } on SessionExpired {
         _sesionVencida();
         _emit(SyncPhase.idle);
@@ -1632,12 +1732,20 @@ class SyncEngine {
         // v1.3.5 (veredicto Argón 2026-10-17): conservar el desglose por
         // tabla para cuadrarlo con DetalleSyncScreen.
         var porTablaScope = <String, int>{};
+        var fallidasScope = 0;
         if (tablasNormales.isNotEmpty) {
           final resScope = await _download(tablasFiltro: tablasNormales);
           n += resScope.aplicadas;
           porTablaScope = resScope.porTabla;
+          fallidasScope = resScope.fallidas;
         }
-        await _db.setMeta('last_pull_scope_ok', isoHabana(ahoraHabana()));
+        // 1.28 (M1-A7/R1M1-H5): los sellos del alcance siguen
+        // la MISMA regla que _doPull (M3-H03): solo con la
+        // bajada limpia (fallidas == 0). Antes se escribían
+        // sin mirar las filas fallidas del alcance.
+        if (fallidasScope == 0) {
+          await _db.setMeta('last_pull_scope_ok', isoHabana(ahoraHabana()));
+        }
         bajadosScope = n;
         // v1.3.1 (E5): scope sync es manual, siempre refleja el ciclo real.
         await _db.setMeta('last_downloaded', '$n');
@@ -1649,7 +1757,11 @@ class SyncEngine {
             int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
         await _db.setMeta('total_bajados', '${prevBajados + n}');
         final tsPullScope = isoHabana(ahoraHabana());
-        await _db.setMeta('ultimo_pull_ts', tsPullScope);
+        // 1.28 (M1-A7/R1M1-H5): ultimo_pull_ts también se
+        // sella solo con la bajada del alcance limpia.
+        if (fallidasScope == 0) {
+          await _db.setMeta('ultimo_pull_ts', tsPullScope);
+        }
         if (debeActualizarDetallePull(n)) {
           await _db.setMeta(
               'ultimo_pull_detalle', serializarDetallePull(porTablaScope));
@@ -1677,6 +1789,13 @@ class SyncEngine {
         // v1.5.0 (Bloque G): el push del alcance es global → el
         // gancho de fin de sync también corre aquí.
         _avisarSyncExitoso();
+      } on _CicloSinLock {
+        // 1.28 (M1-A1): mismo cierre silencioso que push/pull.
+        // Perder el candado a mitad del alcance NO es un error
+        // visible (el catch genérico pintaría «Instance of
+        // '_CicloSinLock'»): el ciclo se corta, no se sella
+        // nada y el proceso relevo sigue con el suyo.
+        _emit(SyncPhase.idle);
       } catch (e) {
         errorEnCiclo = true;
         final errSync = await _describeErrorVisible(e);
@@ -1741,8 +1860,23 @@ class SyncEngine {
     final owner = await _db.adquirirSyncLock();
     if (owner == null) return SyncMotivoNoCorrio.enCurso;
     _running = true;
-    final latido = Timer.periodic(
-        const Duration(seconds: 60), (_) => _db.renovarSyncLock(owner));
+    _lockPerdido = false;
+    // 1.28 (M1-A1/R2M1-F1): el latido RESPETA el bool de la
+    // renovación. Antes el Future<bool> se descartaba: si el
+    // lock expiraba a mitad de un ciclo largo (red lenta) y
+    // otro isolate lo tomaba, AMBOS ciclos escribían a la vez
+    // hasta que el primero terminaba — el «ciclo zombi». Al
+    // detectar la pérdida se marca _lockPerdido y los puntos
+    // de control del ciclo (_exigirLockVivo) lo detienen.
+    final latido = Timer.periodic(const Duration(seconds: 60),
+        (_) async {
+      if (_lockPerdido) return;
+      if (!await _db.renovarSyncLock(owner)) {
+        _lockPerdido = true;
+        AppLog.error('sync', 'sync_lock_perdido',
+            d: 'el ciclo se detiene: otro proceso tomó el relevo');
+      }
+    });
     try {
       await fn();
       return null;
@@ -1814,7 +1948,14 @@ class SyncEngine {
     var subidos = 0;
     var bajados = 0;
     final noCorrio = await _conLock(() async {
-      subidos = await _doPush(desdeForeground: desdeForeground);
+      // 1.28 (M1-A1): si el ciclo pierde el lock a mitad, se
+      // detiene en silencio (sin limpiar errores ni gancho de
+      // éxito): el dueño nuevo está trabajando.
+      try {
+        subidos = await _doPush(desdeForeground: desdeForeground);
+      } on _CicloSinLock {
+        return;
+      }
       // v1.0.14: limpiar error viejo si el push tuvo éxito
       await _db.setMeta('last_sync_error', '');
       // v1.0.17: pull silencioso tras el push para actualizar el watermark.
@@ -1872,14 +2013,16 @@ class SyncEngine {
     AppLog.info('sync', 'push_ini');
     try {
       _emit(SyncPhase.uploading);
-      // A3 (Argón): fotos en push() (no en pull), y rescatar
-      // las que quedaron en 'uploading' por cierre forzoso.
-      try {
-        final db = await _db.db;
-        await db.update('incidencias_fotos',
-            {'sync_estado': 'retry'},
-            where: "sync_estado = 'uploading'");
-      } catch (_) {}
+      // 1.28 (M1-A5/R2M1-F2): el reset masivo de 'uploading'
+      // que vivía aquí se ELIMINÓ. Devolvía TODAS las filas a
+      // 'retry' sin mirar reclamos: anulaba el claim atómico
+      // de subirFotosIncidencias y, entre isolates, el UI
+      // reseteaba la foto que el FGS estaba subiendo y la
+      // subía EN PARALELO (dos ops registrar_foto_incidencia
+      // con UUID distinto: la idempotencia por op_uuid no
+      // deduplicaba, y los intentos se quemaban al doble).
+      // El rescate de huérfanas vive ahora en el propio
+      // worker, respetando el lease (reclamada_en).
       // v1.13.0 (G3, Fase D): los COBROS van primero. Antes las
       // fotos de incidencias subían ANTES de _uploadOps y podían
       // retener cobros hasta 30 min en red lenta. Desde 1.15 (S2,
@@ -1963,6 +2106,9 @@ class SyncEngine {
       try {
         pendientesTrasFotos = await _db.countPendingOps();
       } catch (_) {}
+      // 1.28 (M1-A1): punto de control del ciclo zombi antes
+      // de la segunda subida (las fotos pudieron tardar).
+      _exigirLockVivo();
       if (fotosSubidas > 0 || pendientesTrasFotos > 0) {
         // v1.2.9+46 (Gemini): sumar al total para last_uploaded.
         final resPush2 = await _uploadOps(forzar: forzar);
@@ -2038,7 +2184,13 @@ class SyncEngine {
     final noCorrio = await _conLock(() async {
       // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
       await _verificarCierreForzado();
-      bajados = await _doPull();
+      // 1.28 (M1-A1): pérdida del lock a mitad del pull →
+      // cierre sin gancho de éxito (ver push()).
+      try {
+        bajados = await _doPull();
+      } on _CicloSinLock {
+        return;
+      }
       // 1.15 (caso c): verificación silenciosa si hay ops
       // 'enviada' cuya confirmación pudo perderse. Silenciosa de
       // verdad: un fallo aquí no rompe el pull (el barrido ya es
@@ -2447,8 +2599,11 @@ class SyncEngine {
         // propio fallo borraría su evidencia. Un fallo aquí no
         // puede tumbar el pull: es solo telemetría.
         try {
+          // 1.28 (M1-A3/R3M1-F1): el testigo cuenta filas
+          // LEGIBLES, como la evaluación del W1 (antes contaba
+          // crudo y la variante corrupción quedaba ciega).
           await registrarTestigoClientes(
-              await _db.contarFilasMirror('clientes'));
+              (await _db.conteoMirrorLegible('clientes')).legibles);
         } catch (e) {
           AppLog.error('sync', 'w1_testigo_fallo', d: '$e');
         }
@@ -3125,8 +3280,6 @@ class SyncEngine {
     }
     final rechazadaPorPuente = esRechazoServidor(rec.resultado);
     if (rec.estado == 'aplicada' && !rechazadaPorPuente) {
-      await _db.markOp(uuid, 'aplicada');
-      await _guardarResultadoServidor(uuid, rec.resultado);
       // 1.23 (Push-S P-3; Argón, pasada 2 del Push — H-01 Alta):
       // los efectos laterales de la confirmación viven AQUÍ y
       // no en los llamadores. El barrido los hacía, pero el
@@ -3136,14 +3289,35 @@ class SyncEngine {
       // siguiente con su fila optimista (id negativo) viva —
       // venta o categoría DUPLICADA al bajar la fila real — y
       // la incidencia nunca quedaba marcada sincronizada.
+      // 1.28 (M1-A4/R2M1-F4): los cuatro efectos van ahora en
+      // UNA transacción (LocalDb.confirmarOpAplicada): morir
+      // entre el markOp y la limpieza dejaba el duplicado
+      // permanente, porque la purga solo borra sync_seq > 0.
+      String? incidenciaId;
       if ('${op['tipo']}' == 'incidencia') {
         try {
           final pl = jsonDecode(op['payload'] as String);
-          final iid = pl['id'] as String?;
-          if (iid != null) await _db.marcarIncidenciaSincronizada(iid);
+          incidenciaId = pl['id'] as String?;
         } catch (_) {}
       }
-      await _limpiarOptimistaDeOp(op);
+      final tablaOptimista =
+          '${op['tipo']}' == 'inscripcion_venta_suplemento'
+              ? 'ventas_suplementos'
+              : '${op['tipo']}' == 'crear_categoria'
+                  ? 'categorias_suplemento'
+                  : null;
+      String? resultadoJson;
+      if (rec.resultado != null) {
+        try {
+          resultadoJson = jsonEncode(rec.resultado);
+        } catch (_) {}
+      }
+      await _db.confirmarOpAplicada(
+        uuid,
+        resultadoJson: resultadoJson,
+        incidenciaId: incidenciaId,
+        tablaOptimista: tablaOptimista,
+      );
       return true;
     }
     if (rec.estado == 'rechazada' ||
@@ -3471,6 +3645,21 @@ class SyncEngine {
     }
   }
 
+  /// 1.28 (M1-A9/R3M1-F3): entero TOLERANTE para los valores
+  /// que llegan del servidor (sync_seq, ids): num → toInt,
+  /// String numérico → parseo, cualquier otra cosa → null.
+  /// Es el patrón que el pull de borrados ya usaba (rawSeq) y
+  /// que faltaba en tres sitios con cast duro `as int?`: un
+  /// sync_seq como String/double lanzaba TypeError y, según
+  /// el sitio, dejaba el serverSeq sin guardar ese ciclo o la
+  /// página entera sin aplicar jamás (re-descarga eterna de
+  /// la misma página). Pura: testeable sin motor.
+  static int? enteroTolerante(dynamic v) {
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim());
+    return null;
+  }
+
   Map<String, dynamic>? _prepararFilaMirror(
       String tabla, Map<String, dynamic> m) {
     if (tabla == 'turnos_cierre') {
@@ -3752,7 +3941,10 @@ class SyncEngine {
       data['id'] = uuid;
       return {'id': uuid, 'dataJson': jsonEncode(data), 'esTexto': true};
     }
-    final id = (m['id'] as int?) ?? 0;
+    // 1.28 (M1-A9/R3M1-F3): id tolerante — un id que llegue
+    // como texto en una tabla sin rama propia ya no descarta
+    // TODAS sus filas (el TypeError anterior caía aquí).
+    final id = enteroTolerante(m['id']) ?? 0;
     if (id == 0) return null;
     // gastos usa columnas planas en Supabase (sin 'data' JSON)
     final Map<String, dynamic> data;
@@ -3878,9 +4070,19 @@ class SyncEngine {
     required bool fueReseteada,
     required bool entroEnPurga,
     required bool purgaValidada,
+    bool redescargaCompleta = false,
   }) {
     if (!fueReseteada) return false;
     if (!esPurgable) return true;
+    // 1.28 (M1-A2/C-R2M1-H2): si la re-descarga forzada se
+    // APLICÓ completa en esta pasada, la bandera cumplió su
+    // cometido y se consume AUNQUE la purga no haya validado
+    // (p. ej. porque el server_seq se movió durante la
+    // pasada). Antes la bandera quedaba pinzada y la tabla se
+    // re-descargaba desde 0 en CADA pull en horario de gym.
+    // La purga no se pierde: el manifiesto diario vuelve a
+    // marcar divergencia si el espejo no cuadra.
+    if (redescargaCompleta) return true;
     if (!entroEnPurga) return false;
     return purgaValidada;
   }
@@ -4190,7 +4392,11 @@ class SyncEngine {
           } else {
             await _limpiarMetasEstadoNoAdmin();
           }
-          serverSeq = rows.first['server_seq'] as int?;
+          // 1.28 (M1-A9/R3M1-F3): cast tolerante — con `as int?`
+          // un server_seq como String/double lanzaba, el catch
+          // general lo tragaba y ajustes/usuarios ya guardados
+          // quedaban sin su meta de server_seq ese ciclo.
+          serverSeq = enteroTolerante(rows.first['server_seq']);
           if (serverSeq != null) {
             await _db.setMeta('server_seq', '$serverSeq');
           }
@@ -4284,6 +4490,10 @@ class SyncEngine {
     };
     var ti = 0;
     for (final tabla in tablas) {
+      // 1.28 (M1-A1): punto de control del ciclo zombi entre
+      // tablas (fuera del try por tabla: no debe quedar
+      // registrado como error de ESA tabla).
+      _exigirLockVivo();
       ti++;
       // Ajuste preventivo Gemini (veredicto final): si un scope futuro
       // incluye una tabla no declarada en supTablas, saltarla en vez de
@@ -4324,6 +4534,12 @@ class SyncEngine {
       // (en páginas siguientes el filtro cambia y el conteo ya no
       // es el total de la tabla).
       var pasadaCompleta = false;
+      // 1.28 (M1-A8/R1M1-H1): la pasada llegó al FIN de la
+      // tabla (página vacía o página corta). Solo entonces el
+      // salto del watermark a serverSeq es válido (ver
+      // topeSaltoWatermark); pasadaCompleta sigue siendo la
+      // noción ESTRICTA de la purga (solo página vacía, H-03).
+      var finTabla = false;
       var conteoConfirmado = false;
       int? totalServidor;
       var esPrimeraPagina = true;
@@ -4548,6 +4764,7 @@ class SyncEngine {
             // H-03: página vacía = la tabla se recorrió entera.
             // Es la única salida que acredita una pasada completa.
             pasadaCompleta = true;
+            finTabla = true;
             break;
           }
           // v1.2.7 (Paso 1 Gemini): commit atómico por página.
@@ -4575,7 +4792,12 @@ class SyncEngine {
             var seqEnCurso = 0;
             try {
               final m = Map<String, dynamic>.from(row as Map);
-              final seq = (m['sync_seq'] as int?) ?? 0;
+              // 1.28 (M1-A9/R3M1-F3): seq tolerante — con el
+              // cast duro, una deriva sistemática del tipo
+              // dejaba la tabla sin completar NUNCA una pasada
+              // (cada fila lanzaba y la página se re-pedía
+              // para siempre).
+              final seq = enteroTolerante(m['sync_seq']) ?? 0;
               seqEnCurso = seq;
               final prep = _prepararFilaMirror(tabla, m);
               // H-01 (1.19): la llave de purga sale del conversor,
@@ -4750,13 +4972,23 @@ class SyncEngine {
                 {'k': 'wm_$tabla', 'v': '$paginaMax'},
                 conflictAlgorithm: ConflictAlgorithm.replace,
               );
-            });
-            // FTS es derivado y reconstruible: se actualiza fuera de la txn.
-            for (final op in opsPagina) {
+              // 1.28 (M1-A3/R2M1-F9): el FTS de clientes se
+              // actualiza DENTRO de la transacción de la
+              // página. Antes iba después del commit: si la
+              // app moría entre ambos, el espejo quedaba con
+              // el nombre nuevo y el índice con el viejo (y la
+              // sonda de IDs no lo veía; ahora la sonda
+              // también compara contenido, como segunda red).
               if (tabla == 'clientes') {
-                await _db.actualizarFtsCliente(op['id'] as int,
-                    op['dataJson'] as String, op['oldFoto'] as String?);
+                for (final op in opsPagina) {
+                  await _db.actualizarFtsCliente(
+                      op['id'] as int, op['dataJson'] as String,
+                      op['oldFoto'] as String?,
+                      txn: txn);
+                }
               }
+            });
+            for (final op in opsPagina) {
               // v1.3.3: invalidar caché si cambió la foto del suplemento
               // (el pull no pasa por upsertMirror, usa el batch directo).
               if (tabla == 'suplementos') {
@@ -4796,7 +5028,12 @@ class SyncEngine {
           // haber topado en silencio). Se sigue hasta la página
           // vacía, que es la prueba real. En el resto de tablas se
           // mantiene el corte actual (una petición menos por tabla).
-          if (rows.length < kPisoPagina && !recolectarPurga) break;
+          // 1.28 (M1-A8): la página corta marca fin de tabla
+          // para el salto del watermark (no para la purga).
+          if (rows.length < kPisoPagina && !recolectarPurga) {
+            finTabla = true;
+            break;
+          }
           pageWm = paginaMax;
         }
       } catch (e) {
@@ -4870,8 +5107,9 @@ class SyncEngine {
                   '&select=server_seq'));
               if (r2.statusCode == 200) {
                 final rows2 = jsonDecode(r2.body) as List;
+                // 1.28 (M1-A9): cast tolerante también aquí.
                 final ss2 = rows2.isNotEmpty
-                    ? rows2.first['server_seq'] as int?
+                    ? enteroTolerante(rows2.first['server_seq'])
                     : null;
                 // H-03: ss2 null invalida explícitamente. serverSeq
                 // ya viene garantizado no null por el bloque exterior
@@ -4936,11 +5174,25 @@ class SyncEngine {
           fueReseteada: tablasReseteadas.contains(tabla),
           entroEnPurga: tablasPurga.contains(tabla),
           purgaValidada: purgaValidada,
+          // 1.28 (M1-A2/C-R2M1-H2): la pasada de esta tabla
+          // fue completa (página vacía, H-03) y sin errores
+          // (este bloque solo corre en ese caso): la
+          // re-descarga forzada se aplicó.
+          redescargaCompleta: pasadaCompleta,
         )) {
           await _db.setMeta('forzar_redescarga_$tabla', '');
         }
         final wmActual = await _db.getWatermarkTabla(tabla);
-        if (wmActual < serverSeq) {
+        // 1.28 (M1-A8/R1M1-H1): el destino del salto se topa
+        // al máximo realmente descargado si la pasada no
+        // llegó al fin de la tabla (topeSaltoWatermark).
+        final destinoSalto = topeSaltoWatermark(
+          finTabla: finTabla,
+          serverSeq: serverSeq,
+          tablaMax: tablaMax,
+          wmActual: wmActual,
+        );
+        if (wmActual < destinoSalto) {
           // v1.3.1 (Argón pull): NO forzar el watermark si la tabla es
           // troncal, el cursor estaba en 0 y el servidor devolvió 0
           // filas. En producción esas tablas nunca están vacías:
@@ -4962,10 +5214,12 @@ class SyncEngine {
                 d: '$tabla cursor=0 servidor=0');
           }
           if (forzar && !tablasSecuenciaPropia.contains(tabla)) {
-            await _db.setWatermarkTabla(tabla, serverSeq);
+            // 1.28 (M1-A8): se escribe el DESTINO topado, no
+            // el serverSeq crudo.
+            await _db.setWatermarkTabla(tabla, destinoSalto);
             // v1.2.9+47 (AppLog): watermark persistido.
             AppLog.info('sync', 'pull_wm_guardado',
-                d: '$tabla $wmActual->$serverSeq');
+                d: '$tabla $wmActual->$destinoSalto');
           } else if (tablasSecuenciaPropia.contains(tabla)) {
             // H-02: sin salto. El wm de estas tablas avanza solo
             // por página (al máximo seq propio de la tabla); saltar
@@ -5342,7 +5596,29 @@ class SyncEngine {
   /// ultimo_manifiesto = hoy) cuando el resultado es ≥ 0. Un -1
   /// (RPC ausente o red caída) NO sella: antes sellaba siempre y la
   /// verificación quedaba muda un día entero tras un fallo.
+  /// 1.28 (M1-A2/MANIFIESTO-SF): vuelo único del manifiesto
+  /// en este isolate: dos disparos solapados (run + arranque,
+  /// p. ej.) comparten la MISMA corrida en vez de verificar
+  /// dos veces en paralelo contra el espejo.
+  Future<void>? _manifiestoEnCurso;
+
   Future<void> manifiestoDiarioSiToca({
+    Future<int> Function()? verificar,
+  }) {
+    final enCurso = _manifiestoEnCurso;
+    if (enCurso != null) return enCurso;
+    late final Future<void> corrida;
+    corrida = _manifiestoDiarioSiTocaInterno(verificar: verificar)
+        .whenComplete(() {
+      if (identical(_manifiestoEnCurso, corrida)) {
+        _manifiestoEnCurso = null;
+      }
+    });
+    _manifiestoEnCurso = corrida;
+    return corrida;
+  }
+
+  Future<void> _manifiestoDiarioSiTocaInterno({
     Future<int> Function()? verificar,
   }) async {
     try {
@@ -5356,6 +5632,10 @@ class SyncEngine {
         AppLog.aviso('sync', 'manifiesto_no_concluyente', d: 'dia=$hoy');
         return;
       }
+      // 1.28 (M1-A2/MANIFIESTO-SF): si entraron ops DURANTE la
+      // verificación, el espejo ya no es la foto que se
+      // comparó: no se sella (el próximo ciclo reintenta).
+      if (await _db.countPendingOps() > 0) return;
       await _db.setMeta('ultimo_manifiesto', hoy);
       AppLog.info('sync', 'manifiesto_diario',
           d: 'divergentes=$divergentes dia=$hoy');
@@ -5396,6 +5676,15 @@ class SyncEngine {
     'sync_servicio_salidas': 'servicio_salidas',
     'sync_servicio_botes': 'servicio_botes',
     'sync_servicio_agua_movimientos': 'servicio_agua_movimientos',
+    // 1.28 (M1-A2/C-R1M3-H3): lotes y compras también bajan
+    // (supTablas) y son purgables, pero no se vigilaban: un
+    // lote fantasma o ausente (servicios.dart lee el espejo
+    // servicio_lotes) no divergía nunca. Si la RPC
+    // sync_manifiesto aún no las conociera, la tabla queda
+    // «sin verificar» (ver verificarManifiesto) sin envenenar
+    // el sello del resto.
+    'sync_servicio_lotes': 'servicio_lotes',
+    'sync_servicio_compras': 'servicio_compras',
   };
 
   /// v1.2.5 (D19): verificación por manifiesto (buckets sensibles al rol).
@@ -5404,77 +5693,149 @@ class SyncEngine {
   /// espejo local. Si falta una fila o el servidor tiene sync_seq mayor,
   /// el bucket diverge y se fuerza su re-descarga.
   /// Retorna la cantidad de buckets divergentes (0 = todo coincide).
-  /// v1.13.0 (G4): retorna -1 si la verificación NO fue concluyente
-  /// (algún bucket con RPC 404/400 o excepción de red): antes
-  /// devolvía 0 y manifiestoDiarioSiToca sellaba el día como si todo
-  /// coincidiera, escondiendo el fallo.
+  /// v1.13.0 (G4): retorna -1 si la verificación NO fue concluyente:
+  /// antes devolvía 0 y manifiestoDiarioSiToca sellaba el día como si
+  /// todo coincidiera, escondiendo el fallo.
+  ///
+  /// 1.28 (M1-A2): la conclusividad ahora es POR TABLA
+  /// (C-R2M1-H4): una tabla que la RPC no conoce (400/404) o
+  /// que falla a mitad queda «sin verificar» — registrada en
+  /// la meta manifiesto_sin_verificar y en bitácora — pero NO
+  /// envenena el sello de las demás para siempre (antes el -1
+  /// global hacía repetir la verificación ENTERA en cada
+  /// ciclo de sync, ~104 POST + una query por fila, sin
+  /// sellar jamás). El -1 se reserva al fallo GLOBAL: si
+  /// NINGUNA tabla concluyó, no se sella (la RPC no existe o
+  /// la red cayó: reintentar es lo correcto).
   Future<int> verificarManifiesto({int nBuckets = 8}) async {
     const tablas = tablasManifiesto;
     var divergentes = 0;
-    var concluyente = true;
+    var concluyentes = 0;
+    final sinVerificar = <String>[];
+    // 1.28 (M1-A2, matiz de rol sobre C-R1M3-H3): las tablas
+    // prohibidas para el entrenador (servicio_lotes y
+    // servicio_compras: de sus filas se deriva el conteo de
+    // dosis que el entrenador NO debe ver) no se verifican en
+    // su teléfono: no tiene espejo que curar y no debe pedir
+    // ni los hashes al servidor. Como en el pull
+    // (tablasEspejoActivasParaRol): se saltan en silencio, no
+    // cuentan como «sin verificar». Para el dueño sí entran.
+    final esAdmin = _esAdminSeguro;
     for (final entry in tablas.entries) {
-      final supTabla = entry.key;
-      final localTabla = entry.value;
-      for (var b = 0; b < nBuckets; b++) {
-        try {
-          final r =
-              await _postAuth(Uri.parse('$_base/rest/v1/rpc/sync_manifiesto'),
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode({
-                    'p_tabla': supTabla,
-                    'p_bucket': b,
-                    'p_n_buckets': nBuckets,
-                  }));
-          if (r.statusCode == 404 || r.statusCode == 400) {
-            // RPC aún no aplicado en Supabase: verificación NO
-            // concluyente (antes se omitía en silencio y se sellaba).
-            concluyente = false;
+      if (!esAdmin &&
+          LocalDb.tablasProhibidasEntrenador.contains(entry.value)) {
+        continue;
+      }
+      final r = await _verificarTablaManifiesto(
+          entry.key, entry.value, nBuckets);
+      if (!r.concluyente) {
+        sinVerificar.add(entry.value);
+        continue;
+      }
+      concluyentes++;
+      if (r.divergente) divergentes++;
+    }
+    try {
+      await _db.setMeta(
+          'manifiesto_sin_verificar', sinVerificar.join(','));
+    } catch (_) {}
+    if (sinVerificar.isNotEmpty) {
+      AppLog.aviso('sync', 'manifiesto_tablas_sin_verificar',
+          d: sinVerificar.join(','));
+    }
+    if (concluyentes == 0) return -1;
+    return divergentes;
+  }
+
+  /// Verificación del manifiesto de UNA tabla. Devuelve si
+  /// fue concluyente y si divergió (con la bandera
+  /// forzar_redescarga_<local> ya puesta en ese caso).
+  Future<({bool concluyente, bool divergente})> _verificarTablaManifiesto(
+      String supTabla, String localTabla, int nBuckets,
+      {bool reintentoSaturacion = false}) async {
+    var divergente = false;
+    for (var b = 0; b < nBuckets; b++) {
+      try {
+        final r =
+            await _postAuth(Uri.parse('$_base/rest/v1/rpc/sync_manifiesto'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'p_tabla': supTabla,
+                  'p_bucket': b,
+                  'p_n_buckets': nBuckets,
+                }));
+        if (r.statusCode == 404 || r.statusCode == 400) {
+          // La RPC no conoce esta tabla (o no existe): tabla
+          // sin verificar; el resto del manifiesto sigue.
+          return (concluyente: false, divergente: divergente);
+        }
+        if (r.statusCode != 200) {
+          // SB-06 (auditoría sync 1.21): un 401/403/429/5xx en
+          // un bucket NO es «sin divergencia»: es verificación
+          // NO concluyente (como el error de red).
+          return (concluyente: false, divergente: divergente);
+        }
+        final decoded = jsonDecode(r.body);
+        if (decoded is! List) {
+          return (concluyente: false, divergente: divergente);
+        }
+        final rows = decoded;
+        // v1.2.5-rev2 (ChatGPT): protocolo de saturación. La RPC devuelve
+        // hasta 2001 filas; MÁS de 2000 = truncado.
+        // 1.28 (M1-A2/C-R1M3-H6): antes el bucket saturado se
+        // marcaba divergente SIN comparar — con 8 buckets, el
+        // espejo del agua diverge para siempre al pasar de
+        // ~16 000 filas visibles y se re-descarga a diario.
+        // Ahora la tabla se re-verifica con 8× buckets (el
+        // umbral efectivo sube a ~128 000 filas); solo si AÚN
+        // así satura se marca divergente sin comparar
+        // (dirección segura).
+        if (rows.length > 2000) {
+          if (!reintentoSaturacion) {
+            return await _verificarTablaManifiesto(
+                supTabla, localTabla, nBuckets * 8,
+                reintentoSaturacion: true);
+          }
+          divergente = true;
+          await _db.setMeta('forzar_redescarga_$localTabla', '1');
+          continue;
+        }
+        // 1.28 (M1-A2): comparación POR LOTE — una sola
+        // consulta local por bucket (seqsFilasMirror) en vez
+        // de una por fila (R3M1-F2: el coste diario crecía
+        // con la tabla), y casts TOLERANTES (MANIFIESTO-DS):
+        // un rid/sseq con el tipo derivado ya no tumba el
+        // bucket entero vía excepción.
+        final esperados = <String, int>{};
+        for (final row in rows) {
+          if (row is! Map) continue;
+          final rid = row['rid']?.toString();
+          if (rid == null || rid.isEmpty) continue;
+          esperados[rid] = enteroTolerante(row['sseq']) ?? 0;
+        }
+        final locales =
+            await _db.seqsFilasMirror(localTabla, esperados.keys.toList());
+        var coincide = true;
+        for (final e in esperados.entries) {
+          final localSeq = locales[e.key];
+          // Falta local o el servidor tiene versión más nueva.
+          if (localSeq == null || localSeq < e.value) {
+            coincide = false;
             break;
           }
-          if (r.statusCode != 200) {
-            // SB-06 (auditoría sync 1.21): un 401/403/429/5xx en
-            // un bucket NO es «sin divergencia»: es verificación
-            // NO concluyente (como el error de red). Antes se
-            // saltaba en silencio y el día se sellaba igual.
-            concluyente = false;
-            continue;
-          }
-          final rows = jsonDecode(r.body) as List;
-          // v1.2.5-rev2 (ChatGPT): protocolo de saturación. La RPC devuelve
-          // hasta 2001 filas; MÁS de 2000 = truncado. Se marca divergente
-          // (re-descarga, dirección segura) sin comparar. 2000 exactas =
-          // manifiesto completo, se compara normal.
-          if (rows.length > 2000) {
-            divergentes++;
-            await _db.setMeta('forzar_redescarga_$localTabla', '1');
-            continue;
-          }
-          var coincide = true;
-          for (final row in rows) {
-            final m = Map<String, dynamic>.from(row as Map);
-            final rid = m['rid'] as String?;
-            final sseq = (m['sseq'] as int?) ?? 0;
-            if (rid == null) continue;
-            final localSeq = await _db.seqFilaMirror(localTabla, rid);
-            // Falta local o el servidor tiene versión más nueva.
-            if (localSeq == null || localSeq < sseq) {
-              coincide = false;
-              break;
-            }
-          }
-          if (!coincide) {
-            divergentes++;
-            // Fuerza re-descarga del ámbito en el próximo pull.
-            await _db.setMeta('forzar_redescarga_$localTabla', '1');
-          }
-        } catch (_) {
-          // Error de red: verificación NO concluyente (antes se
-          // ignoraba y se sellaba el día como si todo coincidiera).
-          concluyente = false;
         }
+        if (!coincide) {
+          divergente = true;
+          // Fuerza re-descarga del ámbito en el próximo pull.
+          await _db.setMeta('forzar_redescarga_$localTabla', '1');
+        }
+      } catch (_) {
+        // Error de red: tabla NO concluyente (antes ignoraba
+        // el bucket y se sellaba el día como si coincidiera).
+        return (concluyente: false, divergente: divergente);
       }
     }
-    return concluyente ? divergentes : -1;
+    return (concluyente: true, divergente: divergente);
   }
 
   /// v1.2.5 (D18): verifica que el reloj del dispositivo no esté muy
@@ -5606,10 +5967,14 @@ class SyncEngine {
       dispositivoId: dispositivoId,
     );
     // El hash previo/propio viajan para verificación cruzada en servidor.
-    final rows = await _db.auditoriaPendientes(limit: 1);
-    final ultimo = rows.isEmpty
-        ? null
-        : rows.firstWhere((r) => r['id'] == id, orElse: () => rows.first);
+    // 1.28 (M1-A6/R2M1-F3): se leen de LA FILA RECIÉN INSERTADA,
+    // por su id. Antes se tomaba auditoriaPendientes(limit: 1)
+    // — que devuelve la pendiente MÁS VIEJA — y el firstWhere
+    // caía al orElse en la práctica siempre: la op viajaba con
+    // el id/acción nuevos pero los hashes de OTRA auditoría, y
+    // la cadena no validaba en el servidor (falsa señal de
+    // manipulación sobre un registro íntegro).
+    final propia = await _db.auditoriaPorId(id);
     await _db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'auditoria',
@@ -5619,8 +5984,8 @@ class SyncEngine {
         'objeto_tipo': objetoTipo,
         'objeto_id': objetoId,
         'detalle': detalle,
-        'hash_previo': ultimo?['hash_previo'],
-        'hash_propio': ultimo?['hash_propio'],
+        'hash_previo': propia?['hash_previo'],
+        'hash_propio': propia?['hash_propio'],
       },
     );
     return id;
@@ -6091,13 +6456,14 @@ class SyncEngine {
     try {
       final dateHdr = r.headers['date'];
       if (dateHdr != null) {
-        await _db.setMeta('server_timestamp_ultimo_sync',
-            HttpDate.parse(dateHdr).toUtc().toIso8601String());
-        // Delta del panel (Bloque 6): el instante local de
-        // recepción, para CALIBRAR la hora del servidor entre
-        // pulls (si no, la referencia queda congelada y la
-        // antigüedad de W5 deja de crecer).
-        await _db.setMeta('server_timestamp_recibido_en',
+        // 1.28 (M1-A4/R2M1-F8): la pareja (marca del servidor +
+        // instante local de recepción, con el que W5 CALIBRA
+        // el avance entre pulls) se guarda en UNA transacción:
+        // en dos pasos, morir entre ambos dejaba marca nueva
+        // con recepción vieja y el «ahora del servidor» saltaba
+        // adelante (un teléfono atrasado se veía al día).
+        await _db.guardarCalibracionServidor(
+            HttpDate.parse(dateHdr).toUtc().toIso8601String(),
             ahoraUtcReal().toIso8601String());
       }
     } catch (e) {
@@ -6107,9 +6473,19 @@ class SyncEngine {
   }
 
   Future<int> _pullTiposIncidencia() async {
-    final wm =
+    var wm =
         await _db.getWatermarkTabla('incidencias_tipos');
+    var total = 0;
     try {
+      // 1.28 (M1-A8/R1M1-H4): paginación real. Antes UNA sola
+      // página de 100 y el resto quedaba rezagado en silencio
+      // hasta que algo cruzara el cursor (tras una restauración
+      // con >100 incidencias/tipos/comentarios, el rezago era
+      // permanente sin señal). Ahora se sigue hasta página
+      // corta o vacía, como _download; si el cursor no avanzó
+      // (conflicto/huérfano que lo congela a propósito), se
+      // corta y el próximo ciclo reintenta desde ahí.
+      while (true) {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_tipos?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
@@ -6119,10 +6495,10 @@ class SyncEngine {
             'pull_tipos_incidencia HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return 0;
+      if (rows.isEmpty) break;
       final d = await _db.db;
+      var maxSeq = wm;
       await d.transaction((txn) async {
-        var maxSeq = wm;
         for (final row in rows) {
           final m =
               Map<String, dynamic>.from(row as Map);
@@ -6195,11 +6571,14 @@ class SyncEngine {
             'incidencias_tipos', maxSeq,
             executor: txn);
       });
-      AppLog.info('sync', 'pull_tipos_ok',
-          d: 'n=${rows.length}');
+        total += rows.length;
+        if (rows.length < 100 || maxSeq <= wm) break;
+        wm = maxSeq;
+      }
+      AppLog.info('sync', 'pull_tipos_ok', d: 'n=$total');
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias_tipos', '');
-      return rows.length;
+      return total;
     } catch (e) {
       AppLog.error(
           'sync', 'pull_tipos_fallo', d: '$e');
@@ -6215,9 +6594,13 @@ class SyncEngine {
   /// v1.3.0: Pull de incidencias con OCC por version.
   /// Fix #11 (Sol): no silenciar errores HTTP.
   Future<int> _pullIncidencias() async {
-    final wm =
+    var wm =
         await _db.getWatermarkTabla('incidencias');
+    var total = 0;
     try {
+      // 1.28 (M1-A8/R1M1-H4): paginación real (ver
+      // _pullTiposIncidencia): seguir hasta página corta/vacía.
+      while (true) {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
@@ -6227,10 +6610,10 @@ class SyncEngine {
             'pull_incidencias HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return 0;
+      if (rows.isEmpty) break;
       final d = await _db.db;
+      var maxSeq = wm;
       await d.transaction((txn) async {
-        var maxSeq = wm;
         var huboConflicto = false;
         for (final row in rows) {
           final m =
@@ -6408,11 +6791,14 @@ class SyncEngine {
             'incidencias', maxSeq,
             executor: txn);
       });
-      AppLog.info('sync', 'pull_inc_ok',
-          d: 'n=${rows.length}');
+        total += rows.length;
+        if (rows.length < 100 || maxSeq <= wm) break;
+        wm = maxSeq;
+      }
+      AppLog.info('sync', 'pull_inc_ok', d: 'n=$total');
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias', '');
-      return rows.length;
+      return total;
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_fallo', d: '$e');
@@ -6427,22 +6813,26 @@ class SyncEngine {
 
   /// Argón A2: descarga comentarios de incidencias desde Supabase.
   Future<int> _pullIncidenciasComentarios() async {
-    final wm = await _db.getWatermarkTabla(
+    var wm = await _db.getWatermarkTabla(
         'incidencias_comentarios');
+    var total = 0;
     try {
+      // 1.28 (M1-A8/R1M1-H4): paginación real (ver
+      // _pullTiposIncidencia): seguir hasta página corta/vacía.
+      while (true) {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_comentarios?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return 0; // Argón: tabla no desplegada
+      if (r.statusCode == 404) return total; // Argón: tabla no desplegada
     if (r.statusCode != 200) {
         throw Exception(
             'pull_inc_comentarios HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return 0;
+      if (rows.isEmpty) break;
       final d = await _db.db;
+      var maxSeq = wm;
       await d.transaction((txn) async {
-        var maxSeq = wm;
         var huboHuerfano = false;
         for (final row in rows) {
           final m =
@@ -6499,9 +6889,13 @@ class SyncEngine {
             'incidencias_comentarios', maxSeq,
             executor: txn);
       });
+        total += rows.length;
+        if (rows.length < 100 || maxSeq <= wm) break;
+        wm = maxSeq;
+      }
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias_comentarios', '');
-      return rows.length;
+      return total;
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_com_fallo',
@@ -6532,22 +6926,26 @@ class SyncEngine {
   /// visible en este teléfono (no-dueño descarta y avanza; dueño
   /// retiene el cursor para no perderla).
   Future<int> _pullIncidenciasFotos() async {
-    final wm =
+    var wm =
         await _db.getWatermarkTabla('incidencias_fotos');
+    var total = 0;
     try {
+      // 1.28 (M1-A8/R1M1-H4): paginación real (ver
+      // _pullTiposIncidencia): seguir hasta página corta/vacía.
+      while (true) {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_fotos?sync_seq=gt.$wm'
           '&order=sync_seq&limit=100'));
-      if (r.statusCode == 404) return 0; // tabla no desplegada
+      if (r.statusCode == 404) return total; // tabla no desplegada
       if (r.statusCode != 200) {
         throw Exception(
             'pull_inc_fotos HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return 0;
+      if (rows.isEmpty) break;
       final d = await _db.db;
+      var maxSeq = wm;
       await d.transaction((txn) async {
-        var maxSeq = wm;
         var huboHuerfano = false;
         for (final row in rows) {
           final m =
@@ -6588,8 +6986,12 @@ class SyncEngine {
             'incidencias_fotos', maxSeq,
             executor: txn);
       });
+        total += rows.length;
+        if (rows.length < 100 || maxSeq <= wm) break;
+        wm = maxSeq;
+      }
       await _db.setMeta('wm_err_incidencias_fotos', '');
-      return rows.length;
+      return total;
     } catch (e) {
       AppLog.error('sync', 'pull_inc_fotos_fallo', d: '$e');
       final errTxt = '$e';
@@ -6716,6 +7118,14 @@ class SyncEngine {
 
   Future<void> subirFotosIncidencias() async {
     final d = await _db.db;
+    // 1.28 (M1-A5/R2M1-F2): rescate de reclamos HUÉRFANOS
+    // (proceso muerto a mitad de subida) respetando el lease:
+    // solo vuelven a 'retry' las 'uploading' cuyo reclamo
+    // tenga más de 10 min o no exista. Un reclamo vivo de
+    // OTRO isolate jamás se pisa.
+    try {
+      await _db.rescatarFotosIncidenciasAtascadas();
+    } catch (_) {}
     final pendientes = await d.query(
         'incidencias_fotos',
         where: "sync_estado IN ('pending', 'retry')",
@@ -6732,10 +7142,13 @@ class SyncEngine {
       }
       final fid = '${f['id']}';
       // Claim atómico: solo si sigue en pending/retry.
+      // 1.28 (M1-A5): el claim estampa su lease (reclamada_en)
+      // para que el rescate no lo confunda con una huérfana.
       final reclamadas = await d.update(
           'incidencias_fotos',
           {
             'sync_estado': 'uploading',
+            'reclamada_en': isoHabana(ahoraHabana()),
             'intentos':
                 ((f['intentos'] as num?)?.toInt() ?? 0) + 1,
           },
@@ -6754,7 +7167,7 @@ class SyncEngine {
           // Archivo perdido: marcar error definitivo.
           await d.update(
               'incidencias_fotos',
-              {'sync_estado': 'error'},
+              {'sync_estado': 'error', 'reclamada_en': null},
               where: 'id = ?',
               whereArgs: [fid]);
           continue;
@@ -6786,6 +7199,7 @@ class SyncEngine {
                 'incidencias_fotos', {
               'storage_path': storagePath,
               'sync_estado': 'synced',
+              'reclamada_en': null,
             },
                 where: 'id = ?',
                 whereArgs: [fid]);
@@ -6801,6 +7215,7 @@ class SyncEngine {
               {
                 'sync_estado':
                     intentos >= 5 ? 'error' : 'retry',
+                'reclamada_en': null,
               },
               where: 'id = ?',
               whereArgs: [fid]);
@@ -6816,6 +7231,7 @@ class SyncEngine {
             {
               'sync_estado':
                   intentosCatch >= 5 ? 'error' : 'retry',
+              'reclamada_en': null,
             },
             where: 'id = ?',
             whereArgs: [fid]);
@@ -6825,6 +7241,18 @@ class SyncEngine {
     }
   }
 
+}
+
+/// 1.28 (M1-A1/R2M1-F1): el ciclo perdió el lock de
+/// sincronización a mitad (lo tomó otro isolate). Los puntos
+/// de control del motor la lanzan para DETENER el ciclo
+/// zombi; los puntos de entrada la capturan y cierran sin
+/// sellar éxito (el trabajo restante lo retoma el dueño
+/// nuevo o el próximo ciclo).
+class _CicloSinLock implements Exception {
+  const _CicloSinLock();
+  @override
+  String toString() => 'ciclo detenido: lock de sync perdido';
 }
 
 /// v1.2.9: excepción para errores TUS permanentes (Luna #1).

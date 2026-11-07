@@ -893,6 +893,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
           'termine y vuelve a exportar.');
       return;
     }
+    // 1.28 (M1-A12/R2M1-F10): latido del candado durante el
+    // volcado y la copia — el mismo hueco que en la copia
+    // fría: sin renovar, a los 3 min el lock expiraba y otro
+    // isolate podía hacer checkpoint a media copia. Si se
+    // pierde, el respaldo NO se comparte.
+    final ownerExport = candado;
+    var candadoPerdido = false;
+    final latidoCandado = Timer.periodic(
+        const Duration(seconds: 60), (_) async {
+      if (!await LocalDb.instance.renovarSyncLock(ownerExport)) {
+        candadoPerdido = true;
+      }
+    });
     // 1.23 AT-15: fecha de La Habana, no la del reloj crudo
     // del dispositivo (un teléfono fuera de zona fechaba el
     // respaldo con otro día).
@@ -927,10 +940,24 @@ class _AjustesScreenState extends State<AjustesScreen> {
       final tmp = await getTemporaryDirectory();
       destino = '${tmp.path}/ironbody-respaldo-$fecha.db';
       await File(ruta).copy(destino);
+      // 1.28 (M1-A12): si el candado se perdió durante la
+      // copia, el archivo puede mezclar dos instantes: no se
+      // comparte y se borra.
+      if (candadoPerdido ||
+          !await LocalDb.instance.renovarSyncLock(ownerExport)) {
+        try {
+          await File(destino).delete();
+        } catch (_) {}
+        _msg('No se pudo exportar: la copia tardó demasiado '
+            'y se perdió el candado de sincronización. '
+            'Inténtalo de nuevo.');
+        return;
+      }
     } catch (e) {
       _msg('No se pudo exportar: $e');
       return;
     } finally {
+      latidoCandado.cancel();
       try {
         await LocalDb.instance.liberarSyncLock(candado);
       } catch (_) {}

@@ -88,7 +88,12 @@ String causaProbableEspejoVacio({
 /// que diagnosticar (espejo con clientes, o sin testigo).
 Future<DiagnosticoEspejo?> evaluarEspejoVacio() async {
   final db = LocalDb.instance;
-  final conteo = await db.contarFilasMirror('clientes');
+  // 1.28 (M1-A3/R3M1-F1): el conteo que manda es el de filas
+  // LEGIBLES. contarFilasMirror cuenta crudo: con el JSON de
+  // las filas dañado, las pantallas leen 0 clientes (allMirror
+  // las omite) pero el W1 veía la tabla «llena» y NO
+  // disparaba — ciego justo en la variante corrupción.
+  final conteo = (await db.conteoMirrorLegible('clientes')).legibles;
   final previosTxt = await db.getMeta('clientes_previos_buenos');
   final previos = int.tryParse(previosTxt ?? '') ?? 0;
   if (!esEspejoVacioSospechoso(
