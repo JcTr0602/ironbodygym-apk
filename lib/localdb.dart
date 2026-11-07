@@ -5076,6 +5076,13 @@ class LocalDb {
       int clienteId, String pagadoHasta,
       {DatabaseExecutor? txn}) async {
     final DatabaseExecutor d = txn ?? await db;
+    await updateMirrorPagadoHastaEn(d, clienteId, pagadoHasta);
+  }
+
+  /// Ajuste Argón 1.28 (hallazgo #1): núcleo con ejecutor
+  /// EXPLÍCITO de [updateMirrorPagadoHasta] (ver [setMetaEn]).
+  Future<void> updateMirrorPagadoHastaEn(DatabaseExecutor d,
+      int clienteId, String pagadoHasta) async {
     final rows = await d.query('clientes',
         where: 'id=?', whereArgs: [clienteId], limit: 1);
     if (rows.isEmpty) return;
@@ -5108,8 +5115,14 @@ class LocalDb {
     final rows = await d.query(tabla,
         where: 'id < 0 AND data LIKE ?', whereArgs: ['%$opUuid%']);
     for (final r in rows) {
-      final id = r['id'] as int;
       try {
+        // Ajuste Argón 1.28 (hallazgo #5): el cast va
+        // DENTRO del try. En las dos tablas de hoy el id
+        // es INTEGER, pero limpiarOptimista es genérico:
+        // sobre una tabla con id TEXT/REAL el cast duro
+        // lanzaba un TypeError fuera de la red y la
+        // limpieza entera moría por una fila rara.
+        final id = r['id'] as int;
         final data =
             jsonDecode(r['data'] as String) as Map<String, dynamic>;
         if (data['op_uuid'] == opUuid) {
@@ -7135,9 +7148,19 @@ class LocalDb {
   Future<void> setMeta(String k, String v,
       {DatabaseExecutor? executor}) async {
     final d = executor ?? await db;
-    await d.insert('meta', {'k': k, 'v': v},
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await setMetaEn(d, k, v);
   }
+
+  /// Ajuste Argón 1.28 (hallazgo #1): núcleo con ejecutor
+  /// EXPLÍCITO de [setMeta]. Dentro de una transacción se
+  /// llama a esta forma: el núcleo no conoce el getter [db],
+  /// así que es estructuralmente imposible que toque la
+  /// conexión principal con la transacción abierta (el
+  /// interbloqueo clásico de sqflite), no solo improbable
+  /// por la disciplina del llamador.
+  Future<void> setMetaEn(DatabaseExecutor ex, String k, String v) =>
+      ex.insert('meta', {'k': k, 'v': v},
+          conflictAlgorithm: ConflictAlgorithm.replace);
   Future<String?> getMeta(String k, {DatabaseExecutor? txn}) async {
     final d = txn ?? await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
@@ -8109,8 +8132,27 @@ class LocalDb {
     Duration intervalo = const Duration(seconds: 60),
   }) async {
     var perdido = false;
+    // Ajuste Argón 1.28 (hallazgo #2): blindaje del latido,
+    // espejo del cerrandoMantenimiento de ajustes.dart. Sin
+    // él, un tick ya EN VUELO cuando el finally cancela el
+    // timer podía completar su renovación DESPUÉS de que la
+    // operación terminara, tocando la BD cuando el llamador
+    // ya la dio por cerrada (la copia fría cierra la base al
+    // salir: una renovación zombi la reabriría a media
+    // copia). La bandera se activa como PRIMERA línea del
+    // finally y el tick la comprueba antes y después de
+    // renovar; los errores del tick quedan capturados y
+    // cuentan como pérdida si aún no se estaba cerrando.
+    var cancelado = false;
     final latido = Timer.periodic(intervalo, (_) async {
-      if (!await renovarSyncLock(owner)) perdido = true;
+      if (cancelado || perdido) return;
+      try {
+        final ok = await renovarSyncLock(owner);
+        if (cancelado) return;
+        if (!ok) perdido = true;
+      } catch (_) {
+        if (!cancelado) perdido = true;
+      }
     });
     try {
       final r = await fn();
@@ -8120,6 +8162,7 @@ class LocalDb {
       }
       return r;
     } finally {
+      cancelado = true;
       latido.cancel();
     }
   }
@@ -8481,8 +8524,16 @@ class LocalDb {
   }
 
   Future<void> setWatermarkTabla(String tabla, int seq,
-          {DatabaseExecutor? executor}) =>
-      setMeta('wm_$tabla', '$seq', executor: executor);
+      {DatabaseExecutor? executor}) async {
+    final d = executor ?? await db;
+    await setWatermarkTablaEn(d, tabla, seq);
+  }
+
+  /// Ajuste Argón 1.28 (hallazgo #1): núcleo con ejecutor
+  /// EXPLÍCITO de [setWatermarkTabla] (ver [setMetaEn]).
+  Future<void> setWatermarkTablaEn(
+          DatabaseExecutor ex, String tabla, int seq) =>
+      setMetaEn(ex, 'wm_$tabla', '$seq');
 
   /// Mínimo de todos los cursores: "todo lo descargado hasta aquí".
   /// Se usa para el chequeo de sincronización completa contra server_seq.
@@ -8780,6 +8831,28 @@ class LocalDb {
       String? retenerHastaIso,
       DatabaseExecutor? txn}) async {
     final DatabaseExecutor ex = txn ?? await db;
+    await queueOpEn(ex,
+        opUuid: opUuid,
+        tipo: tipo,
+        payload: payload,
+        fotoPath: fotoPath,
+        retenerHastaIso: retenerHastaIso);
+  }
+
+  /// Ajuste Argón 1.28 (hallazgo #1): núcleo con ejecutor
+  /// EXPLÍCITO de [queueOp]. Dentro de una transacción se
+  /// llama a esta forma: el núcleo no conoce el getter [db]
+  /// y todos sus reflejos optimistas reciben el mismo
+  /// ejecutor, así que ningún cursor puede abrirse fuera de
+  /// la transacción en curso (interbloqueo de sqflite).
+  Future<void> queueOpEn(
+    DatabaseExecutor ex, {
+    required String opUuid,
+    required String tipo,
+    required Map<String, dynamic> payload,
+    String? fotoPath,
+    String? retenerHastaIso,
+  }) async {
     // v1.0.16: guardar autoría para no atribuir ops ajenas al sincronizar.
     // v1.3.4: acceso defensivo — en tests (sin sesión de Supabase) las
     // columnas user_id/telegram_id quedan NULL (son anulables).

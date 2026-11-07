@@ -233,7 +233,14 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
     final nuevoHasta = previewHastaDias(hastaActual, v.premioDias);
     final d = await LocalDb.instance.db;
     await d.transaction((txn) async {
-      await LocalDb.instance.queueOp(
+      // Ajuste Argón 1.28 (hallazgo #1): dentro de la
+      // transacción se opera SOLO contra txn vía los
+      // núcleos con ejecutor explícito (queueOpEn /
+      // updateMirrorPagadoHastaEn / setMetaEn), que no
+      // conocen el getter db: la garantía anti-deadlock
+      // es estructural, no de disciplina del llamador.
+      await LocalDb.instance.queueOpEn(
+        txn,
         opUuid: opUuid,
         tipo: 'regalar_dias_premio',
         payload: {
@@ -241,13 +248,11 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
           'vale_id': v.id,
           'fecha': hoyHabanaIso(),
         },
-        txn: txn,
       );
       await LocalDb.instance
-          .updateMirrorPagadoHasta(v.clienteId, nuevoHasta, txn: txn);
-      await LocalDb.instance.setMeta(
-          'premio_vale_resuelto_${v.id}', opUuid,
-          executor: txn);
+          .updateMirrorPagadoHastaEn(txn, v.clienteId, nuevoHasta);
+      await LocalDb.instance
+          .setMetaEn(txn, 'premio_vale_resuelto_${v.id}', opUuid);
     });
     unawaited(SyncEngine.instance.push());
   }

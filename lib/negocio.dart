@@ -7444,6 +7444,22 @@ double _montoGastoTolerante(dynamic v) {
 Future<List<Map<String, dynamic>>> _gastosPendientes() async {
   final out = <Map<String, dynamic>>[];
   final db = await LocalDb.instance.db;
+  // Ajuste Argón 1.28 (hallazgo #4): aislamiento por autor
+  // (Decisión de Criterio #2: cada entrenador ve SOLO sus
+  // gastos; el dueño, todos). La cola ops_queue NO se
+  // purga al cambiar de sesión (una op sin subir es
+  // trabajo que no puede perderse), así que en un
+  // teléfono compartido las ops de gasto de otro usuario
+  // quedaban visibles aquí hasta sincronizar. El autor
+  // de la op es la columna telegram_id que queueOp selló
+  // al encolar; el del espejo, su registrado_por. Sin
+  // sesión (tests) ambas sellos son nulos y la comparación
+  // nulo==nulo conserva el comportamiento histórico.
+  final esDuenoGastos = AuthService().isOwner;
+  final miTidGastos = AuthService().telegramId;
+  bool gastoEsMio(dynamic selloAutor) =>
+      esDuenoGastos ||
+      LocalDb.normalizarTelegramId(selloAutor) == miTidGastos;
   // Argón Dinero #4: también 'enviada' (en vuelo o retenida),
   // cruzando contra el espejo por (fecha, concepto, monto): la
   // tabla gastos no lleva op_uuid. Sin el cruce, un gasto ya
@@ -7457,13 +7473,23 @@ Future<List<Map<String, dynamic>>> _gastosPendientes() async {
   // fecha se normaliza en ambos lados con fechaNegocioHabana.
   final conteoEspejo = <String, int>{};
   for (final g in await LocalDb.instance.allMirror('gastos')) {
+    // Ajuste Argón 1.28 (hallazgo #4): el cruce solo
+    // consume ocurrencias del PROPIO espejo visible: un
+    // gasto espejado de otro autor no puede «tragarse»
+    // un pendiente mío gemelo (misma fecha/concepto/
+    // monto) ni el mío el suyo.
+    if (!gastoEsMio(g['registrado_por'])) continue;
     final clave = '${fechaNegocioHabana(g['fecha'])}|${g['concepto']}|'
         '${_montoGastoTolerante(g['monto'])}';
     conteoEspejo[clave] = (conteoEspejo[clave] ?? 0) + 1;
   }
   final rows = await db.rawQuery(
-      "SELECT rowid, payload FROM ops_queue WHERE tipo = 'gasto' AND estado IN ('pendiente', 'enviada', 'error')");
+      "SELECT rowid, payload, telegram_id FROM ops_queue WHERE tipo = 'gasto' AND estado IN ('pendiente', 'enviada', 'error')");
   for (final r in rows) {
+    // Ajuste Argón 1.28 (hallazgo #4): la op de gasto de
+    // OTRO autor no entra ni en la lista ni en los
+    // totales de este usuario.
+    if (!gastoEsMio(r['telegram_id'])) continue;
     try {
       final p = jsonDecode(r['payload'] as String) as Map<String, dynamic>;
       final clave = '${fechaNegocioHabana(p['fecha'])}|${p['concepto'] ?? ''}|'
@@ -7486,7 +7512,18 @@ Future<List<Map<String, dynamic>>> _gastosPendientes() async {
 }
 
 Future<List<Map<String, dynamic>>> gastosTodos() async {
-  final rows = await LocalDb.instance.allMirror('gastos');
+  final espejo = await LocalDb.instance.allMirror('gastos');
+  // Ajuste Argón 1.28 (hallazgo #4): la vista de gastos
+  // filtra el espejo por registrado_por cuando quien
+  // mira no es el dueño (Decisión de Criterio #2). El
+  // dueño sigue viendo todos.
+  final rows = AuthService().isOwner
+      ? espejo
+      : espejo
+          .where((g) =>
+              LocalDb.normalizarTelegramId(g['registrado_por']) ==
+              AuthService().telegramId)
+          .toList();
   rows.addAll(await _gastosPendientes());
   rows.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   return rows;

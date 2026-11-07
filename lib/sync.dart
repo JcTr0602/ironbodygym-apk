@@ -127,6 +127,18 @@ Map<String, int> esperadosDesdeSeq(
 /// Al agotarse, el resto de tablas queda «sin verificar»
 /// SIN tocar la red (ver verificarManifiesto). Clase
 /// pura con el reloj inyectable para los tests.
+
+/// Ajuste Argón 1.28 (hallazgo #6): clasificación de
+/// transporte de una respuesta del manifiesto. Un 5xx
+/// (502/503/504 del proxy o de Cloudflare con el backend
+/// caído) NO es «el servidor respondió»: para el
+/// cortacircuitos cuenta como fallo de transporte, igual
+/// que un corte de socket. Si reiniciara la racha, una
+/// pasada con la pasarela caída quemaría los 150 s del
+/// presupuesto tabla a tabla sin que el corte saltara
+/// nunca. Función pura para poder probarla sin red.
+bool huboRespuestaManifiesto(int statusCode) => statusCode < 500;
+
 class CorteManifiesto {
   CorteManifiesto({
     this.presupuesto = const Duration(seconds: 150),
@@ -145,9 +157,11 @@ class CorteManifiesto {
   }
 
   /// Registra el desenlace de transporte de una tabla:
-  /// true si el servidor RESPONDIÓ (cualquier estado
-  /// HTTP: la red vive y la racha se reinicia); false si
-  /// la llamada murió sin respuesta (excepción/timeout).
+  /// true si el servidor RESPONDIÓ (la red vive y la
+  /// racha se reinicia); false si la llamada murió sin
+  /// respuesta útil (excepción/timeout, o un 5xx de
+  /// pasarela — la clasificación vive en
+  /// [huboRespuestaManifiesto], ajuste Argón 1.28 #6).
   void registrarTransporte(bool huboRespuesta) {
     if (huboRespuesta) {
       _fallosSeguidos = 0;
@@ -6149,17 +6163,22 @@ class SyncEngine {
           return (
             concluyente: false,
             divergente: divergente,
-            huboRespuesta: true
+            huboRespuesta: huboRespuestaManifiesto(r.statusCode)
           );
         }
         if (r.statusCode != 200) {
           // SB-06 (auditoría sync 1.21): un 401/403/429/5xx en
           // un bucket NO es «sin divergencia»: es verificación
           // NO concluyente (como el error de red).
+          // Ajuste Argón 1.28 (hallazgo #6): un 5xx de
+          // pasarela (502/503/504 con el backend caído) SÍ
+          // cuenta como fallo de transporte para el
+          // cortacircuitos — huboRespuestaManifiesto solo
+          // da true por debajo de 500.
           return (
             concluyente: false,
             divergente: divergente,
-            huboRespuesta: true
+            huboRespuesta: huboRespuestaManifiesto(r.statusCode)
           );
         }
         final decoded = jsonDecode(r.body);
@@ -6228,10 +6247,11 @@ class SyncEngine {
       } catch (_) {
         // Error de red: tabla NO concluyente (antes ignoraba
         // el bucket y se sellaba el día como si coincidiera).
-        // Corrección A4-D1: es el ÚNICO desenlace que cuenta
-        // como fallo de transporte para el cortacircuitos
-        // (huboRespuesta: false): la llamada murió sin que
-        // el servidor respondiera nada.
+        // Corrección A4-D1: cuenta como fallo de transporte
+        // para el cortacircuitos (huboRespuesta: false): la
+        // llamada murió sin que el servidor respondiera
+        // nada. Ajuste Argón 1.28 (hallazgo #6): un 5xx de
+        // pasarela comparte ese mismo desenlace.
         return (
           concluyente: false,
           divergente: divergente,
@@ -6991,9 +7011,11 @@ class SyncEngine {
                 whereArgs: [m['id']]);
           }
         }
-        await _db.setWatermarkTabla(
-            'incidencias_tipos', maxSeq,
-            executor: txn);
+        // Ajuste Argón 1.28 (hallazgo #1): núcleo con
+        // ejecutor explícito — dentro de la transacción
+        // jamás se entra por el getter db.
+        await _db.setWatermarkTablaEn(
+            txn, 'incidencias_tipos', maxSeq);
       });
         total += rows.length;
         if (rows.length < 100 || maxSeq <= wm) break;
@@ -7211,9 +7233,9 @@ class SyncEngine {
             }
           }
         }
-        await _db.setWatermarkTabla(
-            'incidencias', maxSeq,
-            executor: txn);
+        // Ajuste Argón 1.28 (hallazgo #1): ver
+        // _pullTiposIncidencia.
+        await _db.setWatermarkTablaEn(txn, 'incidencias', maxSeq);
       });
         total += rows.length;
         if (rows.length < 100 || maxSeq <= wm) break;
@@ -7309,9 +7331,10 @@ class SyncEngine {
                 ConflictAlgorithm.replace,
           );
         }
-        await _db.setWatermarkTabla(
-            'incidencias_comentarios', maxSeq,
-            executor: txn);
+        // Ajuste Argón 1.28 (hallazgo #1): ver
+        // _pullTiposIncidencia.
+        await _db.setWatermarkTablaEn(
+            txn, 'incidencias_comentarios', maxSeq);
       });
         total += rows.length;
         if (rows.length < 100 || maxSeq <= wm) break;
@@ -7406,9 +7429,10 @@ class SyncEngine {
             conflictAlgorithm: ConflictAlgorithm.ignore,
           );
         }
-        await _db.setWatermarkTabla(
-            'incidencias_fotos', maxSeq,
-            executor: txn);
+        // Ajuste Argón 1.28 (hallazgo #1): ver
+        // _pullTiposIncidencia.
+        await _db.setWatermarkTablaEn(
+            txn, 'incidencias_fotos', maxSeq);
       });
         total += rows.length;
         if (rows.length < 100 || maxSeq <= wm) break;
@@ -7481,9 +7505,10 @@ class SyncEngine {
                 ConflictAlgorithm.replace,
           );
         }
-        await _db.setWatermarkTabla(
-            'incidencias_historial', maxSeq,
-            executor: txn);
+        // Ajuste Argón 1.28 (hallazgo #1): ver
+        // _pullTiposIncidencia.
+        await _db.setWatermarkTablaEn(
+            txn, 'incidencias_historial', maxSeq);
       });
     } catch (e) {
       AppLog.error(

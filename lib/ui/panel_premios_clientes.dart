@@ -253,7 +253,14 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     // de la transacción no se lee por LocalDb.db.
     final d = await LocalDb.instance.db;
     await d.transaction((txn) async {
-      await LocalDb.instance.queueOp(
+      // Ajuste Argón 1.28 (hallazgo #1): dentro de la
+      // transacción se opera SOLO contra txn vía los
+      // núcleos con ejecutor explícito (queueOpEn /
+      // setMetaEn / updateMirrorPagadoHastaEn), que no
+      // conocen el getter db: la garantía anti-deadlock
+      // es estructural, no de disciplina del llamador.
+      await LocalDb.instance.queueOpEn(
+        txn,
         opUuid: opUuid,
         tipo: 'anular_vale_premio',
         payload: {
@@ -263,11 +270,9 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           'dias_quitados': k,
           'nota': nota,
         },
-        txn: txn,
       );
-      await LocalDb.instance.setMeta(
-          'premio_vale_anulado_${vale.id}', opUuid,
-          executor: txn);
+      await LocalDb.instance
+          .setMetaEn(txn, 'premio_vale_anulado_${vale.id}', opUuid);
       if (k > 0 && hastaFresco != null) {
         // H-01 (Argón 1.27): aritmética UTC pura
         // (sumarDiasIso). Restar un Duration a un
@@ -275,10 +280,10 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         // horario de Cuba y puede correr el espejo un
         // día de más que el servidor.
         if (DateTime.tryParse(hastaFresco) != null) {
-          await LocalDb.instance.updateMirrorPagadoHasta(
+          await LocalDb.instance.updateMirrorPagadoHastaEn(
+            txn,
             clienteId,
             sumarDiasIso(hastaFresco, -k),
-            txn: txn,
           );
         }
       }
