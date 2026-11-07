@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
@@ -15,6 +16,7 @@ import '../sync.dart';
 import '../cliente_protegido.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
+import 'acciones_acceso.dart';
 import 'buscar.dart';
 import 'skeleton.dart';
 import 'componentes.dart';
@@ -188,6 +190,17 @@ class _ListasScreenState extends State<ListasScreen>
   // los visibles cada vez que cambia la búsqueda.
   Map<String, double> _preciosFoto = {};
   Map<int, Map<String, dynamic>> _especialesFoto = {};
+  // 1.28 (M4-C6): cobros hechos EN ESTA VISITA que el
+  // espejo aún no refleja (la op nace con retención de
+  // Deshacer y sube después): sin esta memoria, la recarga
+  // inmediata resucitaba al cliente en su pestaña y el
+  // cobro no «se veía» cobrado. La fila sale animada y no
+  // vuelve en esta visita; al reabrir la pantalla manda
+  // el espejo (ya sincronizado).
+  final Set<int> _cobradosSesion = {};
+  // La fila que está saliendo ahora mismo (una sola: el
+  // cobro rápido ya tiene su guarda anti-doble-toque).
+  int? _saliendoCobroId;
 
   /// 1.28 (M4-A2/R3M4-H5): estimado SÍNCRONO de una lista
   /// con las tarifas ya resueltas EN LOTE — antes cada
@@ -448,7 +461,15 @@ class _ListasScreenState extends State<ListasScreen>
     // protegidos en ninguna.
     List<Map<String, dynamic>> sinProtegidos(
         List<Map<String, dynamic>> l) =>
-        l.where((c) => !esVistaProtegida(c)).toList();
+        l
+            .where((c) =>
+                !esVistaProtegida(c) &&
+                // 1.28 (M4-C6): lo cobrado en esta visita no
+                // resucita en la recarga aunque el espejo
+                // aún no refleje el cobro.
+                !_cobradosSesion
+                    .contains((c['id'] as num?)?.toInt() ?? -1))
+            .toList();
     // 1.25 T02: solo las marcas del vencimiento ACTUAL —
     // una marca de un vencimiento anterior no esconde al
     // cliente de la lista de por avisar.
@@ -550,9 +571,101 @@ class _ListasScreenState extends State<ListasScreen>
     if (!mounted) return;
     if (resultadoCobro == ResultadoCobro.deshecho) {
       mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
+      _cargar();
+    } else if (resultadoCobro == ResultadoCobro.guardado) {
+      // 1.28 (M4-C6): el cobro SE VE — la fila se marca
+      // «Cobrado» y sale animada de su pestaña (la
+      // cabecera descuenta con su contador animado al
+      // completar la salida). Sin recarga inmediata: el
+      // espejo aún no trae el cobro y la fila resucitaría.
+      final id = (c['id'] as num?)?.toInt() ?? 0;
+      if (id > 0) {
+        setState(() => _saliendoCobroId = id);
+      } else {
+        _cargar();
+      }
+    } else {
+      _cargar();
     }
-    _cargar();
     SyncEngine.instance.push();
+  }
+
+  /// 1.28 (M4-C6): la animación de salida terminó — el
+  /// cliente sale de todas las listas en memoria y queda
+  /// en la memoria de la visita (ver _cobradosSesion).
+  void _completarSalidaCobro(int id) {
+    if (!mounted) return;
+    setState(() {
+      _cobradosSesion.add(id);
+      bool noEs(Map<String, dynamic> c) =>
+          ((c['id'] as num?)?.toInt() ?? -1) != id;
+      _hoy = _hoy.where(noEs).toList();
+      _menos30 = _menos30.where(noEs).toList();
+      _sinFecha = _sinFecha.where(noEs).toList();
+      _mas30 = _mas30.where(noEs).toList();
+      _porVencer = _porVencer.where(noEs).toList();
+      _alDia = _alDia.where(noEs).toList();
+      if (_saliendoCobroId == id) _saliendoCobroId = null;
+      _recalcularVisibles();
+    });
+  }
+
+  /// 1.28 (M4-B1): pulsación larga en una fila = el menú
+  /// de acciones de acceso del helper compartido (A5),
+  /// sin salir de la lista. Solo dueño (el dominio de
+  /// accesos es suyo; el entrenador da el alta desde la
+  /// ficha, como siempre).
+  Future<void> _menuAccesoLista(Map<String, dynamic> c) async {
+    final id = (c['id'] as num?)?.toInt() ?? 0;
+    if (id <= 0) return;
+    await abrirMenuAccesoDesdeLista(
+      context,
+      clienteId: id,
+      alTerminar: () async => _cargar(),
+      alAbrirFicha: () async {
+        await Navigator.of(context).push(RutaIron(
+            builder: (_) =>
+                FichaScreen(clienteId: id, origenHero: 'listas')));
+        _cargar();
+      },
+      alDarAcceso: () async {
+        await Navigator.of(context).push(RutaIron(
+            builder: (_) => FichaScreen(
+                clienteId: id,
+                origenHero: 'listas',
+                irAAccesoAlAbrir: true)));
+        _cargar();
+      },
+    );
+  }
+
+  /// 1.28 (M4-B5): «Avisar a los atrasados de esta
+  /// pestaña» — arranca la pasada GUIADA sobre la lista
+  /// visible: cada aviso sigue siendo toque a toque por
+  /// persona (WhatsApp se abre con la plantilla aprobada
+  /// y la línea automática de la casa, vía _avisarEnCadena)
+  /// y cada marcado queda registrado como siempre. Empieza
+  /// por el primer sin avisar de la lista principal; si
+  /// allí no queda nadie, por el grupo sin fecha.
+  void _avisarPestana(
+      List<Map<String, dynamic>> rows,
+      List<Map<String, dynamic>>? cola) {
+    for (var i = 0; i < rows.length; i++) {
+      final id = (rows[i]['id'] as num?)?.toInt() ?? 0;
+      if (!_avisados.contains(id)) {
+        _avisarEnCadena(rows, i);
+        return;
+      }
+    }
+    if (cola != null) {
+      for (var i = 0; i < cola.length; i++) {
+        final id = (cola[i]['id'] as num?)?.toInt() ?? 0;
+        if (!_avisados.contains(id)) {
+          _avisarEnCadena(cola, i);
+          return;
+        }
+      }
+    }
   }
 
   @override
@@ -568,40 +681,62 @@ class _ListasScreenState extends State<ListasScreen>
             // semántico — ámbar para Hoy/Por vencer, rojo para
             // los dos Atrasados, verde para Al día — para ver la
             // urgencia sin leer el número.
+            // 1.28 (M4-C1): las cifras de las pestañas
+            // CUENTAN hasta su número al cargar (y se
+            // mueven al cambiar), en vez de saltar de (0)
+            // al total.
             Tab(
-              child: Text('Hoy (${_visHoy.length})',
-                  style: const TextStyle(
-                      color: AppColores.alerta,
-                      fontWeight: FontWeight.w600)),
+              child: _NumeroAnimado(
+                valor: _visHoy.length.toDouble(),
+                builder: (_, v) => Text('Hoy (${v.round()})',
+                    style: const TextStyle(
+                        color: AppColores.alerta,
+                        fontWeight: FontWeight.w600)),
+              ),
             ),
             Tab(
               // 1.25 T116 (F1-22): la pestaña dice su
               // ventana — el semáforo del avatar se pone
               // ámbar a los 7 días y sin el rótulo parecía
               // que faltaban clientes de 4-7 días.
-              child: Text('Por vencer · 3 días (${_visPorVencer.length})',
-                  style: const TextStyle(
-                      color: AppColores.alerta,
-                      fontWeight: FontWeight.w600)),
+              child: _NumeroAnimado(
+                valor: _visPorVencer.length.toDouble(),
+                builder: (_, v) =>
+                    Text('Por vencer · 3 días (${v.round()})',
+                        style: const TextStyle(
+                            color: AppColores.alerta,
+                            fontWeight: FontWeight.w600)),
+              ),
             ),
             Tab(
-              child: Text(
-                  'Atrasados -30d (${_visMenos30.length + _visSinFecha.length})',
-                  style: const TextStyle(
-                      color: AppColores.error,
-                      fontWeight: FontWeight.w600)),
+              child: _NumeroAnimado(
+                valor: (_visMenos30.length + _visSinFecha.length)
+                    .toDouble(),
+                builder: (_, v) =>
+                    Text('Atrasados -30d (${v.round()})',
+                        style: const TextStyle(
+                            color: AppColores.error,
+                            fontWeight: FontWeight.w600)),
+              ),
             ),
             Tab(
-              child: Text('Atrasados +30d (${_visMas30.length})',
-                  style: const TextStyle(
-                      color: AppColores.error,
-                      fontWeight: FontWeight.w600)),
+              child: _NumeroAnimado(
+                valor: _visMas30.length.toDouble(),
+                builder: (_, v) =>
+                    Text('Atrasados +30d (${v.round()})',
+                        style: const TextStyle(
+                            color: AppColores.error,
+                            fontWeight: FontWeight.w600)),
+              ),
             ),
             Tab(
-              child: Text('Al día (${_visAlDia.length})',
-                  style: const TextStyle(
-                      color: AppColores.exito,
-                      fontWeight: FontWeight.w600)),
+              child: _NumeroAnimado(
+                valor: _visAlDia.length.toDouble(),
+                builder: (_, v) => Text('Al día (${v.round()})',
+                    style: const TextStyle(
+                        color: AppColores.exito,
+                        fontWeight: FontWeight.w600)),
+              ),
             ), // v1.2.1
           ],
         ),
@@ -679,7 +814,11 @@ class _ListasScreenState extends State<ListasScreen>
             // carga, esqueleto honesto en vez de las pestañas
             // vacías afirmando «Todo al día».
             child: _cargando
-                ? const SkeletonLista(items: 6)
+                // 1.28 (M4-C1): el esqueleto tiene la FORMA
+                // de las filas reales de esta pantalla
+                // (avatar, dos líneas, dos botones redondos),
+                // no tarjetas genéricas.
+                ? const SkeletonFilasListas(items: 6)
                 : TabBarView(
               controller: _tab,
               children: [
@@ -920,12 +1059,18 @@ class _ListasScreenState extends State<ListasScreen>
           if (desplaza == 1 && i == 0) {
             return Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-              child: Text(
-                '${rows.length} clientes · '
-                '≈ ${fmtMonto(estimado)} CUP por cobrar '
-                '(una mensualidad de cada uno)',
-                style: AppTexto.secundario
-                    .copyWith(fontWeight: FontWeight.w700),
+              // 1.28 (M4-C6): al cobrar, la cabecera
+              // DESCUENTA la cantidad con una cuenta
+              // animada hasta el nuevo estimado.
+              child: _NumeroAnimado(
+                valor: estimado,
+                builder: (_, v) => Text(
+                  '${rows.length} clientes · '
+                  '≈ ${fmtMonto(v)} CUP por cobrar '
+                  '(una mensualidad de cada uno)',
+                  style: AppTexto.secundario
+                      .copyWith(fontWeight: FontWeight.w700),
+                ),
               ),
             );
           }
@@ -953,7 +1098,7 @@ class _ListasScreenState extends State<ListasScreen>
           // 1.22 Diseño Bloque 1 (T3): cascada acotada —
           // FadeEntrada solo anima los primeros 10 ítems y
           // dentro de la ventana de 400 ms del montaje.
-          return FadeEntrada(
+          final filaPintada = FadeEntrada(
             indice: i,
             child: Container(
                 decoration: avisado
@@ -983,6 +1128,12 @@ class _ListasScreenState extends State<ListasScreen>
                     builder: (_) => FichaScreen(
                         clienteId: id, origenHero: 'listas')))
                 .then((_) => _cargar()),
+            // 1.28 (M4-B1): pulsación larga = menú de
+            // acciones de acceso del helper compartido
+            // (solo dueño: el dominio de accesos es suyo).
+            onLongPress: AuthService().isOwner
+                ? () => _menuAccesoLista(c)
+                : null,
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1045,41 +1196,236 @@ class _ListasScreenState extends State<ListasScreen>
               ),
             ),
           );
+          // 1.28 (M4-C6): si esta fila es la del cobro que
+          // acaba de guardarse, se sella «Cobrado» y sale
+          // animada de la pestaña.
+          if (id == _saliendoCobroId) {
+            return _FilaSalidaCobro(
+              key: ValueKey('saliendo_$id'),
+              alCompletar: () => _completarSalidaCobro(id),
+              child: filaPintada,
+            );
+          }
+          return filaPintada;
       },
       ),
     );
     // 1.25 T50: con la sesión de avisos empezada, el
     // progreso va fijo sobre la lista.
-    if (avisadosLista == 0) return lista;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-          child: Row(
-            children: [
-              const Icon(Icons.check_circle_rounded,
-                  size: 16, color: AppColores.exito),
-              const SizedBox(width: 6),
-              Text('$avisadosLista de $totalLista avisados',
-                  style: AppTexto.secundario
-                      .copyWith(fontWeight: FontWeight.w700)),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadio.sm),
-            child: LinearProgressIndicator(
-              value: totalLista > 0 ? avisadosLista / totalLista : 0,
-              minHeight: 5,
-              backgroundColor: AppColores.borde(context),
-              color: AppColores.exito,
+    Widget cuerpo = lista;
+    if (avisadosLista > 0) {
+      cuerpo = Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded,
+                    size: 16, color: AppColores.exito),
+                const SizedBox(width: 6),
+                Text('$avisadosLista de $totalLista avisados',
+                    style: AppTexto.secundario
+                        .copyWith(fontWeight: FontWeight.w700)),
+              ],
             ),
           ),
-        ),
-        Expanded(child: lista),
-      ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+              child: LinearProgressIndicator(
+                value: totalLista > 0 ? avisadosLista / totalLista : 0,
+                minHeight: 5,
+                backgroundColor: AppColores.borde(context),
+                color: AppColores.exito,
+              ),
+            ),
+          ),
+          Expanded(child: lista),
+        ],
+      );
+    }
+    // 1.28 (M4-B5): en las pestañas de cobro, la pasada
+    // guiada de avisos se ofrece arriba mientras quede
+    // alguien sin avisar EN LO VISIBLE: un toque arranca
+    // la cadena (que sigue siendo toque a toque).
+    final sinAvisar = totalLista - avisadosLista;
+    if (esColaCobro && sinAvisar > 0) {
+      cuerpo = Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                icon: const Icon(Icons.notifications_rounded,
+                    size: 18),
+                label: Text(sinAvisar == 1
+                    ? 'Avisar al que falta de esta pestaña'
+                    : 'Avisar a los $sinAvisar sin avisar de '
+                        'esta pestaña'),
+                onPressed: () => _avisarPestana(rows, cola),
+              ),
+            ),
+          ),
+          Expanded(child: cuerpo),
+        ],
+      );
+    }
+    return cuerpo;
+  }
+}
+
+/// 1.28 (M4-C1/C6): número que CUENTA hasta su valor al
+/// aparecer y se mueve con cuenta animada cuando el valor
+/// cambia (las pestañas de Listas y la cabecera «≈ por
+/// cobrar»). Con «reducir movimiento» activo, el valor se
+/// pinta directo. El constructor recibe el valor actual
+/// del frame ya animado.
+class _NumeroAnimado extends StatefulWidget {
+  final double valor;
+  final Widget Function(BuildContext, double) builder;
+  const _NumeroAnimado({required this.valor, required this.builder});
+
+  @override
+  State<_NumeroAnimado> createState() => _NumeroAnimadoState();
+}
+
+class _NumeroAnimadoState extends State<_NumeroAnimado>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 500));
+    _anim = Tween<double>(begin: 0, end: widget.valor)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _ctrl.forward();
+  }
+
+  @override
+  void didUpdateWidget(_NumeroAnimado oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.valor != widget.valor) {
+      _anim = Tween<double>(begin: _anim.value, end: widget.valor)
+          .animate(
+              CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+      _ctrl
+        ..reset()
+        ..forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.of(context).disableAnimations) {
+      return widget.builder(context, widget.valor);
+    }
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (ctx, _) => widget.builder(ctx, _anim.value),
+    );
+  }
+}
+
+/// 1.28 (M4-C6): la fila del cobro recién guardado — se
+/// sella «✓ Cobrado» sobre la fila (sin botones: la fila
+/// ya no acepta toques) y luego se pliega hasta salir de
+/// la pestaña; al completar avisa para que la pantalla la
+/// retire de sus listas. Con «reducir movimiento», la
+/// salida es inmediata tras el sello.
+class _FilaSalidaCobro extends StatefulWidget {
+  final Widget child;
+  final VoidCallback alCompletar;
+  const _FilaSalidaCobro(
+      {super.key, required this.child, required this.alCompletar});
+
+  @override
+  State<_FilaSalidaCobro> createState() => _FilaSalidaCobroState();
+}
+
+class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _tamano;
+  bool _sello = false;
+  bool _avisado = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 380));
+    _tamano = Tween<double>(begin: 1, end: 0).animate(
+        CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _sello = true);
+      Future.delayed(const Duration(milliseconds: 520), () {
+        if (!mounted) return;
+        if (MediaQuery.of(context).disableAnimations) {
+          _completar();
+        } else {
+          _ctrl.forward().whenComplete(_completar);
+        }
+      });
+    });
+  }
+
+  void _completar() {
+    if (_avisado) return;
+    _avisado = true;
+    widget.alCompletar();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizeTransition(
+      sizeFactor: _tamano,
+      alignment: Alignment.topCenter,
+      child: Stack(
+        children: [
+          IgnorePointer(child: widget.child),
+          if (_sello)
+            Positioned.fill(
+              child: AnimatedOpacity(
+                opacity: _sello ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  color: AppColores.exito.withValues(alpha: 0.14),
+                  alignment: Alignment.center,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle_rounded,
+                          color: AppColores.exito, size: 22),
+                      const SizedBox(width: 6),
+                      Text('Cobrado',
+                          style: AppTexto.subtitulo.copyWith(
+                              color: AppColores.exitoOscuro,
+                              fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

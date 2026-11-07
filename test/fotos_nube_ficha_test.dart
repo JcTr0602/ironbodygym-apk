@@ -20,6 +20,22 @@ final _png1px = Uint8List.fromList(const [
   0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ]);
 
+
+/// 1.28 (M4-C5): la galería agrupa las fotos por mes —
+/// la de un mes anterior puede quedar bajo el pliegue de
+/// la superficie de test (800×600) y el toque no la
+/// alcanza. Se desplaza hasta la fecha antes de tocar;
+/// la interacción que se prueba (tocar la fecha abre el
+/// visor) no cambia.
+Future<void> _tocarFecha(WidgetTester tester, String texto) async {
+  await tester.ensureVisible(find.text(texto));
+  // Sin pumpAndSettle: en H-06 la celda congelada lleva
+  // un indicador indeterminado que nunca «asienta» (el
+  // propio test lo evita a propósito tras este toque).
+  await tester.pump();
+  await tester.tap(find.text(texto));
+}
+
 void main() {
   testWidgets('sin fotos en la nube: no ocupa espacio',
       (tester) async {
@@ -63,7 +79,7 @@ void main() {
     expect(find.text('01/11/2026'), findsOneWidget);
 
     // Abrir la primera y eliminarla desde el visor.
-    await tester.tap(find.text('03/10/2026'));
+    await _tocarFecha(tester, '03/10/2026');
     await tester.pumpAndSettle();
     await tester.tap(find.text('Eliminar de la nube'));
     await tester.pumpAndSettle();
@@ -105,7 +121,7 @@ void main() {
         findsOneWidget);
     // Tocar la celda: como el null no quedó cacheado,
     // se vuelve a descargar y el visor abre.
-    await tester.tap(find.text('03/10/2026'));
+    await _tocarFecha(tester, '03/10/2026');
     await tester.pumpAndSettle();
     expect(descargas, 2);
     expect(find.text('Eliminar de la nube'), findsOneWidget);
@@ -138,7 +154,7 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('03/10/2026'));
+    await _tocarFecha(tester, '03/10/2026');
     await tester.pumpAndSettle();
     await tester.tap(find.text('Eliminar de la nube'));
     await tester.pumpAndSettle();
@@ -156,7 +172,7 @@ void main() {
     expect(find.text('Eliminar de la nube'), findsNothing);
     // Tocar la celda congelada no hace nada: ni visor
     // ni segunda eliminación.
-    await tester.tap(find.text('03/10/2026'));
+    await _tocarFecha(tester, '03/10/2026');
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(eliminaciones, 1);

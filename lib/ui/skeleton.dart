@@ -188,6 +188,63 @@ class SkeletonArqueo extends StatelessWidget {
   }
 }
 
+/// 1.28 (M4-C1): esqueleto de Listas con la FORMA EXACTA
+/// de sus filas reales (FilaCliente): avatar de 56, dos
+/// líneas (nombre y chip) y los dos botones redondos del
+/// final (avisar y cobrar), con el mismo padding y los
+/// divisores en su sitio — la pantalla de cobro diario se
+/// siente instantánea y nada salta cuando llegan los datos.
+class SkeletonFilasListas extends StatelessWidget {
+  final int items;
+  const SkeletonFilasListas({super.key, this.items = 6});
+
+  @override
+  Widget build(BuildContext context) {
+    final reducir = MediaQuery.of(context).disableAnimations;
+    final color =
+        AppColores.textoSecundario(context).withValues(alpha: 0.15);
+    Widget circulo(double d) => Container(
+          width: d,
+          height: d,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        );
+    Widget fila() => Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.lg, vertical: AppEspacio.sm),
+          child: Row(
+            children: [
+              circulo(56),
+              const SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonLinea(ancho: 150, alto: 16),
+                    const SizedBox(height: 8),
+                    SkeletonLinea(ancho: 110, alto: 13),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              circulo(40),
+              const SizedBox(width: AppEspacio.sm),
+              circulo(44),
+            ],
+          ),
+        );
+    final contenido = ListView.separated(
+      itemCount: items,
+      separatorBuilder: (_, __) => Divider(
+          height: 1,
+          indent: 84,
+          color: AppColores.borde(context)),
+      itemBuilder: (_, __) => fila(),
+    );
+    if (reducir) return contenido;
+    return _Pulso(child: contenido);
+  }
+}
+
 /// Pulso de opacidad (respeta reducir movimiento vía el padre).
 class _Pulso extends StatefulWidget {
   final Widget child;

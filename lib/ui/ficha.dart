@@ -15,6 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
+import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../permisos_entrenador.dart';
 import '../mediciones_cliente.dart';
@@ -22,7 +23,6 @@ import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
 import '../comprobantes.dart';
-import '../conciliacion.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
@@ -38,9 +38,9 @@ import 'dialogo_pago.dart';
 import 'panel_bloque2.dart';
 import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
-import 'estado_cuenta.dart';
 import 'diseno.dart';
 import 'ficha_acceso_app.dart';
+import 'ficha_que_falta.dart';
 import 'ficha_secciones.dart';
 import 'foto_personal_ficha.dart';
 import 'fotos_progreso_nube_ficha.dart';
@@ -137,11 +137,19 @@ class FichaScreen extends StatefulWidget {
   /// origen; sin origen no hay vuelo.
   final String? origenHero;
 
+  /// 1.28 (M4-B1): abrir la ficha YA en su sección «Acceso
+  /// App» (el alta de acceso desde la pulsación larga de
+  /// Listas o el menú rápido de Buscar aterriza aquí: la
+  /// generación del PIN vive en esa sección, con las
+  /// guardas de A8, no en una vía nueva).
+  final bool irAAccesoAlAbrir;
+
   const FichaScreen(
       {super.key,
       required this.clienteId,
       this.editarAlAbrir = false,
-      this.origenHero});
+      this.origenHero,
+      this.irAAccesoAlAbrir = false});
   @override
   State<FichaScreen> createState() => _FichaScreenState();
 }
@@ -160,6 +168,29 @@ class _FichaScreenState extends State<FichaScreen> {
   // respuestas ya no hacen setState de la pantalla entera.
   int _datosVersion = 0;
   final CacheSeccionesFicha _cacheSecciones = CacheSeccionesFicha();
+  // 1.28 (M4-C3): scroll propio de la ficha perezosa — la
+  // barra compacta se muestra cuando la cabecera ya salió
+  // de pantalla (desplazamiento por encima del umbral).
+  final ScrollController _scrollFicha = ScrollController();
+  bool _cabeceraCompacta = false;
+  static const double _umbralCabeceraCompacta = 170;
+  // 1.28 (M4-C2): secciones que YA animaron su entrada en
+  // ESTA visita a la ficha: la entrada escalonada ocurre
+  // una sola vez por sección, nunca al volver a ella.
+  final Set<String> _seccionesAnimadas = <String>{};
+  // 1.28 (M4-B1/B4): llave de la sección «Acceso App» para
+  // poder desplazar la lista hasta ella (ensureVisible).
+  final GlobalKey _claveSeccionAcceso = GlobalKey();
+  bool _fueAAcesso = false;
+  // 1.28 (M4-B3): las mediciones que _cargar ya leyó para
+  // el resumen se REUTILIZAN como dato inicial de la
+  // tarjeta de medidas (antes la tarjeta reescaneaba el
+  // espejo entero por su cuenta: dos escaneos completos
+  // por apertura de ficha, R3M4-H6).
+  List<Map<String, dynamic>> _medicionesFicha = const [];
+  // 1.28 (M4-B4): fecha de la medición más reciente (de
+  // cualquier métrica) para el pendiente «sin medición».
+  DateTime? _ultimaMedicionFecha;
   List<Map<String, dynamic>> _pagos = [];
   List<Map<String, dynamic>> _suplementos = [];
   // v1.2.5 (#10): incidencias relacionadas con el cliente.
@@ -219,7 +250,60 @@ class _FichaScreenState extends State<FichaScreen> {
   @override
   void initState() {
     super.initState();
+    // 1.28 (M4-C3): la barra compacta solo cambia de estado
+    // al cruzar el umbral — setState únicamente en el cruce.
+    _scrollFicha.addListener(_alMoverScrollFicha);
     _cargar();
+  }
+
+  @override
+  void dispose() {
+    _scrollFicha.removeListener(_alMoverScrollFicha);
+    _scrollFicha.dispose();
+    super.dispose();
+  }
+
+  void _alMoverScrollFicha() {
+    if (!_scrollFicha.hasClients) return;
+    final mostrar =
+        _scrollFicha.offset > _umbralCabeceraCompacta;
+    if (mostrar != _cabeceraCompacta && mounted) {
+      setState(() => _cabeceraCompacta = mostrar);
+    }
+  }
+
+  /// 1.28 (M4-B1/B4/C3): desplaza la ficha hasta la sección
+  /// «Acceso App». Si la sección aún no se ha construido
+  /// (lista perezosa: está muy abajo), primero se va al
+  /// final para forzar su construcción y luego se ajusta
+  /// con ensureVisible.
+  Future<void> _irASeccionAcceso() async {
+    final ctxAcceso = _claveSeccionAcceso.currentContext;
+    if (ctxAcceso != null) {
+      await Scrollable.ensureVisible(
+        ctxAcceso,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+        alignment: 0.05,
+      );
+      return;
+    }
+    if (!_scrollFicha.hasClients) return;
+    await _scrollFicha.animateTo(
+      _scrollFicha.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOut,
+    );
+    if (!mounted) return;
+    final ctx2 = _claveSeccionAcceso.currentContext;
+    if (ctx2 != null) {
+      await Scrollable.ensureVisible(
+        ctx2,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        alignment: 0.05,
+      );
+    }
   }
 
   Future<void> _cargar() async {
@@ -273,10 +357,26 @@ class _FichaScreenState extends State<FichaScreen> {
     } catch (_) {}
     // 1.25 T57: última medida con peso, del espejo local
     // (tolerante: sin espejo, la fila-resumen no sale).
+    // 1.28 (M4-B3/B4): la lista COMPLETA se conserva — es
+    // el dato inicial de la tarjeta de medidas (que ya no
+    // reescanea el espejo) y de ella sale la fecha de la
+    // medición más reciente para «qué le falta».
     ({double peso, double? delta, String fecha})? ultimaMedida;
+    var medicionesFicha = <Map<String, dynamic>>[];
+    DateTime? ultimaMedicionFecha;
     try {
-      ultimaMedida = resumenUltimaMedida(
-          await medicionesClienteLocal(widget.clienteId));
+      medicionesFicha =
+          await medicionesClienteLocal(widget.clienteId);
+      ultimaMedida = resumenUltimaMedida(medicionesFicha);
+      for (final m in medicionesFicha) {
+        final f =
+            DateTime.tryParse('${m['fecha_medicion'] ?? ''}');
+        if (f != null &&
+            (ultimaMedicionFecha == null ||
+                f.isAfter(ultimaMedicionFecha))) {
+          ultimaMedicionFecha = f;
+        }
+      }
     } catch (_) {}
     // v1.3.9 (F1): el caché de accesos también se carga en
     // _enriquecerDesdeServidor (era el segundo await de red
@@ -305,6 +405,8 @@ class _FichaScreenState extends State<FichaScreen> {
         _foto = null;
         _regaloAnio = regaloAnio;
         _ultimaMedida = ultimaMedida;
+        _medicionesFicha = medicionesFicha;
+        _ultimaMedicionFecha = ultimaMedicionFecha;
         _fiadoPendiente = fiadoPend;
         _especialActiva = especialActiva;
         _tieneRegistroTarifa = tieneRegistro;
@@ -359,6 +461,20 @@ class _FichaScreenState extends State<FichaScreen> {
       _editoAlAbrir = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _editar();
+      });
+    }
+    // 1.28 (M4-B1): aterrizaje directo en la sección
+    // «Acceso App» (alta de acceso desde Listas/Buscar).
+    // Un protegido jamás aterriza en acciones: misma
+    // guarda que editarAlAbrir.
+    if (widget.irAAccesoAlAbrir &&
+        !_fueAAcesso &&
+        mounted &&
+        c != null &&
+        !esVistaProtegida(c)) {
+      _fueAAcesso = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _irASeccionAcceso();
       });
     }
     // v1.3.6 (reporte de campo): la foto carga en SEGUNDO PLANO sin
@@ -1648,6 +1764,22 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   /// Muestra la foto en grande al tocarla (v1.0.11).
+  /// Abre la pestaña de Progreso del cliente (la usan la
+  /// fila de última medida, la tarjeta de acciones y el
+  /// pendiente «sin medición» de M4-B4).
+  void _abrirProgreso() {
+    final cli = _c;
+    Navigator.push(
+      context,
+      RutaIron(
+        builder: (_) => PestanaProgreso(
+          clienteId: '${widget.clienteId}',
+          nombreCliente: '${cli?['nombre'] ?? ''}',
+        ),
+      ),
+    );
+  }
+
   void _verFotoGrande() {    final f = _foto;
     if (f == null) return;
     showDialog(
@@ -2439,21 +2571,170 @@ class _FichaScreenState extends State<FichaScreen> {
                     child: CircularProgressIndicator())
                 : c == null
                     ? _clienteNoEncontrado()
-                    : ListView.builder(
-                    padding: const EdgeInsets.all(
-                        AppEspacio.lg),
-                    itemCount: items.length,
-                    itemBuilder: (ctx, i) {
-                      final it = items[i];
-                      return RepaintBoundary(
-                        key: ValueKey('ficha_${it.clave}'),
-                        child: _cacheSecciones.obtener(
-                            it.clave, it.version, it.widget),
-                      );
-                    },
+                    : Stack(
+                    children: [
+                      ListView.builder(
+                        controller: _scrollFicha,
+                        padding: const EdgeInsets.all(
+                            AppEspacio.lg),
+                        itemCount: items.length,
+                        itemBuilder: (ctx, i) {
+                          final it = items[i];
+                          return RepaintBoundary(
+                            key: ValueKey('ficha_${it.clave}'),
+                            // 1.28 (M4-C2): entrada por
+                            // secciones — fundido corto y
+                            // escalonado SOLO la primera vez
+                            // que la sección entra en
+                            // pantalla en esta visita.
+                            child: EntradaSeccionFicha(
+                              claveSeccion: it.clave,
+                              indice: i,
+                              yaAnimadas: _seccionesAnimadas,
+                              child: _cacheSecciones.obtener(
+                                  it.clave, it.version, it.widget),
+                            ),
+                          );
+                        },
+                      ),
+                      // 1.28 (M4-C3): cabecera compacta al
+                      // bajar — foto pequeña, nombre, estado
+                      // y la acción del momento, sin volver
+                      // arriba para cobrar.
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: _barraCompactaFicha(
+                          nombre: nombre,
+                          esCasa: esCasa,
+                          congelado: congelado,
+                          dias: dias,
+                          colorMarco: colorMarco,
+                        ),
+                      ),
+                    ],
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 1.28 (M4-C3): la barra compacta de la ficha. Aparece
+  /// al bajar más allá de la cabecera (ver
+  /// [_alMoverScrollFicha]) con la foto pequeña, el nombre,
+  /// el estado con el lenguaje de colores de Listas (el
+  /// punto lleva el color del marco de estado) y la acción
+  /// principal del momento: Cobrar — o Dar acceso cuando
+  /// el cliente no tiene acceso a la app y quien mira
+  /// puede darlo (la generación vive en la sección, con
+  /// las guardas de A8: la barra solo desplaza hasta ella).
+  Widget _barraCompactaFicha({
+    required String nombre,
+    required bool esCasa,
+    required bool congelado,
+    required int? dias,
+    required Color colorMarco,
+  }) {
+    final mostrar = _cabeceraCompacta;
+    final puedeAcceso = AuthService().isOwner ||
+        PermisosEntrenador().canGeneratePin;
+    final sinAcceso = puedeAcceso &&
+        AccesoAppCache.instance.cargado &&
+        AccesoAppCache.instance.obtener(widget.clienteId) == null;
+    final textoEstadoBarra = esCasa
+        ? 'Cuenta a la Casa'
+        : congelado
+            ? 'Congelado'
+            : dias == null
+                ? 'Sin pagos'
+                : dias < 0
+                    ? 'Vencido hace ${-dias} días'
+                    : dias == 0
+                        ? 'Vence hoy'
+                        : dias <= 7
+                            ? 'Vence en $dias días'
+                            : 'Al día';
+    return IgnorePointer(
+      ignoring: !mostrar,
+      child: AnimatedSlide(
+        offset: mostrar ? Offset.zero : const Offset(0, -1),
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        child: AnimatedOpacity(
+          opacity: mostrar ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          child: Material(
+            elevation: 6,
+            color: Theme.of(context).cardColor,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.md,
+                  vertical: AppEspacio.sm),
+              child: Row(
+                children: [
+                  AvatarCliente(
+                    nombre: nombre,
+                    foto: _foto,
+                    tamano: TamanoAvatar.s,
+                  ),
+                  const SizedBox(width: AppEspacio.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          nombre,
+                          style: AppTexto.subtitulo,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: colorMarco,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(textoEstadoBarra,
+                                style: AppTexto.secundario),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (sinAcceso)
+                    TextButton.icon(
+                      icon: const Icon(Icons.key_rounded,
+                          size: 18),
+                      label: const Text('Dar acceso'),
+                      onPressed: () => _irASeccionAcceso(),
+                    ),
+                  if (!esCasa)
+                    FilledButton.icon(
+                      icon: const Icon(Icons.payments_rounded,
+                          size: 18),
+                      label: const Text('Cobrar'),
+                      onPressed: _pagar,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.md),
+                        minimumSize: const Size(0, 40),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2567,6 +2848,26 @@ class _FichaScreenState extends State<FichaScreen> {
                           height: AppEspacio.lg),
                       const SizedBox(
                           height: AppEspacio.lg),
+                      // 1.28 (M4-B4): «qué le falta» a este
+                      // cliente, accionable, bajo la cabecera.
+                      // Sin pendientes, la sección no ocupa
+                      // espacio (se decide dentro del widget,
+                      // que además verifica el acceso por su
+                      // cuenta sin afirmar lo no verificado).
+                      SeccionQueFaltaFicha(
+                        clienteId: widget.clienteId,
+                        tieneFoto: _foto != null,
+                        telefonoValido:
+                            _telefonoEfectivoWa(c).length >= 10,
+                        ultimaMedicionEn: _ultimaMedicionFecha,
+                        puedeGestionarAcceso:
+                            AuthService().isOwner ||
+                                PermisosEntrenador().canGeneratePin,
+                        onFoto: _cambiarFoto,
+                        onTelefono: () => _editar(),
+                        onAcceso: () => _irASeccionAcceso(),
+                        onMedicion: _abrirProgreso,
+                      ),
                       // Información personal
                       Tarjeta(
                         child: Column(
@@ -2830,7 +3131,13 @@ class _FichaScreenState extends State<FichaScreen> {
                           height: AppEspacio.md),
                       // v1.13.0 (D4): medidas del entrenador (filas
                       // inmutables, op registrar_medicion_cliente).
-                      TarjetaMedidas(clienteId: widget.clienteId),
+                      // 1.28 (M4-B3): dato inicial = la lectura
+                      // que _cargar ya hizo (sin segundo escaneo
+                      // del espejo por apertura).
+                      TarjetaMedidas(
+                        clienteId: widget.clienteId,
+                        medidasIniciales: _medicionesFicha,
+                      ),
                       const SizedBox(
                           height: AppEspacio.md),
                       // v1.2.5 (#10): incidencias relacionadas con el cliente.
@@ -2885,6 +3192,10 @@ class _FichaScreenState extends State<FichaScreen> {
                       if (AuthService().isOwner ||
                           PermisosEntrenador().canGeneratePin)
                         SeccionAccesoAppFicha(
+                          // 1.28 (M4-B1): llave estable para
+                          // poder desplazar la lista hasta
+                          // esta sección (ensureVisible).
+                          key: _claveSeccionAcceso,
                           clienteId: widget.clienteId,
                           nombreCliente: nombre,
                           telefonoEfectivoWa:
@@ -2932,21 +3243,7 @@ class _FichaScreenState extends State<FichaScreen> {
                               ),
                               trailing: const Icon(
                                   Icons.chevron_right_rounded),
-                              onTap: () {
-                                final cli = _c;
-                                Navigator.push(
-                                  context,
-                                  RutaIron(
-                                    builder: (_) =>
-                                        PestanaProgreso(
-                                      clienteId:
-                                          '${widget.clienteId}',
-                                      nombreCliente:
-                                          '${cli?['nombre'] ?? ''}',
-                                    ),
-                                  ),
-                                );
-                              },
+                              onTap: _abrirProgreso,
                             ),
                           ),
                         ),
@@ -2954,19 +3251,7 @@ class _FichaScreenState extends State<FichaScreen> {
                         vencido: vencido,
                         congelado: (_c?['estado'] as String?) ==
                             'congelado',
-                        onProgreso: () {
-                          final cli = _c;
-                          Navigator.push(
-                            context,
-                            RutaIron(
-                              builder: (_) => PestanaProgreso(
-                                clienteId: '${widget.clienteId}',
-                                nombreCliente:
-                                    '${cli?['nombre'] ?? ''}',
-                              ),
-                            ),
-                          );
-                        },
+                        onProgreso: _abrirProgreso,
                         onRenovar: _renovar,
                         onCongelar: _congelar,
                         onPapelera: _aPapelera,
@@ -3174,6 +3459,14 @@ class _FichaScreenState extends State<FichaScreen> {
 
   Object _versionSeccion(Widget w, Object versionBase, Object versionFoto) {
     if (w is FadeEntrada || w is SeccionFotoPersonal) return versionFoto;
+    // 1.28 (M4-B4): «qué le falta» depende también de la
+    // foto (su pendiente «sin foto» llega en segundo plano
+    // sin subir _datosVersion): suma la versión de foto.
+    // Su pendiente de acceso lo resuelve el propio widget
+    // con estado local, como la sección «Acceso App».
+    if (w is SeccionQueFaltaFicha) {
+      return Object.hash(versionBase, versionFoto);
+    }
     if (w is TarjetaHistorialFicha) {
       return Object.hash(versionBase, _filtroHistorial);
     }

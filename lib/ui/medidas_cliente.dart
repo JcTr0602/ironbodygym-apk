@@ -13,13 +13,41 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../mediciones_cliente.dart';
+import '../negocio.dart' show fmtFecha;
 import '../permisos_entrenador.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'grafico_metrica.dart';
+
+/// Nombre legible de cada métrica para chips y gráficos.
+const Map<String, String> kNombreMetrica = {
+  'peso_kg': 'Peso',
+  'cintura_cm': 'Cintura',
+  'brazo_cm': 'Brazo',
+  'pecho_cm': 'Pecho',
+  'muslo_cm': 'Muslo',
+  'cadera_cm': 'Cadera',
+  'grasa_pct': 'Grasa corporal',
+};
+
+String nombreMetrica(String clave) =>
+    kNombreMetrica[clave] ?? clave.replaceAll('_', ' ');
+
+/// Valor con un decimal y coma, como pinta la ficha.
+String _fmtMedida(double v) =>
+    v.toStringAsFixed(1).replaceAll('.', ',');
 
 class TarjetaMedidas extends StatefulWidget {
   final int clienteId;
-  const TarjetaMedidas({super.key, required this.clienteId});
+
+  /// 1.28 (M4-B3): mediciones ya leídas por la ficha (su
+  /// _cargar las necesita para el resumen). Si vienen, la
+  /// tarjeta NO reescanea el espejo al abrir: dos escaneos
+  /// completos por apertura era el coste de R3M4-H6.
+  final List<Map<String, dynamic>>? medidasIniciales;
+
+  const TarjetaMedidas(
+      {super.key, required this.clienteId, this.medidasIniciales});
 
   @override
   State<TarjetaMedidas> createState() => _TarjetaMedidasState();
@@ -31,11 +59,39 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
   // 1.28 (M4-A12): registro en curso — dos toques abrían
   // dos diálogos y registraban la fila dos veces.
   bool _registrando = false;
+  // 1.28 (M4-B3): la tarjeta enseña la evolución (última
+  // medición + gráfico); el historial entero solo con
+  // «Ver todo».
+  bool _verTodo = false;
+  String? _metricaGrafico;
 
   @override
   void initState() {
     super.initState();
-    _cargar();
+    final iniciales = widget.medidasIniciales;
+    if (iniciales != null) {
+      _medidas = iniciales;
+      _cargando = false;
+    } else {
+      _cargar();
+    }
+  }
+
+  @override
+  void didUpdateWidget(TarjetaMedidas oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // La ficha recargó y trae una foto IGUAL O MÁS NUEVA
+    // (nunca más corta: una foto vieja no pisa el registro
+    // local recién hecho que esta tarjeta ya recargó).
+    final nuevas = widget.medidasIniciales;
+    if (nuevas != null &&
+        !identical(nuevas, oldWidget.medidasIniciales) &&
+        nuevas.length >= _medidas.length) {
+      setState(() {
+        _medidas = nuevas;
+        _cargando = false;
+      });
+    }
   }
 
   Future<void> _cargar() async {
@@ -135,6 +191,62 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
     }
   }
 
+  /// Métricas con al menos un punto, en el orden canónico
+  /// de la lista cerrada (las que la tarjeta puede graficar).
+  List<String> get _metricasConDatos {
+    final presentes = <String>{};
+    for (final m in _medidas) {
+      final medidas = m['medidas'];
+      if (medidas is Map) {
+        for (final k in medidas.keys) {
+          presentes.add('$k');
+        }
+      }
+    }
+    return [
+      for (final k in kMetricasMedicion.keys)
+        if (presentes.contains(k)) k,
+    ];
+  }
+
+  String get _metricaVigente {
+    final conDatos = _metricasConDatos;
+    final elegida = _metricaGrafico;
+    if (elegida != null && conDatos.contains(elegida)) return elegida;
+    if (conDatos.contains('peso_kg')) return 'peso_kg';
+    return conDatos.isEmpty ? 'peso_kg' : conDatos.first;
+  }
+
+  Widget _filaHistorial(Map<String, dynamic> m) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: Text('${m['fecha_medicion']}',
+                  style: AppTexto.cuerpo
+                      .copyWith(fontWeight: FontWeight.w600)),
+            ),
+            if (m['espejado'] != true)
+              const Text('por sincronizar',
+                  style: AppTexto.secundario),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          (m['medidas'] as Map<String, dynamic>).entries.map((e) {
+            final spec = kMetricasMedicion[e.key];
+            final unidad = spec?.unidad ?? '';
+            return '${e.key.replaceAll('_', ' ')}: ${e.value} $unidad';
+          }).join(' · '),
+          style: AppTexto.cuerpo,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Tarjeta(
@@ -160,35 +272,137 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           else if (_medidas.isEmpty)
+            // Alcance FIJADO en B7 (bloque4_b7_estados):
+            // esta tarjeta es una SECCIÓN de la ficha, no
+            // una pantalla — su vacío queda como texto de
+            // sección, sin migrar a EstadoVacio. (M4-C4 lo
+            // respeta; ver el informe de la oleada.)
             const Text('Sin medidas registradas todavía.',
                 style: AppTexto.secundario)
-          else
-            for (final m in _medidas) ...[
-              const Divider(height: 16),
-              Row(
+          else ...[
+            // 1.28 (M4-B3): última medición DESTACADA, con
+            // la variación de cada métrica contra la
+            // anterior que la trae.
+            const SizedBox(height: AppEspacio.sm),
+            _ultimaDestacada(),
+            // Mini-gráfico de la métrica elegida.
+            if (_metricasConDatos.isNotEmpty) ...[
+              const SizedBox(height: AppEspacio.md),
+              Wrap(
+                spacing: AppEspacio.sm,
+                runSpacing: AppEspacio.xs,
                 children: [
-                  Expanded(
-                    child: Text('${m['fecha_medicion']}',
-                        style: AppTexto.cuerpo.copyWith(
-                            fontWeight: FontWeight.w600)),
-                  ),
-                  if (m['espejado'] != true)
-                    const Text('por sincronizar',
-                        style: AppTexto.secundario),
+                  for (final k in _metricasConDatos)
+                    ChoiceChip(
+                      label: Text(nombreMetrica(k)),
+                      selected: _metricaVigente == k,
+                      onSelected: (_) =>
+                          setState(() => _metricaGrafico = k),
+                    ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(
-                (m['medidas'] as Map<String, dynamic>).entries.map((e) {
-                  final spec = kMetricasMedicion[e.key];
-                  final unidad = spec?.unidad ?? '';
-                  return '${e.key.replaceAll('_', ' ')}: ${e.value} $unidad';
-                }).join(' · '),
-                style: AppTexto.cuerpo,
+              GraficoMetricaGestion(
+                titulo:
+                    'Evolución de ${nombreMetrica(_metricaVigente).toLowerCase()}',
+                unidad: kMetricasMedicion[_metricaVigente]?.unidad ??
+                    '',
+                puntos: [
+                  for (final p
+                      in serieMedicion(_medidas, _metricaVigente))
+                    PuntoSerie(p.fecha, p.valor),
+                ],
               ),
             ],
+            // Historial completo, solo a petición.
+            if (_verTodo)
+              for (final m in _medidas) _filaHistorial(m),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    setState(() => _verTodo = !_verTodo),
+                icon: Icon(
+                    _verTodo
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18),
+                label: Text(_verTodo
+                    ? 'Ver menos'
+                    : 'Ver todo (${_medidas.length} mediciones)'),
+              ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  /// La medición más reciente en grande: fecha y cada
+  /// métrica con su variación desde la anterior comparable
+  /// (▲/▼ y la cifra; sin juicio: subir o bajar no es
+  /// bueno ni malo por sí solo).
+  Widget _ultimaDestacada() {
+    final ultima = _medidas.first;
+    final medidas = ultima['medidas'];
+    final deltas = deltasUltimaMedicion(_medidas);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppEspacio.md),
+      decoration: BoxDecoration(
+        color: AppColores.naranja.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                    'Última medición · '
+                    '${fmtFecha(ultima['fecha_medicion'] as String?)}',
+                    style: AppTexto.subtitulo),
+              ),
+              if (ultima['espejado'] != true)
+                const Text('por sincronizar',
+                    style: AppTexto.secundario),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          if (medidas is Map)
+            Wrap(
+              spacing: AppEspacio.md,
+              runSpacing: AppEspacio.xs,
+              children: [
+                for (final e in medidas.entries)
+                  if ((e.value as num?) != null)
+                    _chipMedida('${e.key}', (e.value as num).toDouble(),
+                        deltas['${e.key}']),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chipMedida(String clave, double valor, double? delta) {
+    final unidad = kMetricasMedicion[clave]?.unidad ?? '';
+    final textoDelta = delta == null || delta == 0
+        ? null
+        : '${delta > 0 ? '▲' : '▼'} ${_fmtMedida(delta.abs())}';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '${nombreMetrica(clave)} ${_fmtMedida(valor)} $unidad',
+          style:
+              AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w700),
+        ),
+        if (textoDelta != null) ...[
+          const SizedBox(width: 4),
+          Text(textoDelta, style: AppTexto.secundario),
+        ],
+      ],
     );
   }
 }

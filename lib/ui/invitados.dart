@@ -331,6 +331,69 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     } catch (_) {}
   }
 
+  // 1.28 (M4-B2): invitado cuya conversión arrancó desde
+  // la lista (guarda de un solo vuelo: el toque en el chip
+  // no apila dos preparaciones).
+  String? _convirtiendoId;
+
+  /// 1.28 (M4-B2): «convertir en un toque» desde la lista:
+  /// el chip de candidato abre el MISMO flujo que el
+  /// detalle (prepararConversion → Inscribir con los datos
+  /// del invitado), sin pasar por la pantalla de detalle.
+  /// Guardas en el mismo orden que _convertir del detalle:
+  /// sin conexión no hay conversión (la preparación vive en
+  /// el servidor) y el caducado se extiende antes.
+  Future<void> _convertirDesdeLista(InvitadoResumen inv) async {
+    if (_convirtiendoId != null) return;
+    if (_offline) {
+      mostrarSnack(
+          context, 'Sin conexión: convertir necesita conexión.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    if (inv.caducado) {
+      mostrarSnack(
+          context,
+          'Este invitado está caducado: extiende su vida antes '
+          'de convertirlo.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    setState(() => _convirtiendoId = inv.id);
+    try {
+      final detalle = await _svc.detalle(inv.id);
+      if (!mounted) return;
+      if (detalle.caducado) {
+        mostrarSnack(
+            context,
+            'Este invitado está caducado: extiende su vida antes '
+            'de convertirlo.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      final datos = await _svc.prepararConversion(detalle);
+      if (!mounted) return;
+      await Navigator.of(context).push(RutaIron(
+        builder: (_) => InscribirScreen(conversion: datos),
+      ));
+      await _cargar();
+    } on InvitadoError catch (e) {
+      if (mounted) {
+        mostrarSnack(context, e.mensaje,
+            significado: SignificadoChip.error);
+      }
+    } catch (_) {
+      if (mounted) {
+        mostrarSnack(
+            context, 'No se pudo abrir la conversión. '
+            'Revisa la conexión.',
+            significado: SignificadoChip.error);
+      }
+    } finally {
+      if (mounted) setState(() => _convirtiendoId = null);
+    }
+  }
+
   /// Barra inferior del modo selección: SOLO las tres acciones de
   /// lote del diseño (Plus = dueño; vida = staff). Jamás convertir,
   /// ajustar clave ni eliminar en masa.
@@ -790,16 +853,22 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       );
     }
     if (_listaVisible.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(AppEspacio.xl),
-          child: Text(
-            'No hay invitados en esta vista.\nLos registros nuevos '
-            'desde la app de clientes aparecen aquí.',
-            textAlign: TextAlign.center,
-            style: AppTexto.secundario,
-          ),
-        ),
+      // 1.28 (M4-C4): el vacío pasa del texto plano al
+      // patrón EstadoVacio de la casa (icono, título,
+      // subtítulo y, si la vista es un filtro, la acción
+      // que lo deshace).
+      return EstadoVacio(
+        icono: Icons.people_outline_rounded,
+        titulo: 'No hay invitados en esta vista',
+        subtitulo: 'Los registros nuevos desde la app de '
+            'clientes aparecen aquí.',
+        textoAccion: _filtro != 'todos' ? 'Ver todos' : null,
+        onAccion: _filtro != 'todos'
+            ? () {
+                setState(() => _filtro = 'todos');
+                _cargar();
+              }
+            : null,
       );
     }
     final visible = _listaVisible;
@@ -938,8 +1007,26 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                           (_visitasLista[inv.id] ?? 0) > 0) ...[
                         if ((_visitasLista[inv.id] ?? 0) >=
                             _umbralLista)
-                          _chip('⭐ Candidato a cliente',
-                              _doradoPlus),
+                          // 1.28 (M4-B2): el chip de
+                          // candidato ES el botón: un toque
+                          // abre la conversión (el flujo del
+                          // detalle), sin entrar a la ficha
+                          // del invitado. En conversión no se
+                          // ofrece (ya tiene su camino).
+                          if (!inv.enConversion)
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _convertirDesdeLista(inv),
+                              child: _chip(
+                                  _convirtiendoId == inv.id
+                                      ? '⭐ Preparando conversión…'
+                                      : '⭐ Candidato a cliente · '
+                                          'Convertir',
+                                  _doradoPlus),
+                            )
+                          else
+                            _chip('⭐ Candidato a cliente',
+                                _doradoPlus),
                         _chip(
                             '👣 ${_visitasLista[inv.id]} visitas (30 días)',
                             AppColores.infoOscuro),

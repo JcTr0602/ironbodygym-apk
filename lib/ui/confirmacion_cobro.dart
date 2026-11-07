@@ -358,6 +358,30 @@ class _ConfirmacionOperacionScreenState
                       ),
                     ),
                   ),
+                  // 1.28 (M4-C6): barra de tiempo de la
+                  // ventana — el contador en texto solo se
+                  // nota si se lee; la barra se VE vaciarse.
+                  // Se anima suave hacia cada segundo (el
+                  // Timer ya baja de 1 en 1).
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 48),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadio.sm),
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween<double>(
+                            end: (_segundos / 15).clamp(0.0, 1.0)),
+                        duration: const Duration(milliseconds: 950),
+                        builder: (_, v, __) =>
+                            LinearProgressIndicator(
+                          value: v,
+                          minHeight: 4,
+                          color: AppColores.error,
+                          backgroundColor: AppColores.borde(context),
+                        ),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 48),

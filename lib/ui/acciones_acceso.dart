@@ -484,6 +484,45 @@ Future<void> _cambiarTelefonoAccesoInterna(
   }
 }
 
+/// 1.28 (M4-B1): puerta de entrada al menú de acceso desde
+/// una FILA (pulsación larga en Listas, menú rápido en
+/// Buscar). Resuelve el acceso del cliente desde el caché
+/// (cargándolo si hace falta) y abre EL MISMO menú del
+/// helper A5 — nada de una segunda vía sin guarda. Si el
+/// cliente NO tiene acceso verificado, el alta vive en la
+/// sección «Acceso App» de su ficha (con las guardas de
+/// A8): se delega en [alDarAcceso]. Sin caché ni red, se
+/// dice la verdad en vez de adivinar un estado. Solo dueño:
+/// el dominio de accesos es suyo (la ficha sigue siendo la
+/// vía del entrenador con permiso de generar PIN).
+Future<void> abrirMenuAccesoDesdeLista(
+  BuildContext ctx, {
+  required int clienteId,
+  required Future<void> Function() alTerminar,
+  required Future<void> Function() alAbrirFicha,
+  required Future<void> Function() alDarAcceso,
+}) async {
+  if (!_soloDueno(ctx)) return;
+  if (!AccesoAppCache.instance.cargado) {
+    await AccesoAppCache.instance.cargar();
+    if (!ctx.mounted) return;
+  }
+  final a = AccesoAppCache.instance.obtener(clienteId);
+  if (a != null) {
+    await mostrarMenuAccionesAcceso(
+      ctx,
+      a: a,
+      alTerminar: alTerminar,
+      alAbrirFicha: alAbrirFicha,
+    );
+  } else if (AccesoAppCache.instance.cargado) {
+    await alDarAcceso();
+  } else {
+    _snack(ctx,
+        'Sin conexión para verificar el acceso; abre su ficha.');
+  }
+}
+
 /// Hoja de opciones rápidas de un acceso (menú ⋮ de la lista).
 /// [ctx] debe ser el contexto de la pantalla anfitriona: la hoja se
 /// cierra antes de ejecutar cualquier acción y todo lo posterior

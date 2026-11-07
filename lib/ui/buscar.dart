@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../perfil.dart';
@@ -17,6 +18,7 @@ import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
+import 'acciones_acceso.dart';
 import 'app_bar.dart';
 import 'diagnostico_espejo_card.dart';
 import 'componentes.dart';
@@ -405,7 +407,18 @@ class _BuscarScreenState extends State<BuscarScreen> {
       icono: Icons.search_off_rounded,
       titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
       subtitulo: _busco
-          ? 'Prueba con otro nombre, carnet o teléfono'
+          // 1.28 (M4-C4): sin resultados con búsqueda
+          // activa, el vacío ofrece la salida natural:
+          // ¿es un cliente nuevo?
+          ? 'Prueba con otro nombre, carnet o teléfono. '
+              '¿Es un cliente nuevo?'
+          : null,
+      textoAccion: _busco ? 'Inscribir a esta persona' : null,
+      onAccion: _busco
+          ? () => Navigator.of(context)
+              .push(RutaIron(
+                  builder: (_) => const InscribirScreen()))
+              .then((_) => _buscar())
           : null,
     );
   }
@@ -1221,6 +1234,16 @@ class _BuscarScreenState extends State<BuscarScreen> {
               title: const Text('Editar cliente'),
               onTap: () => Navigator.pop(ctx, 'editar'),
             ),
+            // 1.28 (M4-B1): el acceso también desde el menú
+            // rápido de Buscar (solo dueño — el helper
+            // compartido decide según el estado verificado
+            // del acceso qué se puede hacer).
+            if (AuthService().isOwner)
+              ListTile(
+                leading: const Icon(Icons.key_rounded),
+                title: const Text('Acceso a la app'),
+                onTap: () => Navigator.pop(ctx, 'acceso'),
+              ),
             ListTile(
               leading: const Icon(Icons.checklist_rounded),
               title: const Text('Seleccionar varios para avisar'),
@@ -1252,6 +1275,31 @@ class _BuscarScreenState extends State<BuscarScreen> {
       case 'seleccionar':
         setState(() => _modoSeleccion = true);
         _alternarSeleccion(c);
+      case 'acceso':
+        // 1.28 (M4-B1): menú de acceso del helper
+        // compartido, sin salir de Buscar.
+        await abrirMenuAccesoDesdeLista(
+          context,
+          clienteId: (c['id'] as num?)?.toInt() ?? 0,
+          alTerminar: () async {
+            if (mounted) await _buscar();
+          },
+          alAbrirFicha: () async {
+            await Navigator.of(context).push(RutaIron(
+                builder: (_) => FichaScreen(
+                    clienteId: (c['id'] as num?)?.toInt() ?? 0,
+                    origenHero: 'buscar')));
+            if (mounted) await _buscar();
+          },
+          alDarAcceso: () async {
+            await Navigator.of(context).push(RutaIron(
+                builder: (_) => FichaScreen(
+                    clienteId: (c['id'] as num?)?.toInt() ?? 0,
+                    origenHero: 'buscar',
+                    irAAccesoAlAbrir: true)));
+            if (mounted) await _buscar();
+          },
+        );
     }
   }
 

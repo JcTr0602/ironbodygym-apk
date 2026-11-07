@@ -1061,3 +1061,76 @@ List<
       ),
   ];
 }
+
+/// 1.28 (M4-C2): entrada de UNA sección de la ficha
+/// perezosa — fundido corto con un levante mínimo,
+/// escalonado por posición, SOLO la primera vez que la
+/// sección entra en pantalla en esta visita. La ficha
+/// guarda las claves ya animadas ([yaAnimadas]): al
+/// desmontarse y volver a montarse haciendo scroll, la
+/// sección entra DIRECTA, sin re-animar (la ficha deja de
+/// sentirse una página que «carga» en cada vaivén).
+/// Respeta «reducir movimiento» del sistema: con la
+/// opción activa no hay animación alguna. El único estado
+/// que guarda es el de esta animación de presentación.
+class EntradaSeccionFicha extends StatefulWidget {
+  final String claveSeccion;
+  final int indice;
+  final Set<String> yaAnimadas;
+  final Widget child;
+
+  const EntradaSeccionFicha({
+    super.key,
+    required this.claveSeccion,
+    required this.indice,
+    required this.yaAnimadas,
+    required this.child,
+  });
+
+  @override
+  State<EntradaSeccionFicha> createState() =>
+      _EntradaSeccionFichaState();
+}
+
+class _EntradaSeccionFichaState extends State<EntradaSeccionFicha> {
+  bool _animar = false;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Set.add devuelve false si la clave ya estaba: esa
+    // sección ya animó en esta visita y entra directa.
+    if (widget.yaAnimadas.add(widget.claveSeccion)) {
+      _animar = true;
+      final ms = (widget.indice * 45).clamp(0, 270);
+      if (ms == 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _visible = true);
+        });
+      } else {
+        Future.delayed(Duration(milliseconds: ms), () {
+          if (mounted) setState(() => _visible = true);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_animar || MediaQuery.of(context).disableAnimations) {
+      return widget.child;
+    }
+    return AnimatedSlide(
+      offset: _visible ? Offset.zero : const Offset(0, 0.05),
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+      child: AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}

@@ -161,6 +161,53 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
   return lista;
 }
 
+/// 1.28 (M4-B3): variación de cada métrica de la medición
+/// MÁS RECIENTE contra la anterior que trae ESA métrica
+/// (las filas son parciales: no todas traen todas las
+/// métricas). Sin anterior comparable, la métrica no entra
+/// en el mapa. La lista llega recientes primero
+/// (medicionesClienteLocal). PURO.
+Map<String, double> deltasUltimaMedicion(
+    List<Map<String, dynamic>> mediciones) {
+  if (mediciones.isEmpty) return const {};
+  final ultima = mediciones.first['medidas'];
+  if (ultima is! Map) return const {};
+  final r = <String, double>{};
+  for (final e in ultima.entries) {
+    final v = (e.value as num?)?.toDouble();
+    if (v == null) continue;
+    for (var i = 1; i < mediciones.length; i++) {
+      final m = mediciones[i]['medidas'];
+      if (m is! Map) continue;
+      final anterior = (m[e.key] as num?)?.toDouble();
+      if (anterior != null) {
+        r['${e.key}'] = v - anterior;
+        break;
+      }
+    }
+  }
+  return r;
+}
+
+/// 1.28 (M4-B3): serie cronológica (antigua → reciente) de
+/// una métrica para el mini-gráfico de la ficha: solo las
+/// mediciones que la traen y cuya fecha parsea. PURO.
+List<({DateTime fecha, double valor})> serieMedicion(
+    List<Map<String, dynamic>> mediciones, String metrica) {
+  final puntos = <({DateTime fecha, double valor})>[];
+  for (final m in mediciones) {
+    final medidas = m['medidas'];
+    if (medidas is! Map) continue;
+    final v = (medidas[metrica] as num?)?.toDouble();
+    if (v == null) continue;
+    final f = DateTime.tryParse('${m['fecha_medicion'] ?? ''}');
+    if (f == null) continue;
+    puntos.add((fecha: f, valor: v));
+  }
+  puntos.sort((a, b) => a.fecha.compareTo(b.fecha));
+  return puntos;
+}
+
 /// 1.25 T57: resumen de la última medida con peso para la
 /// fila de la ficha: el peso más reciente y su variación
 /// contra la medición anterior con peso (null si no hay

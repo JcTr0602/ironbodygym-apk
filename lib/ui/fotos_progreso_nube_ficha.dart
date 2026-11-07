@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -52,6 +53,55 @@ class _ErrorSesionFotos implements Exception {
   const _ErrorSesionFotos();
 }
 
+/// 1.28 (M4-C5): un mes de la galería — título legible y
+/// sus fotos, en el orden en que llegaron.
+class GrupoFotosMes {
+  final String titulo;
+  final List<Map<String, dynamic>> fotos;
+  const GrupoFotosMes(this.titulo, this.fotos);
+}
+
+const List<String> _mesesEs = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre',
+  'Diciembre',
+];
+
+/// 1.28 (M4-C5, PURA): agrupa las fotos por mes de su
+/// fecha, del mes más reciente al más viejo (el orden de
+/// entrada se conserva DENTRO de cada mes). Las fotos sin
+/// fecha legible van al grupo final «Sin fecha». Función
+/// pura para poder probarla sin widgets.
+List<GrupoFotosMes> agruparFotosPorMes(
+    List<Map<String, dynamic>> fotos) {
+  final porClave = <String, List<Map<String, dynamic>>>{};
+  final titulos = <String, String>{};
+  final sinFecha = <Map<String, dynamic>>[];
+  for (final f in fotos) {
+    final fecha = DateTime.tryParse(f['fecha']?.toString() ?? '');
+    if (fecha == null) {
+      sinFecha.add(f);
+      continue;
+    }
+    final clave =
+        '${fecha.year.toString().padLeft(4, '0')}-${fecha.month.toString().padLeft(2, '0')}';
+    porClave.putIfAbsent(clave, () => []).add(f);
+    titulos[clave] =
+        '${_mesesEs[fecha.month - 1]} ${fecha.year}';
+  }
+  final claves = porClave.keys.toList()..sort((a, b) => b.compareTo(a));
+  return [
+    for (final k in claves)
+      GrupoFotosMes(
+          '${titulos[k]} · ${porClave[k]!.length} '
+          '${porClave[k]!.length == 1 ? 'foto' : 'fotos'}',
+          porClave[k]!),
+    if (sinFecha.isNotEmpty)
+      GrupoFotosMes('Sin fecha · ${sinFecha.length} '
+          '${sinFecha.length == 1 ? 'foto' : 'fotos'}', sinFecha),
+  ];
+}
+
 class _SeccionFotosProgresoNubeState
     extends State<SeccionFotosProgresoNube> {
   bool _cargando = true;
@@ -95,6 +145,17 @@ class _SeccionFotosProgresoNubeState
   // admin_eliminar sobre la misma foto.
   final Set<String> _eliminandoIds = {};
 
+  // 1.28 (M4-C5): proporción real (ancho/alto) de cada
+  // foto, resuelta al descargar sus bytes: la rejilla
+  // pinta cada celda con la forma de SU foto en vez de
+  // recortar todas al mismo rectángulo.
+  final Map<String, double> _aspectos = {};
+
+  // 1.28 (M4-B6): selección para moderar por tandas
+  // (pulsación larga entra en el modo; vacío = modo
+  // normal).
+  final Set<String> _seleccion = {};
+
   @override
   void initState() {
     super.initState();
@@ -114,6 +175,8 @@ class _SeccionFotosProgresoNubeState
       _falloEnMs.clear();
       _futuroFallo.clear();
       _eliminandoIds.clear();
+      _aspectos.clear();
+      _seleccion.clear();
       _viendoId = null;
       _fotos = const [];
       _cargar();
@@ -289,6 +352,11 @@ class _SeccionFotosProgresoNubeState
         _falloEnMs.remove(fotoId);
         _futuroFallo.remove(fotoId);
         _guardarEnCache(fotoId, bytes);
+        // 1.28 (M4-C5): la proporción real sale de los
+        // bytes (la EF no la devuelve): se resuelve EN
+        // SEGUNDO PLANO, sin bloquear la entrega de la
+        // miniatura (la celda adopta la forma al llegar).
+        unawaited(_resolverAspecto(fotoId, bytes));
       }
       return bytes;
     } catch (_) {
@@ -296,6 +364,30 @@ class _SeccionFotosProgresoNubeState
       return null;
     } finally {
       _liberarDescarga();
+    }
+  }
+
+  /// 1.28 (M4-C5): resuelve y guarda la proporción de la
+  /// foto (acotada a un rango sano para la rejilla).
+  /// Best-effort: bytes que no decodifican dejan la
+  /// proporción por defecto de la celda.
+  Future<void> _resolverAspecto(String fotoId, Uint8List bytes) async {
+    if (_aspectos.containsKey(fotoId)) return;
+    try {
+      final codec = await ui.instantiateImageCodec(bytes,
+          targetWidth: 64);
+      final frame = await codec.getNextFrame();
+      final w = frame.image.width;
+      final h = frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
+      if (w > 0 && h > 0 && !_dispuesto) {
+        _aspectos[fotoId] = (w / h).clamp(0.45, 2.2).toDouble();
+        // La celda se repinta con la forma real.
+        if (mounted) setState(() {});
+      }
+    } catch (_) {
+      // Sin proporción: la celda usa su defecto.
     }
   }
 
@@ -335,8 +427,14 @@ class _SeccionFotosProgresoNubeState
     return futuro;
   }
 
-  Future<void> _verGrande(Map<String, dynamic> foto) async {
-    final fotoId = foto['id']?.toString() ?? '';
+  /// 1.28 (M4-C5): el visor es una GALERÍA — se abre en
+  /// la foto tocada y se hojea con PageView, sin cerrar
+  /// y reabrir por foto. Devuelve el id a eliminar (la
+  /// confirmación vive dentro; el borrado lo ejecuta la
+  /// sección tras cerrarse el visor, como manda H-06).
+  Future<void> _verGrande(int indice) async {
+    if (indice < 0 || indice >= _fotos.length) return;
+    final fotoId = _fotos[indice]['id']?.toString() ?? '';
     // O-01 (delta 1.27): si esta foto ya se está eliminando,
     // ni siquiera abrir el visor — blinda también una futura
     // entrada directa que no pase por el onTap de la rejilla.
@@ -347,128 +445,28 @@ class _SeccionFotosProgresoNubeState
     if (_viendoId == fotoId) return;
     _viendoId = fotoId;
     try {
-      await _verGrandeFlujo(foto, fotoId);
+      final aBorrar = await showDialog<String>(
+        context: context,
+        builder: (ctx) => _VisorFotosNube(
+          fotos: _fotos,
+          indiceInicial: indice,
+          descargar: (id) => _miniatura(id, forzar: true),
+        ),
+      );
+      if (aBorrar == null || !mounted) return;
+      await _eliminarFotoModeracion(aBorrar);
     } finally {
       _viendoId = null;
     }
   }
 
-  Future<void> _verGrandeFlujo(
-      Map<String, dynamic> foto, String fotoId) async {
-    // Toque explícito: reintenta al momento aunque la
-    // miniatura fallara hace nada (H-08); la pausa de la
-    // caché negativa solo frena reconstrucciones.
-    final bytes = await _miniatura(fotoId, forzar: true);
-    if (!mounted) return;
-    if (bytes == null) {
-      mostrarSnack(context, 'No se pudo descargar la foto.',
-          significado: SignificadoChip.error);
-      return;
-    }
-    // La celda se re-enlaza a los bytes ya cacheados al
-    // volver (C-R2M4-H2: quedaba en «rota» con el futuro
-    // fallido aunque el visor sí descargó la foto).
-    setState(() {});
-    // 1.28 (M4-A13/C-R2M4-H1): la confirmación de eliminar
-    // DENTRO del visor no tenía guarda: doble toque, dos
-    // confirmaciones apiladas.
-    var confirmando = false;
-    final borrada = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => Dialog(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Foto del ${fmtFecha(foto['fecha']?.toString() ?? '')}',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w800, fontSize: 15),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              // 1.28 (M4-A13): decodificación acotada al
-              // ancho pintado y marca visible si los bytes
-              // no decodifican (antes: bitmap completo de
-              // ~1280 px y celda vacía sin marca).
-              child: Image.memory(
-                bytes,
-                fit: BoxFit.contain,
-                cacheWidth: (MediaQuery.sizeOf(context).width *
-                        MediaQuery.devicePixelRatioOf(context))
-                    .round(),
-                errorBuilder: (_, __, ___) => const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Icon(Icons.broken_image_outlined, size: 40),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: () async {
-                      if (confirmando) return;
-                      confirmando = true;
-                      try {
-                        final ok = await showDialog<bool>(
-                          context: ctx,
-                          builder: (c2) => AlertDialog(
-                            title: const Text('¿Eliminar esta foto?'),
-                            content: const Text(
-                                'Se borra de la nube y el cliente '
-                                'dejará de verla en su app. No se '
-                                'puede deshacer.'),
-                            actions: [
-                              TextButton(
-                                onPressed: () =>
-                                    Navigator.of(c2).pop(false),
-                                child: const Text('Cancelar'),
-                              ),
-                              FilledButton(
-                                onPressed: () =>
-                                    Navigator.of(c2).pop(true),
-                                child: const Text('Eliminar'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (ok == true) {
-                          Navigator.of(ctx).pop(true);
-                        }
-                      } finally {
-                        confirmando = false;
-                      }
-                    },
-                    icon: const Icon(Icons.delete_outline,
-                        color: AppColores.error),
-                    label: const Text('Eliminar de la nube',
-                        style: TextStyle(color: AppColores.error)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (borrada != true || !mounted) return;
-    // H-06 (Argón 1.27): la celda queda marcada como
-    // «eliminando» ANTES del await (que puede tardar
-    // hasta el timeout): el grid la congela y un
-    // segundo toque no dispara otro admin_eliminar.
+  /// H-06 (Argón 1.27): la celda queda marcada como
+  /// «eliminando» ANTES del await (que puede tardar
+  /// hasta el timeout): el grid la congela y un
+  /// segundo toque no dispara otro admin_eliminar.
+  /// Devuelve si el servidor borró la foto.
+  Future<bool> _eliminarFotoModeracion(String fotoId) async {
+    if (_eliminandoIds.contains(fotoId)) return false;
     setState(() => _eliminandoIds.add(fotoId));
     bool ok;
     try {
@@ -477,23 +475,109 @@ class _SeccionFotosProgresoNubeState
       _eliminandoIds.remove(fotoId);
       if (mounted) setState(() {});
     }
-    if (!mounted) return;
+    if (!mounted) return ok;
     if (ok) {
-      setState(() {
-        _fotos = [
-          for (final f in _fotos)
-            if (f['id']?.toString() != fotoId) f,
-        ];
-        final quitados = _bytesCache.remove(fotoId);
-        if (quitados != null) _bytesCacheTotal -= quitados.length;
-        _falloEnMs.remove(fotoId);
-        _futuroFallo.remove(fotoId);
-      });
+      _borrarFotoLocal(fotoId);
     } else {
       mostrarSnack(
           context, 'El servidor no eliminó la foto. Inténtalo de nuevo.',
           significado: SignificadoChip.error);
     }
+    return ok;
+  }
+
+  /// Retira la foto de la vista y de todas las cachés
+  /// (bytes, proporción, fallos y selección).
+  void _borrarFotoLocal(String fotoId) {
+    setState(() {
+      _fotos = [
+        for (final f in _fotos)
+          if (f['id']?.toString() != fotoId) f,
+      ];
+      final quitados = _bytesCache.remove(fotoId);
+      if (quitados != null) _bytesCacheTotal -= quitados.length;
+      _aspectos.remove(fotoId);
+      _falloEnMs.remove(fotoId);
+      _futuroFallo.remove(fotoId);
+      _seleccion.remove(fotoId);
+    });
+  }
+
+  // ── 1.28 (M4-B6): moderación por tandas ─────────────
+
+  void _alternarSeleccion(String fotoId, bool entra) {
+    setState(() {
+      if (entra) {
+        _seleccion.add(fotoId);
+      } else {
+        _seleccion.remove(fotoId);
+      }
+    });
+  }
+
+  String get _rangoSeleccion {
+    final fechas = <String>[];
+    for (final f in _fotos) {
+      if (_seleccion.contains(f['id']?.toString())) {
+        fechas.add(f['fecha']?.toString() ?? '');
+      }
+    }
+    fechas.sort();
+    if (fechas.isEmpty) return '';
+    final primera = fmtFecha(fechas.first);
+    final ultima = fmtFecha(fechas.last);
+    return primera == ultima ? primera : 'del $primera al $ultima';
+  }
+
+  /// UNA confirmación para toda la tanda (con el conteo
+  /// y el rango de fechas) y borrado secuencial con el
+  /// mismo candado H-06 por foto; el resultado se resume
+  /// en un solo aviso.
+  Future<void> _eliminarSeleccion() async {
+    final ids = [
+      for (final f in _fotos)
+        if (_seleccion.contains(f['id']?.toString()))
+          f['id']?.toString() ?? '',
+    ]..removeWhere((id) => id.isEmpty);
+    if (ids.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c2) => AlertDialog(
+        title: Text('¿Eliminar ${ids.length} '
+            '${ids.length == 1 ? 'foto' : 'fotos'}?'),
+        content: Text('Fotos $_rangoSeleccion. Se borran de '
+            'la nube y el cliente dejará de verlas en su '
+            'app. No se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(c2).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(c2).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    var borradas = 0;
+    for (final id in ids) {
+      if (!mounted) break;
+      if (await _eliminarFotoModeracion(id)) borradas++;
+    }
+    if (!mounted) return;
+    setState(() => _seleccion.clear());
+    mostrarSnack(
+      context,
+      borradas == ids.length
+          ? '${ids.length} ${ids.length == 1 ? 'foto eliminada' : 'fotos eliminadas'} de la nube'
+          : 'Se eliminaron $borradas de ${ids.length}; el resto '
+              'no se pudo. Inténtalo de nuevo.',
+      significado: borradas == ids.length
+          ? SignificadoChip.exito
+          : SignificadoChip.error,
+    );
   }
 
   @override
@@ -534,6 +618,12 @@ class _SeccionFotosProgresoNubeState
     // Sin fotos en la nube, la sección no ocupa espacio
     // (patrón de la foto personal).
     if (_fotos.isEmpty) return const SizedBox.shrink();
+    // 1.28 (M4-C5): la rejilla pasa a GALERÍA — fotos
+    // agrupadas por mes con su cabecera, cada celda con
+    // la proporción real de su foto. M4-B6: pulsación
+    // larga = selección para moderar por tandas.
+    final enSeleccion = _seleccion.isNotEmpty;
+    final grupos = agruparFotosPorMes(_fotos);
     return Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -546,125 +636,368 @@ class _SeccionFotosProgresoNubeState
             'Solo tú puedes verlas.',
             style: TextStyle(fontSize: 12.5),
           ),
-          const SizedBox(height: 12),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 0.78,
+          if (enSeleccion) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColores.naranja.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(AppRadio.sm),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                        '${_seleccion.length} seleccionada'
+                        '${_seleccion.length == 1 ? '' : 's'}',
+                        style: AppTexto.cuerpo
+                            .copyWith(fontWeight: FontWeight.w700)),
+                  ),
+                  TextButton.icon(
+                    onPressed: _eliminarSeleccion,
+                    icon: const Icon(Icons.delete_outline,
+                        size: 18, color: AppColores.error),
+                    label: const Text('Eliminar de la nube',
+                        style: TextStyle(color: AppColores.error)),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _seleccion.clear()),
+                    child: const Text('Cancelar'),
+                  ),
+                ],
+              ),
             ),
-            itemCount: _fotos.length,
-            itemBuilder: (ctx, i) {
-              final f = _fotos[i];
-              final fotoId = f['id']?.toString() ?? '';
-              // H-06: celda congelada mientras su
-              // eliminación está en vuelo.
-              final eliminando = _eliminandoIds.contains(fotoId);
-              return InkWell(
-                onTap: eliminando ? null : () => _verGrande(f),
-                borderRadius: BorderRadius.circular(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          ],
+          for (final g in grupos) ...[
+            const SizedBox(height: 14),
+            Text(g.titulo, style: AppTexto.subtitulo),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (ctx, cons) {
+                final ancho = (cons.maxWidth - 16) / 3;
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    Expanded(
-                      child: ClipRRect(
+                    for (final f in g.fotos)
+                      SizedBox(
+                        width: ancho,
+                        child: _celdaFoto(f),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Una celda de la galería: imagen con la proporción
+  /// real de la foto (o la de por defecto mientras no se
+  /// conoce), fecha debajo y, según el modo, toque para
+  /// abrir el visor o para (des)seleccionar; la pulsación
+  /// larga entra en el modo selección (M4-B6).
+  Widget _celdaFoto(Map<String, dynamic> f) {
+    final fotoId = f['id']?.toString() ?? '';
+    // H-06: celda congelada mientras su eliminación está
+    // en vuelo.
+    final eliminando = _eliminandoIds.contains(fotoId);
+    final seleccionada = _seleccion.contains(fotoId);
+    final enSeleccion = _seleccion.isNotEmpty;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: eliminando
+          ? null
+          : () {
+              if (enSeleccion) {
+                _alternarSeleccion(fotoId, !seleccionada);
+              } else {
+                _verGrande(_fotos.indexOf(f));
+              }
+            },
+      onLongPress: eliminando
+          ? null
+          : () => _alternarSeleccion(fotoId, true),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: _aspectos[fotoId] ?? 0.8,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _imagenCelda(fotoId),
+                  if (seleccionada)
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                            color: AppColores.naranja, width: 3),
                         borderRadius: BorderRadius.circular(10),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            // 1.28 (M4-A13): con los bytes ya
-                            // en caché (p. ej. los bajó el
-                            // visor), la celda pinta directo;
-                            // si no, el futuro de la descarga.
-                            // La decodificación va acotada al
-                            // ancho real de la celda.
-                            if (_bytesCache[fotoId] != null)
-                              LayoutBuilder(
-                                builder: (ctx, cons) => Image.memory(
-                                  _bytesCache[fotoId]!,
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  cacheWidth: (cons.maxWidth *
-                                          MediaQuery
-                                              .devicePixelRatioOf(ctx))
-                                      .round(),
-                                  errorBuilder: (_, __, ___) =>
-                                      Container(
-                                    color: Colors.black12,
-                                    child: const Center(
-                                      child: Icon(
-                                          Icons.broken_image_outlined),
-                                    ),
-                                  ),
-                                ),
-                              )
-                            else
-                              FutureBuilder<Uint8List?>(
-                                future: _miniatura(fotoId),
-                                builder: (ctx, snap) {
-                                  final bytes = snap.data;
-                                  if (bytes == null) {
-                                    return Container(
-                                      color: Colors.black12,
-                                      child: Center(
-                                        child: snap.connectionState ==
-                                                ConnectionState.waiting
-                                            ? const CircularProgressIndicator(
-                                                strokeWidth: 2)
-                                            : const Icon(
-                                                Icons.broken_image_outlined),
-                                      ),
-                                    );
-                                  }
-                                  return LayoutBuilder(
-                                    builder: (ctx2, cons) =>
-                                        Image.memory(
-                                      bytes,
-                                      fit: BoxFit.cover,
-                                      width: double.infinity,
-                                      cacheWidth: (cons.maxWidth *
-                                              MediaQuery
-                                                  .devicePixelRatioOf(
-                                                      ctx2))
-                                          .round(),
-                                      errorBuilder: (_, __, ___) =>
-                                          Container(
-                                        color: Colors.black12,
-                                        child: const Center(
-                                          child: Icon(Icons
-                                              .broken_image_outlined),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            if (eliminando)
-                              Container(
-                                color: Colors.black38,
-                                child: const Center(
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
-                                ),
-                              ),
-                          ],
-                        ),
+                        color:
+                            AppColores.naranja.withValues(alpha: 0.15),
+                      ),
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.all(4),
+                      child: const Icon(Icons.check_circle_rounded,
+                          color: AppColores.naranja, size: 20),
+                    ),
+                  if (eliminando)
+                    Container(
+                      color: Colors.black38,
+                      child: const Center(
+                        child:
+                            CircularProgressIndicator(strokeWidth: 2),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      fmtFecha(f['fecha']?.toString() ?? ''),
-                      style: const TextStyle(
-                          fontSize: 11.5, fontWeight: FontWeight.w700),
-                    ),
-                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            fmtFecha(f['fecha']?.toString() ?? ''),
+            style: const TextStyle(
+                fontSize: 11.5, fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// La imagen de una celda: bytes cacheados directos o
+  /// el futuro de la descarga (M4-A13, sin cambios).
+  Widget _imagenCelda(String fotoId) {
+    // 1.28 (M4-A13): con los bytes ya en caché (p. ej. los
+    // bajó el visor), la celda pinta directo; si no, el
+    // futuro de la descarga. La decodificación va acotada
+    // al ancho real de la celda.
+    if (_bytesCache[fotoId] != null) {
+      return LayoutBuilder(
+        builder: (ctx, cons) => Image.memory(
+          _bytesCache[fotoId]!,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          cacheWidth:
+              (cons.maxWidth * MediaQuery.devicePixelRatioOf(ctx))
+                  .round(),
+          errorBuilder: (_, __, ___) => Container(
+            color: Colors.black12,
+            child: const Center(
+              child: Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        ),
+      );
+    }
+    return FutureBuilder<Uint8List?>(
+      future: _miniatura(fotoId),
+      builder: (ctx, snap) {
+        final bytes = snap.data;
+        if (bytes == null) {
+          return Container(
+            color: Colors.black12,
+            child: Center(
+              child: snap.connectionState == ConnectionState.waiting
+                  ? const CircularProgressIndicator(strokeWidth: 2)
+                  : const Icon(Icons.broken_image_outlined),
+            ),
+          );
+        }
+        return LayoutBuilder(
+          builder: (ctx2, cons) => Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            cacheWidth: (cons.maxWidth *
+                    MediaQuery.devicePixelRatioOf(ctx2))
+                .round(),
+            errorBuilder: (_, __, ___) => Container(
+              color: Colors.black12,
+              child: const Center(
+                child: Icon(Icons.broken_image_outlined),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 1.28 (M4-C5): el visor como galería hojeable — se abre
+/// en la foto tocada y se pasa de una a otra con el dedo
+/// (PageView); cada página descarga con el mismo
+/// cargador de la sección (toque explícito: reintenta al
+/// momento, H-08). «Eliminar de la nube» actúa sobre la
+/// foto EN PANTALLA: confirma y CIERRA el visor
+/// devolviendo su id; el borrado lo ejecuta la sección
+/// (H-06: la celda se congela fuera, con el visor ya
+/// cerrado).
+class _VisorFotosNube extends StatefulWidget {
+  final List<Map<String, dynamic>> fotos;
+  final int indiceInicial;
+  final Future<Uint8List?> Function(String fotoId) descargar;
+
+  const _VisorFotosNube({
+    required this.fotos,
+    required this.indiceInicial,
+    required this.descargar,
+  });
+
+  @override
+  State<_VisorFotosNube> createState() => _VisorFotosNubeState();
+}
+
+class _VisorFotosNubeState extends State<_VisorFotosNube> {
+  late final PageController _paginas;
+  late int _indice;
+  // La confirmación de eliminar DENTRO del visor no
+  // tenía guarda: doble toque, dos confirmaciones
+  // apiladas (M4-A13/C-R2M4-H1).
+  bool _confirmando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _indice = widget.indiceInicial;
+    _paginas = PageController(initialPage: widget.indiceInicial);
+  }
+
+  @override
+  void dispose() {
+    _paginas.dispose();
+    super.dispose();
+  }
+
+  Map<String, dynamic> get _foto => widget.fotos[_indice];
+
+  Future<void> _pedirEliminar() async {
+    if (_confirmando) return;
+    _confirmando = true;
+    try {
+      final fotoId = _foto['id']?.toString() ?? '';
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c2) => AlertDialog(
+          title: const Text('¿Eliminar esta foto?'),
+          content: const Text(
+              'Se borra de la nube y el cliente '
+              'dejará de verla en su app. No se '
+              'puede deshacer.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(c2).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(c2).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        ),
+      );
+      if (ok == true && mounted) {
+        Navigator.of(context).pop(fotoId);
+      }
+    } finally {
+      _confirmando = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Foto del '
+                    '${fmtFecha(_foto['fecha']?.toString() ?? '')}',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 15),
+                  ),
                 ),
-              );
-            },
+                if (widget.fotos.length > 1)
+                  Text('${_indice + 1} de ${widget.fotos.length}',
+                      style: AppTexto.secundario),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: PageView.builder(
+              controller: _paginas,
+              itemCount: widget.fotos.length,
+              onPageChanged: (i) => setState(() => _indice = i),
+              itemBuilder: (ctx, i) {
+                final id = widget.fotos[i]['id']?.toString() ?? '';
+                return FutureBuilder<Uint8List?>(
+                  future: widget.descargar(id),
+                  builder: (ctx, snap) {
+                    final bytes = snap.data;
+                    if (bytes == null) {
+                      return Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: snap.connectionState ==
+                                  ConnectionState.waiting
+                              ? const CircularProgressIndicator(
+                                  strokeWidth: 2)
+                              : const Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 40),
+                        ),
+                      );
+                    }
+                    // Decodificación acotada al ancho
+                    // pintado y marca visible si los bytes
+                    // no decodifican (M4-A13).
+                    return Image.memory(
+                      bytes,
+                      fit: BoxFit.contain,
+                      cacheWidth: (MediaQuery.sizeOf(context).width *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .round(),
+                      errorBuilder: (_, __, ___) => const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Icon(Icons.broken_image_outlined,
+                            size: 40),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                TextButton.icon(
+                  onPressed: _pedirEliminar,
+                  icon: const Icon(Icons.delete_outline,
+                      color: AppColores.error),
+                  label: const Text('Eliminar de la nube',
+                      style: TextStyle(color: AppColores.error)),
+                ),
+              ],
+            ),
           ),
         ],
       ),
