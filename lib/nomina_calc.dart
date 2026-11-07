@@ -649,8 +649,9 @@ String textoResumenNominaWhatsApp({
   }
   b
     ..writeln()
-    ..writeln('🤖 _Mensaje automático de nuestro sistema de '
-        'gestión; no lo envía una persona. Si vas a responder, '
-        'escríbenos al 58191577._');
+    // 1.28 (M5-A10/R3M5-H08): la línea sale de la
+    // constante compartida (sin su salto doble inicial:
+    // el writeln() de arriba ya dejó la línea en blanco).
+    ..writeln(lineaMensajeAutomatico.trimLeft());
   return b.toString().trimRight();
 }

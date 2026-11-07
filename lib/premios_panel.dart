@@ -80,6 +80,16 @@ int _entero(Object? v) {
   return 0;
 }
 
+/// 1.28 (M5-A2/C-R3M5-H3): un CONTEO nunca es negativo:
+/// un dato degradado del servidor (-3 días de premio)
+/// pintaba cifras imposibles en el panel del dueño. Los
+/// ids NO pasan por aquí: su degradación se trata
+/// descartando la fila (ver parseBandejaPremios).
+int _conteo(Object? v) {
+  final n = _entero(v);
+  return n < 0 ? 0 : n;
+}
+
 String _texto(Object? v) => v == null ? '' : '$v';
 
 /// Interpreta el jsonb de admin_premios_vales. Tolerante:
@@ -92,15 +102,22 @@ BandejaPremios parseBandejaPremios(Object? json) {
   if (crudosV is List) {
     for (final e in crudosV) {
       if (e is! Map) continue;
+      // 1.28 (M5-A2/C-R3M5-H7): una fila con el id
+      // degradado a 0 se DESCARTA: dos filas así
+      // colisionaban en la misma marca local
+      // «premio_vale_resuelto_0» y aprobar una ocultaba
+      // la otra. Mismo criterio que Comunidad con el id.
+      final id = _entero(e['id']);
+      if (id <= 0) continue;
       vales.add(ValePendiente(
-        id: _entero(e['id']),
+        id: id,
         clienteId: _entero(e['cliente_id']),
         nombre: _texto(e['nombre']),
         telefono: _texto(e['telefono']),
         pagadoHasta: e['pagado_hasta']?.toString(),
         logroId: _texto(e['logro_id']),
-        premioDias: _entero(e['premio_dias']),
-        diasAlReclamar: _entero(e['dias_al_reclamar']),
+        premioDias: _conteo(e['premio_dias']),
+        diasAlReclamar: _conteo(e['dias_al_reclamar']),
         creadoEn: _texto(e['creado_en']),
         creadoNota: _texto(e['creado_nota']),
       ));
@@ -111,11 +128,13 @@ BandejaPremios parseBandejaPremios(Object? json) {
   if (crudosR is List) {
     for (final e in crudosR) {
       if (e is! Map) continue;
+      final id = _entero(e['id']);
+      if (id <= 0) continue;
       recientes.add(ValeReciente(
-        id: _entero(e['id']),
+        id: id,
         clienteId: _entero(e['cliente_id']),
         nombre: _texto(e['nombre']),
-        premioDias: _entero(e['premio_dias']),
+        premioDias: _conteo(e['premio_dias']),
         estado: _texto(e['estado']),
         resueltoEn: _texto(e['resuelto_en']),
         resueltoNota: _texto(e['resuelto_nota']),
@@ -317,8 +336,8 @@ DetallePremiosCliente parseDetallePremiosCliente(Object? json) {
       vales.add(ValeHistorial(
         id: _entero(e['id']),
         logroId: _texto(e['logro_id']),
-        premioDias: _entero(e['premio_dias']),
-        diasAlReclamar: _entero(e['dias_al_reclamar']),
+        premioDias: _conteo(e['premio_dias']),
+        diasAlReclamar: _conteo(e['dias_al_reclamar']),
         estado: _texto(e['estado']),
         creadoEn: _texto(e['creado_en']),
         creadoNota: _texto(e['creado_nota']),
@@ -360,10 +379,10 @@ DetallePremiosCliente parseDetallePremiosCliente(Object? json) {
   return DetallePremiosCliente(
     nombre: _texto(json['nombre']),
     logroBarraId: progMap['logro_id']?.toString(),
-    metaDias: _entero(progMap['meta_dias']),
-    premioDias: _entero(progMap['premio_dias']),
-    dias: _entero(progMap['dias']),
-    faltan: _entero(progMap['faltan']),
+    metaDias: _conteo(progMap['meta_dias']),
+    premioDias: _conteo(progMap['premio_dias']),
+    dias: _conteo(progMap['dias']),
+    faltan: _conteo(progMap['faltan']),
     cicloDesde: progMap['ciclo_desde']?.toString(),
     sesionesQueSumaron: sesiones,
     vales: vales,
@@ -440,8 +459,8 @@ List<EntradaCatalogoPremio> parseCatalogoPremios(Object? json) {
     entradas.add(EntradaCatalogoPremio(
       logroId: _texto(e['logro_id']),
       nombre: _texto(e['nombre']),
-      metaDias: _entero(e['meta_dias']),
-      premioDias: _entero(e['premio_dias']),
+      metaDias: _conteo(e['meta_dias']),
+      premioDias: _conteo(e['premio_dias']),
       activo: e['activo'] == true,
       ultimoCambioTexto: ultimo,
     ));

@@ -440,16 +440,18 @@ String textoReciboCobroWa({
   required String vencimientoTxt,
 }) {
   final primerNombre = nombreCliente.trim().split(' ').first;
+  // 1.28 (M5-A10/R3M5-H08): el cierre usa la constante
+  // compartida lineaMensajeAutomatico (trae su propio
+  // salto doble inicial): el literal duplicado podía
+  // divergir de la línea oficial sin que nadie lo notara.
   return '🧾 *Recibo de pago — Iron Body Gym*\n'
       'Hola, $primerNombre. Confirmamos tu pago:\n'
       '💰 Monto: $montoTxt\n'
       '💳 Método: $metodoTxt\n'
       '📅 Período: $periodoTxt\n'
       '✅ Tu membresía vence el $vencimientoTxt.\n'
-      '¡Gracias por entrenar con nosotros! 💪\n\n'
-      '🤖 _Mensaje automático de nuestro sistema de gestión; '
-      'no lo envía una persona. Si vas a responder, '
-      'escríbenos al 58191577._';
+      '¡Gracias por entrenar con nosotros! 💪'
+      '$lineaMensajeAutomatico';
 }
 
 /// Resultado del flujo de cobro. 1.24 Bloque 1 (botón roto de

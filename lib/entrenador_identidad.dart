@@ -84,9 +84,16 @@ Future<List<Map<String, dynamic>>> usuariosApk() async {
   try {
     final raw = await LocalDb.instance.getMeta('usuarios_apk');
     if (raw == null || raw.isEmpty) return const [];
+    final dec = jsonDecode(raw);
+    if (dec is! List) return const [];
+    // 1.28 (M5-A5/R3M5-H06): degradación FILA a fila —
+    // un elemento que no sea mapa se salta; antes, el
+    // cast reventaba y el catch global devolvía la
+    // lista ENTERA vacía (todos los entrenadores sin
+    // nombre ni telegram para la pantalla que leyera).
     return [
-      for (final u in jsonDecode(raw) as List)
-        Map<String, dynamic>.from(u as Map),
+      for (final u in dec)
+        if (u is Map) Map<String, dynamic>.from(u),
     ];
   } catch (_) {
     return const [];
@@ -100,8 +107,14 @@ Future<Map<int, String>> nombresCanonEntrenadores() async {
   try {
     final raw = await LocalDb.instance.getMeta('usuarios_apk');
     if (raw != null && raw.isNotEmpty) {
-      for (final u in jsonDecode(raw) as List) {
-        final m = Map<String, dynamic>.from(u as Map);
+      final dec = jsonDecode(raw);
+      if (dec is! List) return out;
+      // 1.28 (M5-A5): misma degradación fila a fila que
+      // usuariosApk (el cast `u as Map` tumbaba el mapa
+      // entero ante una sola fila rara).
+      for (final u in dec) {
+        if (u is! Map) continue;
+        final m = Map<String, dynamic>.from(u);
         final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
         final nom = '${m['nombre'] ?? ''}'.trim();
         if (tid != null && nom.isNotEmpty) out[tid] = nom;

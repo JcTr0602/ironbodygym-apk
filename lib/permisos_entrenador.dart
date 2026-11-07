@@ -157,6 +157,29 @@ class PermisosEntrenador {
           .rpc('obtener_mis_permisos')
           .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
+      // 1.28 (M5-A1 ★/R3M5-H02): la sesión pudo CAMBIAR
+      // durante la espera de la RPC (hasta 12 s): si el
+      // usuario de ahora no es el capturado al inicio,
+      // esta foto NO se aplica ni se persiste — aterrizaba
+      // sobre la sesión nueva (en memoria y en prefs, cuyas
+      // claves se reevalúan por usuario en cada acceso) y
+      // el recién entrado heredaba los permisos del
+      // anterior hasta el siguiente refresco. La sesión
+      // nueva hará su propia carga.
+      if (AuthService().username != usuarioActual) {
+        return false;
+      }
+      // 1.28 (M5-A1 ★/R3M5-H03): la respuesta se valida
+      // COMPLETA antes de sellarla como foto fresca. Sin
+      // 'activo', el _activo=false de abajo se leía como
+      // una suspensión VERIFICADA por el servidor y Home
+      // expulsaba al entrenador aunque la RPC solo hubiera
+      // respondido algo incompleto. Incompleta = como si
+      // la red hubiera fallado: manda la caché del paso 1.
+      if (data['es_admin'] != true &&
+          (data['activo'] is! bool || data['permisos'] is! Map)) {
+        return false;
+      }
       if (data['es_admin'] == true) {
         _permisos = {
           'can_generate_pin': true,
@@ -189,10 +212,16 @@ class PermisosEntrenador {
       }
       _cargado = true;
       _ultimoRefrescoOk = ahoraHabana();
-      await prefs.setBool(_kPrefsActivo, _activo);
-      await prefs.setBool(_kPrefsHabilitado, _habilitado);
-      await prefs.setString(
-          _kPrefsPermisos, jsonEncode(_permisos));
+      // 1.28 (M5-A1): las claves de prefs se capturan UNA
+      // vez (son getters que reevalúan el usuario en cada
+      // acceso): las tres escrituras caen así bajo el
+      // MISMO usuario aunque la sesión cambiara a mitad.
+      final kActivo = _kPrefsActivo;
+      final kHabilitado = _kPrefsHabilitado;
+      final kPermisos = _kPrefsPermisos;
+      await prefs.setBool(kActivo, _activo);
+      await prefs.setBool(kHabilitado, _habilitado);
+      await prefs.setString(kPermisos, jsonEncode(_permisos));
       return true;
     } catch (_) {
       // Offline: ya quedó cargado el caché de SharedPreferences del paso 1

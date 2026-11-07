@@ -247,6 +247,10 @@ Future<void> main() async {
   // vía este gancho (sin él, pausar a las 07:50 no cancelaba
   // la alarma de las 08:00 hasta el próximo sync o reinicio).
   ganchoSincronizarAvisos = AvisosRecordatorios.sincronizar;
+  // 1.28 (M5-A6/R1M5-5): al cerrar sesión se cancelan
+  // TODAS las alarmas de recordatorios (sobreviven al
+  // cierre y no deben saltar ya sin sesión).
+  AuthService.alCerrarSesion = AvisosRecordatorios.cancelarTodos;
   // 23/25: programar avisos de recordatorios de hoy (sin sesión
   // no hace nada; tras cada sync se reprograma con lista fresca).
   unawaited(AvisosRecordatorios.sincronizar());

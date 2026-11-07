@@ -201,18 +201,30 @@ class RecordatoriosService {
         !_soyDueno) {
       throw Exception('Ese recordatorio no es tuyo');
     }
-    final fila = {
-      ...cfg,
-      'activa': activa ? 1 : 0,
-      // Argón #10-6: sin sellar actualizada_ts, un pull con la fila
-      // vieja podía pisar el cambio de estado (Last-Write-Wins).
-      'actualizada_ts': isoHabana(ahoraHabana()),
-    };
     // Panel 9/10 (Luna): guardar y encolar en UNA transacción. Dos
     // pasos separados dejaban el cambio local sin op si la app se
     // cerraba entre ambos (el servidor nunca se enteraba).
+    // 1.28 (M5-A6/R2M5-H08): la fila se RELEE DENTRO de la
+    // transacción y se construye desde ella (antes se partía de
+    // la lectura de fuera: un pull entre la lectura y la
+    // escritura dejaba el payload de la op con los campos
+    // viejos de las demás columnas, pisando lo recién bajado).
+    // Los guardas de permiso de arriba siguen usando la lectura
+    // externa; la fila de la transacción manda para el contenido.
     final d = await LocalDb.instance.db;
     await d.transaction((txn) async {
+      final filas = await txn.query('recordatorio_config',
+          where: 'id = ?', whereArgs: [id]);
+      if (filas.isEmpty) {
+        throw Exception('Recordatorio no encontrado');
+      }
+      final fila = {
+        ...filas.first,
+        'activa': activa ? 1 : 0,
+        // Argón #10-6: sin sellar actualizada_ts, un pull con la fila
+        // vieja podía pisar el cambio de estado (Last-Write-Wins).
+        'actualizada_ts': isoHabana(ahoraHabana()),
+      };
       await LocalDb.instance.guardarRecordatorio(fila, txn: txn);
       await LocalDb.instance.queueOp(
         opUuid: const Uuid().v4(),
@@ -277,6 +289,11 @@ class RecordatoriosService {
     final mmDd = hoy.substring(5, 10);
     final configs = await LocalDb.instance.listarRecordatorios();
     final clientes = await LocalDb.instance.allMirror('clientes');
+    // 1.28 (M5-A6/R3M5-H05): los disparos del día se
+    // cargan UNA vez y se evalúan en memoria (antes: una
+    // consulta por cliente×config en cada pasada).
+    final disparosHoy =
+        await LocalDb.instance.disparosRecordatoriosDelDia(hoy);
     final out = <RecordatorioDebido>[];
     for (final cfg in configs) {
       if ((cfg['activa'] as num?)?.toInt() != 1) continue;
@@ -298,8 +315,7 @@ class RecordatoriosService {
           continue;
         }
         final ya = disparadoMasivoHoy ||
-            await LocalDb.instance.yaDisparadoRecordatorio(
-                recordatorioId: id, fechaHabana: hoy, targetKey: 'todos');
+            disparosHoy.contains('$id|todos');
         out.add(RecordatorioDebido(
           recordatorioId: id,
           titulo: titulo,
@@ -353,8 +369,7 @@ class RecordatoriosService {
               c['pagado_hasta'] as String?, hoy, dias);
         }
         if (!aplica) continue;
-        final yaLog = await LocalDb.instance.yaDisparadoRecordatorio(
-            recordatorioId: id, fechaHabana: hoy, targetKey: target);
+        final yaLog = disparosHoy.contains('$id|$target');
         // Argón #10-1: el estado por cliente NO consulta el marcador
         // masivo de la config (ver estadoDebidoPorCliente).
         final est = estadoDebidoPorCliente(

@@ -78,6 +78,19 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
     }
   }
 
+  /// 1.28 (M5-A6/R1M5-H1): ¿puede ESTA sesión pausar o
+  /// eliminar esta configuración? Espejo de los guardas
+  /// del servicio (que siguen siendo el cinturón): el
+  /// dueño, todo; el entrenador, solo sus «solo para
+  /// mí». Sin permiso, la tarjeta enseña «Solo el dueño»
+  /// en vez de botones que al tocarlos no hacían nada
+  /// visible (el servicio lanzaba y nadie lo contaba).
+  bool _puedoGestionar(Map<String, dynamic> c) {
+    if (_soyDueno) return true;
+    if ('${c['alcance']}' != 'solo_mio') return false;
+    return c['creado_por'] == _yo;
+  }
+
   Future<void> _disparar(RecordatorioDebido d) async {
     final ok = await RecordatoriosService.instance.disparar(d);
     if (ok) {
@@ -376,7 +389,15 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                             '${(c['activa'] as num?)?.toInt() == 1 ? 'activo' : 'pausado'}'
                             '${'${c['frecuencia'] ?? 'ninguna'}' == 'semanal' ? ' · cada semana' : '${c['frecuencia'] ?? 'ninguna'}' == 'mensual' ? ' · cada mes' : ''}',
                             style: AppTexto.secundario),
-                        trailing: Row(
+                        // 1.28 (M5-A6/R1M5-H1): sin permiso
+                        // de gestión, etiqueta en vez de
+                        // botones mudos; con permiso, los
+                        // handlers avisan si el servicio
+                        // rechaza (defensa en profundidad).
+                        trailing: !_puedoGestionar(c)
+                            ? const Text('Solo el dueño',
+                                style: AppTexto.metadato)
+                            : Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
@@ -386,9 +407,23 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                                       : Icons.play_arrow_rounded,
                                   size: 20),
                               onPressed: () async {
-                                await RecordatoriosService.instance
-                                    .cambiarActiva('${c['id']}',
-                                        (c['activa'] as num?)?.toInt() != 1);
+                                try {
+                                  await RecordatoriosService.instance
+                                      .cambiarActiva('${c['id']}',
+                                          (c['activa'] as num?)?.toInt() != 1);
+                                } catch (e) {
+                                  if (mounted) {
+                                    mostrarSnack(
+                                        context,
+                                        e
+                                            .toString()
+                                            .replaceFirst(
+                                                'Exception: ', ''),
+                                        significado:
+                                            SignificadoChip.error);
+                                  }
+                                  return;
+                                }
                                 await _cargar();
                               },
                             ),
@@ -410,8 +445,22 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                                   peligro: true,
                                 );
                                 if (!seguro) return;
-                                await RecordatoriosService.instance
-                                    .eliminar('${c['id']}');
+                                try {
+                                  await RecordatoriosService.instance
+                                      .eliminar('${c['id']}');
+                                } catch (e) {
+                                  if (mounted) {
+                                    mostrarSnack(
+                                        context,
+                                        e
+                                            .toString()
+                                            .replaceFirst(
+                                                'Exception: ', ''),
+                                        significado:
+                                            SignificadoChip.error);
+                                  }
+                                  return;
+                                }
                                 await _cargar();
                               },
                             ),

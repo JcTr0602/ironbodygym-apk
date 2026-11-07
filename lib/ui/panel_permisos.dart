@@ -167,6 +167,20 @@ class _PanelPermisosState extends State<PanelPermisos> {
     }
     setState(() => _cargando = true);
     try {
+      // 1.28 (M5-A1/R2M5-H06): un refresco con guardados
+      // en vuelo dejaba las relecturas y reversiones de
+      // esos guardados escribiendo sobre los objetos que
+      // la lista nueva acababa de sustituir: el cambio
+      // «desaparecía» de la pantalla sin haber fallado.
+      // Se drenan las colas por entrenador ANTES de
+      // aplicar la lista nueva.
+      if (_colas.isNotEmpty) {
+        for (final f in _colas.values.toList()) {
+          try {
+            await f;
+          } catch (_) {}
+        }
+      }
       // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
       // tope, una conexión colgada dejaba el panel en «cargando»
       // eterno (un cuelgue no es un error; el catch no corría).
@@ -264,6 +278,14 @@ class _PanelPermisosState extends State<PanelPermisos> {
     }
   }
 
+  /// 1.28 (M5-A1/R2M5-H06): la instancia de la lista que
+  /// la pantalla está pintando para este entrenador (un
+  /// refresco pudo sustituir los objetos: el que traiga
+  /// un llamador viejo puede ser un huérfano invisible).
+  EntrenadorPermiso _instanciaViva(EntrenadorPermiso ent) =>
+      _entrenadores.where((e) => e.email == ent.email).firstOrNull ??
+      ent;
+
   /// v1.4.4 (Permisos nivel 1): tras un guardado confirmado por el
   /// servidor, relee la fila real de ese entrenador y la pinta tal
   /// cual quedó. La palabra final la tiene el servidor, no la UI
@@ -289,13 +311,20 @@ class _PanelPermisosState extends State<PanelPermisos> {
       final m = Map<String, dynamic>.from(res as Map);
       final perms = m['permisos'];
       if (!mounted) return false;
+      // 1.28 (M5-A1/R2M5-H06): la verdad se aplica sobre
+      // la instancia VIGENTE de la lista (buscada por
+      // email): si un refresco sustituyó la lista mientras
+      // el guardado volaba, escribir sobre el objeto
+      // huérfano que traía el llamador no pintaba nada.
+      final vivo = _instanciaViva(ent);
       setState(() {
-        ent.activo = m['activo'] == true;
+        vivo.activo = m['activo'] == true;
         // Reconstrucción completa (panel de código): una clave
         // ausente en la respuesta vale false (fail-closed), no se
         // conserva el valor anterior.
         for (final k in EntrenadorPermiso.permisosDisponibles) {
-          ent.permisos[k.$1] = perms is Map ? perms[k.$1] == true : false;
+          vivo.permisos[k.$1] =
+              perms is Map ? perms[k.$1] == true : false;
         }
       });
       return true;
@@ -315,21 +344,26 @@ class _PanelPermisosState extends State<PanelPermisos> {
     // Serializado por entrenador (panel de código): el estado
     // anterior se lee al ejecutar la operación, no al tocar.
     return _enSerie(ent.email, () async {
-      final anterior = ent.permisos[key] ?? false;
-      if (mounted) setState(() => ent.permisos[key] = valor);
+      // 1.28 (M5-A1/R2M5-H06): la operación trabaja sobre
+      // la instancia VIGENTE de la lista: un refresco
+      // pudo sustituir los objetos mientras esta op
+      // esperaba su turno en la cola.
+      final vivo = _instanciaViva(ent);
+      final anterior = vivo.permisos[key] ?? false;
+      if (mounted) setState(() => vivo.permisos[key] = valor);
       try {
         await Supabase.instance.client
             .rpc(
               'actualizar_permiso_entrenador',
               params: {
-                'p_email': ent.email,
+                'p_email': vivo.email,
                 'p_permiso_key': key,
                 'p_valor': valor,
               },
             )
             // 1.24 Bloque 4: timeout de escritura (12 s).
             .timeout(const Duration(seconds: 12));
-        final verificado = await _releerEntrenador(ent);
+        final verificado = await _releerEntrenador(vivo);
         if (mounted) {
           mostrarSnack(
               context,
@@ -342,9 +376,41 @@ class _PanelPermisosState extends State<PanelPermisos> {
               duracion: const Duration(seconds: 2));
         }
       } catch (e) {
+        // 1.28 (M5-A1/R1M5-H3): un TIMEOUT no es un «no
+        // llegó»: la RPC pudo aplicar el cambio y perder
+        // la respuesta. Antes de revertir y anunciar
+        // «Cambio revertido», se relee la fila real: si
+        // ya trae el valor nuevo, se anuncia aplicado;
+        // si la fila trae el anterior, el cambio no
+        // llegó; y si ni releer se puede, se dice que no
+        // se pudo confirmar (sin afirmar ni lo uno ni
+        // lo otro).
+        if (e is TimeoutException) {
+          final verificado = await _releerEntrenador(vivo);
+          if (!mounted) return;
+          if (verificado) {
+            final aplicado = vivo.permisos[key] == valor;
+            mostrarSnack(
+                context,
+                aplicado
+                    ? 'Permiso actualizado'
+                    : 'El cambio no llegó al servidor.',
+                significado: aplicado
+                    ? SignificadoChip.exito
+                    : SignificadoChip.alerta);
+          } else {
+            setState(() => vivo.permisos[key] = anterior);
+            mostrarSnack(
+                context,
+                'No se pudo confirmar si el cambio se '
+                'aplicó. Revisa el estado al refrescar.',
+                significado: SignificadoChip.error);
+          }
+          return;
+        }
         // Revertir
         if (mounted) {
-          setState(() => ent.permisos[key] = anterior);
+          setState(() => vivo.permisos[key] = anterior);
           mostrarSnack(context, 'Sin conexión. Cambio revertido.',
               significado: SignificadoChip.error);
         }
@@ -385,27 +451,30 @@ class _PanelPermisosState extends State<PanelPermisos> {
     // anterior ya dejó la cuenta en el estado objetivo (doble toque),
     // no se repite la RPC.
     return _enSerie(ent.email, () async {
-      if (ent.activo == objetivo) return;
+      // 1.28 (M5-A1/R2M5-H06): instancia vigente de la
+      // lista, como en _togglePermiso.
+      final vivo = _instanciaViva(ent);
+      if (vivo.activo == objetivo) return;
       final nuevo = objetivo;
-      if (mounted) setState(() => ent.activo = nuevo);
+      if (mounted) setState(() => vivo.activo = nuevo);
       try {
         await Supabase.instance.client
             .rpc(
               'suspender_entrenador',
-              params: {'p_email': ent.email, 'p_activo': nuevo},
+              params: {'p_email': vivo.email, 'p_activo': nuevo},
             )
             // 1.24 Bloque 4: timeout de escritura (12 s).
             .timeout(const Duration(seconds: 12));
         // v1.4.4 (Permisos nivel 1): confirmación visible en AMBOS
         // sentidos + relectura de la fila real.
-        final verificado = await _releerEntrenador(ent);
+        final verificado = await _releerEntrenador(vivo);
         if (mounted) {
           mostrarSnack(
               context,
               verificado
                   ? (nuevo
-                      ? '${ent.nombre} reactivado'
-                      : 'Acceso de ${ent.nombre} suspendido')
+                      ? '${vivo.nombre} reactivado'
+                      : 'Acceso de ${vivo.nombre} suspendido')
                   : 'Guardado, pero no se pudo verificar el estado',
               significado: verificado
                   ? SignificadoChip.exito
@@ -413,8 +482,35 @@ class _PanelPermisosState extends State<PanelPermisos> {
               duracion: const Duration(seconds: 2));
         }
       } catch (e) {
+        // 1.28 (M5-A1/R1M5-H3): timeout honesto, como en
+        // _togglePermiso: releer antes de anunciar nada.
+        if (e is TimeoutException) {
+          final verificado = await _releerEntrenador(vivo);
+          if (!mounted) return;
+          if (verificado) {
+            final aplicado = vivo.activo == nuevo;
+            mostrarSnack(
+                context,
+                aplicado
+                    ? (nuevo
+                        ? '${vivo.nombre} reactivado'
+                        : 'Acceso de ${vivo.nombre} suspendido')
+                    : 'El cambio no llegó al servidor.',
+                significado: aplicado
+                    ? SignificadoChip.exito
+                    : SignificadoChip.alerta);
+          } else {
+            setState(() => vivo.activo = !nuevo);
+            mostrarSnack(
+                context,
+                'No se pudo confirmar si el cambio se '
+                'aplicó. Revisa el estado al refrescar.',
+                significado: SignificadoChip.error);
+          }
+          return;
+        }
         if (mounted) {
-          setState(() => ent.activo = !nuevo);
+          setState(() => vivo.activo = !nuevo);
           mostrarSnack(context, 'Sin conexión. Cambio revertido.',
               significado: SignificadoChip.error);
         }

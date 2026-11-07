@@ -35,6 +35,17 @@ String emailToUsername(String email) {
 class AuthService {
   SupabaseClient get _c => Supabase.instance.client;
 
+  /// 1.28 (M5-A6/R1M5-5): gancho de cancelación de los
+  /// avisos programados al cerrar sesión (main.dart lo
+  /// conecta con AvisosRecordatorios.cancelarTodos). Las
+  /// alarmas nativas sobreviven al cierre y dispararían
+  /// avisos con nombres de clientes ya sin sesión.
+  /// auth.dart no importa el servicio de avisos (ciclo
+  /// auth → notificaciones → recordatorios → auth): la
+  /// costura es este gancho, como ganchoSincronizarAvisos
+  /// en recordatorios.dart.
+  static Future<void> Function()? alCerrarSesion;
+
   /// Acceso a Supabase Storage (v1.0.14: fotos de usuarios).
   SupabaseStorageClient get storage => _c.storage;
 
@@ -116,7 +127,28 @@ class AuthService {
   bool get isOwner {
     final email = session?.user.email ?? '';
     final base = email.split('@').first.toLowerCase();
-    return AppConfig.ownerUsernames.contains(base);
+    if (!AppConfig.ownerUsernames.contains(base)) return false;
+    // 1.28 (M5-A10/R1M5-9): «julio» es un nombre propio
+    // común: una cuenta futura de entrenador con ese
+    // alias heredaba la INTERFAZ de dueño solo por el
+    // nombre (el cinturón de datos siempre estuvo en el
+    // servidor, pero la pantalla no debe abrirse). Para
+    // ese alias se exige además una señal que solo el
+    // servidor escribe (app_metadata): el rol admin o el
+    // telegram_id del dueño. «jc»/«jctr0602» son los
+    // alias propios de Jc y siguen valiendo por nombre.
+    // DECISIÓN con margen (para Argón): no se retiró
+    // «julio» del conjunto — si Jc entra con ese alias,
+    // su cuenta real trae la señal del servidor y sigue
+    // entrando como dueño.
+    if (base != 'julio') return true;
+    final meta = session?.user.appMetadata;
+    if (meta == null) return false;
+    if ('${meta['rol'] ?? ''}'.toLowerCase() == 'admin') {
+      return true;
+    }
+    final tid = meta['telegram_id'];
+    return tid == 735772141 || '$tid' == '735772141';
   }
 
   /// ¿Tiene rol de administrador? userMetadata['rol']=='admin' o el
@@ -149,6 +181,17 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    // 1.28 (M5-A6/R1M5-5): primero se cancelan los avisos
+    // programados (gancho de main.dart): son alarmas
+    // nativas que sobreviven al cierre de sesión. La
+    // purga no toca sus marcas (notif_prog_*), así que
+    // este es el punto que las alcanza siempre.
+    final ganchoSalida = alCerrarSesion;
+    if (ganchoSalida != null) {
+      try {
+        await ganchoSalida();
+      } catch (_) {}
+    }
     // 1.15 P3: limpiar el caché de accesos a la App de Clientes
     // AL INICIO del cierre, antes de operaciones que puedan
     // fallar (purga local o signOut remoto). Así, aunque la

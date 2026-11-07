@@ -8648,6 +8648,25 @@ class LocalDb {
     return rows.isNotEmpty;
   }
 
+  /// 1.28 (M5-A6/R3M5-H05): TODAS las claves de disparo
+  /// de un día en UNA consulta ('recordatorioId|targetKey').
+  /// debidosHoy hacía una consulta por cliente×config
+  /// (~30 por pasada, y la pasada corre al arrancar, tras
+  /// cada sync y tras cada mutación): con esto se carga
+  /// el conjunto una vez y se evalúa en memoria.
+  Future<Set<String>> disparosRecordatoriosDelDia(
+      String fechaHabana) async {
+    final d = await db;
+    final rows = await d.query('recordatorio_disparos_log',
+        columns: ['recordatorio_id', 'target_key'],
+        where: 'fecha_habana = ?',
+        whereArgs: [fechaHabana]);
+    return {
+      for (final r in rows)
+        '${r['recordatorio_id']}|${r['target_key']}',
+    };
+  }
+
   Future<List<Map<String, dynamic>>> listarEntregasEfectivo(
       int telegramId) async {
     final d = await db;

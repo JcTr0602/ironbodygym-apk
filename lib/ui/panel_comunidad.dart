@@ -51,7 +51,12 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
         .rpc('admin_comunidad_perfiles')
         .timeout(const Duration(seconds: 12));
     if (res is Map) return Map<String, dynamic>.from(res);
-    return {};
+    // 1.28 (M5-A2 ★): una respuesta que no es un mapa es
+    // un FALLO, no «todavía nadie tiene vitrina» (antes
+    // devolvía {} y el parse degradaba a lista vacía con
+    // _falloCarga en false: lo cargado mentía).
+    throw StateError(
+        'admin_comunidad_perfiles: respuesta no es un mapa');
   }
 
   Future<Map<String, dynamic>> _ocultarReal(
@@ -75,7 +80,11 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
       setState(() {
         _perfiles = parsePerfilesComunidad(json);
         _cargando = false;
-        _falloCarga = json.isNotEmpty && json['ok'] != true;
+        // 1.28 (M5-A2 ★): un {ok:false} (o una respuesta
+        // sin ok) ES un fallo de carga aunque el mapa
+        // venga vacío — antes el isNotEmpty lo disfrazaba
+        // de directorio vacío legítimo.
+        _falloCarga = json['ok'] != true;
       });
     } catch (_) {
       if (mounted) {

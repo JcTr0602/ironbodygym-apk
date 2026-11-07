@@ -94,10 +94,51 @@ String claveAvisoRecordatorio({
 class AvisosRecordatorios {
   static const _canal = MethodChannel('ironbody/recordatorios');
 
+  /// 1.28 (M5-A6/R2M5-H03): cadena de serialización de
+  /// [sincronizar] — dos corridas solapadas se
+  /// entrelazaban (una leía el estado anterior a una
+  /// pausa/borrado y reprogramaba su alarma DESPUÉS del
+  /// barrido de cancelación de la otra: el aviso borrado
+  /// resucitaba). Cada mutación dispara el gancho al
+  /// final, así que la última corrida de la cadena lee
+  /// el estado final y su barrido corre el último.
+  static Future<void> _cadenaSincronizar = Future<void>.value();
+
   /// Programa los avisos de hoy y cancela los que dejaron de
   /// estar vigentes. Llamar al arrancar y tras cada sync (el
   /// gancho ya existe en main.dart). Nunca lanza.
-  static Future<void> sincronizar() async {
+  static Future<void> sincronizar() {
+    final corrida = _cadenaSincronizar.then((_) async {
+      try {
+        await _sincronizarReal();
+      } catch (_) {}
+    });
+    _cadenaSincronizar = corrida;
+    return corrida;
+  }
+
+  /// 1.28 (M5-A6/R1M5-5): cancela TODAS las alarmas
+  /// programadas y limpia sus marcas. La invoca el
+  /// gancho de cierre de sesión (AuthService.signOut vía
+  /// main.dart): las alarmas nativas sobreviven al
+  /// cierre y un aviso con el nombre de un cliente no
+  /// debe saltar ya sin sesión (sincronizar() devuelve
+  /// temprano sin sesión a propósito, así que la
+  /// cancelación tiene que ser explícita).
+  static Future<void> cancelarTodos() async {
+    try {
+      final programados =
+          await LocalDb.instance.metasConPrefijo('notif_prog_');
+      for (final k in programados) {
+        try {
+          await _canal.invokeMethod('cancelar', {'id': k});
+        } catch (_) {}
+        await LocalDb.instance.setMeta(k, '');
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> _sincronizarReal() async {
     // Sin sesión no se puede atribuir nada: NO tocar los avisos
     // programados (un barrido con la lista vacía los cancelaría
     // todos por error).

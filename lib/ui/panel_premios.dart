@@ -15,6 +15,14 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
+/// 1.28 (M5-A4/C-R2M5-H2): señal entre pestañas del hub
+/// de Premios — cuando en «Clientes» se CONCEDE un vale,
+/// la Bandeja ya montada (TabBarView la conserva viva)
+/// se entera y recarga: el vale nuevo no esperaba a que
+/// el dueño saliera y volviera a entrar al hub.
+final ValueNotifier<int> premiosAvisosExternos =
+    ValueNotifier<int>(0);
+
 /// Premios (Pieza G, 1.26): bandeja «Premios por
 /// aprobar» del Panel — los vales que los clientes
 /// reclamaron en su app por sus logros.
@@ -53,10 +61,27 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
   BandejaPremios _bandeja = BandejaPremios.vacia;
   Set<int> _resueltosLocales = {};
 
+  // 1.28 (M5-A4/C-R2M5-H3): generación de carga — una
+  // foto vieja que llega tarde no pisa el estado (y
+  // _aprobar la incrementa al resolver: la carga en
+  // vuelo en ese momento queda invalidada).
+  int _genCarga = 0;
+
   @override
   void initState() {
     super.initState();
+    premiosAvisosExternos.addListener(_alAvisoExterno);
     _cargar();
+  }
+
+  @override
+  void dispose() {
+    premiosAvisosExternos.removeListener(_alAvisoExterno);
+    super.dispose();
+  }
+
+  void _alAvisoExterno() {
+    if (mounted) _cargar();
   }
 
   Future<Map<String, dynamic>> _cargarBandejaReal() async {
@@ -64,35 +89,71 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
         .rpc('admin_premios_vales')
         .timeout(const Duration(seconds: 12));
     if (res is Map) return Map<String, dynamic>.from(res);
-    return {};
+    // 1.28 (M5-A2 ★): una respuesta que no es un mapa NO
+    // es una bandeja vacía: es un fallo, y se trata como
+    // tal (antes devolvía {} y la pantalla anunciaba
+    // «Sin vales pendientes» ante cualquier degradación).
+    throw StateError('admin_premios_vales: respuesta no es un mapa');
   }
 
   Future<void> _cargar() async {
+    final gen = ++_genCarga;
     setState(() {
       _cargando = true;
       _falloCarga = false;
     });
     try {
       final json = await (widget.cargarBandeja ?? _cargarBandejaReal)();
+      // 1.28 (M5-A2 ★): la RPC NO devuelve clave 'ok' en
+      // el éxito — devuelve {vales, recientes} — así que
+      // lo que se valida es la FORMA: ok no puede ser
+      // false y ambas listas deben venir como listas. Un
+      // mapa sin esa forma es un fallo de carga, no una
+      // bandeja vacía (lo cargado no miente).
+      final formaOk = json['ok'] != false &&
+          json['vales'] is List &&
+          json['recientes'] is List;
+      if (!formaOk) {
+        if (mounted && gen == _genCarga) {
+          setState(() {
+            _cargando = false;
+            _falloCarga = true;
+          });
+        }
+        return;
+      }
       final bandeja = parseBandejaPremios(json);
       // Vales ya resueltos en ESTE teléfono (op encolada):
       // fuera de la lista para no aprobarlos dos veces.
+      // 1.28 (M5-A3 ★/C-R1M5-H1): la marca se RECONCILIA
+      // con el estado real de su op — si el servidor la
+      // RECHAZÓ, la marca se borra y el vale vuelve a ser
+      // accionable (antes el vale quedaba bloqueado para
+      // siempre en este teléfono pese al rechazo). Si la
+      // op sigue en vuelo o ya se aplicó, sigue oculto;
+      // si la op ya se purgó (sin estado), la marca se
+      // conserva (conservador).
       final locales = <int>{};
       for (final v in bandeja.vales) {
-        if (await LocalDb.instance.getMeta(
-                'premio_vale_resuelto_${v.id}') !=
-            null) {
-          locales.add(v.id);
+        final marca = await LocalDb.instance
+            .getMeta('premio_vale_resuelto_${v.id}');
+        if (marca == null) continue;
+        final estado = await LocalDb.instance.estadoOp(marca);
+        if (estado == 'rechazada') {
+          await LocalDb.instance
+              .borrarMeta('premio_vale_resuelto_${v.id}');
+          continue;
         }
+        locales.add(v.id);
       }
-      if (!mounted) return;
+      if (!mounted || gen != _genCarga) return;
       setState(() {
         _bandeja = bandeja;
         _resueltosLocales = locales;
         _cargando = false;
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && gen == _genCarga) {
         setState(() {
           _cargando = false;
           _falloCarga = true;
@@ -104,6 +165,15 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
   /// Aprobación real: op de canje + espejo optimista +
   /// marca local anti-doble-aprobación (patrón del
   /// regalo de cumpleaños).
+  ///
+  /// 1.28 (M5-A3 ★): los tres pasos van en UNA
+  /// transacción. Antes iban sueltos: si el proceso
+  /// moría entre ellos quedaba una foto a medias (op
+  /// sin marca — el vale reaparecía y podía aprobarse
+  /// otra vez — o espejo adelantado sin op). Precedente
+  /// de la casa: queueOpYMarcarEliminado. La lectura del
+  /// espejo se hace FUERA: dentro de la transacción no
+  /// se lee por LocalDb.db (regla anti-deadlock).
   Future<void> _aprobarReal(ValePendiente v) async {
     final opUuid = const Uuid().v4();
     final cli =
@@ -112,19 +182,24 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
         ? cli.first['pagado_hasta'] as String?
         : v.pagadoHasta;
     final nuevoHasta = previewHastaDias(hastaActual, v.premioDias);
-    await LocalDb.instance.queueOp(
-      opUuid: opUuid,
-      tipo: 'regalar_dias_premio',
-      payload: {
-        'cliente_id': v.clienteId,
-        'vale_id': v.id,
-        'fecha': hoyHabanaIso(),
-      },
-    );
-    await LocalDb.instance
-        .updateMirrorPagadoHasta(v.clienteId, nuevoHasta);
-    await LocalDb.instance
-        .setMeta('premio_vale_resuelto_${v.id}', opUuid);
+    final d = await LocalDb.instance.db;
+    await d.transaction((txn) async {
+      await LocalDb.instance.queueOp(
+        opUuid: opUuid,
+        tipo: 'regalar_dias_premio',
+        payload: {
+          'cliente_id': v.clienteId,
+          'vale_id': v.id,
+          'fecha': hoyHabanaIso(),
+        },
+        txn: txn,
+      );
+      await LocalDb.instance
+          .updateMirrorPagadoHasta(v.clienteId, nuevoHasta, txn: txn);
+      await LocalDb.instance.setMeta(
+          'premio_vale_resuelto_${v.id}', opUuid,
+          executor: txn);
+    });
     unawaited(SyncEngine.instance.push());
   }
 
@@ -168,13 +243,29 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
                   'Premio: ${v.premioDias} días de mensualidad '
                   'gratis.\n'
                   'Su vencimiento pasaría a ${fmtFecha(nuevoHasta)}.'
-              : '${v.nombre} reclamó el logro '
-                  '«${tituloLogroPremio(v.logroId)}» con '
-                  '${v.diasAlReclamar} días entrenados verificados '
-                  'por el servidor.\n\n'
-                  'Premio: ${v.premioDias} días de mensualidad '
-                  'gratis.\n'
-                  'Su vencimiento pasaría a ${fmtFecha(nuevoHasta)}.',
+              // 1.28 (M5-A8/C-R3M5-H2): un vale CONCEDIDO
+              // por el dueño con un logro real (la nota de
+              // creación viene llena) no se presenta como
+              // «reclamó el logro»: lo concedió el dueño.
+              : v.creadoNota.isNotEmpty
+                  ? 'Vale concedido por ti para ${v.nombre} '
+                      'con el logro '
+                      '«${tituloLogroPremio(v.logroId)}» '
+                      '(«${v.creadoNota}»). Al concederlo '
+                      'tenía ${v.diasAlReclamar} días '
+                      'entrenados verificados por el '
+                      'servidor.\n\n'
+                      'Premio: ${v.premioDias} días de '
+                      'mensualidad gratis.\n'
+                      'Su vencimiento pasaría a '
+                      '${fmtFecha(nuevoHasta)}.'
+                  : '${v.nombre} reclamó el logro '
+                      '«${tituloLogroPremio(v.logroId)}» con '
+                      '${v.diasAlReclamar} días entrenados verificados '
+                      'por el servidor.\n\n'
+                      'Premio: ${v.premioDias} días de mensualidad '
+                      'gratis.\n'
+                      'Su vencimiento pasaría a ${fmtFecha(nuevoHasta)}.',
         ),
         actions: [
           TextButton(
@@ -202,6 +293,10 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       }
       await (widget.aprobarVale ?? _aprobarReal)(v);
       if (!mounted) return;
+      // 1.28 (M5-A4/C-R2M5-H3): resolver invalida la
+      // carga en vuelo: su foto vieja (sin este vale en
+      // _resueltosLocales) no puede pisar el estado.
+      _genCarga++;
       setState(() => _resueltosLocales = {..._resueltosLocales, v.id});
       mostrarSnack(
           context, 'Premio aplicado a ${v.nombre}: se sincroniza solo',
@@ -389,8 +484,15 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
             v.esManual
                 ? 'Vale manual creado por ti · '
                     '${v.diasAlReclamar} días verificados al concederlo'
-                : 'Logro «${tituloLogroPremio(v.logroId)}» · '
-                    '${v.diasAlReclamar} días verificados',
+                // 1.28 (M5-A8/C-R3M5-H2): concesión del
+                // dueño con logro real (nota de creación
+                // llena): se dice concedido, no reclamado.
+                : v.creadoNota.isNotEmpty
+                    ? 'Vale concedido por ti · logro '
+                        '«${tituloLogroPremio(v.logroId)}» · '
+                        '${v.diasAlReclamar} días verificados'
+                    : 'Logro «${tituloLogroPremio(v.logroId)}» · '
+                        '${v.diasAlReclamar} días verificados',
             style: AppTexto.cuerpo,
           ),
           if (v.creadoNota.isNotEmpty)

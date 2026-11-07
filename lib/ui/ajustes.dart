@@ -296,37 +296,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
     TextInputType teclado = TextInputType.text,
     required Future<void> Function(String?) guardar,
   }) async {
-    final ctrl = TextEditingController(text: valorActual ?? '');
-    final ok = await showDialog<bool>(
+    // 1.28 (M5-A10/R1M5-7): el diálogo es un
+    // StatefulWidget con dispose (regla de la casa):
+    // el controlador suelto de antes nunca se liberaba.
+    final entrada = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
+      builder: (_) => _DialogoEditarTextoAjustes(
         titulo: titulo,
-        iconoTitulo: Icons.edit_rounded,
-        contenido: CampoTexto(
-          controller: ctrl,
-          etiqueta: etiqueta,
-          teclado: teclado,
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Guardar')),
-        ],
+        valorInicial: valorActual ?? '',
+        etiqueta: etiqueta,
+        teclado: teclado,
       ),
     );
-    if (ok != true || !mounted) return;
-    final texto = ctrl.text.trim();
+    if (entrada == null || !mounted) return;
+    final texto = entrada.trim();
     // Lote 2 Argón: vacío se normaliza a null (antes guardaba "" y el
     // subtítulo quedaba en blanco en vez de 'Igual que la cuenta';
     // setNombreVisible(null) borra la preferencia). Sin límite, un
@@ -347,42 +330,18 @@ class _AjustesScreenState extends State<AjustesScreen> {
     required String errorMsg,
     required Future<void> Function(String) guardar,
   }) async {
-    final ctrl = TextEditingController(text: valorActual ?? '');
-    final ok = await showDialog<bool>(
+    // 1.28 (M5-A10/R1M5-7): StatefulWidget con dispose,
+    // como _editarTexto.
+    final entrada = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
+      builder: (_) => _DialogoEditarCampoAjustes(
         titulo: titulo,
-        iconoTitulo: Icons.edit_rounded,
-        contenido: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly
-          ],
-          decoration: InputDecoration(
-              labelText: etiqueta,
-              border: const OutlineInputBorder()),
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Guardar')),
-        ],
+        valorInicial: valorActual ?? '',
+        etiqueta: etiqueta,
       ),
     );
-    if (ok != true || !mounted) return;
-    final v = ctrl.text.trim();
+    if (entrada == null || !mounted) return;
+    final v = entrada.trim();
     if (v.isNotEmpty && !validar(v)) {
       _msg(errorMsg);
       return;
@@ -559,64 +518,25 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Cambio de contraseña dentro de la app.
   Future<void> _cambiarClave() async {
-    final actual = TextEditingController();
-    final nueva = TextEditingController();
-    final nueva2 = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.28 (M5-A10/R1M5-7): el diálogo es un
+    // StatefulWidget con dispose y devuelve los VALORES
+    // (antes: tres controladores sueltos sin liberar).
+    final datos = await showDialog<
+        ({String actual, String nueva, String nueva2})>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Cambiar contraseña',
-        iconoTitulo: Icons.key_rounded,
-        contenido: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CampoTexto(
-                  controller: actual,
-                  obscure: true,
-                  etiqueta: 'Contraseña actual'),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: nueva,
-                  obscure: true,
-                  etiqueta: 'Nueva contraseña'),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: nueva2,
-                  obscure: true,
-                  etiqueta: 'Repite la nueva'),
-            ],
-          ),
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Cambiar')),
-        ],
-      ),
+      builder: (_) => const _DialogoCambiarClave(),
     );
-    if (ok != true || !mounted) return;
-    if (nueva.text != nueva2.text) {
+    if (datos == null || !mounted) return;
+    if (datos.nueva != datos.nueva2) {
       _msg('Las contraseñas nuevas no coinciden');
       return;
     }
-    if (nueva.text.length < 6) {
+    if (datos.nueva.length < 6) {
       _msg('La nueva debe tener al menos 6 caracteres');
       return;
     }
     try {
-      await _auth.changePassword(actual.text, nueva.text);
+      await _auth.changePassword(datos.actual, datos.nueva);
       _msg('Contraseña cambiada');
     } catch (_) {
       _msg('No se pudo cambiar: verifica tu contraseña actual');
@@ -625,104 +545,21 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// Configura o cambia el PIN rápido (4 dígitos).
   Future<void> _configurarPin() async {
-    final c0 = TextEditingController(); // PIN actual (si existe)
-    final c1 = TextEditingController();
-    final c2 = TextEditingController();
-    final accion = await showDialog<String>(
+    // 1.28 (M5-A10/R1M5-7): el diálogo es un
+    // StatefulWidget con dispose y devuelve la acción y
+    // los PIN tecleados (antes: tres controladores
+    // sueltos sin liberar en cada apertura).
+    final res = await showDialog<
+        ({String accion, String pin1, String pin2})>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: _tienePin ? 'Cambiar PIN' : 'Crear PIN rápido',
-        iconoTitulo: Icons.pin_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // v1.3.2 (Argón #19): pedir el PIN actual antes de
-            // cambiarlo o quitarlo.
-            if (_tienePin)
-              TextField(
-                controller: c0,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'PIN actual',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            if (_tienePin) const SizedBox(height: 8),
-            TextField(
-              controller: c1,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'PIN (4 dígitos)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: c2,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Repite el PIN',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        acciones: [
-          if (_tienePin)
-            TextButton(
-              onPressed: () async {
-                // v1.3.2 (Argón #19): verificar PIN actual antes de quitar.
-                final okPin = await _perfil.verificarPin(c0.text.trim());
-                if (!okPin) {
-                  if (ctx.mounted) {
-                    mostrarSnack(ctx, 'PIN actual incorrecto', significado: SignificadoChip.alerta);
-                  }
-                  return;
-                }
-                await _perfil.setPinHash(null);
-                if (ctx.mounted) Navigator.pop(ctx, 'quitar');
-              },
-              child: const Text('Quitar PIN',
-                  style: TextStyle(color: AppColores.error)),
-            ),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () async {
-                // v1.3.2 (Argón #19): verificar PIN actual antes de guardar.
-                if (_tienePin) {
-                  final okPin =
-                      await _perfil.verificarPin(c0.text.trim());
-                  if (!okPin) {
-                    if (ctx.mounted) {
-                      mostrarSnack(ctx, 'PIN actual incorrecto', significado: SignificadoChip.alerta);
-                    }
-                    return;
-                  }
-                }
-                if (ctx.mounted) Navigator.pop(ctx, 'guardar');
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Guardar')),
-        ],
+      builder: (_) => _DialogoConfigurarPin(
+        tienePin: _tienePin,
+        verificarActual: (pin) => _perfil.verificarPin(pin),
+        quitarPinActual: () => _perfil.setPinHash(null),
       ),
     );
-    if (!mounted) return;
-    if (accion == 'quitar') {
+    if (res == null || !mounted) return;
+    if (res.accion == 'quitar') {
       // PIN eliminado: actualizar estado y desactivar el bloqueo.
       await _perfil.setBloqueoMinutos(0);
       // v1.3.1: limpiar ciclos de bloqueo acumulados.
@@ -734,9 +571,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
       _msg('PIN eliminado');
       return;
     }
-    if (accion != 'guardar') return;
-    final p1 = c1.text.trim();
-    final p2 = c2.text.trim();
+    if (res.accion != 'guardar') return;
+    final p1 = res.pin1.trim();
+    final p2 = res.pin2.trim();
     if (p1.length != 4 || int.tryParse(p1) == null) {
       _msg('El PIN debe tener 4 dígitos');
       return;
@@ -2194,6 +2031,353 @@ class _AjustesScreenState extends State<AjustesScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+/// 1.28 (M5-A10/R1M5-7): diálogo de edición de texto de
+/// Ajustes como StatefulWidget con dispose (regla de la
+/// casa). Devuelve el texto tecleado al pulsar Guardar;
+/// null si se cancela.
+class _DialogoEditarTextoAjustes extends StatefulWidget {
+  final String titulo;
+  final String valorInicial;
+  final String etiqueta;
+  final TextInputType teclado;
+
+  const _DialogoEditarTextoAjustes({
+    required this.titulo,
+    required this.valorInicial,
+    required this.etiqueta,
+    required this.teclado,
+  });
+
+  @override
+  State<_DialogoEditarTextoAjustes> createState() =>
+      _DialogoEditarTextoAjustesState();
+}
+
+class _DialogoEditarTextoAjustesState
+    extends State<_DialogoEditarTextoAjustes> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.valorInicial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: widget.titulo,
+      iconoTitulo: Icons.edit_rounded,
+      contenido: CampoTexto(
+        controller: _ctrl,
+        etiqueta: widget.etiqueta,
+        teclado: widget.teclado,
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// 1.28 (M5-A10/R1M5-7): diálogo de edición de campo
+/// numérico de Ajustes, StatefulWidget con dispose.
+/// Devuelve el texto tecleado o null si se cancela.
+class _DialogoEditarCampoAjustes extends StatefulWidget {
+  final String titulo;
+  final String valorInicial;
+  final String etiqueta;
+
+  const _DialogoEditarCampoAjustes({
+    required this.titulo,
+    required this.valorInicial,
+    required this.etiqueta,
+  });
+
+  @override
+  State<_DialogoEditarCampoAjustes> createState() =>
+      _DialogoEditarCampoAjustesState();
+}
+
+class _DialogoEditarCampoAjustesState
+    extends State<_DialogoEditarCampoAjustes> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.valorInicial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: widget.titulo,
+      iconoTitulo: Icons.edit_rounded,
+      contenido: TextField(
+        controller: _ctrl,
+        keyboardType: TextInputType.number,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+        ],
+        decoration: InputDecoration(
+            labelText: widget.etiqueta,
+            border: const OutlineInputBorder()),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// 1.28 (M5-A10/R1M5-7): diálogo «Cambiar contraseña»
+/// como StatefulWidget con dispose. Devuelve los tres
+/// valores tecleados; la validación y el cambio los
+/// hace el llamador, como antes.
+class _DialogoCambiarClave extends StatefulWidget {
+  const _DialogoCambiarClave();
+
+  @override
+  State<_DialogoCambiarClave> createState() =>
+      _DialogoCambiarClaveState();
+}
+
+class _DialogoCambiarClaveState extends State<_DialogoCambiarClave> {
+  final _actual = TextEditingController();
+  final _nueva = TextEditingController();
+  final _nueva2 = TextEditingController();
+
+  @override
+  void dispose() {
+    _actual.dispose();
+    _nueva.dispose();
+    _nueva2.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Cambiar contraseña',
+      iconoTitulo: Icons.key_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CampoTexto(
+                controller: _actual,
+                obscure: true,
+                etiqueta: 'Contraseña actual'),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _nueva,
+                obscure: true,
+                etiqueta: 'Nueva contraseña'),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _nueva2,
+                obscure: true,
+                etiqueta: 'Repite la nueva'),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, (
+                  actual: _actual.text,
+                  nueva: _nueva.text,
+                  nueva2: _nueva2.text,
+                )),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Cambiar')),
+      ],
+    );
+  }
+}
+
+/// 1.28 (M5-A10/R1M5-7): diálogo «Crear/Cambiar PIN»
+/// como StatefulWidget con dispose. La verificación
+/// del PIN actual y el borrado del PIN viven en las
+/// devoluciones del llamador (PerfilService); el
+/// diálogo devuelve ('guardar', pin1, pin2) o
+/// ('quitar', '', '') — la validación de los 4 dígitos
+/// y el guardado del hash los hace el llamador, como
+/// antes.
+class _DialogoConfigurarPin extends StatefulWidget {
+  final bool tienePin;
+  final Future<bool> Function(String pinActual) verificarActual;
+  final Future<void> Function() quitarPinActual;
+
+  const _DialogoConfigurarPin({
+    required this.tienePin,
+    required this.verificarActual,
+    required this.quitarPinActual,
+  });
+
+  @override
+  State<_DialogoConfigurarPin> createState() =>
+      _DialogoConfigurarPinState();
+}
+
+class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
+  final _c0 = TextEditingController(); // PIN actual (si existe)
+  final _c1 = TextEditingController();
+  final _c2 = TextEditingController();
+
+  @override
+  void dispose() {
+    _c0.dispose();
+    _c1.dispose();
+    _c2.dispose();
+    super.dispose();
+  }
+
+  Future<bool> _verificarActualSiAplica() async {
+    // v1.3.2 (Argón #19): verificar PIN actual antes de
+    // cambiarlo o quitarlo.
+    if (!widget.tienePin) return true;
+    final okPin = await widget.verificarActual(_c0.text.trim());
+    if (!okPin) {
+      if (mounted) {
+        mostrarSnack(context, 'PIN actual incorrecto',
+            significado: SignificadoChip.alerta);
+      }
+      return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: widget.tienePin ? 'Cambiar PIN' : 'Crear PIN rápido',
+      iconoTitulo: Icons.pin_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.tienePin)
+            TextField(
+              controller: _c0,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'PIN actual',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          if (widget.tienePin) const SizedBox(height: 8),
+          TextField(
+            controller: _c1,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'PIN (4 dígitos)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _c2,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Repite el PIN',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      acciones: [
+        if (widget.tienePin)
+          TextButton(
+            onPressed: () async {
+              if (!await _verificarActualSiAplica()) return;
+              await widget.quitarPinActual();
+              if (mounted) {
+                Navigator.pop(context,
+                    (accion: 'quitar', pin1: '', pin2: ''));
+              }
+            },
+            child: const Text('Quitar PIN',
+                style: TextStyle(color: AppColores.error)),
+          ),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () async {
+              if (!await _verificarActualSiAplica()) return;
+              if (mounted) {
+                Navigator.pop(context, (
+                  accion: 'guardar',
+                  pin1: _c1.text,
+                  pin2: _c2.text,
+                ));
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Guardar')),
+      ],
     );
   }
 }

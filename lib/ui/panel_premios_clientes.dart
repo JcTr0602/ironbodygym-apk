@@ -11,6 +11,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'panel_premios.dart';
 import 'widgets.dart';
 
 /// Premios (1.27, S3/G3): pestaña «Clientes» del hub —
@@ -74,6 +75,14 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   // Bandeja): check-and-set SÍNCRONO antes del primer
   // await; un doble toque apilaba dos diálogos.
   bool _operando = false;
+
+  // 1.28 (M5-A4 ★/R2M5-H-02): token de secuencia del
+  // detalle — abrir el detalle de B mientras la foto de
+  // A aún viaja ya no puede pintar el detalle de A sobre
+  // B (cada apertura/recarga captura su generación y el
+  // id; un resultado cuya generación o id ya no mandan
+  // se descarta).
+  int _genDetalle = 0;
 
   @override
   void initState() {
@@ -172,9 +181,27 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   }
 
   Future<bool> _enCursoReal(int valeId) async {
-    return await LocalDb.instance
-            .getMeta('premio_vale_anulado_$valeId') !=
-        null;
+    final opUuid = await LocalDb.instance
+        .getMeta('premio_vale_anulado_$valeId');
+    if (opUuid == null) return false;
+    // 1.28 (M5-A3 ★/C-R1M5-H1): la marca se RECONCILIA
+    // con el estado real de su op (las dobles inyectadas
+    // de los tests saltan esta vía: la reconciliación
+    // vive solo en la real). Si el servidor RECHAZÓ la
+    // anulación, la marca se borra y el vale vuelve a
+    // ser anulable (antes quedaba «en curso» para
+    // siempre en este teléfono). Si la op ya se APLICÓ,
+    // la anulación se da por hecha: marca fuera y el
+    // detalle fresco del servidor manda (ya no lo lista
+    // como canjeado). En vuelo o en revisión: sigue en
+    // curso — la revisión no libera la marca.
+    final estado = await LocalDb.instance.estadoOp(opUuid);
+    if (estado == 'rechazada' || estado == 'aplicada') {
+      await LocalDb.instance
+          .borrarMeta('premio_vale_anulado_$valeId');
+      return false;
+    }
+    return true;
   }
 
   /// S7 real: encola la op de anulación (el servidor
@@ -199,37 +226,90 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     // Lo que manda es la op: k viaja en el payload y
     // el servidor lo verifica contra su propio cálculo.
     final k = modo == 'completo' ? vale.premioDias : diasQuitables;
-    await LocalDb.instance.queueOp(
-      opUuid: opUuid,
-      tipo: 'anular_vale_premio',
-      payload: {
-        'cliente_id': clienteId,
-        'vale_id': vale.id,
-        'modo': modo,
-        'dias_quitados': k,
-        'nota': nota,
-      },
-    );
-    await LocalDb.instance
-        .setMeta('premio_vale_anulado_${vale.id}', opUuid);
-    if (k > 0 && _pagadoHasta != null) {
-      // H-01 (Argón 1.27): aritmética UTC pura
-      // (sumarDiasIso). Restar un Duration a un
-      // DateTime en hora local cruza el cambio de
-      // horario de Cuba y puede correr el espejo un
-      // día de más que el servidor.
-      if (DateTime.tryParse(_pagadoHasta!) != null) {
-        await LocalDb.instance.updateMirrorPagadoHasta(
-          clienteId,
-          sumarDiasIso(_pagadoHasta!, -k),
-        );
+    // 1.28 (M5-A3 ★/C-R2M5-H4): el avance del espejo se
+    // calcula contra el pagado_hasta FRESCO del espejo,
+    // no contra el de cuando se abrió el detalle (un
+    // pago sincronizado en medio corría la resta sobre
+    // una base vieja).
+    String? hastaFresco;
+    try {
+      final filas = await LocalDb.instance
+          .mirrorPorIds('clientes', [clienteId]);
+      if (filas.isNotEmpty) {
+        hastaFresco = filas.first['pagado_hasta'] as String?;
       }
-    }
+    } catch (_) {}
+    // 1.28 (M5-A3 ★): op + marca + avance del espejo en
+    // UNA transacción (antes iban sueltos: morir entre
+    // el queueOp y el setMeta dejaba la op sin marca —
+    // solo la guarda H-01 de arriba salvaba el reintento
+    // — y el espejo podía quedar corrido sin op). Dentro
+    // de la transacción no se lee por LocalDb.db.
+    final d = await LocalDb.instance.db;
+    await d.transaction((txn) async {
+      await LocalDb.instance.queueOp(
+        opUuid: opUuid,
+        tipo: 'anular_vale_premio',
+        payload: {
+          'cliente_id': clienteId,
+          'vale_id': vale.id,
+          'modo': modo,
+          'dias_quitados': k,
+          'nota': nota,
+        },
+        txn: txn,
+      );
+      await LocalDb.instance.setMeta(
+          'premio_vale_anulado_${vale.id}', opUuid,
+          executor: txn);
+      if (k > 0 && hastaFresco != null) {
+        // H-01 (Argón 1.27): aritmética UTC pura
+        // (sumarDiasIso). Restar un Duration a un
+        // DateTime en hora local cruza el cambio de
+        // horario de Cuba y puede correr el espejo un
+        // día de más que el servidor.
+        if (DateTime.tryParse(hastaFresco) != null) {
+          await LocalDb.instance.updateMirrorPagadoHasta(
+            clienteId,
+            sumarDiasIso(hastaFresco, -k),
+            txn: txn,
+          );
+        }
+      }
+    });
     unawaited(SyncEngine.instance.push());
   }
 
+  /// Datos locales de apoyo del detalle (vencimiento
+  /// del espejo y marcas de anulación en curso). Si el
+  /// espejo local falla, el detalle del servidor se
+  /// muestra igual, solo sin el botón de anular afinado.
+  Future<({String? hasta, Set<int> enCurso})> _apoyosDe(
+      int id, DetallePremiosCliente detalle) async {
+    String? hasta;
+    try {
+      hasta = await (widget.pagadoHastaDe ?? _pagadoHastaReal)(id);
+    } catch (_) {}
+    final enCurso = <int>{};
+    for (final v in detalle.vales) {
+      if (!v.canjeado) continue;
+      try {
+        if (await (widget.anulacionEnCursoDe ?? _enCursoReal)(v.id)) {
+          enCurso.add(v.id);
+        }
+      } catch (_) {}
+    }
+    return (hasta: hasta, enCurso: enCurso);
+  }
+
+  /// ¿Sigue mandando la apertura/recarga que capturó
+  /// [gen] para el cliente [id]? (M5-A4/R2M5-H-02.)
+  bool _detalleVigente(int gen, int id) =>
+      mounted && gen == _genDetalle && _seleccionadoId == id;
+
   Future<void> _abrirDetalle(
       ({int id, String nombre, String telefono}) c) async {
+    final gen = ++_genDetalle;
     setState(() {
       _seleccionadoId = c.id;
       _seleccionadoNombre = c.nombre;
@@ -242,34 +322,30 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     try {
       final json =
           await (widget.cargarDetalle ?? _detalleReal)(c.id);
-      if (!mounted) return;
-      final detalle = parseDetallePremiosCliente(json);
-      // Datos locales de apoyo (vencimiento y marcas de
-      // anulación en curso): si el espejo local falla,
-      // el detalle del servidor se muestra igual, solo
-      // sin el botón de anular afinado.
-      String? hasta;
-      try {
-        hasta = await (widget.pagadoHastaDe ?? _pagadoHastaReal)(c.id);
-      } catch (_) {}
-      final enCurso = <int>{};
-      for (final v in detalle.vales) {
-        if (!v.canjeado) continue;
-        try {
-          if (await (widget.anulacionEnCursoDe ?? _enCursoReal)(v.id)) {
-            enCurso.add(v.id);
-          }
-        } catch (_) {}
+      if (!_detalleVigente(gen, c.id)) return;
+      // 1.28 (M5-A2 ★/C-R1M5-H3): un {ok:false} del
+      // servidor (p. ej. cliente_no_existe) NO es un
+      // detalle vacío: el parser lo degradaba a «vacío»
+      // y la pantalla ofrecía conceder/reiniciar sobre
+      // un cliente fantasma. Es un fallo de carga.
+      if (json['ok'] != true) {
+        setState(() {
+          _cargandoDetalle = false;
+          _falloDetalle = true;
+        });
+        return;
       }
-      if (!mounted) return;
+      final detalle = parseDetallePremiosCliente(json);
+      final apoyos = await _apoyosDe(c.id, detalle);
+      if (!_detalleVigente(gen, c.id)) return;
       setState(() {
         _detalle = detalle;
-        _pagadoHasta = hasta;
-        _anulacionesEnCurso = enCurso;
+        _pagadoHasta = apoyos.hasta;
+        _anulacionesEnCurso = apoyos.enCurso;
         _cargandoDetalle = false;
       });
     } catch (_) {
-      if (mounted) {
+      if (_detalleVigente(gen, c.id)) {
         setState(() {
           _cargandoDetalle = false;
           _falloDetalle = true;
@@ -281,11 +357,29 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   Future<void> _recargarDetalle() async {
     final id = _seleccionadoId;
     if (id == null) return;
+    // 1.28 (M5-A4): la recarga captura la generación
+    // vigente (sin incrementarla: compite en igualdad
+    // con la apertura que la trajo) y descarta su foto
+    // si el dueño ya abrió otro cliente.
+    final gen = _genDetalle;
     try {
       final json =
           await (widget.cargarDetalle ?? _detalleReal)(id);
-      if (!mounted) return;
-      setState(() => _detalle = parseDetallePremiosCliente(json));
+      if (!_detalleVigente(gen, id)) return;
+      if (json['ok'] != true) return;
+      final detalle = parseDetallePremiosCliente(json);
+      // 1.28 (M5-A3/C-R1M5-H2): la recarga refresca
+      // TAMBIÉN los apoyos (vencimiento y anulaciones en
+      // curso): un vale anulado desde otro teléfono
+      // dejaba de ofrecer «Anular vale» sin salir del
+      // detalle, y un pagado_hasta nuevo se usa fresco.
+      final apoyos = await _apoyosDe(id, detalle);
+      if (!_detalleVigente(gen, id)) return;
+      setState(() {
+        _detalle = detalle;
+        _pagadoHasta = apoyos.hasta;
+        _anulacionesEnCurso = apoyos.enCurso;
+      });
     } catch (_) {}
   }
 
@@ -326,6 +420,10 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
             'Vale creado: está en la Bandeja, apruébalo ahí '
             'para aplicar los días.',
             significado: SignificadoChip.exito);
+        // 1.28 (M5-A4/C-R2M5-H2): la Bandeja ya montada
+        // se entera y recarga: el vale recién concedido
+        // aparece sin salir y reentrar al hub.
+        premiosAvisosExternos.value++;
         await _recargarDetalle();
       }
     } finally {
@@ -448,10 +546,19 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         ListTile(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () => setState(() {
-              _seleccionadoId = null;
-              _detalle = null;
-            }),
+            onPressed: () {
+              // 1.28 (M5-A4/C-R2M5-H6): al volver, la
+              // lista de clientes se recarga (antes se
+              // cargaba una sola vez en initState: un
+              // cliente inscrito con el hub abierto no
+              // aparecía en el buscador).
+              _genDetalle++;
+              setState(() {
+                _seleccionadoId = null;
+                _detalle = null;
+              });
+              _cargarClientes();
+            },
           ),
           title: Text(_seleccionadoNombre,
               style: AppTexto.subtitulo),
@@ -778,33 +885,68 @@ class _DialogoConcederValeState extends State<_DialogoConcederVale> {
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _logroId,
-            isExpanded: true,
-            decoration:
-                const InputDecoration(labelText: 'Logro'),
-            items: [
-              for (final e in widget.catalogo)
-                DropdownMenuItem(
-                  value: e.logroId,
-                  child: Text(e.nombre, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            onChanged: _guardando
-                ? null
-                : (v) {
-                    if (v == null) return;
-                    setState(() {
-                      _logroId = v;
-                      final entrada = widget.catalogo
-                          .where((e) => e.logroId == v)
-                          .firstOrNull;
-                      if (entrada != null && entrada.premioDias > 0) {
-                        _diasCtrl.text = '${entrada.premioDias}';
-                      }
-                    });
-                  },
-          ),
+          // 1.28 (M5-A8/C-R1M5-H4): con el catálogo vacío
+          // no hay desplegable (su valor inicial quedaba
+          // fuera de los items) ni botón de crear: se
+          // dice por qué y dónde se arregla.
+          if (widget.catalogo.isEmpty)
+            Text(
+              'El catálogo de premios está vacío: no hay '
+              'logros para conceder. Activa alguno en la '
+              'pestaña Catálogo.',
+              style: AppTexto.secundario
+                  .copyWith(color: AppColores.error),
+            )
+          else
+            DropdownButtonFormField<String>(
+              initialValue: _logroId,
+              isExpanded: true,
+              decoration:
+                  const InputDecoration(labelText: 'Logro'),
+              items: [
+                for (final e in widget.catalogo)
+                  DropdownMenuItem(
+                    value: e.logroId,
+                    child: Text(
+                      // 1.28 (M5-A8/C-R1M5-H5): cada
+                      // entrada dice su estado (la
+                      // semántica de estadoTexto, en
+                      // corto para que quepa): activo con
+                      // sus días, apagado con sus días o
+                      // sin premio. Conceder a ciegas con
+                      // un logro apagado sorprendía.
+                      e.activo
+                          ? '${e.nombre} · ${e.premioDias} días'
+                          : e.premioDias > 0
+                              ? '${e.nombre} · apagado · '
+                                  '${e.premioDias} días'
+                              : '${e.nombre} · sin premio',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: _guardando
+                  ? null
+                  : (v) {
+                      if (v == null) return;
+                      setState(() {
+                        _logroId = v;
+                        final entrada = widget.catalogo
+                            .where((e) => e.logroId == v)
+                            .firstOrNull;
+                        // 1.28 (M5-A8/C-R1M5-H5): el
+                        // campo de días se recarga
+                        // SIEMPRE: con un logro sin
+                        // premio queda VACÍO (a teclear),
+                        // no con los días del anterior.
+                        if (entrada != null) {
+                          _diasCtrl.text = entrada.premioDias > 0
+                              ? '${entrada.premioDias}'
+                              : '';
+                        }
+                      });
+                    },
+            ),
           const SizedBox(height: 8),
           CampoTexto(
               controller: _diasCtrl,
@@ -829,7 +971,8 @@ class _DialogoConcederValeState extends State<_DialogoConcederVale> {
                 _guardando ? null : () => Navigator.pop(context, false),
             child: const Text('Cancelar')),
         ElevatedButton(
-          onPressed: _guardando ? null : _enviar,
+          onPressed:
+              _guardando || widget.catalogo.isEmpty ? null : _enviar,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColores.naranja,
             foregroundColor: Colors.white,
@@ -987,12 +1130,19 @@ class _DialogoAnularValeState extends State<_DialogoAnularVale> {
   String? _error;
   bool _guardando = false;
 
-  late final int _k = diasQuitablesVale(
-    pagadoHasta: widget.pagadoHasta,
-    resueltoEn: widget.vale.resueltoEn,
-    premioDias: widget.vale.premioDias,
-    hoy: widget.hoy,
-  );
+  // 1.28 (M5-A3/C-R2M5-H7): la VISTA PREVIA usa el hoy
+  // de la apertura (widget.hoy, inyectado); el valor
+  // que VIAJA en la op se recalcula en _enviar con el
+  // hoy real de ese momento — el diálogo podía quedar
+  // abierto cruzando la medianoche y la resta salía
+  // con un día de menos (y el servidor, que recalcula
+  // con SU hoy, la rechazaba).
+  int get _k => diasQuitablesVale(
+        pagadoHasta: widget.pagadoHasta,
+        resueltoEn: widget.vale.resueltoEn,
+        premioDias: widget.vale.premioDias,
+        hoy: widget.hoy,
+      );
 
   @override
   void dispose() {
@@ -1024,7 +1174,15 @@ class _DialogoAnularValeState extends State<_DialogoAnularVale> {
       _error = null;
     });
     try {
-      await widget.anular(_modo, _k, nota);
+      // C-R2M5-H7: k recalculado al confirmar, con el
+      // hoy de AHORA (no el de la apertura del diálogo).
+      final kAhora = diasQuitablesVale(
+        pagadoHasta: widget.pagadoHasta,
+        resueltoEn: widget.vale.resueltoEn,
+        premioDias: widget.vale.premioDias,
+        hoy: ahoraHabana(),
+      );
+      await widget.anular(_modo, kAhora, nota);
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
       if (mounted) {

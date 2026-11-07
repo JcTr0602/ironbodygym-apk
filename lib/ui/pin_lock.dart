@@ -25,6 +25,28 @@ class _PinLockScreenState extends State<PinLockScreen> {
   String? _error;
   bool _verificando = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // 1.28 (M5-A7/R1M5-4): si el PIN ya está en tiempo de
+    // espera al abrir la pantalla, se dice desde el
+    // principio (antes había que fallar una vez para
+    // «descubrirlo», y el aviso mentía: «PIN incorrecto»).
+    _avisarSiBloqueado();
+  }
+
+  /// Muestra el aviso honesto de espera si hay un
+  /// bloqueo por intentos vigente; devuelve si lo había.
+  Future<bool> _avisarSiBloqueado() async {
+    final min = await PerfilService.instance
+        .pinBloqueoMinutosRestantes();
+    if (!mounted || min <= 0) return false;
+    setState(() => _error =
+        'Demasiados intentos. Espera $min min antes de '
+        'intentarlo de nuevo.');
+    return true;
+  }
+
   Future<void> _tecla(String d) async {
     if (_verificando || _pin.length >= 4) return;
     setState(() {
@@ -44,9 +66,16 @@ class _PinLockScreenState extends State<PinLockScreen> {
       } else {
         setState(() {
           _verificando = false;
-          _error = 'PIN incorrecto';
           _pin = '';
         });
+        // 1.28 (M5-A7/R1M5-4): verificarPin devuelve el
+        // mismo false por PIN erróneo y por bloqueo de
+        // intentos; la pantalla distingue preguntando el
+        // tiempo restante: si hay espera, ESE es el
+        // mensaje (con sus minutos), no «PIN incorrecto».
+        if (!await _avisarSiBloqueado() && mounted) {
+          setState(() => _error = 'PIN incorrecto');
+        }
       }
     }
   }

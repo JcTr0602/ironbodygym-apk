@@ -34,6 +34,11 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   final _db = LocalDb.instance;
   bool _cargando = true;
   bool _guardando = false;
+
+  /// 1.28 (M5-A7/R2M5-H07): candados en curso de retirada,
+  /// por id: un doble toque sobre la misma fila no abre
+  /// dos diálogos ni encola dos bajas.
+  final Set<String> _quitandoIds = {};
   List<Map<String, dynamic>> _activos = [];
   List<({String tid, String nombre})> _entrenadores = [];
   final Map<String, String> _nombresPersonas = {};
@@ -177,6 +182,12 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   }
 
   Future<void> _enviarOp(Map<String, dynamic> payload) async {
+    // 1.28 (M5-A7/R1M5-8): guarda de dueño en el MÉTODO
+    // (defensa en profundidad, patrón P-1 de la casa): el
+    // build esconde la pantalla, pero ningún camino
+    // encola un candado sin ser el dueño (el servidor
+    // además lo exige: la op es SOLO_ADMIN).
+    if (!AuthService().isOwner) return;
     await _db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'acceso_bloqueo_set',
@@ -189,6 +200,24 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   }
 
   Future<void> _crear() async {
+    // 1.28 (M5-A7/R1M5-8 + R2M5-H07): guarda de dueño en
+    // el método y candado anti-doble-toque tomado AL
+    // ENTRAR (check-and-set síncrono): antes _guardando
+    // se activaba tras la validación y el diálogo de
+    // confirmación, y dos toques rápidos abrían dos
+    // diálogos y encolaban dos candados. El finally lo
+    // libera en TODAS las salidas de _crearReal.
+    if (!AuthService().isOwner) return;
+    if (_guardando) return;
+    setState(() => _guardando = true);
+    try {
+      await _crearReal();
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  Future<void> _crearReal() async {
     String? objetivo;
     if (_alcance == 'rol') {
       objetivo = _rol;
@@ -236,9 +265,7 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
       icono: Icons.lock_rounded,
     );
     if (!ok || !mounted) return;
-    setState(() => _guardando = true);
-    try {
-      final mensaje = _mensajeCtrl.text.trim();
+    final mensaje = _mensajeCtrl.text.trim();
       // 1.23 (tipo_objetivo): el dominio de la persona viaja
       // explícito en la op; cada evaluador casará solo dentro
       // de su dominio.
@@ -277,38 +304,45 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
       mostrarSnack(context, 'Candado aplicado. Llegará a cada '
           'teléfono cuando sincronice.');
       await _cargar();
-    } finally {
-      if (mounted) setState(() => _guardando = false);
-    }
   }
 
   Future<void> _quitar(Map<String, dynamic> f) async {
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Quitar candado',
-      mensaje: 'Se reactivará el acceso de «${_tituloFila(f)}» '
-          'en cuanto cada teléfono sincronice. Las operaciones '
-          'retenidas saldrán solas.',
-      aceptar: 'Quitar',
-      icono: Icons.lock_open_rounded,
-    );
-    if (!ok) return;
-    await _enviarOp({
-      'id': '${f['id']}',
-      'alcance': '${f['alcance'] ?? 'global'}',
-      'app': '${f['app'] ?? 'ambas'}',
-      if (f['objetivo'] != null) 'objetivo': '${f['objetivo']}',
-      // El tipo viaja si la fila lo trae (si no, el servidor
-      // preserva el guardado al desactivar: condición A).
-      if (f['tipo_objetivo'] != null)
-        'tipo_objetivo': '${f['tipo_objetivo']}',
-      if ((f['mensaje']?.toString() ?? '').isNotEmpty)
-        'mensaje': '${f['mensaje']}',
-      'activo': 0,
-    });
-    if (!mounted) return;
-    mostrarSnack(context, 'Candado retirado.');
-    await _cargar();
+    // 1.28 (M5-A7/R1M5-8 + R2M5-H07): guarda de dueño en
+    // el método y anti-doble-toque por fila tomado ANTES
+    // del diálogo (check-and-set síncrono).
+    if (!AuthService().isOwner) return;
+    final idFila = '${f['id']}';
+    if (!_quitandoIds.add(idFila)) return;
+    try {
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Quitar candado',
+        mensaje: 'Se reactivará el acceso de «${_tituloFila(f)}» '
+            'en cuanto cada teléfono sincronice. Las operaciones '
+            'retenidas saldrán solas.',
+        aceptar: 'Quitar',
+        icono: Icons.lock_open_rounded,
+      );
+      if (!ok) return;
+      await _enviarOp({
+        'id': idFila,
+        'alcance': '${f['alcance'] ?? 'global'}',
+        'app': '${f['app'] ?? 'ambas'}',
+        if (f['objetivo'] != null) 'objetivo': '${f['objetivo']}',
+        // El tipo viaja si la fila lo trae (si no, el servidor
+        // preserva el guardado al desactivar: condición A).
+        if (f['tipo_objetivo'] != null)
+          'tipo_objetivo': '${f['tipo_objetivo']}',
+        if ((f['mensaje']?.toString() ?? '').isNotEmpty)
+          'mensaje': '${f['mensaje']}',
+        'activo': 0,
+      });
+      if (!mounted) return;
+      mostrarSnack(context, 'Candado retirado.');
+      await _cargar();
+    } finally {
+      _quitandoIds.remove(idFila);
+    }
   }
 
   /// Ids que el panel reconoce como personas de Clientes

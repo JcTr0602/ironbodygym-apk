@@ -59,11 +59,22 @@ List<PerfilComunidadAdmin> parsePerfilesComunidad(
   final out = <PerfilComunidadAdmin>[];
   for (final e in lista) {
     if (e is! Map) continue;
-    final id = e['cliente_id'];
-    if (id is! num) continue;
+    // 1.28 (M5-A2/C-R3M5-H8): el id también vale como
+    // TEXTO parseable: con la exigencia de num, un
+    // perfil cuyo id bajara como cadena se saltaba en
+    // silencio y quedaba INMODERABLE desde el panel.
+    final idCrudo = e['cliente_id'];
+    final id = idCrudo is num
+        ? idCrudo.toInt()
+        : int.tryParse('${idCrudo ?? ''}');
+    if (id == null) continue;
+    // Un nombre vacío (o de solo espacios) pintaba una
+    // tarjeta sin título que no se podía identificar:
+    // cae a «Sin nombre» como el resto de la casa.
+    final nombreCrudo = '${e['nombre'] ?? ''}'.trim();
     out.add(PerfilComunidadAdmin(
-      clienteId: id.toInt(),
-      nombre: (e['nombre'] ?? 'Sin nombre').toString(),
+      clienteId: id,
+      nombre: nombreCrudo.isEmpty ? 'Sin nombre' : nombreCrudo,
       visible: e['visible'] == true,
       ocultoAdmin: e['oculto_admin'] == true,
       mostrarMarcas: e['mostrar_marcas'] == true,

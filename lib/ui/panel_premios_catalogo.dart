@@ -31,6 +31,16 @@ class _PremiosCatalogoTabState extends State<PremiosCatalogoTab> {
   bool _falloCarga = false;
   List<EntradaCatalogoPremio> _entradas = const [];
 
+  // 1.28 (M5-A4/C-R2M5-H3): generación de carga — una
+  // foto vieja que llega tarde no pisa el estado.
+  int _genCarga = 0;
+
+  // 1.28 (M5-A4/C-R2M5-H1): el editor no se apila —
+  // check-and-set síncrono antes del primer await (un
+  // doble toque abría dos editores y el segundo
+  // guardado pisaba el primero sin avisar).
+  bool _editando = false;
+
   @override
   void initState() {
     super.initState();
@@ -61,19 +71,31 @@ class _PremiosCatalogoTabState extends State<PremiosCatalogoTab> {
   }
 
   Future<void> _cargar() async {
+    final gen = ++_genCarga;
     setState(() {
       _cargando = true;
       _falloCarga = false;
     });
     try {
       final json = await (widget.cargarCatalogo ?? _cargarReal)();
-      if (!mounted) return;
+      if (!mounted || gen != _genCarga) return;
+      // 1.28 (M5-A2 ★): el éxito de admin_premios_catalogo
+      // SÍ trae ok:true (s2): una respuesta sin ok no es
+      // un catálogo vacío legítimo — es un fallo, y se
+      // pinta como fallo, no como «sin premios».
+      if (json['ok'] != true) {
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
+        return;
+      }
       setState(() {
         _entradas = parseCatalogoPremios(json);
         _cargando = false;
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && gen == _genCarga) {
         setState(() {
           _cargando = false;
           _falloCarga = true;
@@ -83,17 +105,23 @@ class _PremiosCatalogoTabState extends State<PremiosCatalogoTab> {
   }
 
   Future<void> _editar(EntradaCatalogoPremio e) async {
-    final guardado = await showDialog<bool>(
-      context: context,
-      builder: (_) => _DialogoEditarPremio(
-        entrada: e,
-        guardar: widget.guardarEntrada ?? _guardarReal,
-      ),
-    );
-    if (guardado == true && mounted) {
-      mostrarSnack(context, 'Catálogo actualizado',
-          significado: SignificadoChip.exito);
-      await _cargar();
+    if (_editando) return;
+    _editando = true;
+    try {
+      final guardado = await showDialog<bool>(
+        context: context,
+        builder: (_) => _DialogoEditarPremio(
+          entrada: e,
+          guardar: widget.guardarEntrada ?? _guardarReal,
+        ),
+      );
+      if (guardado == true && mounted) {
+        mostrarSnack(context, 'Catálogo actualizado',
+            significado: SignificadoChip.exito);
+        await _cargar();
+      }
+    } finally {
+      _editando = false;
     }
   }
 

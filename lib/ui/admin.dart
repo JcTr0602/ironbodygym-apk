@@ -35,6 +35,7 @@ import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'config_precios_bancarios.dart';
+import 'panel_anuncios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
 import 'bandeja_whatsapp.dart';
@@ -213,11 +214,39 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  /// 1.28 (M5-A5/R3M5-H01): corre una lectura del Panel a
+  /// prueba de fallos: si UNA cifra revienta, cae SOLO
+  /// esa (conserva su valor vigente) y las demás siguen
+  /// cargando. Antes _cargar encadenaba ~20 lecturas sin
+  /// red de seguridad: un solo fallo dejaba el Panel en
+  /// «cargando» para siempre (el _cargando=false vivía
+  /// solo en el setState final, al que nunca se llegaba).
+  Future<T> _seguro<T>(Future<T> Function() lectura, T respaldo) async {
+    try {
+      return await lectura();
+    } catch (_) {
+      return respaldo;
+    }
+  }
+
   Future<void> _cargar() async {
     // Ronda 17 M2-H1 (defensa en profundidad): sin dueño no
     // se cargan los KPIs financieros aunque se invoque directo.
     if (!AuthService().isOwner) return;
-    final ing = await ingresosMes();
+    try {
+      await _cargarReal();
+    } finally {
+      // El spinner nunca se queda puesto: si algo no
+      // aislado revienta en _cargarReal, el Panel abre
+      // con las cifras que tenga.
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarReal() async {
+    final ing = await _seguro(ingresosMes, _ingresos);
     // 1.23 (Delta Argón 4ª#3): derivaciones en memoria en vez
     // de re-escanear espejos enteros por cifra:
     // - inscripcionesMes = suma de inscripcionesPorEntrenador
@@ -225,13 +254,14 @@ class _AdminScreenState extends State<AdminScreen> {
     //   fecha_inscripcion del mes actual).
     // - morosos y activos salen de resumenActivosMorosos (una
     //   sola lectura del padrón activo).
-    final resumenAct = await resumenActivosMorosos();
-    final pend = await pendientePorEntrenador();
+    final resumenAct = await _seguro(resumenActivosMorosos,
+        (activos: _clientesActivos, morosos: 0));
+    final pend = await _seguro(pendientePorEntrenador, _pend);
     // 1.25 T40: inscripciones del mes y morosos ya no se
     // calculan aquí: solo alimentaban el resumen fino que
     // Ingresos dejó de abrir (el Dashboard trae los suyos).
-    final gastos = await gastosTodos();
-    final caja = await cobradoHoyPorMetodo();
+    final gastos = await _seguro(gastosTodos, _gastos);
+    final caja = await _seguro(cobradoHoyPorMetodo, _caja);
     final hoy = ahoraHabana();
     final hoyIso = '${hoy.year.toString().padLeft(4, '0')}-'
         '${hoy.month.toString().padLeft(2, '0')}-'
@@ -245,15 +275,28 @@ class _AdminScreenState extends State<AdminScreen> {
             fechaNegocioHabana(g['fecha']) == hoyIso)
         .fold<double>(
             0, (s, g) => s + ((g['monto'] as num?)?.toDouble() ?? 0));
-    final aj = await LocalDb.instance.getAjustes();
+    // 1.28 (M5-A5): los ajustes se leen aparte: si fallan,
+    // NO se reaplica la configuración (aplicarla desde un
+    // mapa vacío borraría los campos de precios pintados)
+    // y el contador de precios sin fijar conserva su valor.
+    Map<String, dynamic>? ajOk;
+    try {
+      ajOk = await LocalDb.instance.getAjustes();
+    } catch (_) {}
+    final aj = ajOk ?? const <String, dynamic>{};
     // 1.25 Panel 10: decisiones pendientes del módulo de
     // Precios = claves C6 sin valor válido.
-    final preciosSinFijar = clavesPrecioSinFijar(aj).length;
-    final tipos = await getTiposPago(soloActivos: false);
-    final pagoEnt = await PerfilService.instance.getPagoEntrenador();
+    final preciosSinFijar = ajOk == null
+        ? _preciosSinFijar
+        : clavesPrecioSinFijar(aj).length;
+    final tipos = await _seguro(
+        () => getTiposPago(soloActivos: false), _tipos);
+    final pagoEnt = await _seguro(
+        PerfilService.instance.getPagoEntrenador, _pagoEntrenador);
     // Salud del sistema
-    final det = await SyncEngine.instance.detalle();
-    final pendSubir = await LocalDb.instance.countPendingOps();
+    final det = await _seguro(SyncEngine.instance.detalle, _syncDet);
+    final pendSubir = await _seguro(
+        LocalDb.instance.countPendingOps, _pendientesSubir);
     // Panel del dueño (v1.6.0): KPIs del mes y pendientes reales,
     // todos de fuentes existentes (sin cifras inventadas).
     // Panel 1.6.0 (decisión de Jc): el KPI «Pagos este mes» usa la
@@ -261,16 +304,26 @@ class _AdminScreenState extends State<AdminScreen> {
     // (NominaCalc: descuenta a quien vence dentro del propio mes).
     // pagosRealizadosMes() conserva su sentido contable en sus
     // otros usos; aquí no se usa.
-    final pagosMes = await NominaCalc.clientesQuePagaronElMes(
-        NominaCalc.prefMesActual());
+    final pagosMes = await _seguro(
+        () => NominaCalc.clientesQuePagaronElMes(
+            NominaCalc.prefMesActual()),
+        _pagosMes);
     // 1.25 Panel 7: las cifras de comparación del mes pasado
     // y la serie de 7 días de la mini-tendencia.
-    final ingAnt = await ingresosMesAnterior();
-    final pagosMesAnt = await NominaCalc.clientesQuePagaronElMes(
-        NominaCalc.prefMesAnterior());
-    final serie7Panel = await ingresosUltimos7Dias();
+    final ingAnt = await _seguro<double?>(
+        () => ingresosMesAnterior(), _ingresosMesAnt);
+    final pagosMesAnt = await _seguro<int?>(
+        () => NominaCalc.clientesQuePagaronElMes(
+            NominaCalc.prefMesAnterior()),
+        _pagosMesAnt);
+    final serie7Panel =
+        await _seguro(ingresosUltimos7Dias, _serie7Panel);
     final activos = resumenAct.activos; // 4ª#3: de la lectura única
-    final fotoRS = await _fotoReservasStock();
+    final fotoRS = await _seguro(_fotoReservasStock, (
+      solicitadas: _reservasSolicitadas,
+      nombreSupl: _nombreSupl,
+      criticos: _stockCritico,
+    ));
     final solicitadas = fotoRS.solicitadas;
     final nombreSupl = fotoRS.nombreSupl;
     final criticos = fotoRS.criticos;
@@ -279,14 +332,25 @@ class _AdminScreenState extends State<AdminScreen> {
         '${d.year.toString().padLeft(4, '0')}-'
         '${d.month.toString().padLeft(2, '0')}-'
         '${d.day.toString().padLeft(2, '0')}';
-    final sinHoy = await turnosSinReporte(isoDia(hoyH));
-    final sinAyer = await turnosSinReporte(
-        isoDia(hoyH.subtract(const Duration(days: 1))));
+    final sinHoy = await _seguro(
+        () => turnosSinReporte(isoDia(hoyH)), _sinReporteHoy);
+    final sinAyer = await _seguro(
+        () => turnosSinReporte(
+            isoDia(hoyH.subtract(const Duration(days: 1)))),
+        _sinReporteAyer);
     // 1.25 T97: los que vencen hoy, para la bandeja única.
-    final vencen = await vencenHoy();
-    final incidencias = await incidenciasSyncPendientes();
+    final vencenNombres = await _seguro(
+        () async => [
+              for (final c in await vencenHoy())
+                '${c['nombre'] ?? ''}',
+            ],
+        _vencenHoyNombres);
+    final incidenciasPend = await _seguro(
+        () async => (await incidenciasSyncPendientes()).length,
+        _incidenciasPend);
     // v1.7.0: contador de Cuentas a la Casa (consulta local).
-    final casa = await LocalDb.instance.conteoCuentasCasa();
+    final casa = await _seguro(
+        LocalDb.instance.conteoCuentasCasa, _cuentasCasa);
     // 1.23 (B3 Paso 3b): neto de nómina del mes desde la foto
     // compartida (nomina_foto.dart — la misma que arma la
     // pantalla de Nómina). Si la foto falla o aún no hay
@@ -330,16 +394,16 @@ class _AdminScreenState extends State<AdminScreen> {
         _stockCritico = criticos;
         _sinReporteAyer = sinAyer;
         _sinReporteHoy = sinHoy;
-        _vencenHoyNombres = [
-          for (final c in vencen) '${c['nombre'] ?? ''}',
-        ];
-        _incidenciasPend = incidencias.length;
+        _vencenHoyNombres = vencenNombres;
+        _incidenciasPend = incidenciasPend;
         // B3 (SWR): las bandejas RPC NO se vacían al recargar —
         // conservan su último payload bueno hasta que el
         // segundo pase lo renueve o falle (y si falla, queda la
         // caché con su nota «Sin red · datos de…»).
         _cuentasCasa = casa;
-        _aplicarConfig(aj, tipos, pagoEnt);
+        // 1.28 (M5-A5): sin ajustes leídos no se reaplica
+        // la configuración (ver la lectura aislada arriba).
+        if (ajOk != null) _aplicarConfig(aj, tipos, pagoEnt);
         _cargando = false;
       });
     }
@@ -447,25 +511,45 @@ class _AdminScreenState extends State<AdminScreen> {
   /// muta alimenta un agregado omitido.
   Future<void> _cargarContadores() async {
     if (!AuthService().isOwner) return;
-    final pend = await pendientePorEntrenador();
-    final det = await SyncEngine.instance.detalle();
-    final pendSubir = await LocalDb.instance.countPendingOps();
-    final pagosMes = await NominaCalc.clientesQuePagaronElMes(
-        NominaCalc.prefMesActual());
-    final activos = await activosCount();
-    final fotoRS = await _fotoReservasStock();
+    // 1.28 (M5-A5/R3M5-H01): misma pauta aislada que
+    // _cargar: cada contador cae solo, no en cadena.
+    final pend = await _seguro(pendientePorEntrenador, _pend);
+    final det = await _seguro(SyncEngine.instance.detalle, _syncDet);
+    final pendSubir = await _seguro(
+        LocalDb.instance.countPendingOps, _pendientesSubir);
+    final pagosMes = await _seguro(
+        () => NominaCalc.clientesQuePagaronElMes(
+            NominaCalc.prefMesActual()),
+        _pagosMes);
+    final activos = await _seguro(activosCount, _clientesActivos);
+    final fotoRS = await _seguro(_fotoReservasStock, (
+      solicitadas: _reservasSolicitadas,
+      nombreSupl: _nombreSupl,
+      criticos: _stockCritico,
+    ));
     final hoyH = ahoraHabana();
     String isoDia(DateTime d) =>
         '${d.year.toString().padLeft(4, '0')}-'
         '${d.month.toString().padLeft(2, '0')}-'
         '${d.day.toString().padLeft(2, '0')}';
-    final sinHoy = await turnosSinReporte(isoDia(hoyH));
-    final sinAyer = await turnosSinReporte(
-        isoDia(hoyH.subtract(const Duration(days: 1))));
+    final sinHoy = await _seguro(
+        () => turnosSinReporte(isoDia(hoyH)), _sinReporteHoy);
+    final sinAyer = await _seguro(
+        () => turnosSinReporte(
+            isoDia(hoyH.subtract(const Duration(days: 1)))),
+        _sinReporteAyer);
     // 1.25 T97: los que vencen hoy, para la bandeja única.
-    final vencen = await vencenHoy();
-    final incidencias = await incidenciasSyncPendientes();
-    final casa = await LocalDb.instance.conteoCuentasCasa();
+    final vencenNombres = await _seguro(
+        () async => [
+              for (final c in await vencenHoy())
+                '${c['nombre'] ?? ''}',
+            ],
+        _vencenHoyNombres);
+    final incidenciasPend = await _seguro(
+        () async => (await incidenciasSyncPendientes()).length,
+        _incidenciasPend);
+    final casa = await _seguro(
+        LocalDb.instance.conteoCuentasCasa, _cuentasCasa);
     if (!mounted) return;
     setState(() {
       _pend = pend;
@@ -478,10 +562,8 @@ class _AdminScreenState extends State<AdminScreen> {
       _stockCritico = fotoRS.criticos;
       _sinReporteAyer = sinAyer;
       _sinReporteHoy = sinHoy;
-      _vencenHoyNombres = [
-        for (final c in vencen) '${c['nombre'] ?? ''}',
-      ];
-      _incidenciasPend = incidencias.length;
+      _vencenHoyNombres = vencenNombres;
+      _incidenciasPend = incidenciasPend;
       _cuentasCasa = casa;
     });
     unawaited(_cargarSolicitudesInvitados());
@@ -2634,6 +2716,14 @@ class _AdminScreenState extends State<AdminScreen> {
         'Comunidad',
         'Perfiles visibles de los clientes y ocultación',
         () => _ir(const ComunidadPanelScreen()),
+      ),
+      // 1.28 (M5 ítem fijo, Pieza G de Anuncios): el
+      // compositor de anuncios de la app de Clientes.
+      _tarjetaFlujo(
+        Icons.campaign_rounded,
+        'Anuncio a clientes',
+        'Avisos en la app de Clientes: texto, audiencia y vigencia',
+        () => _ir(const PanelAnunciosScreen()),
       ),
       _tarjetaFlujo(
         Icons.event_rounded,

@@ -283,6 +283,14 @@ class _HomeScreenState extends State<HomeScreen>
   /// Evita apilar el diálogo de suspendido (Argón).
   bool _mostrandoDialogoSuspendido = false;
 
+  /// 1.28 (M5-A7/R1M5-H2): evita apilar pantallas de
+  /// bloqueo por PIN (mismo patrón que el diálogo de
+  /// suspendido): dos «resumed» seguidos —o el arranque
+  /// más un resumed— empujaban dos PinLockScreen y al
+  /// desbloquear una quedaba la otra debajo pidiendo el
+  /// PIN otra vez.
+  bool _pinEnPantalla = false;
+
   /// v1.3.9 Sprint 4 (#9): verifica cierres automáticos pendientes.
   Future<void> _verificarCierresAuto() async {
     final ejecuto = await verificarCierresAutomaticos();
@@ -643,13 +651,23 @@ class _HomeScreenState extends State<HomeScreen>
       // Argón Acceso #7: un transcurrido NEGATIVO significa que
       // el reloj del teléfono se atrasó tras sellar la actividad:
       // se bloquea igual (fail-closed), no se regala la sesión.
-      if ((transcurridos < 0 || transcurridos >= minutos) && mounted) {
-        await Navigator.of(context).push(
-          RutaIron(
-            builder: (_) => const PinLockScreen(),
-            fullscreenDialog: true,
-          ),
-        );
+      if ((transcurridos < 0 || transcurridos >= minutos) &&
+          mounted &&
+          !_pinEnPantalla) {
+        // 1.28 (M5-A7/R1M5-H2): guarda síncrona ANTES del
+        // push (check-and-set): una sola pantalla de
+        // bloqueo a la vez; se libera al cerrarse.
+        _pinEnPantalla = true;
+        try {
+          await Navigator.of(context).push(
+            RutaIron(
+              builder: (_) => const PinLockScreen(),
+              fullscreenDialog: true,
+            ),
+          );
+        } finally {
+          _pinEnPantalla = false;
+        }
       }
       // Al abrir, sellar actividad después de revisar (el PIN ya sella
       // al validarse; esto cubre el caso donde no hizo falta bloquear).

@@ -520,8 +520,20 @@ const novedades = [
 /// Compara versiones semánticas (1.0.10 > 1.0.9).
 /// La comparación de strings falla: "1.0.10" < "1.0.9" letra por letra.
 int compararVersiones(String a, String b) {
-  final pa = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-  final pb = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  // 1.28 (M5-A9/R3M5-H04): el sufijo «+build» se limpia
+  // ANTES de trocear: la versión guardada es la completa
+  // ('1.26.1+87') y su tercer componente se parseaba
+  // como '1+87' → null → 0, así que la 1.26.1 instalada
+  // se comparaba como 1.26.0 y sus notas se repetían en
+  // cada actualización siguiente.
+  List<int> partes(String v) => v
+      .split('+')
+      .first
+      .split('.')
+      .map((e) => int.tryParse(e) ?? 0)
+      .toList();
+  final pa = partes(a);
+  final pb = partes(b);
   for (var i = 0; i < 3; i++) {
     final x = i < pa.length ? pa[i] : 0;
     final y = i < pb.length ? pb[i] : 0;
@@ -535,12 +547,29 @@ Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
   final perfil = PerfilService.instance;
   final vista = await perfil.getUltimaVersionVista();
   if (vista == AppConfig.appVersion) return false;
-  await perfil.setUltimaVersionVista(AppConfig.appVersion);
-  final nuevas = novedades
-      .where((n) =>
-          vista == null || compararVersiones(n.version, vista) > 0)
-      .toList();
-  if (nuevas.isEmpty || !context.mounted) return false;
+  // 1.28 (M5-A9/R1M5-6): en una instalación LIMPIA
+  // (vista == null) solo se muestran las notas de la
+  // versión instalada — volcar las 60+ versiones
+  // históricas sobre un teléfono nuevo no informa de
+  // nada nuevo para él.
+  final nuevas = vista == null
+      ? novedades
+          .where((n) =>
+              compararVersiones(n.version, AppConfig.appVersion) ==
+              0)
+          .toList()
+      : novedades
+          .where((n) => compararVersiones(n.version, vista) > 0)
+          .toList();
+  if (nuevas.isEmpty) {
+    // Nada que mostrar: se marca igual (no hay nada que
+    // perder) y no se reintenta en cada arranque.
+    await perfil.setUltimaVersionVista(AppConfig.appVersion);
+    return false;
+  }
+  // 1.28 (M5-A9/R3M5-H07): sin contexto montado NO se
+  // marca: la oferta se repite en el próximo arranque.
+  if (!context.mounted) return false;
   await showDialog<void>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -573,5 +602,10 @@ Future<bool> mostrarNovedadesSiHay(BuildContext context) async {
       ],
     ),
   );
+  // 1.28 (M5-A9/R3M5-H07): «visto» se marca SOLO tras
+  // cerrar el diálogo: si el proceso muere con el
+  // diálogo abierto, las notas se reofrecen al volver
+  // (antes se marcaba antes de mostrar y se perdían).
+  await perfil.setUltimaVersionVista(AppConfig.appVersion);
   return true;
 }
