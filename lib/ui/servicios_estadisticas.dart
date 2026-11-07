@@ -1066,7 +1066,22 @@ class _ServiciosEstadisticasScreenState
             color: AppColores.superficie(context),
             borderRadius: BorderRadius.circular(AppRadio.md),
             border: Border.all(color: AppColores.borde(context)),
-            boxShadow: AppSombra.tarjeta(context),
+            // 1.29 D-18: valor exacto de la sombra de tarjeta
+            // de la clase deprecada, escrito en el sitio.
+            boxShadow: [
+              BoxShadow(
+                color: (Theme.of(context).brightness == Brightness.dark
+                        ? Colors.black
+                        : Colors.grey)
+                    .withValues(
+                        alpha: Theme.of(context).brightness ==
+                                Brightness.dark
+                            ? 0.4
+                            : 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

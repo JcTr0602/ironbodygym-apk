@@ -91,11 +91,22 @@ class BotonPrimario extends StatelessWidget {
     final radio = BorderRadius.circular(AppRadio.md);
     // Gradiente naranja + sombra cuando está activo; gris del tema
     // (sin gradiente) cuando está deshabilitado o cargando.
+    // 1.29 D-18: la sombra conserva EXACTO el valor que daba la
+    // clase deprecada de sombras (naranja 35 %, desenfoque 12,
+    // desplazamiento 0/4), ahora escrito en el propio componente.
     final boton = DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: radio,
         gradient: activo ? AppColores.gradienteNaranja : null,
-        boxShadow: activo ? AppSombra.botonPrimario : null,
+        boxShadow: activo
+            ? [
+                BoxShadow(
+                  color: AppColores.naranja.withValues(alpha: 0.35),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
       child: ElevatedButton(
         onPressed: cargando ? null : onPressed,
@@ -510,12 +521,23 @@ class Tarjeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.29 D-18: la sombra conserva EXACTO el valor que daba la
+    // clase deprecada de sombras (negro/gris según el brillo),
+    // escrito en el propio componente.
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
     final card = Container(
       decoration: BoxDecoration(
         color: color ?? AppColores.superficie(context),
         borderRadius: BorderRadius.circular(AppRadio.lg),
         border: Border.all(color: AppColores.borde(context)),
-        boxShadow: AppSombra.tarjeta(context),
+        boxShadow: [
+          BoxShadow(
+            color: (oscuro ? Colors.black : Colors.grey)
+                .withValues(alpha: oscuro ? 0.4 : 0.12),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Padding(padding: padding, child: child),
     );
@@ -551,40 +573,45 @@ class BadgeEstado extends StatelessWidget {
     late final Color fondo;
     late final Color frente;
     late final IconData icono;
+    // 1.29 D-06: el frente es el ROL de texto del estado
+    // (D-02), ya resuelto por tema — se acabó el parche de
+    // aclarar con lerp sin medir. Los brillantes quedan
+    // solo como tinte de fondo. GD-03: porVencer deja el
+    // #D97706 que daba 3,19 en claro y congelado deja el
+    // azul brillante que daba 3,68/3,90.
     switch (estado) {
       case EstadoMembresia.alDia:
         fondo = AppColores.exito.withValues(alpha: 0.15);
-        frente = AppColores.exitoOscuro;
+        frente = AppColores.exitoTexto(context);
         icono = Icons.check_circle_rounded;
         break;
       case EstadoMembresia.porVencer:
         fondo = AppColores.alerta.withValues(alpha: 0.15);
-        frente = AppColores.alertaOscuro;
+        frente = AppColores.alertaTexto(context);
         icono = Icons.schedule_rounded;
         break;
       case EstadoMembresia.vencido:
         fondo = AppColores.error.withValues(alpha: 0.15);
-        frente = AppColores.errorOscuro;
+        frente = AppColores.errorTexto(context);
         icono = Icons.warning_rounded;
         break;
       // 1.25 T04: nunca pagó — neutro, jamás el verde
-      // de «al día».
+      // de «al día». 1.29: el frente pasa al rol de texto
+      // secundario (el gris anterior daba 2,50 en oscuro
+      // sobre su propio tinte).
       case EstadoMembresia.sinPagos:
         fondo = AppColores.bannerGrisA.withValues(alpha: 0.18);
-        frente = AppColores.bannerGrisB;
+        frente = AppColores.textoSecundario(context);
         icono = Icons.receipt_long_rounded;
         break;
       // 1.25 T13: membresía congelada — el estado manda
       // sobre los días (su vencimiento no está corriendo).
       case EstadoMembresia.congelado:
         fondo = AppColores.info.withValues(alpha: 0.15);
-        frente = AppColores.info;
+        frente = AppColores.infoTexto(context);
         icono = Icons.ac_unit_rounded;
         break;
     }
-    // En modo oscuro aclarar el texto del badge.
-    final oscuro =
-        Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
@@ -595,17 +622,13 @@ class BadgeEstado extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icono, size: 16, color: oscuro ? _aclarar(frente) : frente),
+          Icon(icono, size: 16, color: frente),
           const SizedBox(width: 4),
-          Text(texto,
-              style: AppTexto.etiqueta.copyWith(
-                  color: oscuro ? _aclarar(frente) : frente)),
+          Text(texto, style: AppTexto.etiqueta.copyWith(color: frente)),
         ],
       ),
     );
   }
-
-  Color _aclarar(Color c) => Color.lerp(c, Colors.white, 0.35) ?? c;
 
   /// Construye el badge desde días restantes (helper común).
   static BadgeEstado desdeDias(int dias, {int umbral = 7}) {
@@ -1292,6 +1315,87 @@ class ChipEstado extends StatelessWidget {
                 style: AppTexto.etiqueta
                     .copyWith(color: c),
                 overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Significado de un [AvisoEstado] (1.29 OG-0, D-03).
+enum TipoAviso { exito, aviso, error, info }
+
+/// Aviso de estado sobre fondo SÓLIDO (1.29 OG-0, D-03):
+/// para los mensajes que no pueden pasar desapercibidos
+/// (error de sync, aviso importante, confirmación). Fondo
+/// de la familia `*Fondo` de [AppColores] — invariante por
+/// tema — con icono canónico y texto en Colors.white
+/// literal (6,54–7,68:1 verificado por test): icono +
+/// palabra siempre, ningún estado solo por color.
+///
+/// Iconos canónicos de estado, fijados en la fundación y
+/// sin vuelta a discutir (tabla del estudio 1.29 §4.2):
+/// aviso = warning_amber_rounded · error =
+/// error_outline_rounded · info = info_rounded ·
+/// éxito = check_circle_rounded.
+class AvisoEstado extends StatelessWidget {
+  final TipoAviso tipo;
+  final String texto;
+  final IconData? icono;
+
+  const AvisoEstado({
+    super.key,
+    required this.tipo,
+    required this.texto,
+    this.icono,
+  });
+
+  Color get _fondo {
+    switch (tipo) {
+      case TipoAviso.exito:
+        return AppColores.exitoFondo;
+      case TipoAviso.aviso:
+        return AppColores.avisoFondo;
+      case TipoAviso.error:
+        return AppColores.errorFondo;
+      case TipoAviso.info:
+        return AppColores.infoFondo;
+    }
+  }
+
+  IconData get _iconoCanonico {
+    switch (tipo) {
+      case TipoAviso.exito:
+        return Icons.check_circle_rounded;
+      case TipoAviso.aviso:
+        return Icons.warning_amber_rounded;
+      case TipoAviso.error:
+        return Icons.error_outline_rounded;
+      case TipoAviso.info:
+        return Icons.info_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.lg, vertical: AppEspacio.md),
+      decoration: BoxDecoration(
+        color: _fondo,
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icono ?? _iconoCanonico, size: 20, color: Colors.white),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Text(
+              texto,
+              style: AppTexto.cuerpo.copyWith(
+                  color: Colors.white, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),

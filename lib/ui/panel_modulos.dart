@@ -73,7 +73,9 @@ List<DatoModuloPanel> modulosPanel({
   return [
     DatoModuloPanel(
       icono: Icons.attach_money_rounded,
-      tinte: AppColores.exito,
+      // 1.29 D-05/P-07: Caja deja el verde de estado por el
+      // dorado de módulo — el verde significa solo «al día».
+      tinte: AppColores.moduloCaja,
       titulo: 'Caja y dinero',
       estado: cajaHoyTotal > 0 || pendCajaTotal > 0
           ? 'Hoy \$${fmtMonto(cajaHoyTotal)} cobrado'
@@ -83,7 +85,7 @@ List<DatoModuloPanel> modulosPanel({
     ),
     DatoModuloPanel(
       icono: Icons.people_rounded,
-      tinte: AppColores.info,
+      tinte: AppColores.moduloClientes,
       titulo: 'Clientes e invitados',
       estado: '$clientesActivos clientes activos'
           '${valesPorAprobar > 0 ? ' · ${_conteo(valesPorAprobar, 'vale por aprobar', 'vales por aprobar')}' : ''}',
@@ -91,7 +93,7 @@ List<DatoModuloPanel> modulosPanel({
     ),
     DatoModuloPanel(
       icono: Icons.groups_rounded,
-      tinte: AppColores.naranja,
+      tinte: AppColores.moduloEquipo,
       titulo: 'Equipo y turnos',
       estado: sinReporte > 0
           ? _conteo(sinReporte, 'cierre sin reporte',
@@ -101,7 +103,7 @@ List<DatoModuloPanel> modulosPanel({
     ),
     DatoModuloPanel(
       icono: Icons.inventory_2_rounded,
-      tinte: const Color(0xFFA855F7),
+      tinte: AppColores.moduloSuplementos,
       titulo: 'Suplementos y contenido',
       estado: [
         if (reservas > 0)
@@ -119,7 +121,7 @@ List<DatoModuloPanel> modulosPanel({
       // es la configuración (decisión de la oleada,
       // a revisión de Argón).
       icono: Icons.settings_rounded,
-      tinte: const Color(0xFF9AA3B2),
+      tinte: AppColores.moduloConfiguracion,
       titulo: 'Configuración y datos',
       estado: preciosSinFijar > 0
           ? _conteo(preciosSinFijar, 'precio sin fijar',
@@ -129,7 +131,7 @@ List<DatoModuloPanel> modulosPanel({
     ),
     DatoModuloPanel(
       icono: Icons.bar_chart_rounded,
-      tinte: const Color(0xFF14B8A6),
+      tinte: AppColores.moduloControl,
       titulo: 'Control y sistema',
       estado: incidencias > 0
           ? _conteo(incidencias, 'incidencia por revisar',
@@ -163,12 +165,13 @@ class BadgeModuloPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // La misma pastilla roja de siempre de los módulos;
-    // lo nuevo es solo el pulso.
+    // La pastilla del contador, ahora sobre errorFondo
+    // (1.29 D-05): el blanco sobre el error brillante daba
+    // 3,76:1 y fallaba AA a 11 sp; sobre errorFondo da 6,54:1.
     final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColores.error,
+        color: AppColores.errorFondo,
         borderRadius: BorderRadius.circular(AppRadio.circular),
       ),
       child: Text(

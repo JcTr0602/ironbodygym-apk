@@ -6,6 +6,18 @@
 ///
 /// Target: gama media — se permite diseño rico (sombras sutiles,
 /// gradientes) manteniendo apertura rápida sin conexión.
+///
+/// NORMAS DE LA FUNDACIÓN (1.29 OG-0, escritas — no negociables):
+/// 1. **Ningún estado solo por color** — dinero y sync incluidos:
+///    todo estado lleva palabra; banners y diálogos, icono +
+///    palabra. (Hereda la A.7.6 del DS V2 de Clientes.)
+/// 2. **Blanco sobre naranja, prohibido**: sobre la marca va
+///    [AppColores.sobreMarca] (grafito, 6,32:1; el blanco da 2,75).
+/// 3. **Texto semántico = rol `*Texto`** resuelto por tema; el
+///    color brillante (exito/alerta/error/info) es relleno o
+///    gráfico, nunca texto directo en pantallas nuevas.
+/// 4. **Ningún `Color(0x…)` nuevo fuera de este archivo**: todo
+///    color nace como token con nombre aquí.
 library;
 
 import 'package:flutter/material.dart';
@@ -35,6 +47,39 @@ class AppColores {
   static const errorOscuro = Color(0xFFB91C1C);
   static const info = Color(0xFF3B82F6);
   static const infoOscuro = Color(0xFF1D4ED8);
+
+  // --- Roles de TEXTO de los semánticos (1.29 OG-0, D-02) ---
+  // Los brillantes de arriba son color de RELLENO o gráfico:
+  // como texto fallan AA sobre las superficies reales (GD-02:
+  // error sobre la superficie elevada oscura 3,81; exito sobre
+  // blanco 2,28). El texto de estado se pide SIEMPRE por estos
+  // roles, resueltos por brillo con los helpers exitoTexto /
+  // alertaTexto / errorTexto / infoTexto de abajo. Valores y
+  // cuentas de la tabla normativa del estudio de diseño 1.29
+  // (§4.1), verificados por test codificado:
+  //   oscuro sobre fondo/superficie/elevada · claro sobre
+  //   blanca/fondo/hundida, todo ≥ 4,5 salvo el límite declarado
+  //   de exitoTextoClaro sobre hundida (4,40: la hundida no
+  //   aloja texto de estado).
+  static const exitoTextoClaro = Color(0xFF15803D);
+  static const exitoTextoOscuro = Color(0xFF22C55E);
+  static const alertaTextoClaro = Color(0xFF9C4A0C);
+  static const alertaTextoOscuro = Color(0xFFF59E0B);
+  static const errorTextoClaro = Color(0xFFB91C1C);
+  static const errorTextoOscuro = Color(0xFFFF6B6B);
+  static const infoTextoClaro = Color(0xFF1D4ED8);
+  static const infoTextoOscuro = Color(0xFF38BDF8);
+
+  // --- Fondos SÓLIDOS de estado (1.29 OG-0, D-03) ---
+  // Invariantes por tema; encima va Colors.white literal
+  // (7,68 / 7,09 / 6,54 / 7,56 : 1, verificado por test).
+  // Para los avisos que no pueden fallar (AvisoEstado en
+  // componentes.dart): fondo sólido + icono + palabra, nunca
+  // un tinte translúcido.
+  static const exitoFondo = Color(0xFF065F46);
+  static const avisoFondo = Color(0xFF92400E);
+  static const errorFondo = Color(0xFFB3261E);
+  static const infoFondo = Color(0xFF075985);
 
   // --- Gradientes del banner de sync ---
   // Cola 1.20: los hex sueltos de widgets.dart pasan a ser
@@ -192,6 +237,15 @@ class AppColores {
   /// Contenido (texto/icono) sobre fondo naranja.
   static const sobreNaranja = Colors.white;
 
+  /// Contenido sobre la MARCA (1.29 OG-0, D-01 · GD-01): el
+  /// blanco sobre #E8821A da 2,75:1 y falla AA incluso en
+  /// texto grande; este grafito da 6,32:1 (y 4,98 sobre el
+  /// extremo oscuro del gradiente primario, 8,09 sobre el
+  /// ámbar). Lo fijan el tema (botón elevado, botón relleno,
+  /// FAB, onPrimary) y por herencia [BotonPrimario]. Regla
+  /// de la fundación: blanco sobre naranja, prohibido.
+  static const sobreMarca = Color(0xFF1A1A1C);
+
   /// Superficie y borde tintados de alerta (avisos, no errores).
   static const alertaSuperficieClaro = Color(0xFFFEF3C7);
   static const alertaBordeClaro = Color(0xFFFDE68A);
@@ -209,6 +263,107 @@ class AppColores {
       Theme.of(context).brightness == Brightness.dark
           ? alertaBordeOscuro
           : alertaBordeClaro;
+
+  /// Texto de éxito según el brillo actual (rol D-02).
+  static Color exitoTexto(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? exitoTextoOscuro
+          : exitoTextoClaro;
+
+  /// Texto de alerta según el brillo actual (rol D-02).
+  /// OJO: en claro es #9C4A0C, NO alertaOscuro (#D97706 da
+  /// 3,19 sobre blanco) ni #B45309 (ese ya es naranjaTexto:
+  /// aviso y marca serían el mismo color).
+  static Color alertaTexto(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? alertaTextoOscuro
+          : alertaTextoClaro;
+
+  /// Texto de error según el brillo actual (rol D-02).
+  /// En oscuro es #FF6B6B y no #FF5252: sobre la superficie
+  /// elevada de Gestión (#2A2A2A) el FF5252 queda en 4,50
+  /// exactos, sin margen; el FF6B6B deja 5,17.
+  static Color errorTexto(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? errorTextoOscuro
+          : errorTextoClaro;
+
+  /// Texto de información según el brillo actual (rol D-02).
+  static Color infoTexto(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? infoTextoOscuro
+          : infoTextoClaro;
+
+  // --- Identidad de módulo del Panel (1.29 OG-0, D-05) ---
+  // Los 6 tintes viven SOLO en la pastilla del icono del
+  // módulo y en su cabecera, siempre junto al nombre del
+  // módulo. «Caja y dinero» deja el verde de estado por el
+  // dorado (P-07): el verde significa solo «al día»/éxito
+  // en toda la app. Guarda: el dorado de módulo no se usa
+  // como tinte dentro de las pantallas de caja — dentro
+  // del dinero, dorado significa una sola cosa: efectivo.
+  static const moduloCaja = Color(0xFFD9A441);
+  static const moduloClientes = info;
+  static const moduloEquipo = naranja;
+  static const moduloSuplementos = Color(0xFFA855F7);
+  static const moduloConfiguracion = Color(0xFF9AA3B2);
+  static const moduloControl = Color(0xFF14B8A6);
+
+  // --- Categórica de trabajo (1.29 OG-0, D-11) ---
+  // Color con función, SIEMPRE junto a la palabra (nombre
+  // del entrenador o del método): jamás como estado (un
+  // entrenador «en rojo» no significa nada). En oscuro
+  // mandan los valores base (6,06–8,67 sobre las
+  // superficies); en claro, la variante oscurecida hasta
+  // ≥ 3,0 sobre blanco (calculada, no a ojo; el test
+  // codificado la verifica).
+  static const entrenador2 = Color(0xFF38BDF8);
+  static const entrenador2Claro = Color(0xFF2D97C6);
+  static const entrenador3 = Color(0xFFA78BFA);
+  static const entrenador3Claro = Color(0xFF967DE1);
+  static const entrenador4 = Color(0xFF34D399);
+  static const entrenador4Claro = Color(0xFF279E73);
+
+  /// Color de la posición [indice] en la lista estable de
+  /// entrenadores: 0 = dueño (la marca; en claro, su
+  /// variante de texto legible), 1..3 = los siguientes por
+  /// ORDEN de la lista — la asignación es por posición,
+  /// nunca por nombre escrito en código. Si la lista crece
+  /// más allá de 4 personas, los colores rotan: la
+  /// categórica distingue de un vistazo hasta 4.
+  static Color colorEntrenador(BuildContext context, int indice) {
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    switch (indice % 4) {
+      case 0:
+        return oscuro ? naranja : naranjaTexto;
+      case 1:
+        return oscuro ? entrenador2 : entrenador2Claro;
+      case 2:
+        return oscuro ? entrenador3 : entrenador3Claro;
+      default:
+        return oscuro ? entrenador4 : entrenador4Claro;
+    }
+  }
+
+  /// Método de pago: efectivo = dorado, transferencia =
+  /// azul. Solo junto a la palabra «efectivo» /
+  /// «transferencia»: el color refuerza, no sustituye.
+  static const metodoEfectivo = Color(0xFFD9A441);
+  static const metodoEfectivoClaro = Color(0xFFB28635);
+  static const metodoTransferencia = Color(0xFF60A5FA);
+  static const metodoTransferenciaClaro = Color(0xFF538ED7);
+
+  /// Dorado de «efectivo» según el brillo actual.
+  static Color colorEfectivo(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? metodoEfectivo
+          : metodoEfectivoClaro;
+
+  /// Azul de «transferencia» según el brillo actual.
+  static Color colorTransferencia(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? metodoTransferencia
+          : metodoTransferenciaClaro;
 }
 
 /// Tipografía del sistema (V1 1.20, escala contractual).
@@ -320,6 +475,13 @@ class AppRadio {
 }
 
 /// Sombras sutiles (gama media: permitidas, sin exagerar).
+///
+/// 1.29 OG-0 (D-18): queda UN solo lenguaje de elevación —
+/// el del tema ([AppTema]: cardTheme y los botones). Esta
+/// clase queda deprecada y sin llamadores; se conserva
+/// solo como referencia histórica de los valores.
+@Deprecated('La elevación manda del tema (AppTema), no de una '
+    'clase paralela. No usar en código nuevo (1.29 D-18).')
 class AppSombra {
   AppSombra._();
 
@@ -349,8 +511,9 @@ class AppSombra {
 /// v1.2.4 (Hark): tema único (claro/oscuro) a partir de los tokens.
 /// Antes estaba duplicado en main.dart. Unifica botones (alto mínimo 48,
 /// estado deshabilitado visible), campos, diálogos y avisos. Diseño rico,
-/// no plano: tarjetas y botones con sombra sutil (AppSombra) y el
-/// gradiente naranja en el botón primario (BotonPrimario).
+/// no plano: tarjetas y botones con la elevación del tema (único
+/// lenguaje de elevación desde la 1.29, D-18) y el gradiente naranja
+/// en el botón primario (BotonPrimario).
 class AppTema {
   AppTema._();
 
@@ -406,7 +569,9 @@ class AppTema {
         seedColor: AppColores.naranja,
         brightness: b,
         primary: AppColores.naranja,
-        onPrimary: Colors.white,
+        // 1.29 D-01 (GD-01): sobre la marca va el grafito
+        // sobreMarca (6,32:1); el blanco daba 2,75:1.
+        onPrimary: AppColores.sobreMarca,
         surface: superficie,
         error: AppColores.error,
         // Borde del tema (Argón 1.20): igual que antes en modo normal,
@@ -469,7 +634,8 @@ class AppTema {
       ),
       cardTheme: CardThemeData(
         color: superficie,
-        // Sombra sutil (misma gama que AppSombra.tarjeta).
+        // Sombra sutil del tema: la elevación de las tarjetas
+        // vive AQUÍ y solo aquí (1.29 D-18).
         elevation: 2,
         shadowColor: oscuro
             ? Colors.black.withValues(alpha: 0.6)
@@ -499,7 +665,8 @@ class AppTema {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColores.naranja,
-          foregroundColor: Colors.white,
+          // 1.29 D-01: letra grafito sobre la marca.
+          foregroundColor: AppColores.sobreMarca,
           disabledBackgroundColor: deshabilitadoFondo,
           disabledForegroundColor: deshabilitadoTexto,
           elevation: 2,
@@ -515,7 +682,8 @@ class AppTema {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColores.naranja,
-          foregroundColor: Colors.white,
+          // 1.29 D-01: letra grafito sobre la marca.
+          foregroundColor: AppColores.sobreMarca,
           disabledBackgroundColor: deshabilitadoFondo,
           disabledForegroundColor: deshabilitadoTexto,
           minimumSize: minimo,
@@ -584,7 +752,8 @@ class AppTema {
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: AppColores.naranja,
-        foregroundColor: Colors.white,
+        // 1.29 D-01: icono grafito sobre la marca.
+        foregroundColor: AppColores.sobreMarca,
       ),
       textTheme: const TextTheme(
         displayLarge: AppTexto.display,

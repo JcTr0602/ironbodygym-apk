@@ -2151,8 +2151,23 @@ class _ColaScreenState extends State<ColaScreen> {
                                     .withValues(alpha: 0.4),
                         width: 1,
                       ),
-                      boxShadow:
-                          AppSombra.tarjeta(context),
+                      // 1.29 D-18: valor exacto de la sombra de
+                      // tarjeta de la clase deprecada, en el sitio.
+                      boxShadow: [
+                        BoxShadow(
+                          color: (Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.black
+                                  : Colors.grey)
+                              .withValues(
+                                  alpha: Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? 0.4
+                                      : 0.12),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: ListTile(
                       leading: Icon(_iconoEstado(estado),

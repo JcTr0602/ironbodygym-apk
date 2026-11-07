@@ -1182,8 +1182,17 @@ class _ListasScreenState extends State<ListasScreen>
                       gradient:
                           AppColores.gradienteNaranja,
                       shape: BoxShape.circle,
-                      boxShadow:
-                          AppSombra.botonPrimario,
+                      // 1.29 D-18: valor exacto de la sombra del
+                      // botón primario de la clase deprecada,
+                      // escrito en el sitio.
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColores.naranja
+                              .withValues(alpha: 0.35),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: InkWell(
                       customBorder:
