@@ -805,11 +805,22 @@ class _PendienteScreenState extends State<PendienteScreen> {
     final colorAcento =
         hayPendiente ? AppColores.naranja : AppColores.exito;
     // Gemini: montos por moneda, sin mezclar.
-    final montos = <String>[];
-    if (total > 0) montos.add('${fmtMonto(total)} CUP');
-    if (_totalUsd > 0) montos.add('${_totalUsd.toStringAsFixed(2)} USD');
-    final textoMonto =
-        montos.isEmpty ? '0 CUP' : montos.join(' · ');
+    // 1.29 (Oleada 2, D-19): el pendiente total CUENTA
+    // hasta su cifra cuando cambia (MontoAnimado, 300 ms)
+    // en vez de saltar de golpe: al cobrar o liquidar se
+    // nota al instante si el número se movió y a cuánto.
+    // El formato final es exactamente el de antes (CUP y
+    // USD por separado, sin mezclar); el USD no se anima
+    // (es el acompañante fijo del total CUP).
+    String formatoTotal(double v) {
+      final montos = <String>[];
+      if (v > 0) montos.add('${fmtMonto(v)} CUP');
+      if (_totalUsd > 0) {
+        montos.add('${_totalUsd.toStringAsFixed(2)} USD');
+      }
+      return montos.isEmpty ? '0 CUP' : montos.join(' · ');
+    }
+
     return Padding(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Tarjeta(
@@ -828,12 +839,14 @@ class _PendienteScreenState extends State<PendienteScreen> {
                 ),
                 const SizedBox(width: AppEspacio.sm),
                 Flexible(
-                  child: Text(textoMonto,
-                      textAlign: TextAlign.center,
-                      style: AppTexto.display.copyWith(
-                        color: colorAcento,
-                        fontWeight: FontWeight.bold,
-                      )),
+                  child: MontoAnimado(
+                    valor: total,
+                    formato: formatoTotal,
+                    style: AppTexto.display.copyWith(
+                      color: colorAcento,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -870,6 +883,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
     required String titulo,
     required String subtitulo,
     required String monto,
+    // 1.29 (Oleada 2, D-11): método de la fila cuando el
+    // título ya lo escribe («Mensualidad — transferencia»):
+    // se pinta su punto categórico junto a la palabra.
+    String? metodo,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
@@ -886,7 +903,18 @@ class _PendienteScreenState extends State<PendienteScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(titulo, style: AppTexto.cuerpo),
+                if (metodo == null)
+                  Text(titulo, style: AppTexto.cuerpo)
+                else
+                  Row(
+                    children: [
+                      PuntoMetodo(metodo: metodo),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(titulo, style: AppTexto.cuerpo),
+                      ),
+                    ],
+                  ),
                 Text(subtitulo, style: AppTexto.secundario),
               ],
             ),
@@ -912,6 +940,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
             _filaDesglose(
               icono: Icons.payments_rounded,
               color: AppColores.exito,
+              metodo: '${p['metodo'] ?? ''}',
               titulo: 'Mensualidad — ${p['metodo']}',
               subtitulo:
                   '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)',
@@ -1281,10 +1310,18 @@ class _EntrenadorCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('${(porcion * 100).round()}% del total',
-                      style: AppTexto.metadato.copyWith(
-                          color:
-                              AppColores.textoSecundario(context))),
+                  // 1.29 (GD-12, caza del test): con porción
+                  // 100 % el texto fijo no cabía junto a la
+                  // barra en anchos estrechos y la fila
+                  // desbordaba; Flexible + elipsis.
+                  Flexible(
+                    child: Text(
+                        '${(porcion * 100).round()}% del total',
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTexto.metadato.copyWith(
+                            color: AppColores.textoSecundario(
+                                context))),
+                  ),
                 ],
               ),
             ],
@@ -1441,7 +1478,9 @@ class _DiaTile extends StatefulWidget {
 }
 
 class _DiaTileState extends State<_DiaTile> {
-  bool _mostrarTodos = false;
+  // 1.29 (Oleada 2, GD-12): la tarjeta ya NO esconde
+  // pagos tras un «Ver N pagos más...»: pinta SIEMPRE
+  // todos los del día (ver el cuerpo de build).
 
   // 1.25 T118 (F2-13): insignia con tokens semánticos del
   // tema — antes colores Material fijos (red/amber.shade100,
@@ -1531,10 +1570,16 @@ class _DiaTileState extends State<_DiaTile> {
         : monedasDia
             .map((m) => '${fmtMonto(dia.totalPorMoneda(m))} $m')
             .join(' · ');
-    final visibles = (_mostrarTodos ||
-            dia.pagos.length <= 3)
-        ? dia.pagos
-        : dia.pagos.take(3).toList();
+    // 1.29 (Oleada 2, GD-12 — síntoma de campo de Jc,
+    // 2026-11-07): se pintan TODOS los pagos del día, sin
+    // tope. El mecanismo anterior cortaba a 3 y dejaba el
+    // resto tras un enlace «Ver N pagos más...» en letra
+    // pequeña al pie de la tarjeta (y la tarjeta del
+    // entrenador arranca plegada): en campo, el día de
+    // Gabriel enseñaba 3 pagos de 5 y el total no se
+    // podía comprobar fila a fila — cobrar a ciegas.
+    // P-02 del plan: sin mecanismo de expandir.
+    final visibles = dia.pagos;
     // F2-13: sin emoji de semáforo — la insignia ya dice la
     // urgencia con su color y la etiqueta («HACE 4 DÍAS»);
     // dos lenguajes a la vez sobraban.
@@ -1584,12 +1629,19 @@ class _DiaTileState extends State<_DiaTile> {
                   style: AppTexto.cuerpo.copyWith(color: AppColores.texto(context), fontWeight: FontWeight.bold),
                 ),
               ),
-              IconButton(
-                visualDensity:
-                    VisualDensity.compact,
-                icon: const Icon(Icons.done_all_rounded,
-                    color: AppColores.exito, size: 20),
-                tooltip: 'Cobrar este día',
+              // 1.29 (Oleada 2, D-12): «Cobrar este día»
+              // deja de ser un iconito compacto de ~40 px
+              // sin texto y pasa a botón con su nombre y
+              // objetivo ≥ 48, como mandan las acciones de
+              // dinero (con las manos en el mostrador, un
+              // icono de 20 px sin etiqueta se falla).
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  foregroundColor: AppColores.exito,
+                ),
+                icon: const Icon(Icons.done_all_rounded, size: 20),
+                label: const Text('Cobrar'),
                 onPressed: widget.onConfirmar,
               ),
             ],
@@ -1637,23 +1689,6 @@ class _DiaTileState extends State<_DiaTile> {
                   // v1.3.4 (C2d): badge si se cobró distinto del oficial.
                   _chipPrecioModificado(p),
                 ],
-              ),
-            ),
-          if (dia.pagos.length > 3)
-            InkWell(
-              onTap: () => setState(
-                  () => _mostrarTodos =
-                      !_mostrarTodos),
-              child: Padding(
-                padding:
-                    const EdgeInsets.only(top: AppEspacio.xs),
-                child: Text(
-                  _mostrarTodos
-                      ? 'Ocultar detalles'
-                      : 'Ver ${dia.pagos.length - 3} pagos más...',
-                  style: AppTexto.metadato.copyWith(color: Theme.of(context)
-                          .primaryColor, fontWeight: FontWeight.w500),
-                ),
               ),
             ),
         ],

@@ -91,8 +91,11 @@ Future<bool> mostrarDialogoResolverDiferencia(
                   const SizedBox(height: AppEspacio.sm),
                   Text(
                     'Para «Otro» hay que escribir la nota.',
-                    style: AppTexto.metadato
-                        .copyWith(color: AppColores.error),
+                    // 1.29 (Oleada 2): rol de TEXTO de error
+                    // de la Oleada 1 (el rol crudo no llegaba
+                    // al contraste sobre el fondo del tema).
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(context)),
                   ),
                 ],
               ],
@@ -150,7 +153,16 @@ Widget chipExpedienteDiferencia(Map<String, dynamic> exp) {
 }
 
 class DiferenciasCajaScreen extends StatefulWidget {
-  const DiferenciasCajaScreen({super.key});
+  /// 1.29 (Oleada 2, D-A4): con [soloEntrenadorTid], la
+  /// pantalla es la vista del PROPIO entrenador sobre SUS
+  /// expedientes (solo lectura: sin candado de dueño y
+  /// sin botón Resolver). Es el destino del «y N más» de
+  /// su tarjeta en el Dashboard: sin filtro, la lista
+  /// completa de sus expedientes no existía en su vista
+  /// (la tarjeta cortaba a 5 sin salida).
+  final int? soloEntrenadorTid;
+
+  const DiferenciasCajaScreen({super.key, this.soloEntrenadorTid});
 
   @override
   State<DiferenciasCajaScreen> createState() =>
@@ -163,6 +175,8 @@ class _DiferenciasCajaScreenState
   List<Map<String, dynamic>> _abiertas = [];
   List<Map<String, dynamic>> _resueltas = [];
 
+  bool get _filtrada => widget.soloEntrenadorTid != null;
+
   @override
   void initState() {
     super.initState();
@@ -172,7 +186,10 @@ class _DiferenciasCajaScreenState
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final filas = await DiferenciasCajaService.instance.todas();
+      final tid = widget.soloEntrenadorTid;
+      final filas = tid != null
+          ? await DiferenciasCajaService.instance.deEntrenador(tid)
+          : await DiferenciasCajaService.instance.todas();
       if (mounted) {
         setState(() {
           _abiertas = filas
@@ -223,7 +240,10 @@ class _DiferenciasCajaScreenState
               Text('Nota: $notaRes',
                   style: AppTexto.metadato.copyWith(
                       color: AppColores.textoSecundario(context))),
-            if (!resuelta) ...[
+            // 1.29 (D-A4): en la vista filtrada del propio
+            // entrenador no hay acción de resolver (eso lo
+            // hace el dueño en su bandeja).
+            if (!resuelta && !_filtrada) ...[
               const SizedBox(height: AppEspacio.sm),
               Align(
                 alignment: Alignment.centerRight,
@@ -248,7 +268,11 @@ class _DiferenciasCajaScreenState
 
   @override
   Widget build(BuildContext context) {
-    if (!AuthService().isOwner) {
+    // 1.29 (D-A4): la vista filtrada es del propio
+    // entrenador sobre sus expedientes: no pasa por el
+    // candado de dueño (sus datos ya son los suyos; el
+    // servicio filtra por su telegram_id).
+    if (!_filtrada && !AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Diferencias de caja'),
         body: const EstadoVacio(
@@ -260,7 +284,7 @@ class _DiferenciasCajaScreenState
     return Scaffold(
       appBar: appBarIron(
         context,
-        'Diferencias de caja',
+        _filtrada ? 'Mis diferencias de caja' : 'Diferencias de caja',
         acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -297,6 +321,63 @@ class _DiferenciasCajaScreenState
               ),
             ),
         ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 2, D-A4): el resumen de expedientes de la
+/// tarjeta «Mis diferencias de caja» del Dashboard del
+/// entrenador: pinta como máximo [maxVisibles] filas y,
+/// si quedan más, el enlace «y N más» que lleva a la
+/// lista completa filtrada por ese entrenador. Antes la
+/// tarjeta cortaba la lista a 5 EN SILENCIO: el sexto
+/// expediente en adelante no existía en su vista.
+class ListaDiferenciasResumen extends StatelessWidget {
+  final List<Map<String, dynamic>> expedientes;
+  final VoidCallback? onVerMas;
+  final int maxVisibles;
+
+  const ListaDiferenciasResumen({
+    super.key,
+    required this.expedientes,
+    this.onVerMas,
+    this.maxVisibles = 5,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visibles = expedientes.take(maxVisibles).toList();
+    final restantes = expedientes.length - visibles.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final e in visibles)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Faltan '
+                    '${fmtMonto(e['monto'])} '
+                    '${e['moneda'] ?? 'CUP'} · '
+                    '${fmtFecha('${e['fecha'] ?? ''}')}',
+                    style: AppTexto.secundario,
+                  ),
+                ),
+                chipExpedienteDiferencia(e),
+              ],
+            ),
+          ),
+        if (restantes > 0)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: onVerMas,
+              child: Text('y $restantes más'),
+            ),
+          ),
+      ],
     );
   }
 }

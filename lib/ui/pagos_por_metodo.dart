@@ -332,11 +332,17 @@ class _PagosPorMetodoState
                 padding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.lg),
                 children: [
+                  // 1.29 (Oleada 2, D-11): las barras de
+                  // método usan SU color categórico (efectivo
+                  // dorado, transferencia azul), no el verde
+                  // de «éxito» ni el azul de «info»: el método
+                  // se reconoce de un vistazo en toda la app
+                  // con el mismo código.
                   _buildBarra(
                     'Efectivo',
                     _efectivo,
                     total,
-                    AppColores.exito,
+                    AppColores.metodoEfectivo,
                     Icons.money_rounded,
                     operaciones: _nEfectivo,
                   ),
@@ -345,7 +351,7 @@ class _PagosPorMetodoState
                     'Transferencia',
                     _transferencia,
                     total,
-                    AppColores.info,
+                    AppColores.metodoTransferencia,
                     Icons.credit_card_rounded,
                     operaciones: _nTransferencia,
                   ),
@@ -391,7 +397,7 @@ class _PagosPorMetodoState
                       'Efectivo USD',
                       _efectivoUsd,
                       _efectivoUsd + _transferenciaUsd,
-                      AppColores.exito,
+                      AppColores.metodoEfectivo,
                       Icons.money_rounded,
                       moneda: 'USD',
                     ),
@@ -401,7 +407,7 @@ class _PagosPorMetodoState
                         'Transferencia USD',
                         _transferenciaUsd,
                         _efectivoUsd + _transferenciaUsd,
-                        AppColores.info,
+                        AppColores.metodoTransferencia,
                         Icons.credit_card_rounded,
                         moneda: 'USD',
                       ),

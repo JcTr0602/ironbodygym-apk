@@ -1677,6 +1677,41 @@ class MontoAnimado extends StatelessWidget {
   }
 }
 
+/// 1.29 (Oleada 2, D-11): color categórico de un método
+/// de cobro — efectivo en dorado, transferencia en azul
+/// (los tokens metodoEfectivo/metodoTransferencia de la
+/// Oleada 1). Cualquier otro valor (mixto, cortesía…)
+/// cae al naranja de marca: no es un método de dos
+/// colores y no debe disfrazarse de ninguno.
+Color colorDeMetodo(String? metodo) {
+  final m = (metodo ?? '').toLowerCase();
+  if (m.contains('transfer')) return AppColores.metodoTransferencia;
+  if (m.contains('efectivo')) return AppColores.metodoEfectivo;
+  return AppColores.naranja;
+}
+
+/// 1.29 (Oleada 2, D-11): el punto de color del método,
+/// para pintar JUNTO a la palabra que la fila ya escribe
+/// («Mensualidad — transferencia»): la lista de dinero se
+/// escanea de un vistazo sin leer cada fila, y el método
+/// nunca va SOLO por color (la palabra sigue ahí).
+class PuntoMetodo extends StatelessWidget {
+  final String? metodo;
+  const PuntoMetodo({super.key, required this.metodo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        color: colorDeMetodo(metodo),
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
 /// 1.25 T65: la línea de corte punteada del ticket,
 /// compartida por el Preview y el Recibo del cobro (el
 /// mismo trazo que el comprobante ya usaba).

@@ -531,14 +531,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Text(titulo, style: AppTexto.titulo),
             const SizedBox(height: 12),
-            _filaDetalle('Efectivo', efectivo),
-            _filaDetalle('Transferencia', transferencia),
+            // 1.29 (Oleada 2, D-11): las filas de método
+            // llevan su punto categórico junto a la palabra
+            // (efectivo dorado, transferencia azul).
+            _filaDetalle('Efectivo', efectivo,
+                punto: AppColores.metodoEfectivo),
+            _filaDetalle('Transferencia', transferencia,
+                punto: AppColores.metodoTransferencia),
             if (diario > 0) _filaDetalle('Pago diario', diario),
             if (suplementos > 0)
               _filaDetalle('Suplementos', suplementos),
             if (servicios > 0) _filaDetalle('Servicios', servicios),
             const Divider(),
-            _filaDetalle('Total', total, negrita: true),
+            // 1.29 (Oleada 2, D-19): el total cuenta hasta
+            // su cifra (MontoAnimado) en vez de texto plano.
+            _filaDetalle('Total', total, negrita: true, animado: true),
             const SizedBox(height: 8),
             Text('${pagos.length} movimientos registrados',
                 style: AppTexto.secundario.copyWith(
@@ -551,14 +558,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _filaDetalle(String etiqueta, double valor,
-      {bool negrita = false}) {    return Padding(
+      {bool negrita = false, Color? punto, bool animado = false}) {
+    final estiloValor = AppTexto.subtitulo.copyWith(
+        color: negrita ? naranja : null, fontWeight: FontWeight.bold);
+    return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppEspacio.xs),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(etiqueta, style: AppTexto.subtitulo),
-          Text('${fmtMonto(valor)} CUP',
-              style: AppTexto.subtitulo.copyWith(color: negrita ? naranja : null, fontWeight: FontWeight.bold)),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (punto != null) ...[
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                      color: punto, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(etiqueta, style: AppTexto.subtitulo),
+            ],
+          ),
+          if (animado)
+            MontoAnimado(
+              valor: valor,
+              formato: (v) => '${fmtMonto(v)} CUP',
+              style: estiloValor,
+            )
+          else
+            Text('${fmtMonto(valor)} CUP', style: estiloValor),
         ],
       ),
     );
@@ -708,25 +738,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         crossAxisAlignment:
                             CrossAxisAlignment.start,
                         children: [
-                          for (final e in _misDiferencias.take(5))
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                  bottom: AppEspacio.sm),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      'Faltan '
-                                      '${fmtMonto(e['monto'])} '
-                                      '${e['moneda'] ?? 'CUP'} · '
-                                      '${fmtFecha('${e['fecha'] ?? ''}')}',
-                                      style: AppTexto.secundario,
-                                    ),
-                                  ),
-                                  chipExpedienteDiferencia(e),
-                                ],
-                              ),
-                            ),
+                          // 1.29 (Oleada 2, D-A4): la tarjeta
+                          // cortaba la lista a 5 EN SILENCIO
+                          // (take(5) sin salida): del sexto
+                          // expediente en adelante no existía
+                          // en su vista. Ahora pinta 5 + «y N
+                          // más», que lleva a la lista
+                          // completa filtrada por él.
+                          ListaDiferenciasResumen(
+                            expedientes: _misDiferencias,
+                            onVerMas: _auth.telegramId == null
+                                ? null
+                                : () => _ir(DiferenciasCajaScreen(
+                                    soloEntrenadorTid:
+                                        _auth.telegramId)),
+                          ),
                           Text(
                             'El dueño abre un expediente cuando '
                             'falta dinero en una liquidación y no '

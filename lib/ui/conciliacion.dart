@@ -132,16 +132,19 @@ Future<bool> mostrarDialogoConciliar(
                   Text(
                     'Para marcar «Con problema» o «Rechazada» '
                     'hay que escribir la nota.',
-                    style: AppTexto.metadato
-                        .copyWith(color: AppColores.error),
+                    // 1.29 (Oleada 2): rol de TEXTO de error
+                    // de la Oleada 1 (contraste sobre el
+                    // fondo del tema en claro y en oscuro).
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(ctx)),
                   ),
                 ],
                 if (errorGuardado != null) ...[
                   const SizedBox(height: AppEspacio.sm),
                   Text(
                     errorGuardado!,
-                    style: AppTexto.metadato
-                        .copyWith(color: AppColores.error),
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(ctx)),
                   ),
                 ],
               ],
@@ -453,10 +456,12 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: AppEspacio.xs),
                 child: Text('Nota: $nota',
+                    // 1.29 (Oleada 2): rol de TEXTO de error
+                    // de la Oleada 1 en la nota de problema.
                     style: AppTexto.metadato.copyWith(
                         color: (estado == 'problema' ||
                                 estado == 'rechazada')
-                            ? AppColores.error
+                            ? AppColores.errorTexto(context)
                             : AppColores.textoSecundario(context))),
               ),
             const SizedBox(height: AppEspacio.sm),
