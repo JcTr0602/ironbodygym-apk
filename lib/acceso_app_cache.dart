@@ -237,6 +237,19 @@ class AccesoAppCache {
     // ya; la red refresca encima en esta misma llamada.
     if (_porCliente == null) {
       await _restaurarPersistido();
+      // Corrección A3-X1 (auditorías 1.28): si limpiar() (o
+      // una mutación) ganó la carrera DURANTE la
+      // restauración, la foto restaurada es de la vida
+      // anterior y no puede repoblar la caché recién
+      // limpiada: se deshace la restauración y este vuelo
+      // se descarta, como ya hacía el chequeo de
+      // generación tras la RPC.
+      if (gen != _genDatos) {
+        _porCliente = null;
+        _verificadoEn = null;
+        _esPersistido = false;
+        return false;
+      }
     }
     try {
       // Timeout propio (10 s): sin conexión, una RPC sin
@@ -290,6 +303,17 @@ class AccesoAppCache {
   /// frío). Nunca lanza: sin meta o con meta sucia, el caché
   /// queda como estaba.
   Future<void> _restaurarPersistido() async {
+    // Corrección A3-X1: si un limpiar() está borrando la
+    // foto persistida, se espera a que el borrado aterrice
+    // antes de leer: sin esto, una restauración de la
+    // sesión NUEVA podía leer la foto de la anterior.
+    final borrado = _borradoPersistido;
+    if (borrado != null) {
+      await borrado;
+      if (identical(_borradoPersistido, borrado)) {
+        _borradoPersistido = null;
+      }
+    }
     try {
       final crudo = await LocalDb.instance.getMeta(_kMeta);
       if (crudo == null || crudo.isEmpty) return;
@@ -336,6 +360,11 @@ class AccesoAppCache {
     _genDatos++;
   }
 
+  /// Corrección A3-X1: el borrado de la foto persistida
+  /// que [limpiar] deja en curso; [_restaurarPersistido]
+  /// lo espera antes de leer la meta.
+  Future<void>? _borradoPersistido;
+
   /// Limpia el caché (al cerrar sesión): memoria, foto
   /// persistida y vuelos en curso quedan invalidados — la
   /// sesión siguiente no hereda un aterrizaje zombi como
@@ -347,10 +376,11 @@ class AccesoAppCache {
     _genEnCurso = -1;
     _verificadoEn = null;
     _esPersistido = false;
-    unawaited(() async {
+    _borradoPersistido = () async {
       try {
         await LocalDb.instance.setMeta(_kMeta, '');
       } catch (_) {}
-    }());
+    }();
+    unawaited(_borradoPersistido!);
   }
 }

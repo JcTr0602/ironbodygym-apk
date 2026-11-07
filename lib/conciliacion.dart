@@ -14,6 +14,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import 'localdb.dart';
@@ -68,9 +69,9 @@ class ConciliacionService {
   /// La bandeja la pinta sobre el espejo para que lo ya
   /// marcado no siga saliendo «por comprobar» hasta que el
   /// sync baje la fila nueva.
-  Future<Map<int, String>> _marcasEnCola() async {
+  Future<Map<int, String>> _marcasEnCola({DatabaseExecutor? txn}) async {
     final out = <int, String>{};
-    for (final op in await _db.pendingOpsLectura()) {
+    for (final op in await _db.pendingOpsLectura(txn: txn)) {
       if ('${op['tipo']}' != 'marcar_conciliacion') continue;
       try {
         final p = jsonDecode(op['payload'] as String)
@@ -94,22 +95,32 @@ class ConciliacionService {
     // servidor (su CAS espera el estado crudo del espejo, que
     // la primera ya había movido) y caía a revisión como
     // incidencia fantasma.
-    if ((await _marcasEnCola()).containsKey(pagoId)) {
-      throw StateError(
-          'Este pago ya tiene una marca de conciliación en '
-          'cola de sincronización: espera a que sincronice.');
-    }
-    await _db.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'marcar_conciliacion',
-      payload: {
-        'pago_id': pagoId,
-        'estado': estado,
-        'estado_esperado': estadoEsperado,
-        if (nota != null && nota.trim().isNotEmpty)
-          'nota': nota.trim(),
-      },
-    );
+    // Corrección A3-D1 (auditorías 1.28): la comprobación y
+    // el encolado van en UNA transacción leyendo solo por
+    // txn — antes eran check-then-act en pasos separados y
+    // dos marcadas concurrentes (el lote y el diálogo, o un
+    // doble toque del lote) podían pasar ambas el check y
+    // encolar dos ops para el mismo pago.
+    final d = await _db.db;
+    await d.transaction((txn) async {
+      if ((await _marcasEnCola(txn: txn)).containsKey(pagoId)) {
+        throw StateError(
+            'Este pago ya tiene una marca de conciliación en '
+            'cola de sincronización: espera a que sincronice.');
+      }
+      await _db.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'marcar_conciliacion',
+        payload: {
+          'pago_id': pagoId,
+          'estado': estado,
+          'estado_esperado': estadoEsperado,
+          if (nota != null && nota.trim().isNotEmpty)
+            'nota': nota.trim(),
+        },
+        txn: txn,
+      );
+    });
     // 1.23 (auditoría extra P3): sin await — no congelar la UI.
     // Delta panel M2: helper compartido (consume el error
     // asíncrono; el try/catch de antes no lo veía).

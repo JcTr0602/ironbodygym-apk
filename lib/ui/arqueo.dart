@@ -470,12 +470,29 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     mostrarSnack(context, 'Resumen copiado, pégalo en WhatsApp');
   }
 
+  /// Corrección A3-D2 (auditorías 1.28): guarda de vuelo
+  /// del deshacer en cola — sin ella, un doble toque
+  /// lanzaba dos deshacerLiquidacion: la primera deshacía
+  /// y la segunda, al no encontrar la op, enseñaba el
+  /// FALSO «ya sincronizó» tras un deshacer correcto.
+  bool _deshaciendo = false;
+
   /// (M2-BC B2) Deshacer desde el panel «en cola» (la misma
   /// vía que la barra de aviso): solo si la op sigue en el
   /// teléfono; si ya sincronizó, se dice y no se toca nada.
   Future<void> _deshacerEnCola() async {
+    if (_deshaciendo) return;
     final uuid = _uuidEnCola;
     if (uuid == null) return;
+    setState(() => _deshaciendo = true);
+    try {
+      await _deshacerEnColaReal(uuid);
+    } finally {
+      if (mounted) setState(() => _deshaciendo = false);
+    }
+  }
+
+  Future<void> _deshacerEnColaReal(String uuid) async {
     final ok = await deshacerLiquidacion(uuid);
     if (!mounted) return;
     if (ok) {
@@ -954,7 +971,9 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                         size: 18),
                                     label: const Text(
                                         'Deshacer liquidación'),
-                                    onPressed: _deshacerEnCola,
+                                    onPressed: _deshaciendo
+                                        ? null
+                                        : _deshacerEnCola,
                                     style: TextButton.styleFrom(
                                         foregroundColor:
                                             AppColores.error),

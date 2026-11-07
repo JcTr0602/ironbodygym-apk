@@ -33,6 +33,13 @@ class PremiosHubScreen extends StatefulWidget {
 class _PremiosHubScreenState extends State<PremiosHubScreen> {
   int? _porAprobar;
 
+  /// Corrección A3-D3 (auditorías 1.28): generación del
+  /// conteo, el mismo patrón que el Panel en admin.dart —
+  /// sin ella, un reconteo lento podía aterrizar DESPUÉS
+  /// de uno nuevo y la pastilla enseñaba el conteo viejo
+  /// (con un vale de más) hasta el próximo aviso.
+  int _conteoGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -47,8 +54,10 @@ class _PremiosHubScreenState extends State<PremiosHubScreen> {
   }
 
   Future<void> _recargarConteo() async {
+    final gen = ++_conteoGen;
     final n = await contarValesPorAprobar();
-    if (mounted) setState(() => _porAprobar = n);
+    if (!mounted || gen != _conteoGen) return;
+    setState(() => _porAprobar = n);
   }
 
   @override

@@ -289,10 +289,27 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
     });
   }
 
+  /// Corrección A3-D1 (auditorías 1.28): guarda de vuelo
+  /// del lote — el marcado tarda segundos (una op por
+  /// fila) y el botón quedaba vivo con la selección
+  /// intacta: un segundo toque abría otro diálogo y
+  /// lanzaba un SEGUNDO lote concurrente.
+  bool _marcandoLote = false;
+
   /// (M2-BC B4) marca las seleccionadas como comprobadas
   /// en una sola pasada (servicio: [marcarLoteComprobadas])
   /// y reporta marcadas/omitidas con honestidad.
   Future<void> _marcarLote() async {
+    if (_marcandoLote) return;
+    setState(() => _marcandoLote = true);
+    try {
+      await _marcarLoteReal();
+    } finally {
+      if (mounted) setState(() => _marcandoLote = false);
+    }
+  }
+
+  Future<void> _marcarLoteReal() async {
     final filas = [
       for (final p in _porComprobar)
         if (_seleccion.contains((p['id'] as num?)?.toInt())) p,
@@ -565,7 +582,11 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                         texto: 'Marcar comprobadas '
                             '(${_seleccion.length})',
                         icono: Icons.fact_check_rounded,
-                        onPressed: _marcarLote,
+                        // Corrección A3-D1: mientras el lote
+                        // corre, el botón se deshabilita y
+                        // enseña el indicador.
+                        onPressed: _marcandoLote ? null : _marcarLote,
+                        cargando: _marcandoLote,
                       ),
                     ),
                   ),
