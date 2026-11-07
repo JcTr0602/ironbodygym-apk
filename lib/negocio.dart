@@ -7441,6 +7441,90 @@ double _montoGastoTolerante(dynamic v) {
   return 0;
 }
 
+/// 1.29 (Oleada 2, D-A1), PURO: normaliza el nombre de
+/// autor de un gasto para compararlo: recorta espacios,
+/// retira el sufijo «(APK)» con el que algunos caminos
+/// anotan el origen y pasa a minúsculas. El servidor
+/// publica el autor del gasto como NOMBRE (sync.py lo
+/// resuelve desde sync_devices por telegram_id y el
+/// puente lo baja así al espejo), así que la autoría de
+/// los gastos del espejo se compara por nombre
+/// normalizado, jamás por telegram_id contra un texto.
+String normalizarNombreAutorGasto(String nombre) {
+  var s = nombre.trim();
+  s = s.replaceAll(RegExp(r'\s*\(apk\)\s*$', caseSensitive: false), '');
+  return s.trim().toLowerCase();
+}
+
+/// 1.29 (Oleada 2, D-A1): el predicado ÚNICO de autoría
+/// de gastos, compartido por [_gastosPendientes] y
+/// [gastosTodos]. Devuelve los dos predicados ya
+/// resueltos contra la sesión y el directorio del pull:
+///
+/// - `opEsMia(sello)`: la op de la cola es mía si soy el
+///   dueño o su sello `telegram_id` — la columna ENTERA
+///   que queueOp selló al encolar — es el mío. Sin
+///   cambios: el sello de la cola SÍ es un id.
+/// - `espejoEsMio(fila)`: la fila del espejo es mía si
+///   soy el dueño; si su `registrado_por` trae forma de
+///   id (filas viejas), se compara como id; si trae
+///   NOMBRE — la forma real de producción — se compara
+///   contra MI nombre canónico, resuelto desde MI
+///   telegram_id contra el directorio `usuarios_apk`
+///   ([nombresCanonEntrenadores]).
+///
+/// Reglas H-04 de Argón que este predicado impone:
+/// - PROHIBIDO caer al nombre de exhibición de la
+///   sesión (displayName): lo edita el propio usuario y
+///   permitiría ver los gastos de otro poniéndose su
+///   nombre. Solo manda el nombre que el DIRECTORIO
+///   asocia a mi telegram_id (app_metadata, no
+///   editable por el usuario).
+/// - Fail-closed en arranque en frío: con sesión pero
+///   sin nombre resuelto (directorio vacío o sin mi
+///   fila), el espejo devuelve CERO filas; mis
+///   pendientes se siguen viendo por su sello entero.
+///   Jamás se compara el nombre contra '' (un autor
+///   vacío no es «mío»).
+/// - Sin sesión legible (telegram_id nulo; los tests
+///   sin login) se conserva la semántica histórica de
+///   H4 (id nulo == id nulo).
+///
+/// Acceso defensivo (patrón de queueOp): sin Supabase
+/// inicializado la identidad es nula y la comparación
+/// de sellos se comporta como siempre; AuthService no
+/// debe tumbar una lectura de dinero.
+Future<
+    ({
+      bool Function(dynamic sello) opEsMia,
+      bool Function(Map<String, dynamic> fila) espejoEsMio,
+    })> _filtroGastos() async {
+  var esDueno = false;
+  int? miTid;
+  try {
+    esDueno = AuthService().isOwner;
+    miTid = AuthService().telegramId;
+  } catch (_) {}
+  final miNombre = (esDueno || miTid == null)
+      ? null
+      : (await nombresCanonEntrenadores())[miTid];
+  final miNombreNorm =
+      miNombre == null ? null : normalizarNombreAutorGasto(miNombre);
+  bool opEsMia(dynamic sello) =>
+      esDueno || LocalDb.normalizarTelegramId(sello) == miTid;
+  bool espejoEsMio(Map<String, dynamic> g) {
+    if (esDueno) return true;
+    final regTid = LocalDb.normalizarTelegramId(g['registrado_por']);
+    if (miTid == null) return regTid == null;
+    if (regTid != null) return regTid == miTid;
+    if (miNombreNorm == null || miNombreNorm.isEmpty) return false;
+    return normalizarNombreAutorGasto('${g['registrado_por'] ?? ''}') ==
+        miNombreNorm;
+  }
+
+  return (opEsMia: opEsMia, espejoEsMio: espejoEsMio);
+}
+
 Future<List<Map<String, dynamic>>> _gastosPendientes() async {
   final out = <Map<String, dynamic>>[];
   final db = await LocalDb.instance.db;
@@ -7455,19 +7539,13 @@ Future<List<Map<String, dynamic>>> _gastosPendientes() async {
   // al encolar; el del espejo, su registrado_por. Sin
   // sesión (tests) ambas sellos son nulos y la comparación
   // nulo==nulo conserva el comportamiento histórico.
-  // Acceso defensivo (patrón de queueOp): sin Supabase
-  // inicializado la identidad es nula y la comparación
-  // de sellos se comporta como siempre; AuthService no
-  // debe tumbar una lectura de dinero.
-  var esDuenoGastos = false;
-  int? miTidGastos;
-  try {
-    esDuenoGastos = AuthService().isOwner;
-    miTidGastos = AuthService().telegramId;
-  } catch (_) {}
-  bool gastoEsMio(dynamic selloAutor) =>
-      esDuenoGastos ||
-      LocalDb.normalizarTelegramId(selloAutor) == miTidGastos;
+  // 1.29 (Oleada 2, D-A1): los dos sellos NO tienen la
+  // misma forma — el de la cola es un telegram_id entero
+  // y el del espejo es el NOMBRE del autor — así que la
+  // autoría la decide el predicado único [_filtroGastos]
+  // (opEsMia para la cola, espejoEsMio para el espejo).
+  final filtro = await _filtroGastos();
+  bool gastoEsMio(dynamic selloAutor) => filtro.opEsMia(selloAutor);
   // Argón Dinero #4: también 'enviada' (en vuelo o retenida),
   // cruzando contra el espejo por (fecha, concepto, monto): la
   // tabla gastos no lleva op_uuid. Sin el cruce, un gasto ya
@@ -7486,7 +7564,13 @@ Future<List<Map<String, dynamic>>> _gastosPendientes() async {
     // gasto espejado de otro autor no puede «tragarse»
     // un pendiente mío gemelo (misma fecha/concepto/
     // monto) ni el mío el suyo.
-    if (!gastoEsMio(g['registrado_por'])) continue;
+    // 1.29 (D-A1): «propio» en el espejo se decide por
+    // el predicado de nombre/id de [_filtroGastos], no
+    // por el sello entero de la cola: con el sello, una
+    // fila espejo con autor en texto nunca contaba como
+    // propia y la op gemela de otro entrenador podía
+    // consumir la ocurrencia de la mía.
+    if (!filtro.espejoEsMio(g)) continue;
     final clave = '${fechaNegocioHabana(g['fecha'])}|${g['concepto']}|'
         '${_montoGastoTolerante(g['monto'])}';
     conteoEspejo[clave] = (conteoEspejo[clave] ?? 0) + 1;
@@ -7522,24 +7606,20 @@ Future<List<Map<String, dynamic>>> _gastosPendientes() async {
 Future<List<Map<String, dynamic>>> gastosTodos() async {
   final espejo = await LocalDb.instance.allMirror('gastos');
   // Ajuste Argón 1.28 (hallazgo #4): la vista de gastos
-  // filtra el espejo por registrado_por cuando quien
-  // mira no es el dueño (Decisión de Criterio #2). El
-  // dueño sigue viendo todos.
-  // Misma lectura defensiva de identidad que
-  // _gastosPendientes (sin Supabase, identidad nula).
-  var esDuenoVista = false;
-  int? miTidVista;
-  try {
-    esDuenoVista = AuthService().isOwner;
-    miTidVista = AuthService().telegramId;
-  } catch (_) {}
-  final rows = esDuenoVista
-      ? espejo
-      : espejo
-          .where((g) =>
-              LocalDb.normalizarTelegramId(g['registrado_por']) ==
-              miTidVista)
-          .toList();
+  // filtra el espejo por autor cuando quien mira no es
+  // el dueño (Decisión de Criterio #2). El dueño sigue
+  // viendo todos.
+  // 1.29 (Oleada 2, D-A1): el filtro anterior comparaba
+  // `registrado_por` como telegram_id, pero el servidor
+  // lo publica como NOMBRE: la comparación daba siempre
+  // «no es mío» y al entrenador se le ocultaban TODOS
+  // sus gastos ya sincronizados. Manda el predicado
+  // único de [_filtroGastos] (nombre canónico desde el
+  // telegram_id contra el directorio del pull;
+  // fail-closed sin directorio; sin fallback al nombre
+  // de exhibición).
+  final filtro = await _filtroGastos();
+  final rows = espejo.where(filtro.espejoEsMio).toList();
   rows.addAll(await _gastosPendientes());
   rows.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   return rows;

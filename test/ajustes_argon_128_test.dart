@@ -252,7 +252,14 @@ void main() {
   group('H4 · gastos por autor (teléfono compartido)', () {
     Future<void> sembrarGastos() async {
       final d = await LocalDb.instance.db;
-      // Espejo: un gasto de A (111111) y uno de B (222222).
+      // Espejo: un gasto de A y uno de B.
+      // 1.29 (Oleada 2, D-A1): la siembra original traía
+      // el autor como ENTERO (telegram_id) y el test
+      // pasaba — un FALSO VERDE: en producción el
+      // servidor publica el autor como NOMBRE y con esa
+      // forma la vista del entrenador ocultaba todos sus
+      // gastos. La siembra usa ahora la forma real
+      // (nombre en texto) + el directorio del pull.
       await d.insert('gastos', {
         'id': 1,
         'data': jsonEncode({
@@ -260,7 +267,7 @@ void main() {
           'fecha': '2026-11-06',
           'concepto': 'Espejo A',
           'monto': 100,
-          'registrado_por': 111111,
+          'registrado_por': 'Duany',
         }),
         'sync_seq': 1,
       });
@@ -271,10 +278,26 @@ void main() {
           'fecha': '2026-11-06',
           'concepto': 'Espejo B',
           'monto': 200,
-          'registrado_por': 222222,
+          'registrado_por': 'Gabriel',
         }),
         'sync_seq': 2,
       });
+      await LocalDb.instance.setMeta(
+        'usuarios_apk',
+        jsonEncode([
+          {'telegram_id': 111111, 'nombre': 'Duany', 'username': 'duany'},
+          {
+            'telegram_id': 222222,
+            'nombre': 'Gabriel',
+            'username': 'gabriel'
+          },
+          {
+            'telegram_id': 735772141,
+            'nombre': 'Jc',
+            'username': 'jctr0602'
+          },
+        ]),
+      );
       // Cola: una op pendiente de cada uno, sellada con
       // el telegram_id de su autor (como hace queueOp).
       await d.insert('ops_queue', {

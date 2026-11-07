@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../auth.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import 'admin_secciones.dart';
@@ -44,24 +43,18 @@ class _GastosScreenState extends State<GastosScreen> {
     // espejo dejaba la pantalla en spinner eterno (no había
     // try/catch y _cargado nunca pasaba a true).
     try {
-      var gastos = await gastosTodos();
+      final gastos = await gastosTodos();
       // (M2-A A7, decisión de Jc vía delegación 2026-11-06)
       // el entrenador ve SOLO SUS gastos; el dueño, todos.
-      // El espejo trae registrado_por (el nombre con el que
-      // el servidor guarda al autor); las ops pendientes de
-      // ESTE teléfono son suyas por definición. Sin nombre
-      // de sesión, el entrenador solo ve sus pendientes.
-      final auth = AuthService();
-      if (!auth.isOwner) {
-        final nombre = auth.displayName.trim();
-        gastos = [
-          for (final g in gastos)
-            if (g['pendiente_sync'] == 1 ||
-                (nombre.isNotEmpty &&
-                    '${g['registrado_por'] ?? ''}'.trim() == nombre))
-              g,
-        ];
-      }
+      // 1.29 (Oleada 2, D-A1): el filtro vive SOLO en
+      // gastosTodos (predicado único de negocio.dart: el
+      // autor del espejo se compara contra el nombre
+      // canónico que el directorio asocia al telegram_id
+      // de la sesión). Aquí había una segunda copia que
+      // comparaba contra el nombre de EXHIBICIÓN de la
+      // sesión (displayName, editable por el propio
+      // usuario): además de duplicar, permitía ver los
+      // gastos de otro poniéndose su nombre. Retirada.
       if (!mounted) return;
       setState(() {
         _gastos = gastos;
