@@ -7455,8 +7455,16 @@ Future<List<Map<String, dynamic>>> _gastosPendientes() async {
   // al encolar; el del espejo, su registrado_por. Sin
   // sesión (tests) ambas sellos son nulos y la comparación
   // nulo==nulo conserva el comportamiento histórico.
-  final esDuenoGastos = AuthService().isOwner;
-  final miTidGastos = AuthService().telegramId;
+  // Acceso defensivo (patrón de queueOp): sin Supabase
+  // inicializado la identidad es nula y la comparación
+  // de sellos se comporta como siempre; AuthService no
+  // debe tumbar una lectura de dinero.
+  var esDuenoGastos = false;
+  int? miTidGastos;
+  try {
+    esDuenoGastos = AuthService().isOwner;
+    miTidGastos = AuthService().telegramId;
+  } catch (_) {}
   bool gastoEsMio(dynamic selloAutor) =>
       esDuenoGastos ||
       LocalDb.normalizarTelegramId(selloAutor) == miTidGastos;
@@ -7517,12 +7525,20 @@ Future<List<Map<String, dynamic>>> gastosTodos() async {
   // filtra el espejo por registrado_por cuando quien
   // mira no es el dueño (Decisión de Criterio #2). El
   // dueño sigue viendo todos.
-  final rows = AuthService().isOwner
+  // Misma lectura defensiva de identidad que
+  // _gastosPendientes (sin Supabase, identidad nula).
+  var esDuenoVista = false;
+  int? miTidVista;
+  try {
+    esDuenoVista = AuthService().isOwner;
+    miTidVista = AuthService().telegramId;
+  } catch (_) {}
+  final rows = esDuenoVista
       ? espejo
       : espejo
           .where((g) =>
               LocalDb.normalizarTelegramId(g['registrado_por']) ==
-              AuthService().telegramId)
+              miTidVista)
           .toList();
   rows.addAll(await _gastosPendientes());
   rows.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
