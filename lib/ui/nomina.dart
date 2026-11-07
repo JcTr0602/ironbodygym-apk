@@ -75,7 +75,14 @@ class _NominaScreenState extends State<NominaScreen> {
     super.dispose();
   }
 
+  // (M2-A A4) generación de carga: dos _cargar solapados (p.
+  // ej. pull-to-refresh + retorno de un diálogo) podían
+  // terminar fuera de orden y la foto VIEJA pisaba la fresca;
+  // solo chequeaba mounted.
+  int _genCarga = 0;
+
   Future<void> _cargar() async {
+    final gen = ++_genCarga;
     setState(() => _cargando = true);
     final ahora = ahoraHabana();
     final pref = hoyHabanaIso().substring(0, 7); // YYYY-MM
@@ -117,7 +124,9 @@ class _NominaScreenState extends State<NominaScreen> {
       // llegan de leerBonosMesConMigracion (arriba).
       final foto = await fotoNominaMes(pref);
       // #7 (Argón nómina): el doble chequeo era redundante.
-      if (!mounted) return;
+      // (M2-A A4) y si una carga más nueva ya arrancó, esta
+      // foto vieja no pisa su estado.
+      if (!mounted || gen != _genCarga) return;
       setState(() {
         _comisionDosis = foto.comisionDosis;
         _personasAdelantos = foto.personas;
@@ -1152,11 +1161,16 @@ class _NominaScreenState extends State<NominaScreen> {
     final metodo = '${e['metodo'] ?? 'efectivo'}';
     var destino =
         origenActual == 'caja_turno' ? 'fondo_dueno' : 'caja_turno';
+    // (M2-A A4) UNA sola foto de personas para todo el flujo:
+    // _personasAdelantos puede recargarse con el diálogo
+    // abierto y leer nombre/gaveta de dos fotos distintas
+    // mezclaba el payload.
+    final fotoPersonas = _personasAdelantos;
     // Gaveta inicial: la actual si se reconoce; si no, la del
     // propio adelanto.
     final gavetaActual = LocalDb.normalizarTelegramId(e['descuenta_a']);
     var gaveta = entrenadorId ?? 'duany';
-    for (final entry in _personasAdelantos.entries) {
+    for (final entry in fotoPersonas.entries) {
       if (entry.value.telegramId != null &&
           entry.value.telegramId == gavetaActual) {
         gaveta = entry.key;
@@ -1164,7 +1178,7 @@ class _NominaScreenState extends State<NominaScreen> {
       }
     }
     final nombreEntrenador =
-        _personasAdelantos[entrenadorId]?.nombre ?? 'el entrenador';
+        fotoPersonas[entrenadorId]?.nombre ?? 'el entrenador';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1210,14 +1224,14 @@ class _NominaScreenState extends State<NominaScreen> {
                 const Text('Sale de la gaveta de:',
                     style: AppTexto.metadato),
                 DropdownButton<String>(
-                  value: _personasAdelantos.containsKey(gaveta)
+                  value: fotoPersonas.containsKey(gaveta)
                       ? gaveta
-                      : (_personasAdelantos.keys.isNotEmpty
-                          ? _personasAdelantos.keys.first
+                      : (fotoPersonas.keys.isNotEmpty
+                          ? fotoPersonas.keys.first
                           : gaveta),
                   isExpanded: true,
                   items: [
-                    for (final entry in _personasAdelantos.entries)
+                    for (final entry in fotoPersonas.entries)
                       DropdownMenuItem(
                           value: entry.key,
                           child: Text(entry.value.nombre)),
@@ -1258,7 +1272,7 @@ class _NominaScreenState extends State<NominaScreen> {
       await AdelantosService.instance.corregirOrigen(id,
           nuevoOrigen: destino,
           descuentaA: destino == 'caja_turno'
-              ? _personasAdelantos[gaveta]?.telegramId
+              ? fotoPersonas[gaveta]?.telegramId
               : null,
           entrenadorId: entrenadorId,
           mesNomina: mesNomina);
@@ -1285,7 +1299,12 @@ class _NominaScreenState extends State<NominaScreen> {
     if (_operando) return;
     _operando = true;
     try {
-      final persona = _personasAdelantos[ent]!;
+      // (M2-A A4) UNA sola foto de personas: persona y
+      // gavetaPersona salen de la MISMA lectura (antes la
+      // gaveta se re-leía tras el diálogo y una recarga
+      // intermedia mezclaba dos fotos en el payload).
+      final fotoPersonas = _personasAdelantos;
+      final persona = fotoPersonas[ent]!;
       // 1.27: sin identificador sincronizado ni se abre
       // el diálogo — la op nacería con entrenador='' y
       // el servidor la rechazaría tras anunciar
@@ -1308,7 +1327,7 @@ class _NominaScreenState extends State<NominaScreen> {
       // (antes 'duany'/'gabriel' escritos a mano: tercer
       // sitio de la misma lista, F2-14).
       final gavetas = <({String username, String nombre})>[
-        for (final e in _personasAdelantos.entries)
+        for (final e in fotoPersonas.entries)
           (username: e.key, nombre: e.value.nombre),
       ];
       if (!gavetas.any((g) => g.username == ent)) {
@@ -1331,7 +1350,7 @@ class _NominaScreenState extends State<NominaScreen> {
         ),
       );
       if (datos == null) return;
-      final gavetaPersona = _personasAdelantos[datos.gaveta];
+      final gavetaPersona = fotoPersonas[datos.gaveta];
       // 1.27: si el servicio corta el registro (sin id o
       // sin gaveta para el efectivo de caja), se muestra
       // SU motivo y jamás el «registrado» de éxito.

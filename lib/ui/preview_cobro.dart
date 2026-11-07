@@ -24,7 +24,9 @@ import '../comprobantes.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
+import '../precio_cobro.dart';
 import '../tiempo.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
@@ -492,6 +494,58 @@ Future<ResultadoCobro> cobrarConPreviewYRecibo({
   }
 }
 
+/// (M2-A A12) Recotización fresca de un payload de cobro:
+/// el total que se cobraría AHORA, con la MISMA construcción
+/// de precios del diálogo (mapa desde getTiposPago + la
+/// transferencia de preciosVigentes) y el motor compartido.
+/// Null si no se puede recotizar (sin cliente en el espejo o
+/// error de lectura): en ese caso el flujo sigue con el
+/// precio del diálogo, como antes.
+Future<({double total, String escalon, List<String> avisos})?>
+    _recotizarMonto(Map<String, dynamic> payload) async {
+  try {
+    final clienteId = (payload['cliente_id'] as num?)?.toInt();
+    if (clienteId == null) return null;
+    final filas =
+        await LocalDb.instance.mirrorPorIds('clientes', [clienteId]);
+    if (filas.isEmpty) return null;
+    final cliente = filas.first;
+    final menor = esMenor(cliente['carnet'] as String?);
+    final tipos = await getTiposPago(paraMenor: menor);
+    double montoTipo(String id, double def) {
+      for (final t in tipos) {
+        if (t.id == id) return t.monto;
+      }
+      return def;
+    }
+    final pr = await preciosVigentes();
+    final preciosMapa = <String, double>{
+      'mensual': montoTipo('mensual', 2000),
+      'menores': montoTipo('menores', 1500),
+      'transfer': pr['transfer'] ?? 2500,
+      'semanal': montoTipo('semanal', 600),
+      'quincenal': montoTipo('quincenal', 1200),
+    };
+    final periodo = '${payload['periodo'] ?? 'mensual'}';
+    final precio = await precioCobroParaCliente(
+      cliente: cliente,
+      periodo: periodo,
+      metodo: '${payload['metodo'] ?? 'efectivo'}',
+      precios: preciosMapa,
+    );
+    final meses = periodo == 'mensual'
+        ? ((payload['meses'] as num?)?.toInt() ?? 1)
+        : 1;
+    return (
+      total: precio.monto * meses,
+      escalon: precio.escalon,
+      avisos: precio.avisos,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   required BuildContext context,
   required String nombreCliente,
@@ -505,6 +559,53 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   if (!await permisoOperativoOkConRefresco(
         context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
     return ResultadoCobro.cancelado;
+  }
+  // (M2-A A12) RECOTIZACIÓN con aviso: el diálogo cotizó al
+  // abrir; si una tarifa cambió con el diálogo abierto (una
+  // especial creada o editada que sincronizó mientras tanto),
+  // se cobraba el precio VIEJO en silencio. Se recotiza con
+  // la foto fresca y, si el monto cambia, el cobrador decide
+  // con las dos cifras a la vista ANTES del preview. Fuera
+  // quedan el periodo 'personalizado' (monto tecleado a mano)
+  // y el escalón 'oferta' (tipo de monto fijo elegido a
+  // mano): ninguno de los dos es una cotización del motor.
+  final periodoRecot = '${payload['periodo'] ?? 'mensual'}';
+  final escalonRecot = '${payload['_escalon'] ?? ''}';
+  if (periodoRecot != 'personalizado' && escalonRecot != 'oferta') {
+    final recotizado = await _recotizarMonto(payload);
+    if (!context.mounted) return ResultadoCobro.cancelado;
+    if (recotizado != null) {
+      final montoViejo = (payload['monto'] as num?)?.toDouble() ?? 0;
+      if ((recotizado.total - montoViejo).abs() > 0.01) {
+        final acepta = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('El precio cambió'),
+            content: Text('Mientras decidías, el precio de '
+                '$nombreCliente cambió: era '
+                '${fmtMonto(montoViejo)} CUP y ahora es '
+                '${fmtMonto(recotizado.total)} CUP.\n\n'
+                '¿Cobrar con el precio nuevo?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar cobro'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Cobrar precio nuevo'),
+              ),
+            ],
+          ),
+        );
+        if (acepta != true || !context.mounted) {
+          return ResultadoCobro.cancelado;
+        }
+        payload['monto'] = recotizado.total;
+        payload['_escalon'] = recotizado.escalon;
+        payload['_avisos'] = recotizado.avisos;
+      }
+    }
   }
   final monto = (payload['monto'] as num?) ?? 0;
   final vencRaw = '${payload['pagado_hasta'] ?? ''}';

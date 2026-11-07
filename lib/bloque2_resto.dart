@@ -53,6 +53,7 @@ import 'negocio.dart'
         idsCubiertosLibroC1,
         idsLiquidados,
         esPendiente,
+        esPagoAnulado,
         esPagoDiarioEfectivo,
         fechaNacDeCarnet,
         ventasSuplementosCup,
@@ -305,13 +306,19 @@ Future<String> _registrarEntregaEfectivoImpl({
   final cubiertosLibro =
       await idsCubiertosLibroC1(entrenadorTelegramId);
   final liquidados = await idsLiquidados(entrenadorTelegramId);
+  // (M2-A A3) un pago con anulación en cola no es candidato:
+  // su dinero ya no está en la gaveta y el pendiente contra el
+  // que se valida el monto (pendienteDeltaC1) ya lo excluye;
+  // marcarlo aquí dejaría la entrega cubriendo un fantasma.
+  final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
   final candidatos = <({String tabla, int id, double monto, String fecha})>[];
   for (final p in await LocalDb.instance.mirrorFiltrado(
       'pagos', {'telegram_user_id': entrenadorTelegramId})) {
     final id = (p['id'] as num?)?.toInt();
     if (id == null ||
         cubiertosLibro.contains('pagos:$id') ||
-        liquidados.contains('pagos:$id')) {
+        liquidados.contains('pagos:$id') ||
+        esPagoAnulado(p, anuladosCola)) {
       continue;
     }
     if ((p['metodo'] as String?) == 'efectivo' &&

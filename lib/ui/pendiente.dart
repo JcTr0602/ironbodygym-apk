@@ -263,6 +263,37 @@ class _PendienteScreenState extends State<PendienteScreen> {
         return;
       }
     }
+    // (M2-A A2) la foto de pantalla puede estar vieja: otro
+    // flujo (una liquidación, una entrega por el bot) pudo
+    // cerrar parte de estos pagos tras cargar la lista, y
+    // confirmar los ids de la FOTO marcaba como entregado lo
+    // ya liquidado — o lo dejaba fuera del total mostrado. Se
+    // re-derivan los ids vivos y el día se filtra a los que
+    // SIGUEN pendientes; el diálogo de abajo ya enseña el
+    // total filtrado, no el de la foto.
+    if (tidBloqueo != null) {
+      final frescos =
+          await idsPendientesEntrega(trainerId: tidBloqueo);
+      final vivosPorTipo = <String, Set<int>>{
+        'mensual': frescos.pagos.toSet(),
+        'diario': frescos.diarios.toSet(),
+        'suplemento': frescos.suplementos.toSet(),
+        'servicio': frescos.servicios.toSet(),
+      };
+      final filtrados = [
+        for (final p in dia.pagos)
+          if (vivosPorTipo[p.tipo]?.contains(p.id) ?? false) p,
+      ];
+      if (filtrados.isEmpty) {
+        if (!mounted) return;
+        mostrarSnack(context, 'Ese pendiente ya cambió: recargué la lista para que confirmes con la foto actual.', significado: SignificadoChip.alerta);
+        await _cargar();
+        return;
+      }
+      if (filtrados.length != dia.pagos.length) {
+        dia = PendienteDia(fecha: dia.fecha, pagos: filtrados);
+      }
+    }
     // Campo 2026-11-02 (1.22): un día que no es CUP NO se
     // confirma por esta vía: confirmar_entrega valida solo
     // efectivo CUP y el servidor rechaza la op entera (la
@@ -386,6 +417,15 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // el mirror aún no se actualizó (el push va en background).
   }
 
+  /// (M2-A A1) mensaje al fallar una liquidación: si el
+  /// servicio rechazó por liquidación YA EN COLA, se dice tal
+  /// cual (es accionable: esperar a que sincronice); el resto
+  /// conserva el genérico de siempre.
+  String _msgErrorLiquidacion(Object e) =>
+      '$e'.contains('en cola de sincronización')
+          ? '$e'.replaceFirst('Exception: ', '')
+          : 'Error al guardar, intenta de nuevo';
+
   /// H11 compartido (1.26.1): si el entrenador tiene
   /// adelantos vivos o resto C1 sin liquidar, avisar y
   /// llevar al Arqueo, donde la liquidación sí los
@@ -486,7 +526,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
       );
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error al guardar, intenta de nuevo', significado: SignificadoChip.error);
+        mostrarSnack(context, _msgErrorLiquidacion(e), significado: SignificadoChip.error);
       }
       return;
     } finally {
@@ -588,7 +628,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
       );
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error al guardar, intenta de nuevo', significado: SignificadoChip.error);
+        mostrarSnack(context, _msgErrorLiquidacion(e), significado: SignificadoChip.error);
       }
       return;
     } finally {

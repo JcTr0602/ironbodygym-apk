@@ -80,6 +80,30 @@ TipoPago tipoInicialPago(
       orElse: () => tiposDisp.first);
 }
 
+/// (M2-A A6) FUENTE ÚNICA del precio de menores, pura sobre
+/// los ajustes crudos: el monto del tipo 'menores' del blob
+/// `tipos_pago` manda (es el que el dueño edita en el editor
+/// de tipos y el que cobra el diálogo de cobro); la clave fija
+/// 'mensualidad_menores' es el respaldo histórico; 1500 es el
+/// suelo. TODOS los lectores (getTiposPago, precioMenor,
+/// preciosVigentes) resuelven por aquí: antes Inscribir
+/// cobraba la clave fija y Renovar el tipo del blob — dos
+/// fuentes editables por separado que divergían en silencio.
+double precioMenoresDesdeAjustes(Map<String, dynamic> aj) {
+  final crudo = aj['tipos_pago'];
+  if (crudo is List) {
+    for (final t in crudo) {
+      if (t is Map && '${t['id']}' == 'menores') {
+        final m = (t['monto'] as num?)?.toDouble();
+        if (m != null && m > 0) return m;
+      }
+    }
+  }
+  final fijo = (aj['mensualidad_menores'] as num?)?.toDouble();
+  if (fijo != null && fijo > 0) return fijo;
+  return 1500;
+}
+
 /// Lee los tipos de pago de los ajustes sincronizados.
 /// Con `soloActivos=true` filtra los desactivados.
 /// Con `paraMenor=true`: el tipo 'mensual' se reemplaza por 'menores'
@@ -134,8 +158,8 @@ Future<List<TipoPago>> getTiposPago(
   // patrón de respaldo que usa precioMenor() — colocado junto al
   // mensual. Si el blob SÍ trae 'menores', se respeta tal cual.
   if (paraMenor && !tipos.any((t) => t.id == 'menores')) {
-    final montoMenor =
-        (aj['mensualidad_menores'] as num?)?.toDouble() ?? 1500;
+    // (M2-A A6) el monto sintetizado sale de la fuente única.
+    final montoMenor = precioMenoresDesdeAjustes(aj);
     if (montoMenor > 0) {
       final sintetico = TipoPago(
           id: 'menores',
@@ -165,12 +189,17 @@ Future<List<TipoPago>> getTiposPago(
 }
 
 /// Precio de la mensualidad para menores (configurable, v1.0.16).
-/// Lee del tipo 'menores' o de la clave fija; fallback 1500.
+/// (M2-A A6) Antes llamaba a getTiposPago SIN paraMenor: el
+/// filtro final descarta los tipos soloMenores, así que la rama
+/// del tipo 'menores' era INALCANZABLE y siempre cobraba la
+/// clave fija, aunque el dueño hubiera editado el tipo en el
+/// blob (la fuente que sí usa el diálogo de cobro). Ahora lee
+/// el tipo con paraMenor: true y cae a la fuente única.
 Future<double> precioMenor() async {
-  final tipos = await getTiposPago(soloActivos: false);
+  final tipos = await getTiposPago(soloActivos: false, paraMenor: true);
   for (final t in tipos) {
     if (t.id == 'menores') return t.monto;
   }
   final aj = await LocalDb.instance.getAjustes();
-  return (aj['mensualidad_menores'] as num?)?.toDouble() ?? 1500;
+  return precioMenoresDesdeAjustes(aj);
 }

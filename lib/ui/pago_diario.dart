@@ -453,31 +453,31 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // NO se edita: antes se caía al precio VIGENTE (_precio) y
     // se encolaba una edición con total recalculado a precio
     // nuevo contra un registro que este teléfono no tiene.
+    // (M2-A A12) lectura, cómputo y escritura DENTRO de la
+    // misma transacción: antes la fila se leía FUERA y su JSON
+    // entero se reescribía dentro — un sync que aterrizaba
+    // entre la lectura y la escritura pisaba el `entregado`
+    // fresco con la copia vieja y el diario ya entregado
+    // «resucitaba» como pendiente.
     final db = await LocalDb.instance.db;
-    final rows = await db.query('pagos_diarios',
-        columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
-    if (rows.isEmpty) {
-      if (!mounted) return;
-      mostrarSnack(context,
-          'Ese registro ya no está en este teléfono; no se editó',
-          significado: SignificadoChip.alerta);
-      _cargarHoy();
-      return;
-    }
-    final previa = Map<String, dynamic>.from(
-        jsonDecode(rows.first['data'] as String) as Map);
-    final cantVieja = (previa['cantidad'] as num?)?.toDouble() ?? 0;
-    final totalViejo = (previa['total'] as num?)?.toDouble() ?? 0;
-    var precioUnitario = _precio;
-    if (cantVieja > 0 && totalViejo > 0) {
-      precioUnitario = totalViejo / cantVieja;
-    }
-    final data = previa;
-    data['cantidad'] = cantidad;
-    data['total'] = cantidad * precioUnitario;
-    data['nota'] = notaTexto;
-    // Espejo + op en UNA transacción (antes dos awaits sueltos).
+    var editado = false;
     await db.transaction((txn) async {
+      final rows = await txn.query('pagos_diarios',
+          columns: ['data'], where: 'id = ?', whereArgs: [id],
+          limit: 1);
+      if (rows.isEmpty) return;
+      final previa = Map<String, dynamic>.from(
+          jsonDecode(rows.first['data'] as String) as Map);
+      final cantVieja = (previa['cantidad'] as num?)?.toDouble() ?? 0;
+      final totalViejo = (previa['total'] as num?)?.toDouble() ?? 0;
+      var precioUnitario = _precio;
+      if (cantVieja > 0 && totalViejo > 0) {
+        precioUnitario = totalViejo / cantVieja;
+      }
+      final data = previa;
+      data['cantidad'] = cantidad;
+      data['total'] = cantidad * precioUnitario;
+      data['nota'] = notaTexto;
       await txn.update('pagos_diarios', {'data': jsonEncode(data)},
           where: 'id = ?', whereArgs: [id]);
       await LocalDb.instance.queueOp(
@@ -494,7 +494,16 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         },
         txn: txn,
       );
+      editado = true;
     });
+    if (!editado) {
+      if (!mounted) return;
+      mostrarSnack(context,
+          'Ese registro ya no está en este teléfono; no se editó',
+          significado: SignificadoChip.alerta);
+      _cargarHoy();
+      return;
+    }
     _cargarHoy();
     SyncEngine.instance.push();
     if (!mounted) return;

@@ -15,6 +15,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../cliente_protegido.dart';
+import '../comprobantes.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
@@ -48,6 +49,10 @@ class _Cobro {
   // ausente" (otro agente aún no lo escribe) de "anterior null".
   final bool tienePagadoHastaAnterior;
   final String? pagadoHastaAnterior;
+  // (M2-A A12) comprobante enlazado al cobro local: al
+  // deshacerlo hay que descartarlo, o la foto se sube
+  // huérfana detrás de un pago que ya no existe.
+  final String? comprobanteUuid;
 
   const _Cobro({
     required this.nombre,
@@ -61,6 +66,7 @@ class _Cobro {
     this.clienteId,
     this.tienePagadoHastaAnterior = false,
     this.pagadoHastaAnterior,
+    this.comprobanteUuid,
   });
 
   bool get esLocal => opUuid != null;
@@ -269,6 +275,7 @@ class _PagoScreenState extends State<PagoScreen> {
         pagadoHastaAnterior: anteriorRaw == null
             ? null
             : '$anteriorRaw',
+        comprobanteUuid: payload['comprobante_uuid'] as String?,
       ));
     }
 
@@ -447,6 +454,16 @@ class _PagoScreenState extends State<PagoScreen> {
         if (borradas == 0) {
           mostrarSnack(context, 'Ese pago se está sincronizando, intenta en unos segundos', significado: SignificadoChip.alerta);
           return;
+        }
+        // (M2-A A12) el comprobante del cobro deshecho se
+        // descarta (la vía de la vista previa ya lo hacía;
+        // esta no, y la foto se subía huérfana).
+        final compUuid = u.comprobanteUuid;
+        if (compUuid != null && compUuid.isNotEmpty) {
+          try {
+            await ComprobantesService.instance
+                .descartar(compUuid);
+          } catch (_) {}
         }
         // P1#4 (contrato): si la op trae 'pagado_hasta_anterior',
         // restaurar el espejo a ese valor al borrarla. Sin ese

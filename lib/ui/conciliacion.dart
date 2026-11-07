@@ -59,6 +59,10 @@ Future<bool> mostrarDialogoConciliar(
   final notaCtrl = TextEditingController(
       text: '${pago['conciliacion_nota'] ?? ''}');
   var errorNota = false;
+  // (M2-A A10) guarda en vuelo del Guardar + error de
+  // servicio visible sin cerrar el diálogo.
+  var guardando = false;
+  String? errorGuardado;
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => StatefulBuilder(
@@ -132,6 +136,14 @@ Future<bool> mostrarDialogoConciliar(
                         .copyWith(color: AppColores.error),
                   ),
                 ],
+                if (errorGuardado != null) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    errorGuardado!,
+                    style: AppTexto.metadato
+                        .copyWith(color: AppColores.error),
+                  ),
+                ],
               ],
             ),
           ),
@@ -141,20 +153,37 @@ Future<bool> mostrarDialogoConciliar(
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
-              onPressed: () async {
-                if (notaObligatoria &&
-                    notaCtrl.text.trim().isEmpty) {
-                  setState(() => errorNota = true);
-                  return;
-                }
-                await ConciliacionService.instance.marcar(
-                  pagoId: (pago['id'] as num).toInt(),
-                  estado: destino,
-                  estadoEsperado: actual,
-                  nota: notaCtrl.text,
-                );
-                if (ctx.mounted) Navigator.pop(ctx, true);
-              },
+              // (M2-A A10) deshabilitado durante el guardado:
+              // el doble toque encolaba la marca dos veces (la
+              // segunda rebotaba en el servidor y caía a
+              // revisión). El servicio además la rechaza.
+              onPressed: guardando
+                  ? null
+                  : () async {
+                      if (notaObligatoria &&
+                          notaCtrl.text.trim().isEmpty) {
+                        setState(() => errorNota = true);
+                        return;
+                      }
+                      setState(() => guardando = true);
+                      try {
+                        await ConciliacionService.instance.marcar(
+                          pagoId: (pago['id'] as num).toInt(),
+                          estado: destino,
+                          estadoEsperado: actual,
+                          nota: notaCtrl.text,
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx, true);
+                      } catch (e) {
+                        if (ctx.mounted) {
+                          setState(() {
+                            guardando = false;
+                            errorGuardado = '$e'
+                                .replaceFirst('Bad state: ', '');
+                          });
+                        }
+                      }
+                    },
               child: const Text('Guardar'),
             ),
           ],

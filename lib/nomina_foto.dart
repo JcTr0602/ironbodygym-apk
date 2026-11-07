@@ -275,10 +275,21 @@ Future<FotoNominaMes> fotoNominaMes(String pref) async {
     final brutoPorMes = <String, double>{};
     var mes = primero;
     while (mes.compareTo(pref) <= 0) {
-      conteoCache[mes] ??= await NominaCalc.clientesQuePagaronElMes(
-          mes,
-          cuentasCasaPre: cuentasCasaPre);
-      brutoPorMes[mes] = conteoCache[mes]! * tarifa.toDouble();
+      // (M2-A A8) variante SEGURA del conteo: la otra devuelve
+      // 0 ante un error de lectura y el ??= CONGELABA ese 0
+      // como «nadie pagó» para toda la foto (base de nómina en
+      // cero sin explicación). Ante error NO se cachea: este
+      // pase usa el conteo plano y el siguiente recalcula.
+      if (!conteoCache.containsKey(mes)) {
+        final seguro = await NominaCalc.clientesQuePagaronElMesSeguro(
+            mes,
+            cuentasCasaPre: cuentasCasaPre);
+        if (seguro != null) conteoCache[mes] = seguro;
+      }
+      final conteoMes = conteoCache[mes] ??
+          await NominaCalc.clientesQuePagaronElMes(mes,
+              cuentasCasaPre: cuentasCasaPre);
+      brutoPorMes[mes] = conteoMes * tarifa.toDouble();
       mes = mesSiguiente(mes);
     }
     // Autoauditoría 1.22 #1: las comisiones POR MES suman

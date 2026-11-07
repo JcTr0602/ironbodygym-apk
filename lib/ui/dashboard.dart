@@ -150,18 +150,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // lanzadas a la vez (ingresos / clientes / novedades del
       // dashboard); dentro de cada grupo las lecturas corren en
       // paralelo. NO se añaden consultas nuevas en serie.
-      final fIngresos = Future.wait([
-        ingresosHoy(),
-        ingresosSemana(),
-        ingresosMes(),
-        ingresosMesAnterior(),
-        proyeccionMes(),
-        ingresosPorMetodo(),
-        ingresosPorTipo(),
-        mejorPeorDia(),
-        ingresosUltimos7Dias(),
-        ingresosUltimos30Dias(),
-      ]);
+      // (M2-A A11) las diez cifras de ingresos salen de UNA
+      // foto de una pasada por tabla (fotoIngresosDashboard),
+      // no de diez funciones que re-escaneaban los espejos.
+      final fIngresos = fotoIngresosDashboard();
       final fClientes = Future.wait([
         activosCount(),
         morosos(),
@@ -197,7 +189,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Panel Terra B2: cada grupo se espera por separado. Un fallo
       // en un grupo ya no tumba los otros dos: el grupo que falló
       // conserva los valores anteriores y los demás se aplican.
-      List<dynamic>? ing;
+      FotoIngresos? ing;
       List<dynamic>? cli;
       List<dynamic>? nov;
       try {
@@ -209,16 +201,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted && v == _versionCarga) {
         setState(() {
           if (ing != null) {
-            _hoy = ing[0] as double;
-            _semana = ing[1] as double;
-            _mes = ing[2] as double;
-            _mesAnterior = ing[3] as double;
-            _proyeccion = ing[4] as double;
-            _porMetodo = ing[5] as Map<String, double>;
-            _porTipo = ing[6] as Map<String, double>;
-            _mejorPeor = ing[7] as Map<String, Map<String, dynamic>>;
-            _ultimos7 = ing[8] as List<Map<String, dynamic>>;
-            _ultimos30 = ing[9] as List<Map<String, dynamic>>;
+            _hoy = ing.hoy;
+            _semana = ing.semana;
+            _mes = ing.mes;
+            _mesAnterior = ing.mesAnterior;
+            _proyeccion = ing.proyeccion;
+            _porMetodo = ing.porMetodo;
+            _porTipo = ing.porTipo;
+            _mejorPeor = ing.mejorPeor;
+            _ultimos7 = ing.ultimos7;
+            _ultimos30 = ing.ultimos30;
           }
           if (cli != null) {
             final venc = cli[2]
@@ -255,7 +247,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final novedades = nov!;
         setState(() {
           final nomina = novedades[0] as double?;
-          if (nomina != null) _nominaProy = nomina;
+          // (M2-A A11) si el precálculo falló, la nómina
+          // anterior NO se conserva (podía ser de otro mes y
+          // la fila seguía diciendo «Utilidad neta real»):
+          // null devuelve la etiqueta honesta «antes de
+          // nómina» de filaUtilidadBalance.
+          _nominaProy = nomina;
           _cumpleHoy = novedades[1] as int;
           _casaActivas = novedades[2] as int;
           _stockBajo = novedades[3] as List<Map<String, dynamic>>;

@@ -301,7 +301,23 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     }
   }
 
+  // (M2-A A1) guarda SÍNCRONA al entrar: antes el setState de
+  // _liquidando llegaba DESPUÉS del diálogo de confirmación y
+  // un doble toque pasaba dos veces por todo el flujo. La
+  // guarda de servicio (crearLiquidacion rechaza la segunda
+  // liquidación en cola del mismo entrenador+moneda) es la red
+  // final; esta evita el doble diálogo.
   Future<void> _liquidar() async {
+    if (_liquidando) return;
+    setState(() => _liquidando = true);
+    try {
+      await _liquidarReal();
+    } finally {
+      if (mounted) setState(() => _liquidando = false);
+    }
+  }
+
+  Future<void> _liquidarReal() async {
     final entregado =
         double.tryParse(_entregadoCtrl.text.replaceAll(',', '.'));
     // Autoauditoría 1.22 #2 (clase N-2 fuera de nómina): NaN no
@@ -452,7 +468,6 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     final explicacionExpediente = expCtrl.text;
     expCtrl.dispose();
     if (ok != true || !mounted) return;
-    setState(() => _liquidando = true);
     try {
       await crearLiquidacion(
         entrenadorTelegramId: widget.telegramId,
@@ -477,8 +492,6 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
       }
     } catch (e) {
       _aviso('No se pudo liquidar: $e');
-    } finally {
-      if (mounted) setState(() => _liquidando = false);
     }
   }
 

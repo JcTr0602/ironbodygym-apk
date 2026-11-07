@@ -226,13 +226,21 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
       sinTelegram.add(e.value.nombre);
       continue;
     }
-    final arq = await pendienteArqueo(tid);
-    if (arq.cup != 0 || arq.usd != 0) {
+    // (M2-A A8/A11) los ids liquidados se decodifican UNA vez
+    // por entrenador y se comparten entre las tres lecturas
+    // (antes cada una re-decodificaba todas las liquidaciones,
+    // y el libro C1 otra vez por dentro). La comparación
+    // contra cero lleva la tolerancia de la casa (0.01): un
+    // residuo de redondeo de 0.005 bloqueaba el cierre para
+    // siempre, sin ninguna cifra visible que lo explicara.
+    final cubiertos = await idsLiquidados(tid);
+    final arq = await pendienteArqueo(tid, cubiertosPre: cubiertos);
+    if (arq.cup > 0.01 || arq.usd > 0.01) {
       arqueoPendiente.add(e.value.nombre);
     }
-    final ent = await pendienteEntrega(tid);
-    final entUsd = await pendienteEntregaUsd(tid);
-    if (ent != 0 || entUsd != 0) {
+    final ent = await pendienteEntrega(tid, cubiertosPre: cubiertos);
+    final entUsd = await pendienteEntregaUsd(tid, cubiertosPre: cubiertos);
+    if (ent > 0.01 || entUsd > 0.01) {
       entregaPendiente.add(e.value.nombre);
     }
   }
@@ -287,7 +295,10 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
     esManual: true,
   );
 
-  final cerradoTxt = progreso['cerradoEn'] as String?;
+  // (M2-A A8) lectura tolerante: un cerradoEn corrupto (no
+  // texto) tumbaba la evaluación entera con el cast duro.
+  final cerradoCrudo = progreso['cerradoEn'];
+  final cerradoTxt = cerradoCrudo is String ? cerradoCrudo : null;
   return EstadoCierreMes(
     pref: pref,
     pasos: [

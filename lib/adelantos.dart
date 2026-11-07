@@ -148,54 +148,84 @@ List<MesLibroAdelantos> libroAdelantos({
   return (correcciones: correcciones, anuladosEnCola: anuladosEnCola);
 }
 
-double sumaAdelantosPendientes({
+/// (M2-A A2/A4) Adelantos del ESPEJO que descuentan de la
+/// gaveta de [telegramId] según la foto completa (espejo +
+/// cola): UNA sola decisión por fila, compartida por el monto
+/// ([sumaAdelantosPendientes]) y por la lista de ids de la
+/// liquidación (`idsPendienteArqueo` en negocio.dart). Antes la
+/// lista leía el espejo CRUDO sin overlay y el par
+/// (monto_esperado, op_ids) no cuadraba con la fórmula que el
+/// servidor verifica al aplicar `liquidar_caja`:
+/// - Anulado en cola → fuera (neto cero en ambas lecturas; el
+///   servidor aplica la anulación antes que la liquidación por
+///   orden de cola, así que tampoco lo resta allá).
+/// - Con corrección en cola manda el origen NUEVO (Argón
+///   Dinero #5): descuenta solo si pasa a (o sigue en)
+///   caja_turno+efectivo y la gaveta es la de este entrenador
+///   (descuenta_a de la corrección; si no viene, el del propio
+///   adelanto, como hace el servidor — que al aplicar la
+///   liquidación ya aplicó la corrección).
+/// - Sin corrección: la gaveta cruda del espejo (el servidor
+///   solo fija descuenta_a en adelantos caja_turno+efectivo).
+List<({int id, double monto})> adelantosEspejoQueDescuentan({
   required List<Map<String, dynamic>> espejo,
   required List<Map<String, dynamic>> opsPendientes,
   required int telegramId,
   required int? Function(Object?) normalizarTid,
 }) {
-  double total = 0;
-  final uuidsEspejo = <String>{};
-  final porId = <int, Map<String, dynamic>>{};
-  // Argón Dinero #5: correcciones de origen AÚN encoladas. Sin
-  // este overlay, entre corregir y sincronizar la liquidación
-  // se calculaba con el origen VIEJO (el adelanto seguía
-  // descontando de la gaveta equivocada) y la lista permitía
-  // corregir dos veces con destinos contradictorios. La
-  // última corrección encolada manda.
-  final correcciones = overlayAdelantosEnCola(opsPendientes).correcciones;
+  final overlay = overlayAdelantosEnCola(opsPendientes);
+  final out = <({int id, double monto})>[];
   for (final a in espejo) {
-    final id = (a['id'] as num?)?.toInt();
-    if (id != null) porId[id] = a;
-    final u = a['op_uuid'];
-    if (u != null) uuidsEspejo.add('$u');
     if ((a['en_pendiente'] as num?)?.toInt() != 1) continue;
-    final corr = id == null ? null : correcciones[id];
+    final id = (a['id'] as num?)?.toInt();
+    if (id == null) continue;
+    if (overlay.anuladosEnCola.contains(id)) continue;
+    final corr = overlay.correcciones[id];
     if (corr != null) {
-      // Con corrección en curso, manda el origen NUEVO: solo
-      // descuenta si pasa a (o sigue en) caja_turno+efectivo y
-      // la gaveta es la de este entrenador (descuenta_a de la
-      // corrección; si no viene, el del propio adelanto, como
-      // hace el servidor).
       final nuevoOrigen = '${corr['nuevo_origen'] ?? ''}';
-      final gaveta = normalizarTid(
-          corr['descuenta_a'] ?? a['descuenta_a']);
+      final gaveta =
+          normalizarTid(corr['descuenta_a'] ?? a['descuenta_a']);
       if (nuevoOrigen == 'caja_turno' &&
           '${a['metodo'] ?? 'efectivo'}' == 'efectivo' &&
           gaveta == telegramId) {
-        total += (a['monto'] as num?)?.toDouble() ?? 0;
+        out.add((id: id, monto: (a['monto'] as num?)?.toDouble() ?? 0));
       }
       continue;
     }
     if (normalizarTid(a['descuenta_a']) == telegramId) {
-      total += (a['monto'] as num?)?.toDouble() ?? 0;
+      out.add((id: id, monto: (a['monto'] as num?)?.toDouble() ?? 0));
     }
   }
+  return out;
+}
+
+double sumaAdelantosPendientes({
+  required List<Map<String, dynamic>> espejo,
+  required List<Map<String, dynamic>> opsPendientes,
+  required int telegramId,
+  required int? Function(Object?) normalizarTid,
+  bool incluirRegistrosEnCola = true,
+}) {
+  // Parte de espejo: la decisión compartida de
+  // [adelantosEspejoQueDescuentan]. (M2-A A4) Una anulación
+  // encolada neta la fila a cero CON o SIN corrección: antes la
+  // rama de corrección sumaba por la gaveta NUEVA y la rama de
+  // anulación restaba por la VIEJA — con ambas ops en cola, un
+  // entrenador descontaba de menos y otro de más (fantasma).
+  var total = adelantosEspejoQueDescuentan(
+    espejo: espejo,
+    opsPendientes: opsPendientes,
+    telegramId: telegramId,
+    normalizarTid: normalizarTid,
+  ).fold<double>(0, (s, e) => s + e.monto);
+  if (!incluirRegistrosEnCola) return total;
+  // Registros aún sin espejo (solo existen como op en cola).
+  final uuidsEspejo = <String>{
+    for (final a in espejo)
+      if (a['op_uuid'] != null) '${a['op_uuid']}',
+  };
   for (final op in opsPendientes) {
-    final tipo = '${op['tipo']}';
-    if (tipo != 'registrar_adelanto' && tipo != 'anular_adelanto') {
-      continue;
-    }
+    if ('${op['tipo']}' != 'registrar_adelanto') continue;
     Map<String, dynamic> payload;
     try {
       payload = jsonDecode(op['payload'] as String)
@@ -203,29 +233,17 @@ double sumaAdelantosPendientes({
     } catch (_) {
       continue;
     }
-    if (tipo == 'registrar_adelanto') {
-      final uuid = op['op_uuid'] ?? op['uuid'];
-      if (uuid != null && uuidsEspejo.contains('$uuid')) continue;
-      if ('${payload['origen'] ?? 'caja_turno'}' == 'caja_turno' &&
-          '${payload['metodo'] ?? 'efectivo'}' == 'efectivo' &&
-          normalizarTid(payload['descuenta_a']) == telegramId) {
-        total += (payload['monto'] as num?)?.toDouble() ?? 0;
-      }
-    } else {
-      // Anulación encolada: resta lo que el original aún suma.
-      // LÍMITE CONOCIDO (auditoría 1.21 B-13): si el original aún
-      // es una op pendiente de ESTE teléfono (registrado y anulado
-      // antes de sincronizar), no está en el espejo ni la
-      // anulación conoce su id de servidor: el pendiente queda
-      // sobreestimado hasta que el ciclo de sync espeja ambas
-      // ops (ventana de un ciclo, mismo teléfono).
-      final origId = (payload['adelanto_id'] as num?)?.toInt();
-      final orig = origId == null ? null : porId[origId];
-      if (orig != null &&
-          normalizarTid(orig['descuenta_a']) == telegramId &&
-          (orig['en_pendiente'] as num?)?.toInt() == 1) {
-        total -= (orig['monto'] as num?)?.toDouble() ?? 0;
-      }
+    final uuid = op['op_uuid'] ?? op['uuid'];
+    if (uuid != null && uuidsEspejo.contains('$uuid')) continue;
+    // LÍMITE CONOCIDO (auditoría 1.21 B-13): un registro anulado
+    // antes de sincronizar no se netea aquí (la anulación
+    // referencia el id de servidor, que aún no existe): el
+    // pendiente queda sobreestimado hasta que el ciclo de sync
+    // espeja ambas ops (ventana de un ciclo, mismo teléfono).
+    if ('${payload['origen'] ?? 'caja_turno'}' == 'caja_turno' &&
+        '${payload['metodo'] ?? 'efectivo'}' == 'efectivo' &&
+        normalizarTid(payload['descuenta_a']) == telegramId) {
+      total += (payload['monto'] as num?)?.toDouble() ?? 0;
     }
   }
   return total;
@@ -466,7 +484,9 @@ class AdelantosService {
     var mes = mesNomina;
     if (ent == null || mes == null) {
       for (final a in await _db.allMirror('adelantos')) {
-        if ((a['id'] as num?)?.toInt() == adelantoId) {
+        // (M2-A A4) id tolerante: una fila con el id como texto
+        // reventaba el cast duro con un TypeError crudo.
+        if (SyncEngine.enteroTolerante(a['id']) == adelantoId) {
           ent ??= '${a['entrenador'] ?? a['entrenador_telegram_id'] ?? ''}';
           final m = '${a['mes_nomina'] ?? ''}';
           if (mes == null && m.length == 7) mes = m;
@@ -499,14 +519,17 @@ class AdelantosService {
       String? mesNomina}) async {
     var ent = entrenadorId;
     var mes = mesNomina;
-    if (ent == null || mes == null) {
-      for (final a in await _db.allMirror('adelantos')) {
-        if ((a['id'] as num?)?.toInt() == adelantoId) {
-          ent ??= '${a['entrenador'] ?? a['entrenador_telegram_id'] ?? ''}';
-          final m = '${a['mes_nomina'] ?? ''}';
-          if (mes == null && m.length == 7) mes = m;
-          break;
-        }
+    // (M2-A A4) La fila del espejo se busca SIEMPRE (no solo si
+    // faltan entrenador/mes): hace falta su método para la
+    // guarda G2 de abajo. Id tolerante como en [anular].
+    String? metodoFila;
+    for (final a in await _db.allMirror('adelantos')) {
+      if (SyncEngine.enteroTolerante(a['id']) == adelantoId) {
+        metodoFila = '${a['metodo'] ?? 'efectivo'}';
+        ent ??= '${a['entrenador'] ?? a['entrenador_telegram_id'] ?? ''}';
+        final m = '${a['mes_nomina'] ?? ''}';
+        if (mes == null && m.length == 7) mes = m;
+        break;
       }
     }
     if (ent != null &&
@@ -516,6 +539,23 @@ class AdelantosService {
       throw StateError(
           'La nómina de $mes ya está liquidada: no se puede '
           'corregir el origen de este adelanto.');
+    }
+    // (M2-A A4) Guarda G2, la misma de [registrar]: corregir a
+    // caja_turno un adelanto en efectivo SIN gaveta válida
+    // recreaba el huérfano invisible (en_pendiente=1 que
+    // ninguna consulta ve) que registrar() ya corta: el payload
+    // omite descuenta_a si es null y el elegido en el diálogo
+    // puede no tener telegram_id en la foto. Si la fila no está
+    // en el espejo no se puede saber el método y manda el
+    // servidor, como en el resto de guardas de esta clase.
+    if (nuevoOrigen == 'caja_turno' &&
+        metodoFila == 'efectivo' &&
+        (descuentaA == null || descuentaA <= 0)) {
+      throw StateError(
+          'Falta la gaveta del turno: sin el identificador '
+          'del entrenador de turno no se puede pasar '
+          'un adelanto en efectivo a la caja. '
+          'El origen NO se corrigió.');
     }
     return _queueYEmpujar('corregir_origen_adelanto', {
       'adelanto_id': adelantoId,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import 'admin_secciones.dart';
@@ -39,12 +40,40 @@ class _GastosScreenState extends State<GastosScreen> {
   }
 
   Future<void> _recargar() async {
-    final gastos = await gastosTodos();
-    if (!mounted) return;
-    setState(() {
-      _gastos = gastos;
-      _cargado = true;
-    });
+    // (M2-A A7) con red de seguridad: una fila sucia del
+    // espejo dejaba la pantalla en spinner eterno (no había
+    // try/catch y _cargado nunca pasaba a true).
+    try {
+      var gastos = await gastosTodos();
+      // (M2-A A7, decisión de Jc vía delegación 2026-11-06)
+      // el entrenador ve SOLO SUS gastos; el dueño, todos.
+      // El espejo trae registrado_por (el nombre con el que
+      // el servidor guarda al autor); las ops pendientes de
+      // ESTE teléfono son suyas por definición. Sin nombre
+      // de sesión, el entrenador solo ve sus pendientes.
+      final auth = AuthService();
+      if (!auth.isOwner) {
+        final nombre = auth.displayName.trim();
+        gastos = [
+          for (final g in gastos)
+            if (g['pendiente_sync'] == 1 ||
+                (nombre.isNotEmpty &&
+                    '${g['registrado_por'] ?? ''}'.trim() == nombre))
+              g,
+        ];
+      }
+      if (!mounted) return;
+      setState(() {
+        _gastos = gastos;
+        _cargado = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _gastos = const [];
+        _cargado = true;
+      });
+    }
   }
 
   Future<void> _agregar() async {

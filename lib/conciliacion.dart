@@ -12,6 +12,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
@@ -62,12 +63,42 @@ class ConciliacionService {
       ConciliacionService._();
   final LocalDb _db = LocalDb.instance;
 
+  /// (M2-A A10) marca de conciliación AÚN EN COLA para un
+  /// pago: pagoId → estado destino de la ÚLTIMA op encolada.
+  /// La bandeja la pinta sobre el espejo para que lo ya
+  /// marcado no siga saliendo «por comprobar» hasta que el
+  /// sync baje la fila nueva.
+  Future<Map<int, String>> _marcasEnCola() async {
+    final out = <int, String>{};
+    for (final op in await _db.pendingOpsLectura()) {
+      if ('${op['tipo']}' != 'marcar_conciliacion') continue;
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        final id = (p['pago_id'] as num?)?.toInt();
+        final est = '${p['estado'] ?? ''}';
+        if (id != null && est.isNotEmpty) out[id] = est;
+      } catch (_) {}
+    }
+    return out;
+  }
+
   Future<void> marcar({
     required int pagoId,
     required String estado,
     required String estadoEsperado,
     String? nota,
   }) async {
+    // (M2-A A10) anti-duplicado: el doble toque encolaba dos
+    // marcas para el mismo pago; la segunda rebotaba en el
+    // servidor (su CAS espera el estado crudo del espejo, que
+    // la primera ya había movido) y caía a revisión como
+    // incidencia fantasma.
+    if ((await _marcasEnCola()).containsKey(pagoId)) {
+      throw StateError(
+          'Este pago ya tiene una marca de conciliación en '
+          'cola de sincronización: espera a que sincronice.');
+    }
     await _db.queueOp(
       opUuid: const Uuid().v4(),
       tipo: 'marcar_conciliacion',
@@ -87,12 +118,27 @@ class ConciliacionService {
 
   /// Pagos por transferencia del espejo con su estado ya
   /// resuelto, ordenados por fecha descendente.
+  /// (M2-A A10) Overlay de la cola: si hay una marca
+  /// `marcar_conciliacion` sin sincronizar para el pago, el
+  /// estado MOSTRADO es el de la op (con `_conciliacionEnCola`)
+  /// — antes lo marcado seguía contando «por comprobar» en la
+  /// bandeja y en el badge hasta que bajaba el espejo. El
+  /// estado CRUDO del espejo sigue disponible con
+  /// [estadoConciliacion] sobre la fila: es el que el CAS del
+  /// servidor espera como `estado_esperado`.
   Future<List<Map<String, dynamic>>> transferencias() async {
     final rows = await _db.mirrorFiltrado(
         'pagos', {'metodo': 'transferencia'});
+    final enCola = await _marcasEnCola();
     final res = [
       for (final r in rows)
-        {...r, '_conciliacion': estadoConciliacion(r)},
+        {
+          ...r,
+          '_conciliacion': enCola[(r['id'] as num?)?.toInt()] ??
+              estadoConciliacion(r),
+          if (enCola.containsKey((r['id'] as num?)?.toInt()))
+            '_conciliacionEnCola': true,
+        },
     ];
     res.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
     return res;
