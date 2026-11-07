@@ -158,6 +158,13 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   bool _verificando = false;
   bool _generandoPin = false;
 
+  /// 1.29 (D-B1-09 FIJO): bandera de vuelo de la revocación
+  /// (diálogo + RPC). «Regenerar PIN» y «Revocar» no la
+  /// tenían: un doble toque abría dos diálogos de
+  /// confirmación y la revocación podía dispararse dos
+  /// veces, mientras las demás ramas sí respetaban la suya.
+  bool _revocando = false;
+
   /// El último PIN se generó desde ESTA sección sin poder
   /// recargar el listado (entrenador): el acceso existe
   /// aunque el caché no lo enseñe.
@@ -327,8 +334,11 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.refresh_rounded, size: 18),
                   label: const Text('Regenerar PIN'),
-                  onPressed: () =>
-                      _confirmarRegenerar(acceso),
+                  // 1.29 (D-B1-09): deshabilitado con cualquier
+                  // operación en vuelo, como las demás ramas.
+                  onPressed: (_generandoPin || _revocando)
+                      ? null
+                      : () => _confirmarRegenerar(acceso),
                 ),
               ),
               const SizedBox(width: AppEspacio.sm),
@@ -338,8 +348,9 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                       size: 18, color: AppColores.error),
                   label: const Text('Revocar',
                       style: TextStyle(color: AppColores.error)),
-                  onPressed: () =>
-                      _confirmarRevocar(acceso),
+                  onPressed: (_generandoPin || _revocando)
+                      ? null
+                      : () => _confirmarRevocar(acceso),
                 ),
               ),
             ],
@@ -449,69 +460,93 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   }
 
   Future<void> _confirmarRegenerar(AccesoCliente acceso) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Regenerar PIN'),
-        content: const Text(
-            'Se invalidará el PIN anterior y se cerrará la sesión del cliente en su app. ¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Regenerar')),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      _generarPin();
+    // 1.29 (D-B1-09): la bandera se levanta ANTES del diálogo
+    // (patrón del registro de medidas): un doble toque rápido
+    // no abre dos confirmaciones ni llega dos veces a la RPC.
+    if (_generandoPin || _revocando) return;
+    setState(() => _generandoPin = true);
+    var confirmado = false;
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Regenerar PIN'),
+          content: const Text(
+              'Se invalidará el PIN anterior y se cerrará la sesión del cliente en su app. ¿Continuar?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Regenerar')),
+          ],
+        ),
+      );
+      confirmado = ok == true;
+    } finally {
+      // Sin confirmación, la bandera cae aquí; con ella, la
+      // cae el finally de _generarPinCuerpo al terminar la RPC.
+      if (!confirmado && mounted) {
+        setState(() => _generandoPin = false);
+      }
+    }
+    if (confirmado && mounted) {
+      await _generarPinCuerpo();
     }
   }
 
   Future<void> _confirmarRevocar(AccesoCliente acceso) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Revocar acceso'),
-        content: Text(
-            'Se desactivará el acceso de ${acceso.nombre} a la app y se cerrará su sesión. ¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              style: FilledButton.styleFrom(
-                  backgroundColor: AppColores.error),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Revocar')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+    // 1.29 (D-B1-09): bandera de vuelo propia cubriendo
+    // diálogo + RPC — antes no había ninguna y el doble toque
+    // apilaba diálogos y repetía la revocación.
+    if (_revocando || _generandoPin) return;
+    setState(() => _revocando = true);
     try {
-      await Supabase.instance.client
-          .rpc('revocar_acceso_cliente', params: {
-            'p_cliente_id': widget.clienteId,
-          })
-          // 1.24 Bloque 4: timeout de escritura (12 s).
-          .timeout(const Duration(seconds: 12));
-      // A6: la mutación invalida cualquier carga en vuelo —
-      // la recarga posterior lee la foto NUEVA, no se une a
-      // un vuelo anterior a la revocación.
-      AccesoAppCache.instance.invalidar();
-      await AccesoAppCache.instance.cargar();
-      if (mounted) {
-        setState(() {});
-        mostrarSnack(context, 'Acceso revocado',
-            significado: SignificadoChip.exito);
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Revocar acceso'),
+          content: Text(
+              'Se desactivará el acceso de ${acceso.nombre} a la app y se cerrará su sesión. ¿Continuar?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: AppColores.error),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Revocar')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      try {
+        await Supabase.instance.client
+            .rpc('revocar_acceso_cliente', params: {
+              'p_cliente_id': widget.clienteId,
+            })
+            // 1.24 Bloque 4: timeout de escritura (12 s).
+            .timeout(const Duration(seconds: 12));
+        // A6: la mutación invalida cualquier carga en vuelo —
+        // la recarga posterior lee la foto NUEVA, no se une a
+        // un vuelo anterior a la revocación.
+        AccesoAppCache.instance.invalidar();
+        await AccesoAppCache.instance.cargar();
+        if (mounted) {
+          setState(() {});
+          mostrarSnack(context, 'Acceso revocado',
+              significado: SignificadoChip.exito);
+        }
+      } catch (e) {
+        if (mounted) {
+          mostrarSnack(context, 'Error al revocar: $e',
+              significado: SignificadoChip.error);
+        }
       }
-    } catch (e) {
-      if (mounted) {
-        mostrarSnack(context, 'Error al revocar: $e',
-            significado: SignificadoChip.error);
-      }
+    } finally {
+      if (mounted) setState(() => _revocando = false);
     }
   }
 
@@ -522,6 +557,14 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   Future<void> _generarPin() async {
     if (_generandoPin) return;
     setState(() => _generandoPin = true);
+    await _generarPinCuerpo();
+  }
+
+  /// El cuerpo de la generación, con la bandera YA levantada
+  /// (la levantan _generarPin o _confirmarRegenerar, que la
+  /// marca antes de su diálogo — 1.29 D-B1-09); su finally
+  /// siempre la baja.
+  Future<void> _generarPinCuerpo() async {
     try {
       final res = await Supabase.instance.client
           .rpc('generar_acceso_cliente', params: {
