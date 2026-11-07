@@ -119,70 +119,49 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
   }
 
   Future<void> _registrarFlujo() async {
-    final ctrls = <String, TextEditingController>{
-      for (final k in kMetricasMedicion.keys) k: TextEditingController(),
-    };
-    final ok = await showDialog<bool>(
+    // 1.29 (D-B1-08, defecto destapado por su propio test):
+    // el diálogo es un StatefulWidget DUEÑO de los
+    // controladores (regla de la casa). Antes se creaban
+    // aquí y se disponían en cuanto showDialog resolvía —
+    // pero la ruta aún se estaba desmontando y sus campos
+    // se reconstruían una última vez contra controladores
+    // ya dispuestos («used after being disposed») y con un
+    // alto absurdo. Ahora el diálogo los dispone en su
+    // propio dispose, cuando ya no queda ningún campo.
+    final res = await showDialog<_ResultadoMedidaDialogo>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Registrar medida',
-        iconoTitulo: Icons.straighten_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Escribe al menos una medida. Las filas no se editan: '
-              'si te equivocas, registra otra fila corregida.',
-              style: AppTexto.secundario,
-            ),
-            const SizedBox(height: 8),
-            for (final e in kMetricasMedicion.entries)
-              TextField(
-                controller: ctrls[e.key],
-                keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true),
-                decoration: InputDecoration(
-                    labelText:
-                        '${e.key.replaceAll('_', ' ')} (${e.value.unidad})'),
-              ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Registrar'),
-          ),
-        ],
-      ),
+      builder: (ctx) => const _DialogoRegistrarMedida(),
     );
-    if (ok != true || !mounted) {
-      // Argón Clientes #10: cancelar fugaba TODOS los
-      // controladores (el dispose vivía tras este return).
-      for (final c in ctrls.values) {
-        c.dispose();
+    if (res == null || !mounted) return;
+    final medidas = res.medidas;
+    final descartadas = res.descartadas;
+    if (medidas.isEmpty && descartadas.isNotEmpty) {
+      // Nada parseó: la verdad es que nada se guardó, y el
+      // aviso nombra los campos (no el genérico «escribe al
+      // menos una medida» de cuando todo venía vacío).
+      if (mounted) {
+        mostrarSnack(context,
+            descartadas.length == 1
+                ? '${descartadas.first} no se guardó: revisa el valor.'
+                : 'Nada se guardó: revisa ${descartadas.join(', ')}.',
+            significado: SignificadoChip.alerta);
       }
       return;
-    }
-    final medidas = <String, double>{};
-    for (final e in ctrls.entries) {
-      final txt = e.value.text.trim().replaceAll(',', '.');
-      if (txt.isEmpty) continue;
-      final v = double.tryParse(txt);
-      if (v != null) medidas[e.key] = v;
-    }
-    for (final c in ctrls.values) {
-      c.dispose();
     }
     try {
       await registrarMedicionCliente(
           clienteId: widget.clienteId, medidas: medidas);
       await _cargar();
       if (mounted) {
-        mostrarSnack(context, 'Medida registrada.', significado: SignificadoChip.exito);
+        if (descartadas.isEmpty) {
+          mostrarSnack(context, 'Medida registrada.', significado: SignificadoChip.exito);
+        } else {
+          mostrarSnack(context,
+              descartadas.length == 1
+                  ? 'Medida registrada. Ojo: ${descartadas.first} no se guardó: revisa el valor.'
+                  : 'Medida registrada. Ojo: no se guardaron ${descartadas.join(', ')}: revisa los valores.',
+              significado: SignificadoChip.alerta);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -402,6 +381,103 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
           const SizedBox(width: 4),
           Text(textoDelta, style: AppTexto.secundario),
         ],
+      ],
+    );
+  }
+}
+
+/// Resultado del diálogo de registro de medida: las medidas
+/// que parsearon y los NOMBRES de los campos que no (1.29,
+/// D-B1-08: el aviso los nombra, no los descarta en silencio).
+class _ResultadoMedidaDialogo {
+  final Map<String, double> medidas;
+  final List<String> descartadas;
+  const _ResultadoMedidaDialogo(this.medidas, this.descartadas);
+}
+
+/// 1.29 (D-B1-08): el diálogo de «Registrar medida» como
+/// StatefulWidget DUEÑO de sus controladores (regla de la
+/// casa para diálogos con TextEditingController). Los
+/// dispone en su propio dispose — cuando la ruta ya se
+/// desmontó entera — en vez de al resolver showDialog,
+/// que dejaba los campos reconstruyéndose contra
+/// controladores muertos durante la animación de salida.
+class _DialogoRegistrarMedida extends StatefulWidget {
+  const _DialogoRegistrarMedida();
+
+  @override
+  State<_DialogoRegistrarMedida> createState() =>
+      _DialogoRegistrarMedidaState();
+}
+
+class _DialogoRegistrarMedidaState
+    extends State<_DialogoRegistrarMedida> {
+  final _ctrls = <String, TextEditingController>{
+    for (final k in kMetricasMedicion.keys) k: TextEditingController(),
+  };
+
+  @override
+  void dispose() {
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _registrar() {
+    final medidas = <String, double>{};
+    // Los campos con texto que NO parsea se NOMBRAN en el
+    // resultado (D-B1-08): un «8O» con O de letra en el peso
+    // no desaparece sin dejar rastro.
+    final descartadas = <String>[];
+    for (final e in _ctrls.entries) {
+      final txt = e.value.text.trim().replaceAll(',', '.');
+      if (txt.isEmpty) continue;
+      final v = double.tryParse(txt);
+      if (v != null) {
+        medidas[e.key] = v;
+      } else {
+        descartadas.add(nombreMetrica(e.key));
+      }
+    }
+    Navigator.pop(
+        context, _ResultadoMedidaDialogo(medidas, descartadas));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Registrar medida',
+      iconoTitulo: Icons.straighten_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Escribe al menos una medida. Las filas no se editan: '
+            'si te equivocas, registra otra fila corregida.',
+            style: AppTexto.secundario,
+          ),
+          const SizedBox(height: 8),
+          for (final e in kMetricasMedicion.entries)
+            TextField(
+              controller: _ctrls[e.key],
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true),
+              decoration: InputDecoration(
+                  labelText:
+                      '${e.key.replaceAll('_', ' ')} (${e.value.unidad})'),
+            ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _registrar,
+          child: const Text('Registrar'),
+        ),
       ],
     );
   }
