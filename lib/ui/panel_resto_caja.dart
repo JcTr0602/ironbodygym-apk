@@ -880,23 +880,12 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
     if (!AuthService().isOwner) return;
     setState(() => _cargando = true);
     try {
-      final filas = <FilaIngreso>[];
-      for (final p in await LocalDb.instance.allMirror('pagos')) {
-        final f = filaIngresoDesdeEspejo('pagos', p);
-        if (f != null) filas.add(f);
-      }
-      for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-        final f = filaIngresoDesdeEspejo('pagos_diarios', d);
-        if (f != null) filas.add(f);
-      }
-      for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-        final f = filaIngresoDesdeEspejo('ventas_suplementos', v);
-        if (f != null) filas.add(f);
-      }
-      for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-        final f = filaIngresoDesdeEspejo('servicio_ventas', v);
-        if (f != null) filas.add(f);
-      }
+      // 1.29 (Oleada 2, D-A2): lectura por consultas de
+      // rango (índice en pagos, filtro SQL en las demás)
+      // en vez de cargar los cuatro espejos enteros y
+      // filtrar en Dart; las cifras no cambian (la
+      // equivalencia la vigila un test).
+      final filas = await filasIngresoPeriodo(_desde, _hasta);
       // Plus: línea propia, solo por transferencia, desde reportes
       // CONFIRMADOS del servidor (el espejo local no existe). Si la
       // RPC falla o no hay red, la línea queda marcada sin datos y
@@ -994,8 +983,16 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
                             'Transferencia: '
                             '${r.transferencia.toStringAsFixed(0)} CUP',
                             style: AppTexto.cuerpo),
-                        Text('Total: ${r.total.toStringAsFixed(0)} CUP',
-                            style: AppTexto.titulo),
+                        // 1.29 (Oleada 2, D-19): el total del
+                        // período cuenta hasta su cifra al
+                        // cambiar de rango (MontoAnimado), con
+                        // el mismo formato final de antes.
+                        MontoAnimado(
+                          valor: r.total,
+                          formato: (v) =>
+                              'Total: ${v.toStringAsFixed(0)} CUP',
+                          style: AppTexto.titulo,
+                        ),
                       ],
                     ),
                   ),

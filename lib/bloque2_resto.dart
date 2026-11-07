@@ -561,6 +561,60 @@ FilaIngreso? filaIngresoDesdeEspejo(
   return null;
 }
 
+/// 1.29 (Oleada 2, D-A2): las filas de ingreso de un
+/// período [desde..hasta] ('YYYY-MM-DD', inclusive) SIN
+/// cargar los espejos enteros en memoria. Es la lectura
+/// de «Ingresos del período» y del «Registro mensual»:
+/// antes ambas pantallas recorrían allMirror de las
+/// cuatro fuentes y filtraban en Dart.
+///
+/// La equivalencia con el camino viejo es por
+/// construcción y la vigila un test de cifras idénticas:
+/// - `pagos` va por la columna indexada `fecha`
+///   (pagosPorFiltro) con UN DÍA de margen por debajo:
+///   la columna guarda la fecha de NEGOCIO Habana y la
+///   conversión [filaIngresoDesdeEspejo] usa los 10
+///   primeros caracteres del JSON crudo; entre ambas
+///   puede haber un día de diferencia (un timestamp UTC
+///   de madrugada). El margen garantiza que ninguna
+///   fila del rango se quede fuera del precorte; el
+///   rango EXACTO lo sigue aplicando [resumenIngresos]
+///   sobre la fecha de la conversión, como antes.
+/// - Las otras tres fuentes van por `mirrorPorFecha`,
+///   que filtra EN SQL sobre el mismo substring del
+///   JSON que usa la conversión: el precorte es exacto,
+///   sin margen.
+Future<List<FilaIngreso>> filasIngresoPeriodo(
+    String desde, String hasta) async {
+  final filas = <FilaIngreso>[];
+  final d = DateTime.tryParse(desde);
+  final desdePrecorte = d == null
+      ? desde
+      : _isoFecha(d.subtract(const Duration(days: 1)));
+  for (final p
+      in await LocalDb.instance.pagosPorFiltro(fechaDesde: desdePrecorte)) {
+    final f = filaIngresoDesdeEspejo('pagos', p);
+    if (f != null) filas.add(f);
+  }
+  for (final fuente in const [
+    'pagos_diarios',
+    'ventas_suplementos',
+    'servicio_ventas',
+  ]) {
+    for (final r in await LocalDb.instance
+        .mirrorPorFecha(fuente, 'fecha', desde, hasta)) {
+      final f = filaIngresoDesdeEspejo(fuente, r);
+      if (f != null) filas.add(f);
+    }
+  }
+  return filas;
+}
+
+String _isoFecha(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
 // ---------------------------------------------------------------------------
 // C6/H1 — Precios por método, única fuente
 // ---------------------------------------------------------------------------

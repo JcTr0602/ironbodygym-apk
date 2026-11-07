@@ -291,8 +291,25 @@ class _HomeScreenState extends State<HomeScreen>
   /// PIN otra vez.
   bool _pinEnPantalla = false;
 
+  /// 1.29 (Oleada 2, D-B2-04): guarda anti-doble-corrida
+  /// de la verificación de cierres automáticos: el
+  /// arranque y un «resumed» inmediato (o dos «resumed»
+  /// seguidos) no pueden correrla a la vez ni apilar el
+  /// diálogo informativo.
+  bool _verificandoCierres = false;
+
   /// v1.3.9 Sprint 4 (#9): verifica cierres automáticos pendientes.
   Future<void> _verificarCierresAuto() async {
+    if (_verificandoCierres) return;
+    _verificandoCierres = true;
+    try {
+      await _verificarCierresAutoReal();
+    } finally {
+      _verificandoCierres = false;
+    }
+  }
+
+  Future<void> _verificarCierresAutoReal() async {
     final ejecuto = await verificarCierresAutomaticos();
     if (ejecuto && mounted) {
       // Mostrar diálogo informativo
@@ -572,6 +589,15 @@ class _HomeScreenState extends State<HomeScreen>
       // v1.3.3: refrescar el estado del turno al volver (pudo cambiar
       // la fecha/franja mientras la app estaba en background).
       _refrescarTurno();
+      // 1.29 (Oleada 2, D-B2-04): el auto-cierre también
+      // se verifica al VOLVER a la app, no solo al
+      // arrancar: un turno que venció con la app en
+      // segundo plano (o cerrada y reabierta sin reinicio
+      // del proceso) quedaba abierto hasta el próximo
+      // arranque en frío. La guarda de
+      // _verificarCierresAuto evita la doble corrida si
+      // el arranque y el resumed se pisan.
+      _verificarCierresAuto();
     }
   }
 

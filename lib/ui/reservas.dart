@@ -83,6 +83,19 @@ class ReservaVista {
 
   double get totalFoto => cantidad * precioUnitario;
 
+  /// 1.29 (Oleada 2, D-B2-03): apartado cuyo vencimiento
+  /// ya pasó pero el espejo aún lo trae como 'reservada'
+  /// (el servidor lo libera en su barrido; entre tanto la
+  /// fila sigue aquí). Un apartado así NO se puede cobrar:
+  /// cobrarlo encolaría un cobro que el servidor va a
+  /// rechazar por expirado. Solo aplica a 'reservada'
+  /// (las solicitadas no tienen stock apartado).
+  bool apartadoVencido(DateTime ahora) {
+    if (estado != 'reservada') return false;
+    final vence = expiraEn == null ? null : DateTime.tryParse(expiraEn!);
+    return vence != null && vence.isBefore(ahora);
+  }
+
   /// Diferencia total contra el precio vigente del catálogo
   /// (null si el suplemento ya no está en el espejo, o si la
   /// moneda del catálogo difiere de la snapshot: restar unidades
@@ -350,7 +363,14 @@ class _ReservasScreenState extends State<ReservasScreen> {
     final reservas = await LocalDb.instance.allMirror('reservas');
     final clientes = await LocalDb.instance.allMirror('clientes');
     final suplementos = await LocalDb.instance.allMirror('suplementos');
-    final ops = await LocalDb.instance.pendingOps();
+    // 1.29 (Oleada 2, D-B2-02): lectura de DINERO
+    // (pendingOpsLectura: pendiente + enviada + error),
+    // no la del push. Con pendingOps, una acción de
+    // reserva en estado 'enviada' (ya subida, aún sin
+    // bajar el espejo) dejaba de bloquear su tarjeta y
+    // el doble cobro/rechazo pasaba — la misma clase de
+    // fuga que M3-A2 de la 1.28 cerró en Servicios.
+    final ops = await LocalDb.instance.pendingOpsLectura();
     if (!mounted) return;
     setState(() {
       _bandeja = construirBandeja(reservas, clientes, suplementos,
@@ -393,7 +413,11 @@ class _ReservasScreenState extends State<ReservasScreen> {
           espejo.where((r) => _entero(r['id']) == rid).toList();
       final estadoActual =
           filas.isEmpty ? null : '${filas.first['estado'] ?? ''}';
-      final opsFrescas = await LocalDb.instance.pendingOps();
+      // 1.29 (D-B2-02): la revalidación mira la misma
+      // lectura que la carga (con 'enviada'), no la del
+      // push: si no, la ventana entre subir y bajar el
+      // espejo dejaba encolar la acción contradictoria.
+      final opsFrescas = await LocalDb.instance.pendingOpsLectura();
       final conOp = reservasConOpPendiente(opsFrescas).contains(rid);
       if (estadoActual == null ||
           !requeridos.contains(estadoActual) ||
@@ -524,6 +548,15 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
   Future<void> _cobrar(ReservaVista r) async {
     if (_bloqueada(r.id)) return;
+    // 1.29 (Oleada 2, D-B2-03): defensa en el propio
+    // flujo — un apartado vencido no se cobra aunque la
+    // tarjeta se hubiera pintado antes del vencimiento.
+    if (r.apartadoVencido(ahoraHabana())) {
+      mostrarSnack(context,
+          'Este apartado ya venció: se libera solo y no se puede cobrar.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     // Lote 2 Argón: respetar los métodos aceptados del gimnasio
     // (antes ofrecía efectivo/transferencia fijos aunque el ajuste
     // H1 dijera otra cosa; mismo helper que pagoDialogo).
@@ -999,7 +1032,24 @@ class TarjetaReserva extends StatelessWidget {
                   ),
                 ],
               ),
-            if (reservada && !bloqueada)
+            if (reservada && !bloqueada && r.apartadoVencido(ahora))
+              // 1.29 (Oleada 2, D-B2-03): apartado vencido
+              // que el servidor aún no libera: SIN botones
+              // (cobrarlo encolaría un cobro condenado al
+              // rechazo por expirado; cancelarlo es
+              // innecesario, se libera solo). La línea de
+              // vencimiento de arriba ya dice «Vencida —
+              // se libera sola»; esta lo deja explícito
+              // junto a donde estarían las acciones.
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Text(
+                  'Apartado vencido: se libera solo, no se puede cobrar.',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.alertaTexto(context)),
+                ),
+              ),
+            if (reservada && !bloqueada && !r.apartadoVencido(ahora))
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [

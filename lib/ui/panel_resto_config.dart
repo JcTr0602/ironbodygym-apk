@@ -416,25 +416,12 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
     if (!AuthService().isOwner) return;
     final mes = mesHabanaActual();
     try {
-      final filas = <FilaIngreso>[];
-      for (final p in await LocalDb.instance.allMirror('pagos')) {
-        final f = filaIngresoDesdeEspejo('pagos', p);
-        if (f != null) filas.add(f);
-      }
-      for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
-        final f = filaIngresoDesdeEspejo('pagos_diarios', d);
-        if (f != null) filas.add(f);
-      }
-      for (final v in await LocalDb.instance.allMirror('ventas_suplementos')) {
-        final f = filaIngresoDesdeEspejo('ventas_suplementos', v);
-        if (f != null) filas.add(f);
-      }
-      for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
-        final f = filaIngresoDesdeEspejo('servicio_ventas', v);
-        if (f != null) filas.add(f);
-      }
       final desde = '$mes-01';
       final hasta = hoyHabanaIso();
+      // 1.29 (Oleada 2, D-A2): misma migración que
+      // «Ingresos del período» — consultas de rango en
+      // vez de los cuatro espejos enteros en memoria.
+      final filas = await filasIngresoPeriodo(desde, hasta);
       final resumen = resumenIngresos(filas, desde, hasta);
       final pagaron = await NominaCalc.clientesQuePagaronElMes(mes);
       if (mounted) {
