@@ -112,7 +112,7 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 66;
+  static const int versionActual = 67;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1557,6 +1557,22 @@ class LocalDb {
           // reactiva sola. NULL = sin pausa con fecha.
           await _addColumnIfMissing(db, 'recordatorio_config',
               'pausada_hasta', 'TEXT');
+        }
+        if (oldV < 67) {
+          // 1.28 (corrección A5-D1): 'pausada_hasta' de
+          // espejo_recordatorio_config nunca bajó (el select
+          // del pull no la pedía ni el conversor la copiaba,
+          // aunque el puente la publica y la fusión la
+          // espera: patrón G-08, el mismo de 'frecuencia' en
+          // v64). Los watermarks de esa tabla ya avanzaron
+          // sin ella: se resetea el de la tabla para que baje
+          // entera con la pausa. Misma tolerancia con meta
+          // que en v62/v64.
+          await db.execute(
+              'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+          await db.rawInsert(
+              "INSERT OR REPLACE INTO meta (k, v) "
+              "VALUES ('wm_espejo_recordatorio_config', '0')");
         }
       },
     );
@@ -8579,11 +8595,12 @@ class LocalDb {
             ? 1
             : (e['activa'] is num ? (e['activa'] as num).toInt() : 0),
         // 1.28 (M5-B3): la pausa con fecha viaja en la fila;
-        // si el espejo aún no la trae (el servidor todavía
-        // no la publica), manda la LOCAL: un pull no puede
-        // borrar una pausa que este teléfono fijó. Cuando
-        // el espejo la traiga (clave presente, aunque sea
-        // null), manda el espejo.
+        // si el espejo aún no la trae (filas bajadas antes de
+        // que el select/conversor la pidieran: la migración
+        // v67 re-baja la tabla entera), manda la LOCAL: un
+        // pull no puede borrar una pausa que este teléfono
+        // fijó. Cuando el espejo la traiga (clave presente,
+        // aunque sea null), manda el espejo.
         'pausada_hasta': e.containsKey('pausada_hasta')
             ? e['pausada_hasta']
             : local?['pausada_hasta'],

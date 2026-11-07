@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../localdb.dart';
+import '../tipos_pago.dart';
 
 /// Claves de ajustes que son MONTOS (con su etiqueta visible).
 const clavesMontoConfig = <(String, String)>[
@@ -113,10 +114,26 @@ Map<String, double> parsearCambiosMontos(
 /// transacción (auditoría 1.22 D2-01). No incluye la
 /// republicación del precio App Plus ni el push: los dispara
 /// el llamador tras guardar.
+///
+/// Corrección A5-D2 (auditoría 5 de la 1.28): la
+/// 'mensualidad_menores' se escribe ADEMÁS en la FUENTE ÚNICA
+/// del cobro — el tipo 'menores' del blob `tipos_pago`, vía
+/// op `guardar_tipos_pago` en la MISMA transacción — porque
+/// [precioMenoresDesdeAjustes] lee el blob primero y la clave
+/// fija es solo respaldo: guardar solo la clave dejaba el
+/// campo editado sin efecto sobre lo cobrado. La clave se
+/// sigue escribiendo como espejo (respaldo histórico y
+/// versiones viejas de la app que solo la leen a ella).
 Future<void> aplicarCambiosMontos(Map<String, double> cambios) async {
   final aj = await LocalDb.instance.getAjustes();
   for (final e in cambios.entries) {
     aj[e.key] = e.value;
+  }
+  final nuevoMenores = cambios['mensualidad_menores'];
+  List<Map<String, dynamic>>? blobMenores;
+  if (nuevoMenores != null) {
+    blobMenores = blobTiposConPrecioMenores(aj, nuevoMenores);
+    aj['tipos_pago'] = blobMenores;
   }
   final conn = await LocalDb.instance.db;
   await conn.transaction((txn) async {
@@ -125,6 +142,14 @@ Future<void> aplicarCambiosMontos(Map<String, double> cambios) async {
         opUuid: const Uuid().v4(),
         tipo: 'ajuste',
         payload: {'clave': e.key, 'valor': e.value},
+        txn: txn,
+      );
+    }
+    if (blobMenores != null) {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'guardar_tipos_pago',
+        payload: {'tipos': blobMenores},
         txn: txn,
       );
     }

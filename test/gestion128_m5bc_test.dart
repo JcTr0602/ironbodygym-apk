@@ -521,11 +521,14 @@ void main() {
       await LocalDb.resetParaTest();
     });
 
-    test('el esquema nuevo trae pausada_hasta y la versión es 66',
+    test('el esquema nuevo trae pausada_hasta y la versión es 67',
         () async {
       final db = await LocalDb.instance.db;
       expect(await db.getVersion(), LocalDb.versionActual);
-      expect(LocalDb.versionActual, 66);
+      // 67 desde la corrección A5-D1 (reset del watermark de
+      // espejo_recordatorio_config para que pausada_hasta
+      // baje por el pull).
+      expect(LocalDb.versionActual, 67);
       final cols = await db
           .rawQuery("PRAGMA table_info(recordatorio_config)");
       expect(cols.map((c) => c['name']),

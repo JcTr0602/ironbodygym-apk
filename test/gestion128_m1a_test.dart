@@ -560,9 +560,11 @@ void main() {
       final cols = await db.rawQuery('PRAGMA table_info(incidencias_fotos)');
       expect(cols.map((c) => c['name']), contains('reclamada_en'));
       // 1.28 (M5-B3): la versión vigente subió a 66
-      // (pausada_hasta); la columna de v65 sigue naciendo
-      // en el esquema limpio, que es lo que aquí se fija.
-      expect(LocalDb.versionActual, 66);
+      // (pausada_hasta); 1.28 (corrección A5-D1): a 67
+      // (reset del watermark de recordatorios). La columna
+      // de v65 sigue naciendo en el esquema limpio, que es
+      // lo que aquí se fija.
+      expect(LocalDb.versionActual, 67);
     });
   });
 

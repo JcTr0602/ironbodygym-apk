@@ -824,11 +824,17 @@ class _AdminScreenState extends State<AdminScreen> {
     _tipos = tipos;
     _pagoEntrenador = pagoEnt;
     for (final (clave, _) in clavesMontoConfig) {
-      final v = aj[clave] as num?;
+      // Corrección A5-D2: 'Mensualidad menores' muestra la
+      // FUENTE ÚNICA (precioMenoresDesdeAjustes: el tipo del
+      // blob manda), no la clave fija legacy — el campo
+      // enseñaba una cifra que podía no ser la cobrada.
+      final num? v = clave == 'mensualidad_menores'
+          ? precioMenoresDesdeAjustes(aj)
+          : aj[clave] as num?;
       _montos
           .putIfAbsent(clave, () => TextEditingController())
           .text = v != null
-              ? '$v'
+              ? (v == v.roundToDouble() ? '${v.toInt()}' : '$v')
               : (clave == 'precio_app_plus' ? '1000' : '');
     }
     // v1.2.4: datos bancarios (strings) + titular (v0.6.0).

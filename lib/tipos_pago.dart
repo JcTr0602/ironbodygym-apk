@@ -104,6 +104,105 @@ double precioMenoresDesdeAjustes(Map<String, dynamic> aj) {
   return 1500;
 }
 
+/// Lector tolerante de un importe de ajustes: num finito o
+/// texto parseable («1600»); cualquier otra cosa es null.
+/// Misma semántica que `NominaCalc.montoTolerante` (clase N-2:
+/// Infinity/NaN no son importes), pero sin importar
+/// nomina_calc (que importa negocio → tipos_pago: ciclo).
+/// El blob de ajustes también se edita desde el bot y por
+/// SQL: un importe puede llegar como texto y un cast duro
+/// `as num?` lanzaría TypeError en vez de degradar
+/// (correcciones A2-D2 / A5-D2).
+double? montoAjusteTolerante(dynamic v) {
+  if (v is num) {
+    final d = v.toDouble();
+    return d.isFinite ? d : null;
+  }
+  if (v is String) {
+    final d = double.tryParse(v.trim());
+    return (d != null && d.isFinite) ? d : null;
+  }
+  return null;
+}
+
+/// (Corrección A5-D2) ESCRITURA de la fuente única del precio
+/// de menores: devuelve el blob `tipos_pago` COMPLETO (sin
+/// filtros de activos/menores) con el monto del tipo
+/// 'menores' fijado en [monto]. Es el reverso de
+/// [precioMenoresDesdeAjustes]: el editor de Configuración
+/// persiste por aquí (op `guardar_tipos_pago`), no por la
+/// clave fija legacy — antes el campo «Mensualidad menores»
+/// editaba la clave y el cobro seguía leyendo el blob, así
+/// que el cambio del dueño no cambiaba lo cobrado.
+///
+/// - Blob con 'menores': solo cambia su monto; el resto de
+///   tipos queda intacto.
+/// - Blob sin 'menores': se inserta tras 'mensual' (la misma
+///   posición en la que getTiposPago lo sintetiza).
+/// - Sin blob: se materializa la lista por defecto que
+///   getTiposPago construye desde las claves fijas, para que
+///   al nacer el blob no se pierdan mensual/semanal/quincenal.
+List<Map<String, dynamic>> blobTiposConPrecioMenores(
+    Map<String, dynamic> aj, double monto) {
+  final crudo = aj['tipos_pago'];
+  final lista = <Map<String, dynamic>>[
+    if (crudo is List)
+      for (final t in crudo)
+        if (t is Map) Map<String, dynamic>.from(t),
+  ];
+  if (lista.isEmpty) {
+    double valor(String k, double def) =>
+        montoAjusteTolerante(aj[k]) ?? def;
+    lista.addAll([
+      {
+        'id': 'mensual',
+        'nombre': 'Mensualidad',
+        'monto': valor('mensualidad', 2000),
+        'dias': 30,
+        'activo': true,
+      },
+      {
+        'id': 'menores',
+        'nombre': 'Mensualidad menores',
+        'monto': monto,
+        'dias': 30,
+        'activo': true,
+        'solo_menores': true,
+      },
+      {
+        'id': 'semanal',
+        'nombre': 'Semana',
+        'monto': valor('pago_semanal', 600),
+        'dias': 7,
+        'activo': true,
+      },
+      {
+        'id': 'quincenal',
+        'nombre': 'Quincena',
+        'monto': valor('pago_quincenal', 1200),
+        'dias': 15,
+        'activo': true,
+      },
+    ]);
+    return lista;
+  }
+  final i = lista.indexWhere((t) => '${t['id']}' == 'menores');
+  if (i >= 0) {
+    lista[i]['monto'] = monto;
+  } else {
+    final iMensual = lista.indexWhere((t) => '${t['id']}' == 'mensual');
+    lista.insert(iMensual >= 0 ? iMensual + 1 : 0, {
+      'id': 'menores',
+      'nombre': 'Mensualidad menores',
+      'monto': monto,
+      'dias': 30,
+      'activo': true,
+      'solo_menores': true,
+    });
+  }
+  return lista;
+}
+
 /// Lee los tipos de pago de los ajustes sincronizados.
 /// Con `soloActivos=true` filtra los desactivados.
 /// Con `paraMenor=true`: el tipo 'mensual' se reemplaza por 'menores'

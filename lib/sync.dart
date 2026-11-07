@@ -4046,6 +4046,11 @@ class SyncEngine {
           // 1.24.2 (auditoría sync M2): la copia de la
           // frecuencia que faltaba (ver el select).
           'frecuencia': m['frecuencia'],
+          // 1.28 (corrección A5-D1): la pausa con fecha
+          // también se copia (ver el select): sin esta llave,
+          // la fusión jamás la veía presente en el espejo y
+          // mandaba siempre el valor local de cada teléfono.
+          'pausada_hasta': m['pausada_hasta'],
           'activa': m['activa'],
           'creado_por': m['creado_por'],
           'disparado_en_fecha_habana': m['disparado_en_fecha_habana'],
@@ -4757,8 +4762,14 @@ class SyncEngine {
               // local la espera, pero nadie la pedía: todo
               // recordatorio recurrente llegaba degradado a
               // disparo único (patrón G-08).
+              // 1.28 (corrección A5-D1): 'pausada_hasta' entra
+              // igual — la pausa con fecha de M5-B3 se guardaba
+              // y el servidor la publicaba, pero el select no la
+              // pedía y el conversor no la copiaba: la pausa
+              // solo existía en el teléfono que la fijó y los
+              // demás seguían disparando (mismo patrón G-08).
               'id,titulo,tipo,alcance,target_key,dias_anticipacion,'
-                  'fecha_fija,frecuencia,activa,creado_por,'
+                  'fecha_fija,frecuencia,pausada_hasta,activa,creado_por,'
                   'disparado_en_fecha_habana,creada_ts,actualizada_ts,'
                   'sync_seq',
             // Bandeja (1.19, v49): permisos_bandeja es plano SIN

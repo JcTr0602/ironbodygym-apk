@@ -649,9 +649,17 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       };
       // v1.3.1 (Argón): valores de precios en ajustes para auditar
       // discrepancias (menores 1500 vs 2000).
+      // Corrección A5-D2: el de menores sale de la FUENTE
+      // ÚNICA del cobro (precioMenoresDesdeAjustes), no de la
+      // clave fija legacy: el diagnóstico enseñaba la cifra
+      // que NO se cobra cuando el blob manda otra.
       final aj = await db.getAjustes();
       datos['Precio mensual'] = '${aj['mensualidad'] ?? 2000}';
-      datos['Precio menores'] = '${aj['mensualidad_menores'] ?? 1500}';
+      final precioMenoresDiag = precioMenoresDesdeAjustes(aj);
+      datos['Precio menores'] =
+          precioMenoresDiag == precioMenoresDiag.roundToDouble()
+              ? '${precioMenoresDiag.toInt()}'
+              : '$precioMenoresDiag';
       datos['Precio transferencia'] = '${aj['transferencia'] ?? 2500}';
       // v1.3.1 (Argón): detalle de fotos atascadas en la cola.
       // Nota: sin lista columns (SELECT *) y con fallbacks por si el
