@@ -16,11 +16,16 @@ class Novedad {
 }
 
 const novedades = [
-  // NOTA 1.28 (M5-B5): la entrada de la 1.28.0 se añade
-  // JUNTO con el bump del pubspec — el test guardián
-  // (novedades_version_guard_test) exige que la primera
-  // entrada sea la versión del pubspec. Texto listo en
-  // el informe de la oleada M5-BC.
+  Novedad('1.28.0', [
+    'Sincronización blindada y a la vista: la pantalla «Salud de la sincronización» muestra el estado de cada tabla con un semáforo; si el espejo de un teléfono se desfasa, la app lo detecta y lo repara sola, y la cola de operaciones explica por fila por qué algo no subió y qué hacer',
+    'Panel reorganizado: los seis módulos se llaman como los usas —«Caja y dinero», «Clientes e invitados», «Equipo y turnos», «Suplementos y contenido», «Configuración y datos» y «Control y sistema»—, cada uno con su línea de estado en vivo, y el Panel abre al instante con los datos del día',
+    'Anuncios desde la app: crea los anuncios de la app de Clientes sin salir de Gestión, con vista previa tal como los verán, audiencia a elegir (todos, clientes, invitados o específicos) y ventana de vigencia',
+    'Dinero sin dobleces: liquidar dos veces el mismo pendiente ya es imposible; el resumen de liquidación se comparte por WhatsApp tal cual se registra; si liquidaste por error, puedes deshacerlo mientras la orden siga en tu teléfono; y el historial de liquidaciones queda consultable con buscador',
+    'Pendiente que avisa solo: si un entrenador acumula entregas de varios días o mucho efectivo sin entregar, el Panel lo marca con su antigüedad antes de que sea un problema',
+    'La ficha del cliente abre y se desplaza sin tirones: carga por partes según bajas, y la sección «Qué le falta» te dice en la propia ficha qué le falta a ese cliente y te da el botón para resolverlo',
+    'Turnos, Servicios y nómina más honestos: el turno olvidado se cierra marcado como cierre automático tardío; las ventas muestran su estado («Por sincronizar» o «Revertida»); y al liquidar la nómina, el resumen sale listo para WhatsApp',
+    'Recordatorios con pausa hasta una fecha: pausas los avisos hasta el día que elijas y la pausa vale en todos los teléfonos, no solo en el tuyo; los vales de Premios por aprobar se anuncian en el Panel y los premios se ven con su nombre y su medalla en todas partes',
+  ]),
   Novedad('1.27.0', [
     'Premios con control total: el catálogo de premios se edita desde la app (días, meta y activo), puedes crear un vale manual para cualquier cliente con su motivo, ver el historial completo de cada uno y anular un vale ya canjeado eligiendo si quitas el pago completo o solo los días no usados',
     'Gastos para el equipo: un entrenador con tu permiso ya puede registrar gastos desde su teléfono (nueva sección «Gastos»); sin permiso, ni siquiera puede encolarlos',
