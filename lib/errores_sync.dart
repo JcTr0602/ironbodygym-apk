@@ -376,6 +376,100 @@ String resumenErrorDiagnostico(String crudo) {
   return 'error de sincronización';
 }
 
+/// 1.28 (M1-C5): explicación EN LENGUAJE LLANO de por qué
+/// una operación de la cola está como está y qué se puede
+/// hacer con ella. Función PURA y única: la usan la fila de
+/// la cola, el bloque de bloqueadas y el detalle de la op,
+/// para que las tres superficies digan lo mismo (antes cada
+/// una traducía por su cuenta y la fila de bloqueadas
+/// enseñaba el texto técnico crudo).
+///
+/// El texto CRUDO nunca se devuelve como motivo salvo que
+/// sea un motivo de negocio que el propio servidor escribió
+/// en español (sin marcas de excepción ni códigos HTTP):
+/// esos motivos SÍ son el dato que el dueño necesita.
+({String motivo, String accion}) explicacionOp({
+  required String estado,
+  String error = '',
+  String codigoError = '',
+}) {
+  final err = error.trim();
+  final primeraLinea = err.split('\n').first.trim();
+  switch (estado) {
+    case 'pendiente':
+      return (
+        motivo: 'Todavía no se ha enviado.',
+        accion: 'Se subirá sola cuando haya conexión.',
+      );
+    case 'enviada':
+      return (
+        motivo: 'Se envió y el servidor aún no la confirma.',
+        accion: 'Se confirma sola en la próxima sincronización.',
+      );
+    case 'aplicada':
+      return (motivo: 'El servidor ya la confirmó.', accion: '');
+    case 'error':
+      if (err.isEmpty) {
+        return (
+          motivo: 'Falló el último intento de envío.',
+          accion: 'Se reintenta sola; también puedes reintentarla '
+              'con el botón de la fila.',
+        );
+      }
+      final t = traducirErrorSync(err);
+      return (motivo: t.mensaje, accion: t.accionTexto);
+    case 'rechazada':
+    case 'necesita_revision':
+      final esRevision = estado == 'necesita_revision';
+      final accion = esRevision
+          ? 'La decide el dueño: reintentarla o descartarla.'
+          : 'Puedes reintentarla o descartarla con los botones '
+              'de la fila. Si el motivo es un dato incorrecto, '
+              'corrígelo antes de reintentar.';
+      if (err.contains('cliente no existe')) {
+        return (
+          motivo: 'El cliente ya no existe en el servidor '
+              '(fue eliminado).',
+          accion: 'No es necesario reintentar: descártala.',
+        );
+      }
+      if (err.contains('HTTP 409') ||
+          codigoError.toUpperCase().contains('DUPLICAD')) {
+        return (
+          motivo: 'La operación ya fue registrada (duplicada).',
+          accion: 'No es necesario reintentar: descártala.',
+        );
+      }
+      if (err.contains('HTTP 400')) {
+        return (
+          motivo:
+              'El servidor rechazó la operación por datos inválidos.',
+          accion: accion,
+        );
+      }
+      // Motivo de negocio del servidor (español, sin marcas
+      // técnicas): es el dato útil, se muestra tal cual.
+      final pareceTecnico = err.contains('Exception') ||
+          err.contains('HTTP') ||
+          err.contains('Socket') ||
+          err.contains('timeout') ||
+          err.contains('Timeout');
+      if (primeraLinea.isNotEmpty &&
+          !pareceTecnico &&
+          primeraLinea.length <= 200) {
+        return (motivo: primeraLinea, accion: accion);
+      }
+      return (
+        motivo: esRevision
+            ? 'El servidor la dejó apartada para revisión.'
+            : 'El servidor rechazó esta operación.',
+        accion: accion,
+      );
+    default:
+      return (motivo: 'Estado: $estado.', accion: '');
+  }
+}
+
 /// Calcula el backoff con jitter para un reintento.
 Duration backoffReintento(int intentos) {
   const baseSeg = 30;

@@ -13,6 +13,7 @@ import 'app_log.dart';
 import 'auth.dart';
 import 'aviso_pendientes.dart';
 import 'config.dart';
+import 'copia_automatica.dart';
 import 'fotos_cola.dart';
 import 'invitados.dart';
 import 'localdb.dart';
@@ -67,6 +68,13 @@ Future<void> _trasSyncExitosa() async {
   // (nunca lanza; en el isolate de fondo el canal no existe y se
   // ignora en silencio).
   await AvisosRecordatorios.sincronizar();
+  // 1.28 (M1-B6): copia de seguridad automática semanal.
+  // Corre AQUÍ (gancho post-sync), no dentro del ciclo: la
+  // copia en frío toma el candado con reintentos y dentro
+  // del ciclo esperaría ~15 s para registrar un fallo
+  // espurio. Ella misma decide si toca (≥7 días) y nunca
+  // lanza; el fallo queda visible en la Salud del sync.
+  await copiaAutomaticaSiToca();
 }
 
 /// Tarea en segundo plano (punto 21): sube lo pendiente aunque la app

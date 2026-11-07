@@ -45,6 +45,7 @@ import 'centro_control.dart';
 import 'actividad.dart';
 import 'buscar.dart';
 import 'admin_secciones.dart';
+import 'salud_sync_screen.dart';
 import 'cola.dart';
 import 'arqueo.dart';
 import 'guia.dart';
@@ -593,7 +594,7 @@ class _AdminScreenState extends State<AdminScreen> {
       case DestinoAtencion.incidencias:
         _ir(const IncidenciasSyncScreen());
       case DestinoAtencion.diagnostico:
-        _irLigera(const SeccionDiagnosticoScreen());
+        _irLigera(const SaludSyncScreen());
       case DestinoAtencion.suplementos:
         _ir(const SuplementosScreen());
     }
@@ -757,7 +758,7 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'registro_mensual':
         _ir(const RegistroMensualScreen());
       case 'estado_sync':
-        _irLigera(const SeccionDiagnosticoScreen());
+        _irLigera(const SaludSyncScreen());
       case 'cola_sync':
         _ir(const ColaScreen());
       case 'historial_sync':
@@ -1667,7 +1668,7 @@ class _AdminScreenState extends State<AdminScreen> {
         // «Problema de sincronización» del bloque de atención.
         InkWell(
           borderRadius: BorderRadius.circular(AppRadio.circular),
-          onTap: () => _irLigera(const SeccionDiagnosticoScreen()),
+          onTap: () => _irLigera(const SaludSyncScreen()),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.xs),
             decoration: BoxDecoration(
@@ -2902,7 +2903,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _pendientesSubir > 0
             ? '$_pendientesSubir ops por subir'
             : 'Sincronizado',
-        () => _irLigera(const SeccionDiagnosticoScreen()),
+        () => _irLigera(const SaludSyncScreen()),
       ),
       // Módulo 6 (pendientes + reintento): la pantalla ya existía
       // (detalle por operación, reintento uno/a uno y por lote,

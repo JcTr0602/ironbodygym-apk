@@ -66,6 +66,46 @@ class SyncProgress {
   });
 }
 
+/// 1.28 (M1-B2): modo de una pasada del manifiesto.
+/// - [completo]: se compara la tabla entera contra el
+///   servidor (la pasada que garantiza detectar filas
+///   BORRADAS en el servidor, que la rápida no puede ver).
+/// - [rapido]: se comparan solo las filas con sync_seq
+///   mayor que el de la última comprobación concluyente:
+///   lo bastante para detectar la deriva común (fila nueva
+///   o editada tras la última bajada) sin re-descargar
+///   hashes de toda la tabla a diario.
+enum ModoChequeoManifiesto { completo, rapido }
+
+/// 1.28 (M1-B2): decide el modo de chequeo de UNA tabla.
+/// Función pura (testeable sin BD ni red). La pasada es
+/// completa si se fuerza, si la tabla nunca concluyó una
+/// comprobación (sin seq previa), si la pasada completa
+/// semanal ya venció o si una pasada rápida anterior dejó
+/// la completa marcada como debida.
+ModoChequeoManifiesto decidirModoChequeoManifiesto({
+  required bool forzarCompleto,
+  required bool haySeqPrevia,
+  required bool completaVencida,
+  required bool completaDebida,
+}) {
+  if (forzarCompleto || !haySeqPrevia || completaVencida || completaDebida) {
+    return ModoChequeoManifiesto.completo;
+  }
+  return ModoChequeoManifiesto.rapido;
+}
+
+/// 1.28 (M1-B2): de los (rid → sseq) que devuelve la RPC,
+/// solo los posteriores a [seqPrevia] interesan en la
+/// pasada rápida. Función pura.
+Map<String, int> esperadosDesdeSeq(
+    Map<String, int> esperados, int seqPrevia) {
+  return {
+    for (final e in esperados.entries)
+      if (e.value > seqPrevia) e.key: e.value,
+  };
+}
+
 class SyncStatus {
   final SyncPhase phase;
   final int pending;
@@ -101,6 +141,18 @@ class SyncStatus {
   /// ¿Cuándo confirmó el servidor lo último (ack)?
   final DateTime? ultimoSincronizado;
 
+  /// 1.28 (M1-B5): la foto es UN cálculo compartido, no una
+  /// recomputación por pantalla. [calculadoEn]: instante
+  /// (hora Habana) en que se calculó esta foto; una foto
+  /// reciente se reutiliza tal cual por quien la pida
+  /// (ver SyncEngine.fotoEstado). [watermarkMinimo] y
+  /// [serverSeq]: los valores que ESTA foto observó, para
+  /// que el Diagnóstico y la Salud lean la foto en vez de
+  /// recalcular cada uno por su cuenta.
+  final DateTime? calculadoEn;
+  final int watermarkMinimo;
+  final int serverSeq;
+
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
@@ -113,7 +165,10 @@ class SyncStatus {
       this.ultimoResumenHora,
       this.enLinea = true,
       this.ultimoGuardado,
-      this.ultimoSincronizado});
+      this.ultimoSincronizado,
+      this.calculadoEn,
+      this.watermarkMinimo = 0,
+      this.serverSeq = 0});
 
   /// v1.2.5 (D11): frase en lenguaje humano según las 3 dimensiones.
   String get frase {
@@ -1040,6 +1095,12 @@ class SyncEngine {
 
   String get _base => AppConfig.supabaseUrl;
 
+  /// 1.28 (M1-C3): nombre amigable público para las
+  /// pantallas de salud/diagnóstico (misma tabla que usa
+  /// el progreso de la descarga).
+  static String nombreAmigableTabla(String tabla) =>
+      _nombreAmigable(tabla);
+
   /// Nombre amigable de cada tabla espejo para los mensajes de progreso.
   static String _nombreAmigable(String tabla) {
     switch (tabla) {
@@ -1176,15 +1237,49 @@ class SyncEngine {
           ultimoResumenHora: resHoraL,
           enLinea: _current.enLinea,
           ultimoGuardado: _current.ultimoGuardado,
-          ultimoSincronizado: _current.ultimoSincronizado);
+          ultimoSincronizado: _current.ultimoSincronizado,
+          // 1.28 (M1-B5): la emisión ligera no recalcula la
+          // foto: hereda su sello y sus valores tal cual.
+          calculadoEn: _current.calculadoEn,
+          watermarkMinimo: _current.watermarkMinimo,
+          serverSeq: _current.serverSeq);
       _emitAplicada = seqEmision;
       _status.add(_current);
       return;
     }
+    final foto = await _construirFoto(phase,
+        error: error,
+        progreso: progreso,
+        detalle: detalle,
+        resumen: resumen,
+        seqEmision: seqEmision);
+    if (foto == null) return;
+    _current = foto;
+    _status.add(_current);
+  }
+
+  /// 1.28 (M1-B5): construye la FOTO completa del estado
+  /// (pendientes, última sync buena, novedades por watermark,
+  /// línea, guardado/sincronizado) y la sella con
+  /// [SyncStatus.calculadoEn] + los watermark/seq observados.
+  /// Devuelve null si la emisión [seqEmision] quedó superada
+  /// por una más nueva mientras calculaba (guarda A7): el
+  /// llamador no aplica nada. Es el ÚNICO constructor de
+  /// fotos completas: lo usan [_emit] y [fotoEstado], para
+  /// que banner, Diagnóstico y Salud vean la MISMA foto en
+  /// vez de recalcular cada uno por su cuenta.
+  Future<SyncStatus?> _construirFoto(SyncPhase phase,
+      {ErrorSync? error,
+      double? progreso,
+      String? detalle,
+      String? resumen,
+      required int seqEmision}) async {
     final pending = await _db.countPendingOps();
     final lastOk = await _ultimaOk();
     // v1.0.15: detectar si el servidor tiene cambios sin bajar
     bool novedades = false;
+    int wmObs = 0;
+    int ssObs = 0;
     try {
       // v1.4.4: el cartel excluye 'borrados' del mínimo. El cursor
       // de tumbas solo avanza hasta la última tumba bajada y desde
@@ -1198,6 +1293,8 @@ class SyncEngine {
       final wm = await _db.getWatermarkMinimo(
           excluir: {'borrados'}, esAdmin: _esAdminSeguro);
       final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+      wmObs = wm;
+      ssObs = ss;
       novedades = ss > wm;
     } catch (_) {}
     // v1.0.17: conservar el último resumen salvo que se pase uno nuevo
@@ -1220,9 +1317,9 @@ class SyncEngine {
     // 1.28 (M1-A7/R2M1-F5): si mientras esta emisión esperaba
     // ya se aplicó una más nueva, esta llega tarde: se
     // descarta en vez de pintar su fase vieja sobre la actual.
-    if (seqEmision < _emitAplicada) return;
+    if (seqEmision < _emitAplicada) return null;
     _emitAplicada = seqEmision;
-    _current = SyncStatus(
+    return SyncStatus(
         phase: phase,
         pending: pending,
         lastOk: lastOk,
@@ -1234,8 +1331,54 @@ class SyncEngine {
         ultimoResumenHora: resHora,
         enLinea: enLinea,
         ultimoGuardado: guardado,
-        ultimoSincronizado: sincronizado);
-    _status.add(_current);
+        ultimoSincronizado: sincronizado,
+        calculadoEn: ahoraHabana(),
+        watermarkMinimo: wmObs,
+        serverSeq: ssObs);
+  }
+
+  /// 1.28 (M1-B5): cálculo de foto en curso, compartido por
+  /// todos los llamadores concurrentes de [fotoEstado].
+  Future<SyncStatus>? _fotoEnCurso;
+
+  /// 1.28 (M1-B5): la FOTO del estado, única y compartida.
+  /// Si la foto vigente tiene menos de 3 s se devuelve tal
+  /// cual (sin tocar la BD); si ya hay un cálculo en curso,
+  /// todos los llamadores esperan EL MISMO; si no, se
+  /// calcula una foto nueva conservando fase/error/progreso
+  /// actuales y se publica en el stream como cualquier
+  /// emisión. Nunca lanza: ante un fallo de cálculo se
+  /// devuelve la foto vigente.
+  Future<SyncStatus> fotoEstado() {
+    final enCurso = _fotoEnCurso;
+    if (enCurso != null) return enCurso;
+    final ult = _current.calculadoEn;
+    if (ult != null &&
+        ahoraHabana().difference(ult) < const Duration(seconds: 3)) {
+      return Future<SyncStatus>.value(_current);
+    }
+    late final Future<SyncStatus> f;
+    f = _calcularFotoAhora().whenComplete(() {
+      if (identical(_fotoEnCurso, f)) _fotoEnCurso = null;
+    });
+    _fotoEnCurso = f;
+    return f;
+  }
+
+  Future<SyncStatus> _calcularFotoAhora() async {
+    try {
+      final seqEmision = ++_emitSeq;
+      final foto = await _construirFoto(_current.phase,
+          error: _current.lastError,
+          progreso: _current.progreso,
+          detalle: _current.detalle,
+          seqEmision: seqEmision);
+      if (foto != null) {
+        _current = foto;
+        _status.add(_current);
+      }
+    } catch (_) {}
+    return _current;
   }
 
   /// v1.2.5 (D12): marca "guardado en este teléfono" tras un COMMIT local.
@@ -5685,7 +5828,51 @@ class SyncEngine {
     // el sello del resto.
     'sync_servicio_lotes': 'servicio_lotes',
     'sync_servicio_compras': 'servicio_compras',
+    // 1.28 (M1-B1): la autocura cubre TODOS los espejos que
+    // baja el pull (las 39 de tablasEspejo/supTablas) +
+    // incidencias_mirror histórica = 40 entradas. Antes una
+    // tabla fuera del mapa divergía en silencio para
+    // siempre (el caso Duany de la 1.27 nació así). Las
+    // tablas que la RPC aún no conozca quedan «sin
+    // verificar» sin envenenar el sello (M1-A2); en el
+    // servidor hace falta ampliar el allowlist de
+    // sync_manifiesto con estos 25 nombres (SQL pendiente,
+    // ver el informe de la oleada M1-BC). El skip por rol
+    // sigue mandando: las prohibidas del entrenador
+    // (LocalDb.tablasProhibidasEntrenador, por nombre local)
+    // se saltan en su teléfono.
+    'sync_turnos_cierre': 'turnos_cierre',
+    'sync_turnos_apertura': 'turnos_apertura',
+    'sync_suplemento_ajustes': 'suplemento_ajustes',
+    'sync_adelantos': 'adelantos',
+    'sync_nomina_liquidada': 'nomina_liquidada',
+    'sync_nomina_liquidada_snapshot': 'nomina_liquidada_snapshot',
+    'sync_nomina_confirmaciones': 'nomina_confirmaciones',
+    'sync_diferencias_caja': 'diferencias_caja',
+    'sync_acceso_bloqueos': 'acceso_bloqueos',
+    'sync_liquidaciones_caja': 'liquidaciones_caja',
+    'sync_incidencias_sync': 'incidencias_sync',
+    'sync_gympedia': 'gympedia_articulos',
+    'sync_gympedia_solicitudes': 'gympedia_solicitudes',
+    'sync_permisos_bandeja': 'permisos_bandeja',
+    'sync_gympedia_borradores': 'espejo_gympedia_borradores',
+    'sync_guia_ejercicios': 'guia_fichas',
+    'sync_equipos_guia': 'guia_equipos',
+    'sync_reservas': 'reservas',
+    'sync_solicitudes_adelanto': 'solicitudes_adelanto',
+    'sync_avisos_entrenadores': 'avisos_entrenadores',
+    'sync_nomina_bonos': 'nomina_bonos',
+    'sync_tarifas_especiales': 'espejo_tarifas_especiales',
+    'sync_cliente_mediciones': 'cliente_mediciones',
+    'sync_entregas_efectivo': 'espejo_entregas_efectivo',
+    'sync_recordatorio_config': 'espejo_recordatorio_config',
   };
+
+  /// 1.28 (M1-B2): días entre pasadas COMPLETAS del
+  /// manifiesto. Entre medias, la pasada diaria es rápida
+  /// (solo filas posteriores al seq de la última
+  /// comprobación concluyente de cada tabla).
+  static const int diasEntreManifiestosCompletos = 7;
 
   /// v1.2.5 (D19): verificación por manifiesto (buckets sensibles al rol).
   ///
@@ -5707,7 +5894,40 @@ class SyncEngine {
   /// sellar jamás). El -1 se reserva al fallo GLOBAL: si
   /// NINGUNA tabla concluyó, no se sella (la RPC no existe o
   /// la red cayó: reintentar es lo correcto).
-  Future<int> verificarManifiesto({int nBuckets = 8}) async {
+  /// 1.28 (M1-B2): comprobación COMPLETA a petición (la
+  /// usan la pantalla de Salud y el Reparar guiado): fuerza
+  /// el modo completo en todas las tablas, sin esperar a la
+  /// pasada diaria ni a la semanal. Devuelve el nº de
+  /// tablas divergentes (con su bandera ya puesta) o -1 si
+  /// NINGUNA concluyó. Solo lee y marca banderas: curar es
+  /// trabajo del próximo pull (que las consume).
+  Future<int> comprobarManifiestoAhora() =>
+      verificarManifiesto(forzarCompleta: true);
+
+  /// 1.28 (M1-B2): la pasada ordinaria compara por
+  /// DIFERENCIA (modo rápido por tabla: solo filas con
+  /// sseq > la última comprobación concluyente) y la
+  /// completa — la que también detecta filas borradas en
+  /// el servidor — corre una vez por semana
+  /// ([diasEntreManifiestosCompletos]), o cuando una tabla
+  /// la debe (la rápida halló algo raro) o se fuerza con
+  /// [forzarCompleta] (ver [comprobarManifiestoAhora]).
+  /// Metas por tabla: manifiesto_seq_<local> (server_seq
+  /// observado en su última concluyente),
+  /// manifiesto_tabla_<local> (ok|divergente, para la
+  /// Salud), manifiesto_debida_<local>; globales:
+  /// manifiesto_completa_en (última corrida completa por
+  /// política: forzada o semanal) y manifiesto_chequeo_en
+  /// (última corrida con ≥1 concluyente).
+  ///
+  /// Nota honesta de alcance: el ahorro de RED completo
+  /// exige que la RPC acepte un parámetro p_desde_seq
+  /// (SQL pendiente, ver informe M1-BC); hoy la RPC sigue
+  /// devolviendo los buckets y el filtro se aplica al
+  /// comparar — el ahorro local (consultas al espejo) y la
+  /// semántica de modos ya son los definitivos.
+  Future<int> verificarManifiesto(
+      {int nBuckets = 8, bool forzarCompleta = false}) async {
     const tablas = tablasManifiesto;
     var divergentes = 0;
     var concluyentes = 0;
@@ -5721,23 +5941,75 @@ class SyncEngine {
     // (tablasEspejoActivasParaRol): se saltan en silencio, no
     // cuentan como «sin verificar». Para el dueño sí entran.
     final esAdmin = _esAdminSeguro;
+    final serverSeqActual =
+        int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+    final completaEnTxt = await _db.getMeta('manifiesto_completa_en');
+    final completaEn =
+        completaEnTxt == null ? null : DateTime.tryParse(completaEnTxt);
+    final completaVencida = completaEn == null ||
+        ahoraHabana().difference(completaEn) >=
+            const Duration(days: diasEntreManifiestosCompletos);
+    // La corrida es «completa por política» (sella
+    // manifiesto_completa_en) solo si se forzó o venció la
+    // semanal; que UNA tabla vaya completa por no tener seq
+    // previa o deberla no adelanta el reloj semanal.
+    final corridaCompleta = forzarCompleta || completaVencida;
     for (final entry in tablas.entries) {
       if (!esAdmin &&
           LocalDb.tablasProhibidasEntrenador.contains(entry.value)) {
         continue;
       }
-      final r = await _verificarTablaManifiesto(
-          entry.key, entry.value, nBuckets);
+      final local = entry.value;
+      final seqPreviaTxt = await _db.getMeta('manifiesto_seq_$local');
+      final seqPrevia =
+          seqPreviaTxt == null ? null : int.tryParse(seqPreviaTxt);
+      final debida = await _db.getMeta('manifiesto_debida_$local') == '1';
+      final modo = decidirModoChequeoManifiesto(
+          forzarCompleto: forzarCompleta,
+          haySeqPrevia: seqPrevia != null,
+          completaVencida: completaVencida,
+          completaDebida: debida);
+      final r = await _verificarTablaManifiesto(entry.key, local, nBuckets,
+          desdeSeq: modo == ModoChequeoManifiesto.rapido ? seqPrevia : null);
       if (!r.concluyente) {
-        sinVerificar.add(entry.value);
+        sinVerificar.add(local);
+        try {
+          await _db.setMeta('manifiesto_tabla_$local', 'sin_verificar');
+        } catch (_) {}
         continue;
       }
       concluyentes++;
-      if (r.divergente) divergentes++;
+      try {
+        await _db.setMeta(
+            'manifiesto_tabla_$local', r.divergente ? 'divergente' : 'ok');
+        await _db.setMeta('manifiesto_seq_$local', '$serverSeqActual');
+        if (modo == ModoChequeoManifiesto.completo) {
+          await _db.setMeta('manifiesto_debida_$local', '');
+        }
+      } catch (_) {}
+      if (r.divergente) {
+        divergentes++;
+        if (modo == ModoChequeoManifiesto.rapido) {
+          // La rápida halló algo raro: la pasada completa
+          // de la tabla queda DEBIDA para la siguiente
+          // comprobación (la rápida no ve borrados).
+          try {
+            await _db.setMeta('manifiesto_debida_$local', '1');
+          } catch (_) {}
+        }
+      }
     }
     try {
       await _db.setMeta(
           'manifiesto_sin_verificar', sinVerificar.join(','));
+      if (concluyentes > 0) {
+        await _db.setMeta(
+            'manifiesto_chequeo_en', isoHabana(ahoraHabana()));
+        if (corridaCompleta) {
+          await _db.setMeta(
+              'manifiesto_completa_en', isoHabana(ahoraHabana()));
+        }
+      }
     } catch (_) {}
     if (sinVerificar.isNotEmpty) {
       AppLog.aviso('sync', 'manifiesto_tablas_sin_verificar',
@@ -5750,9 +6022,13 @@ class SyncEngine {
   /// Verificación del manifiesto de UNA tabla. Devuelve si
   /// fue concluyente y si divergió (con la bandera
   /// forzar_redescarga_<local> ya puesta en ese caso).
+  /// [desdeSeq] (1.28, M1-B2): pasada rápida — solo se
+  /// comparan las filas del servidor con sseq mayor que
+  /// [desdeSeq] (la última comprobación concluyente de la
+  /// tabla); null = pasada completa.
   Future<({bool concluyente, bool divergente})> _verificarTablaManifiesto(
       String supTabla, String localTabla, int nBuckets,
-      {bool reintentoSaturacion = false}) async {
+      {bool reintentoSaturacion = false, int? desdeSeq}) async {
     var divergente = false;
     for (var b = 0; b < nBuckets; b++) {
       try {
@@ -5794,7 +6070,7 @@ class SyncEngine {
           if (!reintentoSaturacion) {
             return await _verificarTablaManifiesto(
                 supTabla, localTabla, nBuckets * 8,
-                reintentoSaturacion: true);
+                reintentoSaturacion: true, desdeSeq: desdeSeq);
           }
           divergente = true;
           await _db.setMeta('forzar_redescarga_$localTabla', '1');
@@ -5806,12 +6082,17 @@ class SyncEngine {
         // con la tabla), y casts TOLERANTES (MANIFIESTO-DS):
         // un rid/sseq con el tipo derivado ya no tumba el
         // bucket entero vía excepción.
-        final esperados = <String, int>{};
+        var esperados = <String, int>{};
         for (final row in rows) {
           if (row is! Map) continue;
           final rid = row['rid']?.toString();
           if (rid == null || rid.isEmpty) continue;
           esperados[rid] = enteroTolerante(row['sseq']) ?? 0;
+        }
+        // 1.28 (M1-B2): en la pasada rápida solo cuentan
+        // las filas posteriores a la última concluyente.
+        if (desdeSeq != null) {
+          esperados = esperadosDesdeSeq(esperados, desdeSeq);
         }
         final locales =
             await _db.seqsFilasMirror(localTabla, esperados.keys.toList());

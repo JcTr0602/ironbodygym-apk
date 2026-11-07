@@ -64,8 +64,14 @@ void main() {
         expect(SyncEngine.tablasManifiesto[e.key], e.value,
             reason: 'la entrada histórica ${e.key} cambió');
       }
+      // 1.28 (M1-B1): el mapa crece de 15 a 40 entradas —
+      // la autocura cubre TODAS las tablas que baja el pull
+      // (las 39 de tablasEspejo) + incidencias_mirror. Las
+      // 25 nuevas se fijan una a una en
+      // gestion128_m1bc_test.dart (paridad con supTablas);
+      // aquí solo se actualiza el total con esa justificación.
       expect(SyncEngine.tablasManifiesto.length,
-          historicas.length + esperadasServicios.length);
+          historicas.length + esperadasServicios.length + 25);
     });
 
     test(

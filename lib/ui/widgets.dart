@@ -8,9 +8,28 @@ import 'package:flutter/services.dart';
 
 import 'diseno.dart';
 import 'componentes.dart';
+import 'reparar_sync_screen.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+
+/// 1.28 (M1-C2): ¿el resumen de la última sincronización
+/// («↑ N enviados · ↓ M nuevos» / «Sin cambios») se muestra
+/// como protagonista del banner? Solo recién terminado
+/// (< 30 s): el banner CUENTA el resultado al terminar y
+/// después el subtítulo vuelve a su texto normal, con la
+/// transición suave del AnimatedSwitcher. Función pura.
+bool resumenBannerProtagonista({
+  required String? resumen,
+  required DateTime? resumenHora,
+  required DateTime ahora,
+}) {
+  if (resumen == null || resumen.isEmpty || resumenHora == null) {
+    return false;
+  }
+  final edad = ahora.difference(resumenHora);
+  return !edad.isNegative && edad < const Duration(seconds: 30);
+}
 
 /// Franja de estado de sincronización (visible en todas las pantallas).
 ///
@@ -46,6 +65,12 @@ class _SyncBannerState extends State<SyncBanner>
   late final AnimationController _giro;
   bool _expandido = false;
 
+  /// 1.28 (M1-C2): temporizador de un disparo que retira el
+  /// resumen protagonista a los 30 s aunque no llegue
+  /// ninguna emisión nueva del motor.
+  Timer? _timerResumen;
+  DateTime? _resumenProgramado;
+
   @override
   void initState() {
     super.initState();
@@ -55,8 +80,21 @@ class _SyncBannerState extends State<SyncBanner>
 
   @override
   void dispose() {
+    _timerResumen?.cancel();
     _giro.dispose();
     super.dispose();
+  }
+
+  void _programarFinResumen(DateTime hora) {
+    if (_resumenProgramado == hora && _timerResumen != null) return;
+    _timerResumen?.cancel();
+    _resumenProgramado = hora;
+    final restante =
+        const Duration(seconds: 30) - ahoraHabana().difference(hora);
+    _timerResumen =
+        Timer(restante.isNegative ? Duration.zero : restante, () {
+      if (mounted) setState(() {});
+    });
   }
 
   /// Dispara el ciclo (por alcance o completo) y, si la
@@ -116,6 +154,10 @@ class _SyncBannerState extends State<SyncBanner>
         IconData icono;
         String titulo;
         String? subtitulo;
+        // 1.28 (M1-C2): el resumen recién terminado manda
+        // en el subtítulo durante 30 s.
+        var resumenProtagonista = false;
+        DateTime? resumenHoraActiva;
         switch (s.phase) {
           case SyncPhase.uploading:
             gradiente = const [
@@ -200,20 +242,33 @@ class _SyncBannerState extends State<SyncBanner>
                 AppColores.exitoOscuro
               ];
               icono = Icons.check_circle_outline_rounded;
-              // v1.0.17: resumen discreto de la última sincronización
+              // v1.0.17: resumen discreto de la última sincronización.
+              // 1.28 (M1-C2): recién terminado (< 30 s) el
+              // resumen ES el subtítulo, protagonista («↑ 2
+              // enviados · ↓ 3 nuevos» / «Sin cambios»); antes
+              // se mostraba débil y hasta 10 min mezclado con
+              // el «Sincronizado hace…». Pasada la ventana,
+              // vuelve el texto normal (el State programa el
+              // redespliegue a los 30 s). La ventana se mide
+              // en hora Habana, no con el reloj crudo.
               final res = s.ultimoResumen;
               final resHora = s.ultimoResumenHora;
-              final reciente = res != null &&
-                  resHora != null &&
-                  DateTime.now()
-                          .difference(resHora)
-                          .inMinutes <
-                      10;
-              subtitulo = reciente
-                  ? 'Última sincronización: $res'
-                  : 'Sincronizado ${_hace(s.ultimoSincronizado ?? s.lastOk)}';
+              resumenProtagonista = resumenBannerProtagonista(
+                  resumen: res,
+                  resumenHora: resHora,
+                  ahora: ahoraHabana());
+              if (resumenProtagonista) {
+                resumenHoraActiva = resHora;
+                subtitulo = res;
+              } else {
+                subtitulo =
+                    'Sincronizado ${_hace(s.ultimoSincronizado ?? s.lastOk)}';
+              }
             }
             break;
+        }
+        if (resumenProtagonista && resumenHoraActiva != null) {
+          _programarFinResumen(resumenHoraActiva);
         }
         final enProgreso = s.phase == SyncPhase.uploading ||
             s.phase == SyncPhase.downloading ||
@@ -353,14 +408,34 @@ class _SyncBannerState extends State<SyncBanner>
                                 // en el subtítulo.
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis),
-                            if (subtitulo != null &&
-                                subtitulo.isNotEmpty)
-                              Text(subtitulo,
-                                  style: AppTexto.metadato.copyWith(color: Colors.white),
-                                  maxLines:
-                                      _expandido ? 10 : 1,
-                                  overflow:
-                                      TextOverflow.ellipsis),
+                            // 1.28 (M1-C1): el hueco del
+                            // subtítulo se reserva SIEMPRE
+                            // (una línea de metadato), haya o
+                            // no texto: antes el subtítulo
+                            // nacía y moría entre fases y el
+                            // banner cambiaba de altura sin
+                            // que el usuario tocara nada.
+                            // 1.28 (M1-C2): el texto entra y
+                            // sale con fundido (AnimatedSwitcher),
+                            // p. ej. el resumen protagonista de
+                            // los primeros 30 s.
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                  minHeight: 17),
+                              child: AnimatedSwitcher(
+                                duration:
+                                    const Duration(milliseconds: 300),
+                                child: Text(
+                                  subtitulo ?? '',
+                                  key: ValueKey<String>(
+                                      subtitulo ?? ''),
+                                  style: AppTexto.metadato
+                                      .copyWith(color: Colors.white),
+                                  maxLines: _expandido ? 10 : 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -373,36 +448,90 @@ class _SyncBannerState extends State<SyncBanner>
                             size: 20),
                     ],
                   ),
-                  if (enProgreso)
-                    Padding(
-                      padding:
-                          const EdgeInsets.only(top: AppEspacio.sm),
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween<double>(
-                            begin: 0,
-                            end: s.progreso ?? 0),
-                        duration: const Duration(
-                            milliseconds: 400),
-                        builder: (c, v, _) =>
-                            ClipRRect(
-                          borderRadius:
-                              BorderRadius.circular(4),
-                          child:
-                              LinearProgressIndicator(
-                            value: s.progreso == null
-                                ? null
-                                : v,
-                            backgroundColor:
-                                Colors.white30,
-                            valueColor:
-                                const AlwaysStoppedAnimation<
-                                        Color>(
-                                    Colors.white),
-                            minHeight: 6,
-                          ),
-                        ),
-                      ),
-                    ),
+                  // 1.28 (M1-C1): franja inferior de ALTURA
+                  // FIJA (38) en TODOS los estados automáticos:
+                  // hospeda la barra de progreso en curso, los
+                  // botones de error (M1-C2) o nada — pero el
+                  // hueco nunca nace ni muere, y la pantalla de
+                  // debajo no salta al cambiar la fase. Las
+                  // expansiones por TOQUE (detalle del error,
+                  // desglose de pendientes) quedan fuera de la
+                  // franja: son gesto del usuario, no salto.
+                  const SizedBox(height: AppEspacio.xs),
+                  SizedBox(
+                    key: const Key('sync_banner_franja'),
+                    height: 38,
+                    child: enProgreso
+                        ? Center(
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween<double>(
+                                  begin: 0, end: s.progreso ?? 0),
+                              duration:
+                                  const Duration(milliseconds: 400),
+                              builder: (c, v, _) => ClipRRect(
+                                borderRadius:
+                                    BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: s.progreso == null ? null : v,
+                                  backgroundColor: Colors.white30,
+                                  valueColor:
+                                      const AlwaysStoppedAnimation<
+                                          Color>(Colors.white),
+                                  minHeight: 6,
+                                ),
+                              ),
+                            ),
+                          )
+                        : esError && !_expandido
+                            ? Row(
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: _dispararSync,
+                                    icon: const Icon(
+                                        Icons.refresh_rounded,
+                                        color: Colors.white,
+                                        size: 18),
+                                    label: Text('Reintentar',
+                                        style: AppTexto.metadato
+                                            .copyWith(
+                                                color: Colors.white,
+                                                fontWeight:
+                                                    FontWeight.bold)),
+                                    style: TextButton.styleFrom(
+                                      minimumSize:
+                                          const Size(0, 36),
+                                      visualDensity:
+                                          VisualDensity.compact,
+                                    ),
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: () =>
+                                        Navigator.of(ctx).push(
+                                      MaterialPageRoute(
+                                          builder: (_) =>
+                                              const RepararSyncScreen()),
+                                    ),
+                                    icon: const Icon(
+                                        Icons.build_rounded,
+                                        color: Colors.white,
+                                        size: 18),
+                                    label: Text('Ver qué quedó',
+                                        style: AppTexto.metadato
+                                            .copyWith(
+                                                color: Colors.white,
+                                                fontWeight:
+                                                    FontWeight.bold)),
+                                    style: TextButton.styleFrom(
+                                      minimumSize:
+                                          const Size(0, 36),
+                                      visualDensity:
+                                          VisualDensity.compact,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : const SizedBox.shrink(),
+                  ),
                   if (_expandido && esError && s.lastError != null)
                     Padding(
                       padding:

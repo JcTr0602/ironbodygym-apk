@@ -534,6 +534,16 @@ void main() {
     expect(find.text('Resueltos recientes'), findsOneWidget);
     expect(find.textContaining('Anulado'), findsOneWidget);
     expect(find.byIcon(Icons.undo_rounded), findsOneWidget);
+    // 1.28 (M1-C1): el SyncBanner de esta pantalla ahora
+    // reserva su franja inferior fija (38 px) en todos los
+    // estados — es el arreglo del salto de altura — y la
+    // ventana del test (600 px) deja el segundo vale fuera
+    // de la zona que la lista construye sin desplazar. Se
+    // desplaza hasta él antes de exigirlo; las aserciones
+    // de H-05 no cambian.
+    await tester.scrollUntilVisible(
+        find.textContaining('Rechazado'), 120);
+    await tester.pump();
     expect(find.textContaining('Rechazado'), findsOneWidget);
     expect(find.byIcon(Icons.block_rounded), findsOneWidget);
   });

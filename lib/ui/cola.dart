@@ -1646,17 +1646,18 @@ class _ColaScreenState extends State<ColaScreen> {
     final fecha =
         fechaCorta(op['creada_ts'], 16).replaceAll('T', ' ');
     final error = '${op['error'] ?? ''}';
-    // Traduce errores técnicos a lenguaje claro
-    String errorClaro = error;
-    if (error.contains('cliente no existe')) {
-      errorClaro =
-          'El cliente ya no existe en el servidor (fue eliminado). No es necesario reintentar.';
-    } else if (error.contains('HTTP 400')) {
-      errorClaro =
-          'El servidor rechazó la operación por datos inválidos. Revisa los datos e intenta de nuevo.';
-    } else if (error.contains('HTTP 409')) {
-      errorClaro = 'La operación ya fue registrada (duplicada). No es necesario reintentar.';
-    }
+    // 1.28 (M1-C5): UNA sola traducción en lenguaje llano
+    // (explicacionOp), la misma que enseñan la fila y el
+    // bloque de bloqueadas. Sustituye la traducción
+    // artesanal de 3 casos que vivía aquí: el texto técnico
+    // crudo ya no llega al diálogo.
+    final expl = explicacionOp(
+        estado: estado,
+        error: error,
+        codigoError: '${op['codigo_error'] ?? ''}');
+    final mostrarExpl = error.isNotEmpty ||
+        estado == 'rechazada' ||
+        estado == 'necesita_revision';
     // Detalles del payload según tipo (v1.0.11)
     // D-17 (1.21): _verDetalle es fire-and-forget desde el
     // onTap; un fallo resolviendo detalles dejaba el toque sin
@@ -1702,7 +1703,7 @@ class _ColaScreenState extends State<ColaScreen> {
               const SizedBox(height: 4),
               Text(d),
             ],
-            if (errorClaro.isNotEmpty) ...[
+            if (mostrarExpl) ...[
               const SizedBox(height: 8),
               Row(
                 crossAxisAlignment:
@@ -1713,13 +1714,18 @@ class _ColaScreenState extends State<ColaScreen> {
                       color: AppColores.error),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(errorClaro,
+                    child: Text(expl.motivo,
                         style: const TextStyle(
                             color:
                                 AppColores.error)),
                   ),
                 ],
               ),
+              if (expl.accion.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text('Qué hacer: ${expl.accion}',
+                    style: AppTexto.secundario),
+              ],
             ],
           ],
         ),
@@ -2035,12 +2041,24 @@ class _ColaScreenState extends State<ColaScreen> {
                         title: Text(
                             '${b['tipo'] ?? ''}',
                             style: AppTexto.cuerpo),
-                        subtitle: Text(
-                            '${b['codigo_error'] ?? 'error'} · '
-                            '${(b['error'] as String? ?? '').split('\n').first}',
-                            style: AppTexto.secundario,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis),
+                        // 1.28 (M1-C5): antes el subtítulo era el
+                        // código y el error CRUDOS; ahora motivo y
+                        // acción en lenguaje llano (explicacionOp),
+                        // para distinguir de un vistazo «cliente
+                        // borrado» de «sin conexión».
+                        subtitle: Builder(builder: (context) {
+                          final e = explicacionOp(
+                              estado: '${b['estado'] ?? 'rechazada'}',
+                              error: '${b['error'] ?? ''}',
+                              codigoError: '${b['codigo_error'] ?? ''}');
+                          return Text(
+                              e.accion.isEmpty
+                                  ? e.motivo
+                                  : '${e.motivo} ${e.accion}',
+                              style: AppTexto.secundario,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis);
+                        }),
                         trailing: TextButton(
                           onPressed: () => _reintentarBloqueada(
                               b['op_uuid'] as String),
@@ -2128,21 +2146,28 @@ class _ColaScreenState extends State<ColaScreen> {
                               : hace,
                           style: AppTexto.metadato,
                         ),
-                        if (esError &&
+                        // 1.28 (M1-C5): la fila dice el MOTIVO en
+                        // lenguaje llano (explicacionOp), igual que
+                        // el bloque de bloqueadas y el detalle —
+                        // antes las filas rechazada/revisión no
+                        // enseñaban motivo alguno y las de error
+                        // solo el mensaje sin la acción.
+                        if ((esError || esBloqueada) &&
                             op['error'] != null &&
                             '${op['error']}'.isNotEmpty)
                           Builder(
                             builder: (context) {
-                              // v1.3.9: traducir error a lenguaje humano
-                              final errTraducido =
-                                  traducirErrorSync(
-                                      '${op['error']}');
+                              final expl = explicacionOp(
+                                  estado: estado,
+                                  error: '${op['error']}',
+                                  codigoError:
+                                      '${op['codigo_error'] ?? ''}');
                               return Padding(
                                 padding:
                                     const EdgeInsets.only(
                                         top: AppEspacio.xs),
                                 child: Text(
-                                  errTraducido.mensaje,
+                                  expl.motivo,
                                   style: AppTexto.metadato.copyWith(color: AppColores.error),
                                 ),
                               );

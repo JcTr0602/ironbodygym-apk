@@ -129,6 +129,31 @@ class _TarjetaDiagnosticoEspejoState
     setState(() => _diag = null);
   }
 
+  /// 1.28 (M1-C4): cifra destacada de la tarjeta (el dato
+  /// grande arriba, su etiqueta pequeña debajo).
+  Widget _cifra(BuildContext context, String valor, String etiqueta) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+      decoration: BoxDecoration(
+        color: AppColores.error.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            valor,
+            style: AppTexto.titulo.copyWith(color: AppColores.error),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(etiqueta, style: AppTexto.metadato),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = _diag;
@@ -148,11 +173,24 @@ class _TarjetaDiagnosticoEspejoState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 1.28 (M1-C4): la tarjeta se lee de un vistazo —
+            // causa en UNA frase primero, los dos datos como
+            // CIFRAS destacadas y las acciones separadas por
+            // importancia. Antes todo era texto corrido y el
+            // «es correcto» era un botón más entre los demás.
             Row(
               children: [
-                Icon(Icons.warning_amber_rounded,
-                    color: AppColores.error),
-                const SizedBox(width: AppEspacio.sm),
+                Container(
+                  padding: const EdgeInsets.all(AppEspacio.sm),
+                  decoration: BoxDecoration(
+                    color:
+                        AppColores.error.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.warning_amber_rounded,
+                      color: AppColores.error, size: 22),
+                ),
+                const SizedBox(width: AppEspacio.md),
                 Expanded(
                   child: Text(
                     'Los clientes aparecen en cero',
@@ -162,19 +200,38 @@ class _TarjetaDiagnosticoEspejoState
                 ),
               ],
             ),
+            const SizedBox(height: AppEspacio.md),
+            // La causa probable, primero y en una frase.
+            Text(
+              d.causaProbable,
+              style: AppTexto.cuerpo
+                  .copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            // Los dos datos que importan, como cifras.
+            Row(
+              children: [
+                Expanded(
+                  child: _cifra(
+                    context,
+                    '${d.clientesPrevios}',
+                    'clientes que había',
+                  ),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: _cifra(
+                    context,
+                    textoUltimaSyncOk(d.ultimaSyncOk),
+                    'última bajada buena',
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: AppEspacio.sm),
             Text(
-              'Este teléfono tenía ${d.clientesPrevios} clientes '
-              'tras su última bajada buena '
-              '(${textoUltimaSyncOk(d.ultimaSyncOk)}) y ahora el '
-              'espejo está vacío. No es un estado normal: puede '
-              'que la bajada haya llegado incompleta.',
-              style: AppTexto.cuerpo,
-            ),
-            const SizedBox(height: AppEspacio.xs),
-            Text(
-              'Pendientes por subir: ${d.opsPendientes}. '
-              '${d.causaProbable}',
+              'Pendientes por subir en este teléfono: '
+              '${d.opsPendientes}.',
               style: AppTexto.secundario,
             ),
             const SizedBox(height: AppEspacio.md),
@@ -205,11 +262,26 @@ class _TarjetaDiagnosticoEspejoState
                   icon: const Icon(Icons.chat_outlined),
                   label: const Text('Reportar al dueño'),
                 ),
-                TextButton(
-                  onPressed: _marcarCorrecto,
-                  child: const Text('Es correcto, no hay clientes'),
-                ),
               ],
+            ),
+            // Acción discreta y APARTE: declarar el vacío
+            // legítimo no compite con las acciones de
+            // rescate.
+            const SizedBox(height: AppEspacio.xs),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: _marcarCorrecto,
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      AppColores.textoSecundario(context),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.sm),
+                  minimumSize: const Size(0, 36),
+                ),
+                child: const Text(
+                    'Es correcto, se borraron a propósito'),
+              ),
             ),
           ],
         ),

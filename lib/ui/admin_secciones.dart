@@ -625,8 +625,13 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       final db = LocalDb.instance;
       final lastOk = await db.getMeta('last_sync_ok');
       final lastErr = await db.getMeta('last_sync_error');
-      final wm = await db.getWatermarkMinimo();
-      final ss = await db.getMeta('server_seq') ?? '?';
+      // 1.28 (M1-B5): el watermark y el server_seq salen de
+      // la FOTO única del motor (fotoEstado), no de dos
+      // lecturas sueltas de esta pantalla: todas las
+      // superficies leen el mismo cálculo.
+      final foto = await SyncEngine.instance.fotoEstado();
+      final wm = foto.watermarkMinimo;
+      final ss = foto.serverSeq;
       final datos = <String, String>{
         'Versión': '${AppConfig.appVersion} (${AuthService().username})',
         'Última sync correcta': _fmt(lastOk),
