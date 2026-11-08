@@ -12,12 +12,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../config.dart';
+import '../gympedia_almacen.dart';
 import '../gympedia_validacion.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
@@ -55,12 +55,18 @@ class GympediaEditorScreen extends StatefulWidget {
   /// artículo NO se revierte.
   final String? solicitudId;
 
+  /// 1.30 Oleada 6 (§8.3): costura de almacenamiento de la
+  /// imagen del artículo. En producción es null y manda la
+  /// implementación HTTP real; los tests inyectan una falsa.
+  final AlmacenImagenesGympedia? almacen;
+
   const GympediaEditorScreen({
     super.key,
     this.publicado,
     this.borrador,
     required this.slugsPublicados,
     this.solicitudId,
+    this.almacen,
   });
 
   @override
@@ -69,6 +75,9 @@ class GympediaEditorScreen extends StatefulWidget {
 
 class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   final _db = LocalDb.instance;
+
+  AlmacenImagenesGympedia get _almacen =>
+      widget.almacen ?? const AlmacenImagenesGympediaHttp();
   final _slug = TextEditingController();
   final _titulo = TextEditingController();
   final _esencial = TextEditingController();
@@ -492,6 +501,14 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       // borrador jamás toca el objeto público. Si la subida falla,
       // no se encola nada y el borrador queda intacto.
       final slug = '${a['id']}';
+      // 1.30 Oleada 6 (§8.2.1): ¿lo publicado tenía imagen?
+      // Se lee del espejo ANTES de la actualización optimista:
+      // si este publicar la quita, el objeto del bucket se
+      // borra en esta misma operación. La ruta sale del propio
+      // artículo (su slug), nunca de texto libre.
+      final previo = await _db.gympediaPublicado(slug);
+      final teniaImagenPublicada = previo != null &&
+          (previo['tiene_imagen'] == true || previo['tiene_imagen'] == 1);
       if (_imagenCambiada && _tieneImagen && _imagenLocal.isNotEmpty) {
         if (!await _subirImagen(slug)) return;
       }
@@ -531,17 +548,30 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       if (rutaSubida.isNotEmpty) {
         await _db.gympediaBorrarImagenLocal(rutaSubida);
       }
-      // 1.22 GY-03: si el artículo quedó SIN imagen, el
-      // objeto del bucket YA NO se borra aquí: la op aún no
-      // viajó y un rechazo del servidor dejaría lo publicado
-      // apuntando a una imagen borrada. Con tiene_imagen=
-      // false las apps dejan de mostrarla; el huérfano se
-      // limpia en el servidor (pendiente anotado).
       // 1.22 GY-04: marca «en cola de publicación» + huella
       // al día (salir tras publicar no pregunta por cambios).
       await _db.setMeta('gympedia_en_cola_$slug', '1');
       _huella = _huellaActual();
-      _aviso('Publicado. Se enviará al servidor al sincronizar.');
+      // 1.30 Oleada 6 (§8.2.1-2, cierra GY-03): si el artículo
+      // quedó SIN imagen habiéndola tenido publicada, el objeto
+      // del bucket se borra en ESTA misma operación — la
+      // decisión 1.22 de no tocarlo aquí queda supersedida por
+      // el plan 1.30, que corta la hemorragia de huérfanos en
+      // el origen. Si el borrado falla tras el reintento, el
+      // aviso lo dice claro y el barrido del puente lo recoge:
+      // nunca queda silencioso. En el REEMPLAZO no hay nada
+      // que borrar: la subida hace upsert sobre el MISMO
+      // objeto (`<slug>.webp`), la imagen vieja muere al
+      // aterrizar la nueva y el artículo jamás se queda sin
+      // imagen a mitad de camino.
+      var avisoFinal = 'Publicado. Se enviará al servidor al sincronizar.';
+      if (teniaImagenPublicada && !_tieneImagen) {
+        if (!await _borrarObjetoImagen(slug)) {
+          avisoFinal = 'El artículo se guardó; la imagen '
+              'anterior se limpiará en el próximo barrido.';
+        }
+      }
+      _aviso(avisoFinal);
       if (mounted) Navigator.of(context).pop(true);
     } finally {
       if (mounted) setState(() => _ocupado = false);
@@ -553,28 +583,42 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
   Future<bool> _subirImagen(String slug) async {
     // Ronda 17 M3-H1: subir al bucket público es solo del dueño.
     if (!AuthService().isOwner) return false;
+    // 1.30 Oleada 6: la subida va por la costura de
+    // almacenamiento (la misma petición HTTP de siempre); el
+    // código devuelto conserva los dos avisos históricos.
+    final int codigo;
     try {
       final bytes = await File(_imagenLocal).readAsBytes();
-      final token = AuthService().session?.accessToken ?? '';
-      final r = await http
-          .post(
-            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-                '${AppConfig.bucketGympedia}/$slug.webp'),
-            headers: {
-              'apikey': AppConfig.anonKey,
-              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-              'Content-Type': 'image/webp',
-              'x-upsert': 'true',
-            },
-            body: bytes,
-          )
-          .timeout(const Duration(seconds: 60));
-      if (r.statusCode == 200 || r.statusCode == 201) return true;
-      _aviso('La subida de la imagen falló (HTTP ${r.statusCode}). '
-          'No se publicó nada; revisa la conexión e inténtalo de nuevo.');
+      codigo = await _almacen.subir(slug, bytes);
     } catch (_) {
       _aviso('La subida de la imagen falló. No se publicó nada; '
           'revisa la conexión e inténtalo de nuevo.');
+      return false;
+    }
+    if (codigo == 200 || codigo == 201) return true;
+    if (codigo > 0) {
+      _aviso('La subida de la imagen falló (HTTP $codigo). '
+          'No se publicó nada; revisa la conexión e inténtalo de nuevo.');
+    } else {
+      _aviso('La subida de la imagen falló. No se publicó nada; '
+          'revisa la conexión e inténtalo de nuevo.');
+    }
+    return false;
+  }
+
+  /// 1.30 Oleada 6 (§8.2.1-2, GY-03): borra del bucket el
+  /// objeto `<slug>.webp` de un artículo que se publica SIN
+  /// imagen habiéndola tenido. 1 reintento inmediato con
+  /// backoff corto dentro de la misma operación; SIN tabla ni
+  /// cola de reintento persistente (BAJA-01 de Argón): si los
+  /// dos intentos fallan, lo recoge el barrido del puente, que
+  /// contrasta el bucket contra las referencias vivas.
+  Future<bool> _borrarObjetoImagen(String slug) async {
+    for (var intento = 0; intento < 2; intento++) {
+      if (intento > 0) {
+        await Future.delayed(const Duration(milliseconds: 600));
+      }
+      if (await _almacen.borrar(slug)) return true;
     }
     return false;
   }
