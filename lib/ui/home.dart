@@ -1690,7 +1690,11 @@ class _HomeScreenState extends State<HomeScreen>
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
+              // 1.29 O9 (cabo O5): sobre la marca va sobreMarca
+              // (grafito, 6,32:1) — el blanco daba 2,75:1 y era
+              // la última superficie del dock fuera de la regla
+              // D-01 que la Oleada 1 fijó para el tema.
+              foregroundColor: AppColores.sobreMarca,
               padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xs),
             ),
             onPressed: ir,
@@ -3227,7 +3231,7 @@ class _HomeScreenState extends State<HomeScreen>
             'Transferencia',
             () => _ir(const TransferenciaScreen())),
         // v1.5.0 (Bloque G): bandeja de invitados de la app de clientes.
-        _herramienta(Icons.person_add_alt_rounded, 'Invitados',
+        _herramienta(Icons.person_add_rounded, 'Invitados',
             () => _ir(const InvitadosScreen())),
         _herramienta(Icons.cake_rounded, 'Cumpleaños',
             () => _ir(const CumpleanosScreen())),
@@ -3252,7 +3256,7 @@ class _HomeScreenState extends State<HomeScreen>
         if (_auth.isAdmin)
           _herramienta(Icons.badge_rounded, 'Mis cobros',
               () => _ir(const MiTurnoScreen())),
-        _herramienta(Icons.delete_rounded, 'Papelera',
+        _herramienta(Icons.delete_outline_rounded, 'Papelera',
             () => _ir(const PapeleraScreen())),
         _herramienta(Icons.logout_rounded, 'Salir', _salir,
             color: AppColores.error),
@@ -3485,15 +3489,12 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
             ),
           ),
           // v1.3.6 (Argón, diseño): FAB con gradiente lineal reservado
-          // para el speed dial + sombra naranja.
+          // para el speed dial + sombra naranja. 1.29 O9: el gradiente
+          // vive tokenizado con nombre propio (AppColores.gradienteDial).
           Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                colors: [Color(0xFFFF8A00), Color(0xFFEA580C)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+              gradient: AppColores.gradienteDial,
               boxShadow: [
                 BoxShadow(
                   color:

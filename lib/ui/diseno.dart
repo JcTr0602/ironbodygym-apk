@@ -180,6 +180,16 @@ class AppColores {
     end: Alignment.centerRight,
   );
 
+  /// Gradiente RESERVADO del FAB del speed dial (v1.3.6; tokenizado
+  /// en la 1.29 O9 con nombre propio, como mandó la pasada de
+  /// diseño: NO es el gradiente de marca general — sus extremos
+  /// (#FF8A00 → #EA580C) son los del dial y solo los usa él).
+  static const gradienteDial = LinearGradient(
+    colors: [Color(0xFFFF8A00), Color(0xFFEA580C)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
   // --- P0 (1.20, paquete de diseño Argón) ---
   // Superficies con jerarquía: elevada flota sobre la tarjeta, hundida
   // se hunde hacia el fondo. Valores por modo + helpers por brillo.
