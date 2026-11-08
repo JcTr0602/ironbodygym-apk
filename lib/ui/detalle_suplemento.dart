@@ -22,6 +22,7 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
+import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'aviso_duplicado.dart';
@@ -1437,8 +1438,100 @@ class _MovimientosStockState extends State<_MovimientosStock> {
   }
 }
 
+/// 1.30 (Oleada 4, §5.3 punto 1): ventas del suplemento en el
+/// espejo local. La tabla local usa JSON (data TEXT), no
+/// columnas. Si es > 0, la confirmación de eliminar ni se
+/// ofrece: la cascada no toca las ventas (historia de dinero
+/// con pagos promo enlazados) y el servidor rechaza con el
+/// mismo criterio.
+Future<int> ventasEspejoDeSuplemento(int suplementoId) async {
+  final d = await LocalDb.instance.db;
+  final ventas = await d.rawQuery(
+    "SELECT COUNT(*) as n FROM ventas_suplementos WHERE json_extract(data, '\$.suplemento_id') = ?",
+    [suplementoId],
+  );
+  return (ventas.first['n'] as int?) ?? 0;
+}
+
+/// Las cuentas de lo que se va al eliminar un suplemento
+/// (1.30, Oleada 4, §5.3 punto 2).
+typedef CuentasCascada = ({
+  int pomos,
+  int dosis,
+  int botes,
+  int botesAbiertos,
+  int reservasVivas,
+});
+
+/// 1.30 (Oleada 4, §5.3 punto 2): cuentas desde los espejos
+/// locales, calculadas ANTES de encolar la op: pomos con el Σ
+/// de sus saldos derivados (la misma fórmula del servidor vía
+/// saldoPomoLocal: asignadas − repartidas − ventas − salidas),
+/// botes (abiertos y cerrados) y reservas vivas
+/// (solicitada/reservada: las que la cascada borra; las no
+/// vivas se desvinculan y no cuentan como pérdida).
+Future<CuentasCascada> cuentasCascadaSuplemento(int suplementoId) async {
+  final db = LocalDb.instance;
+  final pomos = (await db.allMirror('servicio_pomos'))
+      .where((p) => (p['suplemento_id'] as num?)?.toInt() == suplementoId)
+      .toList();
+  var dosis = 0;
+  for (final p in pomos) {
+    final pid = (p['id'] as num?)?.toInt();
+    if (pid != null) dosis += await saldoPomoLocal(pid);
+  }
+  final botes = (await db.allMirror('servicio_botes'))
+      .where((b) => (b['suplemento_id'] as num?)?.toInt() == suplementoId)
+      .toList();
+  final reservasVivas = (await db.allMirror('reservas'))
+      .where((r) =>
+          (r['suplemento_id'] as num?)?.toInt() == suplementoId &&
+          (r['estado']?.toString() == 'solicitada' ||
+              r['estado']?.toString() == 'reservada'))
+      .length;
+  return (
+    pomos: pomos.length,
+    dosis: dosis,
+    botes: botes.length,
+    botesAbiertos:
+        botes.where((b) => b['estado']?.toString() == 'abierto').length,
+    reservasVivas: reservasVivas,
+  );
+}
+
+/// PURO (1.30, Oleada 4, §5.3 punto 2): la frase de cuentas de
+/// la confirmación, en lenguaje llano. Sin nada que se vaya,
+/// cadena vacía.
+String textoCuentasCascada(CuentasCascada c) {
+  final partes = <String>[];
+  if (c.pomos > 0) {
+    partes.add('${c.pomos} pomo(s) con ${c.dosis} dosis en total');
+  }
+  if (c.botes > 0) partes.add('${c.botes} bote(s)');
+  if (c.reservasVivas > 0) {
+    partes.add('${c.reservasVivas} reserva(s) pendiente(s)');
+  }
+  if (partes.isEmpty) return '';
+  final lista = partes.length == 1
+      ? partes.first
+      : '${partes.sublist(0, partes.length - 1).join(', ')} y ${partes.last}';
+  return 'Se eliminan $lista. '
+      'El historial de dosis vendidas se conserva.';
+}
+
+/// PURO: el mensaje completo de la confirmación de eliminar
+/// (la pregunta de siempre + las cuentas de lo que se va).
+String mensajeConfirmacionCascada(String nombre, CuentasCascada c) {
+  final cuentas = textoCuentasCascada(c);
+  return '¿Eliminar "$nombre" del catálogo? '
+      'Esta acción no se puede deshacer.'
+      '${cuentas.isEmpty ? '' : '\n\n$cuentas'}';
+}
+
 /// Elimina un suplemento (v1.3.1).
-/// Pide confirmación, lo marca como eliminado localmente y encola la op.
+/// Pide confirmación (1.30, Oleada 4: enseñando antes las
+/// cuentas de lo que se va, §5.3 punto 2), aplica la purga
+/// local en cascada y encola la op en una transacción.
 /// Suplementos con borrado en curso (candado de exclusión, Argón
 /// menos auditados MENOR: sin él, un doble toque encolaba dos borrados).
 final _eliminandoSuplementos = <int>{};
@@ -1453,13 +1546,9 @@ Future<void> _eliminarSuplemento(
   final db = LocalDb.instance;
   final d = await db.db;
 
-  // Argón: verificar localmente que no tenga ventas antes de borrar.
-  // La tabla local usa JSON (data TEXT), no columnas.
-  final ventas = await d.rawQuery(
-    "SELECT COUNT(*) as n FROM ventas_suplementos WHERE json_extract(data, '\$.suplemento_id') = ?",
-    [id],
-  );
-  final nVentas = (ventas.first['n'] as int?) ?? 0;
+  // Argón: verificar localmente que no tenga ventas antes de
+  // borrar (guarda de ventas de §5.3 punto 1, vía helper).
+  final nVentas = await ventasEspejoDeSuplemento(id);
   if (nVentas > 0) {
     if (!context.mounted) return;
     mostrarSnack(context, 'No se puede eliminar: tiene $nVentas venta(s) registrada(s).', significado: SignificadoChip.alerta);
@@ -1467,11 +1556,15 @@ Future<void> _eliminarSuplemento(
   }
 
   // Argón #9 (ALTO): el espejo solo trae ventas ya sincronizadas.
-  // Una venta recién hecha vive en ops_queue (detrás del pull) y un
-  // bote abierto vive en servicio_botes: borrar ahora dejaría la op
-  // de eliminar detrás de la venta pendiente. Solo cuentan ops
-  // vivas (pendiente/enviada/en revisión): aplicada ya está en el
-  // espejo y rechazada no se aplicará.
+  // Una venta recién hecha vive en ops_queue (detrás del pull):
+  // borrar ahora dejaría la op de eliminar detrás de la venta
+  // pendiente y el servidor la rebotaría por su guarda de
+  // ventas. Solo cuentan ops vivas (pendiente/enviada/en
+  // revisión): aplicada ya está en el espejo y rechazada no se
+  // aplicará.
+  // 1.30 (Oleada 4): los botes abiertos YA NO bloquean — la
+  // cascada los borra con el suplemento (§5.2 paso 5) y la
+  // confirmación enseña antes sus cuentas (§5.3 punto 2).
   final pendientes = await d.rawQuery(
     "SELECT COUNT(*) as n FROM ops_queue WHERE tipo IN "
     "('venta_suplemento', 'inscripcion_venta_suplemento', "
@@ -1481,25 +1574,22 @@ Future<void> _eliminarSuplemento(
     [id, id],
   );
   final nPendientes = (pendientes.first['n'] as int?) ?? 0;
-  final botesAbiertos = await d.rawQuery(
-    "SELECT COUNT(*) as n FROM servicio_botes WHERE "
-    "json_extract(data, '\$.suplemento_id') = ? AND "
-    "json_extract(data, '\$.estado') = 'abierto'",
-    [id],
-  );
-  final nBotes = (botesAbiertos.first['n'] as int?) ?? 0;
-  if (nPendientes > 0 || nBotes > 0) {
+  if (nPendientes > 0) {
     if (!context.mounted) return;
-    mostrarSnack(context, 'No se puede eliminar: tiene ventas pendientes o botes abiertos.', significado: SignificadoChip.alerta);
+    mostrarSnack(context, 'No se puede eliminar: tiene operaciones pendientes de sincronizar.', significado: SignificadoChip.alerta);
     return;
   }
 
   if (!context.mounted) return;
   final nombre = '${s['nombre'] ?? 'suplemento'}';
+  // 1.30 (Oleada 4, §5.3 punto 2): las cuentas de lo que se va,
+  // desde los espejos, ANTES de que el dueño confirme.
+  final cuentas = await cuentasCascadaSuplemento(id);
+  if (!context.mounted) return;
   final ok = await DialogoApp.confirmar(
     context,
     titulo: 'Eliminar suplemento',
-    mensaje: '¿Eliminar "$nombre" del catálogo? Esta acción no se puede deshacer.',
+    mensaje: mensajeConfirmacionCascada(nombre, cuentas),
     aceptar: 'Eliminar',
   );
   if (ok != true || !context.mounted) return;

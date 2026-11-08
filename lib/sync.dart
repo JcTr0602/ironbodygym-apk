@@ -3313,6 +3313,12 @@ class SyncEngine {
             await _db.revertirOptimismoReponerLote(p);
           } catch (_) {}
         }
+        if (op['tipo'] == 'eliminar_suplemento') {
+          // 1.30 (Oleada 4, §5.3 punto 4): la op nunca llegó al
+          // servidor y quedó en revisión: la purga optimista se
+          // restaura igual que en _aplicarEstadoServidor.
+          await _marcarRestauracionSuplemento();
+        }
       }
     } catch (_) {}
   }
@@ -3394,6 +3400,14 @@ class SyncEngine {
                     jsonDecode(op['payload'] as String) as Map<String, dynamic>;
                 await _db.revertirOptimismoReponerLote(p);
               } catch (_) {}
+            }
+            if ('${op['tipo']}' == 'eliminar_suplemento') {
+              // 1.30 (Oleada 4, §5.3 punto 4): espejo del camino
+              // de estados (G-10a) — esta op nunca llegó a
+              // sync_ops y _aplicarEstadoServidor jamás la
+              // procesará: la restauración de la purga se marca
+              // aquí.
+              await _marcarRestauracionSuplemento();
             }
           }
         } else {
@@ -3628,6 +3642,13 @@ class SyncEngine {
       }.contains('${op['tipo']}')) {
         _pullProtegidoPendiente = true;
       }
+      if ('${op['tipo']}' == 'eliminar_suplemento') {
+        // 1.30 (Oleada 4, §5.3 punto 4): si el servidor rechaza
+        // el borrado en cascada (su guarda de ventas manda sobre
+        // lo que el espejo veía), los espejos purgados en local
+        // se restauran en el acto con la re-descarga focalizada.
+        await _marcarRestauracionSuplemento();
+      }
       if ('${op['tipo']}' == 'pago_mensual') {
         // 1.24 Bloque 2: reversión DETERMINISTA del vencimiento
         // optimista. El pull protegido de AT-04 es delta por
@@ -3679,6 +3700,15 @@ class SyncEngine {
           await _db.revertirOptimismoReponerLote(p);
         } catch (_) {}
       }
+      if ('${op['tipo']}' == 'eliminar_suplemento') {
+        // 1.30 (Oleada 4, §5.3 punto 4): en revisión el borrado
+        // tampoco está aplicado — la purga optimista se restaura
+        // igual que en el rechazo (precedente 1.24.2: la revisión
+        // limpia el optimismo igual). Si el dueño aprueba la op
+        // en el servidor, la cascada se aplica allí y el pull
+        // trae los borrados.
+        await _marcarRestauracionSuplemento();
+      }
       return false;
     }
     return false; // 'pendiente' u otro: en vuelo, no tocar.
@@ -3710,6 +3740,31 @@ class SyncEngine {
             cid, f.length >= 10 ? f.substring(0, 10) : f);
       }
     } catch (_) {}
+  }
+
+  /// 1.30 (Oleada 4, §5.3 punto 4): marca la restauración de los
+  /// espejos purgados por un eliminar_suplemento que el servidor
+  /// NO aplicó (rechazo o revisión). La purga local de la cascada
+  /// es optimista y un pull delta jamás traería las filas de
+  /// vuelta (en el servidor no cambiaron: su sync_seq no avanzó
+  /// — patrón Missail), así que se fuerza la re-descarga COMPLETA
+  /// y focalizada de las 5 tablas de la cascada y se pide el pull
+  /// silencioso de fin de ciclo (el mismo gancho de
+  /// CLIENTE_PROTEGIDO): el suplemento vuelve a verse en el acto,
+  /// con sus pomos, botes, lotes y reservas. Las banderas
+  /// sobreviven si ese pull cae a mitad: el siguiente ciclo
+  /// reintenta la re-descarga.
+  Future<void> _marcarRestauracionSuplemento() async {
+    for (final t in const [
+      'suplementos',
+      'servicio_pomos',
+      'servicio_botes',
+      'servicio_lotes',
+      'reservas',
+    ]) {
+      await _db.setMeta('forzar_redescarga_$t', '1');
+    }
+    _pullProtegidoPendiente = true;
   }
 
   /// Marca una op como rechazada por el SERVIDOR (el puente la procesó

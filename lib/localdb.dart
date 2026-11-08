@@ -4021,13 +4021,123 @@ class LocalDb {
     }
   }
 
+  /// 1.30 (Oleada 4, §5.3 punto 3): desvincula una fila espejo
+  /// DENTRO de la transacción [txn]: pone [campos] a NULL en su
+  /// JSON y reescribe `data` con el propio ejecutor, conservando
+  /// `sync_seq`. No se usa upsertMirror: no acepta txn y llamarlo
+  /// aquí bloquearía la transacción (regla de la casa). Las
+  /// columnas dedicadas no derivan de los campos desvinculados
+  /// (verificado: columnasServicioVentas y columnasMoneda no leen
+  /// suplemento_id/lote_id/pomo_id), así que reescribir solo
+  /// `data` es completo.
+  Future<void> _desvincularEspejoEnTxn(DatabaseExecutor txn,
+      String tabla, Map<String, dynamic> fila, List<String> campos) async {
+    final data = Map<String, dynamic>.from(fila);
+    for (final c in campos) {
+      data[c] = null;
+    }
+    await txn.update(tabla, {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [fila['id']]);
+  }
+
   /// Panel 9/10 (Luna): borrar un suplemento del espejo y encolar su
   /// op en UNA transacción. Antes eran dos pasos: un cierre entre
   /// ambos dejaba el borrado sin op y el siguiente pull restauraba
   /// el suplemento.
+  ///
+  /// 1.30 (Oleada 4, §5.3 punto 3): la purga aplica sobre los
+  /// espejos el MISMO tratamiento que la cascada del servidor
+  /// (§5.2, pieza S-130-3 de la ventana §10), en su orden: la
+  /// historia se DESVINCULA, no se borra (ventas/salidas de
+  /// servicios pierden lote_id/pomo_id conservando montos y
+  /// comisiones; compras pierden suplemento_id; reservas NO vivas
+  /// pierden suplemento_id y sobreviven), y lo vivo se borra
+  /// (lotes, botes, pomos y reservas vivas: solicitada/reservada).
+  /// Así ninguna pantalla enseña enlaces rotos mientras el pull
+  /// confirma. Si el servidor rechaza la op, la restauración va
+  /// por la re-descarga focalizada de sync.dart (§5.3 punto 4).
   Future<void> eliminarSuplementoLocal(int id) async {
     final d = await db;
     await d.transaction((txn) async {
+      final botes = await mirrorPorCampo(
+          'servicio_botes', 'suplemento_id', id, txn: txn);
+      final boteIds = <int>{
+        for (final b in botes)
+          if ((b['id'] as num?) != null) (b['id'] as num).toInt(),
+      };
+      final pomos = await mirrorPorCampo(
+          'servicio_pomos', 'suplemento_id', id, txn: txn);
+      final pomoIds = <int>{
+        for (final p in pomos)
+          if ((p['id'] as num?) != null) (p['id'] as num).toInt(),
+      };
+      final loteIds = <int>{};
+      for (final boteId in boteIds) {
+        final lotes = await mirrorPorCampo(
+            'servicio_lotes', 'bote_id', boteId, txn: txn);
+        loteIds.addAll({
+          for (final l in lotes)
+            if ((l['id'] as num?) != null) (l['id'] as num).toInt(),
+        });
+      }
+      // Historia de dosis: desvincular, jamás borrar (§5.2 paso 3).
+      for (final loteId in loteIds) {
+        for (final v in await mirrorPorCampo(
+            'servicio_ventas', 'lote_id', loteId, txn: txn)) {
+          await _desvincularEspejoEnTxn(
+              txn, 'servicio_ventas', v, ['lote_id']);
+        }
+        for (final s in await mirrorPorCampo(
+            'servicio_salidas', 'lote_id', loteId, txn: txn)) {
+          await _desvincularEspejoEnTxn(
+              txn, 'servicio_salidas', s, ['lote_id']);
+        }
+      }
+      for (final pomoId in pomoIds) {
+        for (final v in await mirrorPorCampo(
+            'servicio_ventas', 'pomo_id', pomoId, txn: txn)) {
+          await _desvincularEspejoEnTxn(
+              txn, 'servicio_ventas', v, ['pomo_id']);
+        }
+        for (final s in await mirrorPorCampo(
+            'servicio_salidas', 'pomo_id', pomoId, txn: txn)) {
+          await _desvincularEspejoEnTxn(
+              txn, 'servicio_salidas', s, ['pomo_id']);
+        }
+      }
+      // Lotes, botes y pomos se borran (§5.2 pasos 4-6; el saldo
+      // que se va ya se contó derivado en la confirmación).
+      for (final loteId in loteIds) {
+        await deleteMirror('servicio_lotes', loteId, txn: txn);
+      }
+      for (final boteId in boteIds) {
+        await deleteMirror('servicio_botes', boteId, txn: txn);
+      }
+      for (final pomoId in pomoIds) {
+        await deleteMirror('servicio_pomos', pomoId, txn: txn);
+      }
+      // Compras: historia de gasto, se desvincula (§5.2 paso 7).
+      for (final c in await mirrorPorCampo(
+          'servicio_compras', 'suplemento_id', id, txn: txn)) {
+        await _desvincularEspejoEnTxn(
+            txn, 'servicio_compras', c, ['suplemento_id']);
+      }
+      // Reservas (§5.2 paso 8): las vivas se borran; las NO vivas
+      // se desvinculan y sobreviven con su historia, jamás se
+      // borran (en producción hay 7 rechazadas reales en 6
+      // suplementos: borrarlas sería perder la historia).
+      for (final r in await mirrorPorCampo(
+          'reservas', 'suplemento_id', id, txn: txn)) {
+        final rid = (r['id'] as num?)?.toInt();
+        if (rid == null) continue;
+        final estado = r['estado']?.toString() ?? '';
+        if (estado == 'solicitada' || estado == 'reservada') {
+          await deleteMirror('reservas', rid, txn: txn);
+        } else {
+          await _desvincularEspejoEnTxn(
+              txn, 'reservas', r, ['suplemento_id']);
+        }
+      }
       await deleteMirror('suplementos', id, txn: txn);
       await queueOp(
         opUuid: const Uuid().v4(),
