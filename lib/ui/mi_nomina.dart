@@ -1218,11 +1218,49 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
   final _montoCtrl = TextEditingController();
   final _motivoCtrl = TextEditingController();
 
+  // 1.30 (Oleada 2): puerta blanda anti-duplicado — el primer
+  // toque con una viva idéntica solo enseña el aviso; el
+  // segundo («Pedir igual») devuelve los datos y el llamador
+  // encola. Editar cualquier campo rearme la puerta.
+  bool _avisoIgual = false;
+  bool _consultando = false;
+
   @override
   void dispose() {
     _montoCtrl.dispose();
     _motivoCtrl.dispose();
     super.dispose();
+  }
+
+  void _rearmarAviso() {
+    if (_avisoIgual) setState(() => _avisoIgual = false);
+  }
+
+  Future<void> _enviar() async {
+    if (!_avisoIgual) {
+      final monto = int.tryParse(_montoCtrl.text.trim());
+      final motivo = _motivoCtrl.text.trim();
+      if (monto != null && monto > 0 && motivo.isNotEmpty) {
+        setState(() => _consultando = true);
+        var igual = false;
+        try {
+          igual = await SolicitudesAdelantoService.instance
+              .tieneVivaIgual(
+                  monto: monto.toDouble(), motivo: motivo);
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() => _consultando = false);
+        if (igual) {
+          setState(() => _avisoIgual = true);
+          return;
+        }
+      }
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop((
+      monto: _montoCtrl.text.trim(),
+      motivo: _motivoCtrl.text.trim(),
+    ));
   }
 
   @override
@@ -1234,6 +1272,7 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
         children: [
           TextField(
             controller: _montoCtrl,
+            onChanged: (_) => _rearmarAviso(),
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
               labelText: 'Monto (CUP, pesos enteros)',
@@ -1243,6 +1282,7 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
           const SizedBox(height: AppEspacio.md),
           TextField(
             controller: _motivoCtrl,
+            onChanged: (_) => _rearmarAviso(),
             decoration: const InputDecoration(
               labelText: 'Motivo',
               border: OutlineInputBorder(),
@@ -1255,6 +1295,16 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
             'pendiente NO descuenta de tu nómina.',
             style: AppTexto.secundario,
           ),
+          if (_avisoIgual) ...[
+            const SizedBox(height: AppEspacio.sm),
+            Text(
+              'Ya tienes una solicitud igual sin resolver. '
+              'Si la quieres pedir de todos modos, toca '
+              '«Pedir igual».',
+              style: AppTexto.secundario
+                  .copyWith(color: AppColores.alertaTexto(context)),
+            ),
+          ],
         ],
       ),
       actions: [
@@ -1263,11 +1313,8 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop((
-            monto: _montoCtrl.text.trim(),
-            motivo: _motivoCtrl.text.trim(),
-          )),
-          child: const Text('Enviar solicitud'),
+          onPressed: _consultando ? null : _enviar,
+          child: Text(_avisoIgual ? 'Pedir igual' : 'Enviar solicitud'),
         ),
       ],
     );

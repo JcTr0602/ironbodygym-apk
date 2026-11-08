@@ -2,6 +2,14 @@
 /// Cubre solicitudesConPendientes (PURO): el espejo manda y las
 /// ops `solicitar_adelanto` en 'pendiente' aparecen como
 /// 'por_enviar' sin duplicar nada.
+///
+/// 1.30 (Oleada 2): el contrato se amplió — entran los TRES
+/// estados vivos ('pendiente', 'enviada', 'error') con
+/// deduplicación exacta por op_uuid y el fallback MEDIA-02.
+/// El test que fijaba «enviada no entra» codificaba el defecto
+/// (la petición en vuelo desaparecía de «mías») y se actualizó
+/// con este motivo; la cobertura completa de la oleada vive en
+/// gestion130_oleada2_adelantos_test.dart.
 library;
 
 import 'dart:convert';
@@ -16,9 +24,11 @@ void main() {
     required String id,
     required String estado,
     double monto = 1000,
+    String? opUuid,
   }) =>
       SolicitudAdelanto(
           id: id, monto: monto, motivo: 'personal', estado: estado,
+          opUuid: opUuid,
           creadoEn: '2026-10-30T10:00:00-04:00');
 
   Map<String, dynamic> op({
@@ -50,16 +60,23 @@ void main() {
     expect(porEnviar.first.id, 'op:u1');
   });
 
-  test('otros estados y otros tipos no entran', () {
+  test('enviada y error entran; aplicada y otros tipos no', () {
+    // 1.30 (Oleada 2): antes este test exigía que la 'enviada'
+    // NO entrara — eso era el defecto (la petición en vuelo
+    // desaparecía de «mías» hasta el pull). Ahora entran los
+    // tres estados vivos; 'aplicada' ya no está en la cola de
+    // lectura y otros tipos nunca son adelantos.
     final out = solicitudesConPendientes(
       espejo: [],
       opsPendientes: [
         op(uuid: 'u1', estado: 'enviada'),
         op(uuid: 'u2', estado: 'aplicada'),
         op(uuid: 'u3', estado: 'pendiente', tipo: 'pago_mensual'),
+        op(uuid: 'u4', estado: 'error'),
       ],
     );
-    expect(out, isEmpty);
+    expect(out.length, 2);
+    expect(out.map((s) => s.id), containsAll(['op:u1', 'op:u4']));
   });
 
   test('payload malformado o sin monto se ignora', () {

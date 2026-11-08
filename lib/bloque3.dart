@@ -18,6 +18,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:uuid/uuid.dart';
 
 import 'auth.dart';
@@ -498,6 +499,14 @@ class SolicitudAdelanto {
   /// viejas o aún pendientes).
   final String? destinoResolucion;
 
+  /// 1.30 (Oleada 2): llave de la op que originó la solicitud
+  /// (la publica el servidor en el espejo). Es la llave EXACTA
+  /// de deduplicación contra la op aún en cola en este
+  /// teléfono. Null en filas viejas (anteriores a la cadena
+  /// op_uuid) o si un eslabón la pierde — para ese caso vive
+  /// el fallback de [solicitudesConPendientes].
+  final String? opUuid;
+
   const SolicitudAdelanto({
     required this.id,
     required this.monto,
@@ -512,6 +521,7 @@ class SolicitudAdelanto {
     this.resueltoPorNombre,
     this.motivoResolucion,
     this.destinoResolucion,
+    this.opUuid,
   });
 
   factory SolicitudAdelanto.fromMirror(Map<String, dynamic> m) {
@@ -532,6 +542,7 @@ class SolicitudAdelanto {
       resueltoPorNombre: m['resuelto_por_nombre'] as String?,
       motivoResolucion: m['motivo_resolucion'] as String?,
       destinoResolucion: m['destino_resolucion'] as String?,
+      opUuid: m['op_uuid'] as String?,
     );
   }
 
@@ -564,30 +575,99 @@ class SolicitudAdelanto {
           'motivo_resolucion': motivoResolucion,
         if (destinoResolucion != null)
           'destino_resolucion': destinoResolucion,
+        if (opUuid != null) 'op_uuid': opUuid,
       };
 }
 
-/// PURO (19/25, testeable sin BD): espejo + ops `solicitar_adelanto`
-/// aún en 'pendiente' de este teléfono, como filas con estado
-/// 'por_enviar'. Las ops en otro estado no entran: 'enviada' ya
-/// está en camino (llega con el pull) y los errores se ven en la
-/// Cola de sync. Payload malformado o sin monto/motivo se ignora.
+/// 1.30 (Oleada 2, MEDIA-02): normalización del motivo de un
+/// adelanto para COMPARAR (nunca para guardar): recorta, pasa
+/// a minúsculas y deja un solo espacio entre palabras.
+/// «Almuerzo » y «almuerzo» son el mismo motivo — con la
+/// comparación cruda, un espacio del teclado predictivo
+/// burlaba la puerta anti-duplicado y el fallback de abajo.
+String normalizarMotivoAdelanto(String motivo) =>
+    motivo.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+/// PURO (testeable sin BD): espejo + ops `solicitar_adelanto`
+/// aún VIVAS en la cola de este teléfono (los TRES estados:
+/// 'pendiente', 'enviada', 'error'), como filas con estado
+/// 'por_enviar'. Payload malformado o sin monto/motivo se
+/// ignora (contrato histórico).
+///
+/// 1.30 (Oleada 2, espejo del H-03 de rellenos pero con llave
+/// exacta): antes solo entraba 'pendiente' — la 'enviada' cuya
+/// respuesta se perdió desaparecía de «mías» hasta el pull y
+/// la 'error' se tiraba en silencio. Ahora:
+/// - Deduplicación EXACTA: si el espejo ya trae una fila con
+///   el mismo op_uuid que la op (cualquier estado de la fila),
+///   la op ES esa fila ya aterrizada: se salta.
+/// - Fallback (MEDIA-02): si la fila espejo trae op_uuid null
+///   (un eslabón de la cadena columna→puente→select perdió la
+///   llave), SOLO para ops en 'enviada' — la 'pendiente' aún
+///   no pudo aterrizar —: misma identidad (entrenador, monto y
+///   motivo normalizado) y creada_ts dentro de ±5 min del
+///   creado_en del espejo ⇒ se trata como la misma y se
+///   salta, avisando por [registrarDiagnostico]. El fallback
+///   tapa el síntoma; el aviso delata el eslabón roto.
 List<SolicitudAdelanto> solicitudesConPendientes({
   required List<SolicitudAdelanto> espejo,
   required List<Map<String, dynamic>> opsPendientes,
+  void Function(String mensaje)? registrarDiagnostico,
 }) {
   final out = [...espejo];
+  final uuidsEspejo = <String>{
+    for (final s in espejo)
+      if (s.opUuid != null && s.opUuid!.isNotEmpty) s.opUuid!,
+  };
+  final espejoSinLlave = [
+    for (final s in espejo)
+      if (s.opUuid == null || s.opUuid!.isEmpty) s,
+  ];
   for (final op in opsPendientes) {
     if (op['tipo'] != kTipoOpSolicitarAdelanto) continue;
-    if (op['estado'] != 'pendiente') continue;
+    final estadoOp = '${op['estado'] ?? ''}';
+    if (estadoOp != 'pendiente' &&
+        estadoOp != 'enviada' &&
+        estadoOp != 'error') {
+      continue;
+    }
+    final opUuid = '${op['op_uuid'] ?? ''}';
+    if (opUuid.isNotEmpty && uuidsEspejo.contains(opUuid)) continue;
     try {
       final p =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       final monto = (p['monto'] as num?)?.toDouble();
       final motivo = '${p['motivo'] ?? ''}'.trim();
       if (monto == null || monto <= 0 || motivo.isEmpty) continue;
+      if (estadoOp == 'enviada' && espejoSinLlave.isNotEmpty) {
+        final creadaOp = DateTime.tryParse('${op['creada_ts'] ?? ''}');
+        final tidOp = LocalDb.normalizarTelegramId(op['telegram_id']);
+        final esLaMisma = espejoSinLlave.any((s) {
+          if (tidOp != null &&
+              s.entrenadorTelegramId != null &&
+              s.entrenadorTelegramId != tidOp) {
+            return false;
+          }
+          if (s.monto != monto) return false;
+          if (normalizarMotivoAdelanto(s.motivo) !=
+              normalizarMotivoAdelanto(motivo)) {
+            return false;
+          }
+          final creadaEspejo = DateTime.tryParse(s.creadoEn ?? '');
+          if (creadaOp == null || creadaEspejo == null) return false;
+          return creadaOp.difference(creadaEspejo).abs() <=
+              const Duration(minutes: 5);
+        });
+        if (esLaMisma) {
+          registrarDiagnostico?.call(
+              'op_uuid ausente en espejo de adelanto: la op '
+              '$opUuid (enviada) se tapó por identidad y ventana '
+              'de ±5 min');
+          continue;
+        }
+      }
       out.add(SolicitudAdelanto(
-        id: 'op:${op['op_uuid'] ?? ''}',
+        id: 'op:$opUuid',
         monto: monto,
         motivo: motivo,
         estado: 'por_enviar',
@@ -638,6 +718,13 @@ class SolicitudesAdelantoService {
         'motivo': motivo.trim(),
       },
     );
+    // 1.30 (Oleada 2): el pedido sale ya (patrón H-03 de
+    // rellenos): sin empujón esperaba al próximo ciclo del
+    // motor y la ventana invitaba a repetirlo. Un fallo del
+    // empujón no tumba el pedido (la op queda en cola y el
+    // motor la reintenta en su ciclo).
+    unawaited(SyncEngine.instance.push().then((_) {},
+        onError: (_) {}));
   }
 
   Future<List<SolicitudAdelanto>> _todas() async {
@@ -650,11 +737,12 @@ class SolicitudesAdelantoService {
   /// Solicitudes del entrenador actual (pendientes y resueltas).
   /// Sin telegram_id no se puede atribuir ninguna: lista vacía en
   /// vez de mostrar solicitudes ajenas.
-  /// 19/25: fusiona además las ops `solicitar_adelanto` aún en
-  /// estado 'pendiente' de este teléfono (sin fila espejo): el
-  /// entrenador ve su pedido desde que lo toca, no solo cuando
-  /// sube y baja. Una op 'pendiente' nunca tiene fila espejo
-  /// (el servidor aún no la aplicó), así que no duplica.
+  /// 19/25: fusiona además las ops `solicitar_adelanto` aún
+  /// vivas en la cola de este teléfono: el entrenador ve su
+  /// pedido desde que lo toca, no solo cuando sube y baja.
+  /// 1.30 (Oleada 2): la fusión lee los TRES estados y deduplica
+  /// por op_uuid contra el espejo (con el fallback MEDIA-02 si
+  /// la llave llega nula): ver [solicitudesConPendientes].
   Future<List<SolicitudAdelanto>> mias() async {
     final tid = AuthService().telegramId;
     if (tid == null) return [];
@@ -665,10 +753,23 @@ class SolicitudesAdelantoService {
     ];
     List<Map<String, dynamic>> ops = [];
     try {
-      ops = await LocalDb.instance.pendingOps();
+      // 1.30 (Oleada 2): lectura AMPLIA (incluye 'enviada'):
+      // con pendingOps() la petición en vuelo ni llegaba al
+      // filtro y desaparecía de «mías» (el defecto gemelo que
+      // H-03 corrigió en rellenos en la 1.29).
+      ops = await LocalDb.instance.pendingOpsLectura();
     } catch (_) {}
     return solicitudesConPendientes(
       espejo: miasEspejo,
+      registrarDiagnostico: (mensaje) {
+        // Señal PERSISTENTE (patrón mirror_corruptas de
+        // allMirror): el debugPrint nadie lo ve en producción;
+        // la meta queda para el diagnóstico.
+        debugPrint('[adelantos] $mensaje');
+        unawaited(LocalDb.instance
+            .setMeta('diag_opuuid_adelanto', mensaje)
+            .catchError((_) {}));
+      },
       opsPendientes: [
         // Panel Terra A7: solo ops atribuidas a la sesión actual.
         // Antes se colaban también las ops sin telegram_id y un
@@ -678,6 +779,27 @@ class SolicitudesAdelantoService {
             op,
       ],
     );
+  }
+
+  /// 1.30 (Oleada 2): ¿vive una solicitud idéntica a esta
+  /// (mismo monto y mismo motivo, comparado NORMALIZADO) del
+  /// propio entrenador? «Viva» = pendiente en el espejo o aún
+  /// en cola ('por_enviar' en la fusión de [mias]). La puerta
+  /// del diálogo la consulta antes de encolar: avisa, no
+  /// bloquea — dos adelantos idénticos legítimos existen; lo
+  /// que se caza es el doble toque y la repetición por
+  /// impaciencia, que es el duplicado real.
+  Future<bool> tieneVivaIgual({
+    required double monto,
+    required String motivo,
+  }) async {
+    final motivoNorm = normalizarMotivoAdelanto(motivo);
+    if (motivoNorm.isEmpty) return false;
+    final lista = await mias();
+    return lista.any((s) =>
+        (s.estado == 'pendiente' || s.estado == 'por_enviar') &&
+        s.monto == monto &&
+        normalizarMotivoAdelanto(s.motivo) == motivoNorm);
   }
 
   /// Todas (dueño, para resolver).

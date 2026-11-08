@@ -4114,6 +4114,9 @@ class SyncEngine {
           'resuelto_por_nombre': m['resuelto_por_nombre'],
           'motivo_resolucion': m['motivo_resolucion'],
           'destino_resolucion': m['destino_resolucion'],
+          // 1.30 (Oleada 2): la llave de la op que originó la
+          // solicitud (deduplicación exacta en bloque3).
+          'op_uuid': m['op_uuid'],
         });
       } else {
         data.addAll({
@@ -4855,11 +4858,14 @@ class SyncEngine {
                   'nota_resolucion,sync_seq',
             // v1.12.0 (Bloque 3, F3/F4): espejos planos con id TEXT
             // (contrato servidor 59f2ffd — columnas exactas).
+            // 1.30 (Oleada 2, S-130-2): op_uuid viaja en el pull —
+            // es la llave exacta con la que la app deduplica la op
+            // en vuelo contra su fila espejo (bloque3).
             'solicitudes_adelanto' =>
               'id,entrenador_telegram_id,entrenador_nombre,entrenador,'
                   'monto,motivo,estado,creado_en,resuelto_en,resuelto_por,'
                   'resuelto_por_nombre,motivo_resolucion,'
-                  'destino_resolucion,sync_seq',
+                  'destino_resolucion,op_uuid,sync_seq',
             // 1.29 (Oleada 4, FB-09): espejo de solicitudes de
             // relleno (columnas exactas del espejo de Supabase).
             'solicitudes_relleno' =>
