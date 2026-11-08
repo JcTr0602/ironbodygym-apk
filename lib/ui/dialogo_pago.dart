@@ -323,20 +323,6 @@ Future<Map<String, dynamic>?> pagoDialogo(
     'quincenal': montoTipo('quincenal', 1200),
   };
 
-  /// Especial aplicable a un periodo del motor: la fila
-  /// activa de ese periodo. El método NO pre-filtra (M2,
-  /// verificado): solo elige qué monto de la fila aplica,
-  /// dentro del motor. Q2 (1.20): sin fallback legacy — la
-  /// columna migró a filas seed_legacy_<id>, que llegan en
-  /// filasEspecial como cualquier otra tarifa.
-  Map<String, dynamic>? especialPara(String periodoMotor) {
-    for (final f in filasEspecial) {
-      if (f['activa'] == 1 && '${f['periodo']}' == periodoMotor) {
-        return f;
-      }
-    }
-    return null;
-  }
   TipoPago? tipoPorId(String? id) {
     for (final t in tiposDisp) {
       if (t.id == id) return t;
@@ -354,7 +340,7 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // desde la 1.24 (Jc 2026-11-04): tipoInicialPago abre siempre
   // en 'menores'. (Antes regía el «MIN» del 2026-10-25: la
   // opción de 30 días más barata por defecto, derogado.)
-  int meses = 1;
+  // (Los meses del paso viven en _DialogoPaso1Pago desde la 1.30.)
   String metodo = aceptaEfectivo ? 'efectivo' : 'transferencia';
   // Panel 18: repetir también preselecciona el método del
   // último cobro, si el gym lo sigue aceptando.
@@ -368,16 +354,14 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // y la pantalla de confirmación la convierte en
   // 'comprobante_uuid' + fila en comprobantes_pago; la ruta en sí
   // NUNCA va en el payload de la op.
-  String? comprobanteRuta;
-  final diasCtrl = TextEditingController();
-  final montoCtrl = TextEditingController();
+  // (La ruta la guarda el State de _DialogoPaso1Pago desde la 1.30.)
   // 1.15 (C1): fecha del pago en hora Habana, no DateTime.now()
   // crudo (la zona del dispositivo no es necesariamente Habana).
   DateTime fechaPago = ahoraHabana(); // v1.1: permite elegir fecha del pago
-  // v1.3.1 (Argón regresión 2): sin try/finally con dispose. Esta es una
-  // función global, no un StatefulWidget; los controllers locales los
-  // recoge el GC. El dispose tras showDialog causaba
-  // "TextEditingController was used after being disposed".
+  // 1.30 (Oleada 7, clase B): los controladores de días y
+  // monto del personalizado ya NO viven en esta función:
+  // son del State de _DialogoPaso1Pago, que los dispone.
+  // (Sustituye a la nota v1.3.1 de «los recoge el GC».)
 
   // v1.3.2 (Argón): si el cliente está vencido, preguntar ANTES del paso 1
   // si siguió viniendo. La respuesta define la base del período nuevo:
@@ -434,6 +418,227 @@ Future<Map<String, dynamic>?> pagoDialogo(
       if (r == null || !context.mounted) return null;
       if (r) basePago = pagadoHasta;
     }
+  }
+
+
+
+  // 1.24 (Jc 2026-11-04): para menores, el tipo inicial es
+  // SIEMPRE 'menores' (su tarifa). Deroga el «Default MIN» del
+  // 2026-10-25 (la opción de 30 días más barata): la oferta
+  // sigue en el desplegable para elegirla a mano, pero el
+  // diálogo abre en la tarifa del menor. Ver tipoInicialPago.
+  if (menor) {
+    tipoSel = tipoInicialPago(tiposDisp, menor: true);
+  }
+
+
+  // Paso 1: período y método. 1.30 (Oleada 7, clase B):
+  // el paso vive en _DialogoPaso1Pago, StatefulWidget
+  // dueño de diasCtrl/montoCtrl y del estado del paso;
+  // devuelve la selección y las elecciones del paso.
+  final paso1 = await showDialog<_ResultadoPaso1Pago>(
+    context: context,
+    builder: (ctx) => _DialogoPaso1Pago(
+      cliente: cliente,
+      menor: menor,
+      esCasa: esCasa,
+      tipos: tipos,
+      tiposDisp: tiposDisp,
+      filasEspecial: filasEspecial,
+      preciosMapa: preciosMapa,
+      aceptaEfectivo: aceptaEfectivo,
+      aceptaTransfer: aceptaTransfer,
+      tipoSelInicial: tipoSel,
+      metodoInicialSel: metodo,
+      fechaPagoInicial: fechaPago,
+      basePagoInicial: basePago,
+    ),
+  );
+  if (paso1 == null || !context.mounted) return null;
+
+  // 1.15 (M5): ELIMINADO el diálogo interno «Confirmar pago»:
+  // el payload se devuelve al terminar el Paso 1 y la ÚNICA
+  // confirmación antes del encolado es PreviewCobroScreen
+  // (cobrarConPreviewYRecibo), que muestra cliente, monto,
+  // método, período y vencimiento. La vista previa obligatoria
+  // NO se quita: queda como único paso.
+  // 1.15 (C4): detener el flujo antes de cobrar si el id no es
+  // válido (0 o no interpretable): nunca se encola un cobro
+  // sin cliente.
+  if (clienteId <= 0) return null;
+  final s = paso1.sel;
+  // 1.23 (Delta Argón 5ª#1): lectura DEFENSIVA del dueño para
+  // la marca 'entregado' de abajo — el getter de sesión toca
+  // Supabase.instance y lanza si la instancia no está
+  // inicializada (tests sin Supabase). Mismo patrón defensivo
+  // que queueOp con AuthService. En la app real Supabase
+  // siempre está inicializado y esto no cambia nada.
+  var esDuenoCobro = false;
+  try {
+    esDuenoCobro = AuthService().isOwner;
+  } catch (_) {}
+  final fpIso2 = isoFechaHabana(paso1.fechaPago);
+  final nuevo = previewHastaDias(
+      normalizarFechaCobro(cliente['pagado_hasta']), _diasDe(s),
+      fechaPago: fpIso2, base: paso1.basePago);
+
+  return {
+    'cliente_id': clienteId,
+    'periodo': s.periodo,
+    // v1.3.1: tipo_id para que el servidor aplique el precio correcto
+    // (ej. 2500 con transferencia en vez de 2000).
+    if (s.tipoId != null) 'tipo_id': s.tipoId,
+    // v1.3.1: meses solo tiene sentido en mensual.
+    if (s.periodo == 'mensual') 'meses': s.meses,
+    if (s.periodo == 'personalizado') 'dias': s.dias,
+    // Monto calculado y vencimiento previsto: los usa la pantalla de
+    // confirmación. El servidor los ignora (recalcula él mismo).
+    'monto': s.monto,
+    'pagado_hasta': nuevo,
+    'metodo': paso1.metodo,
+    // F1 (1.20): ruta LOCAL del comprobante (solo transferencia);
+    // la confirmación la convierte en comprobante_uuid.
+    if (paso1.comprobanteRuta != null &&
+        paso1.metodo == 'transferencia')
+      '_comprobante_ruta': paso1.comprobanteRuta,
+    // v1.3.2: base explícita si el cliente siguió viniendo vencido.
+    // El servidor la respeta en record_payment.
+    if (paso1.basePago != null) 'base': paso1.basePago,
+    // 1.25 T21: el escalón que decidió el precio y sus
+    // avisos viajan al Preview (claves locales '_': la
+    // confirmación las retira; no viajan en la op). Sin
+    // esto, el «por qué cuesta eso» se perdía al salir del
+    // diálogo y la confirmación era a ciegas.
+    '_escalon': s.escalon,
+    if (s.avisos.isNotEmpty) '_avisos': s.avisos,
+    'siguio_viniendo': paso1.basePago != null,
+    'fecha': isoFechaHabana(paso1.fechaPago),
+    // 1.23 (Delta Argón 5ª#1): el dueño no se debe a sí mismo —
+    // TODO cobro suyo nace con 'entregado': 1 en el propio
+    // payload, sea cual sea la pantalla que lo originó (ficha,
+    // pago rápido, buscar, listas, papelera). Antes solo la ficha
+    // lo marcaba tras recibir el payload; el cobro rápido del
+    // dueño quedaba como pendiente a entregar.
+    if (esDuenoCobro) 'entregado': 1,
+  };
+}
+
+/// Resultado del Paso 1 del diálogo de pago: la selección
+/// calculada y las elecciones que el paso puede cambiar
+/// (método, comprobante, base y fecha del pago).
+typedef _ResultadoPaso1Pago = ({
+  PeriodoSel sel,
+  String metodo,
+  String? comprobanteRuta,
+  String? basePago,
+  DateTime fechaPago,
+});
+
+/// 1.30 (Oleada 7, clase B): el Paso 1 del diálogo de pago
+/// como StatefulWidget propio: posee y dispone diasCtrl /
+/// montoCtrl en su `dispose` (antes vivían en la función
+/// global pagoDialogo y nunca se liberaban: el dispose tras
+/// showDialog reventaba, regresión 2 de la v1.3.1, y dejarlos
+/// al GC era la salida conocida). El resto del flujo (la
+/// preparación y la pregunta de cliente vencido) sigue en
+/// pagoDialogo; este paso recibe ese contexto ya calculado
+/// y devuelve el resultado con Continuar.
+class _DialogoPaso1Pago extends StatefulWidget {
+  final Map<String, dynamic> cliente;
+  final bool menor;
+  final bool esCasa;
+  final List<TipoPago> tipos;
+  final List<TipoPago> tiposDisp;
+  final List<Map<String, dynamic>> filasEspecial;
+  final Map<String, double> preciosMapa;
+  final bool aceptaEfectivo;
+  final bool aceptaTransfer;
+  final TipoPago tipoSelInicial;
+  final String metodoInicialSel;
+  final DateTime fechaPagoInicial;
+  final String? basePagoInicial;
+  const _DialogoPaso1Pago({
+    required this.cliente,
+    required this.menor,
+    required this.esCasa,
+    required this.tipos,
+    required this.tiposDisp,
+    required this.filasEspecial,
+    required this.preciosMapa,
+    required this.aceptaEfectivo,
+    required this.aceptaTransfer,
+    required this.tipoSelInicial,
+    required this.metodoInicialSel,
+    required this.fechaPagoInicial,
+    required this.basePagoInicial,
+  });
+
+  @override
+  State<_DialogoPaso1Pago> createState() => _DialogoPaso1PagoState();
+}
+
+class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
+  late Map<String, dynamic> cliente;
+  late bool menor;
+  late bool esCasa;
+  late List<TipoPago> tipos;
+  late List<TipoPago> tiposDisp;
+  late List<Map<String, dynamic>> filasEspecial;
+  late Map<String, double> preciosMapa;
+  late bool aceptaEfectivo;
+  late bool aceptaTransfer;
+  late TipoPago tipoSel;
+  int meses = 1;
+  late String metodo;
+  // F1 (1.20): foto del comprobante (solo transferencia). Es una
+  // ruta LOCAL: viaja en el resultado con clave '_comprobante_ruta'
+  // y la pantalla de confirmación la convierte en
+  // 'comprobante_uuid' + fila en comprobantes_pago; la ruta en sí
+  // NUNCA va en el payload de la op.
+  String? comprobanteRuta;
+  final diasCtrl = TextEditingController();
+  final montoCtrl = TextEditingController();
+  late DateTime fechaPago;
+  late String? basePago;
+
+  @override
+  void initState() {
+    super.initState();
+    cliente = widget.cliente;
+    menor = widget.menor;
+    esCasa = widget.esCasa;
+    tipos = widget.tipos;
+    tiposDisp = widget.tiposDisp;
+    filasEspecial = widget.filasEspecial;
+    preciosMapa = widget.preciosMapa;
+    aceptaEfectivo = widget.aceptaEfectivo;
+    aceptaTransfer = widget.aceptaTransfer;
+    tipoSel = widget.tipoSelInicial;
+    metodo = widget.metodoInicialSel;
+    fechaPago = widget.fechaPagoInicial;
+    basePago = widget.basePagoInicial;
+  }
+
+  @override
+  void dispose() {
+    diasCtrl.dispose();
+    montoCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Especial aplicable a un periodo del motor: la fila
+  /// activa de ese periodo. El método NO pre-filtra (M2,
+  /// verificado): solo elige qué monto de la fila aplica,
+  /// dentro del motor. Q2 (1.20): sin fallback legacy — la
+  /// columna migró a filas seed_legacy_<id>, que llegan en
+  /// filasEspecial como cualquier otra tarifa.
+  Map<String, dynamic>? especialPara(String periodoMotor) {
+    for (final f in filasEspecial) {
+      if (f['activa'] == 1 && '${f['periodo']}' == periodoMotor) {
+        return f;
+      }
+    }
+    return null;
   }
 
   /// Mapea el tipo elegido al período del motor del servidor.
@@ -539,15 +744,6 @@ Future<Map<String, dynamic>?> pagoDialogo(
     return t.monto;
   }
 
-  // 1.24 (Jc 2026-11-04): para menores, el tipo inicial es
-  // SIEMPRE 'menores' (su tarifa). Deroga el «Default MIN» del
-  // 2026-10-25 (la opción de 30 días más barata): la oferta
-  // sigue en el desplegable para elegirla a mano, pero el
-  // diálogo abre en la tarifa del menor. Ver tipoInicialPago.
-  if (menor) {
-    tipoSel = tipoInicialPago(tiposDisp, menor: true);
-  }
-
   // 1.15 (m8): el personalizado delega en la función pura
   // (1 <= días <= 3650, monto positivo y finito).
   bool valido(PeriodoSel s) {
@@ -557,552 +753,488 @@ Future<Map<String, dynamic>?> pagoDialogo(
     return true;
   }
 
-  // Paso 1: período y método.
-  final paso1 = await showDialog<PeriodoSel>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setS) {
-        final s = actual();
-        final fpIso = isoFechaHabana(fechaPago);
-        final nuevo = previewHastaDias(
-            // 1.15 (C2): vencimiento normalizado a día Habana.
-            normalizarFechaCobro(cliente['pagado_hasta']),
-            _diasDe(s),
-            fechaPago: fpIso, base: basePago);
-        return DialogoApp(
-          titulo: 'Pago — ${cliente['nombre']}',
-          iconoTitulo: Icons.payments_rounded,
-          contenido: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                    'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
-                // v1.0.14: aviso de precio reducido para menores
-                if (menor)
-                  Container(
-                    margin:
-                        const EdgeInsets.only(top: AppEspacio.sm, bottom: AppEspacio.xs),
-                    padding: const EdgeInsets.all(AppEspacio.md),
-                    decoration: BoxDecoration(
+  @override
+  Widget build(BuildContext context) {
+    final s = actual();
+    final fpIso = isoFechaHabana(fechaPago);
+    final nuevo = previewHastaDias(
+        // 1.15 (C2): vencimiento normalizado a día Habana.
+        normalizarFechaCobro(cliente['pagado_hasta']),
+        _diasDe(s),
+        fechaPago: fpIso, base: basePago);
+    return DialogoApp(
+      titulo: 'Pago — ${cliente['nombre']}',
+      iconoTitulo: Icons.payments_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
+            // v1.0.14: aviso de precio reducido para menores
+            if (menor)
+              Container(
+                margin:
+                    const EdgeInsets.only(top: AppEspacio.sm, bottom: AppEspacio.xs),
+                padding: const EdgeInsets.all(AppEspacio.md),
+                decoration: BoxDecoration(
+                  color: AppColores.info
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(
+                      AppRadio.md),
+                  border: Border.all(
                       color: AppColores.info
-                          .withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(
-                          AppRadio.md),
-                      border: Border.all(
-                          color: AppColores.info
-                              .withValues(alpha: 0.4)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.child_care_rounded,
-                            color: AppColores.info),
-                        const SizedBox(
-                            width: AppEspacio.sm),
-                        Expanded(
-                          child: Text(
-                            'Menor de 18: precio especial '
-                            '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
-                            style: AppTexto.secundario,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                // v1.0.14: aviso claro si paga por adelantado
-                Builder(builder: (_) {
-                  // 1.15 (C2): vencimiento normalizado a día Habana.
-                  final ph =
-                      normalizarFechaCobro(cliente['pagado_hasta']);
-                  if (ph != null && ph.compareTo(fpIso) > 0) {
-                    final diasRest = DateTime.parse(ph)
-                        .difference(DateTime.parse(fpIso))
-                        .inDays;
-                    return Container(
-                      margin: const EdgeInsets.only(
-                          top: AppEspacio.sm, bottom: AppEspacio.xs),
-                      padding: const EdgeInsets.all(AppEspacio.md),
-                      decoration: BoxDecoration(
-                        color: AppColores.exito
-                            .withValues(alpha: 0.08),
-                        borderRadius:
-                            BorderRadius.circular(
-                                AppRadio.md),
-                        border: Border.all(
-                            color: AppColores.exito
-                                .withValues(alpha: 0.4)),
+                          .withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.child_care_rounded,
+                        color: AppColores.info),
+                    const SizedBox(
+                        width: AppEspacio.sm),
+                    Expanded(
+                      child: Text(
+                        'Menor de 18: precio especial '
+                        '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
+                        style: AppTexto.secundario,
                       ),
-                      child: Row(
+                    ),
+                  ],
+                ),
+              ),
+            // v1.0.14: aviso claro si paga por adelantado
+            Builder(builder: (_) {
+              // 1.15 (C2): vencimiento normalizado a día Habana.
+              final ph =
+                  normalizarFechaCobro(cliente['pagado_hasta']);
+              if (ph != null && ph.compareTo(fpIso) > 0) {
+                final diasRest = DateTime.parse(ph)
+                    .difference(DateTime.parse(fpIso))
+                    .inDays;
+                return Container(
+                  margin: const EdgeInsets.only(
+                      top: AppEspacio.sm, bottom: AppEspacio.xs),
+                  padding: const EdgeInsets.all(AppEspacio.md),
+                  decoration: BoxDecoration(
+                    color: AppColores.exito
+                        .withValues(alpha: 0.08),
+                    borderRadius:
+                        BorderRadius.circular(
+                            AppRadio.md),
+                    border: Border.all(
+                        color: AppColores.exito
+                            .withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                          Icons.check_circle_rounded,
+                          color:
+                              AppColores.exito),
+                      const SizedBox(
+                          width: AppEspacio.sm),
+                      Expanded(
+                        child: Text(
+                          'Tiene $diasRest día(s) vigentes. '
+                          'No se pierden: el nuevo período '
+                          'empieza al vencer.',
+                          style: AppTexto.secundario,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            }),
+            const SizedBox(height: 8),
+            // Selector de fecha del pago (v1.1)
+            InkWell(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: fechaPago,
+                  firstDate: DateTime(2020),
+                  // 1.15 (C1): límite del selector en fecha Habana.
+                  lastDate: ahoraHabana(),
+                  helpText: 'Fecha del pago',
+                );
+                if (picked == null) return;
+                // 1.15 (C3): al cambiar la fecha, la decisión
+                // anterior se invalida y se recalcula todo con
+                // la fecha elegida. Si ya no está vencida, la
+                // base queda null; si sigue vencida, se vuelve
+                // a preguntar ANTES de aceptar. Sin respuesta,
+                // se conserva la fecha y la decisión anteriores.
+                final fechaAnterior = fechaPago;
+                final baseAnterior = basePago;
+                final pickedIso = isoFechaHabana(picked);
+                final phNorm =
+                    normalizarFechaCobro(cliente['pagado_hasta']);
+                final rec = recalcularBaseAlCambiarFecha(
+                    pagadoHasta: phNorm, fechaPagoIso: pickedIso);
+                if (!rec.necesitaPregunta) {
+                  if (mounted) {
+                    setState(() {
+                      fechaPago = picked;
+                      basePago = null;
+                    });
+                  }
+                  return;
+                }
+                final diasV =
+                    diasVencidosCobro(phNorm, pickedIso) ?? 0;
+                // 1.25 T22: las fechas se calculan con el
+                // período ELEGIDO en el diálogo (antes 30
+                // fijos: con Semana prometía un mes que el
+                // cobro no cumplía).
+                final diasSel = tipoSel.id == 'personalizado'
+                    ? (int.tryParse(diasCtrl.text.trim()) ?? 30)
+                    : tipoSel.dias;
+                final hastaSi = previewHastaDias(phNorm, diasSel,
+                    fechaPago: pickedIso, base: phNorm);
+                final hastaNo = previewHastaDias(phNorm, diasSel,
+                    fechaPago: pickedIso);
+                if (!context.mounted) return;
+                final r = await showDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (ctx2) => AlertDialog(
+                    title: const Text('Cliente vencido'),
+                    content: Text(
+                      'Venció el ${fmtFecha(phNorm)} '
+                      '(hace $diasV día${diasV == 1 ? '' : 's'}).\n'
+                      '¿Siguió viniendo después del vencimiento?\n\n'
+                      'Sí → nuevo vencimiento: ${fmtFecha(hastaSi)}\n'
+                      'No → nuevo vencimiento: ${fmtFecha(hastaNo)}\n\n'
+                      '(Con el período elegido ahora; si lo '
+                      'cambias, la fecha cambia y la verás '
+                      'antes de confirmar.)',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx2, false),
+                        child: const Text('No, dejó de venir'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(ctx2, true),
+                        child: const Text('Sí, siguió viniendo'),
+                      ),
+                    ],
+                  ),
+                );
+                if (!mounted) return;
+                if (r == null) {
+                  setState(() {
+                    fechaPago = fechaAnterior;
+                    basePago = baseAnterior;
+                  });
+                  return;
+                }
+                setState(() {
+                  fechaPago = picked;
+                  basePago = r ? phNorm : null;
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppEspacio.md, vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                      color: AppColores.borde(context)),
+                  borderRadius: BorderRadius.circular(AppRadio.sm),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today_rounded, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Pagado el: ${fechaPago.day.toString().padLeft(2, '0')}/'
+                      '${fechaPago.month.toString().padLeft(2, '0')}/'
+                      '${fechaPago.year}',
+                      style: AppTexto.subtitulo,
+                    ),
+                    const Spacer(),
+                    Icon(Icons.edit_rounded,
+                        size: 16,
+                        color: AppColores.textoSecundario(context)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text('Período:'),
+            DropdownButton<String>(
+              value: tipoSel.id,
+              isExpanded: true,
+              items: [
+                // v1.3.1 (Argón): tiposDisp ya excluye 'mensual' si
+                // menor == true; value y items siempre coinciden.
+                for (final t in tiposDisp)
+                  DropdownMenuItem(
+                      value: t.id,
+                      child: Text(
+                          // 1.25 T117 (F1-89): los días del tipo
+                          // van en la etiqueta (dos tipos con
+                          // igual monto y distinta duración ya
+                          // no se confunden). Mismo arreglo que
+                          // en Inscribir (F1-62).
+                          '${t.nombre} · ${t.dias} días · ${fmtMonto(montoEtiqueta(t))} CUP')),
+                const DropdownMenuItem(
+                    value: 'personalizado',
+                    child: Text('Personalizado…')),
+              ],
+              onChanged: (v) => setState(() {
+                // v1.3.1: resetear meses/días al cambiar de tipo.
+                meses = 1;
+                diasCtrl.clear();
+                montoCtrl.clear();
+                if (v == 'personalizado') {
+                  tipoSel = const TipoPago(
+                      id: 'personalizado',
+                      nombre: 'Personalizado',
+                      monto: 0,
+                      dias: 0);
+                } else {
+                  tipoSel = tiposDisp.firstWhere((t) => t.id == v,
+                      orElse: () => tiposDisp.first);
+                }
+              }),
+            ),
+            // 1.25 T117 (F1-90): cambiar el método reescribe
+            // el precio de las opciones (2000 ↔ 2500 en la
+            // mensualidad estándar); se dice junto al
+            // desplegable en vez de que el precio «cambie
+            // solo» al tocar el chip de método.
+            const Text(
+              'El precio de cada opción depende del método '
+              'de pago elegido abajo.',
+              style: AppTexto.secundario,
+            ),
+            // Selector de meses para mensual/menores
+            if (tipoSel.id == 'mensual' ||
+                tipoSel.id == 'menores') ...[
+              const SizedBox(height: 8),
+              const Text('Meses:'),
+              DropdownButton<int>(
+                value: meses,
+                isExpanded: true,
+                items: [
+                  for (final m in [1, 2, 3, 6, 12])
+                    DropdownMenuItem(
+                        value: m,
+                        child: Text(
+                            '$m mes${m == 1 ? '' : 'es'}')),
+                ],
+                onChanged: (v) =>
+                    setState(() => meses = v ?? 1),
+              ),
+            ],
+            if (tipoSel.id == 'personalizado') ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: diasCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly
+                ],
+                decoration: const InputDecoration(
+                    labelText: 'Días',
+                    border: OutlineInputBorder()),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: montoCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(
+                        decimal: true),
+                // 1.15 (m8): solo dígitos y un separador
+                // decimal válido (punto o coma; el parseo
+                // posterior convierte la coma y lo inválido
+                // cae a monto 0 → inválido, nunca se cobra).
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(
+                      RegExp(r'[0-9.,]')),
+                ],
+                decoration: const InputDecoration(
+                    labelText: 'Monto (CUP)',
+                    border: OutlineInputBorder()),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+            const SizedBox(height: 8),
+            const Text('Método:'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (aceptaEfectivo)
+                  ChoiceChip(
+                      label: const Text('Efectivo'),
+                      avatar: const Icon(Icons.payments_rounded,
+                          size: 18),
+                      selected: metodo == 'efectivo',
+                      onSelected: (_) =>
+                          setState(() => metodo = 'efectivo')),
+                if (aceptaEfectivo && aceptaTransfer)
+                  const SizedBox(width: 8),
+                if (aceptaTransfer)
+                  ChoiceChip(
+                      label: const Text('Transferencia'),
+                      avatar: const Icon(
+                          Icons.smartphone_rounded,
+                          size: 18),
+                      selected: metodo == 'transferencia',
+                      onSelected: (_) => setState(
+                          () => metodo = 'transferencia')),
+              ],
+            ),
+            // F1 (1.20): comprobante opcional de la
+            // transferencia (foto de la captura del banco).
+            if (metodo == 'transferencia') ...[
+              const SizedBox(height: 8),
+              if (comprobanteRuta == null)
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.add_a_photo_rounded,
+                      size: 18),
+                  label: const Text(
+                      'Adjuntar foto del comprobante'),
+                  onPressed: () async {
+                    final origen = await showDialog<String>(
+                      context: context,
+                      builder: (c2) => SimpleDialog(
+                        title:
+                            const Text('Foto del comprobante'),
                         children: [
-                          const Icon(
-                              Icons.check_circle_rounded,
-                              color:
-                                  AppColores.exito),
-                          const SizedBox(
-                              width: AppEspacio.sm),
-                          Expanded(
-                            child: Text(
-                              'Tiene $diasRest día(s) vigentes. '
-                              'No se pierden: el nuevo período '
-                              'empieza al vencer.',
-                              style: AppTexto.secundario,
+                          SimpleDialogOption(
+                            onPressed: () =>
+                                Navigator.pop(c2, 'camera'),
+                            child: const ListTile(
+                              leading: Icon(
+                                  Icons.photo_camera_rounded),
+                              title: Text('Tomar foto'),
+                            ),
+                          ),
+                          SimpleDialogOption(
+                            onPressed: () =>
+                                Navigator.pop(c2, 'gallery'),
+                            child: const ListTile(
+                              leading: Icon(Icons
+                                  .photo_library_rounded),
+                              title: Text(
+                                  'Elegir de la galería'),
                             ),
                           ),
                         ],
                       ),
                     );
-                  }
-                  return const SizedBox.shrink();
-                }),
-                const SizedBox(height: 8),
-                // Selector de fecha del pago (v1.1)
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: fechaPago,
-                      firstDate: DateTime(2020),
-                      // 1.15 (C1): límite del selector en fecha Habana.
-                      lastDate: ahoraHabana(),
-                      helpText: 'Fecha del pago',
+                    if (origen == null) return;
+                    final img = await ImagePicker().pickImage(
+                      source: origen == 'camera'
+                          ? ImageSource.camera
+                          : ImageSource.gallery,
                     );
-                    if (picked == null) return;
-                    // 1.15 (C3): al cambiar la fecha, la decisión
-                    // anterior se invalida y se recalcula todo con
-                    // la fecha elegida. Si ya no está vencida, la
-                    // base queda null; si sigue vencida, se vuelve
-                    // a preguntar ANTES de aceptar. Sin respuesta,
-                    // se conserva la fecha y la decisión anteriores.
-                    final fechaAnterior = fechaPago;
-                    final baseAnterior = basePago;
-                    final pickedIso = isoFechaHabana(picked);
-                    final phNorm =
-                        normalizarFechaCobro(cliente['pagado_hasta']);
-                    final rec = recalcularBaseAlCambiarFecha(
-                        pagadoHasta: phNorm, fechaPagoIso: pickedIso);
-                    if (!rec.necesitaPregunta) {
-                      if (ctx.mounted) {
-                        setS(() {
-                          fechaPago = picked;
-                          basePago = null;
-                        });
-                      }
-                      return;
-                    }
-                    final diasV =
-                        diasVencidosCobro(phNorm, pickedIso) ?? 0;
-                    // 1.25 T22: las fechas se calculan con el
-                    // período ELEGIDO en el diálogo (antes 30
-                    // fijos: con Semana prometía un mes que el
-                    // cobro no cumplía).
-                    final diasSel = tipoSel.id == 'personalizado'
-                        ? (int.tryParse(diasCtrl.text.trim()) ?? 30)
-                        : tipoSel.dias;
-                    final hastaSi = previewHastaDias(phNorm, diasSel,
-                        fechaPago: pickedIso, base: phNorm);
-                    final hastaNo = previewHastaDias(phNorm, diasSel,
-                        fechaPago: pickedIso);
-                    if (!ctx.mounted) return;
-                    final r = await showDialog<bool>(
-                      context: ctx,
-                      barrierDismissible: false,
-                      builder: (ctx2) => AlertDialog(
-                        title: const Text('Cliente vencido'),
-                        content: Text(
-                          'Venció el ${fmtFecha(phNorm)} '
-                          '(hace $diasV día${diasV == 1 ? '' : 's'}).\n'
-                          '¿Siguió viniendo después del vencimiento?\n\n'
-                          'Sí → nuevo vencimiento: ${fmtFecha(hastaSi)}\n'
-                          'No → nuevo vencimiento: ${fmtFecha(hastaNo)}\n\n'
-                          '(Con el período elegido ahora; si lo '
-                          'cambias, la fecha cambia y la verás '
-                          'antes de confirmar.)',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx2, false),
-                            child: const Text('No, dejó de venir'),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(ctx2, true),
-                            child: const Text('Sí, siguió viniendo'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (!ctx.mounted) return;
-                    if (r == null) {
-                      setS(() {
-                        fechaPago = fechaAnterior;
-                        basePago = baseAnterior;
-                      });
-                      return;
-                    }
-                    setS(() {
-                      fechaPago = picked;
-                      basePago = r ? phNorm : null;
-                    });
+                    if (img == null) return;
+                    setState(() => comprobanteRuta = img.path);
                   },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppEspacio.md, vertical: 10),
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                          color: AppColores.borde(ctx)),
-                      borderRadius: BorderRadius.circular(AppRadio.sm),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today_rounded, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Pagado el: ${fechaPago.day.toString().padLeft(2, '0')}/'
-                          '${fechaPago.month.toString().padLeft(2, '0')}/'
-                          '${fechaPago.year}',
-                          style: AppTexto.subtitulo,
-                        ),
-                        const Spacer(),
-                        Icon(Icons.edit_rounded,
-                            size: 16,
-                            color: AppColores.textoSecundario(ctx)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text('Período:'),
-                DropdownButton<String>(
-                  value: tipoSel.id,
-                  isExpanded: true,
-                  items: [
-                    // v1.3.1 (Argón): tiposDisp ya excluye 'mensual' si
-                    // menor == true; value y items siempre coinciden.
-                    for (final t in tiposDisp)
-                      DropdownMenuItem(
-                          value: t.id,
-                          child: Text(
-                              // 1.25 T117 (F1-89): los días del tipo
-                              // van en la etiqueta (dos tipos con
-                              // igual monto y distinta duración ya
-                              // no se confunden). Mismo arreglo que
-                              // en Inscribir (F1-62).
-                              '${t.nombre} · ${t.dias} días · ${fmtMonto(montoEtiqueta(t))} CUP')),
-                    const DropdownMenuItem(
-                        value: 'personalizado',
-                        child: Text('Personalizado…')),
-                  ],
-                  onChanged: (v) => setS(() {
-                    // v1.3.1: resetear meses/días al cambiar de tipo.
-                    meses = 1;
-                    diasCtrl.clear();
-                    montoCtrl.clear();
-                    if (v == 'personalizado') {
-                      tipoSel = const TipoPago(
-                          id: 'personalizado',
-                          nombre: 'Personalizado',
-                          monto: 0,
-                          dias: 0);
-                    } else {
-                      tipoSel = tiposDisp.firstWhere((t) => t.id == v,
-                          orElse: () => tiposDisp.first);
-                    }
-                  }),
-                ),
-                // 1.25 T117 (F1-90): cambiar el método reescribe
-                // el precio de las opciones (2000 ↔ 2500 en la
-                // mensualidad estándar); se dice junto al
-                // desplegable en vez de que el precio «cambie
-                // solo» al tocar el chip de método.
-                const Text(
-                  'El precio de cada opción depende del método '
-                  'de pago elegido abajo.',
-                  style: AppTexto.secundario,
-                ),
-                // Selector de meses para mensual/menores
-                if (tipoSel.id == 'mensual' ||
-                    tipoSel.id == 'menores') ...[
-                  const SizedBox(height: 8),
-                  const Text('Meses:'),
-                  DropdownButton<int>(
-                    value: meses,
-                    isExpanded: true,
-                    items: [
-                      for (final m in [1, 2, 3, 6, 12])
-                        DropdownMenuItem(
-                            value: m,
-                            child: Text(
-                                '$m mes${m == 1 ? '' : 'es'}')),
-                    ],
-                    onChanged: (v) =>
-                        setS(() => meses = v ?? 1),
-                  ),
-                ],
-                if (tipoSel.id == 'personalizado') ...[
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: diasCtrl,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ],
-                    decoration: const InputDecoration(
-                        labelText: 'Días',
-                        border: OutlineInputBorder()),
-                    onChanged: (_) => setS(() {}),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: montoCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(
-                            decimal: true),
-                    // 1.15 (m8): solo dígitos y un separador
-                    // decimal válido (punto o coma; el parseo
-                    // posterior convierte la coma y lo inválido
-                    // cae a monto 0 → inválido, nunca se cobra).
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9.,]')),
-                    ],
-                    decoration: const InputDecoration(
-                        labelText: 'Monto (CUP)',
-                        border: OutlineInputBorder()),
-                    onChanged: (_) => setS(() {}),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                const Text('Método:'),
+                )
+              else
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (aceptaEfectivo)
-                      ChoiceChip(
-                          label: const Text('Efectivo'),
-                          avatar: const Icon(Icons.payments_rounded,
-                              size: 18),
-                          selected: metodo == 'efectivo',
-                          onSelected: (_) =>
-                              setS(() => metodo = 'efectivo')),
-                    if (aceptaEfectivo && aceptaTransfer)
-                      const SizedBox(width: 8),
-                    if (aceptaTransfer)
-                      ChoiceChip(
-                          label: const Text('Transferencia'),
-                          avatar: const Icon(
-                              Icons.smartphone_rounded,
-                              size: 18),
-                          selected: metodo == 'transferencia',
-                          onSelected: (_) => setS(
-                              () => metodo = 'transferencia')),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.file(
+                        File(comprobanteRuta!),
+                        width: 40,
+                        height: 40,
+                        fit: BoxFit.cover,
+                        errorBuilder:
+                            (context, error, stackTrace) =>
+                                const Icon(
+                                    Icons.image_rounded,
+                                    size: 40),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                        child: Text('Comprobante adjunto')),
+                    IconButton(
+                      icon: const Icon(
+                          Icons.delete_outline_rounded),
+                      tooltip: 'Quitar comprobante',
+                      onPressed: () =>
+                          setState(() => comprobanteRuta = null),
+                    ),
                   ],
                 ),
-                // F1 (1.20): comprobante opcional de la
-                // transferencia (foto de la captura del banco).
-                if (metodo == 'transferencia') ...[
-                  const SizedBox(height: 8),
-                  if (comprobanteRuta == null)
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.add_a_photo_rounded,
-                          size: 18),
-                      label: const Text(
-                          'Adjuntar foto del comprobante'),
-                      onPressed: () async {
-                        final origen = await showDialog<String>(
-                          context: ctx,
-                          builder: (c2) => SimpleDialog(
-                            title:
-                                const Text('Foto del comprobante'),
-                            children: [
-                              SimpleDialogOption(
-                                onPressed: () =>
-                                    Navigator.pop(c2, 'camera'),
-                                child: const ListTile(
-                                  leading: Icon(
-                                      Icons.photo_camera_rounded),
-                                  title: Text('Tomar foto'),
-                                ),
-                              ),
-                              SimpleDialogOption(
-                                onPressed: () =>
-                                    Navigator.pop(c2, 'gallery'),
-                                child: const ListTile(
-                                  leading: Icon(Icons
-                                      .photo_library_rounded),
-                                  title: Text(
-                                      'Elegir de la galería'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (origen == null) return;
-                        final img = await ImagePicker().pickImage(
-                          source: origen == 'camera'
-                              ? ImageSource.camera
-                              : ImageSource.gallery,
-                        );
-                        if (img == null) return;
-                        setS(() => comprobanteRuta = img.path);
-                      },
-                    )
-                  else
-                    Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
-                            File(comprobanteRuta!),
-                            width: 40,
-                            height: 40,
-                            fit: BoxFit.cover,
-                            errorBuilder:
-                                (context, error, stackTrace) =>
-                                    const Icon(
-                                        Icons.image_rounded,
-                                        size: 40),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                            child: Text('Comprobante adjunto')),
-                        IconButton(
-                          icon: const Icon(
-                              Icons.delete_outline_rounded),
-                          tooltip: 'Quitar comprobante',
-                          onPressed: () =>
-                              setS(() => comprobanteRuta = null),
-                        ),
-                      ],
-                    ),
-                ],
-                const SizedBox(height: 12),
-                // 1.25 T117 (F1-88): el pie es el «Resumen» (el
-                // encabezado «Período:» ya vive sobre el
-                // desplegable; repetirlo aquí duplicaba la
-                // etiqueta sin añadir nada).
-                const Text('Resumen',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                Text(_etiquetaPeriodo(s)),
-                Text('Monto: ${fmtMonto(s.monto)} CUP',
-                    style:
-                        const TextStyle(fontWeight: FontWeight.bold)),
-                // v1.10.0 (Bloque 2, D6): chip + avisos del escalón
-                // que decidió el precio (no bloquean, informan).
-                // 1.25 T117 (F1-84): el chip sale para TODO escalón
-                // no estándar — antes solo la tarifa especial lo
-                // tenía y el «por qué cuesta eso» de menores y de
-                // la oferta se perdía (el Preview sí lo mostraba).
-                if (s.escalon != 'estandar')
-                  Padding(
-                    padding: const EdgeInsets.only(top: AppEspacio.xs),
-                    child: Chip(
-                      label: Text(s.escalon == 'especial'
-                          ? 'Tarifa especial'
-                          : s.escalon == 'menores'
-                              ? 'Tarifa de menores'
-                              : s.escalon == 'oferta'
-                                  ? 'Oferta'
-                                  : s.escalon),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                for (final a in s.avisos)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(a,
-                        // 1.23 (Delta Argón 6ª): naranja de la
-                        // casa adaptativo en vez de Colors.orange.
-                        style: AppTexto.secundario
-                            .copyWith(color: AppColores.textoNaranja(ctx))),
-                  ),
-                Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
-                    style:
-                        const TextStyle(fontWeight: FontWeight.bold)),
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-                onPressed:
-                    valido(s) ? () => Navigator.pop(ctx, s) : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColores.naranja,
-                  foregroundColor: Colors.white,
+            ],
+            const SizedBox(height: 12),
+            // 1.25 T117 (F1-88): el pie es el «Resumen» (el
+            // encabezado «Período:» ya vive sobre el
+            // desplegable; repetirlo aquí duplicaba la
+            // etiqueta sin añadir nada).
+            const Text('Resumen',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(_etiquetaPeriodo(s)),
+            Text('Monto: ${fmtMonto(s.monto)} CUP',
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold)),
+            // v1.10.0 (Bloque 2, D6): chip + avisos del escalón
+            // que decidió el precio (no bloquean, informan).
+            // 1.25 T117 (F1-84): el chip sale para TODO escalón
+            // no estándar — antes solo la tarifa especial lo
+            // tenía y el «por qué cuesta eso» de menores y de
+            // la oferta se perdía (el Preview sí lo mostraba).
+            if (s.escalon != 'estandar')
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
+                child: Chip(
+                  label: Text(s.escalon == 'especial'
+                      ? 'Tarifa especial'
+                      : s.escalon == 'menores'
+                          ? 'Tarifa de menores'
+                          : s.escalon == 'oferta'
+                              ? 'Oferta'
+                              : s.escalon),
+                  visualDensity: VisualDensity.compact,
                 ),
-                child: const Text('Continuar')),
+              ),
+            for (final a in s.avisos)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(a,
+                    // 1.23 (Delta Argón 6ª): naranja de la
+                    // casa adaptativo en vez de Colors.orange.
+                    style: AppTexto.secundario
+                        .copyWith(color: AppColores.textoNaranja(context))),
+              ),
+            Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold)),
           ],
-        );
-      },
-    ),
-  );
-  if (paso1 == null || !context.mounted) return null;
-
-  // 1.15 (M5): ELIMINADO el diálogo interno «Confirmar pago»:
-  // el payload se devuelve al terminar el Paso 1 y la ÚNICA
-  // confirmación antes del encolado es PreviewCobroScreen
-  // (cobrarConPreviewYRecibo), que muestra cliente, monto,
-  // método, período y vencimiento. La vista previa obligatoria
-  // NO se quita: queda como único paso.
-  // 1.15 (C4): detener el flujo antes de cobrar si el id no es
-  // válido (0 o no interpretable): nunca se encola un cobro
-  // sin cliente.
-  if (clienteId <= 0) return null;
-  final s = paso1;
-  // 1.23 (Delta Argón 5ª#1): lectura DEFENSIVA del dueño para
-  // la marca 'entregado' de abajo — el getter de sesión toca
-  // Supabase.instance y lanza si la instancia no está
-  // inicializada (tests sin Supabase). Mismo patrón defensivo
-  // que queueOp con AuthService. En la app real Supabase
-  // siempre está inicializado y esto no cambia nada.
-  var esDuenoCobro = false;
-  try {
-    esDuenoCobro = AuthService().isOwner;
-  } catch (_) {}
-  final fpIso2 = isoFechaHabana(fechaPago);
-  final nuevo = previewHastaDias(
-      normalizarFechaCobro(cliente['pagado_hasta']), _diasDe(s),
-      fechaPago: fpIso2, base: basePago);
-
-  return {
-    'cliente_id': clienteId,
-    'periodo': s.periodo,
-    // v1.3.1: tipo_id para que el servidor aplique el precio correcto
-    // (ej. 2500 con transferencia en vez de 2000).
-    if (s.tipoId != null) 'tipo_id': s.tipoId,
-    // v1.3.1: meses solo tiene sentido en mensual.
-    if (s.periodo == 'mensual') 'meses': s.meses,
-    if (s.periodo == 'personalizado') 'dias': s.dias,
-    // Monto calculado y vencimiento previsto: los usa la pantalla de
-    // confirmación. El servidor los ignora (recalcula él mismo).
-    'monto': s.monto,
-    'pagado_hasta': nuevo,
-    'metodo': metodo,
-    // F1 (1.20): ruta LOCAL del comprobante (solo transferencia);
-    // la confirmación la convierte en comprobante_uuid.
-    if (comprobanteRuta != null && metodo == 'transferencia')
-      '_comprobante_ruta': comprobanteRuta,
-    // v1.3.2: base explícita si el cliente siguió viniendo vencido.
-    // El servidor la respeta en record_payment.
-    if (basePago != null) 'base': basePago,
-    // 1.25 T21: el escalón que decidió el precio y sus
-    // avisos viajan al Preview (claves locales '_': la
-    // confirmación las retira; no viajan en la op). Sin
-    // esto, el «por qué cuesta eso» se perdía al salir del
-    // diálogo y la confirmación era a ciegas.
-    '_escalon': s.escalon,
-    if (s.avisos.isNotEmpty) '_avisos': s.avisos,
-    'siguio_viniendo': basePago != null,
-    'fecha': isoFechaHabana(fechaPago),
-    // 1.23 (Delta Argón 5ª#1): el dueño no se debe a sí mismo —
-    // TODO cobro suyo nace con 'entregado': 1 en el propio
-    // payload, sea cual sea la pantalla que lo originó (ficha,
-    // pago rápido, buscar, listas, papelera). Antes solo la ficha
-    // lo marcaba tras recibir el payload; el cobro rápido del
-    // dueño quedaba como pendiente a entregar.
-    if (esDuenoCobro) 'entregado': 1,
-  };
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed:
+                valido(s) ? () => Navigator.pop(context, (
+              sel: s,
+              metodo: metodo,
+              comprobanteRuta: comprobanteRuta,
+              basePago: basePago,
+              fechaPago: fechaPago,
+            )) : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Continuar')),
+      ],
+    );
+  }
 }
+

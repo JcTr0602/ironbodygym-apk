@@ -55,151 +55,13 @@ class _AvisosEntrenadorScreenState
       _snack('Solo el dueño puede crear o editar avisos.');
       return;
     }
-    final tituloCtrl = TextEditingController(text: actual?.titulo ?? '');
-    final mensajeCtrl =
-        TextEditingController(text: actual?.mensaje ?? '');
-    var modo = actual?.modo ?? 'una_vez';
-    var desde = actual?.vigenteDesde;
-    var hasta = actual?.vigenteHasta;
-    // 1.19: destinatario del aviso (null = todos los entrenadores).
-    // Argón avisos Q5: si el destinatario guardado ya no está en
-    // kEntrenadoresAviso, el Dropdown reventaría con AssertionError
-    // (ningún item con ese valor); se cae a «Todos» en ese caso.
-    var destinatario = kEntrenadoresAviso.containsKey(
-            actual?.destinatarioTelegramId)
-        ? actual?.destinatarioTelegramId
-        : null;
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<_DatosAvisoEntrenador>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: Text(actual == null ? 'Nuevo aviso' : 'Editar aviso'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: tituloCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Título',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLength: 80,
-                ),
-                const SizedBox(height: AppEspacio.md),
-                TextField(
-                  controller: mensajeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Mensaje',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 4,
-                  maxLength: 500,
-                ),
-                const SizedBox(height: AppEspacio.md),
-                DropdownButtonFormField<int?>(
-                  initialValue: destinatario,
-                  decoration: const InputDecoration(
-                    labelText: 'Para',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Todos los entrenadores'),
-                    ),
-                    for (final e in kEntrenadoresAviso.entries)
-                      DropdownMenuItem<int?>(
-                        value: e.key,
-                        child: Text('Solo ${e.value}'),
-                      ),
-                  ],
-                  onChanged: (v) => setS(() => destinatario = v),
-                ),
-                const SizedBox(height: AppEspacio.md),
-                RadioListTile<String>(
-                  value: 'una_vez',
-                  groupValue: modo,
-                  onChanged: (v) => setS(() => modo = v ?? 'una_vez'),
-                  title: const Text('Una vez'),
-                  subtitle: const Text(
-                    'Aparece una sola vez por teléfono.',
-                    style: AppTexto.secundario,
-                  ),
-                ),
-                RadioListTile<String>(
-                  value: 'descartable',
-                  groupValue: modo,
-                  onChanged: (v) => setS(() => modo = v ?? 'una_vez'),
-                  title: const Text('Descartable'),
-                  subtitle: const Text(
-                    'Aparece hasta que se cierra.',
-                    style: AppTexto.secundario,
-                  ),
-                ),
-                const SizedBox(height: AppEspacio.sm),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () async {
-                          final f = await showDatePicker(
-                            context: ctx,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2026),
-                            lastDate: DateTime(2030),
-                          );
-                          if (f != null) {
-                            setS(() => desde =
-                                f.toIso8601String().substring(0, 10));
-                          }
-                        },
-                        child: Text(desde == null
-                            ? 'Desde (opcional)'
-                            : 'Desde $desde'),
-                      ),
-                    ),
-                    const SizedBox(width: AppEspacio.sm),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () async {
-                          final f = await showDatePicker(
-                            context: ctx,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2026),
-                            lastDate: DateTime(2030),
-                          );
-                          if (f != null) {
-                            setS(() => hasta =
-                                f.toIso8601String().substring(0, 10));
-                          }
-                        },
-                        child: Text(hasta == null
-                            ? 'Hasta (opcional)'
-                            : 'Hasta $hasta'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Guardar'),
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) => _DialogoEditarAviso(actual: actual),
     );
-    if (ok != true || !mounted) return;
-    final titulo = tituloCtrl.text.trim();
-    final mensaje = mensajeCtrl.text.trim();
+    if (datos == null || !mounted) return;
+    final titulo = datos.titulo.trim();
+    final mensaje = datos.mensaje.trim();
     if (titulo.isEmpty || mensaje.isEmpty) {
       _snack('Título y mensaje son obligatorios.');
       return;
@@ -209,11 +71,11 @@ class _AvisosEntrenadorScreenState
         id: actual?.id ?? '',
         titulo: titulo,
         mensaje: mensaje,
-        modo: modo,
+        modo: datos.modo,
         activo: true,
-        vigenteDesde: desde,
-        vigenteHasta: hasta,
-        destinatarioTelegramId: destinatario,
+        vigenteDesde: datos.desde,
+        vigenteHasta: datos.hasta,
+        destinatarioTelegramId: datos.destinatario,
       ));
       _snack('Aviso guardado.');
       await _cargar();
@@ -373,6 +235,202 @@ class _AvisosEntrenadorScreenState
           );
         },
       ),
+    );
+  }
+}
+
+/// Datos que devuelve el diálogo de aviso al guardar.
+typedef _DatosAvisoEntrenador = ({
+  String titulo,
+  String mensaje,
+  String modo,
+  String? desde,
+  String? hasta,
+  int? destinatario,
+});
+
+/// 1.30 (Oleada 7, clase B): editor de aviso como
+/// StatefulWidget propio: posee y dispone los controladores
+/// de título y mensaje (antes se creaban en el llamador y
+/// nunca se liberaban). Devuelve los datos al guardar o
+/// null si se cancela.
+class _DialogoEditarAviso extends StatefulWidget {
+  final AvisoEntrenador? actual;
+  const _DialogoEditarAviso({required this.actual});
+
+  @override
+  State<_DialogoEditarAviso> createState() =>
+      _DialogoEditarAvisoState();
+}
+
+class _DialogoEditarAvisoState extends State<_DialogoEditarAviso> {
+  late final TextEditingController _tituloCtrl;
+  late final TextEditingController _mensajeCtrl;
+  late String _modo;
+  late String? _desde;
+  late String? _hasta;
+  // 1.19: destinatario del aviso (null = todos los entrenadores).
+  // Argón avisos Q5: si el destinatario guardado ya no está en
+  // kEntrenadoresAviso, el Dropdown reventaría con AssertionError
+  // (ningún item con ese valor); se cae a «Todos» en ese caso.
+  late int? _destinatario;
+
+  @override
+  void initState() {
+    super.initState();
+    final actual = widget.actual;
+    _tituloCtrl = TextEditingController(text: actual?.titulo ?? '');
+    _mensajeCtrl = TextEditingController(text: actual?.mensaje ?? '');
+    _modo = actual?.modo ?? 'una_vez';
+    _desde = actual?.vigenteDesde;
+    _hasta = actual?.vigenteHasta;
+    _destinatario =
+        kEntrenadoresAviso.containsKey(actual?.destinatarioTelegramId)
+            ? actual?.destinatarioTelegramId
+            : null;
+  }
+
+  @override
+  void dispose() {
+    _tituloCtrl.dispose();
+    _mensajeCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final actual = widget.actual;
+    return AlertDialog(
+      title: Text(actual == null ? 'Nuevo aviso' : 'Editar aviso'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _tituloCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Título',
+                border: OutlineInputBorder(),
+              ),
+              maxLength: 80,
+            ),
+            const SizedBox(height: AppEspacio.md),
+            TextField(
+              controller: _mensajeCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Mensaje',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 4,
+              maxLength: 500,
+            ),
+            const SizedBox(height: AppEspacio.md),
+            DropdownButtonFormField<int?>(
+              initialValue: _destinatario,
+              decoration: const InputDecoration(
+                labelText: 'Para',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                const DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text('Todos los entrenadores'),
+                ),
+                for (final e in kEntrenadoresAviso.entries)
+                  DropdownMenuItem<int?>(
+                    value: e.key,
+                    child: Text('Solo ${e.value}'),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _destinatario = v),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            RadioListTile<String>(
+              value: 'una_vez',
+              groupValue: _modo,
+              onChanged: (v) =>
+                  setState(() => _modo = v ?? 'una_vez'),
+              title: const Text('Una vez'),
+              subtitle: const Text(
+                'Aparece una sola vez por teléfono.',
+                style: AppTexto.secundario,
+              ),
+            ),
+            RadioListTile<String>(
+              value: 'descartable',
+              groupValue: _modo,
+              onChanged: (v) =>
+                  setState(() => _modo = v ?? 'una_vez'),
+              title: const Text('Descartable'),
+              subtitle: const Text(
+                'Aparece hasta que se cierra.',
+                style: AppTexto.secundario,
+              ),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final f = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2026),
+                        lastDate: DateTime(2030),
+                      );
+                      if (f != null) {
+                        setState(() => _desde =
+                            f.toIso8601String().substring(0, 10));
+                      }
+                    },
+                    child: Text(_desde == null
+                        ? 'Desde (opcional)'
+                        : 'Desde $_desde'),
+                  ),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final f = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2026),
+                        lastDate: DateTime(2030),
+                      );
+                      if (f != null) {
+                        setState(() => _hasta =
+                            f.toIso8601String().substring(0, 10));
+                      }
+                    },
+                    child: Text(_hasta == null
+                        ? 'Hasta (opcional)'
+                        : 'Hasta $_hasta'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop((
+            titulo: _tituloCtrl.text,
+            mensaje: _mensajeCtrl.text,
+            modo: _modo,
+            desde: _desde,
+            hasta: _hasta,
+            destinatario: _destinatario,
+          )),
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

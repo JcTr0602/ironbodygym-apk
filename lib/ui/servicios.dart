@@ -553,13 +553,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (tipo != 'agua_suelta' && await _pomoParaVender() == null) {
       return;
     }
-    Map<String, dynamic>? cliente;
-    var paraDuenoCasa = false;
     // Ítems 5 y 7 (Argón): el formulario nace posicionado en el
     // primer método HABILITADO del producto.
-    var metodo =
+    final metodoInicial =
         primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
-    var cantidad = 1;
     // 1.25 T34: tope SILENCIOSO del selector de cantidad de
     // dosis = saldo del pomo a la vista (el entrenador no ve
     // el número — regla de la casa — pero el selector no le
@@ -578,315 +575,37 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final pomoTitularTid = tipo == 'agua_suelta'
         ? _miTid
         : ((_pomoActual!['titular_tid'] as int?) ?? _miTid);
-    var vendedorSel = pomoTitularTid;
-    var responsableSel = pomoTitularTid;
-    final comisionCtrl = TextEditingController(
-        text: (_precios?.comision ?? 50).toStringAsFixed(0));
-    // 1.23 S-3: error de validación de la comisión, visible
-    // DENTRO del diálogo (antes un valor vacío caía en silencio
-    // al default y uno inválido contaminaba el payload).
-    var errorComision = '';
-    final ok = await showDialog<bool>(
+    // 1.30 (Oleada 7, clase B): el diálogo de venta es un
+    // StatefulWidget dueño de comisionCtrl y de su estado
+    // (antes el controlador se creaba aquí y nunca se
+    // liberaba). Devuelve las elecciones por Navigator.pop;
+    // cancelar devuelve null.
+    final datosVenta = await showDialog<_ResultadoVentaServicio>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) {
-          final esCasaCliente = cliente != null &&
-              (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
-          // 1.14 (D14): carnet + edad del elegido, para verificar
-          // antes de confirmar la venta.
-          final subCliente =
-              cliente == null ? '' : subtituloClienteVenta(cliente!);
-          final esCasa = esCasaCliente || paraDuenoCasa;
-          // Ítem 7: el precio depende del método elegido y se
-          // recalcula en vivo al alternar Efectivo/Transferencia.
-          final metodosActivos = <String>[
-            for (final m in const ['efectivo', 'transferencia'])
-              if (metodoServicioActivo(_ajustes, tipo, m)) m,
-          ];
-          final precioUnit =
-              precioServicioMetodo(_ajustes, tipo, metodo);
-          return DialogoApp(
-            titulo: tipo == 'dosis_sin_agua'
-                ? 'Dosis sin agua'
-                : tipo == 'dosis_con_agua'
-                    ? 'Dosis con agua'
-                    : 'Pomo de agua',
-            iconoTitulo: Icons.bolt_rounded,
-            contenido: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  esCasa
-                      ? 'Cuenta a la Casa — sin cobro'
-                      : cantidad > 1
-                          ? '${fmtMonto(precioUnit)} CUP × '
-                              '$cantidad = '
-                              '${fmtMonto(precioUnit * cantidad)} CUP'
-                          : '${fmtMonto(precioUnit)} CUP'
-                              '${tipo == 'agua_suelta' ? ' por pomo' : ''}',
-                  style: AppTexto.titulo,
-                ),
-                // v1.8.1 (pedido de Jc 2026-10-23): el diálogo de agua
-                // muestra cuántos pomos quedan (el tope ya existía en
-                // el selector de cantidad, pero el número no se veía).
-                if (tipo == 'agua_suelta') ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    _agua.saldo > 0
-                        ? 'En inventario: ${_agua.saldo} pomos'
-                        : '⚠️ Sin pomos en inventario',
-                    style: AppTexto.secundario,
-                  ),
-                ],
-                const SizedBox(height: 12),
-                // v1.8.1 (pedido de Jc 2026-10-23): el cliente se elige
-                // en un campo completo y evidente, como en la venta de
-                // suplementos — el botón «Elegir» pequeño no se
-                // percibía como buscador de clientes del gym.
-                InkWell(
-                  borderRadius: BorderRadius.circular(AppRadio.md),
-                  onTap: () async {
-                    final sel = await _elegirCliente();
-                    if (sel != null) {
-                      setD(() {
-                        cliente = sel;
-                        paraDuenoCasa = false;
-                      });
-                    }
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppEspacio.md, vertical: 6),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppColores.borde(context)),
-                      borderRadius: BorderRadius.circular(AppRadio.md),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.person_search_rounded, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            cliente == null
-                                ? 'Cliente: sin identificar — toca para elegir del gym'
-                                : 'Cliente: ${cliente!['nombre']}'
-                                    '${subCliente.isEmpty ? '' : ' · $subCliente'}',
-                            style: AppTexto.cuerpo,
-                          ),
-                        ),
-                        if (cliente != null)
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                            onPressed: () =>
-                                setD(() => cliente = null),
-                          )
-                        else
-                          const Icon(Icons.chevron_right_rounded, size: 20),
-                      ],
-                    ),
-                  ),
-                ),
-                if (esCasaCliente)
-                  const ChipEstado.semantico(
-                    texto: 'Cuenta a la Casa',
-                    significado: SignificadoChip.alerta,
-                    icono: Icons.star_rounded,
-                  ),
-                if (_esDueno && cliente == null)
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title:
-                        const Text('Consumo Casa (para el dueño)'),
-                    value: paraDuenoCasa,
-                    onChanged: (v) =>
-                        setD(() => paraDuenoCasa = v ?? false),
-                  ),
-                if (!esCasa) ...[
-                  const SizedBox(height: 8),
-                  // Ítem 7: solo se ofrecen los métodos HABILITADOS
-                  // del producto; sin ninguno, aviso claro y el
-                  // botón Cobrar queda deshabilitado (la Casa no
-                  // cobra y no se ve afectada).
-                  if (metodosActivos.isEmpty)
-                    Text(
-                      '⚠️ Este producto no tiene métodos de cobro '
-                      'habilitados (Administración → Servicios).',
-                      style: AppTexto.secundario.copyWith(
-                          color: AppColores.error),
-                    )
-                  else
-                    // v1.8.1: sin iconos — con icono, «Transferencia»
-                    // se partía en dos líneas en el diálogo (visto por
-                    // Jc en campo el 2026-10-23).
-                    SegmentedButton<String>(
-                      segments: [
-                        for (final m in metodosActivos)
-                          ButtonSegment(
-                              value: m,
-                              label: Text(m == 'efectivo'
-                                  ? 'Efectivo'
-                                  : 'Transferencia')),
-                      ],
-                      selected: {metodo},
-                      onSelectionChanged: (s) =>
-                          setD(() => metodo = s.first),
-                    ),
-                  // Ítem 8: el dueño vende «a nombre de» otro y
-                  // decide quién gana la comisión y quién entrega
-                  // el efectivo de ESTA venta.
-                  if (_esDueno) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Text('A nombre de:'),
-                        const SizedBox(width: 8),
-                        DropdownButton<int>(
-                          value: vendedorSel,
-                          items: [
-                            if (pomoTitularTid != null &&
-                                pomoTitularTid != _miTid)
-                              DropdownMenuItem(
-                                  value: pomoTitularTid,
-                                  child: Text(_personas[pomoTitularTid] ??
-                                      'Entrenador')),
-                            if (_miTid != null)
-                              DropdownMenuItem(
-                                  value: _miTid,
-                                  child: const Text('Yo (dueño)')),
-                            if (tipo == 'agua_suelta')
-                              for (final e in _personas.entries)
-                                if (e.key != _miTid &&
-                                    e.key != pomoTitularTid)
-                                  DropdownMenuItem(
-                                      value: e.key,
-                                      child: Text(e.value)),
-                          ],
-                          onChanged: (v) => setD(() {
-                            vendedorSel = v ?? vendedorSel;
-                            responsableSel = vendedorSel;
-                          }),
-                        ),
-                      ],
-                    ),
-                    if (vendedorSel != _miTid) ...[
-                      TextField(
-                        controller: comisionCtrl,
-                        keyboardType: const TextInputType
-                            .numberWithOptions(decimal: true),
-                        decoration: InputDecoration(
-                            labelText: 'Comisión para '
-                                '${_personas[vendedorSel] ?? 'el entrenador'} (CUP)'),
-                      ),
-                      if (errorComision.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: AppEspacio.xs),
-                          child: Text(errorComision,
-                              style: AppTexto.secundario.copyWith(
-                                  color: AppColores.error)),
-                        ),
-                    ],
-                    if (metodo == 'efectivo' &&
-                        vendedorSel != _miTid)
-                      Row(
-                        children: [
-                          const Text('Efectivo lo entrega:'),
-                          const SizedBox(width: 8),
-                          DropdownButton<int>(
-                            value: responsableSel,
-                            items: [
-                              DropdownMenuItem(
-                                  value: vendedorSel,
-                                  child: Text(_personas[vendedorSel] ??
-                                      'El vendedor')),
-                              if (_miTid != null)
-                                DropdownMenuItem(
-                                    value: _miTid,
-                                    child: const Text('Yo (dueño)')),
-                            ],
-                            onChanged: (v) => setD(
-                                () => responsableSel =
-                                    v ?? responsableSel),
-                          ),
-                        ],
-                      ),
-                  ],
-                ],
-                // 1.25 T34: el selector de cantidad ya no es
-                // solo del agua: vender 3 dosis al mismo
-                // cliente dejaba de exigir 3 diálogos. El
-                // tope del agua es su inventario (visible);
-                // el de la dosis, el saldo del pomo SIN
-                // enseñarlo (topeCantidad).
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Text(tipo == 'agua_suelta' ? 'Pomos:' : 'Dosis:'),
-                    IconButton(
-                      onPressed: cantidad > 1
-                          ? () => setD(() => cantidad--)
-                          : null,
-                      icon: const Icon(Icons.remove_circle_outline_rounded),
-                    ),
-                    Text('$cantidad',
-                        style: AppTexto.titulo),
-                    IconButton(
-                      onPressed: cantidad <
-                              (tipo == 'agua_suelta'
-                                  ? _agua.saldo
-                                  : topeCantidad)
-                          ? () => setD(() => cantidad++)
-                          : null,
-                      icon: const Icon(Icons.add_circle_outline_rounded),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            acciones: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton(
-                onPressed: (esCasa || metodosActivos.isNotEmpty)
-                    ? () {
-                        // 1.23 S-3: la comisión tecleada se
-                        // valida ANTES de cerrar el diálogo:
-                        // vacía, no numérica, negativa o mayor
-                        // que el precio → error visible aquí,
-                        // sin encolar nada.
-                        if (_esDueno &&
-                            vendedorSel != _miTid &&
-                            !esCasa) {
-                          final c = double.tryParse(comisionCtrl.text
-                              .trim()
-                              .replaceAll(',', '.'));
-                          if (c == null ||
-                              !c.isFinite ||
-                              c < 0 ||
-                              c > precioUnit) {
-                            setD(() => errorComision =
-                                'Comisión inválida: escribe un monto '
-                                'entre 0 y ${fmtMonto(precioUnit)} CUP');
-                            return;
-                          }
-                        }
-                        Navigator.pop(ctx, true);
-                      }
-                    : null,
-                child: Text(esCasa ? 'Registrar' : 'Cobrar'),
-              ),
-            ],
-          );
-        },
+      builder: (ctx) => _DialogoVentaServicio(
+        tipo: tipo,
+        topeCantidad: topeCantidad,
+        pomoTitularTid: pomoTitularTid,
+        metodoInicial: metodoInicial,
+        ajustes: _ajustes,
+        aguaSaldo: _agua.saldo,
+        personas: _personas,
+        miTid: _miTid,
+        esDueno: _esDueno,
+        comisionInicial:
+            (_precios?.comision ?? 50).toStringAsFixed(0),
+        alElegirCliente: _elegirCliente,
       ),
     );
-    if (ok != true) return;
+    if (datosVenta == null) return;
+    final cliente = datosVenta.cliente;
+    final paraDuenoCasa = datosVenta.paraDuenoCasa;
+    final metodo = datosVenta.metodo;
+    final cantidad = datosVenta.cantidad;
+    final vendedorSel = datosVenta.vendedorSel;
+    final responsableSel = datosVenta.responsableSel;
     final esCasaCliente = cliente != null &&
-        (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
+        (cliente['cuenta_casa'] as num?)?.toInt() == 1;
     // T16 (1.20): aviso si ya hay una venta de servicio
     // igual en la cola (doble toque o reintento).
     final cidServ = (cliente?['id'] as num?)?.toInt();
@@ -948,7 +667,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               !esCasaCliente &&
               !paraDuenoCasa
           ? (double.tryParse(
-                  comisionCtrl.text.trim().replaceAll(',', '.')) ??
+                  datosVenta.comisionTexto.trim().replaceAll(',', '.')) ??
               _precios?.comision)
           : null;
       final responsableForm = _esDueno &&
@@ -3150,3 +2869,406 @@ class _FotoPomoServiciosState extends State<_FotoPomoServicios> {
     );
   }
 }
+
+/// Resultado del diálogo principal de venta de servicios:
+/// las elecciones del formulario al Cobrar/Registrar.
+typedef _ResultadoVentaServicio = ({
+  Map<String, dynamic>? cliente,
+  bool paraDuenoCasa,
+  String metodo,
+  int cantidad,
+  int? vendedorSel,
+  int? responsableSel,
+  String comisionTexto,
+});
+
+/// 1.30 (Oleada 7, clase B): el diálogo principal de venta
+/// de servicios como StatefulWidget propio: posee y dispone
+/// comisionCtrl en su `dispose` y guarda el estado del
+/// formulario (cliente, método, cantidad, roles) — antes el
+/// controlador se creaba en _venderInterno y nunca se
+/// liberaba. Recibe el contexto ya calculado por la pantalla
+/// (tope silencioso, titular del pomo, ajustes, personas) y
+/// devuelve las elecciones al cobrar; cancelar devuelve
+/// null. EXCLUIDOS de esta oleada (MEDIA-03): «Salida sin
+/// venta» y «Revertir venta» — serán HojaAccion en D3.
+class _DialogoVentaServicio extends StatefulWidget {
+  final String tipo;
+  final int topeCantidad;
+  final int? pomoTitularTid;
+  final String metodoInicial;
+  final Map<String, dynamic> ajustes;
+  final int aguaSaldo;
+  final Map<int, String> personas;
+  final int? miTid;
+  final bool esDueno;
+  final String comisionInicial;
+  final Future<Map<String, dynamic>?> Function() alElegirCliente;
+  const _DialogoVentaServicio({
+    required this.tipo,
+    required this.topeCantidad,
+    required this.pomoTitularTid,
+    required this.metodoInicial,
+    required this.ajustes,
+    required this.aguaSaldo,
+    required this.personas,
+    required this.miTid,
+    required this.esDueno,
+    required this.comisionInicial,
+    required this.alElegirCliente,
+  });
+
+  @override
+  State<_DialogoVentaServicio> createState() =>
+      _DialogoVentaServicioState();
+}
+
+class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
+  late Map<String, dynamic> _ajustes;
+  late Map<int, String> _personas;
+  late int? _miTid;
+  late bool _esDueno;
+  late int _aguaSaldo;
+  late String tipo;
+  late int topeCantidad;
+  late int? pomoTitularTid;
+  Map<String, dynamic>? cliente;
+  var paraDuenoCasa = false;
+  late String metodo;
+  var cantidad = 1;
+  late int? vendedorSel;
+  late int? responsableSel;
+  late final TextEditingController comisionCtrl;
+  // 1.23 S-3: error de validación de la comisión, visible
+  // DENTRO del diálogo (antes un valor vacío caía en silencio
+  // al default y uno inválido contaminaba el payload).
+  var errorComision = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _ajustes = widget.ajustes;
+    _personas = widget.personas;
+    _miTid = widget.miTid;
+    _esDueno = widget.esDueno;
+    _aguaSaldo = widget.aguaSaldo;
+    tipo = widget.tipo;
+    topeCantidad = widget.topeCantidad;
+    pomoTitularTid = widget.pomoTitularTid;
+    metodo = widget.metodoInicial;
+    vendedorSel = pomoTitularTid;
+    responsableSel = pomoTitularTid;
+    comisionCtrl =
+        TextEditingController(text: widget.comisionInicial);
+  }
+
+  @override
+  void dispose() {
+    comisionCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final esCasaCliente = cliente != null &&
+        (cliente!['cuenta_casa'] as num?)?.toInt() == 1;
+    // 1.14 (D14): carnet + edad del elegido, para verificar
+    // antes de confirmar la venta.
+    final subCliente =
+        cliente == null ? '' : subtituloClienteVenta(cliente!);
+    final esCasa = esCasaCliente || paraDuenoCasa;
+    // Ítem 7: el precio depende del método elegido y se
+    // recalcula en vivo al alternar Efectivo/Transferencia.
+    final metodosActivos = <String>[
+      for (final m in const ['efectivo', 'transferencia'])
+        if (metodoServicioActivo(_ajustes, tipo, m)) m,
+    ];
+    final precioUnit =
+        precioServicioMetodo(_ajustes, tipo, metodo);
+    return DialogoApp(
+      titulo: tipo == 'dosis_sin_agua'
+          ? 'Dosis sin agua'
+          : tipo == 'dosis_con_agua'
+              ? 'Dosis con agua'
+              : 'Pomo de agua',
+      iconoTitulo: Icons.bolt_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            esCasa
+                ? 'Cuenta a la Casa — sin cobro'
+                : cantidad > 1
+                    ? '${fmtMonto(precioUnit)} CUP × '
+                        '$cantidad = '
+                        '${fmtMonto(precioUnit * cantidad)} CUP'
+                    : '${fmtMonto(precioUnit)} CUP'
+                        '${tipo == 'agua_suelta' ? ' por pomo' : ''}',
+            style: AppTexto.titulo,
+          ),
+          // v1.8.1 (pedido de Jc 2026-10-23): el diálogo de agua
+          // muestra cuántos pomos quedan (el tope ya existía en
+          // el selector de cantidad, pero el número no se veía).
+          if (tipo == 'agua_suelta') ...[
+            const SizedBox(height: 4),
+            Text(
+              _aguaSaldo > 0
+                  ? 'En inventario: $_aguaSaldo pomos'
+                  : '⚠️ Sin pomos en inventario',
+              style: AppTexto.secundario,
+            ),
+          ],
+          const SizedBox(height: 12),
+          // v1.8.1 (pedido de Jc 2026-10-23): el cliente se elige
+          // en un campo completo y evidente, como en la venta de
+          // suplementos — el botón «Elegir» pequeño no se
+          // percibía como buscador de clientes del gym.
+          InkWell(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            onTap: () async {
+              final sel = await widget.alElegirCliente();
+              if (sel != null) {
+                setState(() {
+                  cliente = sel;
+                  paraDuenoCasa = false;
+                });
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.md, vertical: 6),
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColores.borde(context)),
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_search_rounded, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      cliente == null
+                          ? 'Cliente: sin identificar — toca para elegir del gym'
+                          : 'Cliente: ${cliente!['nombre']}'
+                              '${subCliente.isEmpty ? '' : ' · $subCliente'}',
+                      style: AppTexto.cuerpo,
+                    ),
+                  ),
+                  if (cliente != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: () =>
+                          setState(() => cliente = null),
+                    )
+                  else
+                    const Icon(Icons.chevron_right_rounded, size: 20),
+                ],
+              ),
+            ),
+          ),
+          if (esCasaCliente)
+            const ChipEstado.semantico(
+              texto: 'Cuenta a la Casa',
+              significado: SignificadoChip.alerta,
+              icono: Icons.star_rounded,
+            ),
+          if (_esDueno && cliente == null)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title:
+                  const Text('Consumo Casa (para el dueño)'),
+              value: paraDuenoCasa,
+              onChanged: (v) =>
+                  setState(() => paraDuenoCasa = v ?? false),
+            ),
+          if (!esCasa) ...[
+            const SizedBox(height: 8),
+            // Ítem 7: solo se ofrecen los métodos HABILITADOS
+            // del producto; sin ninguno, aviso claro y el
+            // botón Cobrar queda deshabilitado (la Casa no
+            // cobra y no se ve afectada).
+            if (metodosActivos.isEmpty)
+              Text(
+                '⚠️ Este producto no tiene métodos de cobro '
+                'habilitados (Administración → Servicios).',
+                style: AppTexto.secundario.copyWith(
+                    color: AppColores.error),
+              )
+            else
+              // v1.8.1: sin iconos — con icono, «Transferencia»
+              // se partía en dos líneas en el diálogo (visto por
+              // Jc en campo el 2026-10-23).
+              SegmentedButton<String>(
+                segments: [
+                  for (final m in metodosActivos)
+                    ButtonSegment(
+                        value: m,
+                        label: Text(m == 'efectivo'
+                            ? 'Efectivo'
+                            : 'Transferencia')),
+                ],
+                selected: {metodo},
+                onSelectionChanged: (s) =>
+                    setState(() => metodo = s.first),
+              ),
+            // Ítem 8: el dueño vende «a nombre de» otro y
+            // decide quién gana la comisión y quién entrega
+            // el efectivo de ESTA venta.
+            if (_esDueno) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('A nombre de:'),
+                  const SizedBox(width: 8),
+                  DropdownButton<int>(
+                    value: vendedorSel,
+                    items: [
+                      if (pomoTitularTid != null &&
+                          pomoTitularTid != _miTid)
+                        DropdownMenuItem(
+                            value: pomoTitularTid,
+                            child: Text(_personas[pomoTitularTid] ??
+                                'Entrenador')),
+                      if (_miTid != null)
+                        DropdownMenuItem(
+                            value: _miTid,
+                            child: const Text('Yo (dueño)')),
+                      if (tipo == 'agua_suelta')
+                        for (final e in _personas.entries)
+                          if (e.key != _miTid &&
+                              e.key != pomoTitularTid)
+                            DropdownMenuItem(
+                                value: e.key,
+                                child: Text(e.value)),
+                    ],
+                    onChanged: (v) => setState(() {
+                      vendedorSel = v ?? vendedorSel;
+                      responsableSel = vendedorSel;
+                    }),
+                  ),
+                ],
+              ),
+              if (vendedorSel != _miTid) ...[
+                TextField(
+                  controller: comisionCtrl,
+                  keyboardType: const TextInputType
+                      .numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                      labelText: 'Comisión para '
+                          '${_personas[vendedorSel] ?? 'el entrenador'} (CUP)'),
+                ),
+                if (errorComision.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: AppEspacio.xs),
+                    child: Text(errorComision,
+                        style: AppTexto.secundario.copyWith(
+                            color: AppColores.error)),
+                  ),
+              ],
+              if (metodo == 'efectivo' &&
+                  vendedorSel != _miTid)
+                Row(
+                  children: [
+                    const Text('Efectivo lo entrega:'),
+                    const SizedBox(width: 8),
+                    DropdownButton<int>(
+                      value: responsableSel,
+                      items: [
+                        DropdownMenuItem(
+                            value: vendedorSel,
+                            child: Text(_personas[vendedorSel] ??
+                                'El vendedor')),
+                        if (_miTid != null)
+                          DropdownMenuItem(
+                              value: _miTid,
+                              child: const Text('Yo (dueño)')),
+                      ],
+                      onChanged: (v) => setState(
+                          () => responsableSel =
+                              v ?? responsableSel),
+                    ),
+                  ],
+                ),
+            ],
+          ],
+          // 1.25 T34: el selector de cantidad ya no es
+          // solo del agua: vender 3 dosis al mismo
+          // cliente dejaba de exigir 3 diálogos. El
+          // tope del agua es su inventario (visible);
+          // el de la dosis, el saldo del pomo SIN
+          // enseñarlo (topeCantidad).
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text(tipo == 'agua_suelta' ? 'Pomos:' : 'Dosis:'),
+              IconButton(
+                onPressed: cantidad > 1
+                    ? () => setState(() => cantidad--)
+                    : null,
+                icon: const Icon(Icons.remove_circle_outline_rounded),
+              ),
+              Text('$cantidad',
+                  style: AppTexto.titulo),
+              IconButton(
+                onPressed: cantidad <
+                        (tipo == 'agua_suelta'
+                            ? _aguaSaldo
+                            : topeCantidad)
+                    ? () => setState(() => cantidad++)
+                    : null,
+                icon: const Icon(Icons.add_circle_outline_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: (esCasa || metodosActivos.isNotEmpty)
+              ? () {
+                  // 1.23 S-3: la comisión tecleada se
+                  // valida ANTES de cerrar el diálogo:
+                  // vacía, no numérica, negativa o mayor
+                  // que el precio → error visible aquí,
+                  // sin encolar nada.
+                  if (_esDueno &&
+                      vendedorSel != _miTid &&
+                      !esCasa) {
+                    final c = double.tryParse(comisionCtrl.text
+                        .trim()
+                        .replaceAll(',', '.'));
+                    if (c == null ||
+                        !c.isFinite ||
+                        c < 0 ||
+                        c > precioUnit) {
+                      setState(() => errorComision =
+                          'Comisión inválida: escribe un monto '
+                          'entre 0 y ${fmtMonto(precioUnit)} CUP');
+                      return;
+                    }
+                  }
+                  Navigator.pop(context, (
+                          cliente: cliente,
+                          paraDuenoCasa: paraDuenoCasa,
+                          metodo: metodo,
+                          cantidad: cantidad,
+                          vendedorSel: vendedorSel,
+                          responsableSel: responsableSel,
+                          comisionTexto: comisionCtrl.text,
+                        ));
+                }
+              : null,
+          child: Text(esCasa ? 'Registrar' : 'Cobrar'),
+        ),
+      ],
+    );
+  }
+}
+

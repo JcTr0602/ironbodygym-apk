@@ -589,29 +589,9 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   }
 
   Future<void> _anularManual(String id) async {
-    final motivoCtrl = TextEditingController();
     final motivo = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Anular compra',
-        iconoTitulo: Icons.cancel_rounded,
-        contenido: TextField(
-            controller: motivoCtrl,
-            decoration: const InputDecoration(
-                hintText: 'Motivo de la anulación',
-                border: OutlineInputBorder())),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx,
-                  motivoCtrl.text.trim().isEmpty
-                      ? null
-                      : motivoCtrl.text.trim()),
-              child: const Text('Anular')),
-        ],
-      ),
+      builder: (ctx) => const _DialogoAnularCompra(),
     );
     if (motivo == null || !mounted) return;
     final db = await LocalDb.instance.db;
@@ -636,121 +616,20 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   }
 
   Future<void> _registrarManual(BuildContext context) async {
-    final conceptoCtrl = TextEditingController();
-    final montoCtrl = TextEditingController();
-    // 1.25 T93: la fecha se ELIGE en un selector, no se
-    // teclea «AAAA-MM-DD» (el texto libre era la única
-    // validación que fallaba al registrar a mano).
-    var fechaSel = hoyHabanaIso();
-    var tipo = 'suplemento';
-    String? clienteNombre;
-    // 1.25 T32: el id viaja con el nombre (antes solo el
-    // nombre y la fila nacía con cliente_id null: huérfana).
-    int? clienteId;
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<_DatosCompraManual>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => DialogoApp(
-          titulo: 'Registrar compra manual',
-          iconoTitulo: Icons.receipt_long_rounded,
-          contenido: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Solo para compras fuera del turno. Las ventas del '
-                  'turno ya aparecen solas en el Extracto.',
-                  style: AppTexto.secundario,
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: tipo,
-                  decoration: const InputDecoration(
-                      labelText: 'Tipo', border: OutlineInputBorder()),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'suplemento', child: Text('Suplemento')),
-                    DropdownMenuItem(
-                        value: 'servicio', child: Text('Servicio')),
-                  ],
-                  onChanged: (v) => setS(() => tipo = v ?? tipo),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                    controller: conceptoCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Concepto (ej: Whey 2 lb)',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                TextField(
-                    controller: montoCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                        labelText: 'Monto (CUP)',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_month_rounded,
-                      size: 18),
-                  label: Text('Fecha: $fechaSel'),
-                  onPressed: () async {
-                    final hoy = ahoraHabana();
-                    final elegida = await showDatePicker(
-                      context: ctx,
-                      initialDate:
-                          DateTime.tryParse(fechaSel) ?? hoy,
-                      firstDate: DateTime(2024, 1, 1),
-                      lastDate:
-                          DateTime(hoy.year, hoy.month, hoy.day),
-                    );
-                    if (elegida != null) {
-                      setS(() {
-                        fechaSel =
-                            '${elegida.year.toString().padLeft(4, '0')}-'
-                            '${elegida.month.toString().padLeft(2, '0')}-'
-                            '${elegida.day.toString().padLeft(2, '0')}';
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: () async {
-                    final elegido =
-                        await _elegirCliente(context);
-                    if (elegido != null) {
-                      setS(() {
-                        clienteId = elegido.id;
-                        clienteNombre =
-                            elegido.nombre.isEmpty
-                                ? null
-                                : elegido.nombre;
-                      });
-                    }
-                  },
-                  child: Text(clienteNombre == null
-                      ? 'Elegir cliente (opcional)'
-                      : 'Cliente: $clienteNombre'),
-                ),
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Guardar')),
-          ],
-        ),
-      ),
+      builder: (ctx) =>
+          _DialogoRegistrarCompraManual(alElegirCliente: _elegirCliente),
     );
-    if (ok != true || !context.mounted) return;
+    if (datos == null || !context.mounted) return;
+    final fechaSel = datos.fecha;
+    final tipo = datos.tipo;
+    final clienteNombre = datos.clienteNombre;
+    final clienteId = datos.clienteId;
     final monto =
-        double.tryParse(montoCtrl.text.trim().replaceAll(',', '.'));
+        double.tryParse(datos.monto.trim().replaceAll(',', '.'));
     String? error;
-    if (conceptoCtrl.text.trim().isEmpty) {
+    if (datos.concepto.trim().isEmpty) {
       error = 'Falta el concepto.';
     } else if (monto == null || !monto.isFinite || monto <= 0) {
       // Autoauditoría 1.22 #2 (clase N-2): NaN/Infinity no son
@@ -771,7 +650,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       await txn.insert('compras', {
         'id': id,
         'tipo': tipo,
-        'concepto': conceptoCtrl.text.trim(),
+        'concepto': datos.concepto.trim(),
         'monto': monto,
         'fecha': fechaSel,
         'cliente_id': clienteId,
@@ -788,7 +667,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         payload: {
           'id': id,
           'tipo': tipo,
-          'concepto': conceptoCtrl.text.trim(),
+          'concepto': datos.concepto.trim(),
           'monto': monto,
           'fecha': fechaSel,
           'cliente_id': clienteId,
@@ -810,62 +689,285 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
   Future<({int? id, String nombre})?> _elegirCliente(
       BuildContext context) async {
     final todos = await listaClientes('');
-    final filtro = TextEditingController();
     return showDialog<({int? id, String nombre})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) {
-          final q = filtro.text.trim().toLowerCase();
-          final visibles = q.isEmpty
-              ? todos
-              : todos
-                  .where((c) => '${c['nombre'] ?? ''}'
-                      .toLowerCase()
-                      .contains(q))
-                  .toList();
-          return DialogoApp(
-            titulo: 'Elegir cliente',
-            iconoTitulo: Icons.person_rounded,
-            contenido: SizedBox(
-              width: double.maxFinite,
-              height: 380,
-              child: Column(
+      builder: (ctx) => _DialogoElegirClienteCompras(todos: todos),
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Anular compra» como
+/// StatefulWidget propio: posee y dispone su controlador
+/// (antes se creaba en el llamador y nunca se liberaba).
+/// Devuelve el motivo (vacío = null) o null si se cancela.
+class _DialogoAnularCompra extends StatefulWidget {
+  const _DialogoAnularCompra();
+
+  @override
+  State<_DialogoAnularCompra> createState() =>
+      _DialogoAnularCompraState();
+}
+
+class _DialogoAnularCompraState extends State<_DialogoAnularCompra> {
+  final _motivoCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Anular compra',
+      iconoTitulo: Icons.cancel_rounded,
+      contenido: TextField(
+          controller: _motivoCtrl,
+          decoration: const InputDecoration(
+              hintText: 'Motivo de la anulación',
+              border: OutlineInputBorder())),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context,
+                _motivoCtrl.text.trim().isEmpty
+                    ? null
+                    : _motivoCtrl.text.trim()),
+            child: const Text('Anular')),
+      ],
+    );
+  }
+}
+
+/// Datos que devuelve el diálogo de compra manual al guardar.
+typedef _DatosCompraManual = ({
+  String concepto,
+  String monto,
+  String fecha,
+  String tipo,
+  int? clienteId,
+  String? clienteNombre,
+});
+
+/// 1.30 (Oleada 7, clase B): diálogo «Registrar compra
+/// manual» como StatefulWidget propio: posee y dispone sus
+/// controladores y su estado (fecha, tipo, cliente) — antes
+/// vivían en el llamador y los controladores nunca se
+/// liberaban. El selector de cliente sigue siendo el del
+/// llamador, inyectado por [alElegirCliente].
+class _DialogoRegistrarCompraManual extends StatefulWidget {
+  final Future<({int? id, String nombre})?> Function(BuildContext)
+      alElegirCliente;
+  const _DialogoRegistrarCompraManual(
+      {required this.alElegirCliente});
+
+  @override
+  State<_DialogoRegistrarCompraManual> createState() =>
+      _DialogoRegistrarCompraManualState();
+}
+
+class _DialogoRegistrarCompraManualState
+    extends State<_DialogoRegistrarCompraManual> {
+  final _conceptoCtrl = TextEditingController();
+  final _montoCtrl = TextEditingController();
+  // 1.25 T93: la fecha se ELIGE en un selector, no se
+  // teclea «AAAA-MM-DD» (el texto libre era la única
+  // validación que fallaba al registrar a mano).
+  var _fechaSel = hoyHabanaIso();
+  var _tipo = 'suplemento';
+  String? _clienteNombre;
+  // 1.25 T32: el id viaja con el nombre (antes solo el
+  // nombre y la fila nacía con cliente_id null: huérfana).
+  int? _clienteId;
+
+  @override
+  void dispose() {
+    _conceptoCtrl.dispose();
+    _montoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Registrar compra manual',
+      iconoTitulo: Icons.receipt_long_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Solo para compras fuera del turno. Las ventas del '
+              'turno ya aparecen solas en el Extracto.',
+              style: AppTexto.secundario,
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: _tipo,
+              decoration: const InputDecoration(
+                  labelText: 'Tipo', border: OutlineInputBorder()),
+              items: const [
+                DropdownMenuItem(
+                    value: 'suplemento', child: Text('Suplemento')),
+                DropdownMenuItem(
+                    value: 'servicio', child: Text('Servicio')),
+              ],
+              onChanged: (v) => setState(() => _tipo = v ?? _tipo),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+                controller: _conceptoCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Concepto (ej: Whey 2 lb)',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            TextField(
+                controller: _montoCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: 'Monto (CUP)',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.calendar_month_rounded,
+                  size: 18),
+              label: Text('Fecha: $_fechaSel'),
+              onPressed: () async {
+                final hoy = ahoraHabana();
+                final elegida = await showDatePicker(
+                  context: context,
+                  initialDate:
+                      DateTime.tryParse(_fechaSel) ?? hoy,
+                  firstDate: DateTime(2024, 1, 1),
+                  lastDate:
+                      DateTime(hoy.year, hoy.month, hoy.day),
+                );
+                if (elegida != null) {
+                  setState(() {
+                    _fechaSel =
+                        '${elegida.year.toString().padLeft(4, '0')}-'
+                        '${elegida.month.toString().padLeft(2, '0')}-'
+                        '${elegida.day.toString().padLeft(2, '0')}';
+                  });
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () async {
+                final elegido =
+                    await widget.alElegirCliente(context);
+                if (elegido != null) {
+                  setState(() {
+                    _clienteId = elegido.id;
+                    _clienteNombre = elegido.nombre.isEmpty
+                        ? null
+                        : elegido.nombre;
+                  });
+                }
+              },
+              child: Text(_clienteNombre == null
+                  ? 'Elegir cliente (opcional)'
+                  : 'Cliente: $_clienteNombre'),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, (
+                  concepto: _conceptoCtrl.text,
+                  monto: _montoCtrl.text,
+                  fecha: _fechaSel,
+                  tipo: _tipo,
+                  clienteId: _clienteId,
+                  clienteNombre: _clienteNombre,
+                )),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): selector de cliente de Compras
+/// como StatefulWidget propio: posee y dispone el
+/// controlador del filtro (antes se creaba en el llamador y
+/// nunca se liberaba). Devuelve (id, nombre); «Sin cliente»
+/// devuelve (id: null, nombre: ''); cerrar sin elegir, null.
+class _DialogoElegirClienteCompras extends StatefulWidget {
+  final List<Map<String, dynamic>> todos;
+  const _DialogoElegirClienteCompras({required this.todos});
+
+  @override
+  State<_DialogoElegirClienteCompras> createState() =>
+      _DialogoElegirClienteComprasState();
+}
+
+class _DialogoElegirClienteComprasState
+    extends State<_DialogoElegirClienteCompras> {
+  final _filtro = TextEditingController();
+
+  @override
+  void dispose() {
+    _filtro.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _filtro.text.trim().toLowerCase();
+    final visibles = q.isEmpty
+        ? widget.todos
+        : widget.todos
+            .where((c) =>
+                '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
+            .toList();
+    return DialogoApp(
+      titulo: 'Elegir cliente',
+      iconoTitulo: Icons.person_rounded,
+      contenido: SizedBox(
+        width: double.maxFinite,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              controller: _filtro,
+              decoration: const InputDecoration(
+                  hintText: 'Filtrar por nombre',
+                  border: OutlineInputBorder()),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
                 children: [
-                  TextField(
-                    controller: filtro,
-                    decoration: const InputDecoration(
-                        hintText: 'Filtrar por nombre',
-                        border: OutlineInputBorder()),
-                    onChanged: (_) => setS(() {}),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        for (final c in visibles)
-                          ListTile(
-                            dense: true,
-                            title: Text('${c['nombre'] ?? ''}'),
-                            onTap: () => Navigator.pop(ctx, (
-                                  id: (c['id'] as num?)?.toInt(),
-                                  nombre: '${c['nombre'] ?? ''}',
-                                )),
-                          ),
-                      ],
+                  for (final c in visibles)
+                    ListTile(
+                      dense: true,
+                      title: Text('${c['nombre'] ?? ''}'),
+                      onTap: () => Navigator.pop(context, (
+                            id: (c['id'] as num?)?.toInt(),
+                            nombre: '${c['nombre'] ?? ''}',
+                          )),
                     ),
-                  ),
                 ],
               ),
             ),
-            acciones: [
-              TextButton(
-                  onPressed: () => Navigator.pop(
-                      ctx, (id: null, nombre: '')),
-                  child: const Text('Sin cliente')),
-            ],
-          );
-        },
+          ],
+        ),
       ),
+      acciones: [
+        TextButton(
+            onPressed: () =>
+                Navigator.pop(context, (id: null, nombre: '')),
+            child: const Text('Sin cliente')),
+      ],
     );
   }
 }

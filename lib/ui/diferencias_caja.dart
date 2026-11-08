@@ -23,15 +23,51 @@ Future<bool> mostrarDialogoResolverDiferencia(
   BuildContext context, {
   required Map<String, dynamic> expediente,
 }) async {
-  var resolucion = 'vuelto';
-  final notaCtrl = TextEditingController();
-  var errorNota = false;
   final ok = await showDialog<bool>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) {
-        final notaObligatoria = resolucion == 'otro';
-        return DialogoApp(
+    builder: (ctx) => _DialogoResolverDiferencia(
+      expediente: expediente,
+    ),
+  );
+  if (ok == true && context.mounted) {
+    mostrarSnack(context, 'Diferencia resuelta (se sincronizará)',
+        significado: SignificadoChip.exito);
+  }
+  return ok == true;
+}
+
+/// 1.30 (Oleada 7, clase B): el diálogo de resolución como
+/// StatefulWidget propio: posee y dispone el controlador de
+/// la nota en su `dispose` (antes se creaba en la función y
+/// nunca se liberaba; disponerlo tras showDialog reventaba
+/// con «used after being disposed», AT-09). Devuelve true
+/// si se encoló la resolución.
+class _DialogoResolverDiferencia extends StatefulWidget {
+  final Map<String, dynamic> expediente;
+  const _DialogoResolverDiferencia({required this.expediente});
+
+  @override
+  State<_DialogoResolverDiferencia> createState() =>
+      _DialogoResolverDiferenciaState();
+}
+
+class _DialogoResolverDiferenciaState
+    extends State<_DialogoResolverDiferencia> {
+  var _resolucion = 'vuelto';
+  final _notaCtrl = TextEditingController();
+  var _errorNota = false;
+
+  @override
+  void dispose() {
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final expediente = widget.expediente;
+    final notaObligatoria = _resolucion == 'otro';
+    return DialogoApp(
           titulo: 'Resolver diferencia',
           iconoTitulo: Icons.task_alt_rounded,
           contenido: SingleChildScrollView(
@@ -68,26 +104,28 @@ Future<bool> mostrarDialogoResolverDiferencia(
                       ChoiceChip(
                         label: Text(
                             etiquetaResolucionDiferencia(r)),
-                        selected: resolucion == r,
+                        selected: _resolucion == r,
                         onSelected: (_) => setState(() {
-                          resolucion = r;
-                          errorNota = false;
+                          _resolucion = r;
+                          _errorNota = false;
                         }),
                       ),
                   ],
                 ),
                 const SizedBox(height: AppEspacio.lg),
                 CampoTexto(
-                  controller: notaCtrl,
+                  controller: _notaCtrl,
                   etiqueta: notaObligatoria
                       ? 'Nota (obligatoria)'
                       : 'Nota (opcional)',
                   maxLineas: 3,
                   onChanged: (_) {
-                    if (errorNota) setState(() => errorNota = false);
+                    if (_errorNota) {
+                      setState(() => _errorNota = false);
+                    }
                   },
                 ),
-                if (errorNota) ...[
+                if (_errorNota) ...[
                   const SizedBox(height: AppEspacio.sm),
                   Text(
                     'Para «Otro» hay que escribir la nota.',
@@ -103,38 +141,28 @@ Future<bool> mostrarDialogoResolverDiferencia(
           ),
           acciones: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
               onPressed: () async {
                 if (notaObligatoria &&
-                    notaCtrl.text.trim().isEmpty) {
-                  setState(() => errorNota = true);
+                    _notaCtrl.text.trim().isEmpty) {
+                  setState(() => _errorNota = true);
                   return;
                 }
                 await DiferenciasCajaService.instance.resolver(
                   expedienteId: '${expediente['id']}',
-                  resolucion: resolucion,
-                  nota: notaCtrl.text,
+                  resolucion: _resolucion,
+                  nota: _notaCtrl.text,
                 );
-                if (ctx.mounted) Navigator.pop(ctx, true);
+                if (context.mounted) Navigator.pop(context, true);
               },
               child: const Text('Resolver'),
             ),
           ],
         );
-      },
-    ),
-  );
-  // 1.23 AT-09: sin dispose aquí — el TextField sigue montado
-  // durante la animación de salida del diálogo y disponerlo
-  // revienta con «used after being disposed» (patrón v1.3.1).
-  if (ok == true && context.mounted) {
-    mostrarSnack(context, 'Diferencia resuelta (se sincronizará)',
-        significado: SignificadoChip.exito);
   }
-  return ok == true;
 }
 
 /// Chip de estado de un expediente (abierto / resuelto con

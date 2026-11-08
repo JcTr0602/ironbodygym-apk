@@ -373,8 +373,16 @@ class Resumen360Ficha extends StatelessWidget {
   /// Vacía o con un solo pago: no se pinta gráfico.
   final List<double> serieMontos;
 
+  /// 1.30 FICHA-05: comprado de por vida (suplementos +
+  /// servicios), precalculado por la ficha. Sin compras
+  /// (ambos en 0), la línea no se pinta.
+  final ({double cup, double usd}) compradoVida;
+
   const Resumen360Ficha(
-      {super.key, required this.resumen, this.serieMontos = const []});
+      {super.key,
+      required this.resumen,
+      this.serieMontos = const [],
+      this.compradoVida = const (cup: 0, usd: 0)});
 
   @override
   Widget build(BuildContext context) {
@@ -434,6 +442,20 @@ class Resumen360Ficha extends StatelessWidget {
               ),
               ],
             ),
+            // 1.30 FICHA-05: lo comprado de por vida, en
+            // una línea — el Resumen contaba lo PAGADO de
+            // mensualidad y las compras no salían en
+            // ningún total de la ficha.
+            if (compradoVida.cup > 0 || compradoVida.usd > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Text(
+                  'Comprado en total: ${fmtMonto(compradoVida.cup)} CUP'
+                  '${compradoVida.usd > 0 ? ' · ${fmtMonto(compradoVida.usd)} USD' : ''}',
+                  style: AppTexto.secundario,
+                  textAlign: TextAlign.center,
+                ),
+              ),
             // 1.25 T55: con menos de 2 cobros no hay
             // regularidad que enseñar.
             if (serieMontos.length >= 2) _miniGrafico(context),
@@ -695,10 +717,14 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
                           Text(grupos[g].titulo,
                               style: AppTexto.subtitulo),
                           Text(
-                            grupos[g].nPagos > 0
-                                ? '${grupos[g].nPagos} pago${grupos[g].nPagos == 1 ? '' : 's'} · '
-                                    '${fmtMonto(grupos[g].sumaPagos)} CUP'
-                                : '${grupos[g].entradas.length} movimiento${grupos[g].entradas.length == 1 ? '' : 's'}',
+                            textoResumenMesFicha(
+                              nPagos: grupos[g].nPagos,
+                              sumaPagos: grupos[g].sumaPagos,
+                              nVentas: grupos[g].nVentas,
+                              sumaVentasCup: grupos[g].sumaVentasCup,
+                              sumaVentasUsd: grupos[g].sumaVentasUsd,
+                              nMovimientos: grupos[g].entradas.length,
+                            ),
                             style: AppTexto.metadato.copyWith(
                                 color: AppColores.textoSecundario(
                                     context)),
@@ -1043,12 +1069,20 @@ class _AnilloPeriodoPainter extends CustomPainter {
 /// (descendente). Cada grupo resume sus pagos: conteo y
 /// suma de montos (las cortesías suman su 0). Sin fecha
 /// válida: grupo final «Sin fecha».
+/// 1.30 FICHA-05: cada grupo suma TAMBIÉN sus ventas
+/// (conteo y monto por moneda) desde los campos
+/// estructurados de la entrada ('montoVenta'/'monedaVenta'
+/// que pone _construirEntradas; un montoVenta null — el
+/// servicio de Cuenta a la Casa — no es venta y no cuenta).
 List<
     ({
       String clave,
       String titulo,
       int nPagos,
       double sumaPagos,
+      int nVentas,
+      double sumaVentasCup,
+      double sumaVentasUsd,
       List<Map<String, dynamic>> entradas
     })> gruposHistorialPorMes(List<Map<String, dynamic>> entradas) {
   const meses = [
@@ -1098,9 +1132,74 @@ List<
                             as num?)
                         ?.toDouble() ??
                     0)),
+        nVentas: porClave[clave]!
+            .where((e) => e['tipo'] == 'venta' && e['montoVenta'] != null)
+            .length,
+        sumaVentasCup: porClave[clave]!
+            .where((e) =>
+                e['tipo'] == 'venta' &&
+                e['montoVenta'] != null &&
+                '${e['monedaVenta'] ?? 'CUP'}' != 'USD')
+            .fold<double>(
+                0, (s, e) => s + ((e['montoVenta'] as num?)?.toDouble() ?? 0)),
+        sumaVentasUsd: porClave[clave]!
+            .where((e) =>
+                e['tipo'] == 'venta' &&
+                e['montoVenta'] != null &&
+                '${e['monedaVenta'] ?? 'CUP'}' == 'USD')
+            .fold<double>(
+                0, (s, e) => s + ((e['montoVenta'] as num?)?.toDouble() ?? 0)),
         entradas: porClave[clave]!,
       ),
   ];
+}
+
+/// 1.30 FICHA-05: lo comprado DE POR VIDA por el cliente
+/// (suplementos + servicios), por moneda — la línea
+/// «Comprado en total» del Resumen 360. Los servicios
+/// suman con el agregado de la casa
+/// (resumenServiciosDeCliente: Cuenta a la Casa fuera y
+/// reversos neteados por su signo).
+({double cup, double usd}) totalesCompradoVida(
+    List<Map<String, dynamic>> suplementos,
+    List<Map<String, dynamic>> serviciosHist) {
+  var cup = 0.0;
+  var usd = 0.0;
+  for (final s in suplementos) {
+    final m = (s['precio'] as num?)?.toDouble() ?? 0;
+    if ('${s['moneda'] ?? 'CUP'}' == 'USD') {
+      usd += m;
+    } else {
+      cup += m;
+    }
+  }
+  cup += servicios_svc.resumenServiciosDeCliente(serviciosHist).importe;
+  return (cup: cup, usd: usd);
+}
+
+/// Texto de la cabecera de un mes del historial (1.25 T56
+/// + 1.30 FICHA-05): «3 pagos · 7500 CUP — 5 ventas ·
+/// 2900 CUP» cuando hay de ambos; solo la parte que tenga
+/// dato; sin pagos ni ventas, el conteo de movimientos.
+String textoResumenMesFicha({
+  required int nPagos,
+  required double sumaPagos,
+  required int nVentas,
+  required double sumaVentasCup,
+  required double sumaVentasUsd,
+  required int nMovimientos,
+}) {
+  final partes = <String>[
+    if (nPagos > 0)
+      '$nPagos pago${nPagos == 1 ? '' : 's'} · ${fmtMonto(sumaPagos)} CUP',
+    if (nVentas > 0)
+      '$nVentas venta${nVentas == 1 ? '' : 's'} · ${fmtMonto(sumaVentasCup)} CUP'
+          '${sumaVentasUsd > 0 ? ' · ${fmtMonto(sumaVentasUsd)} USD' : ''}',
+  ];
+  if (partes.isEmpty) {
+    return '$nMovimientos movimiento${nMovimientos == 1 ? '' : 's'}';
+  }
+  return partes.join(' — ');
 }
 
 /// 1.28 (M4-C2): entrada de UNA sección de la ficha

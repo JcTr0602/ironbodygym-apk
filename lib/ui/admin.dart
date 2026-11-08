@@ -1591,60 +1591,22 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _editarTipo(TipoPago t) async {
-    final nombreCtrl = TextEditingController(text: t.nombre);
-    final montoCtrl =
-        TextEditingController(text: '${t.monto}');
-    final diasCtrl =
-        TextEditingController(text: '${t.dias}');
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<_DatosTipoPago>(
       context: context,
-      builder: (ctx) => DialogoApp(
+      builder: (ctx) => _DialogoTipoPago(
         titulo: 'Editar ${t.nombre}',
-        iconoTitulo: Icons.edit_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CampoTexto(
-                controller: nombreCtrl, etiqueta: 'Nombre'),
-            const SizedBox(height: 8),
-            CampoTexto(
-                controller: montoCtrl,
-                etiqueta: 'Monto (CUP)',
-                teclado: const TextInputType
-                    .numberWithOptions(decimal: true)),
-            const SizedBox(height: 8),
-            CampoTexto(
-                controller: diasCtrl,
-                etiqueta: 'Días que cubre',
-                teclado: TextInputType.number),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Guardar')),
-        ],
+        icono: Icons.edit_rounded,
+        botonOk: 'Guardar',
+        nombreIni: t.nombre,
+        montoIni: '${t.monto}',
+        diasIni: '${t.dias}',
       ),
     );
-    final nombre = nombreCtrl.text.trim();
+    if (datos == null || !mounted) return;
+    final nombre = datos.nombre.trim();
     final monto = double.tryParse(
-        montoCtrl.text.trim().replaceAll(',', '.'));
-    final dias = int.tryParse(diasCtrl.text.trim());
-    // v1.3.2 (Argón #11): NO hacer dispose tras showDialog; el diálogo
-    // sigue animando su cierre y el controller aún está en uso.
-    // Los controllers locales los recoge el GC (igual que dialogo_pago).
-    if (ok != true || !mounted) return;
+        datos.monto.trim().replaceAll(',', '.'));
+    final dias = int.tryParse(datos.dias.trim());
     if (nombre.isEmpty || monto == null || !monto.isFinite || monto <= 0) {
       mostrarSnack(context, 'Nombre y monto válido requeridos', significado: SignificadoChip.alerta);
       return;
@@ -1670,57 +1632,21 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _agregarTipo() async {
-    final nombreCtrl = TextEditingController();
-    final montoCtrl = TextEditingController();
-    final diasCtrl = TextEditingController(text: '30');
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<_DatosTipoPago>(
       context: context,
-      builder: (ctx) => DialogoApp(
+      builder: (ctx) => const _DialogoTipoPago(
         titulo: 'Nuevo tipo de pago',
-        iconoTitulo: Icons.add_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CampoTexto(
-                controller: nombreCtrl,
-                etiqueta: 'Nombre (ej: Trimestre)'),
-            const SizedBox(height: 8),
-            CampoTexto(
-                controller: montoCtrl,
-                etiqueta: 'Monto (CUP)',
-                teclado: const TextInputType
-                    .numberWithOptions(decimal: true)),
-            const SizedBox(height: 8),
-            CampoTexto(
-                controller: diasCtrl,
-                etiqueta: 'Días que cubre',
-                teclado: TextInputType.number),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Agregar')),
-        ],
+        icono: Icons.add_rounded,
+        botonOk: 'Agregar',
+        etiquetaNombre: 'Nombre (ej: Trimestre)',
+        diasIni: '30',
       ),
     );
-    final nombre = nombreCtrl.text.trim();
+    if (datos == null || !mounted) return;
+    final nombre = datos.nombre.trim();
     final monto = double.tryParse(
-        montoCtrl.text.trim().replaceAll(',', '.'));
-    final dias = int.tryParse(diasCtrl.text.trim()) ?? 30;
-    // v1.3.2 (Argón #11): sin dispose tras showDialog (ver arriba).
-    if (ok != true || !mounted) return;
+        datos.monto.trim().replaceAll(',', '.'));
+    final dias = int.tryParse(datos.dias.trim()) ?? 30;
     if (nombre.isEmpty ||
         monto == null ||
         !monto.isFinite ||
@@ -1814,45 +1740,11 @@ class _AdminScreenState extends State<AdminScreen> {
   Future<void> _elegirPagoEntrenador() async {
     // Ronda 17 M2-H1: elegir el pago por cliente es solo del dueño.
     if (!AuthService().isOwner) return;
-    final ctrl = TextEditingController(text: '$_pagoEntrenador');
     final sel = await showDialog<int>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Pago a entrenadores'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-                'CUP por cada cliente que pagó su mensualidad:'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                suffixText: 'CUP',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
-          BotonPrimario(
-            texto: 'Guardar',
-            onPressed: () {
-                final v = int.tryParse(ctrl.text);
-                Navigator.pop(ctx, v != null && v > 0 ? v : null);
-              },
-            expandido: false,
-          ),
-        ],
-      ),
+      builder: (ctx) =>
+          _DialogoPagoEntrenador(inicial: _pagoEntrenador),
     );
-    // v1.3.1: no hacer dispose aquí — el TextField sigue montado durante
-    // la animación de salida del diálogo (error "used after being disposed").
     if (sel != null) {
       await PerfilService.instance.setPagoEntrenador(sel);
       // Argón Acceso #9: sin push, el cambio quedaba retenido
@@ -1880,53 +1772,12 @@ class _AdminScreenState extends State<AdminScreen> {
 
   Future<void> _confirmarEntregaImpl(
       {int? trainerId, required String nombre}) async {
-    final notaCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final notaTexto = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Confirmar entrega',
-        iconoTitulo: Icons.done_all_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-                '¿Confirmas que recibiste el dinero pendiente de '
-                '"$nombre"? Su pendiente se pondrá en cero.',
-                style: AppTexto.cuerpo),
-            const SizedBox(height: 12),
-            CampoTexto(
-              controller: notaCtrl,
-              etiqueta: 'Nota (opcional)',
-              hint: 'Ej: entregó en dos partes',
-              maxLineas: 2,
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Confirmar')),
-        ],
-      ),
+      builder: (ctx) => _DialogoConfirmarEntrega(nombre: nombre),
     );
-    final nota = notaCtrl.text.trim();
-    // 1.23 AT-09: sin dispose aquí — el TextField sigue montado
-    // durante la animación de salida del diálogo y disponerlo
-    // revienta con «used after being disposed» (mismo arreglo
-    // v1.3.1 de _editarPagoEntrenador).
-    if (ok != true || !mounted) return;
+    if (notaTexto == null || !mounted) return;
+    final nota = notaTexto.trim();
     // 1.15 (Panel A2): confirmar SIEMPRE por listas de ids explícitas
     // (la pantalla empaqueta lo que muestra, nunca una orden ciega
     // por entrenador). Las listas las calcula idsPendientesEntrega
@@ -1992,59 +1843,16 @@ class _AdminScreenState extends State<AdminScreen> {
       {required int trainerId,
       required String nombre,
       required double pendiente}) async {
-    final montoCtrl = TextEditingController(
-        text: pendiente > 0 ? pendiente.toStringAsFixed(0) : '');
-    final ok = await showDialog<bool>(
+    final montoTexto = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Registrar recogida',
-        iconoTitulo: Icons.handshake_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Entrenador: $nombre', style: AppTexto.cuerpo),
-            Text('Pendiente visible: ${fmtMonto(pendiente)} CUP',
-                style: AppTexto.cuerpo),
-            const SizedBox(height: 12),
-            CampoTexto(
-              controller: montoCtrl,
-              etiqueta: 'Monto recogido (CUP)',
-              teclado:
-                  const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Si el monto supera el pendiente visible, se guarda '
-              'como recogida anticipada: el pendiente quedará en '
-              'negativo hasta que el entrenador sincronice sus pagos.',
-              style: AppTexto.metadato,
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Registrar')),
-        ],
+      builder: (ctx) => _DialogoRegistrarRecogida(
+        nombre: nombre,
+        pendiente: pendiente,
       ),
     );
+    if (montoTexto == null || !mounted) return;
     final monto =
-        double.tryParse(montoCtrl.text.trim().replaceAll(',', '.'));
-    // 1.23 AT-09: sin dispose aquí (animación de salida del
-    // diálogo; ver _confirmarEntregaImpl).
-    if (ok != true || !mounted) return;
+        double.tryParse(montoTexto.trim().replaceAll(',', '.'));
     if (monto == null || !monto.isFinite || monto <= 0) {
       mostrarSnack(context, 'Monto inválido', significado: SignificadoChip.alerta);
       return;
@@ -3847,6 +3655,327 @@ class _ModuloAdminScreenState extends State<_ModuloAdminScreen> {
           ...tarjetas,
         ],
       ),
+    );
+  }
+}
+
+/// Datos que devuelve el diálogo de tipo de pago al guardar.
+typedef _DatosTipoPago = ({
+  String nombre,
+  String monto,
+  String dias,
+});
+
+/// 1.30 (Oleada 7, clase B): diálogo de tipo de pago (editar
+/// / nuevo) como StatefulWidget propio: posee y dispone sus
+/// tres controladores (antes se creaban en el método y nunca
+/// se liberaban; el dispose tras showDialog está prohibido
+/// por Argón #11). Devuelve los textos al guardar o null.
+class _DialogoTipoPago extends StatefulWidget {
+  final String titulo;
+  final IconData icono;
+  final String botonOk;
+  final String etiquetaNombre;
+  final String nombreIni;
+  final String montoIni;
+  final String diasIni;
+  const _DialogoTipoPago({
+    required this.titulo,
+    required this.icono,
+    required this.botonOk,
+    this.etiquetaNombre = 'Nombre',
+    this.nombreIni = '',
+    this.montoIni = '',
+    this.diasIni = '',
+  });
+
+  @override
+  State<_DialogoTipoPago> createState() => _DialogoTipoPagoState();
+}
+
+class _DialogoTipoPagoState extends State<_DialogoTipoPago> {
+  late final TextEditingController _nombreCtrl;
+  late final TextEditingController _montoCtrl;
+  late final TextEditingController _diasCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nombreCtrl = TextEditingController(text: widget.nombreIni);
+    _montoCtrl = TextEditingController(text: widget.montoIni);
+    _diasCtrl = TextEditingController(text: widget.diasIni);
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _montoCtrl.dispose();
+    _diasCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: widget.titulo,
+      iconoTitulo: widget.icono,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CampoTexto(
+              controller: _nombreCtrl,
+              etiqueta: widget.etiquetaNombre),
+          const SizedBox(height: 8),
+          CampoTexto(
+              controller: _montoCtrl,
+              etiqueta: 'Monto (CUP)',
+              teclado: const TextInputType
+                  .numberWithOptions(decimal: true)),
+          const SizedBox(height: 8),
+          CampoTexto(
+              controller: _diasCtrl,
+              etiqueta: 'Días que cubre',
+              teclado: TextInputType.number),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, (
+                  nombre: _nombreCtrl.text,
+                  monto: _montoCtrl.text,
+                  dias: _diasCtrl.text,
+                )),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: Text(widget.botonOk)),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Pago a entrenadores»
+/// como StatefulWidget propio: posee y dispone su
+/// controlador (antes se creaba en el método y nunca se
+/// liberaba). Devuelve el valor válido (> 0) o null.
+class _DialogoPagoEntrenador extends StatefulWidget {
+  final int inicial;
+  const _DialogoPagoEntrenador({required this.inicial});
+
+  @override
+  State<_DialogoPagoEntrenador> createState() =>
+      _DialogoPagoEntrenadorState();
+}
+
+class _DialogoPagoEntrenadorState
+    extends State<_DialogoPagoEntrenador> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: '${widget.inicial}');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Pago a entrenadores'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+              'CUP por cada cliente que pagó su mensualidad:'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              suffixText: 'CUP',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        BotonPrimario(
+          texto: 'Guardar',
+          onPressed: () {
+              final v = int.tryParse(_ctrl.text);
+              Navigator.pop(context, v != null && v > 0 ? v : null);
+            },
+          expandido: false,
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Confirmar entrega»
+/// como StatefulWidget propio: posee y dispone el
+/// controlador de la nota (antes se creaba en el método y
+/// nunca se liberaba). Devuelve la nota al confirmar o
+/// null si se cancela.
+class _DialogoConfirmarEntrega extends StatefulWidget {
+  final String nombre;
+  const _DialogoConfirmarEntrega({required this.nombre});
+
+  @override
+  State<_DialogoConfirmarEntrega> createState() =>
+      _DialogoConfirmarEntregaState();
+}
+
+class _DialogoConfirmarEntregaState
+    extends State<_DialogoConfirmarEntrega> {
+  final _notaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Confirmar entrega',
+      iconoTitulo: Icons.done_all_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+              '¿Confirmas que recibiste el dinero pendiente de '
+              '"${widget.nombre}"? Su pendiente se pondrá en cero.',
+              style: AppTexto.cuerpo),
+          const SizedBox(height: 12),
+          CampoTexto(
+            controller: _notaCtrl,
+            etiqueta: 'Nota (opcional)',
+            hint: 'Ej: entregó en dos partes',
+            maxLineas: 2,
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _notaCtrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Confirmar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Registrar recogida»
+/// como StatefulWidget propio: posee y dispone su
+/// controlador (antes se creaba en el método y nunca se
+/// liberaba). Devuelve el monto escrito o null si se
+/// cancela.
+class _DialogoRegistrarRecogida extends StatefulWidget {
+  final String nombre;
+  final double pendiente;
+  const _DialogoRegistrarRecogida(
+      {required this.nombre, required this.pendiente});
+
+  @override
+  State<_DialogoRegistrarRecogida> createState() =>
+      _DialogoRegistrarRecogidaState();
+}
+
+class _DialogoRegistrarRecogidaState
+    extends State<_DialogoRegistrarRecogida> {
+  late final TextEditingController _montoCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _montoCtrl = TextEditingController(
+        text: widget.pendiente > 0
+            ? widget.pendiente.toStringAsFixed(0)
+            : '');
+  }
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Registrar recogida',
+      iconoTitulo: Icons.handshake_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Entrenador: ${widget.nombre}',
+              style: AppTexto.cuerpo),
+          Text(
+              'Pendiente visible: ${fmtMonto(widget.pendiente)} CUP',
+              style: AppTexto.cuerpo),
+          const SizedBox(height: 12),
+          CampoTexto(
+            controller: _montoCtrl,
+            etiqueta: 'Monto recogido (CUP)',
+            teclado:
+                const TextInputType.numberWithOptions(decimal: true),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Si el monto supera el pendiente visible, se guarda '
+            'como recogida anticipada: el pendiente quedará en '
+            'negativo hasta que el entrenador sincronice sus pagos.',
+            style: AppTexto.metadato,
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _montoCtrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Registrar')),
+      ],
     );
   }
 }

@@ -249,6 +249,9 @@ class _FichaScreenState extends State<FichaScreen> {
 
   ({int n, double total, String metodoTop}) _resumenPagos =
       (n: 0, total: 0, metodoTop: '');
+  // 1.30 FICHA-05: comprado de por vida (suplementos +
+  // servicios) para la línea del Resumen 360.
+  ({double cup, double usd}) _compradoVida = (cup: 0, usd: 0);
   // 1.25 T15: el último pago REAL (sin cortesía): de él
   // salen la fila «Último pago», el «Tipo» y el arranque de
   // la barra del período. Antes salían del movimiento más
@@ -334,6 +337,16 @@ class _FichaScreenState extends State<FichaScreen> {
     final suplementos = await _suplementosDe(widget.clienteId);
     final serviciosHist = await servicios_svc
         .historialServiciosCliente(widget.clienteId);
+    // 1.30 FICHA-05: comprado de por vida para el Resumen
+    // 360. La lista de la línea de tiempo viene recortada
+    // a 20 ventas: si se llenó, el total se calcula con la
+    // lista sin recorte (si no, «de por vida» mentiría
+    // justo en los clientes que más compran).
+    final suplementosVida = suplementos.length >= 20
+        ? await _suplementosDe(widget.clienteId, sinLimite: true)
+        : suplementos;
+    final compradoVida =
+        totalesCompradoVida(suplementosVida, serviciosHist);
     // v1.10.0 (Bloque 2, D6): especial activa + existencia de
     // registros (tolerante: si la tabla aún no existe en algún
     // entorno de test viejo, la ficha igual abre).
@@ -483,6 +496,8 @@ class _FichaScreenState extends State<FichaScreen> {
             .toList()
             .reversed
             .toList();
+        // 1.30 FICHA-05.
+        _compradoVida = compradoVida;
       });
     }
     // La ficha YA pintó con datos locales: la red enriquece
@@ -735,6 +750,23 @@ class _FichaScreenState extends State<FichaScreen> {
     }
   }
 
+  /// 1.30 FICHA-07: tirar hacia abajo en la ficha pide lo
+  /// nuevo del servidor (pull del motor) y relee lo local.
+  /// Sin conexión el pull falla en silencio y la ficha se
+  /// relee igual con lo que hay en el teléfono. El botón de
+  /// la nube del AppBar sigue siendo la verificación a fondo
+  /// de un solo cliente (_verificarServidor); esto es el
+  /// refresco ligero de todos los días.
+  Future<void> _refrescarFicha() async {
+    try {
+      await SyncEngine.instance.pull();
+    } catch (_) {
+      // Sin conexión: se relee lo local igualmente.
+    }
+    if (!mounted) return;
+    await _cargar();
+  }
+
   /// Verifica los datos del cliente contra el servidor (v1.0.10).
   /// Descarga la versión actual y compara con la local.
   /// v1.2.8 (E1): verifica un solo cliente vía RPC, sin pull completo.
@@ -829,50 +861,11 @@ class _FichaScreenState extends State<FichaScreen> {
     final c = _c;
     if (c == null || !AuthService().isOwner) return;
     final nombre = '${c['nombre'] ?? ''}';
-    final ctrl = TextEditingController();
     final motivo = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: activar
-            ? 'Pasar a Cuenta a la Casa'
-            : 'Quitar Cuenta a la Casa',
-        iconoTitulo: Icons.home_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(activar
-                ? '$nombre tendrá acceso permanente sin pagar ni '
-                    'vencer. No contará en nómina, vencimientos ni '
-                    'ingresos.'
-                : '$nombre volverá a ser un cliente normal: regirá '
-                    'su «pagado hasta» actual.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              decoration: const InputDecoration(
-                labelText: 'Motivo (opcional)',
-                hintText: 'Ej.: hermana del dueño, cortesía…',
-                border: OutlineInputBorder(),
-              ),
-              maxLength: 120,
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: Text(activar ? 'Pasar a la Casa' : 'Quitar'),
-          ),
-        ],
-      ),
+      builder: (ctx) =>
+          _DialogoMotivoCuentaCasa(activar: activar, nombre: nombre),
     );
-    // Argón #7B-6: sin dispose tras showDialog (el TextField sigue
-    // montado durante la animación de cierre; el GC recoge el local).
     if (motivo == null || !mounted) return;
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
@@ -1176,100 +1169,68 @@ class _FichaScreenState extends State<FichaScreen> {
     required String hastaFmt,
     required String? anteriorFmt,
   }) async {
-    final c = _c;
     // 1.25 T17: el teléfono efectivo único.
-    final telefono = _telefonoEfectivoWa(c);
+    final telefono = _telefonoEfectivoWa(_c);
     // Ronda 3-9 #4: el campo guarda 8 dígitos (como el resto de
     // la app) y el '+53 ' va solo como prefijo visual. Antes se
     // inicializaba con los 10 dígitos wa.me (53…) y el prefijo
     // '+' duplicaba la idea del código de país.
-    final telCtrl = TextEditingController(
-        text: telefono.length == 10 ? telefono.substring(2) : telefono);
+    final telefonoInicial =
+        telefono.length == 10 ? telefono.substring(2) : telefono;
     final mensaje = _mensajeRegalo(
         nombre: nombre, hastaFmt: hastaFmt, anteriorFmt: anteriorFmt);
     if (!mounted) return;
-    final outerContext = context;
     await showDialog<void>(
-      context: outerContext,
-      builder: (ctx) => AlertDialog(
-        title: const Text('📱 Notificar por WhatsApp'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SelectableText(mensaje),
-              const SizedBox(height: 12),
-              TextField(
-                controller: telCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Teléfono',
-                  hintText: 'Ej. 58123456',
-                  prefixText: '+53 ',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: mensaje));
-              Navigator.of(ctx).pop();
-              mostrarSnack(outerContext, 'Mensaje copiado');
-            },
-            child: const Text('Copiar mensaje'),
-          ),
-          BotonPrimario(
-            texto: 'Abrir WhatsApp',
-            onPressed: () async {
-              final tel = _normalizarTelefono(telCtrl.text);
-              if (tel.isEmpty) {
-                mostrarSnack(ctx, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
-                return;
-              }
-              // Guardar el teléfono en la ficha si cambió (Argón spec 4).
-              // Veredicto de Argón: guardar SIEMPRE los 8 dígitos (sin el
-              // 53), porque validarTelefono() en el resto de la app exige
-              // d.length == 8; 10 dígitos romperían el formulario normal.
-              final actual = _normalizarTelefono('${c?['telefono'] ?? ''}');
-              // 1.24 Bloque 3: persistir el teléfono nuevo es un
-              // editar_cliente (can_editar_fichas en el servidor).
-              // Sin la clave, el número tecleado se usa solo para
-              // abrir ESTE chat: no se toca el espejo ni se encola
-              // una op que rebotaría dejando el espejo divergente.
-              if (tel != actual &&
-                  PermisosEntrenador().canEditarFichas) {
-                final tel8 = tel.length == 10 ? tel.substring(2) : tel;
-                await LocalDb.instance.updateMirrorTelefono(
-                    widget.clienteId, tel8);
-                // 1.25 Panel 9: el teléfono anterior viaja en
-                // la op (registro antes → después).
-                final payloadTel = <String, dynamic>{
-                  'cliente_id': widget.clienteId,
-                  'telefono': tel8,
-                };
-                final antesTel = antesEdicionCliente(
-                    {'telefono': '${c?['telefono'] ?? ''}'}, payloadTel);
-                if (antesTel.isNotEmpty) payloadTel['antes'] = antesTel;
-                await LocalDb.instance.queueOp(
-                  opUuid: const Uuid().v4(),
-                  tipo: 'editar_cliente',
-                  payload: payloadTel,
-                );
-                unawaited(SyncEngine.instance.push());
-              }
-              final url = Uri.parse(
-                  'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}');
-              await launchUrl(url, mode: LaunchMode.externalApplication);
-              if (ctx.mounted) Navigator.of(ctx).pop();
-            },
-            expandido: false,
-          ),
-        ],
+      context: context,
+      builder: (ctx) => _DialogoWhatsAppRegalo(
+        mensaje: mensaje,
+        telefonoInicial: telefonoInicial,
+        alCopiar: () => mostrarSnack(context, 'Mensaje copiado'),
+        alAbrir: (telCrudo) => _abrirWhatsAppRegalo(telCrudo, mensaje),
       ),
     );
+  }
+
+  /// Abre WhatsApp con el mensaje del regalo al número tecleado
+  /// en el diálogo. Devuelve false si el número no es válido (el
+  /// diálogo enseña el aviso y se queda abierto); true si abrió.
+  Future<bool> _abrirWhatsAppRegalo(String telCrudo, String mensaje) async {
+    final c = _c;
+    final tel = _normalizarTelefono(telCrudo);
+    if (tel.isEmpty) return false;
+    // Guardar el teléfono en la ficha si cambió (Argón spec 4).
+    // Veredicto de Argón: guardar SIEMPRE los 8 dígitos (sin el
+    // 53), porque validarTelefono() en el resto de la app exige
+    // d.length == 8; 10 dígitos romperían el formulario normal.
+    final actual = _normalizarTelefono('${c?['telefono'] ?? ''}');
+    // 1.24 Bloque 3: persistir el teléfono nuevo es un
+    // editar_cliente (can_editar_fichas en el servidor).
+    // Sin la clave, el número tecleado se usa solo para
+    // abrir ESTE chat: no se toca el espejo ni se encola
+    // una op que rebotaría dejando el espejo divergente.
+    if (tel != actual && PermisosEntrenador().canEditarFichas) {
+      final tel8 = tel.length == 10 ? tel.substring(2) : tel;
+      await LocalDb.instance.updateMirrorTelefono(widget.clienteId, tel8);
+      // 1.25 Panel 9: el teléfono anterior viaja en
+      // la op (registro antes → después).
+      final payloadTel = <String, dynamic>{
+        'cliente_id': widget.clienteId,
+        'telefono': tel8,
+      };
+      final antesTel = antesEdicionCliente(
+          {'telefono': '${c?['telefono'] ?? ''}'}, payloadTel);
+      if (antesTel.isNotEmpty) payloadTel['antes'] = antesTel;
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'editar_cliente',
+        payload: payloadTel,
+      );
+      unawaited(SyncEngine.instance.push());
+    }
+    final url =
+        Uri.parse('https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}');
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+    return true;
   }
 
   /// Mensaje de felicitación con formato WhatsApp (Argón spec 5):
@@ -1360,123 +1321,27 @@ class _FichaScreenState extends State<FichaScreen> {
     // Ronda 3-9 #1 (CRÍTICO, defensa en profundidad): aunque se
     // invoque directo, un protegido no se edita.
     if (esVistaProtegida(c)) return;
-    final nombre = TextEditingController(text: '${c['nombre'] ?? ''}');
-    final telefono =
-        TextEditingController(text: '${c['telefono'] ?? ''}');
-    final carnet =
-        TextEditingController(text: '${c['carnet'] ?? ''}');
-    // v1.10.0 (Bloque 2, Argón ajuste 4): este diálogo edita SOLO
-    // datos BÁSICOS (nombre, teléfono, carnet, sexo). La tarifa
-    // especial ya NO vive aquí: va por el modal D6. El pagado_hasta
-    // tampoco: solo lo fija el dueño desde «Datos sensibles».
-    String sexo = '${c['sexo'] ?? 'M'}';
-    // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
-    var carnetInvalido = carnetFechaInvalida(carnet.text);
-    final ok = await showDialog<bool>(
+    // 1.30 FICHA-10: el diálogo enseña y edita el teléfono
+    // EFECTIVO (móvil primero), el mismo que la ficha muestra
+    // y WhatsApp abre — antes enseñaba la columna `telefono`,
+    // que en un cliente migrado puede traer otro dato (el
+    // carnet, un número viejo) y editarlo no cambiaba el
+    // número que de verdad se usa.
+    final telEfectivoVisible = _telefonoEfectivoVisible(c);
+    final telEfectivoOrig =
+        telEfectivoVisible == '—' ? null : telEfectivoVisible;
+    final datos = await showDialog<_DatosEditarCliente>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => DialogoApp(
-          titulo: 'Editar cliente',
-          iconoTitulo: Icons.edit_rounded,
-          contenido: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                    controller: nombre,
-                    decoration: const InputDecoration(
-                        labelText: 'Nombre',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                          controller: telefono,
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly
-                          ],
-                          decoration: const InputDecoration(
-                              labelText: 'Teléfono (8 dígitos)',
-                              border: OutlineInputBorder())),
-                    ),
-                    const SizedBox(width: 8),
-                    // Elegir de los contactos del teléfono (v1.0.11)
-                    IconButton(
-                      tooltip: 'Elegir de contactos',
-                      icon: Icon(Icons.contacts_rounded,
-                          color: AppColores.textoSecundario(context)),
-                      onPressed: () async {
-                        final tel =
-                            await _elegirDeContactos(ctx);
-                        if (tel != null && tel.isNotEmpty) {
-                          setS(() =>
-                              telefono.text = tel);
-                        }
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                    controller: carnet,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ],
-                    onChanged: (v) => setS(() =>
-                        carnetInvalido = carnetFechaInvalida(v)),
-                    decoration: const InputDecoration(
-                        labelText: 'Carnet (6–11 dígitos)',
-                        border: OutlineInputBorder())),
-                // v1.5.0 (Bloque G): aviso sin bloquear el guardado.
-                if (carnetInvalido) const AvisoFechaCarnet(),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Text('Sexo: '),
-                    // 1.25 T117 (F1-48): la palabra
-                    // entera — «M»/«F» obligaban a saber
-                    // el código. El valor guardado no
-                    // cambia ('M'/'F').
-                    ChoiceChip(
-                        label: const Text('Masculino'),
-                        selected: sexo == 'M',
-                        onSelected: (_) =>
-                            setS(() => sexo = 'M')),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                        label: const Text('Femenino'),
-                        selected: sexo == 'F',
-                        onSelected: (_) =>
-                            setS(() => sexo = 'F')),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColores.naranja,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Guardar')),
-          ],
-        ),
+      builder: (ctx) => _DialogoEditarCliente(
+        nombreInicial: '${c['nombre'] ?? ''}',
+        telefonoInicial: telEfectivoOrig ?? '',
+        carnetInicial: '${c['carnet'] ?? ''}',
+        sexoInicial: '${c['sexo'] ?? 'M'}',
+        alElegirDeContactos: _elegirDeContactos,
       ),
     );
-    if (ok != true || !mounted) {
-      // v1.3.1 (Argón regresión 2): sin dispose. Son controllers locales de
-      // _editar(); el GC los recoge. El dispose tras showDialog causaba
-      // "TextEditingController was used after being disposed".
-      return;
-    }
+    if (datos == null || !mounted) return;
+    final sexo = datos.sexo;
     // 1.28 (M4-A17/R3M4-H8): el teléfono se limpia a DÍGITOS
     // antes de validar y guardar. El formatter digitsOnly
     // solo corre al TECLEAR: el valor inicial legado o el de
@@ -1484,8 +1349,8 @@ class _FichaScreenState extends State<FichaScreen> {
     // 3456»), pasaban la validación (que limpia) y se
     // GUARDABAN sucios. La comparación de cambios también
     // usa el valor limpio.
-    final tel = telefono.text.replaceAll(RegExp(r'[^0-9]'), '');
-    final car = carnet.text.trim();
+    final tel = datos.telefono.replaceAll(RegExp(r'[^0-9]'), '');
+    final car = datos.carnet.trim();
     if (tel.isNotEmpty && !validarTelefono(tel)) {
       mostrarSnack(context, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
       return;
@@ -1494,7 +1359,7 @@ class _FichaScreenState extends State<FichaScreen> {
       mostrarSnack(context, 'Carnet inválido: 6 a 11 dígitos', significado: SignificadoChip.alerta);
       return;
     }
-    if (nombre.text.trim().isEmpty) {
+    if (datos.nombre.trim().isEmpty) {
       mostrarSnack(context, 'El nombre no puede estar vacío', significado: SignificadoChip.alerta);
       return;
     }
@@ -1504,12 +1369,14 @@ class _FichaScreenState extends State<FichaScreen> {
     // pagado_hasta (va por _editarSensible, solo dueño), ni tarifa
     // especial (va por el modal D6), ni Casa/permisos/accesos.
     final orig = _c ?? {};
-    final nuevoNombre = nombre.text.trim();
+    final nuevoNombre = datos.nombre.trim();
     final nuevoTel = tel.isEmpty ? null : tel;
     final nuevoCar = car.isEmpty ? null : car;
-    // Si no cambió nada, no encolar.
+    // Si no cambió nada, no encolar. 1.30 FICHA-10: el teléfono
+    // se compara contra el EFECTIVO original, no contra la
+    // columna `telefono` (ver la nota al abrir el diálogo).
     final huboCambios = nuevoNombre != '${orig['nombre'] ?? ''}' ||
-        nuevoTel != (orig['telefono'] as String?) ||
+        nuevoTel != telEfectivoOrig ||
         nuevoCar != (orig['carnet'] as String?) ||
         sexo != orig['sexo'];
     if (!huboCambios) {
@@ -1522,7 +1389,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // personas nacidas el mismo día comparten AAMMDD); el teléfono
     // siempre bloquea. posiblesDuplicados mira solo activos, igual
     // que en inscribir.
-    if (nuevoTel != (orig['telefono'] as String?) ||
+    if (nuevoTel != telEfectivoOrig ||
         nuevoCar != (orig['carnet'] as String?)) {
       final dups = await posiblesDuplicados(
         nombre: nuevoNombre,
@@ -1573,7 +1440,10 @@ class _FichaScreenState extends State<FichaScreen> {
       'carnet': nuevoCar,
       'sexo': sexo,
     });
-    // v1.3.1 (Argón regresión 2): sin dispose. Controllers locales de _editar().
+    // 1.30 O7 (clase B): los controladores viven y mueren en
+    // el State de _DialogoEditarCliente; aquí ya no hay nada
+    // que disponer (la regresión 2 de la v1.3.1 queda cerrada
+    // por construcción).
     if (!mounted) return;
     mostrarSnack(context, 'Cambios guardados (se sincronizarán)', significado: SignificadoChip.exito);
     _cargar();
@@ -1760,40 +1630,18 @@ class _FichaScreenState extends State<FichaScreen> {
         context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
       return;
     }
-    final ctrl =
-        TextEditingController(text: '${c['notas'] ?? ''}');
-    final ok = await showDialog<bool>(
+    final notaTexto = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Notas del cliente',
-        iconoTitulo: Icons.note_rounded,
-        contenido: TextField(
-          controller: ctrl,
-          maxLines: 4,
-          decoration: const InputDecoration(
-              hintText: 'Ej: lesionado, viene solo mañanas…',
-              border: OutlineInputBorder()),
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Guardar')),
-        ],
-      ),
+      builder: (ctx) =>
+          _DialogoNotasCliente(notasInicial: '${c['notas'] ?? ''}'),
     );
-    if (ok != true || !mounted) return;
+    if (notaTexto == null || !mounted) return;
+    final notaLimpia = notaTexto.trim();
     // 1.25 Panel 9: la nota anterior viaja en la op para el
     // registro antes → después de la Auditoría.
     final payloadNotas = <String, dynamic>{
       'cliente_id': widget.clienteId,
-      'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
+      'notas': notaLimpia.isEmpty ? null : notaLimpia,
     };
     final antesNotas = antesEdicionCliente(_c, payloadNotas);
     if (antesNotas.isNotEmpty) payloadNotas['antes'] = antesNotas;
@@ -1804,7 +1652,7 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     // Argón #7B-2: reflejo optimista o _cargar() relee la nota vieja.
     await LocalDb.instance.updateMirrorBasico(widget.clienteId, {
-      'notas': ctrl.text.trim().isEmpty ? null : ctrl.text.trim(),
+      'notas': notaLimpia.isEmpty ? null : notaLimpia,
     });
     if (!mounted) return;
     mostrarSnack(context, 'Nota guardada (se sincronizará)', significado: SignificadoChip.exito);
@@ -2237,41 +2085,12 @@ class _FichaScreenState extends State<FichaScreen> {
     if (accion == null || !mounted) return;
 
     if (accion == 'anular') {
-      final motivoCtrl = TextEditingController();
-      final ok = await showDialog<bool>(
+      final motivoTexto = await showDialog<String>(
         context: context,
-        builder: (ctx) => DialogoApp(
-          titulo: 'Anular pago',
-          iconoTitulo: Icons.cancel_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                  '¿Seguro? El pago quedará anulado en el sistema. '
-                  'Esta acción se sincronizará.'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: motivoCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Motivo (obligatorio)',
-                    border: OutlineInputBorder()),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('No')),
-            ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColores.error),
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Sí, anular')),
-          ],
-        ),
+        builder: (ctx) => const _DialogoAnularPagoFicha(),
       );
-      if (ok != true || !mounted) return;
-      final motivo = motivoCtrl.text.trim();
+      if (motivoTexto == null || !mounted) return;
+      final motivo = motivoTexto.trim();
       if (motivo.isEmpty) {
         mostrarSnack(context, 'Falta el motivo de la anulación.', significado: SignificadoChip.alerta);
         return;
@@ -2289,93 +2108,19 @@ class _FichaScreenState extends State<FichaScreen> {
     }
 
     // editar monto/fecha/método (v1.0.12: método incluido)
-    final montoCtrl = TextEditingController(
-        text: fmtMonto(p['monto']));
     // 1.25 T117 (F1-43): corte con guarda — una fecha
     // presente pero corta lanzaba RangeError al abrir.
     final fechaCrudaP = (p['fecha'] as String? ?? '');
-    final fechaCtrl = TextEditingController(
-        text: fechaCrudaP.length >= 10
-            ? fechaCrudaP.substring(0, 10)
-            : fechaCrudaP);
-    final motivoCtrl = TextEditingController();
-    String metodo = '${p['metodo'] ?? 'efectivo'}';
     final datos = await showDialog<Map<String, String>>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => DialogoApp(
-          titulo: 'Editar pago',
-          iconoTitulo: Icons.edit_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: montoCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                  labelText: 'Monto (CUP)',
-                  border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: fechaCtrl,
-              keyboardType: TextInputType.datetime,
-              decoration: const InputDecoration(
-                  labelText: 'Fecha (AAAA-MM-DD)',
-                  border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Text('Método: '),
-                ChoiceChip(
-                  label: const Text('Efectivo'),
-                  selected: metodo == 'efectivo',
-                  onSelected: (_) => setS(() => metodo = 'efectivo'),
-                ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: const Text('Transferencia'),
-                  selected: metodo == 'transferencia',
-                  onSelected: (_) =>
-                      setS(() => metodo = 'transferencia'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: motivoCtrl,
-              decoration: const InputDecoration(
-                  labelText: 'Motivo (obligatorio)',
-                  border: OutlineInputBorder()),
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, {
-                    'monto': montoCtrl.text,
-                    'fecha': fechaCtrl.text,
-                    'metodo': metodo,
-                    'motivo': motivoCtrl.text,
-                  }),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Continuar')),
-        ],
-      ),
+      builder: (ctx) => _DialogoEditarPagoFicha(
+        montoInicial: fmtMonto(p['monto']),
+        fechaInicial: fechaCrudaP.length >= 10
+            ? fechaCrudaP.substring(0, 10)
+            : fechaCrudaP,
+        metodoInicial: '${p['metodo'] ?? 'efectivo'}',
       ),
     );
-    // v1.3.1 (Argón regresión 2): sin dispose tras showDialog. Son controllers
-    // locales del método; el GC los recoge. El dispose síncrono causaba
-    // "TextEditingController was used after being disposed" durante la
-    // animación de cierre del diálogo.
     if (datos == null || !mounted) return;
     final monto =
         double.tryParse(datos['monto']!.replaceAll(',', '.'));
@@ -2649,7 +2394,11 @@ class _FichaScreenState extends State<FichaScreen> {
                     ? _clienteNoEncontrado()
                     : Stack(
                     children: [
-                      ListView.builder(
+                      // 1.30 FICHA-07: tirar hacia abajo
+                      // refresca la ficha (ver _refrescarFicha).
+                      RefreshIndicator(
+                        onRefresh: _refrescarFicha,
+                        child: ListView.builder(
                         controller: _scrollFicha,
                         padding: const EdgeInsets.all(
                             AppEspacio.lg),
@@ -2672,6 +2421,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             ),
                           );
                         },
+                        ),
                       ),
                       // 1.28 (M4-C3): cabecera compacta al
                       // bajar — foto pequeña, nombre, estado
@@ -3173,6 +2923,35 @@ class _FichaScreenState extends State<FichaScreen> {
                                     '${_c?['pagado_hasta'] ?? ''}',
                                 pausada: congelado,
                               ),
+                            // 1.30 FICHA-02 (FIJO de Jc): vencido
+                            // o por vencer (la ventana de la
+                            // casa: 3 días, la de porVencer y la
+                            // bandeja), la tarjeta ofrece avisar
+                            // por WhatsApp con EL mensaje de la
+                            // bandeja sin salir de la ficha.
+                            // Solo si hay teléfono efectivo (el
+                            // 44 % de la cartera no tiene: sin
+                            // número el botón no aparece). La
+                            // Casa no vence y el congelado no
+                            // corre vencimiento: fuera.
+                            if (!esCasa &&
+                                !congelado &&
+                                (vencido ||
+                                    (dias != null && dias <= 3)) &&
+                                _telefonoEfectivoWa(c).isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                    top: AppEspacio.sm),
+                                child: TextButton.icon(
+                                  onPressed:
+                                      _avisarVencimientoWhatsApp,
+                                  icon: const Icon(
+                                      Icons.chat_rounded,
+                                      size: 18),
+                                  label: const Text(
+                                      'Avisar por WhatsApp'),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -3182,7 +2961,8 @@ class _FichaScreenState extends State<FichaScreen> {
                       if (_pagos.isNotEmpty)
                         Resumen360Ficha(
                             resumen: _resumenPagos,
-                            serieMontos: _seriePagos),
+                            serieMontos: _seriePagos,
+                            compradoVida: _compradoVida),
                       // Bloque 1: línea de tiempo única (pagos +
                       // ventas de suplementos y servicios) con
                       // filtros. Absorbe las 3 tarjetas sueltas
@@ -3619,6 +3399,26 @@ class _FichaScreenState extends State<FichaScreen> {
     await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
+  /// 1.30 FICHA-02 (FIJO): avisar el vencimiento desde la
+  /// tarjeta de Membresía. Abre wa.me con EL mensaje de la
+  /// bandeja según el estado (mensajeWaSegunEstado: la
+  /// fuente única que comparten la bandeja y Buscar, con
+  /// su línea de mensaje automático) al teléfono efectivo
+  /// de siempre. Como el toque del teléfono: solo abre
+  /// WhatsApp, no registra nada.
+  Future<void> _avisarVencimientoWhatsApp() async {
+    final tel = _telefonoEfectivoWa(_c);
+    if (tel.length < 8) {
+      if (!mounted) return;
+      mostrarSnack(context, 'Este cliente no tiene un teléfono válido registrado.', significado: SignificadoChip.alerta);
+      return;
+    }
+    final mensaje = mensajeWaSegunEstado(_c ?? const {});
+    final url = Uri.parse(
+        'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}');
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+  }
+
   /// Iniciales para el placeholder de foto.
   /// v1.2.5: etiqueta legible del estado de incidencia.
   String _estadoIncidencia(Object? estado) {
@@ -3732,6 +3532,11 @@ class _FichaScreenState extends State<FichaScreen> {
             '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
         'icono': Icons.shopping_bag_rounded,
         'color': AppColores.naranja,
+        // 1.30 FICHA-05: monto estructurado para las
+        // sumas de la cabecera de mes (antes solo vivía
+        // como texto en 'trailing').
+        'montoVenta': (s['precio'] as num?)?.toDouble() ?? 0,
+        'monedaVenta': '${s['moneda'] ?? 'CUP'}',
       });
     }
     for (final s in _serviciosHist) {
@@ -3759,6 +3564,16 @@ class _FichaScreenState extends State<FichaScreen> {
         'trailing': casa
             ? 'Casa'
             : '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
+        // 1.30 FICHA-05: monto estructurado para las
+        // sumas de la cabecera de mes. La Casa no es
+        // venta (null: no cuenta ni suma); el reverso
+        // netea por su signo, como en el agregado de
+        // la casa (resumenServiciosDeCliente).
+        'montoVenta': casa
+            ? null
+            : ((s['precio_unitario'] as num?)?.toDouble() ?? 0) *
+                ((s['cantidad'] as num?)?.toDouble() ?? 0),
+        'monedaVenta': 'CUP',
         'icono': (s['reverso_de'] as num?) != null
             ? Icons.undo_rounded
             : Icons.bolt_rounded,
@@ -3909,5 +3724,541 @@ class _FichaScreenState extends State<FichaScreen> {
       return 'Migración del sistema anterior';
     }
     return raw;
+  }
+}
+
+/// Resultado del diálogo «Editar cliente» de la ficha.
+typedef _DatosEditarCliente = ({
+  String nombre,
+  String telefono,
+  String carnet,
+  String sexo,
+});
+
+/// 1.30 (Oleada 7, clase B): diálogo «Editar cliente» con sus
+/// controladores en el State (antes vivían en _editar() sin
+/// dispose). v1.10.0 (Bloque 2, Argón ajuste 4): edita SOLO
+/// datos BÁSICOS (nombre, teléfono, carnet, sexo). 1.30
+/// FICHA-10: el campo de teléfono enseña el EFECTIVO.
+class _DialogoEditarCliente extends StatefulWidget {
+  const _DialogoEditarCliente({
+    required this.nombreInicial,
+    required this.telefonoInicial,
+    required this.carnetInicial,
+    required this.sexoInicial,
+    required this.alElegirDeContactos,
+  });
+  final String nombreInicial;
+  final String telefonoInicial;
+  final String carnetInicial;
+  final String sexoInicial;
+  final Future<String?> Function(BuildContext) alElegirDeContactos;
+
+  @override
+  State<_DialogoEditarCliente> createState() => _DialogoEditarClienteState();
+}
+
+class _DialogoEditarClienteState extends State<_DialogoEditarCliente> {
+  late final TextEditingController _nombreCtrl;
+  late final TextEditingController _telefonoCtrl;
+  late final TextEditingController _carnetCtrl;
+  late String _sexo;
+  // v1.5.0 (Bloque G): aviso de fecha de carnet imposible (no bloquea).
+  late bool _carnetInvalido;
+
+  @override
+  void initState() {
+    super.initState();
+    _nombreCtrl = TextEditingController(text: widget.nombreInicial);
+    _telefonoCtrl = TextEditingController(text: widget.telefonoInicial);
+    _carnetCtrl = TextEditingController(text: widget.carnetInicial);
+    _sexo = widget.sexoInicial;
+    _carnetInvalido = carnetFechaInvalida(_carnetCtrl.text);
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _telefonoCtrl.dispose();
+    _carnetCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Editar cliente',
+      iconoTitulo: Icons.edit_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: _nombreCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nombre', border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                      controller: _telefonoCtrl,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                          labelText: 'Teléfono (8 dígitos)',
+                          border: OutlineInputBorder())),
+                ),
+                const SizedBox(width: 8),
+                // Elegir de los contactos del teléfono (v1.0.11)
+                IconButton(
+                  tooltip: 'Elegir de contactos',
+                  icon: Icon(Icons.contacts_rounded,
+                      color: AppColores.textoSecundario(context)),
+                  onPressed: () async {
+                    final tel = await widget.alElegirDeContactos(context);
+                    if (tel != null && tel.isNotEmpty) {
+                      setState(() => _telefonoCtrl.text = tel);
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+                controller: _carnetCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (v) =>
+                    setState(() => _carnetInvalido = carnetFechaInvalida(v)),
+                decoration: const InputDecoration(
+                    labelText: 'Carnet (6–11 dígitos)',
+                    border: OutlineInputBorder())),
+            // v1.5.0 (Bloque G): aviso sin bloquear el guardado.
+            if (_carnetInvalido) const AvisoFechaCarnet(),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Text('Sexo: '),
+                // 1.25 T117 (F1-48): la palabra entera — «M»/«F»
+                // obligaban a saber el código. El valor
+                // guardado no cambia ('M'/'F').
+                ChoiceChip(
+                    label: const Text('Masculino'),
+                    selected: _sexo == 'M',
+                    onSelected: (_) => setState(() => _sexo = 'M')),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                    label: const Text('Femenino'),
+                    selected: _sexo == 'F',
+                    onSelected: (_) => setState(() => _sexo = 'F')),
+              ],
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, (
+                  nombre: _nombreCtrl.text,
+                  telefono: _telefonoCtrl.text,
+                  carnet: _carnetCtrl.text,
+                  sexo: _sexo,
+                )),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo del motivo de Cuenta a
+/// la Casa con su controlador en el State. Devuelve el
+/// motivo (recortado) o null si se cancela.
+class _DialogoMotivoCuentaCasa extends StatefulWidget {
+  const _DialogoMotivoCuentaCasa(
+      {required this.activar, required this.nombre});
+  final bool activar;
+  final String nombre;
+
+  @override
+  State<_DialogoMotivoCuentaCasa> createState() =>
+      _DialogoMotivoCuentaCasaState();
+}
+
+class _DialogoMotivoCuentaCasaState extends State<_DialogoMotivoCuentaCasa> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: widget.activar
+          ? 'Pasar a Cuenta a la Casa'
+          : 'Quitar Cuenta a la Casa',
+      iconoTitulo: Icons.home_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.activar
+              ? '${widget.nombre} tendrá acceso permanente sin pagar ni '
+                  'vencer. No contará en nómina, vencimientos ni '
+                  'ingresos.'
+              : '${widget.nombre} volverá a ser un cliente normal: regirá '
+                  'su «pagado hasta» actual.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            decoration: const InputDecoration(
+              labelText: 'Motivo (opcional)',
+              hintText: 'Ej.: hermana del dueño, cortesía…',
+              border: OutlineInputBorder(),
+            ),
+            maxLength: 120,
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
+          child: Text(widget.activar ? 'Pasar a la Casa' : 'Quitar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Anular pago» de la
+/// ficha con su controlador en el State. Devuelve el
+/// motivo tecleado o null si se cancela.
+class _DialogoAnularPagoFicha extends StatefulWidget {
+  const _DialogoAnularPagoFicha();
+
+  @override
+  State<_DialogoAnularPagoFicha> createState() =>
+      _DialogoAnularPagoFichaState();
+}
+
+class _DialogoAnularPagoFichaState extends State<_DialogoAnularPagoFicha> {
+  late final TextEditingController _motivoCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _motivoCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Anular pago',
+      iconoTitulo: Icons.cancel_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('¿Seguro? El pago quedará anulado en el sistema. '
+              'Esta acción se sincronizará.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _motivoCtrl,
+            decoration: const InputDecoration(
+                labelText: 'Motivo (obligatorio)',
+                border: OutlineInputBorder()),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No')),
+        ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColores.error),
+            onPressed: () => Navigator.pop(context, _motivoCtrl.text),
+            child: const Text('Sí, anular')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Editar pago» de la
+/// ficha con sus controladores y el método en el State.
+/// Devuelve el mismo mapa que devolvía el StatefulBuilder.
+class _DialogoEditarPagoFicha extends StatefulWidget {
+  const _DialogoEditarPagoFicha({
+    required this.montoInicial,
+    required this.fechaInicial,
+    required this.metodoInicial,
+  });
+  final String montoInicial;
+  final String fechaInicial;
+  final String metodoInicial;
+
+  @override
+  State<_DialogoEditarPagoFicha> createState() =>
+      _DialogoEditarPagoFichaState();
+}
+
+class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
+  late final TextEditingController _montoCtrl;
+  late final TextEditingController _fechaCtrl;
+  late final TextEditingController _motivoCtrl;
+  late String _metodo;
+
+  @override
+  void initState() {
+    super.initState();
+    _montoCtrl = TextEditingController(text: widget.montoInicial);
+    _fechaCtrl = TextEditingController(text: widget.fechaInicial);
+    _motivoCtrl = TextEditingController();
+    _metodo = widget.metodoInicial;
+  }
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    _fechaCtrl.dispose();
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Editar pago',
+      iconoTitulo: Icons.edit_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _montoCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+                labelText: 'Monto (CUP)', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _fechaCtrl,
+            keyboardType: TextInputType.datetime,
+            decoration: const InputDecoration(
+                labelText: 'Fecha (AAAA-MM-DD)',
+                border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('Método: '),
+              ChoiceChip(
+                label: const Text('Efectivo'),
+                selected: _metodo == 'efectivo',
+                onSelected: (_) => setState(() => _metodo = 'efectivo'),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('Transferencia'),
+                selected: _metodo == 'transferencia',
+                onSelected: (_) => setState(() => _metodo = 'transferencia'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _motivoCtrl,
+            decoration: const InputDecoration(
+                labelText: 'Motivo (obligatorio)',
+                border: OutlineInputBorder()),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, {
+                  'monto': _montoCtrl.text,
+                  'fecha': _fechaCtrl.text,
+                  'metodo': _metodo,
+                  'motivo': _motivoCtrl.text,
+                }),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Continuar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo de WhatsApp del regalo
+/// de cumpleaños con su controlador en el State. La lógica
+/// de guardar el teléfono y abrir WhatsApp vive en la
+/// ficha y entra por [alAbrir] (false = número inválido:
+/// el diálogo avisa y se queda abierto).
+class _DialogoWhatsAppRegalo extends StatefulWidget {
+  const _DialogoWhatsAppRegalo({
+    required this.mensaje,
+    required this.telefonoInicial,
+    required this.alCopiar,
+    required this.alAbrir,
+  });
+  final String mensaje;
+  final String telefonoInicial;
+  final VoidCallback alCopiar;
+  final Future<bool> Function(String telCrudo) alAbrir;
+
+  @override
+  State<_DialogoWhatsAppRegalo> createState() => _DialogoWhatsAppRegaloState();
+}
+
+class _DialogoWhatsAppRegaloState extends State<_DialogoWhatsAppRegalo> {
+  late final TextEditingController _telCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _telCtrl = TextEditingController(text: widget.telefonoInicial);
+  }
+
+  @override
+  void dispose() {
+    _telCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('📱 Notificar por WhatsApp'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SelectableText(widget.mensaje),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _telCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Teléfono',
+                hintText: 'Ej. 58123456',
+                prefixText: '+53 ',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: widget.mensaje));
+            Navigator.of(context).pop();
+            widget.alCopiar();
+          },
+          child: const Text('Copiar mensaje'),
+        ),
+        BotonPrimario(
+          texto: 'Abrir WhatsApp',
+          onPressed: () async {
+            final ok = await widget.alAbrir(_telCtrl.text);
+            if (!ok) {
+              if (context.mounted) {
+                mostrarSnack(context,
+                    'Teléfono inválido: 8 dígitos empezando con 5 o 6',
+                    significado: SignificadoChip.alerta);
+              }
+              return;
+            }
+            if (context.mounted) Navigator.of(context).pop();
+          },
+          expandido: false,
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Notas del cliente»
+/// con su controlador en el State (antes vivía en
+/// _editarNotas() sin dispose). Devuelve el texto de la
+/// nota al Guardar o null si se cancela.
+class _DialogoNotasCliente extends StatefulWidget {
+  const _DialogoNotasCliente({required this.notasInicial});
+  final String notasInicial;
+
+  @override
+  State<_DialogoNotasCliente> createState() => _DialogoNotasClienteState();
+}
+
+class _DialogoNotasClienteState extends State<_DialogoNotasCliente> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.notasInicial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Notas del cliente',
+      iconoTitulo: Icons.note_rounded,
+      contenido: TextField(
+        controller: _ctrl,
+        maxLines: 4,
+        decoration: const InputDecoration(
+            hintText: 'Ej: lesionado, viene solo mañanas…',
+            border: OutlineInputBorder()),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Guardar')),
+      ],
+    );
   }
 }

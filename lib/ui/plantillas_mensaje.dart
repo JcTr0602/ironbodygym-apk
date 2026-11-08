@@ -135,71 +135,20 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
 
   Future<void> _editarPlantilla(
       BuildContext context, Map<String, dynamic>? p) async {
-    final nombreCtrl = TextEditingController(text: '${p?['nombre'] ?? ''}');
-    final cuerpoCtrl = TextEditingController(text: '${p?['cuerpo'] ?? ''}');
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<({String nombre, String cuerpo})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => DialogoApp(
-          titulo: p == null ? 'Nueva plantilla' : 'Editar plantilla',
-          iconoTitulo: Icons.message_rounded,
-          contenido: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                    controller: nombreCtrl,
-                    decoration: const InputDecoration(
-                        labelText: 'Nombre',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                TextField(
-                    controller: cuerpoCtrl,
-                    maxLines: 6,
-                    decoration: const InputDecoration(
-                        labelText: 'Texto (usa {{variable}})',
-                        border: OutlineInputBorder())),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    for (final v in kVariablesPlantilla)
-                      ActionChip(
-                        label: Text('{{$v}}'),
-                        onPressed: () {
-                          final t = cuerpoCtrl.text;
-                          cuerpoCtrl.text = '$t {{$v}}';
-                          setS(() {});
-                        },
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Guardar')),
-          ],
-        ),
-      ),
+      builder: (ctx) => _DialogoEditarPlantilla(plantilla: p),
     );
-    if (ok != true || !context.mounted) return;
-    if (nombreCtrl.text.trim().isEmpty ||
-        cuerpoCtrl.text.trim().isEmpty) {
+    if (datos == null || !context.mounted) return;
+    if (datos.nombre.trim().isEmpty || datos.cuerpo.trim().isEmpty) {
       mostrarSnack(context, 'Nombre y texto son obligatorios.', significado: SignificadoChip.alerta);
       return;
     }
     if (p == null) {
-      await crearPlantilla(
-          nombreCtrl.text.trim(), cuerpoCtrl.text.trim());
+      await crearPlantilla(datos.nombre.trim(), datos.cuerpo.trim());
     } else {
       await editarPlantilla(
-          '${p['id']}', nombreCtrl.text.trim(), cuerpoCtrl.text.trim());
+          '${p['id']}', datos.nombre.trim(), datos.cuerpo.trim());
     }
   }
 
@@ -274,65 +223,9 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
   /// No registra nada (como el teléfono tocable de la ficha).
   Future<void> _enviarACliente(Map<String, dynamic> p) async {
     final todos = await listaClientes('');
-    final filtro = TextEditingController();
     final cliente = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) {
-          final q = filtro.text.trim().toLowerCase();
-          // P2#8-parte: el filtro de protegidos va AQUÍ, en el
-          // diálogo de envío, no dentro de buscarClientes (que es
-          // compartida). El diálogo muestra además el teléfono, así
-          // que un protegido no debe llegar a esta lista.
-          final sinProtegidos =
-              todos.where((c) => !esVistaProtegida(c)).toList();
-          final visibles = q.isEmpty
-              ? sinProtegidos
-              : sinProtegidos
-                  .where((c) => '${c['nombre'] ?? ''}'
-                      .toLowerCase()
-                      .contains(q))
-                  .toList();
-          return DialogoApp(
-            titulo: 'Elegir cliente',
-            iconoTitulo: Icons.person_rounded,
-            contenido: SizedBox(
-              width: double.maxFinite,
-              height: 380,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: filtro,
-                    decoration: const InputDecoration(
-                        hintText: 'Filtrar por nombre',
-                        border: OutlineInputBorder()),
-                    onChanged: (_) => setS(() {}),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        for (final c in visibles)
-                          ListTile(
-                            dense: true,
-                            title: Text('${c['nombre'] ?? ''}'),
-                            subtitle: Text('${c['telefono'] ?? ''}'),
-                            onTap: () => Navigator.pop(ctx, c),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            acciones: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, null),
-                  child: const Text('Cancelar')),
-            ],
-          );
-        },
-      ),
+      builder: (ctx) => _DialogoElegirClientePlantilla(todos: todos),
     );
     if (cliente == null || !mounted) return;
     final precio = await precioCobroParaCliente(
@@ -399,5 +292,171 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       if (!mounted) return;
       mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
     }
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): editor de plantilla como
+/// StatefulWidget propio: posee y dispone los controladores
+/// de nombre y cuerpo (antes se creaban en el llamador y
+/// nunca se liberaban). Devuelve los textos al guardar o
+/// null si se cancela.
+class _DialogoEditarPlantilla extends StatefulWidget {
+  final Map<String, dynamic>? plantilla;
+  const _DialogoEditarPlantilla({required this.plantilla});
+
+  @override
+  State<_DialogoEditarPlantilla> createState() =>
+      _DialogoEditarPlantillaState();
+}
+
+class _DialogoEditarPlantillaState
+    extends State<_DialogoEditarPlantilla> {
+  late final TextEditingController _nombreCtrl;
+  late final TextEditingController _cuerpoCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.plantilla;
+    _nombreCtrl = TextEditingController(text: '${p?['nombre'] ?? ''}');
+    _cuerpoCtrl = TextEditingController(text: '${p?['cuerpo'] ?? ''}');
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _cuerpoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.plantilla;
+    return DialogoApp(
+      titulo: p == null ? 'Nueva plantilla' : 'Editar plantilla',
+      iconoTitulo: Icons.message_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: _nombreCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nombre',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            TextField(
+                controller: _cuerpoCtrl,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                    labelText: 'Texto (usa {{variable}})',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final v in kVariablesPlantilla)
+                  ActionChip(
+                    label: Text('{{$v}}'),
+                    onPressed: () {
+                      final t = _cuerpoCtrl.text;
+                      _cuerpoCtrl.text = '$t {{$v}}';
+                      setState(() {});
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context,
+                (nombre: _nombreCtrl.text, cuerpo: _cuerpoCtrl.text)),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): selector de cliente para enviar
+/// la plantilla, como StatefulWidget propio: posee y dispone
+/// el controlador del filtro (antes se creaba en el llamador
+/// y nunca se liberaba). Devuelve el cliente elegido o null.
+class _DialogoElegirClientePlantilla extends StatefulWidget {
+  final List<Map<String, dynamic>> todos;
+  const _DialogoElegirClientePlantilla({required this.todos});
+
+  @override
+  State<_DialogoElegirClientePlantilla> createState() =>
+      _DialogoElegirClientePlantillaState();
+}
+
+class _DialogoElegirClientePlantillaState
+    extends State<_DialogoElegirClientePlantilla> {
+  final _filtro = TextEditingController();
+
+  @override
+  void dispose() {
+    _filtro.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _filtro.text.trim().toLowerCase();
+    // P2#8-parte: el filtro de protegidos va AQUÍ, en el
+    // diálogo de envío, no dentro de buscarClientes (que es
+    // compartida). El diálogo muestra además el teléfono, así
+    // que un protegido no debe llegar a esta lista.
+    final sinProtegidos =
+        widget.todos.where((c) => !esVistaProtegida(c)).toList();
+    final visibles = q.isEmpty
+        ? sinProtegidos
+        : sinProtegidos
+            .where((c) =>
+                '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
+            .toList();
+    return DialogoApp(
+      titulo: 'Elegir cliente',
+      iconoTitulo: Icons.person_rounded,
+      contenido: SizedBox(
+        width: double.maxFinite,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              controller: _filtro,
+              decoration: const InputDecoration(
+                  hintText: 'Filtrar por nombre',
+                  border: OutlineInputBorder()),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final c in visibles)
+                    ListTile(
+                      dense: true,
+                      title: Text('${c['nombre'] ?? ''}'),
+                      subtitle: Text('${c['telefono'] ?? ''}'),
+                      onTap: () => Navigator.pop(context, c),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancelar')),
+      ],
+    );
   }
 }

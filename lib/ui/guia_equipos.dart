@@ -96,35 +96,21 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   }
 
   Future<void> _crear() async {
-    final nombre = TextEditingController();
-    final ok = await showDialog<bool>(
+    final texto = await showDialog<String>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Nuevo equipo'),
-        content: TextField(
-          controller: nombre,
-          decoration: const InputDecoration(
-            labelText: 'Nombre del equipo',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Crear')),
-        ],
+      builder: (c) => const _DialogoNombreEquipo(
+        titulo: 'Nuevo equipo',
+        etiqueta: 'Nombre del equipo',
+        botonOk: 'Crear',
       ),
     );
-    if (ok != true || !mounted) return;
-    final errorNombre = GuiaValidacion.errorNombreEquipo(nombre.text);
+    if (texto == null || !mounted) return;
+    final errorNombre = GuiaValidacion.errorNombreEquipo(texto);
     if (errorNombre != null) {
       _aviso(errorNombre);
       return;
     }
-    final slug = _slugDesdeNombre(nombre.text);
+    final slug = _slugDesdeNombre(texto);
     if (!GuiaValidacion.slugValido(slug)) {
       _aviso('Nombre no válido para un equipo.');
       return;
@@ -140,7 +126,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
     try {
       await _aplicarEquipo({
         'equipoId': slug,
-        'equipoNombre': nombre.text.trim(),
+        'equipoNombre': texto.trim(),
         'orden': maxOrden + 1,
         'activo': true,
       });
@@ -151,50 +137,25 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   }
 
   Future<void> _renombrar(Map<String, dynamic> e) async {
-    final nombre =
-        TextEditingController(text: '${e['equipoNombre']}');
-    final ok = await showDialog<bool>(
+    final texto = await showDialog<String>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Renombrar equipo'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nombre,
-              decoration: const InputDecoration(
-                labelText: 'Nuevo nombre',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Renombrar NO republica las fichas: solo cambia el '
-              'nombre que se muestra.',
-              style: AppTexto.metadato.copyWith(
-              color: AppColores.textoSecundario(context)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Renombrar')),
-        ],
+      builder: (c) => _DialogoNombreEquipo(
+        titulo: 'Renombrar equipo',
+        etiqueta: 'Nuevo nombre',
+        botonOk: 'Renombrar',
+        inicial: '${e['equipoNombre']}',
+        conNota: true,
       ),
     );
-    if (ok != true || !mounted) return;
-    final errorNombre = GuiaValidacion.errorNombreEquipo(nombre.text);
+    if (texto == null || !mounted) return;
+    final errorNombre = GuiaValidacion.errorNombreEquipo(texto);
     if (errorNombre != null) {
       _aviso(errorNombre);
       return;
     }
     setState(() => _ocupado = true);
     try {
-      await _aplicarEquipo({...e, 'equipoNombre': nombre.text.trim()});
+      await _aplicarEquipo({...e, 'equipoNombre': texto.trim()});
       _aviso('Equipo renombrado.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
@@ -393,6 +354,83 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                   ),
               ],
             ),
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo de nombre de equipo
+/// (crear / renombrar) como StatefulWidget propio: posee y
+/// dispone su controlador (antes se creaba en el llamador y
+/// nunca se liberaba). Devuelve el texto escrito o null si
+/// se cancela.
+class _DialogoNombreEquipo extends StatefulWidget {
+  final String titulo;
+  final String etiqueta;
+  final String botonOk;
+  final String inicial;
+  final bool conNota;
+  const _DialogoNombreEquipo({
+    required this.titulo,
+    required this.etiqueta,
+    required this.botonOk,
+    this.inicial = '',
+    this.conNota = false,
+  });
+
+  @override
+  State<_DialogoNombreEquipo> createState() =>
+      _DialogoNombreEquipoState();
+}
+
+class _DialogoNombreEquipoState extends State<_DialogoNombreEquipo> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.inicial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final campo = TextField(
+      controller: _ctrl,
+      decoration: InputDecoration(
+        labelText: widget.etiqueta,
+        border: const OutlineInputBorder(),
+      ),
+    );
+    return AlertDialog(
+      title: Text(widget.titulo),
+      content: widget.conNota
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                campo,
+                const SizedBox(height: 8),
+                Text(
+                  'Renombrar NO republica las fichas: solo cambia el '
+                  'nombre que se muestra.',
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
+              ],
+            )
+          : campo,
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            child: Text(widget.botonOk)),
+      ],
     );
   }
 }

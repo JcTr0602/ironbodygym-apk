@@ -265,75 +265,110 @@ Future<void> mostrarModalTarifaEspecial(
 
 Future<List<int>?> _elegirClientes(BuildContext context) async {
   final todos = await listaClientes('');
-  final filtro = TextEditingController();
-  final elegidos = <int>{};
   return showDialog<List<int>>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setS) {
-        final q = filtro.text.trim().toLowerCase();
-        final visibles = q.isEmpty
-            ? todos
-            : todos
-                .where((c) =>
-                    '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
-                .toList();
-        return DialogoApp(
-          titulo: 'Elegir clientes',
-          iconoTitulo: Icons.group_rounded,
-          contenido: SizedBox(
-            width: double.maxFinite,
-            height: 420,
-            child: Column(
-              children: [
-                TextField(
-                  controller: filtro,
-                  decoration: const InputDecoration(
-                      hintText: 'Filtrar por nombre',
-                      border: OutlineInputBorder()),
-                  onChanged: (_) => setS(() {}),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      for (final c in visibles)
-                        CheckboxListTile(
-                          dense: true,
-                          title: Text('${c['nombre'] ?? ''}'),
-                          value: elegidos
-                              .contains((c['id'] as num?)?.toInt()),
-                          onChanged: (v) => setS(() {
-                            final id = (c['id'] as num?)?.toInt();
-                            if (id == null) return;
-                            if (v == true) {
-                              elegidos.add(id);
-                            } else {
-                              elegidos.remove(id);
-                            }
-                          }),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, null),
-                child: const Text('Cancelar')),
-            FilledButton(
-                onPressed: elegidos.isEmpty
-                    ? null
-                    : () => Navigator.pop(ctx, elegidos.toList()),
-                child: Text('Continuar (${elegidos.length})')),
-          ],
-        );
-      },
-    ),
+    builder: (ctx) => _DialogoElegirClientesTarifa(todos: todos),
   );
 }
+
+/// 1.30 (Oleada 7, clase B): selector de clientes de la
+/// tarifa como StatefulWidget propio: posee y dispone el
+/// controlador del filtro (antes se creaba en la función y
+/// nunca se liberaba). Devuelve los ids elegidos o null.
+class _DialogoElegirClientesTarifa extends StatefulWidget {
+  final List<Map<String, dynamic>> todos;
+  const _DialogoElegirClientesTarifa({required this.todos});
+
+  @override
+  State<_DialogoElegirClientesTarifa> createState() =>
+      _DialogoElegirClientesTarifaState();
+}
+
+class _DialogoElegirClientesTarifaState
+    extends State<_DialogoElegirClientesTarifa> {
+  final _filtro = TextEditingController();
+  final _elegidos = <int>{};
+
+  @override
+  void dispose() {
+    _filtro.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _filtro.text.trim().toLowerCase();
+    final visibles = q.isEmpty
+        ? widget.todos
+        : widget.todos
+            .where((c) =>
+                '${c['nombre'] ?? ''}'.toLowerCase().contains(q))
+            .toList();
+    return DialogoApp(
+      titulo: 'Elegir clientes',
+      iconoTitulo: Icons.group_rounded,
+      contenido: SizedBox(
+        width: double.maxFinite,
+        height: 420,
+        child: Column(
+          children: [
+            TextField(
+              controller: _filtro,
+              decoration: const InputDecoration(
+                  hintText: 'Filtrar por nombre',
+                  border: OutlineInputBorder()),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final c in visibles)
+                    CheckboxListTile(
+                      dense: true,
+                      title: Text('${c['nombre'] ?? ''}'),
+                      value: _elegidos
+                          .contains((c['id'] as num?)?.toInt()),
+                      onChanged: (v) => setState(() {
+                        final id = (c['id'] as num?)?.toInt();
+                        if (id == null) return;
+                        if (v == true) {
+                          _elegidos.add(id);
+                        } else {
+                          _elegidos.remove(id);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: _elegidos.isEmpty
+                ? null
+                : () => Navigator.pop(context, _elegidos.toList()),
+            child: Text('Continuar (${_elegidos.length})')),
+      ],
+    );
+  }
+}
+
+/// Datos que devuelve el formulario de tarifa al guardar.
+typedef _DatosTarifa = ({
+  String nombre,
+  String efectivo,
+  String transfer,
+  String desde,
+  String hasta,
+  String motivo,
+  String periodo,
+});
 
 Future<void> _formularioTarifa(
   BuildContext context, {
@@ -341,174 +376,46 @@ Future<void> _formularioTarifa(
   String? clienteNombre,
 }) async {
   final esMulti = clienteIds.length > 1;
-  final nombreCtrl = TextEditingController();
-  final efectivoCtrl = TextEditingController();
-  final transferCtrl = TextEditingController();
-  final desdeCtrl = TextEditingController(text: hoyHabanaIso());
-  final hastaCtrl = TextEditingController();
-  final motivoCtrl = TextEditingController();
-  var periodo = 'mensual';
+  // Pre-carga inicial del periodo por defecto ('mensual'),
+  // ANTES de abrir, como siempre: el diálogo nace ya con los
+  // valores de la fila activa (o vacío si no hay).
   Map<String, dynamic>? activaPrevia;
-
-  Future<void> cargarPrevia() async {
-    // Solo en modo un cliente: pre-carga AMBOS métodos de la fila
-    // activa de ese periodo (ajuste 1).
-    if (esMulti) return;
-    final previa =
-        await tarifaActivaPara(clienteIds.first, periodo);
-    activaPrevia = previa;
-    if (previa != null) {
-      nombreCtrl.text = '${previa['nombre'] ?? ''}';
-      final ef = (previa['monto_efectivo'] as num?)?.toDouble();
-      final tr = (previa['monto_transferencia'] as num?)?.toDouble();
-      efectivoCtrl.text = ef == null ? '' : _num(ef);
-      transferCtrl.text = tr == null ? '' : _num(tr);
-      desdeCtrl.text = '${previa['vigente_desde'] ?? hoyHabanaIso()}';
-      hastaCtrl.text = '${previa['vigente_hasta'] ?? ''}';
-      motivoCtrl.text = '${previa['motivo'] ?? ''}';
-    } else {
-      // Corrección panel 1.10 (BAJO): sin previa, el formulario
-      // es «Nueva tarifa» y NO debe conservar los valores del
-      // periodo anterior (antes se guardaban como si fueran de
-      // este periodo).
-      nombreCtrl.clear();
-      efectivoCtrl.clear();
-      transferCtrl.clear();
-      desdeCtrl.text = hoyHabanaIso();
-      hastaCtrl.clear();
-      motivoCtrl.clear();
-    }
+  if (!esMulti) {
+    activaPrevia =
+        await tarifaActivaPara(clienteIds.first, 'mensual');
   }
-
-  await cargarPrevia();
   if (!context.mounted) return;
 
-  final ok = await showDialog<bool>(
+  final datos = await showDialog<_DatosTarifa>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setS) => DialogoApp(
-        titulo: activaPrevia != null
-            ? 'Editar tarifa especial'
-            : 'Nueva tarifa especial',
-        iconoTitulo: Icons.local_offer_rounded,
-        contenido: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (esMulti)
-                const Text(
-                  'Se creará UNA fila por cliente. Lo que dejes vacío '
-                  'quedará sin especial para ese método en todos los '
-                  'clientes elegidos.',
-                  style: AppTexto.secundario,
-                ),
-              if (!esMulti && clienteNombre != null)
-                Text('Cliente: $clienteNombre',
-                    style: AppTexto.cuerpo),
-              const SizedBox(height: 8),
-              // N1 (estéticas 1.19): campos del sistema.
-              CampoTexto(
-                  controller: nombreCtrl,
-                  etiqueta: 'Nombre (ej: Kevin 1000)'),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: efectivoCtrl,
-                  teclado: TextInputType.number,
-                  etiqueta:
-                      'Monto en efectivo (vacío = sin especial)'),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: transferCtrl,
-                  teclado: TextInputType.number,
-                  etiqueta:
-                      'Monto por transferencia (vacío = sin especial)'),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: periodo,
-                decoration: const InputDecoration(
-                    labelText: 'Periodo',
-                    border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'mensual', child: Text('Mensual')),
-                  DropdownMenuItem(
-                      value: 'semanal', child: Text('Semanal')),
-                  DropdownMenuItem(
-                      value: 'quincenal', child: Text('Quincenal')),
-                ],
-                onChanged: (v) async {
-                  if (v == null) return;
-                  setS(() => periodo = v);
-                  await cargarPrevia();
-                  setS(() {});
-                },
-              ),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: desdeCtrl,
-                  etiqueta: 'Vigente desde (AAAA-MM-DD)'),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: hastaCtrl,
-                  etiqueta: 'Vigente hasta (vacío = sin fin)'),
-              const SizedBox(height: 8),
-              CampoTexto(
-                  controller: motivoCtrl,
-                  etiqueta: 'Motivo (obligatorio, interno: '
-                      'nunca sale en mensajes)'),
-            ],
-          ),
-        ),
-        acciones: [
-          if (activaPrevia != null && !esMulti)
-            TextButton(
-                onPressed: () async {
-                  final motivo = await _pedirMotivo(context);
-                  if (motivo == null || !context.mounted) return;
-                  await revocarTarifaEspecial(
-                      id: '${activaPrevia!['id']}', motivo: motivo);
-                  // Corrección panel 1.10: subir la revocación en
-                  // cuanto se confirma, no esperar al próximo push
-                  // (antes la ventana en que el espejo viejo
-                  // volvía a mostrarla activa duraba un turno).
-                  SyncEngine.instance.push();
-                  // Cerrar SIN guardar: false hace que el código de
-                  // abajo retorne sin otorgar nada nuevo.
-                  if (ctx.mounted) Navigator.pop(ctx, false);
-                },
-                child: const Text('Revocar',
-                    style: TextStyle(color: AppColores.error))),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Guardar')),
-        ],
-      ),
+    builder: (ctx) => _DialogoFormularioTarifa(
+      clienteIds: clienteIds,
+      clienteNombre: clienteNombre,
+      previaInicial: activaPrevia,
     ),
   );
-  if (ok != true || !context.mounted) return;
+  if (datos == null || !context.mounted) return;
+  final periodo = datos.periodo;
 
   // Validación (no bloquea con diálogos crípticos: un aviso claro).
   String? error;
-  final ef = _parseMonto(efectivoCtrl.text);
-  final tr = _parseMonto(transferCtrl.text);
-  if (nombreCtrl.text.trim().isEmpty) {
+  final ef = _parseMonto(datos.efectivo);
+  final tr = _parseMonto(datos.transfer);
+  if (datos.nombre.trim().isEmpty) {
     error = 'Falta el nombre de la tarifa.';
   } else if (ef == null && tr == null) {
     error = 'Pon al menos un monto (efectivo o transferencia).';
   } else if ((ef != null && ef <= 0) || (tr != null && tr <= 0)) {
     error = 'Los montos deben ser mayores que 0.';
-  } else if (motivoCtrl.text.trim().isEmpty) {
+  } else if (datos.motivo.trim().isEmpty) {
     error = 'Falta el motivo (es obligatorio y queda en el historial).';
-  } else if (DateTime.tryParse(desdeCtrl.text.trim()) == null) {
+  } else if (DateTime.tryParse(datos.desde.trim()) == null) {
     error = 'Vigente desde no es una fecha válida (AAAA-MM-DD).';
-  } else if (hastaCtrl.text.trim().isNotEmpty &&
-      DateTime.tryParse(hastaCtrl.text.trim()) == null) {
+  } else if (datos.hasta.trim().isNotEmpty &&
+      DateTime.tryParse(datos.hasta.trim()) == null) {
     error = 'Vigente hasta no es una fecha válida (AAAA-MM-DD).';
-  } else if (hastaCtrl.text.trim().isNotEmpty &&
-      hastaCtrl.text.trim().compareTo(desdeCtrl.text.trim()) < 0) {
+  } else if (datos.hasta.trim().isNotEmpty &&
+      datos.hasta.trim().compareTo(datos.desde.trim()) < 0) {
     error = 'Vigente hasta no puede ser antes que vigente desde.';
   }
   if (error != null) {
@@ -554,14 +461,14 @@ Future<void> _formularioTarifa(
 
   await otorgarTarifaEspecialMulti(
     clienteIds: clienteIds,
-    nombre: nombreCtrl.text.trim(),
+    nombre: datos.nombre.trim(),
     montoEfectivo: ef,
     montoTransferencia: tr,
     periodo: periodo,
-    vigenteDesde: desdeCtrl.text.trim(),
+    vigenteDesde: datos.desde.trim(),
     vigenteHasta:
-        hastaCtrl.text.trim().isEmpty ? null : hastaCtrl.text.trim(),
-    motivo: motivoCtrl.text.trim(),
+        datos.hasta.trim().isEmpty ? null : datos.hasta.trim(),
+    motivo: datos.motivo.trim(),
     otorgadoPor: AuthService().telegramId,
   );
   // Como tras revocar: subir en cuanto se guarda.
@@ -571,28 +478,255 @@ Future<void> _formularioTarifa(
 }
 
 Future<String?> _pedirMotivo(BuildContext context) async {
-  final ctrl = TextEditingController();
   return showDialog<String>(
     context: context,
-    builder: (ctx) => DialogoApp(
+    builder: (ctx) => const _DialogoPedirMotivo(),
+  );
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Motivo de la
+/// revocación» como StatefulWidget propio: posee y dispone
+/// su controlador (antes se creaba en la función y nunca se
+/// liberaba). Devuelve el motivo (vacío = null) o null.
+class _DialogoPedirMotivo extends StatefulWidget {
+  const _DialogoPedirMotivo();
+
+  @override
+  State<_DialogoPedirMotivo> createState() =>
+      _DialogoPedirMotivoState();
+}
+
+class _DialogoPedirMotivoState extends State<_DialogoPedirMotivo> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
       titulo: 'Motivo de la revocación',
       iconoTitulo: Icons.cancel_rounded,
       contenido: TextField(
-          controller: ctrl,
+          controller: _ctrl,
           decoration: const InputDecoration(
               hintText: 'Ej: terminó el pacto',
               border: OutlineInputBorder())),
       acciones: [
         TextButton(
-            onPressed: () => Navigator.pop(ctx, null),
+            onPressed: () => Navigator.pop(context, null),
             child: const Text('Cancelar')),
         FilledButton(
-            onPressed: () => Navigator.pop(
-                ctx, ctrl.text.trim().isEmpty ? null : ctrl.text.trim()),
+            onPressed: () => Navigator.pop(context,
+                _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim()),
             child: const Text('Revocar')),
       ],
-    ),
-  );
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): el formulario de tarifa especial
+/// como StatefulWidget propio: posee y dispone sus seis
+/// controladores (antes se creaban en la función y nunca se
+/// liberaban). La pre-carga inicial llega por [previaInicial]
+/// (el llamador la espera ANTES de abrir, como siempre); al
+/// cambiar el periodo, el propio estado recarga la previa de
+/// ese periodo. Devuelve los datos al guardar o null si se
+/// cancela o se revoca.
+class _DialogoFormularioTarifa extends StatefulWidget {
+  final List<int> clienteIds;
+  final String? clienteNombre;
+  final Map<String, dynamic>? previaInicial;
+  const _DialogoFormularioTarifa({
+    required this.clienteIds,
+    required this.clienteNombre,
+    required this.previaInicial,
+  });
+
+  @override
+  State<_DialogoFormularioTarifa> createState() =>
+      _DialogoFormularioTarifaState();
+}
+
+class _DialogoFormularioTarifaState
+    extends State<_DialogoFormularioTarifa> {
+  final _nombreCtrl = TextEditingController();
+  final _efectivoCtrl = TextEditingController();
+  final _transferCtrl = TextEditingController();
+  late final TextEditingController _desdeCtrl;
+  final _hastaCtrl = TextEditingController();
+  final _motivoCtrl = TextEditingController();
+  var _periodo = 'mensual';
+  Map<String, dynamic>? _activaPrevia;
+
+  bool get _esMulti => widget.clienteIds.length > 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _desdeCtrl = TextEditingController(text: hoyHabanaIso());
+    _aplicarPrevia(widget.previaInicial);
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _efectivoCtrl.dispose();
+    _transferCtrl.dispose();
+    _desdeCtrl.dispose();
+    _hastaCtrl.dispose();
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  void _aplicarPrevia(Map<String, dynamic>? previa) {
+    _activaPrevia = previa;
+    if (previa != null) {
+      _nombreCtrl.text = '${previa['nombre'] ?? ''}';
+      final ef = (previa['monto_efectivo'] as num?)?.toDouble();
+      final tr = (previa['monto_transferencia'] as num?)?.toDouble();
+      _efectivoCtrl.text = ef == null ? '' : _num(ef);
+      _transferCtrl.text = tr == null ? '' : _num(tr);
+      _desdeCtrl.text = '${previa['vigente_desde'] ?? hoyHabanaIso()}';
+      _hastaCtrl.text = '${previa['vigente_hasta'] ?? ''}';
+      _motivoCtrl.text = '${previa['motivo'] ?? ''}';
+    } else {
+      // Corrección panel 1.10 (BAJO): sin previa, el formulario
+      // es «Nueva tarifa» y NO debe conservar los valores del
+      // periodo anterior (antes se guardaban como si fueran de
+      // este periodo).
+      _nombreCtrl.clear();
+      _efectivoCtrl.clear();
+      _transferCtrl.clear();
+      _desdeCtrl.text = hoyHabanaIso();
+      _hastaCtrl.clear();
+      _motivoCtrl.clear();
+    }
+  }
+
+  Future<void> _cargarPrevia() async {
+    // Solo en modo un cliente: pre-carga AMBOS métodos de la fila
+    // activa de ese periodo (ajuste 1).
+    if (_esMulti) return;
+    final previa =
+        await tarifaActivaPara(widget.clienteIds.first, _periodo);
+    if (!mounted) return;
+    setState(() => _aplicarPrevia(previa));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: _activaPrevia != null
+          ? 'Editar tarifa especial'
+          : 'Nueva tarifa especial',
+      iconoTitulo: Icons.local_offer_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_esMulti)
+              const Text(
+                'Se creará UNA fila por cliente. Lo que dejes vacío '
+                'quedará sin especial para ese método en todos los '
+                'clientes elegidos.',
+                style: AppTexto.secundario,
+              ),
+            if (!_esMulti && widget.clienteNombre != null)
+              Text('Cliente: ${widget.clienteNombre}',
+                  style: AppTexto.cuerpo),
+            const SizedBox(height: 8),
+            // N1 (estéticas 1.19): campos del sistema.
+            CampoTexto(
+                controller: _nombreCtrl,
+                etiqueta: 'Nombre (ej: Kevin 1000)'),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _efectivoCtrl,
+                teclado: TextInputType.number,
+                etiqueta:
+                    'Monto en efectivo (vacío = sin especial)'),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _transferCtrl,
+                teclado: TextInputType.number,
+                etiqueta:
+                    'Monto por transferencia (vacío = sin especial)'),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: _periodo,
+              decoration: const InputDecoration(
+                  labelText: 'Periodo',
+                  border: OutlineInputBorder()),
+              items: const [
+                DropdownMenuItem(
+                    value: 'mensual', child: Text('Mensual')),
+                DropdownMenuItem(
+                    value: 'semanal', child: Text('Semanal')),
+                DropdownMenuItem(
+                    value: 'quincenal', child: Text('Quincenal')),
+              ],
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(() => _periodo = v);
+                await _cargarPrevia();
+              },
+            ),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _desdeCtrl,
+                etiqueta: 'Vigente desde (AAAA-MM-DD)'),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _hastaCtrl,
+                etiqueta: 'Vigente hasta (vacío = sin fin)'),
+            const SizedBox(height: 8),
+            CampoTexto(
+                controller: _motivoCtrl,
+                etiqueta: 'Motivo (obligatorio, interno: '
+                    'nunca sale en mensajes)'),
+          ],
+        ),
+      ),
+      acciones: [
+        if (_activaPrevia != null && !_esMulti)
+          TextButton(
+              onPressed: () async {
+                final motivo = await _pedirMotivo(context);
+                if (motivo == null || !mounted) return;
+                await revocarTarifaEspecial(
+                    id: '${_activaPrevia!['id']}', motivo: motivo);
+                // Corrección panel 1.10: subir la revocación en
+                // cuanto se confirma, no esperar al próximo push
+                // (antes la ventana en que el espejo viejo
+                // volvía a mostrarla activa duraba un turno).
+                SyncEngine.instance.push();
+                // Cerrar SIN guardar: null hace que el código de
+                // arriba retorne sin otorgar nada nuevo.
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Revocar',
+                  style: TextStyle(color: AppColores.error))),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, (
+                  nombre: _nombreCtrl.text,
+                  efectivo: _efectivoCtrl.text,
+                  transfer: _transferCtrl.text,
+                  desde: _desdeCtrl.text,
+                  hasta: _hastaCtrl.text,
+                  motivo: _motivoCtrl.text,
+                  periodo: _periodo,
+                )),
+            child: const Text('Guardar')),
+      ],
+    );
+  }
 }
 
 double? _parseMonto(String raw) {

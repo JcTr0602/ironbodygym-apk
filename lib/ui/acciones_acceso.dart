@@ -303,66 +303,15 @@ Future<void> _bloquearAccesoInterna(
 }) async {
   if (!_soloDueno(ctx)) return;
   if (!ctx.mounted) return;
-  final ctrlMotivo = TextEditingController();
-  var dias = 7; // -1 = indefinido
-  final ok = await showDialog<bool>(
+  final datos = await showDialog<({int dias, String motivo})>(
     context: ctx,
-    builder: (dctx) => StatefulBuilder(
-      builder: (dctx, setLocal) => AlertDialog(
-        title: const Text('Bloquear acceso'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: ctrlMotivo,
-              decoration: const InputDecoration(
-                labelText: 'Motivo (opcional)',
-                hintText: 'Ej.: Pago pendiente de aclarar',
-              ),
-            ),
-            const SizedBox(height: AppEspacio.md),
-            const Text('Duración:', style: AppTexto.secundario),
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final (d, et) in [
-                  (1, '1 día'),
-                  (7, '7 días'),
-                  (30, '30 días'),
-                  (-1, 'Indefinido'),
-                ])
-                  ChoiceChip(
-                    label: Text(et),
-                    selected: dias == d,
-                    onSelected: (_) => setLocal(() => dias = d),
-                  ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: AppColores.error),
-            onPressed: () => Navigator.of(dctx).pop(true),
-            child: const Text('Bloquear'),
-          ),
-        ],
-      ),
-    ),
+    builder: (dctx) => const _DialogoBloquearAcceso(),
   );
-  // 1.24.1 (Argón G-05): sin dispose tras showDialog (pauta de
-  // admin.dart): el diálogo aún anima su cierre con el TextField
-  // montado.
-  if (ok != true) return;
+  if (datos == null) return;
   if (!ctx.mounted) return;
+  final dias = datos.dias;
   final motivo =
-      ctrlMotivo.text.trim().isEmpty ? null : ctrlMotivo.text.trim();
+      datos.motivo.trim().isEmpty ? null : datos.motivo.trim();
   try {
     await Supabase.instance.client
         .rpc(
@@ -417,44 +366,14 @@ Future<void> _cambiarTelefonoAccesoInterna(
 }) async {
   if (!_soloDueno(ctx)) return;
   if (!ctx.mounted) return;
-  final ctrl = TextEditingController(text: telefonoActual);
-  final ok = await showDialog<bool>(
+  final texto = await showDialog<String>(
     context: ctx,
-    builder: (dctx) => AlertDialog(
-      title: const Text('Cambiar teléfono del acceso'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: ctrl,
-            keyboardType: TextInputType.phone,
-            maxLength: 8,
-            decoration: const InputDecoration(
-              labelText: 'Nuevo teléfono (8 dígitos)',
-            ),
-          ),
-          const Text(
-            'Solo cambia el teléfono de entrada a la app. El teléfono '
-            'de la ficha del cliente se edita en su ficha.',
-            style: AppTexto.secundario,
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dctx).pop(false),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(dctx).pop(true),
-          child: const Text('Guardar'),
-        ),
-      ],
-    ),
+    builder: (dctx) =>
+        _DialogoCambiarTelefonoAcceso(telefonoActual: telefonoActual),
   );
-  if (ok != true) return;
+  if (texto == null) return;
   if (!ctx.mounted) return;
-  final nuevoTelefono = ctrl.text.trim();
+  final nuevoTelefono = texto.trim();
   // 1.28 (M4-A5/R1M4-B18): validación LOCAL de la casa (8
   // dígitos empezando por 5 o 6) ANTES de la RPC — el campo
   // solo limitaba el largo al teclear (maxLength) y un valor
@@ -710,5 +629,147 @@ Future<void> mostrarMenuAccionesAcceso(
     } catch (e) {
       _snackError(ctx, e);
     }
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Bloquear acceso» como
+/// StatefulWidget propio: posee y dispone el controlador del
+/// motivo (antes se creaba en la función y nunca se liberaba;
+/// disponerlo tras showDialog estaba prohibido por Argón
+/// G-05). Devuelve días y motivo al bloquear, o null.
+class _DialogoBloquearAcceso extends StatefulWidget {
+  const _DialogoBloquearAcceso();
+
+  @override
+  State<_DialogoBloquearAcceso> createState() =>
+      _DialogoBloquearAccesoState();
+}
+
+class _DialogoBloquearAccesoState
+    extends State<_DialogoBloquearAcceso> {
+  final _ctrlMotivo = TextEditingController();
+  var _dias = 7; // -1 = indefinido
+
+  @override
+  void dispose() {
+    _ctrlMotivo.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Bloquear acceso'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _ctrlMotivo,
+            decoration: const InputDecoration(
+              labelText: 'Motivo (opcional)',
+              hintText: 'Ej.: Pago pendiente de aclarar',
+            ),
+          ),
+          const SizedBox(height: AppEspacio.md),
+          const Text('Duración:', style: AppTexto.secundario),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final (d, et) in [
+                (1, '1 día'),
+                (7, '7 días'),
+                (30, '30 días'),
+                (-1, 'Indefinido'),
+              ])
+                ChoiceChip(
+                  label: Text(et),
+                  selected: _dias == d,
+                  onSelected: (_) => setState(() => _dias = d),
+                ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+              backgroundColor: AppColores.error),
+          onPressed: () => Navigator.of(context)
+              .pop((dias: _dias, motivo: _ctrlMotivo.text)),
+          child: const Text('Bloquear'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Cambiar teléfono del
+/// acceso» como StatefulWidget propio: posee y dispone su
+/// controlador (antes se creaba en la función y nunca se
+/// liberaba). Devuelve el texto escrito o null si se cancela.
+class _DialogoCambiarTelefonoAcceso extends StatefulWidget {
+  final String telefonoActual;
+  const _DialogoCambiarTelefonoAcceso(
+      {required this.telefonoActual});
+
+  @override
+  State<_DialogoCambiarTelefonoAcceso> createState() =>
+      _DialogoCambiarTelefonoAccesoState();
+}
+
+class _DialogoCambiarTelefonoAccesoState
+    extends State<_DialogoCambiarTelefonoAcceso> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.telefonoActual);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Cambiar teléfono del acceso'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _ctrl,
+            keyboardType: TextInputType.phone,
+            maxLength: 8,
+            decoration: const InputDecoration(
+              labelText: 'Nuevo teléfono (8 dígitos)',
+            ),
+          ),
+          const Text(
+            'Solo cambia el teléfono de entrada a la app. El teléfono '
+            'de la ficha del cliente se edita en su ficha.',
+            style: AppTexto.secundario,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text),
+          child: const Text('Guardar'),
+        ),
+      ],
+    );
   }
 }

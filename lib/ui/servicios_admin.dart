@@ -342,58 +342,19 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   Future<void> _reponerAguaInterno() async {
     // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
     if (!AuthService().isOwner) return;
-    final cantCtrl = TextEditingController();
-    final costoCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final datos =
+        await showDialog<({String cantidad, String costo})>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Reponer agua',
-        iconoTitulo: Icons.water_drop_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: cantCtrl,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              decoration: const InputDecoration(
-                  labelText: 'Pomos que entraron'),
-            ),
-            TextField(
-              controller: costoCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                  labelText: 'Costo por pomo (CUP)'),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'El costo alimenta el costo promedio (CPP) con el que '
-              'se valoriza cada venta con agua.',
-              style: AppTexto.metadato.copyWith(color: Colors.grey),
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Registrar entrada'),
-          ),
-        ],
-      ),
+      builder: (ctx) => const _DialogoReponerAgua(),
     );
-    if (ok != true) return;
+    if (datos == null) return;
     try {
       // Clase N-2 (#2): lo no finito cae al 0 «inválido» que el
       // servicio ya rechaza (NaN pasaba su validación <= 0).
       final costoCrudo =
-          double.tryParse(costoCtrl.text.trim().replaceAll(',', '.'));
+          double.tryParse(datos.costo.trim().replaceAll(',', '.'));
       await reponerAguaServicio(
-        cantidad: int.tryParse(cantCtrl.text.trim()) ?? 0,
+        cantidad: int.tryParse(datos.cantidad.trim()) ?? 0,
         costoUnitario:
             (costoCrudo != null && costoCrudo.isFinite) ? costoCrudo : 0,
       );
@@ -420,73 +381,17 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   Future<void> _salidaAguaInterno() async {
     // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
     if (!AuthService().isOwner) return;
-    var motivo = 'merma';
-    final cantCtrl = TextEditingController(text: '1');
-    final notaCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<
+        ({String cantidad, String motivo, String nota})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => DialogoApp(
-          titulo: 'Salida de agua sin venta',
-          iconoTitulo: Icons.water_drop_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Stock actual: ${_agua.saldo} pomos. La salida queda '
-                'registrada con su motivo y descuenta del inventario.',
-                style: AppTexto.secundario,
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: motivo,
-                decoration:
-                    const InputDecoration(labelText: 'Motivo'),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'merma', child: Text('Merma / rotura')),
-                  DropdownMenuItem(
-                      value: 'cortesia', child: Text('Cortesía')),
-                  DropdownMenuItem(
-                      value: 'consumo_staff',
-                      child: Text('Consumo del staff')),
-                  DropdownMenuItem(
-                      value: 'ajuste', child: Text('Ajuste')),
-                ],
-                onChanged: (v) => setD(() => motivo = v ?? 'merma'),
-              ),
-              TextField(
-                controller: cantCtrl,
-                keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: 'Pomos'),
-              ),
-              TextField(
-                controller: notaCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nota (opcional)'),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Registrar salida'),
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) => _DialogoSalidaAgua(saldo: _agua.saldo),
     );
-    if (ok != true) return;
+    if (datos == null) return;
     try {
       await registrarSalidaAguaServicio(
-        cantidad: int.tryParse(cantCtrl.text.trim()) ?? 0,
-        motivo: motivo,
-        nota: notaCtrl.text.trim().isEmpty ? null : notaCtrl.text.trim(),
+        cantidad: int.tryParse(datos.cantidad.trim()) ?? 0,
+        motivo: datos.motivo,
+        nota: datos.nota.trim().isEmpty ? null : datos.nota.trim(),
       );
       _aviso('Salida de agua registrada');
       await _cargar();
@@ -516,67 +421,21 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _aviso('No hay suplementos en el catálogo', error: true);
       return;
     }
-    var supId = (_suplementos.first['id'] as num).toInt();
-    final rendCtrl = TextEditingController(text: '30');
-    final costoCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final datos = await showDialog<
+        ({int supId, String rendimiento, String costo})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => DialogoApp(
-          titulo: 'Abrir bote de servicio',
-          iconoTitulo: Icons.science_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<int>(
-                value: supId,
-                decoration:
-                    const InputDecoration(labelText: 'Producto'),
-                items: [
-                  for (final s in _suplementos)
-                    DropdownMenuItem(
-                      value: (s['id'] as num).toInt(),
-                      child: Text(etiquetaDeSuplemento(s, _categorias)),
-                    ),
-                ],
-                onChanged: (v) => setD(() => supId = v ?? supId),
-              ),
-              TextField(
-                controller: rendCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Rendimiento (dosis del bote)'),
-              ),
-              TextField(
-                controller: costoCtrl,
-                keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true),
-                decoration: const InputDecoration(
-                    labelText:
-                        'Costo del bote (CUP, opcional si el producto ya tiene costo)'),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Abrir bote'),
-            ),
-          ],
-        ),
+      builder: (ctx) => _DialogoAbrirBote(
+        suplementos: _suplementos,
+        categorias: _categorias,
       ),
     );
-    if (ok != true) return;
+    if (datos == null) return;
     try {
       final costo =
-          double.tryParse(costoCtrl.text.trim().replaceAll(',', '.'));
+          double.tryParse(datos.costo.trim().replaceAll(',', '.'));
       await abrirBoteServicio(
-        suplementoId: supId,
-        dosisRendimiento: int.tryParse(rendCtrl.text.trim()) ?? 0,
+        suplementoId: datos.supId,
+        dosisRendimiento: int.tryParse(datos.rendimiento.trim()) ?? 0,
         costoBote: (costo != null && costo > 0) ? costo : null,
       );
       _aviso('Bote abierto: sus dosis van al pomo principal '
@@ -1364,6 +1223,251 @@ class _DialogoSalidaPomoState extends State<_DialogoSalidaPomo> {
                     : _notaCtrl.text.trim(),
               )),
           child: const Text('Registrar salida'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Reponer agua» como
+/// StatefulWidget propio: posee y dispone sus controladores
+/// (antes se creaban en el método y nunca se liberaban).
+/// Devuelve los textos al registrar o null si se cancela.
+class _DialogoReponerAgua extends StatefulWidget {
+  const _DialogoReponerAgua();
+
+  @override
+  State<_DialogoReponerAgua> createState() =>
+      _DialogoReponerAguaState();
+}
+
+class _DialogoReponerAguaState extends State<_DialogoReponerAgua> {
+  final _cantCtrl = TextEditingController();
+  final _costoCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _cantCtrl.dispose();
+    _costoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Reponer agua',
+      iconoTitulo: Icons.water_drop_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _cantCtrl,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration: const InputDecoration(
+                labelText: 'Pomos que entraron'),
+          ),
+          TextField(
+            controller: _costoCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+                labelText: 'Costo por pomo (CUP)'),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'El costo alimenta el costo promedio (CPP) con el que '
+            'se valoriza cada venta con agua.',
+            style: AppTexto.metadato.copyWith(color: Colors.grey),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context,
+              (cantidad: _cantCtrl.text, costo: _costoCtrl.text)),
+          child: const Text('Registrar entrada'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Salida de agua sin
+/// venta» como StatefulWidget propio: posee y dispone sus
+/// controladores y el motivo (antes vivían en el método y
+/// los controladores nunca se liberaban). Devuelve los
+/// datos al registrar o null si se cancela.
+class _DialogoSalidaAgua extends StatefulWidget {
+  final int saldo;
+  const _DialogoSalidaAgua({required this.saldo});
+
+  @override
+  State<_DialogoSalidaAgua> createState() =>
+      _DialogoSalidaAguaState();
+}
+
+class _DialogoSalidaAguaState extends State<_DialogoSalidaAgua> {
+  var _motivo = 'merma';
+  final _cantCtrl = TextEditingController(text: '1');
+  final _notaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _cantCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Salida de agua sin venta',
+      iconoTitulo: Icons.water_drop_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Stock actual: ${widget.saldo} pomos. La salida queda '
+            'registrada con su motivo y descuenta del inventario.',
+            style: AppTexto.secundario,
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _motivo,
+            decoration: const InputDecoration(labelText: 'Motivo'),
+            items: const [
+              DropdownMenuItem(
+                  value: 'merma', child: Text('Merma / rotura')),
+              DropdownMenuItem(
+                  value: 'cortesia', child: Text('Cortesía')),
+              DropdownMenuItem(
+                  value: 'consumo_staff',
+                  child: Text('Consumo del staff')),
+              DropdownMenuItem(
+                  value: 'ajuste', child: Text('Ajuste')),
+            ],
+            onChanged: (v) =>
+                setState(() => _motivo = v ?? 'merma'),
+          ),
+          TextField(
+            controller: _cantCtrl,
+            keyboardType: TextInputType.number,
+            decoration:
+                const InputDecoration(labelText: 'Pomos'),
+          ),
+          TextField(
+            controller: _notaCtrl,
+            decoration: const InputDecoration(
+                labelText: 'Nota (opcional)'),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, (
+                cantidad: _cantCtrl.text,
+                motivo: _motivo,
+                nota: _notaCtrl.text,
+              )),
+          child: const Text('Registrar salida'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Abrir bote de
+/// servicio» como StatefulWidget propio: posee y dispone
+/// sus controladores y el producto elegido (antes vivían en
+/// el método y los controladores nunca se liberaban).
+/// Devuelve los datos al abrir o null si se cancela.
+class _DialogoAbrirBote extends StatefulWidget {
+  final List<Map<String, dynamic>> suplementos;
+  final Map<int, String> categorias;
+  const _DialogoAbrirBote(
+      {required this.suplementos, required this.categorias});
+
+  @override
+  State<_DialogoAbrirBote> createState() =>
+      _DialogoAbrirBoteState();
+}
+
+class _DialogoAbrirBoteState extends State<_DialogoAbrirBote> {
+  late int _supId;
+  final _rendCtrl = TextEditingController(text: '30');
+  final _costoCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _supId = (widget.suplementos.first['id'] as num).toInt();
+  }
+
+  @override
+  void dispose() {
+    _rendCtrl.dispose();
+    _costoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Abrir bote de servicio',
+      iconoTitulo: Icons.science_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<int>(
+            value: _supId,
+            decoration: const InputDecoration(labelText: 'Producto'),
+            items: [
+              for (final s in widget.suplementos)
+                DropdownMenuItem(
+                  value: (s['id'] as num).toInt(),
+                  child:
+                      Text(etiquetaDeSuplemento(s, widget.categorias)),
+                ),
+            ],
+            onChanged: (v) => setState(() => _supId = v ?? _supId),
+          ),
+          TextField(
+            controller: _rendCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+                labelText: 'Rendimiento (dosis del bote)'),
+          ),
+          TextField(
+            controller: _costoCtrl,
+            keyboardType: const TextInputType.numberWithOptions(
+                decimal: true),
+            decoration: const InputDecoration(
+                labelText:
+                    'Costo del bote (CUP, opcional si el producto ya tiene costo)'),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, (
+                supId: _supId,
+                rendimiento: _rendCtrl.text,
+                costo: _costoCtrl.text,
+              )),
+          child: const Text('Abrir bote'),
         ),
       ],
     );

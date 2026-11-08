@@ -138,40 +138,19 @@ class _CategoriasSuplementoScreenState
   }
 
   Future<void> _dialogoNombre({Map<String, dynamic>? categoria}) async {
-    final ctrl = TextEditingController(
-        text: categoria != null
-            ? '${categoria['nombre'] ?? ''}'
-            : '');
-    final ok = await showDialog<bool>(
+    final texto = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
+      builder: (ctx) => _DialogoNombreCategoria(
         titulo: categoria == null
             ? 'Nueva categoría'
             : 'Editar categoría',
-        iconoTitulo: Icons.category_rounded,
-        contenido: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Nombre',
-            hintText: 'Ej. Proteínas',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (_) => Navigator.pop(ctx, true),
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Guardar')),
-        ],
+        inicial: categoria != null
+            ? '${categoria['nombre'] ?? ''}'
+            : '',
       ),
     );
-    final nombre = ctrl.text.trim();
-    // v1.3.2 (Argón #11): sin dispose tras showDialog.
-    if (ok == true && nombre.isNotEmpty && mounted) {
+    final nombre = (texto ?? '').trim();
+    if (texto != null && nombre.isNotEmpty && mounted) {
       await _guardar(nombre,
           id: categoria?['id'] as int?);
     }
@@ -353,6 +332,65 @@ class _CategoriasSuplementoScreenState
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo de nombre de categoría
+/// como StatefulWidget propio: posee y dispone su controlador
+/// (antes se creaba en el llamador y nunca se liberaba; el
+/// dispose tras showDialog estaba prohibido por Argón #11).
+/// Devuelve el texto escrito o null si se cancela.
+class _DialogoNombreCategoria extends StatefulWidget {
+  final String titulo;
+  final String inicial;
+  const _DialogoNombreCategoria(
+      {required this.titulo, required this.inicial});
+
+  @override
+  State<_DialogoNombreCategoria> createState() =>
+      _DialogoNombreCategoriaState();
+}
+
+class _DialogoNombreCategoriaState
+    extends State<_DialogoNombreCategoria> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.inicial);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: widget.titulo,
+      iconoTitulo: Icons.category_rounded,
+      contenido: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'Nombre',
+          hintText: 'Ej. Proteínas',
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (_) => Navigator.pop(context, _ctrl.text),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            child: const Text('Guardar')),
+      ],
     );
   }
 }

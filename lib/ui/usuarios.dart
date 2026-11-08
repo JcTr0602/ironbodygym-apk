@@ -177,37 +177,13 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     }
     String? password;
     if (accion == 'reset_pass') {
-      final ctrl = TextEditingController();
-      final ok = await showDialog<bool>(
+      final texto = await showDialog<String>(
         context: context,
-        builder: (ctx) => DialogoApp(
-          titulo: 'Nueva contraseña para $username',
-          iconoTitulo: Icons.key_rounded,
-          contenido: CampoTexto(
-            controller: ctrl,
-            etiqueta: 'Contraseña (mín. 6)',
-            obscure: true,
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColores.naranja,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(AppRadio.md),
-                  ),
-                ),
-                child: const Text('Cambiar')),
-          ],
-        ),
+        builder: (ctx) =>
+            _DialogoNuevaContrasena(username: username),
       );
-      if (ok != true || !mounted) return;
-      password = ctrl.text.trim();
+      if (texto == null || !mounted) return;
+      password = texto.trim();
       if (password.length < 6) {
         mostrarSnack(context, 'Contraseña muy corta (mín. 6 caracteres)', significado: SignificadoChip.alerta);
         return;
@@ -422,50 +398,17 @@ Hola $username, estas son tus credenciales para la app del gym:
       mostrarSnack(context, 'Solo el dueño puede gestionar usuarios.', significado: SignificadoChip.alerta);
       return;
     }
-    final nombreCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final datos =
+        await showDialog<({String nombre, String pass})>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Crear usuario APK',
-        iconoTitulo: Icons.person_add_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CampoTexto(
-                controller: nombreCtrl,
-                etiqueta: 'Nombre de usuario'),
-            const SizedBox(height: 8),
-            CampoTexto(
-                controller: passCtrl,
-                etiqueta: 'Contraseña (mín. 6)',
-                obscure: true),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-              ),
-              child: const Text('Crear')),
-        ],
-      ),
+      builder: (ctx) => const _DialogoCrearUsuario(),
     );
-    if (ok != true || !mounted) return;
-    final nombre = nombreCtrl.text.trim();
+    if (datos == null || !mounted) return;
+    final nombre = datos.nombre.trim();
     // 1.15 P6: la contraseña se recorta ANTES de validar, encolar
     // y compartir: la validada, la encolada y la compartida son
     // la MISMA cadena normalizada.
-    final pass = normalizarPasswordNuevoUsuario(passCtrl.text);
+    final pass = normalizarPasswordNuevoUsuario(datos.pass);
     // 1.14 (M6.9): la regla vive en validarNuevoUsuarioApk.
     final error = validarNuevoUsuarioApk(nombre, pass);
     if (error != null) {
@@ -747,6 +690,122 @@ Hola $username, estas son tus credenciales para la app del gym:
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Nueva contraseña» como
+/// StatefulWidget propio: posee y dispone su controlador
+/// (antes se creaba en el llamador y nunca se liberaba).
+/// Devuelve el texto escrito o null si se cancela.
+class _DialogoNuevaContrasena extends StatefulWidget {
+  final String username;
+  const _DialogoNuevaContrasena({required this.username});
+
+  @override
+  State<_DialogoNuevaContrasena> createState() =>
+      _DialogoNuevaContrasenaState();
+}
+
+class _DialogoNuevaContrasenaState
+    extends State<_DialogoNuevaContrasena> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Nueva contraseña para ${widget.username}',
+      iconoTitulo: Icons.key_rounded,
+      contenido: CampoTexto(
+        controller: _ctrl,
+        etiqueta: 'Contraseña (mín. 6)',
+        obscure: true,
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context, _ctrl.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Cambiar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 7, clase B): diálogo «Crear usuario APK»
+/// como StatefulWidget propio: posee y dispone sus
+/// controladores (antes se creaban en el llamador y nunca
+/// se liberaban). Devuelve nombre y contraseña escritos o
+/// null si se cancela.
+class _DialogoCrearUsuario extends StatefulWidget {
+  const _DialogoCrearUsuario();
+
+  @override
+  State<_DialogoCrearUsuario> createState() =>
+      _DialogoCrearUsuarioState();
+}
+
+class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
+  final _nombreCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Crear usuario APK',
+      iconoTitulo: Icons.person_add_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CampoTexto(
+              controller: _nombreCtrl,
+              etiqueta: 'Nombre de usuario'),
+          const SizedBox(height: 8),
+          CampoTexto(
+              controller: _passCtrl,
+              etiqueta: 'Contraseña (mín. 6)',
+              obscure: true),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(context,
+                (nombre: _nombreCtrl.text, pass: _passCtrl.text)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColores.naranja,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              ),
+            ),
+            child: const Text('Crear')),
+      ],
     );
   }
 }

@@ -723,29 +723,9 @@ class _ActividadScreenState extends State<ActividadScreen> {
   }
 
   Future<void> _guardarFiltroActual() async {
-    final ctrl = TextEditingController();
     final nombre = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Guardar filtros'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-              labelText: 'Nombre (ej. Cobros de Gabriel)'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(ctx).pop(ctrl.text.trim()),
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
+      builder: (ctx) => const _DialogoGuardarFiltro(),
     );
     if (nombre == null || nombre.isEmpty || !mounted) return;
     setState(() {
@@ -1816,326 +1796,55 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   /// v1.3.5 (Fase 1, B1): bottom sheet con los filtros secundarios:
   /// tipo de operación, fecha completa, entrenador y agrupamiento.
+  /// v1.3.5 (Fase 1, B1): abre la hoja de filtros
+  /// secundarios. 1.30 (Oleada 7, clase B): la hoja es un
+  /// StatefulWidget dueño de sus controladores de monto
+  /// (_HojaFiltrosActividad); aquí solo se le pasan los
+  /// valores vigentes y los contactos con la pantalla
+  /// (guardados) y se aplica el resultado al volver.
   Future<void> _abrirPanelFiltros() async {
-    var fTipo = _filtro;
-    var fFecha = _filtroFecha;
-    var fActor = _filtroActor;
-    var fAgrupar = _agruparPor;
-    // v1.3.7 (Fase 2, B2): filtro por monto.
-    var fMonto = _filtroMonto;
-    double? mMin = _montoMin;
-    double? mMax = _montoMax;
-    final minCtrl =
-        TextEditingController(text: mMin?.toStringAsFixed(0) ?? '');
-    final maxCtrl =
-        TextEditingController(text: mMax?.toStringAsFixed(0) ?? '');
-    DateTime? rIni = _rangoIni;
-    DateTime? rFin = _rangoFin;
-    await showModalBottomSheet(
+    final r = await showModalBottomSheet<_FiltrosActividad>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
             top: Radius.circular(AppRadio.xl)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          Widget seccion(String titulo, List<Widget> chips) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(titulo,
-                    style: AppTexto.subtitulo.copyWith(
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, runSpacing: 8, children: chips),
-                const SizedBox(height: 16),
-              ],
-            );
-          }
-
-          ChoiceChip chipSel(
-              String etiqueta, bool sel, VoidCallback onTap) {
-            return ChoiceChip(
-              label: Text(etiqueta,
-                  style: AppTexto.metadato),
-              selected: sel,
-              onSelected: (_) {
-                onTap();
-                setSheet(() {});
-              },
-            );
-          }
-
-          Future<void> elegirRangoSheet() async {
-            final ini = await showDatePicker(
-              context: ctx,
-              // initialDate es solo UI y se deja como está (P2#11).
-              initialDate: rIni ?? DateTime.now(),
-              firstDate: DateTime(2020),
-              // P2#11 (Argón): el tope del rango es hoy en Habana.
-              lastDate: ahoraHabana(),
-              helpText: 'Fecha inicial',
-            );
-            if (ini == null || !ctx.mounted) return;
-            final fin = await showDatePicker(
-              context: ctx,
-              // initialDate es solo UI y se deja como está (P2#11).
-              initialDate: rFin ?? DateTime.now(),
-              firstDate: ini,
-              lastDate: ahoraHabana(),
-              helpText: 'Fecha final',
-            );
-            if (fin == null || !ctx.mounted) return;
-            rIni = ini;
-            rFin = fin;
-            fFecha = 'rango';
-            setSheet(() {});
-          }
-
-          return SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppColores.borde(context),
-                        borderRadius:
-                            BorderRadius.circular(AppRadio.sm),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Filtros',
-                      style: AppTexto.titulo),
-                  const SizedBox(height: 12),
-                  // v1.4.1 (Pieza 7, B3): filtros guardados de este
-                  // dispositivo. Tocar aplica y cierra; la × borra.
-                  if (_guardados.isNotEmpty) ...[
-                    Text('Guardados',
-                        style: AppTexto.subtitulo
-                            .copyWith(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      for (final g in _guardados)
-                        InputChip(
-                          label: Text('${g['nombre'] ?? ''}',
-                              style:
-                                  AppTexto.metadato),
-                          deleteIcon:
-                              const Icon(Icons.close_rounded, size: 16),
-                          onPressed: () {
-                            _aplicarGuardado(g);
-                            Navigator.of(ctx).pop();
-                          },
-                          onDeleted: () async {
-                            setState(() => _guardados.removeWhere(
-                                (x) => x['nombre'] == g['nombre']));
-                            await _persistirGuardados();
-                            setSheet(() {});
-                          },
-                        ),
-                    ]),
-                    const SizedBox(height: 4),
-                  ],
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.bookmark_add_rounded,
-                          size: 18),
-                      label: const Text('Guardar filtros actuales'),
-                      onPressed: () async {
-                        Navigator.of(ctx).pop();
-                        await _guardarFiltroActual();
-                      },
-                    ),
-                  ),
-                  seccion('Tipo de operación', [
-                    chipSel('Todo', fTipo == 'todo',
-                        () => fTipo = 'todo'),
-                    chipSel('Mensualidades',
-                        fTipo == 'mensualidades',
-                        () => fTipo = 'mensualidades'),
-                    chipSel('Inscripciones',
-                        fTipo == 'inscripciones',
-                        () => fTipo = 'inscripciones'),
-                    chipSel('Diarios', fTipo == 'diarios',
-                        () => fTipo = 'diarios'),
-                    chipSel('Suplementos',
-                        fTipo == 'suplementos',
-                        () => fTipo = 'suplementos'),
-                    chipSel('Servicios',
-                        fTipo == 'servicios',
-                        () => fTipo = 'servicios'),
-                    chipSel('Entregas', fTipo == 'entregas',
-                        () => fTipo = 'entregas'),
-                  ]),
-                  seccion('Fecha', [
-                    chipSel('Siempre', fFecha == 'todo',
-                        () => fFecha = 'todo'),
-                    chipSel('Hoy', fFecha == 'hoy',
-                        () => fFecha = 'hoy'),
-                    chipSel('Ayer', fFecha == 'ayer',
-                        () => fFecha = 'ayer'),
-                    chipSel('7 días', fFecha == '7dias',
-                        () => fFecha = '7dias'),
-                    chipSel('Este mes', fFecha == 'mes',
-                        () => fFecha = 'mes'),
-                    chipSel(
-                        fFecha == 'rango' && rIni != null
-                            ? 'Rango ✓'
-                            : 'Rango…',
-                        fFecha == 'rango',
-                        elegirRangoSheet),
-                  ]),
-                  if (_actores.length > 1)
-                    seccion('Entrenador', [
-                      chipSel('Todos', fActor == 'todos',
-                          () => fActor = 'todos'),
-                      for (final actor in _actores)
-                        chipSel(actor, fActor == actor,
-                            () => fActor = actor),
-                    ]),
-                  seccion('Agrupar', [
-                    chipSel('Por día', fAgrupar == 'dia',
-                        () => fAgrupar = 'dia'),
-                    chipSel('Por entrenador',
-                        fAgrupar == 'entrenador',
-                        () => fAgrupar = 'entrenador'),
-                  ]),
-                  // v1.3.7 (Fase 2, B2): filtro por monto en CUP.
-                  seccion('Monto (CUP)', [
-                    chipSel('Todos', fMonto == 'todo',
-                        () => fMonto = 'todo'),
-                    chipSel('>500', fMonto == 'm500',
-                        () => fMonto = 'm500'),
-                    chipSel('>1000', fMonto == 'm1000',
-                        () => fMonto = 'm1000'),
-                    chipSel('>5000', fMonto == 'm5000',
-                        () => fMonto = 'm5000'),
-                    chipSel('Rango…', fMonto == 'rango', () {
-                      fMonto = 'rango';
-                      setSheet(() {});
-                    }),
-                  ]),
-                  if (fMonto == 'rango')
-                    Padding(
-                      padding:
-                          const EdgeInsets.only(bottom: AppEspacio.lg),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: minCtrl,
-                              keyboardType:
-                                  TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Mín CUP',
-                                border:
-                                    OutlineInputBorder(),
-                                contentPadding:
-                                    EdgeInsets.symmetric(
-                                        horizontal: AppEspacio.md,
-                                        vertical: AppEspacio.sm),
-                              ),
-                              onChanged: (_) =>
-                                  setSheet(() {}),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: maxCtrl,
-                              keyboardType:
-                                  TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Máx CUP',
-                                border:
-                                    OutlineInputBorder(),
-                                contentPadding:
-                                    EdgeInsets.symmetric(
-                                        horizontal: AppEspacio.md,
-                                        vertical: AppEspacio.sm),
-                              ),
-                              onChanged: (_) =>
-                                  setSheet(() {}),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          fTipo = 'todo';
-                          fFecha = 'todo';
-                          fActor = 'todos';
-                          fAgrupar = 'dia';
-                          rIni = null;
-                          rFin = null;
-                          // v1.3.7 (Fase 2, B2).
-                          fMonto = 'todo';
-                          mMin = null;
-                          mMax = null;
-                          minCtrl.clear();
-                          maxCtrl.clear();
-                          setSheet(() {});
-                        },
-                        child:
-                            const Text('Limpiar todo'),
-                      ),
-                      const Spacer(),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              AppColores.naranja,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                    AppRadio.md),
-                          ),
-                        ),
-                        onPressed: () {
-                          // v1.3.7 (Fase 2, B2): parsear rango.
-                          if (fMonto == 'rango') {
-                            mMin = double.tryParse(
-                                minCtrl.text.trim());
-                            mMax = double.tryParse(
-                                maxCtrl.text.trim());
-                          }
-                          setState(() {
-                            _filtro = fTipo;
-                            _filtroFecha = fFecha;
-                            _filtroActor = fActor;
-                            _agruparPor = fAgrupar;
-                            _rangoIni = rIni;
-                            _rangoFin = rFin;
-                            _filtroMonto = fMonto;
-                            _montoMin = mMin;
-                            _montoMax = mMax;
-                          });
-                          Navigator.of(ctx).pop();
-                        },
-                        child: const Text('Aplicar'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
+      builder: (ctx) => _HojaFiltrosActividad(
+        tipo: _filtro,
+        fecha: _filtroFecha,
+        actor: _filtroActor,
+        agrupar: _agruparPor,
+        monto: _filtroMonto,
+        montoMin: _montoMin,
+        montoMax: _montoMax,
+        rangoIni: _rangoIni,
+        rangoFin: _rangoFin,
+        actores: _actores,
+        guardados: _guardados,
+        alAplicarGuardado: _aplicarGuardado,
+        alBorrarGuardado: (g) async {
+          setState(() => _guardados.removeWhere(
+              (x) => x['nombre'] == g['nombre']));
+          await _persistirGuardados();
         },
+        alGuardarActuales: _guardarFiltroActual,
       ),
     );
+    if (r == null || !mounted) return;
+    setState(() {
+      _filtro = r.tipo;
+      _filtroFecha = r.fecha;
+      _filtroActor = r.actor;
+      _agruparPor = r.agrupar;
+      _rangoIni = r.rangoIni;
+      _rangoFin = r.rangoFin;
+      _filtroMonto = r.monto;
+      _montoMin = r.montoMin;
+      _montoMax = r.montoMax;
+    });
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -2851,3 +2560,449 @@ Future<int> actividadNoLeidas() async {
     return 0;
   }
 }
+
+/// 1.30 (Oleada 7, clase B): diálogo «Guardar filtros» como
+/// StatefulWidget propio: posee y dispone su controlador
+/// (antes se creaba en el llamador y nunca se liberaba).
+/// Devuelve el nombre escrito (recortado) o null si se cancela.
+class _DialogoGuardarFiltro extends StatefulWidget {
+  const _DialogoGuardarFiltro();
+
+  @override
+  State<_DialogoGuardarFiltro> createState() =>
+      _DialogoGuardarFiltroState();
+}
+
+class _DialogoGuardarFiltroState extends State<_DialogoGuardarFiltro> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Guardar filtros'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(
+            labelText: 'Nombre (ej. Cobros de Gabriel)'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_ctrl.text.trim()),
+          child: const Text('Guardar'),
+        ),
+      ],
+    );
+  }
+}
+
+
+/// Filtros secundarios de Actividad que devuelve la hoja
+/// al tocar «Aplicar» (con «Limpiar» o cerrando sin aplicar
+/// no hay resultado: la pantalla conserva los suyos).
+typedef _FiltrosActividad = ({
+  String tipo,
+  String fecha,
+  String actor,
+  String agrupar,
+  String monto,
+  double? montoMin,
+  double? montoMax,
+  DateTime? rangoIni,
+  DateTime? rangoFin,
+});
+
+/// 1.30 (Oleada 7, clase B): hoja de filtros secundarios
+/// de Actividad como StatefulWidget dueño: crea los
+/// controladores de monto en su estado y los libera en
+/// dispose (antes nacían en _abrirPanelFiltros, dentro de
+/// un StatefulBuilder, y nunca se liberaban). Los contactos
+/// con la pantalla (filtros guardados) entran por
+/// callbacks; el resultado viaja en el pop como
+/// _FiltrosActividad.
+class _HojaFiltrosActividad extends StatefulWidget {
+  const _HojaFiltrosActividad({
+    required this.tipo,
+    required this.fecha,
+    required this.actor,
+    required this.agrupar,
+    required this.monto,
+    required this.montoMin,
+    required this.montoMax,
+    required this.rangoIni,
+    required this.rangoFin,
+    required this.actores,
+    required this.guardados,
+    required this.alAplicarGuardado,
+    required this.alBorrarGuardado,
+    required this.alGuardarActuales,
+  });
+
+  final String tipo;
+  final String fecha;
+  final String actor;
+  final String agrupar;
+  final String monto;
+  final double? montoMin;
+  final double? montoMax;
+  final DateTime? rangoIni;
+  final DateTime? rangoFin;
+  final List<String> actores;
+  final List<Map<String, dynamic>> guardados;
+  final void Function(Map<String, dynamic>) alAplicarGuardado;
+  final Future<void> Function(Map<String, dynamic>) alBorrarGuardado;
+  final Future<void> Function() alGuardarActuales;
+
+  @override
+  State<_HojaFiltrosActividad> createState() =>
+      _HojaFiltrosActividadState();
+}
+
+class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
+  late String fTipo;
+  late String fFecha;
+  late String fActor;
+  late String fAgrupar;
+  // v1.3.7 (Fase 2, B2): filtro por monto.
+  late String fMonto;
+  late double? mMin;
+  late double? mMax;
+  late TextEditingController minCtrl;
+  late TextEditingController maxCtrl;
+  late DateTime? rIni;
+  late DateTime? rFin;
+  late List<Map<String, dynamic>> _guardadosLocales;
+
+  @override
+  void initState() {
+    super.initState();
+    fTipo = widget.tipo;
+    fFecha = widget.fecha;
+    fActor = widget.actor;
+    fAgrupar = widget.agrupar;
+    fMonto = widget.monto;
+    mMin = widget.montoMin;
+    mMax = widget.montoMax;
+    minCtrl =
+        TextEditingController(text: mMin?.toStringAsFixed(0) ?? '');
+    maxCtrl =
+        TextEditingController(text: mMax?.toStringAsFixed(0) ?? '');
+    rIni = widget.rangoIni;
+    rFin = widget.rangoFin;
+    _guardadosLocales = List.of(widget.guardados);
+  }
+
+  @override
+  void dispose() {
+    minCtrl.dispose();
+    maxCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+          Widget seccion(String titulo, List<Widget> chips) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(titulo,
+                    style: AppTexto.subtitulo.copyWith(
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: chips),
+                const SizedBox(height: 16),
+              ],
+            );
+          }
+
+          ChoiceChip chipSel(
+              String etiqueta, bool sel, VoidCallback onTap) {
+            return ChoiceChip(
+              label: Text(etiqueta,
+                  style: AppTexto.metadato),
+              selected: sel,
+              onSelected: (_) {
+                onTap();
+                setState(() {});
+              },
+            );
+          }
+
+          Future<void> elegirRangoSheet() async {
+            final ini = await showDatePicker(
+              context: context,
+              // initialDate es solo UI y se deja como está (P2#11).
+              initialDate: rIni ?? DateTime.now(),
+              firstDate: DateTime(2020),
+              // P2#11 (Argón): el tope del rango es hoy en Habana.
+              lastDate: ahoraHabana(),
+              helpText: 'Fecha inicial',
+            );
+            if (ini == null || !context.mounted) return;
+            final fin = await showDatePicker(
+              context: context,
+              // initialDate es solo UI y se deja como está (P2#11).
+              initialDate: rFin ?? DateTime.now(),
+              firstDate: ini,
+              lastDate: ahoraHabana(),
+              helpText: 'Fecha final',
+            );
+            if (fin == null || !context.mounted) return;
+            rIni = ini;
+            rFin = fin;
+            fFecha = 'rango';
+            setState(() {});
+          }
+
+          return SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColores.borde(context),
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.sm),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Filtros',
+                      style: AppTexto.titulo),
+                  const SizedBox(height: 12),
+                  // v1.4.1 (Pieza 7, B3): filtros guardados de este
+                  // dispositivo. Tocar aplica y cierra; la × borra.
+                  if (_guardadosLocales.isNotEmpty) ...[
+                    Text('Guardados',
+                        style: AppTexto.subtitulo
+                            .copyWith(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final g in _guardadosLocales)
+                        InputChip(
+                          label: Text('${g['nombre'] ?? ''}',
+                              style:
+                                  AppTexto.metadato),
+                          deleteIcon:
+                              const Icon(Icons.close_rounded, size: 16),
+                          onPressed: () {
+                            widget.alAplicarGuardado(g);
+                            Navigator.of(context).pop();
+                          },
+                          onDeleted: () async {
+                            setState(() => _guardadosLocales
+                                .removeWhere((x) =>
+                                    x['nombre'] == g['nombre']));
+                            await widget.alBorrarGuardado(g);
+                          },
+                        ),
+                    ]),
+                    const SizedBox(height: 4),
+                  ],
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.bookmark_add_rounded,
+                          size: 18),
+                      label: const Text('Guardar filtros actuales'),
+                      onPressed: () async {
+                        Navigator.of(context).pop();
+                        await widget.alGuardarActuales();
+                      },
+                    ),
+                  ),
+                  seccion('Tipo de operación', [
+                    chipSel('Todo', fTipo == 'todo',
+                        () => fTipo = 'todo'),
+                    chipSel('Mensualidades',
+                        fTipo == 'mensualidades',
+                        () => fTipo = 'mensualidades'),
+                    chipSel('Inscripciones',
+                        fTipo == 'inscripciones',
+                        () => fTipo = 'inscripciones'),
+                    chipSel('Diarios', fTipo == 'diarios',
+                        () => fTipo = 'diarios'),
+                    chipSel('Suplementos',
+                        fTipo == 'suplementos',
+                        () => fTipo = 'suplementos'),
+                    chipSel('Servicios',
+                        fTipo == 'servicios',
+                        () => fTipo = 'servicios'),
+                    chipSel('Entregas', fTipo == 'entregas',
+                        () => fTipo = 'entregas'),
+                  ]),
+                  seccion('Fecha', [
+                    chipSel('Siempre', fFecha == 'todo',
+                        () => fFecha = 'todo'),
+                    chipSel('Hoy', fFecha == 'hoy',
+                        () => fFecha = 'hoy'),
+                    chipSel('Ayer', fFecha == 'ayer',
+                        () => fFecha = 'ayer'),
+                    chipSel('7 días', fFecha == '7dias',
+                        () => fFecha = '7dias'),
+                    chipSel('Este mes', fFecha == 'mes',
+                        () => fFecha = 'mes'),
+                    chipSel(
+                        fFecha == 'rango' && rIni != null
+                            ? 'Rango ✓'
+                            : 'Rango…',
+                        fFecha == 'rango',
+                        elegirRangoSheet),
+                  ]),
+                  if (widget.actores.length > 1)
+                    seccion('Entrenador', [
+                      chipSel('Todos', fActor == 'todos',
+                          () => fActor = 'todos'),
+                      for (final actor in widget.actores)
+                        chipSel(actor, fActor == actor,
+                            () => fActor = actor),
+                    ]),
+                  seccion('Agrupar', [
+                    chipSel('Por día', fAgrupar == 'dia',
+                        () => fAgrupar = 'dia'),
+                    chipSel('Por entrenador',
+                        fAgrupar == 'entrenador',
+                        () => fAgrupar = 'entrenador'),
+                  ]),
+                  // v1.3.7 (Fase 2, B2): filtro por monto en CUP.
+                  seccion('Monto (CUP)', [
+                    chipSel('Todos', fMonto == 'todo',
+                        () => fMonto = 'todo'),
+                    chipSel('>500', fMonto == 'm500',
+                        () => fMonto = 'm500'),
+                    chipSel('>1000', fMonto == 'm1000',
+                        () => fMonto = 'm1000'),
+                    chipSel('>5000', fMonto == 'm5000',
+                        () => fMonto = 'm5000'),
+                    chipSel('Rango…', fMonto == 'rango', () {
+                      fMonto = 'rango';
+                      setState(() {});
+                    }),
+                  ]),
+                  if (fMonto == 'rango')
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: AppEspacio.lg),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: minCtrl,
+                              keyboardType:
+                                  TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Mín CUP',
+                                border:
+                                    OutlineInputBorder(),
+                                contentPadding:
+                                    EdgeInsets.symmetric(
+                                        horizontal: AppEspacio.md,
+                                        vertical: AppEspacio.sm),
+                              ),
+                              onChanged: (_) =>
+                                  setState(() {}),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: maxCtrl,
+                              keyboardType:
+                                  TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Máx CUP',
+                                border:
+                                    OutlineInputBorder(),
+                                contentPadding:
+                                    EdgeInsets.symmetric(
+                                        horizontal: AppEspacio.md,
+                                        vertical: AppEspacio.sm),
+                              ),
+                              onChanged: (_) =>
+                                  setState(() {}),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          fTipo = 'todo';
+                          fFecha = 'todo';
+                          fActor = 'todos';
+                          fAgrupar = 'dia';
+                          rIni = null;
+                          rFin = null;
+                          // v1.3.7 (Fase 2, B2).
+                          fMonto = 'todo';
+                          mMin = null;
+                          mMax = null;
+                          minCtrl.clear();
+                          maxCtrl.clear();
+                          setState(() {});
+                        },
+                        child:
+                            const Text('Limpiar todo'),
+                      ),
+                      const Spacer(),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              AppColores.naranja,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(
+                                    AppRadio.md),
+                          ),
+                        ),
+                        onPressed: () {
+                          // v1.3.7 (Fase 2, B2): parsear rango.
+                          if (fMonto == 'rango') {
+                            mMin = double.tryParse(
+                                minCtrl.text.trim());
+                            mMax = double.tryParse(
+                                maxCtrl.text.trim());
+                          }
+                          Navigator.of(context).pop((
+                            tipo: fTipo,
+                            fecha: fFecha,
+                            actor: fActor,
+                            agrupar: fAgrupar,
+                            rangoIni: rIni,
+                            rangoFin: rFin,
+                            monto: fMonto,
+                            montoMin: mMin,
+                            montoMax: mMax,
+                          ));
+                        },
+                        child: const Text('Aplicar'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+  }
+}
+
