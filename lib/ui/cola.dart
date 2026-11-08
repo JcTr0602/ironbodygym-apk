@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../comprobantes.dart';
 import '../errores_sync.dart';
@@ -55,10 +56,14 @@ String tituloDeOp(Map<String, dynamic> op) {
 ///   contadores.
 /// - Sin identidad numérica de sesión no se acredita
 ///   ninguna foto como propia (fail-closed).
-/// Este filtro SOLO decide qué se enseña en esta
-/// pantalla: FotosColaService procesa la cola completa
-/// sin mirar el sello — ocultar una foto a una cuenta
-/// nunca detiene su subida.
+/// Este filtro decide qué se enseña en esta pantalla
+/// y, desde la 1.30 (Oleada 9, ítem 11), también qué
+/// fotos puede REINTENTAR a mano cada actor
+/// (reintentarFotoCola / reintentarTodasFotosCola, más
+/// abajo). Lo que NO decide es la subida:
+/// FotosColaService procesa la cola completa sin mirar
+/// el sello — ocultar una foto a una cuenta nunca
+/// detiene su subida.
 bool fotoVisibleParaActor(Map<String, dynamic> foto,
     {required bool esDueno, required int? miTelegramId}) {
   if (esDueno) return true;
@@ -66,6 +71,83 @@ bool fotoVisibleParaActor(Map<String, dynamic> foto,
   if (sello == null) return false;
   if (miTelegramId == null) return false;
   return sello == miTelegramId;
+}
+
+/// 1.30 (Oleada 9, ítem 11): reintento INDIVIDUAL de una
+/// foto de la cola, con el filtro de autor del plan: para
+/// el no-dueño, una fila que [fotoVisibleParaActor] no le
+/// acredita (ajena, sin sello — las previas a v68 son del
+/// dueño — o sin identidad de sesión, fail-closed) NO se
+/// procesa: devuelve `autorizada: false` sin tocarla. El
+/// dueño procesa cualquier fila: su reintento es la
+/// operación de rescate. `tocadas` es el resultado del
+/// UPDATE histórico (0 si la fila está 'subiendo':
+/// cinturón H-01 de la 1.24 — no se le quita el lease al
+/// worker).
+Future<({int tocadas, bool autorizada})> reintentarFotoCola(
+  Database db,
+  int id, {
+  required bool esDueno,
+  required int? miTelegramId,
+}) async {
+  if (!esDueno) {
+    final filas = await db.query('fotos_cola',
+        columns: ['telegram_id'], where: 'id = ?', whereArgs: [id]);
+    if (filas.isEmpty ||
+        !fotoVisibleParaActor(filas.first,
+            esDueno: false, miTelegramId: miTelegramId)) {
+      return (tocadas: 0, autorizada: false);
+    }
+  }
+  final tocadas = await db.update(
+    'fotos_cola',
+    {
+      'estado': 'pendiente',
+      'intentos': 0,
+      'ultimo_error': null,
+      'proximo_intento_en': null,
+      'worker_id': null,
+      'lease_hasta': null,
+      // v1.3.10: el reintento manual salta el filtro QoS de 'original'.
+      'forzar_qos': 1,
+    },
+    where: "id = ? AND estado != 'subiendo'",
+    whereArgs: [id],
+  );
+  return (tocadas: tocadas, autorizada: true);
+}
+
+/// 1.30 (Oleada 9, ítem 11): reintento MASIVO de la cola
+/// de fotos, con el mismo filtro de autor: el no-dueño
+/// solo marca SUS filas (las selladas con su telegram_id;
+/// sin identidad numérica no marca ninguna —
+/// fail-closed) y el dueño marca la cola completa.
+/// Devuelve cuántas filas se marcaron de verdad, para
+/// que el aviso no mienta. OJO: esto filtra el REINTENTO
+/// manual, no el procesamiento — el servicio sigue
+/// subiendo la cola completa (regla declarada en
+/// [fotoVisibleParaActor]).
+Future<int> reintentarTodasFotosCola(
+  Database db, {
+  required bool esDueno,
+  required int? miTelegramId,
+}) async {
+  if (!esDueno && miTelegramId == null) return 0;
+  return db.update(
+    'fotos_cola',
+    {
+      'estado': 'pendiente',
+      'intentos': 0,
+      'ultimo_error': null,
+      'proximo_intento_en': null,
+      'worker_id': null,
+      'lease_hasta': null,
+    },
+    where: esDueno
+        ? "estado IN ('pendiente', 'error')"
+        : "estado IN ('pendiente', 'error') AND telegram_id = ?",
+    whereArgs: esDueno ? null : [miTelegramId],
+  );
 }
 
 /// 1.29 (Oleada 6, FA-06): etiqueta de autor para una op
@@ -775,25 +857,17 @@ class _ColaScreenState extends State<ColaScreen> {
     _fotosReintentando.add(id);
     try {
       final db = await LocalDb.instance.db;
-      // 1.24 Bloque 4 (H-01, cinturón): el UPDATE no toca una
-      // fila 'subiendo' — resetearla bajo el worker le quitaba
-      // el lease y otro reclamo podía duplicar la subida.
-      final tocadas = await db.update(
-        'fotos_cola',
-        {
-          'estado': 'pendiente',
-          'intentos': 0,
-          'ultimo_error': null,
-          'proximo_intento_en': null,
-          'worker_id': null,
-          'lease_hasta': null,
-          // v1.3.10: el reintento manual salta el filtro QoS de 'original'.
-          'forzar_qos': 1,
-        },
-        where: "id = ? AND estado != 'subiendo'",
-        whereArgs: [id],
-      );
-      if (tocadas == 0) {
+      // 1.30 (Oleada 9, ítem 11): la mutación vive en
+      // reintentarFotoCola, con el filtro de autor — un
+      // no-dueño no procesa foto ajena (la lista que ofrece
+      // el botón ya nace filtrada; esto es el cinturón).
+      final r = await reintentarFotoCola(db, id,
+          esDueno: _esDueno, miTelegramId: _miTelegramId);
+      if (!r.autorizada) {
+        await _cargar();
+        return;
+      }
+      if (r.tocadas == 0) {
         if (mounted) {
           mostrarSnack(
               context, 'Esa foto se está subiendo ahora mismo',
@@ -810,8 +884,9 @@ class _ColaScreenState extends State<ColaScreen> {
       // Disparar sincronización para procesarla de inmediato.
       unawaited(SyncEngine.instance.push());
     } catch (e) {
+      AppLog.error('fotos', 'reintento_manual_fallo', d: 'id=$id · $e');
       if (mounted) {
-        mostrarSnack(context, 'No se pudo reintentar: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo reintentar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       _fotosReintentando.remove(id);
@@ -825,27 +900,30 @@ class _ColaScreenState extends State<ColaScreen> {
     _reintentandoTodasFotos = true;
     try {
       final db = await LocalDb.instance.db;
-      await db.update(
-        'fotos_cola',
-        {
-          'estado': 'pendiente',
-          'intentos': 0,
-          'ultimo_error': null,
-          'proximo_intento_en': null,
-          'worker_id': null,
-          'lease_hasta': null,
-        },
-        where: "estado IN ('pendiente', 'error')",
-      );
-      AppLog.info('fotos', 'reintento_manual_todas');
+      // 1.30 (Oleada 9, ítem 11): la mutación vive en
+      // reintentarTodasFotosCola, con el filtro de autor:
+      // el no-dueño solo marca las suyas; el dueño conserva
+      // la cola completa (su reintento es el rescate).
+      final n = await reintentarTodasFotosCola(db,
+          esDueno: _esDueno, miTelegramId: _miTelegramId);
+      AppLog.info('fotos', 'reintento_manual_todas', d: 'tocadas=$n');
       await _cargar();
       if (mounted) {
-        mostrarSnack(context, 'Todas las fotos marcadas para reintento', significado: SignificadoChip.exito);
+        mostrarSnack(
+            context,
+            n == 0
+                ? 'No había fotos por reintentar'
+                : n == 1
+                    ? '1 foto marcada para reintento'
+                    : '$n fotos marcadas para reintento',
+            significado:
+                n == 0 ? SignificadoChip.alerta : SignificadoChip.exito);
       }
-      unawaited(SyncEngine.instance.push());
+      if (n > 0) unawaited(SyncEngine.instance.push());
     } catch (e) {
+      AppLog.error('fotos', 'reintento_manual_todas_fallo', d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'No se pudo reintentar: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo reintentar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       _reintentandoTodasFotos = false;
