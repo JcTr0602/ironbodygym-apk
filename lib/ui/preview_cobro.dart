@@ -32,6 +32,7 @@ import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'permisos_ui.dart';
 import 'confirmacion_cobro.dart';
+import 'dialogo_telefono.dart';
 import 'diseno.dart';
 
 /// Paso A: preview obligatorio antes de guardar el cobro.
@@ -60,6 +61,14 @@ class PreviewCobroScreen extends StatefulWidget {
   final double? montoValor;
   final String? selloTexto;
 
+  /// 1.30 (Oleada 10, FICHA-03): el preview del REPETIR
+  /// directo ofrece «Cambiar»: vuelve al Paso 1 del
+  /// diálogo de pago sin perder el cobro en curso de
+  /// decisión (nada se ha encolado todavía). Solo el
+  /// repetir de la ficha lo activa; los demás flujos
+  /// conservan Confirmar/Cancelar de siempre.
+  final bool permiteCambiar;
+
   const PreviewCobroScreen({
     super.key,
     required this.nombreCliente,
@@ -74,6 +83,7 @@ class PreviewCobroScreen extends StatefulWidget {
     this.avisos = const [],
     this.montoValor,
     this.selloTexto,
+    this.permiteCambiar = false,
   });
 
   @override
@@ -217,16 +227,30 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                           ? null
                           : () {
                               setState(() => _confirmado = true);
-                              Navigator.of(context).pop(true);
+                              Navigator.of(context).pop('confirmar');
                             },
                     ),
                   ),
+                  // 1.30 (Oleada 10, FICHA-03): el repetir
+                  // llegó aquí SIN Paso 1; «Cambiar» es su
+                  // puerta de vuelta al diálogo completo.
+                  if (widget.permiteCambiar) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: () =>
+                            Navigator.of(context).pop('cambiar'),
+                        child: const Text('Cambiar período o método'),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
                       onPressed: () =>
-                          Navigator.of(context).pop(false),
+                          Navigator.of(context).pop('cancelar'),
                       child: const Text('Cancelar'),
                     ),
                   ),
@@ -458,7 +482,11 @@ String textoReciboCobroWa({
 /// cobro): el bool anterior mezclaba «cancelado» con «guardado»
 /// en el mismo false y el llamador de la pantalla de pagos
 /// anunciaba «Pago guardado» también al cancelar en el preview.
-enum ResultadoCobro { cancelado, guardado, deshecho }
+/// 1.30 (Oleada 10, FICHA-03): «cambiar» — el preview del
+/// repetir directo devolvió la palabra al Paso 1 del diálogo
+/// (no se guardó nada); solo lo produce el flujo con
+/// `permiteCambiar` y solo la ficha lo consume.
+enum ResultadoCobro { cancelado, guardado, deshecho, cambiar }
 
 /// Flujo completo de cobro de mensualidad para un [payload] ya
 /// dialogado (de [pagoDialogo], en `dialogo_pago.dart`).
@@ -478,10 +506,30 @@ enum ResultadoCobro { cancelado, guardado, deshecho }
 /// cancelado sin tocar la cola.
 bool _cobroEnCurso = false;
 
+/// 1.30 (Oleada 10, FICHA-06): la acción extra del recibo
+/// según el teléfono del cliente. Con teléfono válido, la
+/// de siempre: enviar el recibo por WhatsApp. Sin
+/// teléfono pero con cliente identificado, el recibo
+/// ofrece AGREGAR el teléfono ahí mismo (el 44 % de la
+/// cartera no tiene: el cobro es el único momento con el
+/// cliente delante) y enviar el recibo con el número
+/// recién guardado. Sin cliente, ninguna. Pura.
+String modoAccionExtraReciboCobro({
+  required String? telefonoWa,
+  required int? clienteId,
+}) {
+  if (telefonoWa != null && telefonoWa.isNotEmpty) {
+    return 'whatsapp';
+  }
+  if (clienteId != null && clienteId > 0) return 'agregar_telefono';
+  return 'ninguna';
+}
+
 Future<ResultadoCobro> cobrarConPreviewYRecibo({
   required BuildContext context,
   required String nombreCliente,
   required Map<String, dynamic> payload,
+  bool permiteCambiar = false,
 }) async {
   if (_cobroEnCurso) return ResultadoCobro.cancelado;
   _cobroEnCurso = true;
@@ -490,6 +538,7 @@ Future<ResultadoCobro> cobrarConPreviewYRecibo({
       context: context,
       nombreCliente: nombreCliente,
       payload: payload,
+      permiteCambiar: permiteCambiar,
     );
   } finally {
     _cobroEnCurso = false;
@@ -552,6 +601,7 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   required BuildContext context,
   required String nombreCliente,
   required Map<String, dynamic> payload,
+  bool permiteCambiar = false,
 }) async {
   // 1.24 Bloque 3 (cinturón del permiso operativo): TODOS los
   // cobros de mensualidad pasan por aquí; sin can_cobrar_pagos
@@ -611,9 +661,11 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   }
   final monto = (payload['monto'] as num?) ?? 0;
   final vencRaw = '${payload['pagado_hasta'] ?? ''}';
-  final confirmado = await Navigator.of(context).push<bool>(
+  final respuestaPreview =
+      await Navigator.of(context).push<String>(
     RutaIron(
       builder: (_) => PreviewCobroScreen(
+        permiteCambiar: permiteCambiar,
         nombreCliente: nombreCliente,
         montoTexto: '${fmtMonto(monto)} CUP',
         metodoTexto:
@@ -643,7 +695,13 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
       ),
     ),
   );
-  if (confirmado != true || !context.mounted) {
+  // 1.30 (Oleada 10, FICHA-03): «Cambiar» en el preview
+  // del repetir: nada se encoló; el llamador reabre el
+  // diálogo por su Paso 1 con la misma intención.
+  if (respuestaPreview == 'cambiar') {
+    return ResultadoCobro.cambiar;
+  }
+  if (respuestaPreview != 'confirmar' || !context.mounted) {
     return ResultadoCobro.cancelado;
   }
 
@@ -761,9 +819,54 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
             escalonTextoPreview('${payload['_escalon'] ?? ''}'),
         // 1.25 T69: enviar el recibo por WhatsApp si el
         // cliente tiene teléfono en su ficha.
-        accionExtra: telefonoCliente == null
-            ? null
-            : AccionExtraConfirmacion(
+        // 1.30 (Oleada 10, FICHA-06): sin teléfono, el
+        // recibo ofrece agregarlo en el acto (diálogo
+        // compartido de la casa: valida, guarda en la
+        // ficha y encola la edición) y enviar el recibo
+        // con el número recién guardado — saltable, el
+        // cobro ya está guardado y nada lo bloquea. La
+        // decisión vive en modoAccionExtraReciboCobro.
+        accionExtra: switch (modoAccionExtraReciboCobro(
+            telefonoWa: telefonoCliente, clienteId: clienteId)) {
+          'agregar_telefono' => AccionExtraConfirmacion(
+              texto: 'Agregar teléfono y enviar recibo',
+              icono: Icons.phone_rounded,
+              alPulsar: () async {
+                final tel = await dialogoAgregarTelefono(
+                  context,
+                  clienteId: clienteId!,
+                );
+                if (tel == null || !context.mounted) return;
+                final wa = normalizarTelefonoWaMe(tel);
+                if (wa.isEmpty) return;
+                final texto = textoReciboCobroWa(
+                  nombreCliente: nombreCliente,
+                  montoTxt: '${fmtMonto(monto)} CUP',
+                  metodoTxt: '${payload['metodo'] ?? ''}' ==
+                          'transferencia'
+                      ? 'Transferencia'
+                      : 'Efectivo',
+                  periodoTxt: periodoTextoPreview(payload),
+                  vencimientoTxt: vencRaw.length >= 10
+                      ? fmtFecha(vencRaw)
+                      : vencRaw,
+                );
+                final url = Uri.parse(
+                    'https://wa.me/$wa'
+                    '?text=${Uri.encodeComponent(texto)}');
+                try {
+                  await launchUrl(url,
+                      mode: LaunchMode.externalApplication);
+                } catch (_) {
+                  if (context.mounted) {
+                    mostrarSnack(context,
+                        'No se pudo abrir WhatsApp',
+                        significado: SignificadoChip.error);
+                  }
+                }
+              },
+            ),
+          'whatsapp' => AccionExtraConfirmacion(
                 texto: 'Enviar recibo por WhatsApp',
                 icono: Icons.send_rounded,
                 alPulsar: () async {
@@ -797,6 +900,8 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
                   }
                 },
               ),
+          _ => null,
+        },
       ),
     ),
   );

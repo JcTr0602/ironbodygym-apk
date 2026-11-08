@@ -258,7 +258,9 @@ String _etiquetaPeriodo(PeriodoSel s) {
 
 Future<Map<String, dynamic>?> pagoDialogo(
     BuildContext context, Map<String, dynamic> cliente,
-    {String? tipoIdInicial, String? metodoInicial}) async {
+    {String? tipoIdInicial,
+    String? metodoInicial,
+    bool repetirDirecto = false}) async {
   final aj = await LocalDb.instance.getAjustes();
   final transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
   // 1.14 (D9): respetar los métodos aceptados en Ajustes (H1).
@@ -436,25 +438,63 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // el paso vive en _DialogoPaso1Pago, StatefulWidget
   // dueño de diasCtrl/montoCtrl y del estado del paso;
   // devuelve la selección y las elecciones del paso.
-  final paso1 = await showDialog<_ResultadoPaso1Pago>(
-    context: context,
-    builder: (ctx) => _DialogoPaso1Pago(
-      cliente: cliente,
-      menor: menor,
-      esCasa: esCasa,
-      tipos: tipos,
-      tiposDisp: tiposDisp,
-      filasEspecial: filasEspecial,
-      preciosMapa: preciosMapa,
-      aceptaEfectivo: aceptaEfectivo,
-      aceptaTransfer: aceptaTransfer,
-      tipoSelInicial: tipoSel,
-      metodoInicialSel: metodo,
-      fechaPagoInicial: fechaPago,
-      basePagoInicial: basePago,
-    ),
-  );
-  if (paso1 == null || !context.mounted) return null;
+  // 1.30 (Oleada 10, FICHA-03): REPETIR el último cobro
+  // salta el Paso 1 y va directo a la vista previa — la
+  // única confirmación del flujo desde la 1.15 (M5) —:
+  // la selección se calcula con la MISMA función del paso
+  // (periodoSelDeCobro), con el tipo y el método del
+  // último cobro y los precios de HOY (el monto nunca se
+  // repite del pago viejo). El atajo solo nace si el tipo
+  // repetido sigue disponible y no es el personalizado
+  // manual (ese necesita días y monto tecleados: sin
+  // ellos el Paso 1 sigue siendo el camino). Quien
+  // quiera cambiar algo usa el «Cambiar» de la vista
+  // previa, que reabre este diálogo por su Paso 1.
+  final directo = repetirDirecto &&
+      tipoIdInicial != null &&
+      tipoSel.id == tipoIdInicial &&
+      tipoSel.id != 'personalizado';
+  final _ResultadoPaso1Pago paso1;
+  if (directo) {
+    paso1 = (
+      sel: periodoSelDeCobro(
+        tipoSel: tipoSel,
+        metodo: metodo,
+        meses: 1,
+        diasTexto: '',
+        montoTexto: '',
+        esCasa: esCasa,
+        esMenor: menor,
+        preciosMapa: preciosMapa,
+        filasEspecial: filasEspecial,
+      ),
+      metodo: metodo,
+      comprobanteRuta: null,
+      basePago: basePago,
+      fechaPago: fechaPago,
+    );
+  } else {
+    final r = await showDialog<_ResultadoPaso1Pago>(
+      context: context,
+      builder: (ctx) => _DialogoPaso1Pago(
+        cliente: cliente,
+        menor: menor,
+        esCasa: esCasa,
+        tipos: tipos,
+        tiposDisp: tiposDisp,
+        filasEspecial: filasEspecial,
+        preciosMapa: preciosMapa,
+        aceptaEfectivo: aceptaEfectivo,
+        aceptaTransfer: aceptaTransfer,
+        tipoSelInicial: tipoSel,
+        metodoInicialSel: metodo,
+        fechaPagoInicial: fechaPago,
+        basePagoInicial: basePago,
+      ),
+    );
+    if (r == null || !context.mounted) return null;
+    paso1 = r;
+  }
 
   // 1.15 (M5): ELIMINADO el diálogo interno «Confirmar pago»:
   // el payload se devuelve al terminar el Paso 1 y la ÚNICA
@@ -526,6 +566,110 @@ Future<Map<String, dynamic>?> pagoDialogo(
 /// Resultado del Paso 1 del diálogo de pago: la selección
 /// calculada y las elecciones que el paso puede cambiar
 /// (método, comprobante, base y fecha del pago).
+/// 1.30 (Oleada 10, FICHA-03): especial aplicable a un
+/// periodo del motor: la fila activa de ese periodo. El
+/// método NO pre-filtra (M2, verificado): solo elige qué
+/// monto de la fila aplica, dentro del motor. Q2 (1.20):
+/// sin fallback legacy — la columna migró a filas
+/// seed_legacy_<id>, que llegan en [filas] como cualquier
+/// otra tarifa. Vivía en el State del Paso 1; al salir,
+/// el Paso 1 y el repetir directo comparten la búsqueda.
+Map<String, dynamic>? especialParaPeriodo(
+    List<Map<String, dynamic>> filas, String periodoMotor) {
+  for (final f in filas) {
+    if (f['activa'] == 1 && '${f['periodo']}' == periodoMotor) {
+      return f;
+    }
+  }
+  return null;
+}
+
+/// 1.30 (Oleada 10, FICHA-03): la selección de período y
+/// precio de un cobro, ÚNICA para el Paso 1 interactivo
+/// y para el repetir directo a la vista previa. Mapea el
+/// tipo elegido al período del motor del servidor: los 4
+/// fijos usan su período nativo; los personalizados van
+/// como 'personalizado' (días + monto), sin cambios en el
+/// servidor. v1.10.0 (Bloque 2, D6): los 4 fijos pasan por
+/// calcularPrecioCobro (función ÚNICA): especial >
+/// menores > Oferta > estándar. Los tipos personalizados
+/// (Oferta) conservan su propio monto.
+PeriodoSel periodoSelDeCobro({
+  required TipoPago tipoSel,
+  required String metodo,
+  required int meses,
+  required String diasTexto,
+  required String montoTexto,
+  required bool esCasa,
+  required bool esMenor,
+  required Map<String, double> preciosMapa,
+  required List<Map<String, dynamic>> filasEspecial,
+}) {
+  double monto;
+  String periodo;
+  int dias = 0;
+  String escalon = 'estandar';
+  List<String> avisos = const [];
+  final id = tipoSel.id;
+  if (id == 'personalizado') {
+    periodo = 'personalizado';
+    dias = int.tryParse(diasTexto.trim()) ?? 0;
+    monto =
+        double.tryParse(montoTexto.trim().replaceAll(',', '.')) ?? 0;
+  } else if (id == 'semanal' || id == 'quincenal') {
+    periodo = id;
+    final r = calcularPrecioCobro(
+        periodo: id,
+        metodo: metodo,
+        esCasa: esCasa,
+        esMenor: esMenor,
+        precios: preciosMapa,
+        especial: especialParaPeriodo(filasEspecial, id),
+        hoyHabana: hoyHabanaIso());
+    monto = r.monto;
+    escalon = r.escalon;
+    avisos = r.avisos;
+  } else if (id == 'mensual' || id == 'menores') {
+    periodo = 'mensual';
+    final r = calcularPrecioCobro(
+        periodo: 'mensual',
+        metodo: metodo,
+        esCasa: esCasa,
+        esMenor: esMenor,
+        precios: preciosMapa,
+        especial: especialParaPeriodo(filasEspecial, 'mensual'),
+        hoyHabana: hoyHabanaIso());
+    monto = r.monto * meses;
+    escalon = r.escalon;
+    avisos = r.avisos;
+  } else {
+    // Tipo personalizado de Jc -> motor 'personalizado'
+    // Lote 2 Argón (verificado, NO es bug): el monto es fijo por
+    // diseño, igual que semanal/quincenal (que tampoco distinguen
+    // método). El servidor liquida el monto del payload tal cual
+    // para personalizado y tipo: (sync.py: monto_custom validado,
+    // sin distinción por método), así que la vista previa y el
+    // backend coinciden aunque se cambie el chip de método.
+    periodo = 'personalizado';
+    dias = tipoSel.dias;
+    monto = tipoSel.monto;
+    escalon = 'oferta';
+  }
+  return PeriodoSel(
+      periodo: periodo,
+      // 1.19 (Argón A2): meses solo tiene sentido en mensual/
+      // menores. Antes se arrastraba el contador a semanal,
+      // quincenal u oferta (monto de 1 periodo con meses: 2):
+      // el objeto quedaba inconsistente aunque el payload
+      // ya filtrara meses a mensual.
+      meses: (id == 'mensual' || id == 'menores') ? meses : 1,
+      dias: dias,
+      monto: monto,
+      tipoId: id == 'personalizado' ? null : id,
+      escalon: escalon,
+      avisos: avisos);
+}
+
 typedef _ResultadoPaso1Pago = ({
   PeriodoSel sel,
   String metodo,
@@ -626,93 +770,27 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
     super.dispose();
   }
 
-  /// Especial aplicable a un periodo del motor: la fila
-  /// activa de ese periodo. El método NO pre-filtra (M2,
-  /// verificado): solo elige qué monto de la fila aplica,
-  /// dentro del motor. Q2 (1.20): sin fallback legacy — la
-  /// columna migró a filas seed_legacy_<id>, que llegan en
-  /// filasEspecial como cualquier otra tarifa.
-  Map<String, dynamic>? especialPara(String periodoMotor) {
-    for (final f in filasEspecial) {
-      if (f['activa'] == 1 && '${f['periodo']}' == periodoMotor) {
-        return f;
-      }
-    }
-    return null;
-  }
+  /// La fila especial activa de un periodo del motor:
+  /// delega en [especialParaPeriodo] (la comparten el
+  /// Paso 1 y el repetir directo de FICHA-03).
+  Map<String, dynamic>? especialPara(String periodoMotor) =>
+      especialParaPeriodo(filasEspecial, periodoMotor);
 
-  /// Mapea el tipo elegido al período del motor del servidor.
-  /// Los 4 fijos usan su período nativo; los personalizados van como
-  /// 'personalizado' (días + monto), sin cambios en el servidor.
-  /// v1.10.0 (Bloque 2, D6): los 4 fijos pasan por calcularPrecioCobro
-  /// (función ÚNICA): especial > menores > Oferta > estándar. Los
-  /// tipos personalizados (Oferta) conservan su propio monto.
-  PeriodoSel actual() {
-    double monto;
-    String periodo;
-    int dias = 0;
-    String escalon = 'estandar';
-    List<String> avisos = const [];
-    final id = tipoSel.id;
-    if (id == 'personalizado') {
-      periodo = 'personalizado';
-      dias = int.tryParse(diasCtrl.text.trim()) ?? 0;
-      monto = double.tryParse(
-              montoCtrl.text.trim().replaceAll(',', '.')) ??
-          0;
-    } else if (id == 'semanal' || id == 'quincenal') {
-      periodo = id;
-      final r = calcularPrecioCobro(
-          periodo: id,
-          metodo: metodo,
-          esCasa: esCasa,
-          esMenor: menor,
-          precios: preciosMapa,
-          especial: especialPara(id),
-          hoyHabana: hoyHabanaIso());
-      monto = r.monto;
-      escalon = r.escalon;
-      avisos = r.avisos;
-    } else if (id == 'mensual' || id == 'menores') {
-      periodo = 'mensual';
-      final r = calcularPrecioCobro(
-          periodo: 'mensual',
-          metodo: metodo,
-          esCasa: esCasa,
-          esMenor: menor,
-          precios: preciosMapa,
-          especial: especialPara('mensual'),
-          hoyHabana: hoyHabanaIso());
-      monto = r.monto * meses;
-      escalon = r.escalon;
-      avisos = r.avisos;
-    } else {
-      // Tipo personalizado de Jc -> motor 'personalizado'
-      // Lote 2 Argón (verificado, NO es bug): el monto es fijo por
-      // diseño, igual que semanal/quincenal (que tampoco distinguen
-      // método). El servidor liquida el monto del payload tal cual
-      // para personalizado y tipo: (sync.py: monto_custom validado,
-      // sin distinción por método), así que la vista previa y el
-      // backend coinciden aunque se cambie el chip de método.
-      periodo = 'personalizado';
-      dias = tipoSel.dias;
-      monto = tipoSel.monto;
-      escalon = 'oferta';
-    }
-    return PeriodoSel(
-        periodo: periodo,
-        // 1.19 (Argón A2): meses solo tiene sentido en mensual/
-        // menores. Antes se arrastraba el contador a semanal,
-        // quincenal u oferta (monto de 1 periodo con meses: 2):
-        // el objeto quedaba inconsistente aunque el payload actual
-        // ya filtrara meses a mensual.
-        meses: (id == 'mensual' || id == 'menores') ? meses : 1,
-        dias: dias,
-        monto: monto,
-        tipoId: id == 'personalizado' ? null : id,
-        escalon: escalon,
-        avisos: avisos);
-  }
+  /// La selección vigente del paso: delega en
+  /// [periodoSelDeCobro], la función ÚNICA que también
+  /// usa el repetir directo (FICHA-03) — mismo tipo y
+  /// método producen la misma selección por las dos vías.
+  PeriodoSel actual() => periodoSelDeCobro(
+        tipoSel: tipoSel,
+        metodo: metodo,
+        meses: meses,
+        diasTexto: diasCtrl.text,
+        montoTexto: montoCtrl.text,
+        esCasa: esCasa,
+        esMenor: menor,
+        preciosMapa: preciosMapa,
+        filasEspecial: filasEspecial,
+      );
 
   /// Precio que mostraría la etiqueta de un tipo en el desplegable
   /// (meses = 1): el mismo que cobraría actual() con ese tipo.

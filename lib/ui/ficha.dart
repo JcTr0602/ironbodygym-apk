@@ -22,6 +22,7 @@ import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
 import '../comprobantes.dart';
+import '../conciliacion.dart';
 import '../fotos.dart';
 import '../fotos_cola.dart';
 import '../localdb.dart';
@@ -39,6 +40,8 @@ import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'diseno.dart';
 import 'ficha_acceso_app.dart';
+import 'servicios.dart';
+import 'venta_suplemento.dart';
 import 'ficha_que_falta.dart';
 import 'ficha_secciones.dart';
 import 'foto_personal_ficha.dart';
@@ -110,6 +113,28 @@ bool mostrarFotoFicha({
 /// setState asíncrono recomponía la lista entera: el scroll
 /// avanzaba a tirones y regresaba (diagnóstico en
 /// investigacion_lag_scroll.md).
+/// 1.30 (Oleada 10, FICHA-04): la acción del momento de la
+/// barra compacta de la ficha — UNA sola, por prioridad:
+/// conciliar (solo el dueño, con una transferencia por
+/// conciliar: es dinero cobrado y sin verificar — el caso
+/// Emisley) > renovar (vencido: la mensualidad es el cobro
+/// que toca) > acceso (sin acceso a la app y quien mira
+/// puede darlo) > cobrar (el gesto de siempre). La Cuenta
+/// a la Casa no cobra mensualidad: ninguna. Pura.
+String accionDelMomentoFicha({
+  required bool esCasa,
+  required bool vencido,
+  required bool hayTransferenciaPorConciliar,
+  required bool esDueno,
+  required bool sinAcceso,
+}) {
+  if (esCasa) return 'ninguna';
+  if (esDueno && hayTransferenciaPorConciliar) return 'conciliar';
+  if (vencido) return 'renovar';
+  if (sinAcceso) return 'acceso';
+  return 'cobrar';
+}
+
 class CacheSeccionesFicha {
   final Map<String, ({Object version, Widget widget})> _cache = {};
 
@@ -182,6 +207,12 @@ class _FichaScreenState extends State<FichaScreen> {
   // 1.28 (M4-B1/B4): llave de la sección «Acceso App» para
   // poder desplazar la lista hasta ella (ensureVisible).
   final GlobalKey _claveSeccionAcceso = GlobalKey();
+  // 1.30 (Oleada 10, FICHA-12): llave de la tarjeta de
+  // medidas: el pendiente «sin medición» de «qué le
+  // falta» desplaza hasta ella (donde la medición se
+  // registra) en vez de abrir Progreso — Progreso queda
+  // con una sola puerta, la tarjeta de la última medida.
+  final GlobalKey _claveSeccionMedidas = GlobalKey();
   bool _fueAAcesso = false;
   // 1.28 (M4-B3): las mediciones que _cargar ya leyó para
   // el resumen se REUTILIZAN como dato inicial de la
@@ -259,6 +290,11 @@ class _FichaScreenState extends State<FichaScreen> {
   // la barra del período. Antes salían del movimiento más
   // reciente y un regalo de cumpleaños (0 CUP) los tapaba.
   Map<String, dynamic>? _ultimoPagoReal;
+  // 1.30 (Oleada 10, FICHA-11): la transferencia por
+  // conciliar más reciente del cliente, resuelta en
+  // _cargar desde la misma lista de pagos: la anuncian
+  // la tarjeta de Membresía y la barra compacta.
+  Map<String, dynamic>? _ultimaTransferenciaPorConciliar;
   // Bloque 1: ya se abrió Editar por editarAlAbrir (una sola vez).
   bool _editoAlAbrir = false;
 
@@ -292,11 +328,21 @@ class _FichaScreenState extends State<FichaScreen> {
   /// (lista perezosa: está muy abajo), primero se va al
   /// final para forzar su construcción y luego se ajusta
   /// con ensureVisible.
-  Future<void> _irASeccionAcceso() async {
-    final ctxAcceso = _claveSeccionAcceso.currentContext;
-    if (ctxAcceso != null) {
+  Future<void> _irASeccionAcceso() =>
+      _desplazarASeccion(_claveSeccionAcceso);
+
+  /// 1.30 (Oleada 10, FICHA-12): desplaza la ficha hasta
+  /// la sección de la [clave] (el mecanismo nació para
+  /// «Acceso App» en la 1.28 y hoy lo comparte la tarjeta
+  /// de medidas). Si la sección aún no se ha construido
+  /// (lista perezosa: está muy abajo), primero se va al
+  /// final para forzar su construcción y luego se ajusta
+  /// con ensureVisible.
+  Future<void> _desplazarASeccion(GlobalKey clave) async {
+    final ctxSeccion = clave.currentContext;
+    if (ctxSeccion != null) {
       await Scrollable.ensureVisible(
-        ctxAcceso,
+        ctxSeccion,
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeOut,
         alignment: 0.05,
@@ -310,7 +356,7 @@ class _FichaScreenState extends State<FichaScreen> {
       curve: Curves.easeOut,
     );
     if (!mounted) return;
-    final ctx2 = _claveSeccionAcceso.currentContext;
+    final ctx2 = clave.currentContext;
     if (ctx2 != null) {
       await Scrollable.ensureVisible(
         ctx2,
@@ -336,6 +382,11 @@ class _FichaScreenState extends State<FichaScreen> {
         break;
       }
     }
+    // 1.30 (Oleada 10, FICHA-11): la transferencia por
+    // conciliar más reciente (la lista ya viene por
+    // fecha descendente).
+    final ultimaTransfPorConciliar =
+        ultimaTransferenciaPorConciliar(pagos);
     final suplementos = await _suplementosDe(widget.clienteId);
     final serviciosHist = await servicios_svc
         .historialServiciosCliente(widget.clienteId);
@@ -450,6 +501,7 @@ class _FichaScreenState extends State<FichaScreen> {
         _c = c;
         _pagos = pagos;
         _ultimoPagoReal = ultimoReal;
+        _ultimaTransferenciaPorConciliar = ultimaTransfPorConciliar;
         _suplementos = suplementos;
         _serviciosHist = serviciosHist;
         _incidencias = incidencias;
@@ -1020,27 +1072,144 @@ class _FichaScreenState extends State<FichaScreen> {
     // 1.25 Panel 18: repetir = el diálogo abre con el tipo
     // y el método del último cobro (el monto lo recalcula
     // el motor de hoy; el Preview sigue siendo obligatorio).
+    // 1.30 (Oleada 10, FICHA-03): repetir va DIRECTO a la
+    // vista previa — pagoDialogo salta su Paso 1 y el
+    // Preview es la única confirmación. Si en el Preview
+    // se toca «Cambiar», el bucle reabre el diálogo por
+    // su Paso 1 con la misma preselección (ya sin atajo).
     final selRepetir =
         repetir ? seleccionRepetirCobro(_ultimoPagoReal) : null;
-    final payload = await pagoDialogo(context, c,
-        tipoIdInicial: selRepetir?.tipoId,
-        metodoInicial: selRepetir?.metodo);
-    if (payload == null || !mounted) return;
-    // 1.23 (Delta Argón 5ª#1): la marca 'entregado': 1 del dueño
-    // ya nace dentro de pagoDialogo; no se repite aquí.
-    // Bloque 1: Preview obligatorio + Recibo con Deshacer 15 s.
-    // Ningún cobro se guarda sin pasar por el preview.
-    final resultadoCobro = await cobrarConPreviewYRecibo(
-      context: context,
-      nombreCliente: '${c['nombre'] ?? ''}',
-      payload: payload,
-    );
-    if (!mounted) return;
-    if (resultadoCobro == ResultadoCobro.deshecho) {
-      mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
+    var directo = repetir;
+    while (true) {
+      final payload = await pagoDialogo(context, c,
+          tipoIdInicial: selRepetir?.tipoId,
+          metodoInicial: selRepetir?.metodo,
+          repetirDirecto: directo);
+      if (payload == null || !mounted) return;
+      // 1.23 (Delta Argón 5ª#1): la marca 'entregado': 1 del dueño
+      // ya nace dentro de pagoDialogo; no se repite aquí.
+      // Bloque 1: Preview obligatorio + Recibo con Deshacer 15 s.
+      // Ningún cobro se guarda sin pasar por el preview.
+      final resultadoCobro = await cobrarConPreviewYRecibo(
+        context: context,
+        nombreCliente: '${c['nombre'] ?? ''}',
+        payload: payload,
+        permiteCambiar: directo,
+      );
+      if (!mounted) return;
+      if (resultadoCobro == ResultadoCobro.cambiar) {
+        // «Cambiar» en el Preview: nada se guardó; se
+        // reabre el diálogo completo.
+        directo = false;
+        continue;
+      }
+      if (resultadoCobro == ResultadoCobro.deshecho) {
+        mostrarSnack(context, 'Cobro deshecho', significado: SignificadoChip.exito);
+      }
+      _cargar();
+      SyncEngine.instance.push();
+      return;
     }
-    _cargar();
-    SyncEngine.instance.push();
+  }
+
+  /// 1.30 (Oleada 10, FICHA-01): vender sin salir de la
+  /// ficha. La hoja de abajo elige la forma de venta y el
+  /// cliente viaja YA ELEGIDO: en Servicios el diálogo de
+  /// venta nace con él puesto (clientePreseleccionado) y
+  /// en el bote la pantalla de venta también (comprador
+  /// preseleccionado). Se vende con los pomos y permisos
+  /// de siempre — esto solo ahorra salir, re-buscar al
+  /// cliente y el riesgo de venderle a otro por prisa.
+  Future<void> _venderDesdeFicha() async {
+    final c = _c;
+    if (c == null) return;
+    final puedeBotes = AuthService().isOwner ||
+        PermisosEntrenador().canVenderSuplementos;
+    final eleccion = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.bolt_rounded),
+              title: const Text('Dosis sin agua'),
+              onTap: () => Navigator.pop(ctx, 'dosis_sin_agua'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.bolt_rounded),
+              title: const Text('Dosis con agua'),
+              onTap: () => Navigator.pop(ctx, 'dosis_con_agua'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.water_drop_rounded),
+              title: const Text('Pomo de agua'),
+              onTap: () => Navigator.pop(ctx, 'agua_suelta'),
+            ),
+            if (puedeBotes)
+              ListTile(
+                leading: const Icon(Icons.medication_rounded),
+                title: const Text('Suplemento (bote)'),
+                onTap: () => Navigator.pop(ctx, 'suplemento'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (eleccion == null || !mounted) return;
+    if (eleccion == 'suplemento') {
+      await _venderSuplementoDesdeFicha(c);
+    } else {
+      await Navigator.of(context).push(
+        RutaIron(
+          builder: (_) => ServiciosScreen(
+            tipoInicial: eleccion,
+            clientePreseleccionado: c,
+          ),
+        ),
+      );
+    }
+    // La venta pudo cambiar su historial: la ficha se
+    // relee al volver, como tras cobrar.
+    if (mounted) _cargar();
+  }
+
+  /// FICHA-01 (bote): elegir el suplemento del catálogo
+  /// local (con stock) y abrir su venta con ESTE cliente
+  /// como comprador ya puesto.
+  Future<void> _venderSuplementoDesdeFicha(
+      Map<String, dynamic> c) async {
+    final suplementos =
+        await LocalDb.instance.allMirror('suplementos');
+    final vendibles = suplementos
+        .where((x) =>
+            !LocalDb.esEliminadoDe(x) &&
+            ((x['stock'] as num?)?.toInt() ?? 0) > 0)
+        .toList()
+      ..sort((a, b) =>
+          '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
+    if (!mounted) return;
+    if (vendibles.isEmpty) {
+      mostrarSnack(context,
+          'No hay suplementos con stock para vender',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    final sel = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _DialogoElegirSuplemento(
+          suplementos: vendibles),
+    );
+    if (sel == null || !mounted) return;
+    await Navigator.of(context).push(
+      RutaIron(
+        builder: (_) => VentaSuplementoScreen(
+          suplemento: sel,
+          clienteIdInicial: (c['id'] as num?)?.toInt(),
+          clienteNombreInicial: '${c['nombre'] ?? ''}',
+        ),
+      ),
+    );
   }
 
   /// v1.3.3: Regala 1 mes de membresía por cumpleaños (solo dueño).
@@ -2472,6 +2641,47 @@ class _FichaScreenState extends State<FichaScreen> {
     final sinAcceso = puedeAcceso &&
         AccesoAppCache.instance.cargado &&
         AccesoAppCache.instance.obtener(widget.clienteId) == null;
+    // 1.30 (Oleada 10, FICHA-04): la barra ofrece LA
+    // acción del momento (función pura
+    // accionDelMomentoFicha): conciliar si hay una
+    // transferencia por conciliar y quien mira es el
+    // dueño, renovar si está vencido, dar acceso si no
+    // tiene, cobrar en el resto. «Dar acceso» queda como
+    // secundaria cuando la del momento es otra.
+    final accion = accionDelMomentoFicha(
+      esCasa: esCasa,
+      vencido: !esCasa && dias != null && dias < 0,
+      hayTransferenciaPorConciliar:
+          _ultimaTransferenciaPorConciliar != null,
+      esDueno: AuthService().isOwner,
+      sinAcceso: sinAcceso,
+    );
+    Widget botonMomento(IconData icono, String texto,
+            VoidCallback alTocar) =>
+        FilledButton.icon(
+          icon: Icon(icono, size: 18),
+          label: Text(texto),
+          onPressed: alTocar,
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.md),
+            minimumSize: const Size(0, 40),
+          ),
+        );
+    final Widget? botonPrincipal = switch (accion) {
+      'conciliar' => botonMomento(
+          Icons.fact_check_rounded,
+          'Conciliar',
+          () => _conciliarDesdeHistorial(
+              _ultimaTransferenciaPorConciliar!)),
+      'renovar' => botonMomento(
+          Icons.refresh_rounded, 'Renovar', _renovar),
+      'acceso' => botonMomento(Icons.key_rounded,
+          'Dar acceso', () => _irASeccionAcceso()),
+      'cobrar' => botonMomento(
+          Icons.payments_rounded, 'Cobrar', _pagar),
+      _ => null,
+    };
     final textoEstadoBarra = esCasa
         ? 'Cuenta a la Casa'
         : congelado
@@ -2540,25 +2750,14 @@ class _FichaScreenState extends State<FichaScreen> {
                       ],
                     ),
                   ),
-                  if (sinAcceso)
+                  if (sinAcceso && accion != 'acceso')
                     TextButton.icon(
                       icon: const Icon(Icons.key_rounded,
                           size: 18),
                       label: const Text('Dar acceso'),
                       onPressed: () => _irASeccionAcceso(),
                     ),
-                  if (!esCasa)
-                    FilledButton.icon(
-                      icon: const Icon(Icons.payments_rounded,
-                          size: 18),
-                      label: const Text('Cobrar'),
-                      onPressed: _pagar,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppEspacio.md),
-                        minimumSize: const Size(0, 40),
-                      ),
-                    ),
+                  if (botonPrincipal != null) botonPrincipal,
                 ],
               ),
             ),
@@ -2664,14 +2863,27 @@ class _FichaScreenState extends State<FichaScreen> {
                         ),
                       // Bloque 1: el único botón de cobro es el
                       // fijo de abajo (bottomNavigationBar); aquí
-                      // queda solo Editar a ancho completo.
-                      SizedBox(
-                        width: double.infinity,
-                        child: BotonSecundario(
-                          texto: 'Editar',
-                          icono: Icons.edit_rounded,
-                          onPressed: _editar,
-                        ),
+                      // quedan Editar y Vender a medias.
+                      // 1.30 (Oleada 10, FICHA-01): Vender abre
+                      // la venta con este cliente ya elegido.
+                      Row(
+                        children: [
+                          Expanded(
+                            child: BotonSecundario(
+                              texto: 'Editar',
+                              icono: Icons.edit_rounded,
+                              onPressed: _editar,
+                            ),
+                          ),
+                          const SizedBox(width: AppEspacio.sm),
+                          Expanded(
+                            child: BotonSecundario(
+                              texto: 'Vender',
+                              icono: Icons.bolt_rounded,
+                              onPressed: _venderDesdeFicha,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
@@ -2697,7 +2909,16 @@ class _FichaScreenState extends State<FichaScreen> {
                         onFoto: _cambiarFoto,
                         onTelefono: () => _editar(),
                         onAcceso: () => _irASeccionAcceso(),
-                        onMedicion: _abrirProgreso,
+                        // 1.30 (Oleada 10, FICHA-12): el
+                        // pendiente «sin medición» ya NO
+                        // abre Progreso: desplaza a la
+                        // tarjeta de medidas de la propia
+                        // ficha, donde la medición se
+                        // registra. Progreso queda con
+                        // una sola puerta (la última
+                        // medida).
+                        onMedicion: () => _desplazarASeccion(
+                            _claveSeccionMedidas),
                       ),
                       // Información personal
                       Tarjeta(
@@ -2870,6 +3091,67 @@ class _FichaScreenState extends State<FichaScreen> {
                                 style: AppTexto.titulo),
                             const SizedBox(
                                 height: AppEspacio.sm),
+                            // 1.30 (Oleada 10, FICHA-11): la
+                            // última transferencia por
+                            // conciliar se anuncia ARRIBA en
+                            // la tarjeta, con su botón:
+                            // comprobarla sin bajar al
+                            // historial a cazar la fila con
+                            // el ⋮ (el caso Emisley se
+                            // habría resuelto en dos
+                            // toques). Solo el dueño: el
+                            // servidor exige dueño para
+                            // marcar la conciliación.
+                            if (AuthService().isOwner &&
+                                _ultimaTransferenciaPorConciliar !=
+                                    null) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(
+                                    AppEspacio.md),
+                                decoration: BoxDecoration(
+                                  color: AppColores.alerta
+                                      .withValues(alpha: 0.10),
+                                  borderRadius:
+                                      BorderRadius.circular(
+                                          AppRadio.md),
+                                  border: Border.all(
+                                      color: AppColores.alerta
+                                          .withValues(
+                                              alpha: 0.4)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                        Icons.fact_check_rounded,
+                                        size: 20,
+                                        color:
+                                            AppColores.alerta),
+                                    const SizedBox(
+                                        width: AppEspacio.sm),
+                                    Expanded(
+                                      child: Text(
+                                        'La transferencia del '
+                                        '${fmtFecha(_ultimaTransferenciaPorConciliar!['fecha'] as String?)} '
+                                        'está '
+                                        '${etiquetaConciliacion(estadoConciliacion(_ultimaTransferenciaPorConciliar!)).toLowerCase()}.',
+                                        style:
+                                            AppTexto.secundario,
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          _conciliarDesdeHistorial(
+                                              _ultimaTransferenciaPorConciliar!),
+                                      child: const Text(
+                                          'Comprobar ahora'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(
+                                  height: AppEspacio.sm),
+                            ],
                             FilaInfoFicha(icono: Icons.calendar_today_rounded, etiqueta: 'Pagado hasta', valor: esCasa
                                     ? 'Sin vencimiento'
                                     : fmtFecha(c['pagado_hasta']
@@ -2955,6 +3237,27 @@ class _FichaScreenState extends State<FichaScreen> {
                                       'Avisar por WhatsApp'),
                                 ),
                               ),
+                            // 1.30 (Oleada 10, FICHA-12): la
+                            // renovación rápida vive JUNTO a
+                            // la Membresía cuando el cliente
+                            // está vencido — donde se mira su
+                            // estado — y ya no al fondo en
+                            // «Acciones». Misma renovación
+                            // de siempre (1 mes, con su
+                            // preview y su recibo).
+                            if (vencido)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                    top: AppEspacio.sm),
+                                child: TextButton.icon(
+                                  onPressed: _renovar,
+                                  icon: const Icon(
+                                      Icons.refresh_rounded,
+                                      size: 18),
+                                  label: const Text(
+                                      'Renovación rápida (1 mes)'),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -3002,6 +3305,10 @@ class _FichaScreenState extends State<FichaScreen> {
                       // que _cargar ya hizo (sin segundo escaneo
                       // del espejo por apertura).
                       TarjetaMedidas(
+                        // 1.30 (Oleada 10, FICHA-12): llave
+                        // para que el pendiente «sin
+                        // medición» desplace hasta aquí.
+                        key: _claveSeccionMedidas,
                         clienteId: widget.clienteId,
                         medidasIniciales: _medicionesFicha,
                       ),
@@ -3114,12 +3421,13 @@ class _FichaScreenState extends State<FichaScreen> {
                             ),
                           ),
                         ),
+                      // 1.30 (Oleada 10, FICHA-12): la
+                      // tarjeta ya no trae Progreso (su
+                      // única puerta es la última medida)
+                      // ni Renovar (junto a Membresía).
                       TarjetaAccionesCliente(
-                        vencido: vencido,
                         congelado: (_c?['estado'] as String?) ==
                             'congelado',
-                        onProgreso: _abrirProgreso,
-                        onRenovar: _renovar,
                         onCongelar: _congelar,
                         onPapelera: _aPapelera,
                       ),
@@ -4261,6 +4569,104 @@ class _DialogoNotasClienteState extends State<_DialogoNotasCliente> {
               foregroundColor: Colors.white,
             ),
             child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// 1.30 (Oleada 10, FICHA-01): elegir el suplemento a
+/// vender desde la ficha — buscador sobre el catálogo
+/// local ya filtrado (con stock, sin eliminados; lo
+/// filtra quien llama). StatefulWidget dueño de su
+/// controlador, como manda la clase B de la oleada 7.
+/// Devuelve la fila elegida o null al cancelar.
+class _DialogoElegirSuplemento extends StatefulWidget {
+  final List<Map<String, dynamic>> suplementos;
+  const _DialogoElegirSuplemento({required this.suplementos});
+
+  @override
+  State<_DialogoElegirSuplemento> createState() =>
+      _DialogoElegirSuplementoState();
+}
+
+class _DialogoElegirSuplementoState
+    extends State<_DialogoElegirSuplemento> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _ctrl.text.trim().toLowerCase();
+    final filtrados = q.isEmpty
+        ? widget.suplementos
+        : widget.suplementos
+            .where((x) =>
+                '${x['nombre'] ?? ''}'.toLowerCase().contains(q))
+            .toList();
+    return DialogoApp(
+      titulo: 'Suplemento a vender',
+      iconoTitulo: Icons.medication_rounded,
+      contenido: SizedBox(
+        width: double.maxFinite,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              controller: _ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Buscar por nombre…',
+                prefixIcon: Icon(Icons.search_rounded),
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                    horizontal: AppEspacio.md,
+                    vertical: AppEspacio.sm),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: filtrados.isEmpty
+                  ? Center(
+                      child: Text('Sin resultados para «$q»',
+                          textAlign: TextAlign.center),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filtrados.length,
+                      itemBuilder: (_, i) {
+                        final x = filtrados[i];
+                        final moneda = LocalDb.monedaDe(x);
+                        final precio =
+                            (x['precio_oficial'] as num?)
+                                    ?.toDouble() ??
+                                0;
+                        final stock =
+                            (x['stock'] as num?)?.toInt() ?? 0;
+                        return ListTile(
+                          title: Text('${x['nombre'] ?? ''}'),
+                          subtitle: Text(
+                              '${fmtMonto(precio)} $moneda · '
+                              'quedan $stock'),
+                          onTap: () =>
+                              Navigator.pop(context, x),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
       ],
     );
   }

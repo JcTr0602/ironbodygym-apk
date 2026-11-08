@@ -40,7 +40,19 @@ import 'widgets.dart';
 
 class VentaSuplementoScreen extends StatefulWidget {
   final Map<String, dynamic> suplemento;
-  const VentaSuplementoScreen({super.key, required this.suplemento});
+
+  /// 1.30 (Oleada 10, FICHA-01): comprador ya elegido al
+  /// entrar (desde la ficha del cliente): la venta nace
+  /// con él puesto. Null = elegir dentro, como siempre.
+  final int? clienteIdInicial;
+  final String? clienteNombreInicial;
+
+  const VentaSuplementoScreen({
+    super.key,
+    required this.suplemento,
+    this.clienteIdInicial,
+    this.clienteNombreInicial,
+  });
 
   @override
   State<VentaSuplementoScreen> createState() =>
@@ -194,6 +206,13 @@ class _VentaSuplementoScreenState
     // v1.3.4 (B3-Invariante): el campo se inicializa SIEMPRE y ÚNICAMENTE
     // con precio_oficial. Jamás se lee ultimo_precio para pre-llenar.
     _precio.text = _precioOficial.toStringAsFixed(2);
+    // 1.30 (Oleada 10, FICHA-01): desde la ficha, el
+    // comprador ya viene elegido (_tipoComprador nace
+    // en 'cliente').
+    if (widget.clienteIdInicial != null) {
+      _clienteId = widget.clienteIdInicial;
+      _clienteNombre = widget.clienteNombreInicial ?? '';
+    }
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() {

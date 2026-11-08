@@ -39,6 +39,7 @@ import '../auth.dart';
 import '../negocio.dart' show fmtFecha, tiempoRelativo;
 import '../plus_residual.dart';
 import '../tiempo.dart';
+import 'actividad_cliente.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha_secciones.dart';
@@ -414,6 +415,25 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                   ),
                 ),
               ],
+              // 1.30 (Oleada 10, FICHA-08): «Ver su
+              // actividad en la app» — la actividad que
+              // el sistema ya recoge de ESTE cliente
+              // (activaciones, sesiones, vales), abierta
+              // desde su ficha sin pasar por Auditoría ni
+              // re-elegirlo en el selector. Solo dueño,
+              // como la propia sección de actividad.
+              if (AuthService().isOwner) ...[
+                const SizedBox(height: AppEspacio.sm),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(
+                        Icons.phone_android_rounded, size: 18),
+                    label: const Text('Ver su actividad en la app'),
+                    onPressed: _verActividadApp,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -634,6 +654,20 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
 
   /// FB-20: salta al panel de Comunidad con el buscador
   /// filtrado por el nombre de este cliente.
+  /// 1.30 (Oleada 10, FICHA-08): abre la actividad en la
+  /// app de ESTE cliente (la sección de Auditoría con el
+  /// cliente fijo, sin selector).
+  void _verActividadApp() {
+    Navigator.of(context).push(
+      RutaIron(
+        builder: (_) => ActividadAppPorClienteScreen(
+          clienteId: widget.clienteId,
+          nombreCliente: widget.nombreCliente,
+        ),
+      ),
+    );
+  }
+
   void _verEnComunidad() {
     Navigator.of(context).push(
       RutaIron(

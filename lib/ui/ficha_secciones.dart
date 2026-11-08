@@ -515,6 +515,68 @@ class Resumen360Ficha extends StatelessWidget {
   }
 }
 
+/// 1.30 (Oleada 10, FICHA-09): normaliza un texto para
+/// buscar en el historial: minúsculas y sin tildes (la
+/// ñ se pliega a n). Pura.
+String normalizarBusquedaFicha(String s) {
+  var r = s.toLowerCase();
+  const mapa = {
+    'á': 'a',
+    'é': 'e',
+    'í': 'i',
+    'ó': 'o',
+    'ú': 'u',
+    'ü': 'u',
+    'ñ': 'n',
+  };
+  mapa.forEach((k, v) => r = r.replaceAll(k, v));
+  return r;
+}
+
+/// 1.30 (Oleada 10, FICHA-09): ¿coincide una entrada del
+/// historial con la consulta? Todos los términos de
+/// texto deben aparecer en el título, el subtítulo o el
+/// trailing de la entrada — o, si es un pago, en su
+/// método, su período o su estado de conciliación (así
+/// «transferencia» y «por comprobar» encuentran sus
+/// pagos). Los dígitos de la consulta (un monto) se
+/// comprueban aparte contra los dígitos del trailing y
+/// del monto: buscar «2500» encuentra el cobro de
+/// 2 500 aunque el texto lo separa con espacio. Pura.
+bool entradaCoincideBusquedaHistorial(
+    Map<String, dynamic> e, String consulta) {
+  final q = normalizarBusquedaFicha(consulta).trim();
+  if (q.isEmpty) return true;
+  final pago = e['pago'] as Map<String, dynamic>?;
+  final pajar = normalizarBusquedaFicha(<String>[
+    '${e['titulo'] ?? ''}',
+    '${e['subtitulo'] ?? ''}',
+    '${e['trailing'] ?? ''}',
+    if (pago != null) ...[
+      '${pago['metodo'] ?? ''}',
+      '${pago['periodo'] ?? ''}',
+      etiquetaConciliacion(estadoConciliacion(pago)),
+    ],
+  ].join(' '));
+  for (final t in q.split(RegExp(r'\s+'))) {
+    if (t.isEmpty) continue;
+    // Los términos de solo dígitos los juzga la
+    // comparación de montos de abajo.
+    if (RegExp(r'^\d+$').hasMatch(t)) continue;
+    if (!pajar.contains(t)) return false;
+  }
+  final digitosQ = q.replaceAll(RegExp(r'\D'), '');
+  if (digitosQ.isNotEmpty) {
+    final digitosPajar = <String>[
+      '${e['trailing'] ?? ''}',
+      if (pago != null) '${pago['monto'] ?? ''}',
+      if (e['montoVenta'] != null) '${e['montoVenta']}',
+    ].join(' ').replaceAll(RegExp(r'\D'), '');
+    if (!digitosPajar.contains(digitosQ)) return false;
+  }
+  return true;
+}
+
 class TarjetaHistorialFicha extends StatefulWidget {
   final List<Map<String, dynamic>> entradas;
   final String filtro;
@@ -562,12 +624,28 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
   // cierra; el mes más reciente empieza abierto.
   Set<String> _mesesAbiertos = {};
 
+  // 1.30 (Oleada 10, FICHA-09): el buscador del historial
+  // (controlador propio de la tarjeta, con su dispose).
+  final _busquedaCtrl = TextEditingController();
+  String _busqueda = '';
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
+
   @override
   void didUpdateWidget(TarjetaHistorialFicha old) {
     super.didUpdateWidget(old);
     if (old.filtro != widget.filtro ||
         old.clienteId != widget.clienteId) {
       _mesesAbiertos = {};
+    }
+    if (old.clienteId != widget.clienteId) {
+      // Otra ficha: la búsqueda anterior no era suya.
+      _busqueda = '';
+      _busquedaCtrl.clear();
     }
   }
 
@@ -593,6 +671,18 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
     // 1.25 T56: el resto va agrupado por mes (los fiados
     // siguen fijados arriba, fuera de los grupos).
     final grupos = gruposHistorialPorMes(resto);
+    // 1.30 (Oleada 10, FICHA-09): con búsqueda activa la
+    // lista deja de agruparse por meses: salen las
+    // coincidencias en plano, dentro del filtro activo
+    // (`todas` ya lo respeta; con «Todo» incluye los
+    // fiados fijados si coinciden).
+    final buscando = _busqueda.trim().isNotEmpty;
+    final coincidencias = buscando
+        ? todas
+            .where((e) =>
+                entradaCoincideBusquedaHistorial(e, _busqueda))
+            .toList()
+        : const <Map<String, dynamic>>[];
     if (_mesesAbiertos.isEmpty && grupos.isNotEmpty) {
       _mesesAbiertos = {grupos.first.clave};
     }
@@ -640,6 +730,30 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
               chipFiltro('ventas', 'Solo ventas'),
             ],
           ),
+          const SizedBox(height: AppEspacio.sm),
+          // 1.30 (Oleada 10, FICHA-09): buscar dentro del
+          // historial — por texto (concepto, método,
+          // «transferencia», «por comprobar»…) o por
+          // monto. No bloquea nada: es un filtro más.
+          TextField(
+            controller: _busquedaCtrl,
+            decoration: InputDecoration(
+              hintText: 'Buscar en el historial…',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _busqueda.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () {
+                        _busquedaCtrl.clear();
+                        setState(() => _busqueda = '');
+                      },
+                    ),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (v) => setState(() => _busqueda = v),
+          ),
           // v1.8.1 (idea de Jc): acumulado de servicios, solo
           // cuando se ven ventas.
           if (widget.serviciosHist.isNotEmpty && filtro != 'pagos')
@@ -664,7 +778,7 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
           const SizedBox(height: AppEspacio.sm),
           // 1.25 T56: el vacío es de la tarjeta entera (sin
           // fiados fijados y sin ningún mes).
-          if (visibles.isEmpty && grupos.isEmpty)
+          if (!buscando && visibles.isEmpty && grupos.isEmpty)
             EstadoVacio(
               icono: Icons.history_rounded,
               // F1-38: en «Todo» no hay «otro filtro» que
@@ -676,7 +790,7 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
                   ? 'Cuando haya pagos o ventas, salen aquí.'
                   : 'Prueba con otro filtro.',
             ),
-          for (var i = 0; i < visibles.length; i++)
+          for (var i = 0; !buscando && i < visibles.length; i++)
             FilaTimelineFicha(
                 e: visibles[i],
                 esUltima: false,
@@ -686,9 +800,40 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
                 onVerComprobante: widget.onVerComprobante,
                 onCorregirPago: widget.onCorregirPago,
                 onConciliar: widget.onConciliar),
+          // 1.30 (Oleada 10, FICHA-09): los resultados de
+          // la búsqueda, en plano y con su conteo.
+          if (buscando) ...[
+            const SizedBox(height: AppEspacio.sm),
+            if (coincidencias.isEmpty)
+              EstadoVacio(
+                icono: Icons.search_off_rounded,
+                titulo:
+                    'Sin resultados para «${_busqueda.trim()}»',
+                subtitulo: 'Prueba con otro texto o un monto.',
+              )
+            else ...[
+              Text(
+                '${coincidencias.length} '
+                'resultado${coincidencias.length == 1 ? '' : 's'} '
+                'para «${_busqueda.trim()}»',
+                style: AppTexto.secundario,
+              ),
+              const SizedBox(height: AppEspacio.xs),
+              for (var i = 0; i < coincidencias.length; i++)
+                FilaTimelineFicha(
+                    e: coincidencias[i],
+                    esUltima: i == coincidencias.length - 1,
+                    esAdmin: widget.esAdmin,
+                    esOwner: widget.esOwner,
+                    onReenviarRecibo: widget.onReenviarRecibo,
+                    onVerComprobante: widget.onVerComprobante,
+                    onCorregirPago: widget.onCorregirPago,
+                    onConciliar: widget.onConciliar),
+            ],
+          ],
           // 1.25 T56: los meses, plegables. La cabecera
           // resume el mes (pagos y su suma) sin abrirlo.
-          for (var g = 0; g < grupos.length; g++) ...[
+          for (var g = 0; !buscando && g < grupos.length; g++) ...[
             InkWell(
               onTap: () => setState(() {
                 if (_mesesAbiertos.contains(grupos[g].clave)) {
@@ -752,7 +897,7 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
           // 1.29 (FB-03): el pie de la muestra — la tarjeta
           // declara que enseña una muestra y ofrece la
           // historia completa sin salir de la ficha.
-          if (widget.onVerAnteriores != null) ...[
+          if (!buscando && widget.onVerAnteriores != null) ...[
             const SizedBox(height: AppEspacio.sm),
             const Divider(height: 1),
             const SizedBox(height: AppEspacio.sm),

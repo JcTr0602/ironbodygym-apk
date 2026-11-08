@@ -1,9 +1,15 @@
 // Etapa 4 · F3: widget tests de la tarjeta «Acciones» de la
 // ficha (TarjetaAccionesCliente). Guardan la matriz de
-// visibilidad acordada en el diseño v2: Renovación solo si está
-// vencido; la fila de frío cambia de etiqueta según el estado;
-// cada fila dispara SU callback; sin desbordes en pantalla
-// estrecha con texto ampliado.
+// visibilidad acordada en el diseño v2: la fila de frío
+// cambia de etiqueta según el estado; cada fila dispara SU
+// callback; sin desbordes en pantalla estrecha con texto
+// ampliado.
+// 1.30 (Oleada 10, FICHA-12): la tarjeta YA NO trae
+// «Progreso y Nutrición» ni «Renovación rápida». Progreso
+// queda con UNA sola puerta en la ficha (la tarjeta de la
+// última medida) y Renovar vive junto a la Membresía.
+// Estos tests fijan el contrato nuevo: esas dos filas no
+// vuelven a la tarjeta.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/componentes.dart';
@@ -22,36 +28,25 @@ void main() {
   }
 
   TarjetaAccionesCliente tarjeta({
-    bool vencido = false,
     bool congelado = false,
-    void Function()? onProgreso,
-    void Function()? onRenovar,
     void Function()? onCongelar,
     void Function()? onPapelera,
   }) {
     return TarjetaAccionesCliente(
-      vencido: vencido,
       congelado: congelado,
-      onProgreso: onProgreso ?? () {},
-      onRenovar: onRenovar ?? () {},
       onCongelar: onCongelar ?? () {},
       onPapelera: onPapelera ?? () {},
     );
   }
 
-  testWidgets('sin vencimiento: no hay Renovación; Congelar sí',
-      (tester) async {
+  testWidgets('solo Congelar y A papelera; FICHA-12: ni '
+      'Progreso ni Renovación viven ya aquí', (tester) async {
     await tester.pumpWidget(envolver(tarjeta()));
-    expect(find.text('Progreso y Nutrición'), findsOneWidget);
-    expect(find.text('Renovación rápida (1 mes)'), findsNothing);
     expect(find.text('Congelar'), findsOneWidget);
     expect(find.text('Descongelar'), findsNothing);
     expect(find.text('A papelera'), findsOneWidget);
-  });
-
-  testWidgets('vencido: aparece Renovación', (tester) async {
-    await tester.pumpWidget(envolver(tarjeta(vencido: true)));
-    expect(find.text('Renovación rápida (1 mes)'), findsOneWidget);
+    expect(find.text('Progreso y Nutrición'), findsNothing);
+    expect(find.text('Renovación rápida (1 mes)'), findsNothing);
   });
 
   testWidgets('congelado: la fila dice Descongelar',
@@ -62,20 +57,13 @@ void main() {
   });
 
   testWidgets('cada fila dispara su callback', (tester) async {
-    var progreso = 0, renovar = 0, congelar = 0, papelera = 0;
+    var congelar = 0, papelera = 0;
     await tester.pumpWidget(envolver(tarjeta(
-      vencido: true,
-      onProgreso: () => progreso++,
-      onRenovar: () => renovar++,
       onCongelar: () => congelar++,
       onPapelera: () => papelera++,
     )));
-    await tester.tap(find.text('Progreso y Nutrición'));
-    await tester.tap(find.text('Renovación rápida (1 mes)'));
     await tester.tap(find.text('Congelar'));
     await tester.tap(find.text('A papelera'));
-    expect(progreso, 1);
-    expect(renovar, 1);
     expect(congelar, 1);
     expect(papelera, 1);
   });
@@ -86,7 +74,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(envolver(
-      tarjeta(vencido: true, congelado: true),
+      tarjeta(congelado: true),
       escalaTexto: 1.3,
     ));
     expect(tester.takeException(), isNull);

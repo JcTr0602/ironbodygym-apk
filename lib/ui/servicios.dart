@@ -46,7 +46,14 @@ class ServiciosScreen extends StatefulWidget {
   /// 'dosis_con_agua' | 'agua_suelta') y el formulario se abre solo.
   final String? tipoInicial;
 
-  const ServiciosScreen({super.key, this.tipoInicial});
+  /// 1.30 (Oleada 10, FICHA-01): cliente ya elegido al
+  /// entrar (desde su ficha): el diálogo de venta nace
+  /// con él puesto, sin re-buscarlo. La fila es la del
+  /// espejo de clientes (id, nombre, cuenta_casa…).
+  final Map<String, dynamic>? clientePreseleccionado;
+
+  const ServiciosScreen(
+      {super.key, this.tipoInicial, this.clientePreseleccionado});
 
   @override
   State<ServiciosScreen> createState() => _ServiciosScreenState();
@@ -597,6 +604,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         comisionInicial:
             (_precios?.comision ?? 50).toStringAsFixed(0),
         alElegirCliente: _elegirCliente,
+        clienteInicial: widget.clientePreseleccionado,
       ),
     );
     if (datosVenta == null) return;
@@ -2905,6 +2913,10 @@ class _DialogoVentaServicio extends StatefulWidget {
   final bool esDueno;
   final String comisionInicial;
   final Future<Map<String, dynamic>?> Function() alElegirCliente;
+  // 1.30 (Oleada 10, FICHA-01): cliente con el que el
+  // diálogo NACE elegido (desde la ficha); null = se
+  // elige dentro, como siempre.
+  final Map<String, dynamic>? clienteInicial;
   const _DialogoVentaServicio({
     required this.tipo,
     required this.topeCantidad,
@@ -2917,6 +2929,7 @@ class _DialogoVentaServicio extends StatefulWidget {
     required this.esDueno,
     required this.comisionInicial,
     required this.alElegirCliente,
+    this.clienteInicial,
   });
 
   @override
@@ -2961,6 +2974,8 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
     responsableSel = pomoTitularTid;
     comisionCtrl =
         TextEditingController(text: widget.comisionInicial);
+    // FICHA-01: desde la ficha, el cliente ya viene.
+    cliente = widget.clienteInicial;
   }
 
   @override

@@ -398,6 +398,13 @@ class _PagoScreenState extends State<PagoScreen> {
       case ResultadoCobro.cancelado:
         mostrarSnack(context, 'Cobro cancelado',
             significado: SignificadoChip.neutral);
+      // 1.30 (Oleada 10, FICHA-03): «cambiar» solo nace
+      // del repetir de la ficha (permiteCambiar); esta
+      // pantalla nunca lo produce — si llegara, es un
+      // cancelado sin guardar, como el de arriba.
+      case ResultadoCobro.cambiar:
+        mostrarSnack(context, 'Cobro cancelado',
+            significado: SignificadoChip.neutral);
     }
     SyncEngine.instance.push();
     _cargarDatos();

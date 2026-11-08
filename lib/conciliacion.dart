@@ -55,6 +55,25 @@ String etiquetaConciliacion(String estado) {
 bool conciliacionAccionable(String estado) =>
     estado == 'pendiente' || estado == 'problema';
 
+/// 1.30 (Oleada 10, FICHA-11): la transferencia por
+/// conciliar más reciente de una lista de pagos (la de
+/// UN cliente): la primera por transferencia cuyo estado
+/// crudo sigue accionable (pendiente o con problema —
+/// el mismo criterio de la bandeja, ver
+/// [conciliacionAccionable]). La lista manda en su
+/// orden: la ficha la trae por fecha descendente. Null
+/// si no hay ninguna. Pura.
+Map<String, dynamic>? ultimaTransferenciaPorConciliar(
+    List<Map<String, dynamic>> pagos) {
+  for (final p in pagos) {
+    if ('${p['metodo'] ?? ''}' == 'transferencia' &&
+        conciliacionAccionable(estadoConciliacion(p))) {
+      return p;
+    }
+  }
+  return null;
+}
+
 /// Servicio de conciliación: encola la op del dueño (el
 /// servidor valida dueño, CAS por estado esperado y la nota
 /// obligatoria en problema/rechazada).

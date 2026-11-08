@@ -96,7 +96,15 @@ String textoSinConexionFb23(DateTime descargadoEnUtc) {
 /// que ya hay).
 class SeccionActividadAppClientes extends StatefulWidget {
   final ActividadClienteService? servicio;
-  const SeccionActividadAppClientes({super.key, this.servicio});
+
+  /// 1.30 (Oleada 10, FICHA-08): cliente fijo — la
+  /// sección nace consultando a ESTA persona y no pinta
+  /// selector (la abre la ficha del cliente). Null = la
+  /// sección de Auditoría de siempre, con su lista.
+  final int? clienteIdFijo;
+
+  const SeccionActividadAppClientes(
+      {super.key, this.servicio, this.clienteIdFijo});
 
   @override
   State<SeccionActividadAppClientes> createState() =>
@@ -122,7 +130,18 @@ class _SeccionActividadAppClientesState
   @override
   void initState() {
     super.initState();
-    _cargarClientes();
+    final fijo = widget.clienteIdFijo;
+    if (fijo != null) {
+      // FICHA-08: no hay lista que cargar; la persona se
+      // elige sola al primer frame (pinta la caché y
+      // enriquece con la RPC, igual que al elegir a mano).
+      _cargandoLista = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _elegir(fijo);
+      });
+    } else {
+      _cargarClientes();
+    }
   }
 
   Future<void> _cargarClientes() async {
@@ -227,7 +246,21 @@ class _SeccionActividadAppClientesState
             style: AppTexto.secundario,
           ),
           const SizedBox(height: AppEspacio.md),
-          if (_cargandoLista)
+          // 1.30 (Oleada 10, FICHA-08): con cliente fijo
+          // no hay selector — solo los chips de rango.
+          if (widget.clienteIdFijo != null)
+            Wrap(
+              spacing: AppEspacio.sm,
+              children: [
+                for (final r in RangoFb23.values)
+                  ChoiceChip(
+                    label: Text(r.etiqueta),
+                    selected: _rango == r,
+                    onSelected: (_) => _cambiarRango(r),
+                  ),
+              ],
+            )
+          else if (_cargandoLista)
             const SkeletonLista(items: 1)
           else if (_clientes.isEmpty)
             const Text(
@@ -361,6 +394,41 @@ class ActividadAppClientesScreen extends StatelessWidget {
         padding: const EdgeInsets.all(AppEspacio.md),
         children: [
           SeccionActividadAppClientes(servicio: servicio),
+        ],
+      ),
+    );
+  }
+}
+
+/// 1.30 (Oleada 10, FICHA-08): la actividad en la app de
+/// UN cliente, abierta desde su ficha: la misma sección
+/// de Auditoría con el cliente fijo (sin selector). El
+/// nombre va arriba para que se sepa de quién se mira.
+class ActividadAppPorClienteScreen extends StatelessWidget {
+  final int clienteId;
+  final String nombreCliente;
+  final ActividadClienteService? servicio;
+
+  const ActividadAppPorClienteScreen({
+    super.key,
+    required this.clienteId,
+    required this.nombreCliente,
+    this.servicio,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: appBarIron(context, 'Actividad en la app'),
+      body: ListView(
+        padding: const EdgeInsets.all(AppEspacio.md),
+        children: [
+          Text(nombreCliente, style: AppTexto.titulo),
+          const SizedBox(height: AppEspacio.sm),
+          SeccionActividadAppClientes(
+            clienteIdFijo: clienteId,
+            servicio: servicio,
+          ),
         ],
       ),
     );

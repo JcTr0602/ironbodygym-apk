@@ -164,26 +164,25 @@ class _ContenidoBoton extends StatelessWidget {
 // Tarjeta de acciones de la ficha del cliente (etapa 4 · F3)
 // ---------------------------------------------------------------------------
 
-/// Tarjeta «Acciones» de la ficha: agrupa como filas lo que antes
-/// eran botones sueltos al final (Progreso y Nutrición,
-/// Renovación rápida solo si está vencido, Congelar/Descongelar
-/// y A papelera en rojo). Widget presentacional sin dependencias
-/// (flags + callbacks): la ficha conserva las condiciones y los
-/// destinos; aquí solo se pinta y se hacen widget tests.
+/// Tarjeta «Acciones» de la ficha: agrupa como filas lo que
+/// antes eran botones sueltos al final (Congelar/Descongelar
+/// y A papelera en rojo). Widget presentacional sin
+/// dependencias (flags + callbacks): la ficha conserva las
+/// condiciones y los destinos; aquí solo se pinta y se hacen
+/// widget tests.
+/// 1.30 (Oleada 10, FICHA-12): la tarjeta ya NO trae
+/// «Progreso y Nutrición» ni «Renovación rápida». Progreso
+/// queda con UNA sola puerta en la ficha (la tarjeta de la
+/// última medida) y Renovar vive junto a la Membresía,
+/// donde se mira el estado que lo justifica.
 class TarjetaAccionesCliente extends StatelessWidget {
-  final bool vencido;
   final bool congelado;
-  final VoidCallback onProgreso;
-  final VoidCallback onRenovar;
   final VoidCallback onCongelar;
   final VoidCallback onPapelera;
 
   const TarjetaAccionesCliente({
     super.key,
-    required this.vencido,
     required this.congelado,
-    required this.onProgreso,
-    required this.onRenovar,
     required this.onCongelar,
     required this.onPapelera,
   });
@@ -252,20 +251,6 @@ class TarjetaAccionesCliente extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
-          _fila(
-            icono: Icons.show_chart_rounded,
-            color: AppColores.info,
-            texto: 'Progreso y Nutrición',
-            onTap: onProgreso,
-            chevron: true,
-          ),
-          if (vencido)
-            _fila(
-              icono: Icons.refresh_rounded,
-              color: AppColores.naranja,
-              texto: 'Renovación rápida (1 mes)',
-              onTap: onRenovar,
-            ),
           _fila(
             icono: congelado ? Icons.wb_sunny_rounded : Icons.ac_unit_rounded,
             color: AppColores.naranja,

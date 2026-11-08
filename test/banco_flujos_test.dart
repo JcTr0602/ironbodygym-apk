@@ -258,6 +258,14 @@ void main() {
       expect(filas.single['pagado_hasta'], nuevoHasta.substring(0, 10),
           reason: 'el espejo refleja el nuevo vencimiento al instante');
 
+      // 1.30 (Oleada 10, FICHA-06): el recibo de un
+      // cliente sin teléfono trae el botón extra «Agregar
+      // teléfono y enviar recibo» y «Entendido» puede
+      // quedar bajo el pliegue en la superficie del test
+      // (en el teléfono se llega deslizando: el recibo es
+      // desplazable). Se desplaza hasta él antes de tocar.
+      await tester.ensureVisible(find.text('Entendido'));
+      await tester.pump();
       await tester.tap(find.text('Entendido'));
       await tester.pumpAndSettle();
       expect(resultado, ResultadoCobro.guardado,
@@ -273,6 +281,11 @@ void main() {
       await _cobrarHastaRecibo(tester);
 
       expect(await LocalDb.instance.pendingOps(), isNotEmpty);
+      // FICHA-06: el mismo botón extra baja «Deshacer» en
+      // el recibo; se asegura visible antes de tocar.
+      await tester
+          .ensureVisible(find.textContaining('Deshacer'));
+      await tester.pump();
       await tester.tap(find.textContaining('Deshacer'));
       await tester.pumpAndSettle();
       expect(resultado, ResultadoCobro.deshecho,
