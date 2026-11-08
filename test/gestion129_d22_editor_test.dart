@@ -157,15 +157,15 @@ void main() {
   group('D-22 puros · totales vivos', () {
     test('fórmula portada: reps × 4 s y descanso efectivo', () {
       final totales = totalesRutinaAdmin([
-        EjercicioGymAdmin(
+        const EjercicioGymAdmin(
             fichaId: 'a',
             descansoSeg: 90,
-            series: const [
+            series: [
               SerieGymAdmin(repsMin: 10),
               SerieGymAdmin(repsMin: 10),
               SerieGymAdmin(repsMin: 10),
             ]),
-        EjercicioGymAdmin(fichaId: 'b', series: const [
+        const EjercicioGymAdmin(fichaId: 'b', series: [
           SerieGymAdmin(repsMin: 8),
           SerieGymAdmin(repsMin: 8),
         ]),
@@ -182,7 +182,7 @@ void main() {
 
     test('sin descanso fijado ni de ficha: 60 s por defecto', () {
       final totales = totalesRutinaAdmin([
-        EjercicioGymAdmin(fichaId: 'x', series: const [
+        const EjercicioGymAdmin(fichaId: 'x', series: [
           SerieGymAdmin(repsMin: 10),
           SerieGymAdmin(repsMin: 10),
         ]),
@@ -193,7 +193,7 @@ void main() {
 
     test('el rango de reps usa repsMax como objetivo', () {
       final totales = totalesRutinaAdmin([
-        EjercicioGymAdmin(fichaId: 'x', descansoSeg: 0, series: const [
+        const EjercicioGymAdmin(fichaId: 'x', descansoSeg: 0, series: [
           SerieGymAdmin(repsMin: 6, repsMax: 8),
         ]),
       ], const {});
