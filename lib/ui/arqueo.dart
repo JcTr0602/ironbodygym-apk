@@ -27,6 +27,8 @@ import 'hoja_liquidar.dart';
 import 'liquidaciones_historial.dart';
 import 'skeleton.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class ArqueoScreen extends StatefulWidget {
   const ArqueoScreen({super.key});
@@ -638,7 +640,8 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
         await _cargar();
       }
     } catch (e) {
-      _aviso('No se pudo liquidar: $e');
+      AppLog.error('arqueo', 'liquidar_fallo', d: '$e');
+      _aviso('No se pudo liquidar: ${mensajeErrorAmable(e)}');
     }
   }
 

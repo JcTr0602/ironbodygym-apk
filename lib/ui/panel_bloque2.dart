@@ -176,7 +176,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
                       Card(
                         child: ListTile(
                           leading: const Icon(Icons.home_rounded,
-                              color: Color(0xFFB8860B)),
+                              color: AppColores.casaIcono),
                           title: Text('${c['nombre'] ?? ''}'),
                           subtitle: Text('${c['telefono'] ?? ''}'),
                           onTap: () => Navigator.push(

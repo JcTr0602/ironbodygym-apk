@@ -18,6 +18,8 @@ import 'auditoria.dart' show descripcionOp;
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class IncidenciasSyncScreen extends StatefulWidget {
   const IncidenciasSyncScreen({super.key});
@@ -122,7 +124,8 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
         await _cargar();
       }
     } catch (e) {
-      _aviso('No se pudo aprobar: $e');
+      AppLog.error('incidencias_sync', 'aprobar_fallo', d: '$e');
+      _aviso('No se pudo aprobar: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _procesando = false);
     }
@@ -152,7 +155,8 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
         await _cargar();
       }
     } catch (e) {
-      _aviso('No se pudo descartar: $e');
+      AppLog.error('incidencias_sync', 'descartar_fallo', d: '$e');
+      _aviso('No se pudo descartar: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _procesando = false);
     }

@@ -565,7 +565,7 @@ class _VentaSuplementoScreenState
               width: double.infinity,
               padding: const EdgeInsets.all(AppEspacio.md),
               decoration: BoxDecoration(
-                color: const Color(0xFFE7F6EC),
+                color: AppColores.comprobanteFondo,
                 borderRadius: BorderRadius.circular(AppRadio.md),
               ),
               child: Text(c.texto.replaceAll('*', '')),

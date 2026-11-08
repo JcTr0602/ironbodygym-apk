@@ -672,8 +672,8 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
           const IconoModuloBadge(
             icono: Icons.water_drop_rounded,
             tinte: Colors.blue,
-            iconoOscuro: Color(0xFF60A5FA),
-            iconoClaro: Color(0xFF2563EB),
+            iconoOscuro: AppColores.azulAguaOscuro,
+            iconoClaro: AppColores.azulAguaClaro,
           ),
           const SizedBox(width: AppEspacio.sm),
           Expanded(

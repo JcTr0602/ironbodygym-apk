@@ -31,6 +31,7 @@ import 'diseno.dart';
 import 'suplementos.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
 
 /// Venta rápida rediseñada (v1.3.4, pedido Jc 2026-10-16).
 ///
@@ -279,7 +280,8 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se registró la venta: $e', significado: SignificadoChip.error);
+        AppLog.error('detalle_suplemento', 'registrar_venta_fallo', d: '$e');
+        mostrarSnack(context, 'No se registró la venta: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -345,7 +347,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
               width: double.infinity,
               padding: const EdgeInsets.all(AppEspacio.md),
               decoration: BoxDecoration(
-                color: const Color(0xFFE7F6EC),
+                color: AppColores.comprobanteFondo,
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),
               ),
@@ -1264,7 +1266,8 @@ Future<bool> _ajustarStock(BuildContext context,
     return true;
   } catch (e) {
     if (context.mounted) {
-      mostrarSnack(context, 'No se pudo ajustar: $e',
+      AppLog.error('detalle_suplemento', 'ajustar_fallo', d: '$e');
+      mostrarSnack(context, 'No se pudo ajustar: ${mensajeErrorAmable(e)}',
           significado: SignificadoChip.error);
     }
     return false;

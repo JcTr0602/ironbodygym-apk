@@ -17,6 +17,8 @@ import 'diseno.dart';
 import 'ficha.dart';
 import 'foto_personal_ficha.dart';
 import 'componentes.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class FichaAccesoScreen extends StatefulWidget {
   final int clienteId;
@@ -128,7 +130,8 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
       if (mounted) {
         setState(() => _cargando = false);
         if (_acceso == null) {
-          mostrarSnack(context, 'Error al cargar la ficha: $e', significado: SignificadoChip.error);
+          AppLog.error('ficha_acceso', 'cargar_fallo', d: '$e');
+          mostrarSnack(context, 'Error al cargar la ficha: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
         } else if (_desdeCache) {
           mostrarSnack(context,
               'Sin conexión: se muestran los datos guardados del acceso.',

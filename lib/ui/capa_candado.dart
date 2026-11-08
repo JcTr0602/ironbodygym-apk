@@ -57,7 +57,7 @@ class _CapaCandadoState extends State<CapaCandado> {
     final expiraHabana = expira == null ? null : aHabana(expira);
     return AbsorbPointer(
       child: ColoredBox(
-        color: const Color(0xF0141414),
+        color: AppColores.carbonProfundo.withAlpha(0xF0),
         child: SafeArea(
           child: Center(
             child: Padding(
@@ -134,8 +134,8 @@ class _CapaCandadoState extends State<CapaCandado> {
                               '${expiraHabana.hour.toString().padLeft(2, '0')}:'
                               '${expiraHabana.minute.toString().padLeft(2, '0')}.',
                               textAlign: TextAlign.center,
-                              style: AppTexto.metadato.copyWith(
-                                  color: Colors.white70, fontSize: 13),
+                              style: AppTexto.secundario
+                                  .copyWith(color: Colors.white70),
                             ),
                           ),
                         ],
@@ -144,9 +144,8 @@ class _CapaCandadoState extends State<CapaCandado> {
                     const SizedBox(height: AppEspacio.lg),
                     Text(
                       'IRON BODY GYM',
-                      style: AppTexto.metadato.copyWith(
+                      style: AppTexto.minuscula.copyWith(
                         color: Colors.white38,
-                        fontSize: 11,
                         letterSpacing: 2.4,
                         fontWeight: FontWeight.w600,
                       ),

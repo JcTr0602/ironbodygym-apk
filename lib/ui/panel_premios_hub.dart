@@ -95,9 +95,8 @@ class _PremiosHubScreenState extends State<PremiosHubScreen> {
                         ),
                         child: Text(
                           '$pendientes',
-                          style: const TextStyle(
+                          style: AppTexto.metadato.copyWith(
                             color: Colors.white,
-                            fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
                         ),

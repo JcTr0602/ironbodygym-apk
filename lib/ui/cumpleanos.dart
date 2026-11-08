@@ -617,7 +617,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
                       : 'Agregar teléfono',
                   icon: Icon(Icons.chat_rounded,
                       color: tieneTelefono
-                          ? const Color(0xFF25D366)
+                          ? AppColores.whatsapp
                           : AppColores.textoSecundario(context)
                               .withValues(alpha: 0.4)),
                   onPressed: tieneTelefono

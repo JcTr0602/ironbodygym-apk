@@ -2254,11 +2254,11 @@ class _AdminScreenState extends State<AdminScreen> {
           Container(
             decoration: BoxDecoration(
               color:
-                  oscuro ? const Color(0xFF1B150B) : const Color(0xFFFFF6E5),
+                  oscuro ? AppColores.avisoPanelFondoOscuro : AppColores.avisoPanelFondoClaro,
               borderRadius: BorderRadius.circular(AppRadio.lg),
               border: Border.all(
                   color: oscuro
-                      ? const Color(0xFF6B4A12)
+                      ? AppColores.avisoPanelBordeOscuro
                       : AppColores.alerta.withValues(alpha: 0.45)),
             ),
             child: Column(
@@ -2406,7 +2406,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 ),
                 child: Text(p.boton,
                     style: AppTexto.metadato.copyWith(color: p.primario
-                            ? const Color(0xFF171106)
+                            ? AppColores.sobreNaranjaOscuro
                             : null, fontWeight: FontWeight.w800)),
               ),
             ),
@@ -2483,7 +2483,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   Widget _accionRapida(IconData icono, String texto,
       {bool primario = false, required VoidCallback onTap}) {
-    final fg = primario ? const Color(0xFF171106) : null;
+    final fg = primario ? AppColores.sobreNaranjaOscuro : null;
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadio.lg),
       onTap: onTap,

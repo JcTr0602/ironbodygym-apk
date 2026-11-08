@@ -1019,10 +1019,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     // «Registrados hoy» pero aquí no se editan:
                     // se dice, no se adivina tocándolas.
                     trailing: Text('solo lectura',
-                        style: TextStyle(
+                        style: AppTexto.minuscula.copyWith(
                             color:
-                                AppColores.textoSecundario(context),
-                            fontSize: 11)),
+                                AppColores.textoSecundario(context))),
                     ),
                   ),
                 ),

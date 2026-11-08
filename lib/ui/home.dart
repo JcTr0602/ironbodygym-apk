@@ -70,6 +70,7 @@ import 'transferencia.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 import '../turno_service.dart';
+import '../errores_sync.dart';
 
 /// v1.6.0 (pedido de Jc): clave DURABLE del descarte del aviso de
 /// turno sin reporte: «sin_reporte:<fecha>:<turno>». La DETECCIÓN
@@ -2513,7 +2514,8 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (e) {
       if (mounted) {
         setState(() => _procesandoTurno = false);
-        mostrarSnack(context, 'No se pudo abrir el turno: $e', significado: SignificadoChip.error);
+        AppLog.error('home', 'abrir_turno_fallo', d: '$e');
+        mostrarSnack(context, 'No se pudo abrir el turno: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     }
   }
@@ -2655,7 +2657,8 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (e) {
       cerrarDialogoSync();
       if (mounted) {
-        mostrarSnack(context, 'Error al cerrar el turno: $e', significado: SignificadoChip.error);
+        AppLog.error('home', 'cerrar_turno_fallo', d: '$e');
+        mostrarSnack(context, 'Error al cerrar el turno: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       cerrarDialogoSync();
@@ -3283,7 +3286,7 @@ class _HomeScreenState extends State<HomeScreen>
               ? IconoModuloBadge(
                   icono: icono,
                   tinte: color,
-                  iconoOscuro: const Color(0xFFF87171),
+                  iconoOscuro: AppColores.errorIconoOscuro,
                   iconoClaro: color,
                   tamanoIcono: 20)
               : IconoModuloBadge.naranja(icono, tamanoIcono: 20),

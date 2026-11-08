@@ -23,6 +23,8 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// Construye el payload de la op 'inscripcion_venta_suplemento'.
 ///
@@ -366,7 +368,8 @@ class _VentaSuplementoInscripcionScreenState
         });
       } catch (e) {
         if (mounted) {
-          mostrarSnack(context, 'No se registró: $e', significado: SignificadoChip.error);
+          AppLog.error('venta_suplemento_inscripcion', 'registrar_fallo', d: '$e');
+          mostrarSnack(context, 'No se registró: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
         }
         return;
       }

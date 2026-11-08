@@ -363,7 +363,7 @@ class _LoginScreenState extends State<LoginScreen>
               Icon(icono, color: AppColores.textoSecundario(context)),
           suffixIcon: suffix,
           filled: true,
-          fillColor: const Color(0xFF2A2A2A),
+          fillColor: AppColores.superficieElevadaOscuro,
           border: OutlineInputBorder(
             borderRadius:
                 BorderRadius.circular(AppRadio.lg),
@@ -373,7 +373,7 @@ class _LoginScreenState extends State<LoginScreen>
             borderRadius:
                 BorderRadius.circular(AppRadio.lg),
             borderSide: const BorderSide(
-                color: Color(0xFF3A3A3A)),
+                color: AppColores.bordeOscuro),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius:

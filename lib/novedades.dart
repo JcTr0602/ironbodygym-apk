@@ -638,10 +638,9 @@ class DialogoNovedades extends StatelessWidget {
                               borderRadius: BorderRadius.circular(
                                   AppRadio.circular),
                             ),
-                            child: const Text('Nuevo',
-                                style: TextStyle(
+                            child: Text('Nuevo',
+                                style: AppTexto.minuscula.copyWith(
                                     color: Colors.white,
-                                    fontSize: 11,
                                     fontWeight: FontWeight.w700)),
                           ),
                         ],

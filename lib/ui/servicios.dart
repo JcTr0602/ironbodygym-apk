@@ -26,6 +26,8 @@ import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
 import 'servicios_estadisticas.dart';
 import 'servicios_historial.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// 1.23 (Delta Argón 4ª#6): un solo RegExp reutilizado en el
 /// buscador de clientes — antes se construía uno nuevo por
@@ -1416,8 +1418,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(errorDosis!,
-                      style: const TextStyle(
-                          color: AppColores.error, fontSize: 13)),
+                      style: AppTexto.secundario
+                          .copyWith(color: AppColores.error)),
                 ),
               TextField(
                 controller: notaCtrl,
@@ -1551,8 +1553,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(errorMotivo!,
-                      style: const TextStyle(
-                          color: AppColores.error, fontSize: 13)),
+                      style: AppTexto.secundario
+                          .copyWith(color: AppColores.error)),
                 ),
               // 1.15 V5: «polvo perdido» solo lo marca el dueño
               // (patrón AuthService().isOwner vía _esDueno). La
@@ -2082,9 +2084,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _pidiendoRelleno = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo pedir el relleno: $e')),
-      );
+      AppLog.error('servicios', 'pedir_relleno_fallo', d: '$e');
+      mostrarSnack(context, 'No se pudo pedir el relleno: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
     }
   }
 

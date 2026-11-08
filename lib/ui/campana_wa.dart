@@ -687,7 +687,7 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
         if (_errorAudiencia != null) ...[
           const SizedBox(height: 12),
           Text(_errorAudiencia!,
-              style: const TextStyle(color: AppColores.error)),
+              style: TextStyle(color: AppColores.errorTexto(context))),
         ],
         const SizedBox(height: 20),
         FilledButton.icon(

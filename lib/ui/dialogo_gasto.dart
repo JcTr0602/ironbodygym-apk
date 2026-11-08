@@ -8,6 +8,8 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// 1.27: flujo ÚNICO de registrar un gasto (op sync
 /// 'gasto'), compartido por el Panel del dueño
@@ -75,7 +77,8 @@ Future<bool> agregarGastoFlow(BuildContext context) async {
     );
   } catch (e) {
     if (context.mounted) {
-      mostrarSnack(context, 'No se pudo guardar el gasto: $e',
+      AppLog.error('dialogo_gasto', 'guardar_fallo', d: '$e');
+      mostrarSnack(context, 'No se pudo guardar el gasto: ${mensajeErrorAmable(e)}',
           significado: SignificadoChip.error);
     }
     return false;

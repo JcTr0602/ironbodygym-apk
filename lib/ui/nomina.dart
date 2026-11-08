@@ -26,6 +26,8 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'mi_nomina.dart';
 import 'skeleton.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// v1.3.7 (Fase A, 6.1): pre-cálculo de nómina mensual.
 /// v1.3.9 Sprint 3 (#8): + bono manual editable por el dueño.
@@ -1385,7 +1387,8 @@ class _NominaScreenState extends State<NominaScreen> {
                     // M1: mes liquidado (u otro rechazo): se avisa
                     // y no se recarga como si hubiera funcionado.
                     if (mounted) {
-                      mostrarSnack(context, '$err', significado: SignificadoChip.error);
+                      AppLog.error('nomina', 'anular_adelanto_fallo', d: '$err');
+                      mostrarSnack(context, mensajeErrorAmable(err), significado: SignificadoChip.error);
                     }
                     return;
                   }
@@ -1567,7 +1570,8 @@ class _NominaScreenState extends State<NominaScreen> {
           mesNomina: mesNomina);
     } catch (err) {
       if (mounted) {
-        mostrarSnack(context, '$err',
+        AppLog.error('nomina', 'mover_adelanto_fallo', d: '$err');
+        mostrarSnack(context, mensajeErrorAmable(err),
             significado: SignificadoChip.error);
       }
       return;

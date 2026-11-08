@@ -19,6 +19,8 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class SolicitudesAdelantoScreen extends StatefulWidget {
   const SolicitudesAdelantoScreen({super.key});
@@ -100,7 +102,8 @@ class _SolicitudesAdelantoScreenState
           '(${destinoFinal == 'nomina' ? 'Nómina' : 'Pendiente a entregar'}).');
       await _cargar();
     } catch (e) {
-      _snack('No se pudo aprobar: $e');
+      AppLog.error('solicitudes_adelanto', 'aprobar_fallo', d: '$e');
+      _snack('No se pudo aprobar: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _actuando = false);
     }
@@ -126,7 +129,8 @@ class _SolicitudesAdelantoScreenState
       _snack('Solicitud rechazada.');
       await _cargar();
     } catch (e) {
-      _snack('No se pudo rechazar: $e');
+      AppLog.error('solicitudes_adelanto', 'rechazar_fallo', d: '$e');
+      _snack('No se pudo rechazar: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _actuando = false);
     }

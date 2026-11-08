@@ -2017,7 +2017,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
         Theme.of(context).brightness == Brightness.dark;
     final fondo = esOscuro
         ? AppColores.naranja.withValues(alpha: 0.35)
-        : const Color(0xFFFFF176).withValues(alpha: 0.7);
+        : AppColores.resaltadoBusqueda.withValues(alpha: 0.7);
     while (true) {
       final idx = norm.indexOf(q, ini);
       if (idx < 0) break;

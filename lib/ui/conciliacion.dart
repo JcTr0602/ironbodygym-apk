@@ -24,6 +24,8 @@ import '../negocio.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// Color semántico del chip de cada estado de conciliación.
 SignificadoChip significadoConciliacion(String estado) {
@@ -629,8 +631,8 @@ class _DialogoConciliarState extends State<_DialogoConciliar> {
                         if (mounted) {
                           setState(() {
                             _guardando = false;
-                            _errorGuardado = '$e'
-                                .replaceFirst('Bad state: ', '');
+                            AppLog.error('conciliacion', 'guardar_fallo', d: '$e');
+                            _errorGuardado = mensajeErrorAmable(e);
                           });
                         }
                       }

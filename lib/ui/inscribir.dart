@@ -27,6 +27,8 @@ import 'diseno.dart';
 import 'permisos_ui.dart';
 import 'foto_elegir.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class InscribirScreen extends StatefulWidget {
   /// v1.5.0 (Bloque G): conversión de un invitado — la pantalla se
@@ -286,7 +288,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
         padding: const EdgeInsets.symmetric(
             horizontal: AppEspacio.md, vertical: AppEspacio.sm),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF3CD),
+          color: AppColores.casaFondo,
           borderRadius: BorderRadius.circular(AppRadio.md),
         ),
         child: const Text('Cuenta a la Casa · sin cobro',
@@ -555,7 +557,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
         SyncEngine.instance.push();
       } catch (e) {
         if (!mounted) return;
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        AppLog.error('inscribir', 'guardar_casa_fallo', d: '$e');
+        mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       } finally {
         if (mounted) setState(() => _guardando = false);
       }
@@ -670,7 +673,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
       SyncEngine.instance.push();
     } catch (e) {
       if (!mounted) return;
-      mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+      AppLog.error('inscribir', 'guardar_fallo', d: '$e');
+      mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -1302,12 +1306,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                 ),
                 if (_cuentaCasa) ...[
                   Tarjeta(
-                    color: const Color(0xFFFFF3CD),
+                    color: AppColores.casaFondo,
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Icon(Icons.home_rounded,
-                            color: Color(0xFFB8860B)),
+                            color: AppColores.casaIcono),
                         const SizedBox(width: AppEspacio.sm),
                         Expanded(
                           child: Text(
@@ -1316,7 +1320,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                             'como cliente activo siempre; no entra '
                             'en nómina ni en avisos de vencimiento.',
                             style: AppTexto.secundario.copyWith(
-                                color: const Color(0xFF7A5A00)),
+                                color: AppColores.casaTexto),
                           ),
                         ),
                       ],

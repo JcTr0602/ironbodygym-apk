@@ -7,6 +7,9 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 /// Categoría del error: decide el tratamiento.
 enum TipoErrorSync {
@@ -513,4 +516,110 @@ String describirError(Object error) {
     return 'Hubo un problema al sincronizar. Exporta la bitácora '
         'desde Ajustes y envíala para revisión.';
   }
+}
+
+/// 1.30 Oleada 8 (ítem añadido «Errores amables» + GEN-09):
+/// traduce CUALQUIER error a UN texto breve y en sencillo para
+/// enseñar en un snack o un campo de error de pantalla. Es el
+/// traductor genérico `Object → texto de pantalla`: NO sustituye
+/// a [traducirErrorSync] (que clasifica errores DEL pipeline de
+/// sync, con la regla de la verdad sobre datos guardados) ni
+/// delega en `errorSyncLegible` (su fallback devuelve el texto
+/// crudo recortado, y aquí la garantía es la contraria: NADA
+/// técnico llega a la UI jamás). La excepción cruda la registra
+/// quien llama, en la bitácora interna (AppLog), con su pantalla
+/// y acción; a la UI solo llega lo que devuelve esta función.
+///
+/// Tabla (propuesta_130 §9.2):
+/// - TimeoutException → [enTimeout] del llamador si lo pasa; si
+///   no, «Sin respuesta del servidor. Inténtalo de nuevo.»
+/// - Red (SocketException, ClientException, host lookup y demás
+///   cortes de transporte) → «Sin conexión a internet. Revisa
+///   tus datos o el Wi-Fi.»
+/// - PostgrestException código P0001 (validación de negocio de
+///   nuestras funciones SQL; el mensaje ya nace en español) →
+///   su mensaje, tal cual.
+/// - PostgrestException, cualquier otro código → «El servidor
+///   no aceptó la operación. Inténtalo de nuevo.»
+/// - Mensaje de negocio curado (fila GEN-09, misma filosofía que
+///   P0001): un StateError o un Exception genérico cuyo texto —
+///   sin el prefijo «Exception: »/«Bad state: » — ya nace en
+///   español para el usuario y no trae marcadores técnicos pasa
+///   tal cual (es el canal normal de los rechazos locales:
+///   adelantos, caja, solicitudes). Con cualquier marcador
+///   técnico, cae al genérico.
+/// - Cualquier otro → «Algo salió mal. Inténtalo de nuevo.»
+///
+/// PostgrestException se detecta sin importar supabase en este
+/// módulo (Dart puro; lo importan localdb/sync): nombre del tipo
+/// en runtime y lectura dinámica de code/message — el mismo
+/// espíritu con el que traducirErrorSync clasifica por contenido
+/// sin importar los paquetes de origen.
+String mensajeErrorAmable(Object error, {String? enTimeout}) {
+  if (error is TimeoutException) {
+    return enTimeout ?? 'Sin respuesta del servidor. Inténtalo de nuevo.';
+  }
+  if (error.runtimeType.toString() == 'PostgrestException') {
+    final dyn = error as dynamic;
+    final code = dyn.code?.toString() ?? '';
+    final message = (dyn.message?.toString() ?? '').trim();
+    if (code == 'P0001' && message.isNotEmpty) return message;
+    return 'El servidor no aceptó la operación. Inténtalo de nuevo.';
+  }
+  final raw = error.toString().toLowerCase();
+  if (error is SocketException ||
+      error is http.ClientException ||
+      raw.contains('failed host lookup') ||
+      raw.contains('socketexception') ||
+      raw.contains('clientexception') ||
+      raw.contains('handshakeexception') ||
+      raw.contains('network is unreachable') ||
+      raw.contains('connection closed') ||
+      raw.contains('connection reset')) {
+    return 'Sin conexión a internet. Revisa tus datos o el Wi-Fi.';
+  }
+  // Mensaje de negocio curado (GEN-09): StateError trae su texto
+  // en .message; un Exception genérico lo trae en el toString
+  // tras el prefijo «Exception: ». Solo pasa si el texto es
+  // limpio: sin marcadores técnicos, no se pinta.
+  String? candidato;
+  if (error is StateError) {
+    candidato = error.message.trim();
+  } else if (error is Exception) {
+    var t = error.toString().trim();
+    if (t.startsWith('Exception: ')) t = t.substring(11).trim();
+    candidato = t;
+  }
+  if (candidato != null && _esTextoDeNegocioLimpio(candidato)) {
+    return candidato;
+  }
+  return 'Algo salió mal. Inténtalo de nuevo.';
+}
+
+/// ¿Es [t] un texto de negocio redactado para el usuario (y no
+/// un resto técnico)? Conservador a propósito: ante la duda, no
+/// pasa (manda el genérico de mensajeErrorAmable).
+bool _esTextoDeNegocioLimpio(String t) {
+  if (t.isEmpty || t.length > 200) return false;
+  final low = t.toLowerCase();
+  const marcadores = [
+    'exception',
+    'bad state',
+    'null check',
+    'sqflite',
+    'postgrest',
+    'assertion',
+    'subtype',
+    'stack',
+    'http',
+    '://',
+    'future not completed',
+    'timeout',
+    'errno',
+    'os error',
+  ];
+  for (final m in marcadores) {
+    if (low.contains(m)) return false;
+  }
+  return true;
 }

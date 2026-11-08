@@ -690,10 +690,10 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   Widget _chipCasa() {
     return Chip(
       label: Text('Casa',
-          style: AppTexto.minuscula.copyWith(color: Color(0xFF7A5A00), fontWeight: FontWeight.w700)),
+          style: AppTexto.minuscula.copyWith(color: AppColores.casaTexto, fontWeight: FontWeight.w700)),
       avatar: Icon(Icons.home_rounded,
-          size: 14, color: Color(0xFFB8860B)),
-      backgroundColor: Color(0xFFFFF3CD),
+          size: 14, color: AppColores.casaIcono),
+      backgroundColor: AppColores.casaFondo,
       visualDensity: VisualDensity.compact,
     );
   }

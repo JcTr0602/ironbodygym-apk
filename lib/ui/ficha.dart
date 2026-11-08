@@ -47,6 +47,8 @@ import 'foto_elegir.dart';
 import 'medidas_cliente.dart';
 import 'pestana_progreso.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// Payload de la renovación rápida (1 mes en efectivo).
 /// Función pura (testeable sin montar la pantalla): el preview
@@ -844,7 +846,8 @@ class _FichaScreenState extends State<FichaScreen> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error al verificar: $e', significado: SignificadoChip.error);
+        AppLog.error('ficha', 'verificar_servidor_fallo', d: '$e');
+        mostrarSnack(context, 'Error al verificar: ${mensajeErrorAmable(e, enTimeout: 'Sin respuesta del servidor; se muestran los datos de tu teléfono')}', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _verificando = false);

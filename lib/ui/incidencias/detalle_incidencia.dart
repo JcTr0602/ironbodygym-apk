@@ -14,6 +14,8 @@ import '../componentes.dart';
 import '../ficha.dart';
 import 'widgets/dialogo_resolver_incidencia.dart';
 import 'editar_incidencia.dart';
+import '../../errores_sync.dart';
+import '../../app_log.dart';
 
 /// Detalle de incidencia: info + comentarios + fotos + historial.
 /// v1.3.0
@@ -465,7 +467,8 @@ class _DetalleIncidenciaScreenState
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        AppLog.error('detalle_incidencia', 'agregar_foto_fallo', d: '$e');
+        mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     }
   }

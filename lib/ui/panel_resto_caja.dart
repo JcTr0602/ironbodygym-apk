@@ -31,6 +31,8 @@ import 'componentes.dart';
 import 'mi_nomina.dart' show BarraComposicionNomina;
 import 'diseno.dart';
 import 'nomina.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 // ---------------------------------------------------------------------------
 // C1
@@ -275,7 +277,8 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
         await _cargar();
       } catch (err) {
         if (mounted) {
-          mostrarSnack(context, '$err', significado: SignificadoChip.error);
+          AppLog.error('panel_caja', 'registrar_entrega_fallo', d: '$err');
+          mostrarSnack(context, mensajeErrorAmable(err), significado: SignificadoChip.error);
         }
         return;
       }
@@ -1194,7 +1197,8 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _guardandoCampo = null);
-        mostrarSnack(context, '$e', significado: SignificadoChip.error);
+        AppLog.error('panel_caja', 'guardar_campo_fallo', d: '$e');
+        mostrarSnack(context, mensajeErrorAmable(e), significado: SignificadoChip.error);
       }
     }
   }

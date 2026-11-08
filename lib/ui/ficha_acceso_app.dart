@@ -45,6 +45,8 @@ import 'ficha_secciones.dart';
 import 'modal_pin_acceso.dart';
 import 'panel_comunidad.dart';
 import 'vista_previa_cliente.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 /// Fila «Plus» de la tarjeta Membresía: consulta SOLA el Plus
 /// residual (solo dueño) y se repinta sola al llegar.
@@ -557,7 +559,8 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
         }
       } catch (e) {
         if (mounted) {
-          mostrarSnack(context, 'Error al revocar: $e',
+          AppLog.error('ficha_acceso_app', 'revocar_fallo', d: '$e');
+          mostrarSnack(context, 'Error al revocar: ${mensajeErrorAmable(e)}',
               significado: SignificadoChip.error);
         }
       }
@@ -608,7 +611,8 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error al generar PIN: $e',
+        AppLog.error('ficha_acceso_app', 'generar_pin_fallo', d: '$e');
+        mostrarSnack(context, 'Error al generar PIN: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
       }
     } finally {

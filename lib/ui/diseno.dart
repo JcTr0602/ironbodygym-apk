@@ -387,6 +387,52 @@ class AppColores {
       Theme.of(context).brightness == Brightness.dark
           ? metodoTransferencia
           : metodoTransferenciaClaro;
+  // --- Roles nacidos en la Oleada 8 de la 1.30 (§9.2) ---
+  // Literales que ya eran un rol con nombre en las pantallas y
+  // vivían sueltos: la oleada los centraliza con el VALOR
+  // EXACTO que ya pintaban (sin cambio visual; un ajuste
+  // futuro del rol se hace en un solo sitio).
+
+  /// Verde de marca de WhatsApp (el icono de la acción).
+  static const whatsapp = Color(0xFF25D366);
+
+  /// Cuenta a la Casa: la pastilla dorada — fondo, icono y
+  /// texto sobre ese fondo. Tinte claro fijo en ambos temas,
+  /// como ya lo pintaban buscar, inscribir y acceso.
+  static const casaFondo = Color(0xFFFFF3CD);
+  static const casaIcono = Color(0xFFB8860B);
+  static const casaTexto = Color(0xFF7A5A00);
+
+  /// Dorado de la pastilla y la línea Plus de Invitados.
+  static const doradoPlus = Color(0xFF9A7B0A);
+
+  /// Fondo de la vista previa del comprobante, tal y como lo
+  /// recibirá el cliente (venta y detalle de suplemento).
+  static const comprobanteFondo = Color(0xFFE7F6EC);
+
+  /// Bloque «por revisar» del Panel: superficie cálida propia
+  /// con su par claro/oscuro (distinta de alertaSuperficie).
+  static const avisoPanelFondoClaro = Color(0xFFFFF6E5);
+  static const avisoPanelFondoOscuro = Color(0xFF1B150B);
+  static const avisoPanelBordeOscuro = Color(0xFF6B4A12);
+
+  /// Texto oscuro sobre el botón naranja (primario) de las
+  /// acciones rápidas del Panel.
+  static const sobreNaranjaOscuro = Color(0xFF171106);
+
+  /// Rojo suave del icono de alerta sobre fondo oscuro (el
+  /// mismo valor que colorSignificadoChip usa para el error
+  /// en oscuro dentro de componentes).
+  static const errorIconoOscuro = Color(0xFFF87171);
+
+  /// Azul del badge de agua, par oscuro/claro (junto a
+  /// azulAgua, el del gradiente de dosis de agua).
+  static const azulAguaOscuro = Color(0xFF60A5FA);
+  static const azulAguaClaro = Color(0xFF2563EB);
+
+  /// Resaltado de coincidencias al buscar dentro de una lista
+  /// (modo claro; en oscuro manda el naranja translúcido).
+  static const resaltadoBusqueda = Color(0xFFFFF176);
 }
 
 /// Tipografía del sistema (V1 1.20, escala contractual).

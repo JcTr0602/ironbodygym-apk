@@ -1201,7 +1201,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
             if (telOk)
               ListTile(
                 leading: const Icon(Icons.chat_rounded,
-                    color: Color(0xFF25D366)),
+                    color: AppColores.whatsapp),
                 title: const Text('WhatsApp'),
                 onTap: () => Navigator.pop(ctx, 'whatsapp'),
               ),
@@ -1772,7 +1772,7 @@ class _FilaClienteState extends State<_FilaCliente> {
     // lleva (no debe filtrar el estado).
     final esCasaAnillo = esCuentaCasa(c);
     final colorSemaforo = esCasaAnillo
-        ? const Color(0xFFB8860B)
+        ? AppColores.casaIcono
         : (d == null || d < 0)
             ? AppColores.error
             : d <= 7
@@ -1904,7 +1904,7 @@ class _FilaClienteState extends State<_FilaCliente> {
                           horizontal: AppEspacio.sm,
                           vertical: AppEspacio.xs),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFF3CD),
+                        color: AppColores.casaFondo,
                         borderRadius: BorderRadius.circular(
                             AppRadio.circular),
                       ),
@@ -1912,11 +1912,11 @@ class _FilaClienteState extends State<_FilaCliente> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.home_rounded,
-                              size: 16, color: Color(0xFFB8860B)),
+                              size: 16, color: AppColores.casaIcono),
                           const SizedBox(width: 4),
                           Text(textoDiasCasa,
                               style: AppTexto.etiqueta.copyWith(
-                                  color: const Color(0xFF7A5A00))),
+                                  color: AppColores.casaTexto)),
                         ],
                       ),
                     )
@@ -2020,7 +2020,7 @@ class _FilaClienteState extends State<_FilaCliente> {
                 (widget.accionWhatsapp != null
                     ? IconButton(
                         icon: const Icon(Icons.chat_rounded,
-                            color: Color(0xFF25D366)),
+                            color: AppColores.whatsapp),
                         tooltip: 'Avisar por WhatsApp',
                         visualDensity: VisualDensity.compact,
                         onPressed: widget.accionWhatsapp,

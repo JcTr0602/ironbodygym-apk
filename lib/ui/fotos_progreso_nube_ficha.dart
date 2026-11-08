@@ -926,8 +926,8 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
                   child: Text(
                     'Foto del '
                     '${fmtFecha(_foto['fecha']?.toString() ?? '')}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w800, fontSize: 15),
+                    style: AppTexto.subtitulo
+                        .copyWith(fontWeight: FontWeight.w800),
                   ),
                 ),
                 if (widget.fotos.length > 1)

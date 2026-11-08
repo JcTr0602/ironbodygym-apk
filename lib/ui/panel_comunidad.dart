@@ -6,7 +6,7 @@ import '../auth.dart';
 import '../comunidad_panel.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
-import 'diseno.dart' show AppEspacio, AppRadio;
+import 'diseno.dart' show AppEspacio, AppRadio, AppTexto;
 import 'ficha.dart';
 
 /// 1.27 (Comunidad MVP, Pieza G): «Comunidad» del
@@ -471,9 +471,8 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                           ),
                           child: Text(
                             '$_reportesPendientes',
-                            style: const TextStyle(
+                            style: AppTexto.minuscula.copyWith(
                               color: Colors.white,
-                              fontSize: 11,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
@@ -543,7 +542,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                 'y retirar un Nick inadecuado. '
                 'Lo que cada cliente apagó no se ve '
                 'ni aquí.',
-                style: TextStyle(fontSize: 13, height: 1.4),
+                style: AppTexto.secundario,
               ),
               const SizedBox(height: 10),
               Text(
@@ -551,8 +550,8 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                 'de $_totalClientes clientes · '
                 '${conteos.visibles} visibles en el directorio · '
                 '${conteos.ocultosPorTi} ocultos por ti',
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700),
+                style: AppTexto.secundario
+                    .copyWith(fontWeight: FontWeight.w700),
               ),
               if (nuevos > 0) ...[
                 const SizedBox(height: 8),
@@ -649,8 +648,8 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
               p.nick == null
                   ? p.nombre
                   : '${p.nombre} · «${p.nick}»',
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700, fontSize: 15),
+              style: AppTexto.subtitulo
+                  .copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 2),
             Text(
@@ -726,8 +725,8 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
             Text(
               '$nombreReportado'
               '${r.reportadoNick == null ? '' : ' (${r.reportadoNombreReal})'}',
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700, fontSize: 15),
+              style: AppTexto.subtitulo
+                  .copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 2),
             Text(
@@ -1021,11 +1020,10 @@ class _VerPerfilComunidadScreenState
                       style: const TextStyle(height: 1.4),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
+                    Text(
                       'LO QUE COMPARTE',
-                      style: TextStyle(
+                      style: AppTexto.etiqueta.copyWith(
                           fontWeight: FontWeight.w700,
-                          fontSize: 12,
                           letterSpacing: 0.6),
                     ),
                     const SizedBox(height: 6),
@@ -1048,11 +1046,10 @@ class _VerPerfilComunidadScreenState
                         ),
                     if (_apagados.isNotEmpty) ...[
                       const SizedBox(height: 10),
-                      const Text(
+                      Text(
                         'APAGADO POR EL CLIENTE (NO VIAJA)',
-                        style: TextStyle(
+                        style: AppTexto.etiqueta.copyWith(
                             fontWeight: FontWeight.w700,
-                            fontSize: 12,
                             letterSpacing: 0.6),
                       ),
                       const SizedBox(height: 6),

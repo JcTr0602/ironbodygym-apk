@@ -77,7 +77,7 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
   /// Casa, naranja en la inscripción normal.
   Widget _cabecera() {
     final colorAnillo =
-        esCasa ? const Color(0xFFB8860B) : AppColores.naranja;
+        esCasa ? AppColores.casaIcono : AppColores.naranja;
     Widget interior;
     if (fotoPath == null || fotoPath!.isEmpty) {
       interior = _iconoCheckNaranja();
@@ -192,7 +192,7 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
                   vertical: AppEspacio.sm,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF3CD),
+                  color: AppColores.casaFondo,
                   borderRadius:
                       BorderRadius.circular(AppRadio.lg),
                 ),
@@ -200,12 +200,12 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(Icons.home_rounded,
-                        size: 20, color: Color(0xFFB8860B)),
+                        size: 20, color: AppColores.casaIcono),
                     const SizedBox(width: AppEspacio.sm),
                     Text(
                       'Sin cobro · Sin vencimiento',
                       style: AppTexto.cuerpo.copyWith(
-                        color: const Color(0xFF7A5A00),
+                        color: AppColores.casaTexto,
                         fontWeight: FontWeight.w600,
                       ),
                     ),

@@ -37,6 +37,8 @@ import 'turnos_calendario.dart'
     show CalendarioTurnosScreen, colorChipEntrenador;
 import 'turno_abrir.dart';
 import 'turnos_hub.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class HubTurnosScreen extends StatefulWidget {
   const HubTurnosScreen({super.key});
@@ -264,7 +266,8 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
       _snack('Turno abierto.');
       await _cargar();
     } catch (e) {
-      _snack('No se pudo abrir el turno: $e');
+      AppLog.error('hub_turnos', 'abrir_turno_fallo', d: '$e');
+      _snack('No se pudo abrir el turno: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _procesando = false);
     }
@@ -282,7 +285,8 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
         await _cargar();
       }
     } catch (e) {
-      _snack('No se pudo cerrar el turno: $e');
+      AppLog.error('hub_turnos', 'cerrar_turno_fallo', d: '$e');
+      _snack('No se pudo cerrar el turno: ${mensajeErrorAmable(e)}');
     } finally {
       if (mounted) setState(() => _procesando = false);
     }

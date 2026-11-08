@@ -58,7 +58,7 @@ class InvitadosScreen extends StatefulWidget {
 final _loteInvitados = AccionLoteInvitados();
 
 /// Dorado de la pastilla y la línea Plus (rango «Invitado Plus»).
-const _doradoPlus = Color(0xFF9A7B0A);
+const _doradoPlus = AppColores.doradoPlus;
 
 /// 1.29 (FB-05 · D-B1-05): costuras de test (patrón de la casa,
 /// cf. leerNominaPermisosParaTest en panel_permisos.dart): el

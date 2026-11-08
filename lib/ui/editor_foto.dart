@@ -286,7 +286,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
             textAlign: TextAlign.center,
             style: AppTexto.secundario.copyWith(
                 color: _preparacionFallo
-                    ? AppColores.error
+                    ? AppColores.errorTexto(context)
                     : AppColores.textoSecundario(context)),
           ),
           const SizedBox(height: 12),

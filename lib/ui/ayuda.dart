@@ -389,7 +389,7 @@ class AyudaScreen extends StatelessWidget {
                                   BorderRadius.circular(AppRadio.md),
                             ),
                             child: Text('v${n.version}',
-                                style: AppTexto.metadato.copyWith(color: AppColores.naranja, fontWeight: FontWeight.bold)),
+                                style: AppTexto.metadato.copyWith(color: AppColores.textoNaranja(context), fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ),
@@ -447,7 +447,7 @@ class _Tema extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(texto,
             style: AppTexto.subtitulo
-                .copyWith(color: AppColores.naranja)),
+                .copyWith(color: AppColores.textoNaranja(context))),
       ),
     );
   }

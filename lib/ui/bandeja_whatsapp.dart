@@ -892,7 +892,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: tieneTelefono
-                        ? const Color(0xFF25D366)
+                        ? AppColores.whatsapp
                         : AppColores.textoSecundario(context)
                             .withValues(alpha: 0.3),
                   ),

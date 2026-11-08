@@ -915,7 +915,7 @@ class _ServiciosEstadisticasScreenState
 
   Color _colorNivelAutonomia(String nivel) => switch (nivel) {
         'holgada' => AppColores.exito,
-        'justa' => const Color(0xFFD97706),
+        'justa' => AppColores.alertaOscuro,
         'critica' => AppColores.error,
         _ => Colors.grey,
       };

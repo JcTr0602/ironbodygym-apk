@@ -32,6 +32,8 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'servicios.dart';
 import 'widgets.dart';
+import '../errores_sync.dart';
+import '../app_log.dart';
 
 class MiNominaScreen extends StatefulWidget {
   const MiNominaScreen({super.key});
@@ -455,7 +457,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       await _cargar();
     } catch (e) {
       if (!mounted) return;
-      mostrarSnack(context, 'No se pudo enviar: $e', significado: SignificadoChip.error);
+      AppLog.error('mi_nomina', 'pedir_adelanto_fallo', d: '$e');
+      mostrarSnack(context, 'No se pudo enviar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _pidiendo = false);
     }
@@ -501,7 +504,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       await _cargar();
     } catch (e) {
       if (!mounted) return;
-      mostrarSnack(context, 'No se pudo confirmar: $e',
+      AppLog.error('mi_nomina', 'confirmar_recepcion_fallo', d: '$e');
+      mostrarSnack(context, 'No se pudo confirmar: ${mensajeErrorAmable(e)}',
           significado: SignificadoChip.error);
     } finally {
       if (mounted) setState(() => _confirmando = false);
