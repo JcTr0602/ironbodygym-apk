@@ -913,7 +913,10 @@ void main() {
           {int? id,
           required String titulo,
           required String cuerpo,
-          required String nivel}) async {
+          required String nivel,
+          // 1.29 O7: la costura gana fechaFin (FB-22); este
+          // falso la ignora (sin fecha, como en la O6).
+          String? fechaFin}) async {
         llamadasGuardar++;
         servidor.add(AvisoCliente(
             id: 99,
