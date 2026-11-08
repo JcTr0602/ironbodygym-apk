@@ -18,12 +18,31 @@ import '../nomina_calc.dart';
 import '../perfil.dart';
 import '../tiempo.dart';
 
-String _csv(List<String> cabecera, List<List<String>> filas) {
+/// CSV de exportación (cabecera + filas). 1.29 (Oleada 6,
+/// D-B3-08): las celdas que empiezan por `=`, `+`, `-` o
+/// `@` se neutralizan con un prefijo de comilla — sin eso,
+/// un nombre de cliente como «=2+5» se abría en Excel como
+/// una FÓRMULA viva (inyección de fórmulas por un dato que
+/// teclea un humano). Y `\r` también dispara el
+/// entrecomillado: un retorno suelto rompía la fila al
+/// abrir el archivo. Pública para poder fijarla con tests,
+/// como los demás helpers puros de este archivo.
+String csvDeExportacion(List<String> cabecera, List<List<String>> filas) {
   String esc(String s) {
-    if (s.contains(',') || s.contains('"') || s.contains('\n')) {
-      return '"${s.replaceAll('"', '""')}"';
+    var v = s;
+    if (v.startsWith('=') ||
+        v.startsWith('+') ||
+        v.startsWith('-') ||
+        v.startsWith('@')) {
+      v = "'$v";
     }
-    return s;
+    if (v.contains(',') ||
+        v.contains('"') ||
+        v.contains('\n') ||
+        v.contains('\r')) {
+      return '"${v.replaceAll('"', '""')}"';
+    }
+    return v;
   }
 
   final sb = StringBuffer();
@@ -138,7 +157,7 @@ Future<bool> exportarExcel() async {
       final id = (c['id'] as num?)?.toInt();
       if (id != null && esVistaProtegida(c)) protegidos.add(id);
     }
-    final csvClientes = _csv(
+    final csvClientes = csvDeExportacion(
       ['nombre', 'carnet', 'telefono', 'estado', 'pagado_hasta'],
       [
         // v1.8.0: la cáscara de una baja conservando estadísticas
@@ -168,7 +187,7 @@ Future<bool> exportarExcel() async {
     };
     final pagosMes =
         pagos.where((p) => '${p['fecha'] ?? ''}'.startsWith(pref)).toList();
-    final csvPagos = _csv(
+    final csvPagos = csvDeExportacion(
       ['fecha', 'cliente', 'monto', 'metodo'],
       [
         for (final p in pagosMes)
@@ -197,7 +216,7 @@ Future<bool> exportarExcel() async {
         if ((s['id'] as num?) != null)
           (s['id'] as num).toInt(): '${s['nombre'] ?? ''}',
     };
-    final csvVentas = _csv(
+    final csvVentas = csvDeExportacion(
       ['fecha', 'producto', 'cantidad', 'monto', 'moneda', 'comprador',
         'vendedor'],
       filasVentasMes(ventas, nombreProd, pref, protegidos),
@@ -213,7 +232,7 @@ Future<bool> exportarExcel() async {
         if ((c['id'] as num?) != null)
           (c['id'] as num).toInt(): '${c['nombre'] ?? ''}',
     };
-    final csvSuplementos = _csv(
+    final csvSuplementos = csvDeExportacion(
       ['nombre', 'categoria', 'precio_oficial', 'stock'],
       filasSuplementos(suplementos, nombreCat),
     );
@@ -339,7 +358,7 @@ Future<bool> exportarExcel() async {
           }
         }
       }
-      final csvNomina = _csv(
+      final csvNomina = csvDeExportacion(
         ['entrenador', 'clientes_base', 'bruto', 'comisiones',
           'bonos', 'devengado', 'adelantos', 'deuda_entrante',
           'neto', 'a_pagar', 'liquidada'],

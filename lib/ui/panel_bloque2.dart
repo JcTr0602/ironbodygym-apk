@@ -68,8 +68,15 @@ Future<void> mostrarPermisosExplicados(BuildContext context) async {
                 child: Text('• ${e.value}', style: AppTexto.cuerpo),
               ),
             const Text(
+              // 1.29 (Oleada 6, D-B3-07): el texto decía que
+              // sin permiso la acción «no se ve», pero la
+              // regla vigente desde la 1.24 es la contraria:
+              // el botón se VE siempre; lo que falta sin
+              // permiso es que ocurra algo al tocarlo.
               'El dueño siempre tiene todo. Un entrenador sin un '
-              'permiso simplemente no ve esa acción.',
+              'permiso ve el botón igual que todos: al tocarlo, '
+              'la app le avisa de que no tiene permiso y la '
+              'acción no ocurre.',
               style: AppTexto.secundario,
             ),
           ],

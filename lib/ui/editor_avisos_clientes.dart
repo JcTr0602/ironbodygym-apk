@@ -47,8 +47,94 @@ class AvisoCliente {
       );
 }
 
+/// 1.29 (Oleada 6, D-B3-05): el resultado de un guardado
+/// con comprobación post-fallo (el patrón de Anuncios y
+/// Premios de la 1.28, que este editor viejo no tenía).
+enum ResultadoGuardadoAviso { guardado, noGuardado, sinConfirmar }
+
+/// ¿La lista recién cargada ya refleja el guardado? En
+/// una edición: la fila con su id trae el título/cuerpo/
+/// nivel nuevos. En una creación: hay un aviso con el
+/// mismo título/cuerpo/nivel cuyo id NO estaba en la
+/// lista previa (un gemelo idéntico preexistente no es
+/// prueba: la prueba es que apareció uno nuevo).
+bool avisoReflejaGuardado({
+  required List<AvisoCliente> lista,
+  required Set<int> idsPrevios,
+  required int? idEditado,
+  required String titulo,
+  required String cuerpo,
+  required String nivel,
+}) {
+  if (idEditado != null) {
+    for (final a in lista) {
+      if (a.id == idEditado) {
+        return a.titulo == titulo &&
+            a.cuerpo == cuerpo &&
+            a.nivel == nivel;
+      }
+    }
+    return false;
+  }
+  return lista.any((a) =>
+      !idsPrevios.contains(a.id) &&
+      a.titulo == titulo &&
+      a.cuerpo == cuerpo &&
+      a.nivel == nivel);
+}
+
+/// Guarda y, si la llamada FALLA (p. ej. timeout: la
+/// respuesta se perdió pero el aviso pudo aterrizar),
+/// comprueba contra la lista antes de declarar el fallo:
+/// sin esta comprobación, el dueño reintentaba y el aviso
+/// salía DUPLICADO a todos los clientes.
+Future<ResultadoGuardadoAviso> guardarAvisoVerificado({
+  required Future<void> Function() guardar,
+  required Future<List<AvisoCliente>> Function() listar,
+  required Set<int> idsPrevios,
+  required int? idEditado,
+  required String titulo,
+  required String cuerpo,
+  required String nivel,
+}) async {
+  try {
+    await guardar();
+    return ResultadoGuardadoAviso.guardado;
+  } catch (_) {
+    final List<AvisoCliente> lista;
+    try {
+      lista = await listar();
+    } catch (_) {
+      // Ni el guardado ni la comprobación respondieron:
+      // no se sabe — y se dice que no se sabe.
+      return ResultadoGuardadoAviso.sinConfirmar;
+    }
+    return avisoReflejaGuardado(
+          lista: lista,
+          idsPrevios: idsPrevios,
+          idEditado: idEditado,
+          titulo: titulo,
+          cuerpo: cuerpo,
+          nivel: nivel,
+        )
+        ? ResultadoGuardadoAviso.guardado
+        : ResultadoGuardadoAviso.noGuardado;
+  }
+}
+
 class EditorAvisosClientesScreen extends StatefulWidget {
-  const EditorAvisosClientesScreen({super.key});
+  /// Costuras de red para los tests (D-B3-05): por defecto
+  /// van las RPC reales admin_guardar_aviso /
+  /// admin_listar_avisos.
+  final Future<void> Function(
+      {int? id,
+      required String titulo,
+      required String cuerpo,
+      required String nivel})? guardarAvisoRpc;
+  final Future<List<AvisoCliente>> Function()? listarAvisosRpc;
+
+  const EditorAvisosClientesScreen(
+      {super.key, this.guardarAvisoRpc, this.listarAvisosRpc});
 
   @override
   State<EditorAvisosClientesScreen> createState() =>
@@ -67,19 +153,39 @@ class _EditorAvisosClientesScreenState
     _cargar();
   }
 
+  Future<List<AvisoCliente>> _listarReal() async {
+    final res = await Supabase.instance.client
+        .rpc('admin_listar_avisos')
+        .timeout(const Duration(seconds: 12));
+    return ((res as List?) ?? const [])
+        .map((e) =>
+            AvisoCliente.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  Future<void> _guardarReal(
+      {int? id,
+      required String titulo,
+      required String cuerpo,
+      required String nivel}) async {
+    await Supabase.instance.client.rpc('admin_guardar_aviso', params: {
+      'p_id': id,
+      'p_titulo': titulo,
+      'p_cuerpo': cuerpo,
+      'p_nivel': nivel,
+    })
+        // 1.24 Bloque 4: timeout de escritura (12 s).
+        .timeout(const Duration(seconds: 12));
+  }
+
   Future<void> _cargar() async {
     if (mounted) setState(() {
       _cargando = true;
       _error = false;
     });
     try {
-      final res = await Supabase.instance.client
-          .rpc('admin_listar_avisos')
-          .timeout(const Duration(seconds: 12));
-      final lista = ((res as List?) ?? const [])
-          .map((e) =>
-              AvisoCliente.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
+      final lista =
+          await (widget.listarAvisosRpc ?? _listarReal)();
       if (!mounted) return;
       setState(() {
         _avisos = lista;
@@ -98,7 +204,15 @@ class _EditorAvisosClientesScreenState
     final cambiado = await Navigator.push<bool>(
       context,
       RutaIron(
-        builder: (_) => _FormularioAvisoScreen(aviso: aviso),
+        builder: (_) => _FormularioAvisoScreen(
+          aviso: aviso,
+          // D-B3-05: la foto de ids que la lista tenía al
+          // abrir — la prueba de «apareció uno nuevo» de
+          // la comprobación post-fallo se mide contra ella.
+          idsPrevios: {for (final a in _avisos) a.id},
+          guardarAvisoRpc: widget.guardarAvisoRpc ?? _guardarReal,
+          listarAvisosRpc: widget.listarAvisosRpc ?? _listarReal,
+        ),
       ),
     );
     if (cambiado == true && mounted) await _cargar();
@@ -198,7 +312,19 @@ class _EditorAvisosClientesScreenState
 
 class _FormularioAvisoScreen extends StatefulWidget {
   final AvisoCliente? aviso;
-  const _FormularioAvisoScreen({this.aviso});
+  final Set<int> idsPrevios;
+  final Future<void> Function(
+      {int? id,
+      required String titulo,
+      required String cuerpo,
+      required String nivel}) guardarAvisoRpc;
+  final Future<List<AvisoCliente>> Function() listarAvisosRpc;
+  const _FormularioAvisoScreen({
+    this.aviso,
+    required this.idsPrevios,
+    required this.guardarAvisoRpc,
+    required this.listarAvisosRpc,
+  });
 
   @override
   State<_FormularioAvisoScreen> createState() =>
@@ -238,28 +364,47 @@ class _FormularioAvisoScreenState extends State<_FormularioAvisoScreen> {
       return;
     }
     setState(() => _guardando = true);
-    try {
-      await Supabase.instance.client
-          .rpc('admin_guardar_aviso', params: {
-            'p_id': widget.aviso?.id,
-            'p_titulo': titulo,
-            'p_cuerpo': cuerpo,
-            'p_nivel': _importante ? 'importante' : 'info',
-          })
-          // 1.24 Bloque 4: timeout de escritura (12 s).
-          .timeout(const Duration(seconds: 12));
-      if (!mounted) return;
-      mostrarSnack(context, 'Aviso publicado',
-          significado: SignificadoChip.exito);
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _guardando = false);
-      AppLog.error('avisos_clientes', 'publicar_fallo', d: '$e');
-      mostrarSnack(context,
-          'No se pudo publicar el aviso. Revisa la conexión '
-          'e inténtalo de nuevo.',
-          significado: SignificadoChip.error);
+    final nivel = _importante ? 'importante' : 'info';
+    // 1.29 (Oleada 6, D-B3-05): guardado VERIFICADO — si la
+    // llamada falla (timeout), se comprueba si el aviso
+    // aterrizó antes de ofrecer reintentar: reintentar a
+    // ciegas duplicaba el aviso en la app de los clientes.
+    final resultado = await guardarAvisoVerificado(
+      guardar: () => widget.guardarAvisoRpc(
+          id: widget.aviso?.id,
+          titulo: titulo,
+          cuerpo: cuerpo,
+          nivel: nivel),
+      listar: widget.listarAvisosRpc,
+      idsPrevios: widget.idsPrevios,
+      idEditado: widget.aviso?.id,
+      titulo: titulo,
+      cuerpo: cuerpo,
+      nivel: nivel,
+    );
+    if (!mounted) return;
+    switch (resultado) {
+      case ResultadoGuardadoAviso.guardado:
+        mostrarSnack(context, 'Aviso publicado',
+            significado: SignificadoChip.exito);
+        Navigator.pop(context, true);
+      case ResultadoGuardadoAviso.noGuardado:
+        setState(() => _guardando = false);
+        AppLog.error('avisos_clientes', 'publicar_fallo',
+            d: 'guardado no reflejado tras el fallo');
+        mostrarSnack(context,
+            'No se pudo publicar el aviso. Revisa la conexión '
+            'e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      case ResultadoGuardadoAviso.sinConfirmar:
+        // No se sabe si aterrizó: se vuelve a la lista (que
+        // se recarga) para comprobarlo ANTES de repetir —
+        // y el mensaje dice exactamente eso.
+        mostrarSnack(context,
+            'No se pudo confirmar si el aviso se publicó. '
+            'Revisa la lista antes de intentarlo de nuevo.',
+            significado: SignificadoChip.alerta);
+        Navigator.pop(context, true);
     }
   }
 

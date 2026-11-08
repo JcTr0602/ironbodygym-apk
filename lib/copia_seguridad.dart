@@ -1,18 +1,39 @@
 /// Copia de seguridad H5 (1.14, M6.30): copia en frío de la BD.
 /// Vuelca el WAL a la BD antes de copiar, para que el archivo no
 /// salga incompleto ni corrupto. NUNCA VACUUM sobre la BD activa.
-/// Solo se copia ironbody.db: las fotos viven fuera de la BD y el
-/// directorio destino nace vacío, así que la copia no las arrastra.
+/// Solo se copia ironbody.db: las fotos viven fuera de la BD.
+///
+/// 1.29 (Oleada 6, D-B3-06): el destino es DURADERO — el
+/// directorio de documentos del teléfono, subcarpeta
+/// `copias_manuales`, con nombre fechado — y exportar NO
+/// borra la copia anterior. Antes la copia iba al temporal
+/// del sistema y cada exportación borraba el directorio
+/// entero: la pantalla decía «Copia guardada en el
+/// teléfono» y el sistema podía barrerla en cualquier
+/// momento (y la siguiente exportación la destruía seguro).
 library;
 
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import 'localdb.dart';
+import 'tiempo.dart';
 
-/// Copia la BD a un directorio temporal nuevo y devuelve el
-/// archivo copiado (la pantalla lo comparte y audita).
+/// Nombre de una copia manual: con la fecha y hora (Habana)
+/// en el propio nombre, para que dos exportaciones no se
+/// pisen y el dueño las distinga en el explorador.
+String nombreCopiaManual(DateTime ahora) {
+  String d2(int n) => n.toString().padLeft(2, '0');
+  return 'ironbody-${ahora.year}${d2(ahora.month)}${d2(ahora.day)}'
+      '-${d2(ahora.hour)}${d2(ahora.minute)}${d2(ahora.second)}.db';
+}
+
+/// Copia la BD al directorio de documentos y devuelve el
+/// archivo copiado (la pantalla lo comparte y audita; la
+/// copia automática semanal lo re-copia a su carpeta con
+/// su rotación propia).
 Future<File> exportarCopiaFria() async {
   // 1.24 Bloque 5 (F5): el mismo rigor que el export de Ajustes
   // y que la importación — candado de sync tomado durante el
@@ -76,16 +97,25 @@ Future<File> _copiarConCandado() async {
     // reconstruía a mano como getDatabasesPath() + 'ironbody.db',
     // lo que en los tests paralelos (P1) apuntaba a otro archivo.
     final origen = File(await LocalDb.instance.dbPath());
-    // 1.24.1 (Argón G-06): directorio FIJO reutilizado — antes
-    // cada exportación creaba un ironbody_backup* nuevo en el
-    // temporal del sistema y nunca se barrían (copias completas
-    // de la BD acumuladas).
-    final tmp = Directory(p.join(Directory.systemTemp.path, 'ironbody_backup'));
-    if (await tmp.exists()) {
-      await tmp.delete(recursive: true);
+    // 1.29 (Oleada 6, D-B3-06): destino DURADERO en el
+    // directorio de documentos (el mismo hogar que la copia
+    // automática semanal de la 1.28), subcarpeta propia
+    // `copias_manuales` para que la rotación de las
+    // automáticas no las toque. NO se borra nada: la
+    // exportación anterior queda. Si dos exportaciones
+    // caen en el mismo segundo, la segunda lleva sufijo
+    // en vez de pisar a la primera.
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(docs.path, 'copias_manuales'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final base = nombreCopiaManual(ahoraHabana());
+    var destino = File(p.join(dir.path, base));
+    var n = 2;
+    while (await destino.exists()) {
+      destino = File(p.join(
+          dir.path, base.replaceFirst('.db', '-$n.db')));
+      n++;
     }
-    await tmp.create(recursive: true);
-    final destino = File(p.join(tmp.path, 'ironbody_backup.db'));
     await origen.copy(destino.path);
     return destino;
 }

@@ -1,10 +1,21 @@
 /// Tests 1.14 (M6.30): la copia de seguridad H5 — copia en frío
 /// de SOLO la BD (sin fotos) que contiene lo último escrito,
 /// incluido lo que aún estaba en el WAL.
+///
+/// 1.29 (Oleada 6, D-B3-06): el destino ya no es el temporal
+/// del sistema: es el directorio de documentos (mock aquí a
+/// una carpeta temporal de la corrida), subcarpeta
+/// copias_manuales, con nombre fechado y SIN borrar la
+/// anterior. La aserción «el directorio contiene 1 archivo»
+/// se re-ancla a la garantía nueva: tras UNA exportación la
+/// carpeta de copias manuales trae exactamente esa copia
+/// (solo la BD, sin fotos); que la segunda no borre a la
+/// primera lo fija el test de la oleada 6.
 library;
 
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/copia_seguridad.dart';
 import 'package:ironbody_gym/localdb.dart';
@@ -28,6 +39,20 @@ Future<void> _abrirDbVacia() async {
 void main() {
   // P1: BD propia de este archivo (modo paralelo).
   LocalDb.nombreArchivoDbForzado = 'test_copia_seguridad_114_test.db';
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  // path_provider → un directorio temporal propio por
+  // corrida: la copia en frío (D-B3-06) escribe en
+  // <docs>/copias_manuales.
+  late Directory docs;
+  setUpAll(() async {
+    docs = await Directory.systemTemp.createTemp('copia_114_docs');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            (call) async => docs.path);
+  });
+
   test('la copia trae lo último escrito y solo la BD', () async {
     await _abrirDbVacia();
     final db = await LocalDb.instance.db;
@@ -44,7 +69,13 @@ void main() {
     final destino = await exportarCopiaFria();
     expect(await destino.exists(), isTrue);
     expect(destino.path, isNot(endsWith('ironbody.db')));
-    // El directorio destino nace vacío: solo la BD, sin fotos.
+    // D-B3-06: destino duradero con nombre fechado, en la
+    // subcarpeta de copias manuales de documentos.
+    expect(p.basename(destino.path),
+        matches(RegExp(r'^ironbody-\d{8}-\d{6}(-\d+)?\.db$')));
+    expect(p.basename(p.dirname(destino.path)), 'copias_manuales');
+    expect(p.dirname(p.dirname(destino.path)), docs.path);
+    // La carpeta trae solo la BD, sin fotos.
     final contenidos =
         await Directory(p.dirname(destino.path)).list().toList();
     expect(contenidos.length, 1);
