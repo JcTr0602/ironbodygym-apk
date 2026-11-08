@@ -546,7 +546,7 @@ class _NominaScreenState extends State<NominaScreen> {
                 ],
               ),
         trailing: IconButton(
-          icon: const Icon(Icons.delete_rounded, color: AppColores.error),
+          icon: const Icon(Icons.delete_outline_rounded, color: AppColores.error),
           tooltip: 'Eliminar bono',
           onPressed: () => _eliminarBono('${b['id']}'),
         ),
@@ -728,7 +728,7 @@ class _NominaScreenState extends State<NominaScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const Icon(
-                                Icons.info_outline_rounded,
+                                Icons.info_rounded,
                                 size: 16,
                                 color: AppColores.info),
                             const SizedBox(width: 8),

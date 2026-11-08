@@ -1866,7 +1866,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             if (puedeConvertir)
               Expanded(
                 child: FilledButton.icon(
-                  icon: const Icon(Icons.person_add_alt_rounded,
+                  icon: const Icon(Icons.person_add_rounded,
                       size: 18),
                   label: const Text('Convertir en cliente'),
                   onPressed: _actuando ? null : _convertir,
@@ -2457,7 +2457,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               const SizedBox(height: AppEspacio.md),
               BotonPrimario(
                 texto: 'Convertir en cliente',
-                icono: Icons.person_add_alt_rounded,
+                icono: Icons.person_add_rounded,
                 onPressed: _actuando ? null : _convertir,
               ),
             ],
@@ -3429,7 +3429,7 @@ class _DialogoAjustarClaveInvitadoState
             CampoTexto(
               controller: _ctrl,
               etiqueta: 'Clave nueva (6–32, sin espacios)',
-              icono: Icons.lock_outline_rounded,
+              icono: Icons.lock_rounded,
               obscure: true,
               onChanged: (_) => setState(() {}),
             ),

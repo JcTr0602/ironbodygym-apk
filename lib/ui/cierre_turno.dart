@@ -96,7 +96,7 @@ Future<bool> cerrarTurnoConDialogo(BuildContext context) async {
         '${(prep['revisionCount'] as int) > 0 ? ', ${prep['revisionCount']} en revisión' : ''}.'
         '${limpio ? '' : ' Cerrar de todos modos deja los pendientes guardados en este teléfono.'}',
     aceptar: limpio ? 'Confirmar cierre' : 'Cerrar de todos modos',
-    icono: Icons.lock_outline_rounded,
+    icono: Icons.lock_rounded,
   );
   if (!ok) return false;
   // Autoauditoría 1.25 ronda 2: éxito solo si el

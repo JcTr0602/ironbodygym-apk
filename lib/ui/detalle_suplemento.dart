@@ -438,7 +438,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                       title: Text('${c['nombre'] ?? ''}'),
                       trailing: Icon(
                           protegido
-                              ? Icons.lock_outline_rounded
+                              ? Icons.lock_rounded
                               : Icons.add_circle_outline_rounded,
                           color: AppColores.naranja),
                       onTap: () {

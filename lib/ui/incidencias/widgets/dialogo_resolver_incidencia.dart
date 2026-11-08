@@ -78,7 +78,7 @@ class _DialogoResolverState
                 ElevatedButton.icon(
                   onPressed: _tomarFoto,
                   icon: const Icon(
-                      Icons.camera_alt_rounded,
+                      Icons.photo_camera_rounded,
                       size: 18),
                   label: Text(_fotoPath ==
                           null

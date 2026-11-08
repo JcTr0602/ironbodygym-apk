@@ -152,7 +152,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                                       backgroundColor:
                                           AppColores.naranja,
                                       child: Icon(
-                                          Icons.warning_rounded,
+                                          Icons.warning_amber_rounded,
                                           color: Colors.white,
                                           size: 22),
                                     ),

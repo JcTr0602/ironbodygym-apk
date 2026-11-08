@@ -352,7 +352,7 @@ class _DialogoTipoState
       case 'water_drop':
         return Icons.water_drop_rounded;
       case 'warning':
-        return Icons.warning_rounded;
+        return Icons.warning_amber_rounded;
       case 'info':
         return Icons.info_rounded;
       default:

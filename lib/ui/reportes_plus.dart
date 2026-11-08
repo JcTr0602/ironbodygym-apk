@@ -224,7 +224,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
               child: Tarjeta(
                 child: Row(
                   children: [
-                    Icon(Icons.lock_outline_rounded,
+                    Icon(Icons.lock_rounded,
                         color: AppColores.naranja),
                     SizedBox(width: AppEspacio.sm),
                     Expanded(

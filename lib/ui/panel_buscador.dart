@@ -135,7 +135,7 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       id: 'papelera',
       titulo: 'Papelera',
       sinonimos: ['eliminados', 'restaurar cliente', 'borrados'],
-      icono: Icons.delete_rounded),
+      icono: Icons.delete_outline_rounded),
   FuncionPanel(
       id: 'cuentas_casa',
       titulo: 'Cuentas a la Casa',

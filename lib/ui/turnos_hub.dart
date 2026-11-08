@@ -40,7 +40,7 @@ class TurnosHubScreen extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline_rounded,
+                Icon(Icons.info_rounded,
                     size: 20, color: AppColores.info),
                 SizedBox(width: AppEspacio.sm),
                 Expanded(

@@ -282,7 +282,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       mensaje:
           'Última oportunidad. Los datos se borrarán permanentemente.',
       aceptar: 'Sí, eliminar',
-      icono: Icons.warning_rounded,
+      icono: Icons.warning_amber_rounded,
       peligro: true,
     );
     if (ok2 != true || !mounted) return;

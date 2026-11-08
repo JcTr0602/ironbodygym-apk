@@ -593,7 +593,7 @@ class BadgeEstado extends StatelessWidget {
       case EstadoMembresia.vencido:
         fondo = AppColores.error.withValues(alpha: 0.15);
         frente = AppColores.errorTexto(context);
-        icono = Icons.warning_rounded;
+        icono = Icons.warning_amber_rounded;
         break;
       // 1.25 T04: nunca pagó — neutro, jamás el verde
       // de «al día». 1.29: el frente pasa al rol de texto
@@ -789,7 +789,7 @@ Future<String?> elegirModoEliminacion(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) => DialogoApp(
         titulo: titulo,
-        iconoTitulo: Icons.warning_rounded,
+        iconoTitulo: Icons.warning_amber_rounded,
         contenido: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1000,7 +1000,7 @@ class ErrorInline extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.error_rounded,
+        const Icon(Icons.error_outline_rounded,
             size: 16, color: AppColores.error),
         const SizedBox(width: AppEspacio.xs),
         Expanded(
@@ -1955,7 +1955,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
     SignificadoChip.exito => (Icons.check_circle_rounded, AppColores.exito),
     SignificadoChip.info => (Icons.info_rounded, AppColores.info),
     SignificadoChip.alerta => (Icons.warning_amber_rounded, AppColores.alerta),
-    SignificadoChip.error => (Icons.error_rounded, AppColores.error),
+    SignificadoChip.error => (Icons.error_outline_rounded, AppColores.error),
     SignificadoChip.agotado => (Icons.warning_amber_rounded, AppColores.alerta),
     SignificadoChip.neutral => (Icons.info_rounded, Colors.white),
   };

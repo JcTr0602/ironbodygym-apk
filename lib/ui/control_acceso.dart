@@ -67,7 +67,7 @@ class ControlAccesoScreen extends StatelessWidget {
               Tab(icon: Icon(Icons.sports_rounded, size: 18), text: 'Entrenadores'),
               Tab(icon: Icon(Icons.people_rounded, size: 18), text: 'Clientes'),
               Tab(
-                  icon: Icon(Icons.person_add_alt_rounded, size: 18),
+                  icon: Icon(Icons.person_add_rounded, size: 18),
                   text: 'Invitados'),
             ],
           ),
@@ -1083,7 +1083,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                     if (r['ok'] != true) {
                       return ListTile(
                         dense: true,
-                        leading: const Icon(Icons.error_rounded,
+                        leading: const Icon(Icons.error_outline_rounded,
                             color: AppColores.error, size: 18),
                         title: Text('Cliente ${r['cliente_id']}'),
                         subtitle: Text('${r['error'] ?? 'Error'}'),

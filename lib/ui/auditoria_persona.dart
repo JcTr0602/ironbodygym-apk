@@ -380,7 +380,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.info_outline_rounded,
+                            const Icon(Icons.info_rounded,
                                 size: 19, color: AppColores.alerta),
                             const SizedBox(width: 8),
                             Expanded(

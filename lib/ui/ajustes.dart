@@ -1982,7 +1982,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 // ----- ACERCA DE -----
                 _seccion('Acerca de'),
                 _opcion(
-                  icono: Icons.info_outline_rounded,
+                  icono: Icons.info_rounded,
                   titulo: 'Versión',
                   subtitulo:
                       '${AppConfig.appVersion} · Toca para buscar actualizaciones',

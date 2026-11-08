@@ -38,7 +38,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('No se pudo guardar'), findsOneWidget);
-    expect(find.byIcon(Icons.error_rounded), findsOneWidget);
+    // 1.29 O9 (D-07): el icono de error de estado es el canónico
+    // error_outline_rounded; error_rounded quedó extinguido.
+    expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
     await tester.pump(const Duration(seconds: 7));
     await tester.pump();
   });

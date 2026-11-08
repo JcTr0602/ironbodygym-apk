@@ -1920,7 +1920,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Eliminar foto',
-        iconoTitulo: Icons.delete_rounded,
+        iconoTitulo: Icons.delete_outline_rounded,
         contenido: const Text(
             '¿Eliminar la foto de este cliente? Esta acción se sincronizará.'),
         acciones: [
@@ -1997,7 +1997,7 @@ class _FichaScreenState extends State<FichaScreen> {
             ),
             if (tieneFoto)
               ListTile(
-                leading: const Icon(Icons.delete_rounded,
+                leading: const Icon(Icons.delete_outline_rounded,
                     size: 24, color: AppColores.error),
                 title: const Text('Eliminar foto',
                     style: TextStyle(color: AppColores.error)),
@@ -2113,7 +2113,7 @@ class _FichaScreenState extends State<FichaScreen> {
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Enviar a papelera',
-        iconoTitulo: Icons.delete_rounded,
+        iconoTitulo: Icons.delete_outline_rounded,
         contenido: const Text(
             'El cliente quedará inactivo y no aparecerá en las listas. '
             'Podrás recuperarlo desde la Papelera.'),
@@ -3243,7 +3243,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                       EdgeInsets.zero,
                                   leading: Icon(
                                     i['visibilidad'] == 'privada'
-                                        ? Icons.lock_outline_rounded
+                                        ? Icons.lock_rounded
                                         : Icons.report_problem_rounded,
                                     size: 20,
                                     color: AppColores.textoSecundario(context),

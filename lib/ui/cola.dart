@@ -333,7 +333,7 @@ Widget chipEstadoOp(String estado) {
     icono = Icons.schedule_rounded;
   } else if (estado == 'error') {
     color = AppColores.error;
-    icono = Icons.warning_rounded;
+    icono = Icons.warning_amber_rounded;
   } else if (estado == 'necesita_revision') {
     // v1.3.5 (auditoría 2026-10-16): etiqueta legible en vez del código.
     color = AppColores.alerta;
@@ -1264,7 +1264,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.warning_rounded,
+                  const Icon(Icons.warning_amber_rounded,
                       size: 16,
                       color: AppColores.error),
                   const SizedBox(width: 8),
@@ -1413,7 +1413,7 @@ class _ColaScreenState extends State<ColaScreen> {
       case 'rechazada':
         return Icons.block_rounded;
       case 'error':
-        return Icons.warning_rounded;
+        return Icons.warning_amber_rounded;
       default:
         return Icons.schedule_rounded;
     }
@@ -1891,7 +1891,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.warning_rounded,
+                  const Icon(Icons.warning_amber_rounded,
                       size: 16,
                       color: AppColores.error),
                   const SizedBox(width: 8),
@@ -1971,7 +1971,7 @@ class _ColaScreenState extends State<ColaScreen> {
     if (totalError > 0) {
       estadoSync = 'error';
       colores = [AppColores.error, AppColores.errorOscuro];
-      iconoEstado = Icons.warning_rounded;
+      iconoEstado = Icons.warning_amber_rounded;
       titulo = 'Atención requerida';
       subtitulo = totalError == 1
           ? '1 elemento falló y necesita tu revisión'
@@ -1987,7 +1987,7 @@ class _ColaScreenState extends State<ColaScreen> {
     } else if (errorReciente != null && errorReciente.isNotEmpty) {
       estadoSync = 'error';
       colores = [AppColores.error, AppColores.errorOscuro];
-      iconoEstado = Icons.warning_rounded;
+      iconoEstado = Icons.warning_amber_rounded;
       titulo = 'Falló la última sincronización';
       // v1.2.9+46: mensaje en lenguaje natural, no genérico.
       subtitulo = describirError(errorReciente);
@@ -2166,7 +2166,7 @@ class _ColaScreenState extends State<ColaScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.warning_rounded,
+                    const Icon(Icons.warning_amber_rounded,
                         size: 20,
                         color: AppColores.error),
                     const SizedBox(width: 8),
@@ -2713,7 +2713,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded,
+                const Icon(Icons.info_rounded,
                     size: 20, color: AppColores.info),
                 const SizedBox(width: 8),
                 Expanded(
@@ -2800,7 +2800,7 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded,
+                const Icon(Icons.info_rounded,
                     size: 20, color: AppColores.info),
                 const SizedBox(width: 8),
                 Expanded(

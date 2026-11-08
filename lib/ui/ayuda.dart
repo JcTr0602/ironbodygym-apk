@@ -240,7 +240,7 @@ class AyudaScreen extends StatelessWidget {
                   'nuevo.\n'
                   '• "Un cliente no aparece": sincroniza manualmente '
                   'desde el inicio.',
-                  icono: Icons.warning_rounded,
+                  icono: Icons.warning_amber_rounded,
                   color: AppColores.error,
                 ),
                 const _Seccion(

@@ -338,7 +338,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: '¿Eliminar?',
-          iconoTitulo: Icons.delete_rounded,
+          iconoTitulo: Icons.delete_outline_rounded,
           contenido: const Text(
               'Se eliminará este registro pendiente (aún no sincronizado).'),
           acciones: [
@@ -395,7 +395,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         context: context,
         builder: (ctx) => DialogoApp(
           titulo: '¿Eliminar?',
-          iconoTitulo: Icons.delete_rounded,
+          iconoTitulo: Icons.delete_outline_rounded,
           contenido: const Text(
               'Se eliminará este registro de pago diario.'),
           acciones: [

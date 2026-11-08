@@ -1213,7 +1213,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           .withValues(alpha: 0.08),
                       child: const Row(
                         children: [
-                          Icon(Icons.info_outline_rounded,
+                          Icon(Icons.info_rounded,
                               color: AppColores.info),
                           SizedBox(
                               width: AppEspacio.sm),
