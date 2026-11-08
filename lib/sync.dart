@@ -5983,7 +5983,10 @@ class SyncEngine {
     // servicio_lotes) no divergía nunca. Si la RPC
     // sync_manifiesto aún no las conociera, la tabla queda
     // «sin verificar» (ver verificarManifiesto) sin envenenar
-    // el sello del resto.
+    // el sello del resto. 1.30 (Oleada 1): lotes y compras son
+    // las ÚNICAS que la RPC sigue sin conocer — no existen
+    // como tabla sync_* en Supabase (el puente no las
+    // publica); el resto del mapa ya verifica (ver abajo).
     'sync_servicio_lotes': 'servicio_lotes',
     'sync_servicio_compras': 'servicio_compras',
     // 1.28 (M1-B1): la autocura cubre TODOS los espejos que
@@ -5992,11 +5995,19 @@ class SyncEngine {
     // tabla fuera del mapa divergía en silencio para
     // siempre (el caso Duany de la 1.27 nació así). Las
     // tablas que la RPC aún no conozca quedan «sin
-    // verificar» sin envenenar el sello (M1-A2); en el
-    // servidor hace falta ampliar el allowlist de
-    // sync_manifiesto con estos 25 nombres (SQL pendiente,
-    // ver el informe de la oleada M1-BC). El skip por rol
-    // sigue mandando: las prohibidas del entrenador
+    // verificar» sin envenenar el sello (M1-A2). 1.30
+    // (Oleada 1, 2026-11-08): el allowlist de sync_manifiesto
+    // YA cubre las 40 tablas sync_* que existen (28 previas +
+    // las 12 del plan: turnos_cierre, liquidaciones_caja,
+    // acceso_bloqueos, incidencias_sync, permisos_bandeja,
+    // avisos_entrenadores, solicitudes_adelanto,
+    // solicitudes_relleno, nomina_bonos, tarifas_especiales,
+    // entregas_efectivo, recordatorio_config), cada una con
+    // el filtro de su RLS (manifiesto ≡ RLS) y el token
+    // canónico de la RPC; gastos verifica también para el
+    // entrenador (filtro por nombre canónico). El inventario
+    // queda fijado por test/manifiesto_130_test.dart. El skip
+    // por rol sigue mandando: las prohibidas del entrenador
     // (LocalDb.tablasProhibidasEntrenador, por nombre local)
     // se saltan en su teléfono.
     'sync_turnos_cierre': 'turnos_cierre',
