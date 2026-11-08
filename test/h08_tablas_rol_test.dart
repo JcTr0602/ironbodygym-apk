@@ -1,6 +1,8 @@
 /// Tests de H-08 (1.23, espejo por rol) — parte pura:
-/// - tablas activas por rol: 39 admin / 28 entrenador (las 11
+/// - tablas activas por rol: 40 admin / 29 entrenador (las 11
 ///   del Grupo 1 resuelto fuera; nomina_bonos NO es Grupo 1).
+///   Eran 39/28 hasta la 1.28; la 1.29 (Oleada 4, FB-09) suma
+///   solicitudes_relleno, que baja a AMBOS roles.
 /// - D-01 (cierre 1.23): servicio_pomos NO es Grupo 1 — la
 ///   fila del pomo es operativa para vender dosis; el conteo
 ///   se oculta vía servicio_lotes, que sí sigue prohibida.
@@ -15,10 +17,11 @@ import 'package:ironbody_gym/sync.dart';
 
 void main() {
   group('H-08: tablas activas por rol', () {
-    test('admin/dueño: las 39 de siempre, sin cambios', () {
+    test('admin/dueño: las 40 (39 + solicitudes_relleno)', () {
       final t = SyncEngine.tablasEspejoActivasParaRol(true);
-      expect(t.length, 39);
+      expect(t.length, 40);
       expect(t, SyncEngine.tablasEspejo);
+      expect(t, contains('solicitudes_relleno'));
     });
 
     test('el Grupo 1 resuelto es exactamente el de la decisión', () {
@@ -38,9 +41,11 @@ void main() {
       expect(LocalDb.tablasProhibidasEntrenador.length, 11);
     });
 
-    test('entrenador: 39 − 11 = 28, sin ninguna del Grupo 1', () {
+    test('entrenador: 40 − 11 = 29, sin ninguna del Grupo 1', () {
       final t = SyncEngine.tablasEspejoActivasParaRol(false);
-      expect(t.length, 28);
+      expect(t.length, 29);
+      // FB-09: sus propias solicitudes SÍ le bajan.
+      expect(t, contains('solicitudes_relleno'));
       for (final g1 in LocalDb.tablasProhibidasEntrenador) {
         expect(t.contains(g1), isFalse, reason: g1);
       }

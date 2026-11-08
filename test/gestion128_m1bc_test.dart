@@ -4,7 +4,8 @@
 ///
 /// - B1: el manifiesto cubre TODAS las tablas que baja el
 ///   pull (paridad con supTablas leída de la fuente) +
-///   incidencias_mirror histórica = 40 entradas.
+///   incidencias_mirror histórica = 40 entradas (41 desde
+///   la 1.29 Oleada 4: + solicitudes_relleno de FB-09).
 /// - B2: decisión de modo del chequeo (pura) y filtro por
 ///   diferencia (puro).
 /// - B3: el batching adaptativo SIGUE cableado (fuente):
@@ -44,10 +45,14 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   group('B1 · manifiesto completo', () {
-    test('son 40 entradas: las 39 del pull + incidencias_mirror', () {
-      expect(SyncEngine.tablasManifiesto.length, 40);
+    test('son 41 entradas: las 40 del pull + incidencias_mirror', () {
+      // 1.29 (Oleada 4, FB-09): el pull suma solicitudes_relleno
+      // (39 → 40) y el manifiesto la vigila como a las demás.
+      expect(SyncEngine.tablasManifiesto.length, 41);
       expect(SyncEngine.tablasManifiesto['sync_incidencias'],
           'incidencias_mirror');
+      expect(SyncEngine.tablasManifiesto['sync_solicitudes_relleno'],
+          'solicitudes_relleno');
     });
 
     test('toda tabla que baja el pull está vigilada', () {

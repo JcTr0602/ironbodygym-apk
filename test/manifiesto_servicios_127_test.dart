@@ -70,8 +70,10 @@ void main() {
       // 25 nuevas se fijan una a una en
       // gestion128_m1bc_test.dart (paridad con supTablas);
       // aquí solo se actualiza el total con esa justificación.
+      // 1.29 (Oleada 4, FB-09): +1 — solicitudes_relleno entra
+      // en el pull y en el manifiesto (fijada en m1bc).
       expect(SyncEngine.tablasManifiesto.length,
-          historicas.length + esperadasServicios.length + 25);
+          historicas.length + esperadasServicios.length + 26);
     });
 
     test(
