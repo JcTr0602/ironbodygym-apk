@@ -1,6 +1,8 @@
 /// Tests de H-08 (1.23) — purga de transición por rol:
-/// - borra SOLO las filas confirmadas (sync_seq > 0) de las 11
-///   tablas del Grupo 1 y de liquidaciones_caja/incidencias_sync;
+/// - borra SOLO las filas confirmadas (sync_seq > 0) de las
+///   tablas del Grupo 1 (11 en la 1.23; 10 desde el ajuste
+///   H-02 de Argón a la 1.29, que sacó 'gastos' al Grupo 2) y
+///   de liquidaciones_caja/incidencias_sync;
 /// - jamás toca ops_queue ni las filas optimistas (sync_seq 0);
 /// - fuerza la re-descarga de clientes y pagos, limpia las
 ///   metas de sync_estado y marca `migracion_h08_rol_v123`
@@ -67,7 +69,10 @@ void main() {
         () async {
       final db = await _abrirDbVacia();
       final ldb = LocalDb.instance;
-      // Grupo 1: una confirmada y una optimista en gastos.
+      // 'gastos': una confirmada y una optimista. Desde el
+      // ajuste H-02 (1.29) es Grupo 2 — corte por fila — y
+      // la transición ya NO lo purga; antes este test lo
+      // usaba como muestra del Grupo 1.
       await _espejo(db, 'gastos', 1, {'concepto': 'confirmado'}, seq: 500);
       await _espejo(db, 'gastos', 2, {'concepto': 'optimista'}, seq: 0);
       await _espejo(db, 'servicio_pomos', 7, {'dueno': 'gabriel'}, seq: 501);
@@ -99,10 +104,12 @@ void main() {
           await SyncEngine.instance.purgaTransicionH08SiToca(esAdmin: false);
       expect(ok, isTrue);
 
-      // Grupo 1: confirmado fuera, optimista intacta.
-      expect(await ldb.contar('gastos'), 1);
-      final restan = await db.query('gastos');
-      expect(restan.single['id'], 2);
+      // H-02: gastos SOBREVIVE entero a la transición
+      // (confirmada y optimista): es Grupo 2, su recorte lo
+      // hace el servidor por fila en cada descarga y lo que
+      // el entrenador ve lo filtra el predicado único de la
+      // app. La purga del Grupo 1 la prueba turnos_cierre.
+      expect(await ldb.contar('gastos'), 2);
       // D-01: servicio_pomos ya NO es Grupo 1 — su fila
       // confirmada SOBREVIVE a la transición (es operativa).
       expect(await ldb.contar('servicio_pomos'), 1);
@@ -135,7 +142,7 @@ void main() {
       final ok2 =
           await SyncEngine.instance.purgaTransicionH08SiToca(esAdmin: false);
       expect(ok2, isTrue);
-      expect(await ldb.contar('gastos'), 2);
+      expect(await ldb.contar('gastos'), 3);
     });
 
     test('admin: no purga nada y no marca la meta', () async {

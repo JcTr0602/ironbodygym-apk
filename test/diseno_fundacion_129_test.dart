@@ -597,4 +597,55 @@ void main() {
           reason: 'la definición queda marcada como deprecada');
     });
   });
+
+  group('H-05 · DialogoApp.confirmar respeta sobreMarca', () {
+    // Ajuste de Argón al código de la 1.29: el botón de
+    // aceptar forzaba texto blanco sobre el naranja también
+    // sin peligro (2,75 de contraste: no pasa D-01). Sin
+    // peligro manda sobreMarca; el blanco queda para el
+    // peligro, sobre el rojo de error.
+    Future<ButtonStyle> estiloAceptar(WidgetTester tester,
+        {required bool peligro}) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => Center(
+              child: ElevatedButton(
+                onPressed: () => DialogoApp.confirmar(ctx,
+                    titulo: 'Título',
+                    mensaje: 'Mensaje',
+                    peligro: peligro),
+                child: const Text('abrir'),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      return tester
+          .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, 'Aceptar'))
+          .style!;
+    }
+
+    testWidgets('sin peligro: texto sobreMarca sobre el '
+        'naranja', (tester) async {
+      final estilo = await estiloAceptar(tester, peligro: false);
+      expect(estilo.backgroundColor!.resolve({}),
+          AppColores.naranja);
+      expect(estilo.foregroundColor!.resolve({}),
+          AppColores.sobreMarca,
+          reason: 'grafito 6,32 — el blanco de antes daba '
+              '2,75 y pisaba D-01');
+    });
+
+    testWidgets('con peligro: texto blanco sobre el rojo '
+        'de error', (tester) async {
+      final estilo = await estiloAceptar(tester, peligro: true);
+      expect(estilo.backgroundColor!.resolve({}),
+          AppColores.error);
+      expect(estilo.foregroundColor!.resolve({}), Colors.white);
+    });
+  });
 }

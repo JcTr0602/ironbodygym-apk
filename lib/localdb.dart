@@ -8397,8 +8397,19 @@ class LocalDb {
   /// transición. `nomina_bonos` NO está aquí a propósito: la
   /// pantalla Mi Nómina del entrenador la lee y su corte es por
   /// FILA en el servidor (Grupo 2), no por tabla.
+  /// `gastos` TAMPOCO está (1.29, ajuste de Argón al código
+  /// H-02): desde D-A1 su corte es POR FILA en el servidor
+  /// (policy `h08_propias` de sync_gastos + el predicado único
+  /// de la app), como `nomina_bonos` — es Grupo 2. Dejarla aquí
+  /// impedía al entrenador descargar siquiera SU espejo
+  /// recortado (sus gastos sincronizados desaparecían de su
+  /// vista) y la seguía tratando como Grupo 1 en la purga de
+  /// transición. Matiz conocido: el manifiesto del servidor
+  /// deniega sync_gastos a no-admin, así que en el teléfono del
+  /// entrenador la tabla queda «sin verificar» en el manifiesto
+  /// — la misma degradación silenciosa que ya vive
+  /// pagos_diarios, sin divergencia ni resync.
   static const tablasProhibidasEntrenador = {
-    'gastos',
     // D-01 (cierre 1.23): 'servicio_pomos' NO está aquí a
     // propósito. La fila del pomo es OPERATIVA: la venta de
     // dosis del entrenador la lee localmente (pomosActivosLocal

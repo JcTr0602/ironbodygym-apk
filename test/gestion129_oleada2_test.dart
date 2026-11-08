@@ -334,6 +334,68 @@ void main() {
               'Habana: no suma en noviembre');
       expect(_foto(espejo, 111, '2026-10').total, 100);
     });
+
+    test('H-04 (Argón, ajustes a la 1.29): venta en cola '
+        'SIN fecha en el payload se fecha por la creación '
+        'de la op', () {
+      // El payload puede no traer 'fecha' (la fija el
+      // servidor al aplicar la op): la fila sintética cae a
+      // op['creada_ts']. Con la fecha vacía de antes, la
+      // atribución ignoraba la fila y la comisión no
+      // aparecía en la foto hasta que bajaba el espejo.
+      final op = <String, dynamic>{
+        'op_uuid': 'op-h04',
+        'tipo': 'venta_servicio',
+        'telegram_id': 111,
+        'creada_ts': '2026-11-06T10:00:00.000-05:00',
+        'payload': jsonEncode({
+          'tipo': 'dosis_sin_agua',
+          'cantidad': 1,
+          'precio_unitario': 600,
+          'comision_unitaria': 50,
+          'metodo': 'efectivo',
+        }),
+      };
+      final filas = filasNominaDesdeCola(
+        ventasEspejo: const [],
+        ops: [op],
+        tidSesion: 111,
+      );
+      expect(filas.single['fecha'],
+          '2026-11-06T10:00:00.000-05:00');
+      expect(_foto(filas, 111, '2026-11').total, 50,
+          reason: 'la venta cuenta en su mes desde la cola');
+    });
+
+    test('H-04 (Argón, ajustes a la 1.29): la venta en cola '
+        'propaga el comision_monto del payload (el snapshot '
+        'manda)', () {
+      final op = <String, dynamic>{
+        'op_uuid': 'op-h04b',
+        'tipo': 'venta_servicio',
+        'telegram_id': 111,
+        'creada_ts': '2026-11-06T10:00:00.000-05:00',
+        'payload': jsonEncode({
+          'tipo': 'dosis_con_agua',
+          'cantidad': 2,
+          'precio_unitario': 900,
+          'comision_unitaria': 50,
+          'comision_monto': 130,
+          'fecha': '2026-11-06',
+          'metodo': 'efectivo',
+        }),
+      };
+      final filas = filasNominaDesdeCola(
+        ventasEspejo: const [],
+        ops: [op],
+        tidSesion: 111,
+      );
+      expect(filas.single['comision_monto'], 130.0);
+      // Sin propagar, la foto recalcularía 50 × 2 = 100 y
+      // la comisión de la cola discreparía de la del espejo
+      // cuando la venta bajara con su snapshot.
+      expect(_foto(filas, 111, '2026-11').total, 130);
+    });
   });
 
   // --------------------------------------------------------------

@@ -442,9 +442,18 @@ class _FormularioAvisoScreenState extends State<_FormularioAvisoScreen> {
   Future<void> _elegirFechaFin() async {
     final h = ahoraHabana();
     final hoy = DateTime(h.year, h.month, h.day);
+    // 1.29 (ajuste de Argón al código, H-01): un aviso YA
+    // VENCIDO trae su fecha en el pasado, y showDatePicker
+    // exige initialDate >= firstDate: sin acotar, tocar
+    // «Cambiar» reventaba con un AssertionError. La inicial
+    // se acota al suelo de hoy.
+    final inicial = (_fechaFinDia != null &&
+            !_fechaFinDia!.isBefore(hoy))
+        ? _fechaFinDia!
+        : hoy;
     final elegida = await showDatePicker(
       context: context,
-      initialDate: _fechaFinDia ?? hoy,
+      initialDate: inicial,
       firstDate: hoy,
       lastDate: hoy.add(const Duration(days: 366)),
       helpText: 'Dejarse de mostrar el',
@@ -465,6 +474,21 @@ class _FormularioAvisoScreenState extends State<_FormularioAvisoScreen> {
       mostrarSnack(context, 'El aviso necesita título y texto',
           significado: SignificadoChip.alerta);
       return;
+    }
+    // 1.29 (ajuste de Argón al código, H-01): una fecha de
+    // fin que ya pasó NUNCA viaja a la RPC (el servidor la
+    // rechaza y el aviso reviviría sin caducar): se pide
+    // elegir una vigente o quitarla antes de guardar.
+    if (_fechaFinDia != null) {
+      final h = ahoraHabana();
+      final hoy = DateTime(h.year, h.month, h.day);
+      if (_fechaFinDia!.isBefore(hoy)) {
+        mostrarSnack(context,
+            'La fecha de fin ya pasó. Elige una fecha '
+            'vigente o quita la fecha para guardar.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
     }
     setState(() => _guardando = true);
     final nivel = _importante ? 'importante' : 'info';

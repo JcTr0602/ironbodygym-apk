@@ -1,8 +1,11 @@
 /// Tests de H-08 (1.23, espejo por rol) — parte pura:
-/// - tablas activas por rol: 40 admin / 29 entrenador (las 11
+/// - tablas activas por rol: 40 admin / 30 entrenador (las 10
 ///   del Grupo 1 resuelto fuera; nomina_bonos NO es Grupo 1).
 ///   Eran 39/28 hasta la 1.28; la 1.29 (Oleada 4, FB-09) suma
-///   solicitudes_relleno, que baja a AMBOS roles.
+///   solicitudes_relleno, que baja a AMBOS roles; y el ajuste
+///   H-02 de Argón al código de la 1.29 saca 'gastos' del
+///   Grupo 1: desde D-A1 su corte es por fila (Grupo 2), así
+///   que el entrenador pasa de 29 a 30 tablas.
 /// - D-01 (cierre 1.23): servicio_pomos NO es Grupo 1 — la
 ///   fila del pomo es operativa para vender dosis; el conteo
 ///   se oculta vía servicio_lotes, que sí sigue prohibida.
@@ -26,7 +29,6 @@ void main() {
 
     test('el Grupo 1 resuelto es exactamente el de la decisión', () {
       expect(LocalDb.tablasProhibidasEntrenador, {
-        'gastos',
         'servicio_lotes',
         'servicio_compras',
         'suplemento_ajustes',
@@ -38,12 +40,12 @@ void main() {
         'turnos_cierre',
         'espejo_gympedia_borradores',
       });
-      expect(LocalDb.tablasProhibidasEntrenador.length, 11);
+      expect(LocalDb.tablasProhibidasEntrenador.length, 10);
     });
 
-    test('entrenador: 40 − 11 = 29, sin ninguna del Grupo 1', () {
+    test('entrenador: 40 − 10 = 30, sin ninguna del Grupo 1', () {
       final t = SyncEngine.tablasEspejoActivasParaRol(false);
-      expect(t.length, 29);
+      expect(t.length, 30);
       // FB-09: sus propias solicitudes SÍ le bajan.
       expect(t, contains('solicitudes_relleno'));
       for (final g1 in LocalDb.tablasProhibidasEntrenador) {
@@ -77,6 +79,23 @@ void main() {
       expect(SyncEngine.tablasEspejoActivasParaRol(false),
           contains('nomina_bonos'));
     });
+
+    test('gastos NO es Grupo 1 (H-02 de Argón a la 1.29): el '
+        'entrenador sí la pide, recortada por fila', () {
+      // Desde D-A1 el corte de gastos es POR FILA en el
+      // servidor (policy h08_propias) + el predicado único de
+      // la app: es Grupo 2, como nomina_bonos. Si volviera a
+      // la lista, el entrenador ni siquiera descargaría su
+      // espejo y sus gastos sincronizados desaparecerían de
+      // su vista (solo quedaría su cola).
+      expect(LocalDb.tablasProhibidasEntrenador.contains('gastos'),
+          isFalse);
+      expect(SyncEngine.tablasEspejoActivasParaRol(false),
+          contains('gastos'));
+      // Y su watermark entra en el mínimo del entrenador.
+      expect(LocalDb.tablasConWatermarkParaRol(false),
+          contains('gastos'));
+    });
   });
 
   group('H-08: watermarks por rol', () {
@@ -85,17 +104,21 @@ void main() {
           LocalDb.tablasConWatermark);
     });
 
-    test('entrenador: fuera el Grupo 1 que lleva watermark (10)', () {
+    test('entrenador: fuera el Grupo 1 que lleva watermark (9)', () {
       final admin = LocalDb.tablasConWatermarkParaRol(true);
       final ent = LocalDb.tablasConWatermarkParaRol(false);
       for (final t in ent) {
         expect(LocalDb.tablasProhibidasEntrenador.contains(t), isFalse,
             reason: t);
       }
-      // 10 de las 11 del Grupo 1 están en tablasConWatermark;
+      // 9 de las 10 del Grupo 1 están en tablasConWatermark;
       // espejo_gympedia_borradores está exenta de antemano.
-      expect(admin.length - ent.length, 10);
+      // (Hasta el ajuste H-02 eran 10 de 11: 'gastos' salió
+      // del Grupo 1 y su watermark ya cuenta para el
+      // entrenador, como el de nomina_bonos.)
+      expect(admin.length - ent.length, 9);
       expect(ent, contains('nomina_bonos'));
+      expect(ent, contains('gastos'));
       expect(ent, contains('clientes'));
     });
   });
@@ -122,8 +145,13 @@ void main() {
           SyncScope.resolver('servicios'));
     });
 
-    test('scope de una sola tabla prohibida: vacío para el entrenador', () {
-      expect(SyncScope.resolver('gastos', esAdmin: false), isEmpty);
+    test('scope «gastos»: resuelve para AMBOS roles (H-02)', () {
+      // Antes de H-02 el scope del entrenador salía vacío
+      // ('gastos' era Grupo 1). Al pasar a Grupo 2, el
+      // alcance lo pide y el SERVIDOR recorta por fila. El
+      // vaciado por rol de tablas que SÍ son Grupo 1 queda
+      // cubierto por el scope «servicios» de arriba.
+      expect(SyncScope.resolver('gastos', esAdmin: false), ['gastos']);
       expect(SyncScope.resolver('gastos', esAdmin: true), ['gastos']);
     });
   });

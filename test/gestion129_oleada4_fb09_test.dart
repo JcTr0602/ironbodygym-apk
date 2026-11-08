@@ -9,6 +9,13 @@
 ///    {suplemento_id, dosis_al_pedir}; mias() atribuye por la
 ///    sesión; tengoPendientePara detecta la petición viva;
 ///    pendientesParaDueno() lee solo el espejo pendiente.
+/// 6. Ajuste H-03 de Argón al código de la 1.29: la petición
+///    sigue VIVA con la op en 'enviada' o en 'error' (antes
+///    solo 'pendiente': en vuelo desaparecía de «mías» y la
+///    banda volvía a ofrecer «Pedir relleno», duplicando);
+///    si el espejo ya trae la 'pendiente' de ese suplemento,
+///    la op no se duplica; pedir() dispara el empujón del
+///    motor al encolar.
 /// 3. El espejo local nace con watermark 0 (sin heredar el
 ///    global: su descarga inicial no se salta).
 /// 4. Pantalla del entrenador: con el pomo bajo se ve
@@ -177,13 +184,63 @@ void main() {
             'payload': jsonEncode({'suplemento_id': 9}),
             'creada_ts': '2026-11-07T13:00:00',
           },
+          {
+            'tipo': 'solicitar_relleno',
+            'estado': 'error',
+            'op_uuid': 'op-5',
+            'payload': jsonEncode({'suplemento_id': 11}),
+            'creada_ts': '2026-11-07T14:00:00',
+          },
+        ],
+      );
+      // H-03 (ajuste de Argón a la 1.29): la petición sigue
+      // viva en 'enviada' y en 'error'. Este mismo test
+      // fijaba antes que la 'enviada' NO entraba — que era
+      // justo el defecto: la petición desaparecía en vuelo y
+      // la banda volvía a ofrecer «Pedir relleno».
+      expect(out.length, 4);
+      expect(out.first.id, 'op:op-5');
+      expect(out.first.estado, 'por_enviar');
+      expect(out[1].id, 'op:op-4');
+      expect(out[1].estado, 'por_enviar');
+      expect(out[2].id, 'op:op-1');
+      expect(out[2].suplementoId, 9);
+      expect(out.last.id, 's1');
+    });
+
+    test('H-03: si el espejo ya trae la pendiente de ese '
+        'suplemento, la op no se duplica como por_enviar', () {
+      final espejo = [
+        const SolicitudRelleno(
+            id: 's9', estado: 'pendiente', suplementoId: 9),
+      ];
+      final out = solicitudesRellenoConPendientes(
+        espejo: espejo,
+        opsPendientes: [
+          {
+            'tipo': 'solicitar_relleno',
+            'estado': 'enviada',
+            'op_uuid': 'op-9',
+            'payload': jsonEncode(
+                {'suplemento_id': 9, 'dosis_al_pedir': 1}),
+            'creada_ts': '2026-11-07T13:00:00',
+          },
+          {
+            'tipo': 'solicitar_relleno',
+            'estado': 'pendiente',
+            'op_uuid': 'op-10',
+            'payload': jsonEncode(
+                {'suplemento_id': 4, 'dosis_al_pedir': 1}),
+            'creada_ts': '2026-11-07T13:05:00',
+          },
         ],
       );
       expect(out.length, 2);
-      expect(out.first.id, 'op:op-1');
-      expect(out.first.estado, 'por_enviar');
-      expect(out.first.suplementoId, 9);
-      expect(out.last.id, 's1');
+      expect(out.any((s) => s.id == 'op:op-9'), isFalse,
+          reason: 'la misma petición no vive dos veces: '
+              'ya bajó al espejo como pendiente');
+      expect(out.any((s) => s.id == 'op:op-10'), isTrue,
+          reason: 'la de otro suplemento sí entra');
     });
 
     test('pedir encola el payload del contrato y mias lo ve',
@@ -205,6 +262,35 @@ void main() {
       expect(await SolicitudesRellenoService.instance
           .tengoPendientePara(8), isFalse);
       final mias = await SolicitudesRellenoService.instance.mias();
+      expect(mias.length, 1);
+      expect(mias.single.estado, 'por_enviar');
+    });
+
+    test('H-03: la petición sigue viva con la op en '
+        'enviada y en error (no se ofrece dos veces)',
+        () async {
+      await _bdVacia();
+      await _fijarSesion(
+          email: 'gabriel@ironbody.gym', telegramId: 222222);
+      await SolicitudesRellenoService.instance
+          .pedir(suplementoId: 7, dosisAlPedir: 3);
+      final db = await LocalDb.instance.db;
+      // La op pasa a 'enviada' (en vuelo): antes la
+      // petición desaparecía de «mías» en esta ventana y la
+      // banda de pomo bajo volvía a ofrecer el botón.
+      await db.update('ops_queue', {'estado': 'enviada'},
+          where: 'tipo = ?', whereArgs: ['solicitar_relleno']);
+      expect(await SolicitudesRellenoService.instance
+          .tengoPendientePara(7), isTrue);
+      var mias = await SolicitudesRellenoService.instance.mias();
+      expect(mias.length, 1);
+      expect(mias.single.estado, 'por_enviar');
+      // Y en 'error' (subida fallida, reintentable): igual.
+      await db.update('ops_queue', {'estado': 'error'},
+          where: 'tipo = ?', whereArgs: ['solicitar_relleno']);
+      expect(await SolicitudesRellenoService.instance
+          .tengoPendientePara(7), isTrue);
+      mias = await SolicitudesRellenoService.instance.mias();
       expect(mias.length, 1);
       expect(mias.single.estado, 'por_enviar');
     });
@@ -299,6 +385,15 @@ void main() {
       expect(payload['suplemento_id'], 7);
       expect(payload['dosis_al_pedir'], 3,
           reason: 'el saldo local que el entrenador veía');
+      // H-03: pedir() ahora dispara el empujón del motor;
+      // el ciclo de sync que arranca se drena entrelazado
+      // antes de desmontar (mismo patrón que el test del
+      // dueño, abajo).
+      for (var i = 0; i < 30; i++) {
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 300)));
+        await tester.pump(const Duration(seconds: 1));
+      }
       expect(tester.takeException(), isNull);
     });
 

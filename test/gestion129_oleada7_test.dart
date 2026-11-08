@@ -375,5 +375,130 @@ void main() {
           reason: 'quitar la fecha = guardar sin fecha '
               '(vuelve a retirarse a mano)');
     });
+
+    // 1.29 (ajuste de Argón al código, H-01): editar un
+    // aviso YA VENCIDO no puede reventar el selector ni
+    // reenviar la fecha pasada a la RPC.
+    testWidgets('aviso vencido: «Cambiar» abre el selector '
+        'sin reventar y al guardar viaja una fecha vigente',
+        (tester) async {
+      final servidor = <AvisoCliente>[
+        const AvisoCliente(
+            id: 8,
+            titulo: 'Aviso vencido',
+            cuerpo: 'Cuerpo',
+            nivel: 'info',
+            creadoTs: '2025-11-01T09:00:00',
+            fechaFin: '2025-12-31'),
+      ];
+      String? fechaRecibida = 'sin-llamar';
+      Future<void> guardarFalso(
+          {int? id,
+          required String titulo,
+          required String cuerpo,
+          required String nivel,
+          String? fechaFin}) async {
+        fechaRecibida = fechaFin;
+        servidor[0] = AvisoCliente(
+            id: 8,
+            titulo: titulo,
+            cuerpo: cuerpo,
+            nivel: nivel,
+            creadoTs: '2025-11-01T09:00:00',
+            fechaFin: fechaFin);
+      }
+
+      Future<List<AvisoCliente>> listarFalso() async =>
+          List.of(servidor);
+
+      _superficieTelefono(tester);
+      await tester.runAsync(() async {
+        await _bdVacia();
+      });
+      await _sesionDueno(tester);
+      await tester.pumpWidget(MaterialApp(
+          home: EditorAvisosClientesScreen(
+              guardarAvisoRpc: guardarFalso,
+              listarAvisosRpc: listarFalso)));
+      await _pumps(tester, 16);
+
+      await tester.tap(find.text('Aviso vencido'));
+      await _pumps(tester, 10);
+      expect(find.text('Cambiar'), findsOneWidget);
+
+      await tester.tap(find.text('Cambiar'));
+      await _pumps(tester, 10);
+      expect(find.byType(DatePickerDialog), findsOneWidget,
+          reason: 'el selector abre acotado a hoy, sin el '
+              'AssertionError de initialDate < firstDate');
+      expect(tester.takeException(), isNull);
+
+      // Aceptar sin tocar = la fecha acotada (hoy).
+      await tester.tap(find.text('OK'));
+      await _pumps(tester, 10);
+
+      await tester.tap(find.text('Guardar cambios'));
+      await _pumps(tester, 20);
+      expect(fechaRecibida, isNot('sin-llamar'),
+          reason: 'el guardado sí ocurrió');
+      expect(fechaRecibida, isNot('2025-12-31'),
+          reason: 'la fecha pasada NUNCA viaja a la RPC');
+      final viajada = DateTime.parse(fechaRecibida!);
+      final suelo = DateTime.now().subtract(
+          const Duration(days: 2));
+      expect(viajada.isBefore(suelo), isFalse,
+          reason: 'la fecha que viaja es vigente');
+    });
+
+    testWidgets('aviso vencido sin tocar la fecha: '
+        '«Guardar cambios» queda bloqueado con aviso',
+        (tester) async {
+      final servidor = <AvisoCliente>[
+        const AvisoCliente(
+            id: 8,
+            titulo: 'Aviso vencido',
+            cuerpo: 'Cuerpo',
+            nivel: 'info',
+            creadoTs: '2025-11-01T09:00:00',
+            fechaFin: '2025-12-31'),
+      ];
+      var llamaronGuardar = false;
+      Future<void> guardarFalso(
+          {int? id,
+          required String titulo,
+          required String cuerpo,
+          required String nivel,
+          String? fechaFin}) async {
+        llamaronGuardar = true;
+      }
+
+      Future<List<AvisoCliente>> listarFalso() async =>
+          List.of(servidor);
+
+      _superficieTelefono(tester);
+      await tester.runAsync(() async {
+        await _bdVacia();
+      });
+      await _sesionDueno(tester);
+      await tester.pumpWidget(MaterialApp(
+          home: EditorAvisosClientesScreen(
+              guardarAvisoRpc: guardarFalso,
+              listarAvisosRpc: listarFalso)));
+      await _pumps(tester, 16);
+
+      await tester.tap(find.text('Aviso vencido'));
+      await _pumps(tester, 10);
+
+      await tester.tap(find.text('Guardar cambios'));
+      await _pumps(tester, 10);
+      expect(llamaronGuardar, isFalse,
+          reason: 'con la fecha pasada no se invoca la RPC');
+      expect(find.textContaining('La fecha de fin ya pasó'),
+          findsOneWidget,
+          reason: 'el bloqueo se explica en pantalla');
+      expect(find.text('Guardar cambios'), findsOneWidget,
+          reason: 'el formulario sigue abierto para '
+              'corregir la fecha o quitarla');
+    });
   });
 }

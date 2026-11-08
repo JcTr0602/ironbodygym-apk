@@ -940,7 +940,19 @@ List<Map<String, dynamic>> filasNominaDesdeCola({
       'comision_entrenador_id': vendedor,
       'comision_unitaria':
           (p['comision_unitaria'] as num?)?.toDouble() ?? 0,
-      'fecha': '${p['fecha'] ?? ''}',
+      // 1.29 (ajuste de Argón al código, H-04): si el
+      // payload trae comision_monto (el total del agua), la
+      // fila lo propaga como hacen el reverso y el cuadre
+      // del día; sin él, la atribución recalcularía la
+      // comisión de memoria y podría no cuadrar con el
+      // espejo cuando la venta baje.
+      if ((p['comision_monto'] as num?) != null)
+        'comision_monto': (p['comision_monto'] as num).toDouble(),
+      // H-04: la fecha cae a la de creación de la op si el
+      // payload no la trae — una fecha vacía dejaba la venta
+      // FUERA del mes en la atribución de nómina hasta que
+      // bajaba el espejo.
+      'fecha': '${p['fecha'] ?? op['creada_ts'] ?? ''}',
       'reverso_de': null,
     });
   }

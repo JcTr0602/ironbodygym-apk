@@ -720,7 +720,14 @@ class DialogoApp extends StatelessWidget {
               backgroundColor: peligro
                   ? AppColores.error
                   : AppColores.naranja,
-              foregroundColor: Colors.white,
+              // 1.29 (ajuste de Argón al código, H-05): sobre
+              // el naranja manda sobreMarca (D-01: grafito,
+              // 6,32 de contraste; el blanco da 2,75 y no
+              // pasa). El blanco queda solo para el peligro,
+              // sobre el rojo de error.
+              foregroundColor: peligro
+                  ? Colors.white
+                  : AppColores.sobreMarca,
               shape: RoundedRectangleBorder(
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),

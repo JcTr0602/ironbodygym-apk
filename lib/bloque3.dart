@@ -15,6 +15,7 @@
 /// venta, solo advierte; nada de DateTime.now() crudo en lógica.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
@@ -22,6 +23,7 @@ import 'package:uuid/uuid.dart';
 import 'auth.dart';
 import 'invitados.dart';
 import 'localdb.dart';
+import 'sync.dart';
 import 'tiempo.dart';
 
 // ---------------------------------------------------------------------------
@@ -822,23 +824,43 @@ class SolicitudRelleno {
 }
 
 /// PURO (testeable sin BD): espejo + ops `solicitar_relleno`
-/// aún en 'pendiente' de este teléfono, como filas con estado
-/// 'por_enviar'. Mismo contrato que solicitudesConPendientes:
-/// payload malformado o sin suplemento_id se ignora; las ops
-/// en otro estado no entran.
+/// aún vivas en la cola de este teléfono, como filas con
+/// estado 'por_enviar'. Mismo contrato que
+/// solicitudesConPendientes: payload malformado o sin
+/// suplemento_id se ignora.
+/// 1.29 (ajuste de Argón al código, H-03): «viva» son los
+/// TRES estados de la cola — 'pendiente', 'enviada' y
+/// 'error'. Antes solo entraba 'pendiente': con la op en
+/// vuelo ('enviada') o en 'error', la petición desaparecía
+/// de «mías», `tengoPendientePara` devolvía false y la banda
+/// de pomo bajo volvía a ofrecer «Pedir relleno» (peticiones
+/// duplicadas). Y si el espejo ya trae una 'pendiente' de
+/// ese suplemento, la op ES esa misma petición ya
+/// aterrizada: no se añade otra vez como 'por_enviar'.
 List<SolicitudRelleno> solicitudesRellenoConPendientes({
   required List<SolicitudRelleno> espejo,
   required List<Map<String, dynamic>> opsPendientes,
 }) {
   final out = [...espejo];
+  final conPendienteEspejo = <int>{
+    for (final s in espejo)
+      if (s.estado == 'pendiente' && s.suplementoId != null)
+        s.suplementoId!,
+  };
   for (final op in opsPendientes) {
     if (op['tipo'] != kTipoOpSolicitarRelleno) continue;
-    if (op['estado'] != 'pendiente') continue;
+    final estadoOp = '${op['estado'] ?? ''}';
+    if (estadoOp != 'pendiente' &&
+        estadoOp != 'enviada' &&
+        estadoOp != 'error') {
+      continue;
+    }
     try {
       final p =
           jsonDecode(op['payload'] as String) as Map<String, dynamic>;
       final supId = (p['suplemento_id'] as num?)?.toInt();
       if (supId == null) continue;
+      if (conPendienteEspejo.contains(supId)) continue;
       out.add(SolicitudRelleno(
         id: 'op:${op['op_uuid'] ?? ''}',
         estado: 'por_enviar',
@@ -882,6 +904,15 @@ class SolicitudesRellenoService {
         'dosis_al_pedir': dosisAlPedir,
       },
     );
+    // 1.29 (ajuste de Argón al código, H-03): la petición
+    // sale ya, sin esperar al próximo ciclo del motor — la
+    // banda de pomo bajo se consulta en caliente y una
+    // petición que tarda en salir invita a repetirla. El
+    // patrón es el de servicios.dart; un fallo del empujón
+    // no tumba el pedido (la op queda en cola y el motor la
+    // reintenta en su ciclo).
+    unawaited(SyncEngine.instance.push().then((_) {},
+        onError: (_) {}));
   }
 
   Future<List<SolicitudRelleno>> _todas() async {
@@ -905,7 +936,10 @@ class SolicitudesRellenoService {
     ];
     List<Map<String, dynamic>> ops = [];
     try {
-      ops = await LocalDb.instance.pendingOps();
+      // H-03: lectura AMPLIA (incluye 'enviada'): con
+      // pendingOps() la petición en vuelo ni siquiera
+      // llegaba al filtro y desaparecía de «mías».
+      ops = await LocalDb.instance.pendingOpsLectura();
     } catch (_) {}
     return solicitudesRellenoConPendientes(
       espejo: miasEspejo,
