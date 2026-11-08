@@ -233,19 +233,40 @@ List<PerfilComunidadAdmin> parsePerfilesComunidad(
   );
 }
 
-/// 1.29 (Comunidad C3, DF-27): reportes NUEVOS = los
-/// pendientes por encima de la marca de vistos que
-/// se guarda al abrir la pantalla de Comunidad. Un
-/// conteo que baja (resoluciones) nunca da negativo.
-int reportesNuevosComunidad(int pendientes, int vistos) {
-  final n = pendientes - vistos;
-  return n < 0 ? 0 : n;
+/// 1.29 (Comunidad C3, DF-27) → 1.30 (A1-M5-01):
+/// reportes NUEVOS = los pendientes cuyo ID supera
+/// la marca de vistos (el id mayor que la pantalla
+/// de Comunidad guardó al abrirse). Antes la marca
+/// era un CONTEO y las resoluciones lo movían:
+/// resolver un reporte viejo hacía «nuevo» a otro
+/// ya visto (y uno nuevo podía quedar tapado). Un
+/// conteo que baja ya no engaña: cada reporte se
+/// compara por su propio id.
+int reportesNuevosComunidad(List<int> idsPendientes, int maxIdVisto) {
+  return idsPendientes.where((id) => id > maxIdVisto).length;
+}
+
+/// Los ids de los reportes pendientes, del payload
+/// de admin_comunidad_perfiles (A1-M5-01).
+List<int> parseIdsReportesPendientes(Map<String, dynamic> json) {
+  if (json['ok'] != true) return const [];
+  final lista = json['reportes_pendientes_ids'];
+  if (lista is! List) return const [];
+  final out = <int>[];
+  for (final e in lista) {
+    final id = e is num ? e.toInt() : int.tryParse('${e ?? ''}');
+    if (id != null) out.add(id);
+  }
+  return out;
 }
 
 /// La clave de la marca de vistos de reportes
 /// (SharedPreferences), por telegram del dueño.
+/// Desde A1-M5-01 la marca es el ID MAYOR visto (no
+/// un conteo): la clave cambia de nombre para no
+/// leer la marca vieja como si fuera un id.
 String claveReportesComunidadVistos(int telegramId) =>
-    'comunidad_reportes_vistos_$telegramId';
+    'comunidad_reportes_vistos_maxid_$telegramId';
 
 /// El texto humano de un motivo de reporte.
 String motivoReporteTexto(String? motivo) {

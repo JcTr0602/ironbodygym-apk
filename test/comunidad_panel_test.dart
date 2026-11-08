@@ -278,11 +278,44 @@ void main() {
       expect(v.apagados, ['rutina', 'foto']);
     });
 
-    test('reportes nuevos = pendientes sobre vistos, '
-        'sin negativos (DF-27)', () {
-      expect(reportesNuevosComunidad(5, 2), 3);
-      expect(reportesNuevosComunidad(2, 5), 0);
-      expect(reportesNuevosComunidad(0, 0), 0);
+    test('reportes nuevos = ids pendientes sobre la '
+        'marca de vistos (DF-27 · A1-M5-01)', () {
+      // La marca es el id mayor visto, no un conteo.
+      expect(reportesNuevosComunidad([1, 2, 3], 0), 3);
+      expect(reportesNuevosComunidad([1, 2, 3], 3), 0);
+      expect(reportesNuevosComunidad([], 3), 0);
+      // El caso de la auditoría: vistos [1,2,3] (marca
+      // 3); se resuelve el 1 y entra el 4 → solo el 4
+      // es nuevo (con la marca por conteo, la cuenta
+      // volvía a 3 y el nuevo quedaba tapado).
+      expect(reportesNuevosComunidad([2, 3, 4], 3), 1);
+      // Resolver sin que entre nadie no fabrica nuevos.
+      expect(reportesNuevosComunidad([2, 3], 3), 0);
+    });
+
+    test('los ids pendientes se parsean del payload '
+        '(A1-M5-01)', () {
+      expect(
+        parseIdsReportesPendientes(const {
+          'ok': true,
+          'reportes_pendientes_ids': [5, 9, 12],
+        }),
+        [5, 9, 12],
+      );
+      expect(
+        parseIdsReportesPendientes(const {'ok': true}),
+        isEmpty,
+      );
+      expect(
+        parseIdsReportesPendientes(const {
+          'ok': false,
+          'reportes_pendientes_ids': [5],
+        }),
+        isEmpty,
+      );
+      // La clave de la marca lleva la semántica nueva.
+      expect(claveReportesComunidadVistos(735772141),
+          contains('maxid'));
     });
   });
 

@@ -24,10 +24,12 @@ import 'ficha.dart';
 /// lo ven los clientes» (COM-26) y «Borrar Nick»;
 /// Historial lee el registro de moderación (COM-27);
 /// y el bloqueo al resolver es POR TARJETA, no
-/// global. Al abrir la pantalla, el conteo de
-/// reportes pendientes queda marcado como visto
-/// (DF-27): la tarjeta del Panel solo volverá a
-/// enseñar la cifra cuando entren reportes nuevos.
+/// global. Al abrir la pantalla, los reportes
+/// pendientes quedan marcados como vistos por su id
+/// mayor (DF-27; A1-M5-01: antes era el conteo y las
+/// resoluciones lo movían): la tarjeta del Panel
+/// solo volverá a enseñar la cifra cuando entren
+/// reportes con ids nuevos.
 ///
 /// El cliente manda sobre sus datos: esta pantalla
 /// NO puede encender la vitrina de nadie ni ver lo
@@ -84,6 +86,10 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
   List<PerfilComunidadAdmin> _perfiles = const [];
   int _totalClientes = 0;
   int _reportesPendientes = 0;
+
+  /// A1-M5-01: los ids de los reportes pendientes
+  /// (la marca de vistos se ancla al id mayor).
+  List<int> _idsReportesPendientes = const [];
 
   List<ReporteComunidadAdmin> _reportes = const [];
   bool _reportesCargados = false;
@@ -190,6 +196,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
         _perfiles = parsePerfilesComunidad(json);
         _totalClientes = raiz.totalClientes;
         _reportesPendientes = raiz.reportesPendientes;
+        _idsReportesPendientes = parseIdsReportesPendientes(json);
         _cargando = false;
         // 1.28 (M5-A2 ★): un {ok:false} ES un fallo de
         // carga aunque el mapa venga vacío.
@@ -206,17 +213,23 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
     }
   }
 
-  /// DF-27: al abrir la lista, el conteo actual de
-  /// reportes pendientes queda como «visto» en este
-  /// teléfono; la tarjeta del Panel enseña solo los
-  /// que entren por encima de esta marca.
+  /// DF-27: al abrir la lista, los reportes pendientes
+  /// actuales quedan como «vistos» en este teléfono;
+  /// la tarjeta del Panel enseña solo los que entren
+  /// después. A1-M5-01: la marca es el ID MAYOR
+  /// pendiente (no el conteo: las resoluciones movían
+  /// el conteo y fabricaban «nuevos» ya vistos).
   Future<void> _marcarReportesVistos() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      var maxId = 0;
+      for (final id in _idsReportesPendientes) {
+        if (id > maxId) maxId = id;
+      }
       await prefs.setInt(
         claveReportesComunidadVistos(
             AuthService().telegramId ?? 0),
-        _reportesPendientes,
+        maxId,
       );
     } catch (_) {}
   }
@@ -820,14 +833,13 @@ Future<int?> contarReportesComunidadNuevos() async {
         .rpc('admin_comunidad_perfiles')
         .timeout(const Duration(seconds: 12));
     if (res is! Map) return null;
-    final raiz =
-        parseRaizComunidad(Map<String, dynamic>.from(res));
+    final json = Map<String, dynamic>.from(res);
     final prefs = await SharedPreferences.getInstance();
     final vistos = prefs.getInt(claveReportesComunidadVistos(
             AuthService().telegramId ?? 0)) ??
         0;
     return reportesNuevosComunidad(
-        raiz.reportesPendientes, vistos);
+        parseIdsReportesPendientes(json), vistos);
   } catch (_) {
     return null;
   }
