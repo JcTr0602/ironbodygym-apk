@@ -41,6 +41,13 @@ class AppColores {
   // --- Semánticos ---
   static const exito = Color(0xFF22C55E);
   static const exitoOscuro = Color(0xFF15803D);
+  // 1.30 D1 (COMP-A): los dos verdes de ICONO del badge
+  // verde de módulos (IconoModuloBadge.verde), tokenizados
+  // con su valor exacto — eran los últimos literales de las
+  // fábricas de componentes.dart fuera de la excepción
+  // colorSignificadoChip. Son color de gráfico, no de texto.
+  static const exitoIconoOscuro = Color(0xFF4ADE80);
+  static const exitoIconoClaro = Color(0xFF16A34A);
   static const alerta = Color(0xFFF59E0B);
   static const alertaOscuro = Color(0xFFD97706);
   static const error = Color(0xFFEF4444);
@@ -118,7 +125,12 @@ class AppColores {
 
   // --- Textos ---
   static const textoClaro = Color(0xFF1A1A1A);
-  static const textoSecundarioClaro = Color(0xFF757575);
+  // 1.30 D1 (UI130-04): #757575 daba 4,23 sobre fondoClaro
+  // (bajo AA para texto pequeño); #6B6B6B da 4,89 sobre el
+  // fondo y ≈5,48 sobre blanco — fijado por test con los
+  // tres pares reales del rol (fondo, superficie y hundida).
+  // El oscuro (#B0B0B0, 8,64) no se toca.
+  static const textoSecundarioClaro = Color(0xFF6B6B6B);
   static const textoOscuro = Color(0xFFF5F5F5);
   static const textoSecundarioOscuro = Color(0xFFB0B0B0);
 
@@ -541,6 +553,48 @@ class AppRadio {
   static const lg = 16.0;
   static const xl = 24.0;
   static const circular = 999.0;
+
+  // 1.30 D1 (UI130-09): vocabulario cerrado de chips —
+  // `chip` (circular) para estado, contador y filtro;
+  // `tag` (md) SOLO para etiquetas de metadato no
+  // interactivas. Antes ChipEstado usaba lg y las
+  // insignias artesanales inventaban su radio (20): a la
+  // altura real de un chip se parecían pero no coincidían.
+  static const chip = circular;
+  static const tag = md;
+}
+
+/// Tokens de movimiento (1.30 D1, UI130-32 — la fundación).
+///
+/// El movimiento es un sistema, como el color: duraciones y
+/// curvas con nombre, únicos para toda la app. Ningún
+/// componente nuevo escribe una duración literal: pide el
+/// token. Valores = los que ya vivían repartidos (la ruta
+/// respiraba a 220 ms desde la 1.22; el contador de montos,
+/// a 300 ms): tokenizar no cambia el ritmo, lo fija.
+/// Todo el sistema respeta `MediaQuery.disableAnimations`:
+/// con «reducir movimiento» activo, las primitivas nacen
+/// puestas, sin animar.
+class AppMovimiento {
+  AppMovimiento._();
+
+  /// Micro-interacciones: chips, contadores cortos, sellos.
+  static const corta = Duration(milliseconds: 150);
+
+  /// La respiración estándar: transición de ruta, entradas.
+  static const media = Duration(milliseconds: 220);
+
+  /// Cifras protagonistas que cuentan hasta su valor.
+  static const larga = Duration(milliseconds: 300);
+
+  /// Curva de entrada del sistema (la de la ruta desde 1.22).
+  static const curva = Curves.easeOutCubic;
+
+  /// Curva de salida del sistema (la inversa de la ruta).
+  static const curvaReversa = Curves.easeInCubic;
+
+  /// Curva suave para contadores y fundidos cortos.
+  static const curvaSuave = Curves.easeOut;
 }
 
 /// Sombras sutiles (gama media: permitidas, sin exagerar).
@@ -856,13 +910,14 @@ class RutaIron<T> extends MaterialPageRoute<T> {
     super.allowSnapshotting = true,
   });
 
+  // 1.30 D1 (UI130-32): la duración sale del token de
+  // movimiento (AppMovimiento.media = los 220 ms de
+  // siempre), no de un literal en la ruta.
   @override
-  Duration get transitionDuration =>
-      const Duration(milliseconds: 220);
+  Duration get transitionDuration => AppMovimiento.media;
 
   @override
-  Duration get reverseTransitionDuration =>
-      const Duration(milliseconds: 220);
+  Duration get reverseTransitionDuration => AppMovimiento.media;
 }
 
 /// 1.22 Diseño Bloque 1 (T1): la transición de página del
@@ -881,10 +936,12 @@ class TransicionPaginaIron extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
+    // 1.30 D1 (UI130-32): curvas del token de movimiento
+    // (easeOutCubic/easeInCubic, las de siempre).
     final curva = CurvedAnimation(
       parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+      curve: AppMovimiento.curva,
+      reverseCurve: AppMovimiento.curvaReversa,
     );
     return FadeTransition(
       opacity: curva,

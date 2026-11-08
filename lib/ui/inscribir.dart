@@ -776,8 +776,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           const SizedBox(width: AppEspacio.xs),
                           Text(pasos[i].etiqueta,
                               style: AppTexto.etiqueta.copyWith(
+                                  // 1.30 D1 (UI130-03): el paso
+                                  // activo es TEXTO de marca:
+                                  // va por textoNaranja, no la
+                                  // marca a pelo.
                                   color: i == activo
-                                      ? AppColores.naranja
+                                      ? AppColores.textoNaranja(context)
                                       : null,
                                   fontWeight: i == activo
                                       ? FontWeight.w800

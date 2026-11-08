@@ -170,39 +170,56 @@ class _PinLockScreenState extends State<PinLockScreen> {
     return PopScope(
       canPop: false,
       child: Scaffold(
-      body: SafeArea(
+      // 1.30 D1 (UI130-29): SOLO el arte de marca del rayo
+      // como fondo decorativo de ESTA pantalla; la lógica
+      // del PIN (4 dígitos, hash+salt, bloqueo por
+      // inactividad) no se toca. El arte vive tras una
+      // cortina del color de fondo al 86 %: se insinúa sin
+      // pelear en contraste con el teclado ni con el
+      // candado. Si el activo fallara, la pantalla se
+      // pinta como siempre (errorBuilder vacío).
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/arte_marca_rayo.jpg',
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const SizedBox.expand(),
+          ),
+          Container(
+            color: AppColores.fondo(context).withValues(alpha: 0.86),
+          ),
+          SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppEspacio.xxl),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // 1.28 (M5-C6): el candado con la identidad
-              // del gym (gradiente de la casa), no un
-              // icono gris suelto.
+              // del gym, no un icono gris suelto.
+              // 1.30 D1 (UI130-01): fuera el frente blanco
+              // sobre el gradiente de marca (2,75/3,49): el
+              // círculo pasa a carbonProfundo con el icono
+              // en naranja de marca (el par que la
+              // auditoría ya dejó tokenizado).
               Container(
                 width: 84,
                 height: 84,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      AppColores.naranja,
-                      AppColores.naranjaOscuro,
-                    ],
-                  ),
+                  color: AppColores.carbonProfundo,
+                  border: Border.all(
+                      color: AppColores.naranja.withValues(alpha: 0.45)),
                   boxShadow: [
                     BoxShadow(
-                      color:
-                          AppColores.naranja.withValues(alpha: 0.35),
+                      color: Colors.black.withValues(alpha: 0.35),
                       blurRadius: 18,
                       offset: const Offset(0, 6),
                     ),
                   ],
                 ),
                 child: const Icon(Icons.lock_rounded,
-                    size: 40, color: Colors.white),
+                    size: 40, color: AppColores.naranja),
               ),
               const SizedBox(height: 16),
               const Text('App bloqueada',
@@ -280,6 +297,8 @@ class _PinLockScreenState extends State<PinLockScreen> {
             ],
           ),
         ),
+          ),
+        ],
       ),
       ),
     );

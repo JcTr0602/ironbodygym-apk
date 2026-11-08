@@ -291,11 +291,15 @@ class AyudaScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Cabecera con gradiente naranja
+            // Cabecera «Lo Nuevo» — 1.30 D1 (UI130-01):
+            // fuera el blanco sobre el gradiente naranja
+            // (1,83/2,73): la cabecera pasa a carbón con
+            // acento naranja y el chip de versión a
+            // carbonProfundo con texto blanco.
             Container(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               decoration: const BoxDecoration(
-                gradient: AppColores.gradienteNaranja,
+                gradient: AppColores.gradienteCarbon,
                 borderRadius: BorderRadius.vertical(
                     top: Radius.circular(AppRadio.lg)),
               ),
@@ -304,12 +308,12 @@ class AyudaScreen extends StatelessWidget {
                   Container(
                     width: 44,
                     height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.22),
+                    decoration: const BoxDecoration(
+                      color: AppColores.carbonProfundo,
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.new_releases_rounded,
-                        color: Colors.white, size: 24),
+                        color: AppColores.naranja, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -320,8 +324,9 @@ class AyudaScreen extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: AppEspacio.xs),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.22),
-                      borderRadius: BorderRadius.circular(20),
+                      color: AppColores.carbonProfundo,
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.chip),
                     ),
                     child: Text('v${actual.version}',
                         style: AppTexto.secundario.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),

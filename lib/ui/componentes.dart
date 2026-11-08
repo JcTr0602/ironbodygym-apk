@@ -5,6 +5,7 @@
 /// sus propios botones/tarjetas/diálogos.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -510,27 +511,53 @@ class Tarjeta extends StatelessWidget {
     // clase deprecada de sombras (negro/gris según el brillo),
     // escrito en el propio componente.
     final oscuro = Theme.of(context).brightness == Brightness.dark;
-    final card = Container(
-      decoration: BoxDecoration(
-        color: color ?? AppColores.superficie(context),
-        borderRadius: BorderRadius.circular(AppRadio.lg),
-        border: Border.all(color: AppColores.borde(context)),
-        boxShadow: [
-          BoxShadow(
-            color: (oscuro ? Colors.black : Colors.grey)
-                .withValues(alpha: oscuro ? 0.4 : 0.12),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Padding(padding: padding, child: child),
+    final sombra = BoxShadow(
+      color: (oscuro ? Colors.black : Colors.grey)
+          .withValues(alpha: oscuro ? 0.4 : 0.12),
+      blurRadius: 8,
+      offset: const Offset(0, 2),
     );
-    if (onTap == null) return card;
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadio.lg),
-      onTap: onTap,
-      child: card,
+    final radio = BorderRadius.circular(AppRadio.lg);
+    if (onTap == null) {
+      return Container(
+        decoration: BoxDecoration(
+          color: color ?? AppColores.superficie(context),
+          borderRadius: radio,
+          border: Border.all(color: AppColores.borde(context)),
+          boxShadow: [sombra],
+        ),
+        child: Padding(padding: padding, child: child),
+      );
+    }
+    // 1.30 D1 (UI130-08): el ripple cae POR FIN sobre la
+    // tarjeta. Antes un InkWell envolvía por fuera un
+    // Container opaco y la tinta se pintaba detrás, en el
+    // Material del fondo: el toque no se veía en las 28
+    // tarjetas tocables. Ahora la sombra vive en un
+    // contenedor transparente exterior y el color, en un
+    // Material propio con el InkWell DENTRO (el mismo
+    // patrón que la Cola resolvió a mano en la 1.29).
+    // Color, borde, sombra y acolchado: los de siempre.
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: radio,
+        boxShadow: [sombra],
+      ),
+      child: Material(
+        color: color ?? AppColores.superficie(context),
+        borderRadius: radio,
+        child: InkWell(
+          borderRadius: radio,
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: radio,
+              border: Border.all(color: AppColores.borde(context)),
+            ),
+            child: Padding(padding: padding, child: child),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1291,7 +1318,11 @@ class ChipEstado extends StatelessWidget {
           horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(AppRadio.lg),
+        // 1.30 D1 (UI130-09): geometría del vocabulario de
+        // chips — circular (AppRadio.chip), no lg: a la
+        // altura real del chip, 16 y circular se parecían
+        // pero no coincidían en filas mixtas.
+        borderRadius: BorderRadius.circular(AppRadio.chip),
         border: Border.all(
             color: c.withValues(alpha: 0.35)),
       ),
@@ -1423,6 +1454,52 @@ class ContadorBadge extends StatelessWidget {
           style: AppTexto.etiqueta.copyWith(
             fontWeight: FontWeight.bold,
             color: AppColores.sobreNaranja,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Contador de URGENCIA (1.30 D1, UI130-02): el que avisa de
+/// algo por hacer (pendientes en un segmento, la campana).
+/// Componente ÚNICO sobre `errorFondo` — blanco da 6,54:1;
+/// el par viejo (blanco sobre `error` brillante #EF4444) daba
+/// 3,76 y queda prohibido para contadores. Mínimo 20×20, como
+/// [ContadorBadge]. Con [conBorde], lleva el borde de
+/// separación para cuando vive sobre la cabecera carbón.
+/// Para cantidades neutras (sin urgencia) manda
+/// [ContadorBadge], no este.
+class ContadorUrgente extends StatelessWidget {
+  final int numero;
+  final bool conBorde;
+
+  const ContadorUrgente({
+    super.key,
+    required this.numero,
+    this.conBorde = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final texto = numero > 99 ? '99+' : '$numero';
+    return Container(
+      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColores.errorFondo,
+        borderRadius: BorderRadius.circular(AppRadio.circular),
+        border: conBorde
+            ? Border.all(
+                color: Colors.white.withValues(alpha: 0.55), width: 1)
+            : null,
+      ),
+      child: Center(
+        child: Text(
+          texto,
+          style: AppTexto.etiqueta.copyWith(
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
           ),
         ),
       ),
@@ -1660,11 +1737,171 @@ class MontoAnimado extends StatelessWidget {
     final base = (style ?? AppTexto.metrica).copyWith(
       fontFeatures: const [FontFeature.tabularFigures()],
     );
+    // 1.30 D1 (UI130-32): la duración sale del token
+    // (AppMovimiento.larga = los 300 ms de siempre) y con
+    // «reducir movimiento» la cifra nace puesta (duración
+    // cero), como manda la fundación de movimiento.
+    final reducir = MediaQuery.of(context).disableAnimations;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(end: valor),
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
+      duration: reducir ? Duration.zero : AppMovimiento.larga,
+      curve: AppMovimiento.curvaSuave,
       builder: (_, v, __) => Text(formato(v), style: base),
+    );
+  }
+}
+
+/// Primitiva de aparición en cascada (1.30 D1, UI130-32):
+/// envuelve la lista o rejilla de una pantalla y sus
+/// [ItemCascada] aparecen escalonados SOLO al abrir la
+/// ruta. La bandera de ciclo de vida vive en el State de
+/// este ámbito (ajuste BAJA-02 de Argón): pasados la
+/// ventana de entrada, la cascada se cierra y las celdas
+/// que el scroll recicla después nacen puestas, sin
+/// re-animar jamás — animar en cada build de celda
+/// produce tirones y marea en listas largas. Con
+/// «reducir movimiento» del teléfono, nada anima.
+/// Las oleadas D2–D6 la adoptan pantalla a pantalla;
+/// D6 cierra el barrido.
+class EntradaCascada extends StatefulWidget {
+  final Widget child;
+
+  const EntradaCascada({super.key, required this.child});
+
+  @override
+  State<EntradaCascada> createState() => _EntradaCascadaState();
+}
+
+class _EntradaCascadaState extends State<EntradaCascada> {
+  bool _ventanaAbierta = true;
+  Timer? _cierre;
+
+  @override
+  void initState() {
+    super.initState();
+    // La ventana cubre el escalonado entero del último
+    // ítem admitido (tope de ItemCascada) + su duración.
+    _cierre = Timer(
+      AppMovimiento.larga +
+          const Duration(
+              milliseconds: ItemCascada.pasoMs * ItemCascada.topeIndice),
+      () {
+        if (mounted) setState(() => _ventanaAbierta = false);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _cierre?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _AmbitoCascada(
+      ventanaAbierta: _ventanaAbierta,
+      child: widget.child,
+    );
+  }
+}
+
+class _AmbitoCascada extends InheritedWidget {
+  final bool ventanaAbierta;
+
+  const _AmbitoCascada({
+    required this.ventanaAbierta,
+    required super.child,
+  });
+
+  static _AmbitoCascada? de(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_AmbitoCascada>();
+
+  @override
+  bool updateShouldNotify(_AmbitoCascada oldWidget) =>
+      ventanaAbierta != oldWidget.ventanaAbierta;
+}
+
+/// Un ítem de la cascada de [EntradaCascada]: entra con
+/// fundido + subida corta, escalonado por [indice]
+/// (acotado a [topeIndice] para que una lista larga no
+/// desfile). Sin ámbito, con la ventana ya cerrada o con
+/// «reducir movimiento», nace puesto, sin animar.
+class ItemCascada extends StatefulWidget {
+  final int indice;
+  final Widget child;
+
+  const ItemCascada({
+    super.key,
+    required this.indice,
+    required this.child,
+  });
+
+  /// Milisegundos de escalón entre ítems consecutivos.
+  static const pasoMs = 45;
+
+  /// Último índice que aún se escalona; el resto entra
+  /// con el último.
+  static const topeIndice = 8;
+
+  @override
+  State<ItemCascada> createState() => _ItemCascadaState();
+}
+
+class _ItemCascadaState extends State<ItemCascada>
+    with SingleTickerProviderStateMixin {
+  AnimationController? _ctrl;
+  Timer? _arranque;
+  bool _decidido = false;
+  bool _animar = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_decidido) return;
+    _decidido = true;
+    final ambito = _AmbitoCascada.de(context);
+    if (ambito == null ||
+        !ambito.ventanaAbierta ||
+        MediaQuery.of(context).disableAnimations) {
+      return;
+    }
+    _animar = true;
+    _ctrl = AnimationController(
+        vsync: this, duration: AppMovimiento.media);
+    final paso = (widget.indice < ItemCascada.topeIndice
+            ? widget.indice
+            : ItemCascada.topeIndice) *
+        ItemCascada.pasoMs;
+    if (paso == 0) {
+      _ctrl!.forward();
+    } else {
+      _arranque = Timer(Duration(milliseconds: paso), () {
+        if (mounted) _ctrl?.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _arranque?.cancel();
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_animar || _ctrl == null) return widget.child;
+    final curva =
+        CurvedAnimation(parent: _ctrl!, curve: AppMovimiento.curva);
+    return FadeTransition(
+      opacity: curva,
+      child: SlideTransition(
+        position: Tween<Offset>(
+                begin: const Offset(0, 0.06), end: Offset.zero)
+            .animate(curva),
+        child: widget.child,
+      ),
     );
   }
 }
@@ -2149,8 +2386,9 @@ class IconoModuloBadge extends StatelessWidget {
     return IconoModuloBadge(
       icono: icono,
       tinte: AppColores.naranja,
-      iconoOscuro: const Color(0xFFFB923C),
-      iconoClaro: const Color(0xFFEA580C),
+      // 1.30 D1 (COMP-A): literales a token de valor exacto.
+      iconoOscuro: AppColores.naranjaTextoOscuro,
+      iconoClaro: AppColores.bannerEnviandoB,
       tamanoIcono: tamanoIcono,
     );
   }
@@ -2160,9 +2398,10 @@ class IconoModuloBadge extends StatelessWidget {
       {double tamanoIcono = 21}) {
     return IconoModuloBadge(
       icono: icono,
-      tinte: const Color(0xFF22C55E),
-      iconoOscuro: const Color(0xFF4ADE80),
-      iconoClaro: const Color(0xFF16A34A),
+      // 1.30 D1 (COMP-A): literales a token de valor exacto.
+      tinte: AppColores.exito,
+      iconoOscuro: AppColores.exitoIconoOscuro,
+      iconoClaro: AppColores.exitoIconoClaro,
       tamanoIcono: tamanoIcono,
     );
   }

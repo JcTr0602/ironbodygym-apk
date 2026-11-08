@@ -1391,18 +1391,11 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 if (contador > 0) ...[
                   const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: AppColores.error,
-                      borderRadius: BorderRadius.circular(AppRadio.circular),
-                    ),
-                    child: Text(contador > 99 ? '99+' : '$contador',
-                        style: AppTexto.etiqueta.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold)),
-                  ),
+                  // 1.30 D1 (UI130-02): el contador de
+                  // urgencia es el componente único sobre
+                  // errorFondo (6,54) — fuera el par
+                  // blanco/error brillante (3,76).
+                  ContadorUrgente(numero: contador),
                 ],
               ],
             ),
@@ -1935,7 +1928,12 @@ class _HomeScreenState extends State<HomeScreen>
       child: Text(
         _rolSimple(),
         style: AppTexto.etiqueta.copyWith(
-            color: AppColores.naranja,
+            // 1.30 D1 (UI130-03): la marca como TEXTO va
+            // por el rol textoNaranja (en oscuro, la
+            // variante clara legible sobre el tinte y la
+            // cabecera carbón); el relleno y el borde
+            // conservan la marca, que como gráfico sí vale.
+            color: AppColores.textoNaranja(context),
             fontWeight: FontWeight.bold),
       ),
     );
@@ -1969,8 +1967,9 @@ class _HomeScreenState extends State<HomeScreen>
       icono: Icons.notifications_rounded,
       tooltip: 'Actividad',
       onPressed: () => _ir(const ActividadScreen()),
-      insignia:
-          _noLeidas > 0 ? (_noLeidas > 9 ? '9+' : '$_noLeidas') : null,
+      // 1.30 D1 (UI130-02): la insignia es el número; el
+      // tope («99+») lo pone el ContadorUrgente único.
+      insignia: _noLeidas > 0 ? _noLeidas : null,
     );
   }
 
@@ -3518,7 +3517,10 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                 duration: const Duration(milliseconds: 220),
                 child: Icon(
                   _abierto ? Icons.close_rounded : Icons.bolt_rounded,
-                  color: Colors.white,
+                  // 1.30 D1 (UI130-01): el glifo del dial va
+                  // en sobreMarca (7,35/4,88 sobre el
+                  // gradiente), no en blanco (2,36/3,56).
+                  color: AppColores.sobreMarca,
                   size: 26,
                 ),
               ),
@@ -3812,7 +3814,11 @@ class _BotonCabecera extends StatelessWidget {
   final IconData icono;
   final String tooltip;
   final VoidCallback onPressed;
-  final String? insignia;
+
+  /// Contador de la insignia (1.30 D1, UI130-02: lo pinta
+  /// el ContadorUrgente único; antes era un texto suelto
+  /// sobre el rojo brillante). Null o 0 = sin insignia.
+  final int? insignia;
   final Color? punto;
   final Animation<double>? giro;
 
@@ -3851,23 +3857,14 @@ class _BotonCabecera extends StatelessWidget {
                       ? iconoW
                       : RotationTransition(turns: giro!, child: iconoW),
                 ),
-                if (insignia != null)
+                if (insignia != null && insignia! > 0)
                   Positioned(
                     right: 2,
                     top: 2,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: AppColores.error,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        insignia!,
-                        style: AppTexto.minuscula.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
+                    // Vive sobre la cabecera carbón: con el
+                    // borde de separación del componente.
+                    child: ContadorUrgente(
+                        numero: insignia!, conBorde: true),
                   ),
                 if (punto != null)
                   Positioned(

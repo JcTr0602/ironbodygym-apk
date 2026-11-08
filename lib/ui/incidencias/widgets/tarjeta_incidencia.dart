@@ -177,9 +177,11 @@ class TarjetaIncidencia extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: _colorEstado
                           .withValues(alpha: 0.15),
+                      // 1.30 D1 (UI130-09): la insignia
+                      // artesanal (radio 20 suelto) adopta la
+                      // geometría del vocabulario de chips.
                       borderRadius:
-                          BorderRadius.circular(
-                              20),
+                          BorderRadius.circular(AppRadio.chip),
                     ),
                     child: Text(
                       _etiquetaEstado,

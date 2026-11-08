@@ -208,11 +208,17 @@ void main() {
       // + fabricas de badge, excepcion de la 1.29) y suplementos
       // (gradiente decorativo de la foto generica, excepcion
       // declarada en esta oleada).
+      // 1.30 D1 (COMP-A): las fábricas de IconoModuloBadge
+      // migran sus 5 literales a tokens de valor exacto
+      // (naranjaTextoOscuro, bannerEnviandoB, exito y los
+      // nuevos exitoIconoOscuro/Claro): en componentes solo
+      // quedan los 6 de colorSignificadoChip, la excepción
+      // real fijada por el test de contraste.
       final conteo = contar(RegExp(r'Color\(0x'),
           excluir: {'lib/ui/diseno.dart'});
       expect(conteo, {
         'lib/ui/cierre_nomina_imagen.dart': 10,
-        'lib/ui/componentes.dart': 11,
+        'lib/ui/componentes.dart': 6,
         'lib/ui/vista_previa_cliente.dart': 9,
         'lib/ui/suplementos.dart': 2,
       });

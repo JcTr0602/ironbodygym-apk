@@ -869,12 +869,25 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               final cup = moneda == 'USD'
                   ? precioOficialEn('CUP', precio, _tasaUsd)
                   : null;
-              return Text(
-                  '${precio.toStringAsFixed(2)} $moneda'
-                  '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
-                  style: AppTexto.secundario.copyWith(
-                      color: AppColores.naranja,
-                      fontWeight: FontWeight.bold));
+              return Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                      text: precio.toStringAsFixed(2),
+                      style: AppTexto.secundario.copyWith(
+                          color: AppColores.textoNaranja(context),
+                          fontWeight: FontWeight.bold)),
+                  // 1.30 D1 (UI130-03): la moneda va como
+                  // metadato junto a la cifra protagonista
+                  // (antes todo el precio era texto de
+                  // marca a pelo: 2,52 en claro).
+                  TextSpan(
+                      text: ' $moneda'
+                          '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
+                      style: AppTexto.metadato.copyWith(
+                          color:
+                              AppColores.textoSecundario(context))),
+                ]),
+              );
             }),
             // F4-12: la cifra que sostiene el «más vendido»
             // (histórico de ventas no anuladas).
@@ -964,13 +977,26 @@ class _FilaSuplemento extends StatelessWidget {
                         .copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    '${precio.toStringAsFixed(2)} $moneda'
-                    '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
-                    style: AppTexto.subtitulo.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: AppColores.naranja,
-                    ),
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(
+                        text: precio.toStringAsFixed(2),
+                        style: AppTexto.subtitulo.copyWith(
+                          fontWeight: FontWeight.bold,
+                          // 1.30 D1 (UI130-03): precio con el
+                          // rol de texto de la marca, no la
+                          // marca a pelo (2,52 en claro).
+                          color: AppColores.textoNaranja(context),
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' $moneda'
+                            '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
+                        style: AppTexto.metadato.copyWith(
+                            color:
+                                AppColores.textoSecundario(context)),
+                      ),
+                    ]),
                   ),
                   if (presentacion.isNotEmpty)
                     Text(

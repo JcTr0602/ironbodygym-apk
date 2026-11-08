@@ -31,6 +31,109 @@ String textoSelloGympedia(String sello) {
   }
 }
 
+/// 1.30 D1 (portadas GymPedia, asignación ALTA-02): la
+/// portada de cada categoría, recortada de la lámina
+/// `portadas_gympedia.jpg` de la serie ilustrada. La
+/// taxonomía VIVA manda (`GympediaValidacion.categorias`):
+/// las cinco con correspondencia temática directa llevan
+/// su recorte; `empieza-aqui` y `mitos` quedan sin portada
+/// (la lámina se diseñó con otra taxonomía — su sexto
+/// recorte, «Cardio/movilidad», no tiene categoría viva a
+/// la que colgar y no se embarca un activo muerto) y su
+/// cabecera se pinta como siempre. Pura, testeable.
+String? portadaGympediaDe(String categoria) {
+  switch (categoria) {
+    case 'entrenamiento':
+      return 'assets/gympedia_entrenamiento.jpg';
+    case 'nutricion':
+      return 'assets/gympedia_nutricion.jpg';
+    case 'suplementos':
+      return 'assets/gympedia_suplementos.jpg';
+    case 'descanso':
+      return 'assets/gympedia_descanso.jpg';
+    case 'tecnica':
+      return 'assets/gympedia_tecnica.jpg';
+    default:
+      return null;
+  }
+}
+
+/// Cabecera de una categoría de GymPedia (1.30 D1): con
+/// portada, banda de imagen con el nombre encima; sin
+/// portada (o si el activo fallara al cargar), el título
+/// plano de siempre con el color de texto de la marca
+/// (UI130-03: `textoNaranja`, no la marca a pelo).
+/// [rutaPortada] es la costura para tests: fuerza una
+/// ruta (p. ej. inexistente) en vez de resolverla por
+/// categoría.
+class CabeceraCategoriaGympedia extends StatelessWidget {
+  final String categoria;
+  final String? rutaPortada;
+
+  const CabeceraCategoriaGympedia({
+    super.key,
+    required this.categoria,
+    this.rutaPortada,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nombre =
+        GympediaValidacion.nombreCategoria[categoria] ?? categoria;
+    final portada = rutaPortada ?? portadaGympediaDe(categoria);
+    if (portada == null) {
+      return Text(
+        nombre,
+        style: AppTexto.etiqueta.copyWith(
+            fontWeight: FontWeight.bold,
+            color: AppColores.textoNaranja(context)),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadio.lg),
+      child: SizedBox(
+        height: 64,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              portada,
+              fit: BoxFit.cover,
+              // Sin activo (caída): banda carbón lisa, el
+              // nombre sigue legible encima — nunca un
+              // icono de imagen rota.
+              errorBuilder: (_, __, ___) => const ColoredBox(
+                  color: AppColores.carbonProfundo),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.65),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: AppEspacio.md,
+              bottom: AppEspacio.sm,
+              child: Text(
+                nombre,
+                style: AppTexto.etiqueta.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class GympediaScreen extends StatefulWidget {
   /// Si es true, se muestra sin Scaffold/AppBar (pestaña dentro de
   /// Biblioteca): el cuerpo trae sus propios botones de acción.
@@ -327,36 +430,63 @@ class _GympediaScreenState extends State<GympediaScreen> {
                   ),
                   const SizedBox(height: 8),
                   for (final b in _borradoresVisibles)
-                    Card(
-                      child: ListTile(
-                        leading: Icon(Icons.edit_note_rounded,
-                            color: AppColores.textoSecundario(context)),
-                        title: Text(
-                            '${b['titulo']}'.isEmpty
-                                ? '(sin título)'
-                                : '${b['titulo']}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
-                        subtitle: Text('${b['slug']}'),
-                        trailing: _obsoleto(b)
-                            ? const Tooltip(
+                    // 1.30 D1 (UI130-09): la fila de borrador
+                    // deja el Card+ListTile+Chip crudos (dos
+                    // generaciones en la misma lista) y pasa
+                    // a Tarjeta + ChipEstado, como las filas
+                    // de publicados de abajo.
+                    Padding(
+                      padding: const EdgeInsets.only(
+                          bottom: AppEspacio.sm),
+                      child: Tarjeta(
+                        padding:
+                            const EdgeInsets.all(AppEspacio.md),
+                        onTap: () => _abrirEditor(borrador: b),
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit_note_rounded,
+                                color: AppColores.textoSecundario(
+                                    context)),
+                            const SizedBox(width: AppEspacio.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      '${b['titulo']}'.isEmpty
+                                          ? '(sin título)'
+                                          : '${b['titulo']}',
+                                      maxLines: 1,
+                                      overflow:
+                                          TextOverflow.ellipsis,
+                                      style: AppTexto.subtitulo),
+                                  Text('${b['slug']}',
+                                      style: AppTexto.secundario),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: AppEspacio.sm),
+                            if (_obsoleto(b))
+                              const Tooltip(
                                 message:
                                     'El artículo publicado cambió desde que abriste este borrador',
-                                child: Icon(Icons.warning_amber_rounded,
+                                child: Icon(
+                                    Icons.warning_amber_rounded,
                                     color: AppColores.error),
                               )
-                            : _enCola.contains('${b['slug']}')
-                                ? const Chip(
-                                    label: Text('En cola de publicación',
-                                        style: AppTexto.minuscula),
-                                    visualDensity: VisualDensity.compact,
-                                  )
-                                : const Chip(
-                                    label: Text('Borrador',
-                                        style: AppTexto.minuscula),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                        onTap: () => _abrirEditor(borrador: b),
+                            else if (_enCola.contains('${b['slug']}'))
+                              const ChipEstado.semantico(
+                                texto: 'En cola de publicación',
+                                significado: SignificadoChip.info,
+                              )
+                            else
+                              const ChipEstado.semantico(
+                                texto: 'Borrador',
+                                significado: SignificadoChip.neutral,
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -388,12 +518,10 @@ class _GympediaScreenState extends State<GympediaScreen> {
                   if (_publicadosVisibles.any((p) => '${p['categoria']}' == cat)) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: AppEspacio.md, bottom: AppEspacio.xs),
-                      child: Text(
-                        GympediaValidacion.nombreCategoria[cat] ?? cat,
-                        style: AppTexto.etiqueta.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: AppColores.naranja),
-                      ),
+                      // 1.30 D1: cabecera con portada por
+                      // categoría (ALTA-02); sin portada, el
+                      // título plano con textoNaranja (03).
+                      child: CabeceraCategoriaGympedia(categoria: cat),
                     ),
                     for (final p in _publicadosVisibles.where(
                         (p) => '${p['categoria']}' == cat))

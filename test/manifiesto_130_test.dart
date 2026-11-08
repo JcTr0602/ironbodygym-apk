@@ -2,11 +2,13 @@
 /// omisión (plan §2.4: tests de la app).
 ///
 /// - Inventario: `SyncEngine.tablasManifiesto` (las 41 que pide
-///   la app) ≡ allowlist de la RPC `sync_manifiesto` tras la
-///   Oleada 1 del servidor (las 40 entradas de la función,
-///   fijadas contra la lista del plan §2.1/§2.2 y contra la
-///   definición aplicada el 2026-11-08). Si la RPC pierde una
-///   tabla, este test lo canta antes de que un teléfono la deje
+///   la app) ⊆ allowlist de la RPC `sync_manifiesto` (42
+///   entradas: las 40 de la Oleada 1 del servidor, fijadas
+///   contra la lista del plan §2.1/§2.2 y contra la definición
+///   aplicada el 2026-11-08, + las 2 que publicó la ventana
+///   §10 — GEN-07: `sync_servicio_lotes` y
+///   `sync_servicio_compras`). Si la RPC pierde una tabla,
+///   este test lo canta antes de que un teléfono la deje
 ///   «sin verificar» para siempre.
 /// - Paridad inversa con el pull: toda tabla del manifiesto
 ///   tiene espejo local real (sin entradas fantasma).
@@ -27,9 +29,11 @@ import 'package:ironbody_gym/sync.dart';
 
 void main() {
   group('Oleada 1 · inventario del manifiesto', () {
-    // Allowlist de la RPC tras la Oleada 1 (servidor): las 28
-    // previas + las 12 del plan §2.2. Fijada por test de fuente
-    // contra la definición aplicada (ver
+    // Allowlist de la RPC: las 28 previas + las 12 del plan
+    // §2.2 (Oleada 1) + las 2 de la ventana §10 / GEN-07
+    // (servicio_lotes y servicio_compras, que el puente no
+    // publicaba y la ventana §10 publicó). Fijada por test de
+    // fuente contra la definición aplicada (ver
     // cola-123/gestion/manifiesto_130_sql/).
     const allowlistRpc = <String>{
       'sync_clientes',
@@ -46,6 +50,10 @@ void main() {
       'sync_servicio_salidas',
       'sync_servicio_botes',
       'sync_servicio_agua_movimientos',
+      // Las 2 de la ventana §10 (GEN-07): el puente pasó a
+      // publicarlas y la RPC las admite en el manifiesto.
+      'sync_servicio_lotes',
+      'sync_servicio_compras',
       'sync_gympedia',
       'sync_gympedia_borradores',
       'sync_gympedia_solicitudes',
@@ -75,19 +83,23 @@ void main() {
       'sync_recordatorio_config',
     };
 
-    test('la app pide 41 y la RPC permite 40: la diferencia es '
-        'exactamente la unión servicio_lotes/compras', () {
+    test('la app pide 41 y la RPC permite 42: las 41 pedidas '
+        'están dentro y la única de más es sync_borrados', () {
       expect(SyncEngine.tablasManifiesto.length, 41);
-      expect(allowlistRpc.length, 40);
-      // servicio_lotes y servicio_compras NO existen como tabla
-      // sync_* en Supabase (el puente no las publica): la app las
-      // pide y quedan «sin verificar» por diseño (M1-A2), sin
-      // envenenar el sello — NO son parte de las 12 de la
-      // Oleada 1 y este test fija que sigan fuera del allowlist.
+      expect(allowlistRpc.length, 42);
+      // servicio_lotes y servicio_compras YA existen como
+      // tablas sync_* en Supabase: la ventana §10 (GEN-07) las
+      // publicó en el puente y entraron en el allowlist de la
+      // RPC, cerrando el «sin verificar por diseño» (M1-A2)
+      // que este test fijaba antes. La app las pedía desde la
+      // Oleada 1: ahora la diferencia pedidas − permitidas es
+      // VACÍA y las 41 verifican de verdad.
       final diferencia =
           SyncEngine.tablasManifiesto.keys.toSet().difference(allowlistRpc);
-      expect(diferencia,
-          {'sync_servicio_lotes', 'sync_servicio_compras'});
+      expect(diferencia, isEmpty,
+          reason: 'toda tabla que la app pide debe estar en el '
+              'allowlist de la RPC (contrato tras la ventana '
+              '§10: 41 pedidas ⊆ 42 permitidas)');
       // La RPC además cubre sync_borrados: la app la verifica
       // por su propio camino (el manifiesto de borrados viaja
       // en la misma RPC, fuera de tablasManifiesto). Es la

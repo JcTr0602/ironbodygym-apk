@@ -48,3 +48,11 @@ flutter:
   uses-material-design: true
   assets:
     - assets/logo.jpg
+    # 1.30 D1 (UI130-29 + portadas ALTA-02): el arte de
+    # marca del PIN y las 5 portadas de categoría GymPedia.
+    - assets/arte_marca_rayo.jpg
+    - assets/gympedia_entrenamiento.jpg
+    - assets/gympedia_nutricion.jpg
+    - assets/gympedia_suplementos.jpg
+    - assets/gympedia_descanso.jpg
+    - assets/gympedia_tecnica.jpg
