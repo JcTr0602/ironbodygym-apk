@@ -157,9 +157,17 @@ void main() {
       // Marcadores de los 6 sitios corregidos: segmento de
       // niveles, avatar, «Mi Turno Hoy», banner sin reporte,
       // X de descarte y filas de «Atención hoy».
-      expect('1.23 B11'.allMatches(home).length, 6);
-      // Tres garantías de alto mínimo exactas.
-      expect('minHeight: 48'.allMatches(home).length, 3);
+      // 1.29 (Oleada 5, D-21): el marcador del avatar
+      // desaparece porque la cabecera se rehízo — la
+      // garantía (área tocable de 48) la hereda la
+      // tarjeta del logo, de 48×48 por construcción, y
+      // la fija el widget test de la oleada 5; aquí se
+      // ancla su rastro en la fuente.
+      expect('1.23 B11'.allMatches(home).length, 5);
+      expect(home.contains('hairline naranja'), isTrue);
+      // Garantías de alto mínimo exactas: las 3 de B11
+      // más la fila tocable del buzón del dueño (FB-12).
+      expect('minHeight: 48'.allMatches(home).length, 4);
       // La X crece por padding (icono intacto en 16).
       expect(
           home.contains('padding: EdgeInsets.all(AppEspacio.lg)'),
