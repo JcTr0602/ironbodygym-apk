@@ -3006,6 +3006,12 @@ class LocalDb {
     await db.execute('CREATE TABLE IF NOT EXISTS solicitudes_adelanto ('
         'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
         'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
+    // 1.29 (Oleada 4, FB-09): espejo de solicitudes de relleno
+    // de pomo. Nace aquí (onCreate y onUpgrade pasan por este
+    // método): sin bump de versión ni migración nueva.
+    await db.execute('CREATE TABLE IF NOT EXISTS solicitudes_relleno ('
+        'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
     // F4: espejo de avisos del dueño (solo lectura en el teléfono
     // del entrenador; el dueño los escribe por sync_ops).
     await db.execute('CREATE TABLE IF NOT EXISTS avisos_entrenadores ('
@@ -3049,6 +3055,7 @@ class LocalDb {
     // migracion_test y migracion_v25_test con idx_pagos_metodo).
     for (final t in [
       'solicitudes_adelanto',
+      'solicitudes_relleno',
       'avisos_entrenadores',
       'servicio_botes',
       'servicio_lotes',
@@ -3070,6 +3077,8 @@ class LocalDb {
     // los tenga no retrocede su progreso).
     await db.rawInsert(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_solicitudes_adelanto', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_solicitudes_relleno', '0')");
     await db.rawInsert(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_avisos_entrenadores', '0')");
     await db.rawInsert(
@@ -8416,6 +8425,8 @@ class LocalDb {
     // (guia_borrados fuera del mínimo: misma nota de tombstones.)
     'reservas',
     'solicitudes_adelanto',
+    // 1.29 (Oleada 4, FB-09): espejo de solicitudes de relleno.
+    'solicitudes_relleno',
     'avisos_entrenadores',
     // Fase A 2026-10-25 (v45): mismo motivo para los espejos de
     // bonos, tarifas, entregas y recordatorios. Una tabla ausente
@@ -8508,6 +8519,7 @@ class LocalDb {
     // v1.12.0 (G2): los espejos nuevos del Bloque 3 nacen con la
     // tabla y deben descargarse desde cero, por el mismo motivo.
     if (tabla == 'solicitudes_adelanto' ||
+        tabla == 'solicitudes_relleno' ||
         tabla == 'avisos_entrenadores') {
       return 0;
     }

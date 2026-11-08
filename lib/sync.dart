@@ -4078,11 +4078,29 @@ class SyncEngine {
     // v1.12.0 (Bloque 3, F3/F4): espejos planos con id TEXT (UUID).
     // Contrato servidor 59f2ffd: sin columna 'data'; el JSON local
     // se arma con las columnas exactas del espejo.
-    if (tabla == 'solicitudes_adelanto' || tabla == 'avisos_entrenadores') {
+    if (tabla == 'solicitudes_adelanto' ||
+        tabla == 'solicitudes_relleno' ||
+        tabla == 'avisos_entrenadores') {
       final id = '${m['id'] ?? ''}';
       if (id.isEmpty) return null;
       final data = <String, dynamic>{'id': id};
-      if (tabla == 'solicitudes_adelanto') {
+      if (tabla == 'solicitudes_relleno') {
+        // 1.29 (Oleada 4, FB-09): columnas exactas del espejo
+        // sync_solicitudes_relleno (las mismas que publica el
+        // puente desde gym.db).
+        data.addAll({
+          'entrenador_telegram_id': m['entrenador_telegram_id'],
+          'entrenador_nombre': m['entrenador_nombre'],
+          'entrenador': m['entrenador'],
+          'suplemento_id': m['suplemento_id'],
+          'suplemento_nombre': m['suplemento_nombre'],
+          'estado': m['estado'],
+          'motivo_cierre': m['motivo_cierre'],
+          'creado_en': m['creado_en'],
+          'resuelto_en': m['resuelto_en'],
+          'dosis_al_pedir': m['dosis_al_pedir'],
+        });
+      } else if (tabla == 'solicitudes_adelanto') {
         data.addAll({
           'entrenador_telegram_id': m['entrenador_telegram_id'],
           'entrenador_nombre': m['entrenador_nombre'],
@@ -4402,6 +4420,7 @@ class SyncEngine {
     // en Supabase, el pull la marca ausente y la omite (mismo
     // patrón que los servicios en v1.8.0).
     'solicitudes_adelanto',
+    'solicitudes_relleno', // 1.29 (Oleada 4, FB-09)
     'avisos_entrenadores',
     // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): mismo patrón de
     // tabla ausente (el puente ya publica las tres de Fase A;
@@ -4729,6 +4748,7 @@ class SyncEngine {
       // (contrato servidor 59f2ffd: esquemas PLANOS, sin columna
       // 'data' — ver la rama de select abajo y _prepararFilaMirror).
       'solicitudes_adelanto': 'sync_solicitudes_adelanto',
+      'solicitudes_relleno': 'sync_solicitudes_relleno',
       'avisos_entrenadores': 'sync_avisos_entrenadores',
       // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): espejos planos
       // del puente (columnas exactas en la rama de select y en
@@ -4840,6 +4860,12 @@ class SyncEngine {
                   'monto,motivo,estado,creado_en,resuelto_en,resuelto_por,'
                   'resuelto_por_nombre,motivo_resolucion,'
                   'destino_resolucion,sync_seq',
+            // 1.29 (Oleada 4, FB-09): espejo de solicitudes de
+            // relleno (columnas exactas del espejo de Supabase).
+            'solicitudes_relleno' =>
+              'id,entrenador_telegram_id,entrenador_nombre,entrenador,'
+                  'suplemento_id,suplemento_nombre,estado,motivo_cierre,'
+                  'creado_en,resuelto_en,dosis_al_pedir,sync_seq',
             'avisos_entrenadores' =>
               'id,titulo,mensaje,modo,activo,vigente_desde,vigente_hasta,'
                   'destinatario_telegram_id,'
@@ -5992,6 +6018,7 @@ class SyncEngine {
     'sync_equipos_guia': 'guia_equipos',
     'sync_reservas': 'reservas',
     'sync_solicitudes_adelanto': 'solicitudes_adelanto',
+    'sync_solicitudes_relleno': 'solicitudes_relleno',
     'sync_avisos_entrenadores': 'avisos_entrenadores',
     'sync_nomina_bonos': 'nomina_bonos',
     'sync_tarifas_especiales': 'espejo_tarifas_especiales',

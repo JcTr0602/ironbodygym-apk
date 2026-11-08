@@ -18,6 +18,7 @@ import '../tiempo.dart';
 import '../cliente_protegido.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'iconos_propios.dart';
 import 'aviso_duplicado.dart';
 import 'diseno.dart';
 import 'skeleton.dart';
@@ -88,6 +89,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   // sincronizar»). Las ventas en cola ya componen la lista
   // de hoy (M3-C5); el sello cuenta TODAS las ops del día.
   int _opsColaHoy = 0;
+  // 1.29 (Oleada 4, FB-09): estado de MI petición de relleno
+  // para el suplemento del pomo seleccionado (espejo u op aún
+  // en cola). Con petición viva, la banda de pomo bajo enseña
+  // «ya pediste» en vez del botón.
+  bool _rellenoPedidoSel = false;
+  bool _pidiendoRelleno = false;
   // 1.28 (M3-C4): autonomía del pomo seleccionado (solo se
   // calcula para el dueño, en _cargarDesglose).
   int? _autonomiaSelDias;
@@ -320,6 +327,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     });
     // 10/25: desglose del pomo seleccionado (dueño) tras la carga.
     _cargarDesglose();
+    // 1.29 (Oleada 4, FB-09): estado de mi petición de relleno.
+    _cargarEstadoRelleno();
     // Ítem 5: llegada desde el speed dial de Home → el formulario de
     // ese tipo se abre solo, una vez, con lotes y precios ya cargados.
     if (widget.tipoInicial != null && !_dialogoInicialAbierto) {
@@ -2089,6 +2098,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 onChanged: (v) {
                   setState(() => _pomoSel = v);
                   _cargarDesglose();
+                  _cargarEstadoRelleno();
                 },
               ),
             )
@@ -2268,20 +2278,95 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   color: AppColores.alertaOscuro
                       .withValues(alpha: 0.15),
                 ),
-                child: Text(
-                  _esDueno
-                      ? '⚠ Quedan pocas dosis en este pomo (menos de 5).'
-                      : '⚠ Te quedan pocas dosis en este pomo (menos de 5): '
-                          'avisa al dueño para que te rellene.',
-                  style: AppTexto.cuerpo.copyWith(
-                      color: AppColores.alertaOscuro,
-                      fontWeight: FontWeight.w600),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _esDueno
+                          ? '⚠ Quedan pocas dosis en este pomo (menos de 5).'
+                          : '⚠ Te quedan pocas dosis en este pomo '
+                              '(menos de 5).',
+                      style: AppTexto.cuerpo.copyWith(
+                          color: AppColores.alertaOscuro,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    // 1.29 (Oleada 4, FB-09): el entrenador pide
+                    // el relleno desde aquí, sin salir de la
+                    // pantalla. Con petición viva no se ofrece
+                    // otra: se enseña el estado.
+                    if (!_esDueno) ...[
+                      const SizedBox(height: AppEspacio.xs),
+                      if (_rellenoPedidoSel)
+                        Text(
+                          'Ya pediste relleno · esperando al dueño',
+                          style: AppTexto.cuerpo.copyWith(
+                              color: AppColores.alertaOscuro),
+                        )
+                      else
+                        FilledButton.tonal(
+                          onPressed: _pidiendoRelleno
+                              ? null
+                              : () => _pedirRelleno(pomo),
+                          child: const Text('Pedir relleno'),
+                        ),
+                    ],
+                  ],
                 ),
               ),
             ),
         ],
       ),
     );
+  }
+
+  /// 1.29 (Oleada 4, FB-09): ¿tengo una petición de relleno
+  /// viva para el suplemento del pomo seleccionado? Solo
+  /// aplica al entrenador (el dueño rellena, no pide).
+  Future<void> _cargarEstadoRelleno() async {
+    if (_esDueno) return;
+    final pomo = _pomoActual;
+    final supId = (pomo?['suplemento_id'] as num?)?.toInt();
+    if (supId == null) {
+      if (mounted && _rellenoPedidoSel) {
+        setState(() => _rellenoPedidoSel = false);
+      }
+      return;
+    }
+    final pedida = await SolicitudesRellenoService.instance
+        .tengoPendientePara(supId);
+    if (mounted) setState(() => _rellenoPedidoSel = pedida);
+  }
+
+  /// 1.29 (Oleada 4, FB-09): pedir relleno del pomo
+  /// seleccionado. dosis_al_pedir = el saldo local que veo
+  /// (ya descuenta mis ventas en cola): es la referencia de
+  /// la petición tardía de H-01 en el servidor. Pedir NO
+  /// mueve dosis; el feedback es inmediato y el error se
+  /// enseña (nunca silencio).
+  Future<void> _pedirRelleno(Map<String, dynamic> pomo) async {
+    if (_pidiendoRelleno) return;
+    final supId = (pomo['suplemento_id'] as num?)?.toInt();
+    final saldo = (pomo['saldo_local'] as num?)?.toInt();
+    if (supId == null || saldo == null) return;
+    setState(() => _pidiendoRelleno = true);
+    try {
+      await SolicitudesRellenoService.instance
+          .pedir(suplementoId: supId, dosisAlPedir: saldo);
+      if (!mounted) return;
+      setState(() {
+        _pidiendoRelleno = false;
+        _rellenoPedidoSel = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pedido enviado al dueño')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pidiendoRelleno = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo pedir el relleno: $e')),
+      );
+    }
   }
 
   Widget _botonesVenta() {
@@ -2292,7 +2377,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         tipo, primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo');
     Widget boton(String tipo, String etiqueta, double precio,
         IconData icono, Color color,
-        {bool grande = false, bool neutro = false, Gradient? degradado}) {
+        {bool grande = false,
+        bool neutro = false,
+        Gradient? degradado,
+        Widget? iconoWidget}) {
       // v1.13.0 (Bloque 4, Argón ajuste 1): bloqueo SEPARADO
       // dosis vs pomos (nunca un interruptor único) + motivo
       // visible bajo el botón apagado. El entrenador sigue ciego
@@ -2338,7 +2426,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ),
               onPressed:
                   est.habilitado ? () => _vender(tipo) : null,
-              icon: Icon(icono, size: 20),
+              icon: iconoWidget ?? Icon(icono, size: 20),
               label: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -2397,7 +2485,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           children: [
             boton('dosis_sin_agua', 'Dosis',
                 precioDe('dosis_sin_agua'), Icons.bolt_rounded, AppColores.naranja,
-                grande: true),
+                grande: true,
+                // 1.29 (Oleada 4, D-10): la dosis deja el rayo
+                // genérico por el icono propio de la casa
+                // (≥ 22 px, suelo del componente).
+                iconoWidget: IconoDosis(
+                  tamano: 24,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                )),
             const SizedBox(width: AppEspacio.sm),
             boton('dosis_con_agua', 'Dosis + agua',
                 precioDe('dosis_con_agua'), Icons.water_drop_rounded,

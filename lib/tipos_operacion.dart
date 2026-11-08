@@ -107,6 +107,9 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Rellenar pomo', Icons.add_circle_outline_rounded),
   'solicitar_adelanto':
       TipoOperacionInfo('Solicitud de adelanto', Icons.request_page_rounded),
+  // 1.29 (Oleada 4, FB-09): el entrenador pide relleno de su pomo.
+  'solicitar_relleno':
+      TipoOperacionInfo('Solicitud de relleno', Icons.medication_rounded),
   'resolver_solicitud_adelanto':
       TipoOperacionInfo('Resolución de adelanto', Icons.rule_rounded),
   'upsert_aviso_entrenador':

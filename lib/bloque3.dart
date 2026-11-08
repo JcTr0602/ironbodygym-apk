@@ -48,6 +48,12 @@ const String kSelloVistaPreviaNomina =
 /// decisión de Jc: NO se registra aquí ni se envía en la 1.12.0.
 const String kTipoOpSolicitarAdelanto = 'solicitar_adelanto';
 const String kTipoOpResolverSolicitudAdelanto = 'resolver_solicitud_adelanto';
+
+/// 1.29 (Oleada 4, FB-09): pedir relleno del pomo propio.
+/// Registrada en el CHECK de sync_ops (100 tipos) ANTES de
+/// que ningún teléfono la enviara, como manda la nota de
+/// arriba.
+const String kTipoOpSolicitarRelleno = 'solicitar_relleno';
 const String kTipoOpUpsertAvisoEntrenador = 'upsert_aviso_entrenador';
 
 // ---------------------------------------------------------------------------
@@ -742,4 +748,193 @@ class SolicitudesAdelantoService {
     await LocalDb.instance.actualizarMirrorTextoOptimista(
         'solicitudes_adelanto', solicitud.id, fila);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 1.29 (Oleada 4, FB-09): solicitudes de relleno de pomo
+// (tabla PROPIA solicitudes_relleno; pedir no mueve dosis)
+// ---------------------------------------------------------------------------
+
+/// Solicitud de relleno tal como baja por el espejo
+/// `solicitudes_relleno` (columnas exactas del espejo de
+/// Supabase, contrato de la oleada). Estados: 'pendiente' |
+/// 'atendida' | 'cerrada'; el cierre lo hace el servidor
+/// (relleno real, relleno previo o suplemento eliminado) —
+/// la app nunca resuelve una solicitud de relleno.
+class SolicitudRelleno {
+  final String id;
+  final int? entrenadorTelegramId;
+  final String? entrenadorNombre;
+  final int? suplementoId;
+  final String? suplementoNombre;
+  final String estado; // pendiente | atendida | cerrada
+  final String? motivoCierre;
+  final String? creadoEn;
+  final String? resueltoEn;
+  final int? dosisAlPedir;
+
+  const SolicitudRelleno({
+    required this.id,
+    required this.estado,
+    this.entrenadorTelegramId,
+    this.entrenadorNombre,
+    this.suplementoId,
+    this.suplementoNombre,
+    this.motivoCierre,
+    this.creadoEn,
+    this.resueltoEn,
+    this.dosisAlPedir,
+  });
+
+  factory SolicitudRelleno.fromMirror(Map<String, dynamic> m) {
+    return SolicitudRelleno(
+      id: '${m['id'] ?? ''}',
+      entrenadorTelegramId: LocalDb.normalizarTelegramId(
+          m['entrenador_telegram_id'] ?? m['telegram_id']),
+      entrenadorNombre: m['entrenador_nombre'] as String?,
+      suplementoId: (m['suplemento_id'] as num?)?.toInt(),
+      suplementoNombre: m['suplemento_nombre'] as String?,
+      estado: '${m['estado'] ?? 'pendiente'}',
+      motivoCierre: m['motivo_cierre'] as String?,
+      creadoEn: m['creado_en'] as String?,
+      resueltoEn: m['resuelto_en'] as String?,
+      dosisAlPedir: (m['dosis_al_pedir'] as num?)?.toInt(),
+    );
+  }
+
+  bool get pendiente => estado == 'pendiente';
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        if (entrenadorTelegramId != null)
+          'entrenador_telegram_id': entrenadorTelegramId,
+        if (entrenadorNombre != null)
+          'entrenador_nombre': entrenadorNombre,
+        if (suplementoId != null) 'suplemento_id': suplementoId,
+        if (suplementoNombre != null)
+          'suplemento_nombre': suplementoNombre,
+        'estado': estado,
+        if (motivoCierre != null) 'motivo_cierre': motivoCierre,
+        if (creadoEn != null) 'creado_en': creadoEn,
+        if (resueltoEn != null) 'resuelto_en': resueltoEn,
+        if (dosisAlPedir != null) 'dosis_al_pedir': dosisAlPedir,
+      };
+}
+
+/// PURO (testeable sin BD): espejo + ops `solicitar_relleno`
+/// aún en 'pendiente' de este teléfono, como filas con estado
+/// 'por_enviar'. Mismo contrato que solicitudesConPendientes:
+/// payload malformado o sin suplemento_id se ignora; las ops
+/// en otro estado no entran.
+List<SolicitudRelleno> solicitudesRellenoConPendientes({
+  required List<SolicitudRelleno> espejo,
+  required List<Map<String, dynamic>> opsPendientes,
+}) {
+  final out = [...espejo];
+  for (final op in opsPendientes) {
+    if (op['tipo'] != kTipoOpSolicitarRelleno) continue;
+    if (op['estado'] != 'pendiente') continue;
+    try {
+      final p =
+          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
+      final supId = (p['suplemento_id'] as num?)?.toInt();
+      if (supId == null) continue;
+      out.add(SolicitudRelleno(
+        id: 'op:${op['op_uuid'] ?? ''}',
+        estado: 'por_enviar',
+        suplementoId: supId,
+        dosisAlPedir: (p['dosis_al_pedir'] as num?)?.toInt(),
+        creadoEn: '${op['creada_ts'] ?? ''}',
+      ));
+    } catch (_) {}
+  }
+  out.sort((a, b) => (b.creadoEn ?? '').compareTo(a.creadoEn ?? ''));
+  return out;
+}
+
+class SolicitudesRellenoService {
+  SolicitudesRellenoService._();
+  static final SolicitudesRellenoService instance =
+      SolicitudesRellenoService._();
+
+  /// Pedir relleno del pomo propio (entrenador). NUNCA mueve
+  /// dosis: solo encola la solicitud. Payload del contrato:
+  /// {suplemento_id, dosis_al_pedir} — dosis_al_pedir es el
+  /// saldo LOCAL que el entrenador ve al pedir (ya descuenta
+  /// sus ventas en cola); el servidor lo usa para detectar
+  /// la petición tardía (H-01). La identidad la pone el
+  /// servidor desde la sesión.
+  Future<void> pedir({
+    required int suplementoId,
+    required int dosisAlPedir,
+  }) async {
+    if (suplementoId <= 0) {
+      throw Exception('Suplemento no válido');
+    }
+    if (dosisAlPedir < 0) {
+      throw Exception('Saldo no válido');
+    }
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: kTipoOpSolicitarRelleno,
+      payload: {
+        'suplemento_id': suplementoId,
+        'dosis_al_pedir': dosisAlPedir,
+      },
+    );
+  }
+
+  Future<List<SolicitudRelleno>> _todas() async {
+    final filas =
+        await LocalDb.instance.allMirror('solicitudes_relleno');
+    final out = [for (final f in filas) SolicitudRelleno.fromMirror(f)];
+    out.sort((a, b) => (b.creadoEn ?? '').compareTo(a.creadoEn ?? ''));
+    return out;
+  }
+
+  /// Solicitudes del entrenador actual (espejo + sus ops aún
+  /// en cola como 'por_enviar'). Sin telegram_id, ninguna se
+  /// atribuye: lista vacía en vez de mostrar ajenas.
+  Future<List<SolicitudRelleno>> mias() async {
+    final tid = AuthService().telegramId;
+    if (tid == null) return [];
+    final todas = await _todas();
+    final miasEspejo = [
+      for (final s in todas)
+        if (s.entrenadorTelegramId == tid) s,
+    ];
+    List<Map<String, dynamic>> ops = [];
+    try {
+      ops = await LocalDb.instance.pendingOps();
+    } catch (_) {}
+    return solicitudesRellenoConPendientes(
+      espejo: miasEspejo,
+      opsPendientes: [
+        for (final op in ops)
+          if (LocalDb.normalizarTelegramId(op['telegram_id']) == tid)
+            op,
+      ],
+    );
+  }
+
+  /// ¿Tiene el entrenador actual una petición viva (pendiente
+  /// en el espejo o aún en cola) para este suplemento? Lo usa
+  /// la banda de pomo bajo para no ofrecer dos veces el botón.
+  Future<bool> tengoPendientePara(int suplementoId) async {
+    final lista = await mias();
+    return lista.any((s) =>
+        s.suplementoId == suplementoId &&
+        (s.estado == 'pendiente' || s.estado == 'por_enviar'));
+  }
+
+  /// Pendientes para el dueño (su superficie de Servicios):
+  /// solo el espejo — las ops en cola de OTROS teléfonos no
+  /// existen aquí, y las propias del dueño no son peticiones.
+  Future<List<SolicitudRelleno>> pendientesParaDueno() async {
+    final todas = await _todas();
+    return [for (final s in todas) if (s.pendiente) s];
+  }
+
+  /// Todas (dueño, historial si hace falta).
+  Future<List<SolicitudRelleno>> todasParaDueno() => _todas();
 }

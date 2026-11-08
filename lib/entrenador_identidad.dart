@@ -124,6 +124,24 @@ Future<Map<int, String>> nombresCanonEntrenadores() async {
   return out;
 }
 
+/// telegram_id → posición en la lista canónica de
+/// entrenadores (el orden del directorio tal como lo guarda
+/// el servidor: el dueño primero). Es el índice que consume
+/// AppColores.colorEntrenador (1.29, D-11): la asignación es
+/// POR POSICIÓN en esta lista, nunca por nombre escrito en
+/// código, y es la misma en todos los teléfonos porque el
+/// orden lo fija el servidor.
+Future<Map<int, int>> indicesEntrenadores() async {
+  final lista = await usuariosApk();
+  final out = <int, int>{};
+  var i = 0;
+  for (final u in lista) {
+    final tid = LocalDb.normalizarTelegramId(u['telegram_id']);
+    if (tid != null && !out.containsKey(tid)) out[tid] = i++;
+  }
+  return out;
+}
+
 /// Nombre normalizado → telegram_id (para atribuir por
 /// ID también las filas sin telegram_user_id cuyo
 /// nombre sí resuelve a un usuario APK).

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../bloque3.dart';
+import '../entrenador_identidad.dart';
 import '../fotos.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
@@ -14,6 +16,7 @@ import '../sync.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'iconos_propios.dart';
 
 /// v1.8.0: Administración de Servicios por dosis (SOLO DUEÑO):
 /// precios y comisión, stock común de agua (CPP), pomos y botes.
@@ -43,6 +46,17 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   ({int saldo, double cpp}) _agua = (saldo: 0, cpp: 0);
   List<Map<String, dynamic>> _botes = [];
   List<Map<String, dynamic>> _pomos = [];
+  // 1.29 (Oleada 4, FB-09): peticiones de relleno pendientes
+  // del espejo + las atendidas EN ESTA pantalla (la fila del
+  // espejo sigue 'pendiente' hasta que la op sube, el
+  // servidor cierra y el pull baja: sin esta memoria, un
+  // segundo toque rellenaría dos veces por la misma
+  // petición).
+  List<SolicitudRelleno> _solicitudesRelleno = [];
+  final Set<String> _rellenoAtendidasLocal = {};
+  // 1.29 (Oleada 4, D-11): telegram_id → posición en la
+  // lista canónica de entrenadores (color categórico).
+  Map<int, int> _indiceEntrenador = {};
   List<Map<String, dynamic>> _suplementos = [];
   Map<int, String> _categorias = {};
   Map<int, String> _personas = {}; // telegram_id → nombre
@@ -155,8 +169,16 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       personas.addAll(await LocalDb.instance
           .nombresPorTelegramIds(titularesSinNombre));
     }
+    // 1.29 (Oleada 4, FB-09 + D-11): peticiones de relleno
+    // pendientes del espejo y la posición canónica de cada
+    // entrenador para su color.
+    final solicitudes =
+        await SolicitudesRellenoService.instance.pendientesParaDueno();
+    final indices = await indicesEntrenadores();
     if (!mounted) return;
     setState(() {
+      _solicitudesRelleno = solicitudes;
+      _indiceEntrenador = indices;
       _precios = precios;
       _agua = agua;
       _botes = botes;
@@ -569,91 +591,56 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   /// principal. Atajos 4/5 (pocas al inicio; 4-5 más cuando baja)
   /// + cantidad libre. El servidor mueve las dosis en una
   /// transacción y rechaza si el principal no alcanza.
-  Future<void> _reponerPomo(Map<String, dynamic> pomo) async {
-    if (_operando) return;
+  /// Devuelve true si el relleno quedó ENCOLADO (la op
+  /// reponer_pomo se creó): la sección de solicitudes FB-09
+  /// lo usa para ocultar al momento la petición atendida.
+  Future<bool> _reponerPomo(Map<String, dynamic> pomo) async {
+    if (_operando) return false;
     _operando = true;
     try {
-      await _reponerPomoInterno(pomo);
+      return await _reponerPomoInterno(pomo);
     } finally {
       _operando = false;
     }
   }
 
-  Future<void> _reponerPomoInterno(Map<String, dynamic> pomo) async {
+  Future<bool> _reponerPomoInterno(Map<String, dynamic> pomo) async {
     // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
-    if (!AuthService().isOwner) return;
+    if (!AuthService().isOwner) return false;
     final supId = (pomo['suplemento_id'] as num?)?.toInt();
     final principal = _pomos.where((l) =>
         (l['es_principal'] as num?)?.toInt() == 1 &&
         (l['suplemento_id'] as num?)?.toInt() == supId).toList();
     if (principal.isEmpty) {
       _aviso('No hay pomo principal para este producto', error: true);
-      return;
+      return false;
     }
     final saldoPrincipal = (principal.first['saldo_local'] as num?)?.toInt() ?? 0;
-    final dosisCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido de diálogos): el diálogo es un
+    // StatefulWidget dueño de su controlador (antes se creaba
+    // en el método y NUNCA se disponía). Devuelve las dosis
+    // por Navigator.pop; cancelar devuelve null.
+    final dosis = await showDialog<int>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => DialogoApp(
-          titulo: 'Rellenar pomo · ${_nombrePersona((pomo['titular_telegram_id'] as num?)?.toInt())}',
-          iconoTitulo: Icons.add_circle_outline_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Principal: $saldoPrincipal dosis · '
-                'Pomo actual: ${pomo['saldo_local'] ?? '—'} dosis. '
-                'Se mueven del principal al pomo.',
-                style: AppTexto.cuerpo,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  for (final atajo in const [4, 5])
-                    Padding(
-                      padding: const EdgeInsets.only(right: AppEspacio.sm),
-                      child: OutlinedButton(
-                        onPressed: () =>
-                            setD(() => dosisCtrl.text = '$atajo'),
-                        child: Text('$atajo dosis'),
-                      ),
-                    ),
-                ],
-              ),
-              TextField(
-                controller: dosisCtrl,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                decoration: const InputDecoration(
-                    labelText: 'Dosis a rellenar'),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Rellenar'),
-            ),
-          ],
-        ),
+      builder: (_) => _DialogoRellenarPomo(
+        nombreTitular: _nombrePersona(
+            (pomo['titular_telegram_id'] as num?)?.toInt()),
+        saldoPrincipal: saldoPrincipal,
+        saldoActual: pomo['saldo_local'],
       ),
     );
-    if (ok != true) return;
+    if (dosis == null) return false;
     try {
       await reponerPomoServicio(
         pomoDestinoId: (pomo['id'] as num).toInt(),
-        dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
+        dosis: dosis,
       );
       _aviso('Pomo rellenado (se sincronizará)');
       await _cargar();
+      return true;
     } catch (e) {
       _aviso(_limpio(e), error: true);
+      return false;
     }
   }
 
@@ -672,71 +659,25 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   Future<void> _salidaPomoInterno(Map<String, dynamic> pomo) async {
     // Ronda 3-9 #10: solo el dueño (ver _guardarPrecios).
     if (!AuthService().isOwner) return;
-    var motivo = 'merma';
-    final dosisCtrl = TextEditingController(text: '1');
-    final notaCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido de diálogos): StatefulWidget
+    // dueño de sus controladores (antes se creaban en el
+    // método y NUNCA se disponían). Devuelve los valores por
+    // Navigator.pop; cancelar devuelve null.
+    final res = await showDialog<({int dosis, String motivo, String? nota})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => DialogoApp(
-          titulo: 'Salida sin venta · ${_nombrePersona((pomo['titular_telegram_id'] as num?)?.toInt())}',
-          iconoTitulo: Icons.outbox_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Saldo del pomo: ${pomo['saldo_local'] ?? '—'} dosis.',
-                style: AppTexto.cuerpo,
-              ),
-              DropdownButtonFormField<String>(
-                value: motivo,
-                decoration:
-                    const InputDecoration(labelText: 'Motivo'),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'merma', child: Text('Merma / rotura')),
-                  DropdownMenuItem(
-                      value: 'cortesia', child: Text('Cortesía')),
-                  DropdownMenuItem(
-                      value: 'consumo_staff',
-                      child: Text('Consumo del staff')),
-                  DropdownMenuItem(
-                      value: 'ajuste', child: Text('Ajuste')),
-                ],
-                onChanged: (v) => setD(() => motivo = v ?? 'merma'),
-              ),
-              TextField(
-                controller: dosisCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Dosis'),
-              ),
-              TextField(
-                controller: notaCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nota (opcional)'),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Registrar salida'),
-            ),
-          ],
-        ),
+      builder: (_) => _DialogoSalidaPomo(
+        nombreTitular: _nombrePersona(
+            (pomo['titular_telegram_id'] as num?)?.toInt()),
+        saldoActual: pomo['saldo_local'],
       ),
     );
-    if (ok != true) return;
+    if (res == null) return;
     try {
       await registrarSalidaServicio(
         pomoId: (pomo['id'] as num).toInt(),
-        dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
-        motivo: motivo,
-        nota: notaCtrl.text.trim().isEmpty ? null : notaCtrl.text.trim(),
+        dosis: res.dosis,
+        motivo: res.motivo,
+        nota: res.nota,
       );
       _aviso('Salida registrada');
       await _cargar();
@@ -779,6 +720,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 const SizedBox(height: AppEspacio.md),
                 _seccionAgua(),
                 const SizedBox(height: AppEspacio.md),
+                _seccionSolicitudesRelleno(),
                 _seccionPomos(),
                 const SizedBox(height: AppEspacio.md),
                 _seccionBotes(),
@@ -991,6 +933,71 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
     );
   }
 
+  /// 1.29 (Oleada 4, FB-09): peticiones de relleno
+  /// pendientes. Un toque en «Rellenar» abre el diálogo de
+  /// relleno de ESE pomo; al encolar el relleno, la petición
+  /// se oculta en esta pantalla (el espejo la seguirá
+  /// mostrando pendiente hasta que el cierre baje por el
+  /// pull). Sin peticiones, la sección no existe.
+  Widget _seccionSolicitudesRelleno() {
+    final visibles = [
+      for (final s in _solicitudesRelleno)
+        if (!_rellenoAtendidasLocal.contains(s.id)) s,
+    ];
+    if (visibles.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        Tarjeta(
+          padding: const EdgeInsets.all(AppEspacio.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  IconoPomo(
+                      tamano: 24, color: AppColores.texto(context)),
+                  const SizedBox(width: AppEspacio.sm),
+                  Text('Solicitudes de relleno',
+                      style: AppTexto.titulo),
+                ],
+              ),
+              for (final s in visibles)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                      '${s.entrenadorNombre ?? _nombrePersona(s.entrenadorTelegramId)}'
+                      ' · ${s.suplementoNombre ?? _nombreSup(s.suplementoId)}'),
+                  subtitle: Text(
+                      'Pidió relleno${s.creadoEn != null ? ' · ${s.creadoEn!.split('T').first}' : ''}'),
+                  trailing: FilledButton.tonal(
+                    onPressed: () => _rellenarDesdeSolicitud(s),
+                    child: const Text('Rellenar'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppEspacio.md),
+      ],
+    );
+  }
+
+  Future<void> _rellenarDesdeSolicitud(SolicitudRelleno s) async {
+    final pomo = _pomos.where((l) =>
+        (l['es_principal'] as num?)?.toInt() != 1 &&
+        LocalDb.normalizarTelegramId(l['titular_telegram_id']) ==
+            s.entrenadorTelegramId &&
+        (l['suplemento_id'] as num?)?.toInt() == s.suplementoId);
+    if (pomo.isEmpty) {
+      _aviso('Ese pomo ya no está activo', error: true);
+      return;
+    }
+    final ok = await _reponerPomo(pomo.first);
+    if (ok && mounted) {
+      setState(() => _rellenoAtendidasLocal.add(s.id));
+    }
+  }
+
   Widget _seccionPomos() {
     // Principal primero, luego entrenadores por nombre.
     final pomos = [..._pomos]
@@ -1007,8 +1014,15 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Pomos',
-              style: AppTexto.titulo),
+          // 1.29 (Oleada 4, D-10): el stock se encabeza con el
+          // icono propio del pomo, no con la metáfora genérica.
+          Row(
+            children: [
+              IconoPomo(tamano: 24, color: AppColores.texto(context)),
+              const SizedBox(width: AppEspacio.sm),
+              Text('Pomos', style: AppTexto.titulo),
+            ],
+          ),
           if (pomos.isEmpty)
             Text('Sin pomos todavía: abre un bote para tener principal.',
                 style: AppTexto.cuerpo.copyWith(
@@ -1020,9 +1034,37 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                 // F4-17: la fila lleva la foto del producto y
                 // el punto semáforo de su saldo.
                 leading: _leadingPomo(l),
-                title: Text(
-                    '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : _nombrePersona((l['titular_telegram_id'] as num?)?.toInt())} '
-                    '· ${_nombreSup((l['suplemento_id'] as num?)?.toInt())}'),
+                // 1.29 (Oleada 4, D-11): el punto de color del
+                // entrenador junto a su nombre (categórica por
+                // posición en la lista canónica, siempre con
+                // la palabra al lado: el color solo no dice
+                // nada).
+                title: Row(
+                  children: [
+                    if (_indiceEntrenador[LocalDb.normalizarTelegramId(
+                            l['titular_telegram_id'])] !=
+                        null) ...[
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColores.colorEntrenador(
+                              context,
+                              _indiceEntrenador[
+                                  LocalDb.normalizarTelegramId(
+                                      l['titular_telegram_id'])]!),
+                        ),
+                      ),
+                      const SizedBox(width: AppEspacio.xs),
+                    ],
+                    Expanded(
+                      child: Text(
+                          '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : _nombrePersona((l['titular_telegram_id'] as num?)?.toInt())} '
+                          '· ${_nombreSup((l['suplemento_id'] as num?)?.toInt())}'),
+                    ),
+                  ],
+                ),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1148,6 +1190,182 @@ class _FotoPomoAdminState extends State<_FotoPomoAdmin> {
           ),
         );
       },
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): diálogo de rellenar
+/// pomo como StatefulWidget DUEÑO de su controlador (patrón
+/// de la casa: antes el controlador se creaba en el método
+/// llamador y nunca se disponía). Devuelve las dosis por
+/// Navigator.pop; cancelar devuelve null. Una dosis no
+/// numérica devuelve 0 y la validación de siempre
+/// (reponerPomoServicio) la rechaza con su aviso, igual que
+/// antes.
+class _DialogoRellenarPomo extends StatefulWidget {
+  final String nombreTitular;
+  final int saldoPrincipal;
+  final Object? saldoActual;
+
+  const _DialogoRellenarPomo({
+    required this.nombreTitular,
+    required this.saldoPrincipal,
+    required this.saldoActual,
+  });
+
+  @override
+  State<_DialogoRellenarPomo> createState() =>
+      _DialogoRellenarPomoState();
+}
+
+class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
+  final _dosisCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _dosisCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Rellenar pomo · ${widget.nombreTitular}',
+      iconoTitulo: Icons.add_circle_outline_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Principal: ${widget.saldoPrincipal} dosis · '
+            'Pomo actual: ${widget.saldoActual ?? '—'} dosis. '
+            'Se mueven del principal al pomo.',
+            style: AppTexto.cuerpo,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final atajo in const [4, 5])
+                Padding(
+                  padding: const EdgeInsets.only(right: AppEspacio.sm),
+                  child: OutlinedButton(
+                    onPressed: () =>
+                        setState(() => _dosisCtrl.text = '$atajo'),
+                    child: Text('$atajo dosis'),
+                  ),
+                ),
+            ],
+          ),
+          TextField(
+            controller: _dosisCtrl,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration:
+                const InputDecoration(labelText: 'Dosis a rellenar'),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(
+              context, int.tryParse(_dosisCtrl.text.trim()) ?? 0),
+          child: const Text('Rellenar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): diálogo de salida
+/// sin venta como StatefulWidget dueño de sus controladores
+/// (antes se creaban en el método llamador y nunca se
+/// disponían). Devuelve (dosis, motivo, nota) por
+/// Navigator.pop; cancelar devuelve null.
+class _DialogoSalidaPomo extends StatefulWidget {
+  final String nombreTitular;
+  final Object? saldoActual;
+
+  const _DialogoSalidaPomo({
+    required this.nombreTitular,
+    required this.saldoActual,
+  });
+
+  @override
+  State<_DialogoSalidaPomo> createState() => _DialogoSalidaPomoState();
+}
+
+class _DialogoSalidaPomoState extends State<_DialogoSalidaPomo> {
+  final _dosisCtrl = TextEditingController(text: '1');
+  final _notaCtrl = TextEditingController();
+  String _motivo = 'merma';
+
+  @override
+  void dispose() {
+    _dosisCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Salida sin venta · ${widget.nombreTitular}',
+      iconoTitulo: Icons.outbox_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Saldo del pomo: ${widget.saldoActual ?? '—'} dosis.',
+            style: AppTexto.cuerpo,
+          ),
+          DropdownButtonFormField<String>(
+            value: _motivo,
+            decoration: const InputDecoration(labelText: 'Motivo'),
+            items: const [
+              DropdownMenuItem(
+                  value: 'merma', child: Text('Merma / rotura')),
+              DropdownMenuItem(
+                  value: 'cortesia', child: Text('Cortesía')),
+              DropdownMenuItem(
+                  value: 'consumo_staff',
+                  child: Text('Consumo del staff')),
+              DropdownMenuItem(
+                  value: 'ajuste', child: Text('Ajuste')),
+            ],
+            onChanged: (v) => setState(() => _motivo = v ?? 'merma'),
+          ),
+          TextField(
+            controller: _dosisCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Dosis'),
+          ),
+          TextField(
+            controller: _notaCtrl,
+            decoration:
+                const InputDecoration(labelText: 'Nota (opcional)'),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, (
+                dosis: int.tryParse(_dosisCtrl.text.trim()) ?? 0,
+                motivo: _motivo,
+                nota: _notaCtrl.text.trim().isEmpty
+                    ? null
+                    : _notaCtrl.text.trim(),
+              )),
+          child: const Text('Registrar salida'),
+        ),
+      ],
     );
   }
 }
