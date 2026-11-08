@@ -12,10 +12,16 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtFecha;
+import '../negocio.dart'
+    show
+        fmtFecha,
+        mensajeWaRecordatorio,
+        telefonoEfectivoWa,
+        urlWaRecordatorio;
 import '../notificaciones_recordatorios.dart';
 import '../recordatorios.dart';
 import '../tiempo.dart';
@@ -34,6 +40,19 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   bool _cargando = true;
   List<RecordatorioDebido> _debidos = [];
   List<Map<String, dynamic>> _configs = [];
+
+  /// 1.29 (Oleada 4, FB-10): fila del espejo de cada cliente
+  /// con debido hoy (para su teléfono efectivo y el mensaje
+  /// según su estado). Se carga con la pantalla: pintar no
+  /// espera ninguna red.
+  Map<int, Map<String, dynamic>> _clientesDebidos = {};
+
+  /// 1.29 (Oleada 4, FB-13): hora vigente de los avisos
+  /// automáticos (la lee el servicio de su meta).
+  int _horaAvisos = 8;
+
+  String get _horaAvisosTxt =>
+      '${_horaAvisos.toString().padLeft(2, '0')}:00';
 
   /// 1.22 R-9: permiso de notificaciones denegado (las
   /// alarmas se programan pero Android no las muestra).
@@ -65,10 +84,30 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
               c['creado_por'] == _yo)
           .toList();
       final permiso = await AvisosRecordatorios.tienePermiso();
+      // 1.29 (FB-10): filas de los clientes debidos, del
+      // espejo local (sin red): su teléfono efectivo decide
+      // si la tarjeta ofrece «WhatsApp».
+      final clientesDebidos = <int, Map<String, dynamic>>{};
+      final idsDebidos = <int>{
+        for (final d in debidos)
+          if (d.clienteId != null) d.clienteId!,
+      };
+      if (idsDebidos.isNotEmpty) {
+        final todos = await LocalDb.instance.allMirror('clientes');
+        for (final c in todos) {
+          final id = (c['id'] as num?)?.toInt();
+          if (id != null && idsDebidos.contains(id)) {
+            clientesDebidos[id] = c;
+          }
+        }
+      }
+      final hora = await AvisosRecordatorios.horaAvisos();
       if (mounted) {
         setState(() {
           _debidos = debidos;
           _configs = visibles;
+          _clientesDebidos = clientesDebidos;
+          _horaAvisos = hora;
           _sinPermisoNotif = !permiso;
           _cargando = false;
         });
@@ -102,6 +141,105 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
             ? 'Recordatorio marcado como disparado hoy'
             : 'Ya estaba disparado hoy');
     await _cargar();
+  }
+
+  /// 1.29 (Oleada 4, FB-10): avisar por WhatsApp desde la
+  /// tarjeta del debido. Abre wa.me con el teléfono efectivo
+  /// del cliente (FB-01) y el mensaje de la casa según su
+  /// estado o su cumpleaños. NO marca el recordatorio como
+  /// atendido: abrir el chat no prueba que el mensaje se
+  /// enviara — el debido sigue pendiente al volver, y
+  /// «Disparar» sigue siendo el gesto que lo asienta.
+  Future<void> _avisarWhatsApp(RecordatorioDebido d) async {
+    final cliente =
+        d.clienteId != null ? _clientesDebidos[d.clienteId] : null;
+    if (cliente == null) return;
+    final tel = telefonoEfectivoWa(cliente);
+    if (tel.isEmpty) return;
+    final mensaje = mensajeWaRecordatorio(
+      tipo: d.tipo,
+      cliente: cliente,
+      nombre: d.clienteNombre ?? '${cliente['nombre'] ?? ''}',
+    );
+    final uri = Uri.parse(urlWaRecordatorio(tel, mensaje));
+    var abierto = false;
+    try {
+      abierto = await launchUrl(uri,
+          mode: LaunchMode.externalApplication);
+    } catch (_) {
+      abierto = false;
+    }
+    if (!abierto && mounted) {
+      mostrarSnack(context, 'No se pudo abrir WhatsApp',
+          significado: SignificadoChip.error);
+    }
+  }
+
+  /// 1.29 (Oleada 4, FB-13): el dueño elige la hora de los
+  /// avisos automáticos; el servicio la persiste y
+  /// reprograma las alarmas vigentes con la hora nueva.
+  Future<void> _cambiarHoraAvisos() async {
+    final elegida = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _horaAvisos, minute: 0),
+      helpText: 'Hora de los avisos automáticos',
+    );
+    if (elegida == null || !mounted) return;
+    await AvisosRecordatorios.fijarHoraAvisos(elegida.hour);
+    if (!mounted) return;
+    setState(() => _horaAvisos = elegida.hour);
+    mostrarSnack(
+        context, 'Avisos automáticos a las $_horaAvisosTxt');
+  }
+
+  /// Tarjeta de un debido de hoy. 1.29 (Oleada 4, FB-10):
+  /// junto a la acción de siempre («Disparar» o «Ver
+  /// ficha»), la tarjeta ofrece «WhatsApp» cuando el cliente
+  /// tiene teléfono válido — avisar NO asienta el debido.
+  Widget _tarjetaDebido(RecordatorioDebido d) {
+    final cliente =
+        d.clienteId != null ? _clientesDebidos[d.clienteId] : null;
+    final telWa = cliente != null ? telefonoEfectivoWa(cliente) : '';
+    return Tarjeta(
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(
+            d.yaDisparado
+                ? Icons.check_circle_rounded
+                : Icons.notifications_rounded,
+            color: d.yaDisparado
+                ? AppColores.exito
+                : AppColores.naranja),
+        title: Text(d.titulo, style: AppTexto.cuerpo),
+        subtitle: Text(
+            '${_tipoLegible(d.tipo)} · ${d.clienteNombre ?? d.targetKey}'
+            '${d.yaDisparado ? ' · ya disparado hoy' : ''}'
+            '${!d.yaDisparado && !d.puedoDisparar ? ' · lo dispara el dueño' : ''}',
+            style: AppTexto.secundario),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (telWa.isNotEmpty)
+              TextButton(
+                onPressed: () => _avisarWhatsApp(d),
+                child: const Text('WhatsApp'),
+              ),
+            if (d.puedoDisparar)
+              TextButton(
+                  onPressed: () => _disparar(d),
+                  child: const Text('Disparar'))
+            else if (d.clienteId != null)
+              TextButton(
+                  onPressed: () => Navigator.push(
+                      context,
+                      RutaIron(
+                          builder: (_) =>
+                              FichaScreen(clienteId: d.clienteId!))),
+                  child: const Text('Ver ficha')),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 1.28 (M5-B3): el estado legible de la config: la
@@ -234,156 +372,25 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
       alcance;
 
   Future<void> _crear() async {
-    final tituloCtrl = TextEditingController();
-    var tipo = 'vencimiento';
-    var alcance = 'solo_mio';
-    var dias = 3;
-    var frecuencia = 'ninguna';
-    // 1.25 T122 (F6-18): la fecha personalizada se ELIGE
-    // con el selector del sistema, no se teclea como texto
-    // YYYY-MM-DD (que fallaba por formato). El selector
-    // siempre devuelve una fecha válida: la validación de
-    // formato de Argón P2#15 ya no hace falta.
-    var fechaSel = hoyHabanaIso();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el formulario vive en un
+    // StatefulWidget dueño de su controlador (antes se
+    // creaba en este método y se disponía al resolver el
+    // showDialog, con la animación de salida aún
+    // reconstruyendo el campo: el defecto D-B1-08).
+    final r =
+        await showDialog<({String titulo, String tipo, String alcance, int dias, String? fechaFija, String frecuencia})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => DialogoApp(
-        titulo: 'Nuevo recordatorio',
-        iconoTitulo: Icons.notifications_rounded,
-        contenido: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                  controller: tituloCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Título (p. ej. «Vence esta semana»')),
-              const SizedBox(height: 8),
-              DropdownButton<String>(
-                value: tipo,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                      value: 'vencimiento', child: Text('Vencimiento')),
-                  DropdownMenuItem(
-                      value: 'cumpleanos', child: Text('Cumpleaños')),
-                  DropdownMenuItem(
-                      value: 'personalizado', child: Text('Personalizado')),
-                ],
-                onChanged: (v) =>
-                    setDialogState(() => tipo = v ?? 'vencimiento'),
-              ),
-              if (_soyDueno) ...[
-                const SizedBox(height: 8),
-                DropdownButton<String>(
-                  value: alcance,
-                  isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'solo_mio', child: Text('Solo para mí')),
-                    DropdownMenuItem(
-                        value: 'todos', child: Text('Para todos (masivo)')),
-                  ],
-                  onChanged: (v) =>
-                      setDialogState(() => alcance = v ?? 'solo_mio'),
-                ),
-                const Text(
-                  'Masivo: solo se dispara en tu teléfono; los demás '
-                  'lo ven como ya disparado ese día.',
-                  style: AppTexto.secundario,
-                ),
-              ] else
-                const Text(
-                  'Como entrenador, tus recordatorios son solo para ti.',
-                  style: AppTexto.secundario,
-                ),
-              const SizedBox(height: 8),
-              // Argón P2#15: el slider de días solo tiene sentido
-              // para vencimiento/cumpleaños; el personalizado usa
-              // fecha fija.
-              if (tipo != 'personalizado') ...[
-                Text('Días de anticipación (vencimiento): $dias'),
-                Slider(
-                    value: dias.toDouble(),
-                    min: 0,
-                    max: 14,
-                    divisions: 14,
-                    onChanged: (v) =>
-                        setDialogState(() => dias = v.round())),
-              ],
-              if (tipo == 'personalizado') ...[
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Fecha', style: AppTexto.cuerpo),
-                  subtitle: Text(fmtFecha(fechaSel),
-                      style: AppTexto.secundario),
-                  trailing: TextButton(
-                    onPressed: () async {
-                      final ini = DateTime.tryParse(fechaSel) ??
-                          ahoraHabana();
-                      final f = await showDatePicker(
-                        context: ctx,
-                        initialDate: ini,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2100),
-                      );
-                      if (f != null) {
-                        setDialogState(() => fechaSel =
-                            '${f.year.toString().padLeft(4, '0')}-'
-                            '${f.month.toString().padLeft(2, '0')}-'
-                            '${f.day.toString().padLeft(2, '0')}');
-                      }
-                    },
-                    child: const Text('Elegir'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // F4 (1.20): repetición del personalizado.
-                DropdownButton<String>(
-                  value: frecuencia,
-                  isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'ninguna', child: Text('Solo esa fecha')),
-                    DropdownMenuItem(
-                        value: 'semanal',
-                        child: Text('Cada semana (ese día)')),
-                    DropdownMenuItem(
-                        value: 'mensual',
-                        child: Text('Cada mes (ese día)')),
-                  ],
-                  onChanged: (v) => setDialogState(
-                      () => frecuencia = v ?? 'ninguna'),
-                ),
-              ],
-            ],
-          ),
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Crear')),
-        ],
-        ),
-      ),
+      builder: (_) => _DialogoCrearRecordatorio(esDueno: _soyDueno),
     );
-    final titulo = tituloCtrl.text.trim();
-    tituloCtrl.dispose();
-    if (ok != true) return;
-    if (titulo.isEmpty) return;
+    if (r == null || r.titulo.isEmpty) return;
     try {
       await RecordatoriosService.instance.crear(
-        titulo: titulo,
-        tipo: tipo,
-        alcance: _soyDueno ? alcance : 'solo_mio',
-        diasAnticipacion: dias,
-        fechaFija: tipo == 'personalizado' ? fechaSel : null,
-        frecuencia: tipo == 'personalizado' ? frecuencia : 'ninguna',
+        titulo: r.titulo,
+        tipo: r.tipo,
+        alcance: _soyDueno ? r.alcance : 'solo_mio',
+        diasAnticipacion: r.dias,
+        fechaFija: r.fechaFija,
+        frecuencia: r.frecuencia,
       );
       await _cargar();
     } catch (e) {
@@ -419,9 +426,10 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                       title: const Text(
                           'Sin permiso de notificaciones',
                           style: AppTexto.cuerpo),
-                      subtitle: const Text(
-                          'Los avisos automáticos (08:00) no se '
-                          'verán en este teléfono hasta activarlo.',
+                      subtitle: Text(
+                          'Los avisos automáticos ($_horaAvisosTxt) '
+                          'no se verán en este teléfono hasta '
+                          'activarlo.',
                           style: AppTexto.secundario),
                       trailing: TextButton(
                         onPressed: () => unawaited(AvisosRecordatorios
@@ -450,39 +458,30 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                   const Text('Nada vence hoy.',
                       style: AppTexto.secundario)
                 else
-                  for (final d in _debidos)
-                    Tarjeta(
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                            d.yaDisparado
-                                ? Icons.check_circle_rounded
-                                : Icons.notifications_rounded,
-                            color: d.yaDisparado
-                                ? AppColores.exito
-                                : AppColores.naranja),
-                        title: Text(d.titulo, style: AppTexto.cuerpo),
-                        subtitle: Text(
-                            '${_tipoLegible(d.tipo)} · ${d.clienteNombre ?? d.targetKey}'
-                            '${d.yaDisparado ? ' · ya disparado hoy' : ''}'
-                            '${!d.yaDisparado && !d.puedoDisparar ? ' · lo dispara el dueño' : ''}',
-                            style: AppTexto.secundario),
-                        trailing: d.puedoDisparar
-                            ? TextButton(
-                                onPressed: () => _disparar(d),
-                                child: const Text('Disparar'))
-                            : d.clienteId != null
-                                ? TextButton(
-                                    onPressed: () => Navigator.push(
-                                        context,
-                                        RutaIron(
-                                            builder: (_) => FichaScreen(
-                                                clienteId: d.clienteId!))),
-                                    child: const Text('Ver ficha'))
-                                : null,
+                  for (final d in _debidos) _tarjetaDebido(d),
+                const SizedBox(height: 20),
+                // 1.29 (Oleada 4, FB-13): la hora de los avisos
+                // automáticos, elegible por el dueño.
+                if (_soyDueno) ...[
+                  Tarjeta(
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.schedule_rounded,
+                          color: AppColores.naranja),
+                      title: const Text('Hora de los avisos',
+                          style: AppTexto.cuerpo),
+                      subtitle: Text(
+                          'Los avisos automáticos suenan a las '
+                          '$_horaAvisosTxt (hora de Cuba)',
+                          style: AppTexto.secundario),
+                      trailing: TextButton(
+                        onPressed: _cambiarHoraAvisos,
+                        child: const Text('Cambiar'),
                       ),
                     ),
-                const SizedBox(height: 20),
+                  ),
+                  const SizedBox(height: 20),
+                ],
                 const Text('Mis recordatorios', style: AppTexto.titulo),
                 const SizedBox(height: 4),
                 if (_configs.isEmpty)
@@ -566,6 +565,184 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                 ],
               ],
             ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): formulario de
+/// «Nuevo recordatorio» como StatefulWidget DUEÑO de su
+/// TextEditingController, dispuesto en dispose() — el
+/// patrón de la casa. Antes el controlador se creaba en el
+/// método `_crear` y se disponía nada más resolver el
+/// showDialog, mientras la animación de salida seguía
+/// reconstruyendo el campo (defecto D-B1-08 de la Oleada 3).
+/// Devuelve los datos del formulario por Navigator.pop.
+class _DialogoCrearRecordatorio extends StatefulWidget {
+  const _DialogoCrearRecordatorio({required this.esDueno});
+
+  final bool esDueno;
+
+  @override
+  State<_DialogoCrearRecordatorio> createState() =>
+      _DialogoCrearRecordatorioState();
+}
+
+class _DialogoCrearRecordatorioState
+    extends State<_DialogoCrearRecordatorio> {
+  final _tituloCtrl = TextEditingController();
+  String _tipo = 'vencimiento';
+  String _alcance = 'solo_mio';
+  int _dias = 3;
+  String _frecuencia = 'ninguna';
+  // 1.25 T122 (F6-18): la fecha personalizada se ELIGE con
+  // el selector del sistema, no se teclea como texto
+  // YYYY-MM-DD (que fallaba por formato).
+  String _fechaSel = hoyHabanaIso();
+
+  @override
+  void dispose() {
+    _tituloCtrl.dispose();
+    super.dispose();
+  }
+
+  void _crear() {
+    Navigator.pop(
+        context,
+        (
+          titulo: _tituloCtrl.text.trim(),
+          tipo: _tipo,
+          alcance: _alcance,
+          dias: _dias,
+          fechaFija: _tipo == 'personalizado' ? _fechaSel : null,
+          frecuencia:
+              _tipo == 'personalizado' ? _frecuencia : 'ninguna',
+        ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Nuevo recordatorio',
+      iconoTitulo: Icons.notifications_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+                controller: _tituloCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'Título (p. ej. «Vence esta semana»')),
+            const SizedBox(height: 8),
+            DropdownButton<String>(
+              value: _tipo,
+              isExpanded: true,
+              items: const [
+                DropdownMenuItem(
+                    value: 'vencimiento', child: Text('Vencimiento')),
+                DropdownMenuItem(
+                    value: 'cumpleanos', child: Text('Cumpleaños')),
+                DropdownMenuItem(
+                    value: 'personalizado',
+                    child: Text('Personalizado')),
+              ],
+              onChanged: (v) =>
+                  setState(() => _tipo = v ?? 'vencimiento'),
+            ),
+            if (widget.esDueno) ...[
+              const SizedBox(height: 8),
+              DropdownButton<String>(
+                value: _alcance,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(
+                      value: 'solo_mio', child: Text('Solo para mí')),
+                  DropdownMenuItem(
+                      value: 'todos',
+                      child: Text('Para todos (masivo)')),
+                ],
+                onChanged: (v) =>
+                    setState(() => _alcance = v ?? 'solo_mio'),
+              ),
+              const Text(
+                'Masivo: solo se dispara en tu teléfono; los demás '
+                'lo ven como ya disparado ese día.',
+                style: AppTexto.secundario,
+              ),
+            ] else
+              const Text(
+                'Como entrenador, tus recordatorios son solo para ti.',
+                style: AppTexto.secundario,
+              ),
+            const SizedBox(height: 8),
+            // Argón P2#15: el slider de días solo tiene sentido
+            // para vencimiento/cumpleaños; el personalizado usa
+            // fecha fija.
+            if (_tipo != 'personalizado') ...[
+              Text('Días de anticipación (vencimiento): $_dias'),
+              Slider(
+                  value: _dias.toDouble(),
+                  min: 0,
+                  max: 14,
+                  divisions: 14,
+                  onChanged: (v) =>
+                      setState(() => _dias = v.round())),
+            ],
+            if (_tipo == 'personalizado') ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Fecha', style: AppTexto.cuerpo),
+                subtitle: Text(fmtFecha(_fechaSel),
+                    style: AppTexto.secundario),
+                trailing: TextButton(
+                  onPressed: () async {
+                    final ini = DateTime.tryParse(_fechaSel) ??
+                        ahoraHabana();
+                    final f = await showDatePicker(
+                      context: context,
+                      initialDate: ini,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2100),
+                    );
+                    if (f != null && mounted) {
+                      setState(() => _fechaSel =
+                          '${f.year.toString().padLeft(4, '0')}-'
+                          '${f.month.toString().padLeft(2, '0')}-'
+                          '${f.day.toString().padLeft(2, '0')}');
+                    }
+                  },
+                  child: const Text('Elegir'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // F4 (1.20): repetición del personalizado.
+              DropdownButton<String>(
+                value: _frecuencia,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(
+                      value: 'ninguna', child: Text('Solo esa fecha')),
+                  DropdownMenuItem(
+                      value: 'semanal',
+                      child: Text('Cada semana (ese día)')),
+                  DropdownMenuItem(
+                      value: 'mensual',
+                      child: Text('Cada mes (ese día)')),
+                ],
+                onChanged: (v) =>
+                    setState(() => _frecuencia = v ?? 'ninguna'),
+              ),
+            ],
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        TextButton(
+            onPressed: _crear, child: const Text('Crear')),
+      ],
     );
   }
 }

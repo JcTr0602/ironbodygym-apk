@@ -8,8 +8,10 @@
 ///
 /// Reglas:
 /// - Solo debidos de hoy, no disparados y que puedo disparar.
-/// - Hora: 08:00 Habana del día; si ya pasó, dentro de 5 minutos
-///   (el debido es de hoy: mañana ya no aplica).
+/// - Hora: la configurada por el dueño (meta
+///   `hora_avisos_recordatorios`; 08:00 Habana por defecto);
+///   si ya pasó, dentro de 5 minutos (el debido es de hoy:
+///   mañana ya no aplica).
 /// - Idempotente por meta `notif_prog_<id>_<target>_<fecha>`: un
 ///   segundo sincronizar el mismo día no reprograma.
 /// - Al disparar (pantalla Mis avisos) se cancela el aviso.
@@ -59,26 +61,45 @@ import 'tiempo.dart';
   }
 }
 
-/// Instante (UTC) de las 08:00 Habana del día [fecha] (PURO).
-/// Misma convergencia en una iteración que `isoHabana`: el offset
-/// depende del instante (DST: -4 en verano, -5 en invierno).
-DateTime instanteAvisoHabana(String fecha) {
+/// Meta con la hora (0-23, pared Habana) de los avisos: el
+/// ajuste del dueño de la 1.29 (FB-13). Vive en las metas de
+/// LocalDb como el resto del estado de este servicio
+/// (notif_prog_*, notif_permiso_pedido): los ajustes JSON del
+/// gym son espejo del servidor y el pull los sobrescribiría.
+const String kMetaHoraAvisosRecordatorios = 'hora_avisos_recordatorios';
+
+/// Hora por defecto de los avisos (la histórica de la app).
+const int kHoraAvisosPorDefecto = 8;
+
+/// Instante (UTC) de las [hora]:00 Habana del día [fecha]
+/// (PURO). Misma convergencia en una iteración que
+/// `isoHabana`: el offset depende del instante (DST: -4 en
+/// verano, -5 en invierno). La aritmética es de calendario en
+/// UTC, así que el borde DST cae donde le toca.
+DateTime instanteAvisoHabanaHora(String fecha, int hora) {
   final y = int.parse(fecha.substring(0, 4));
   final m = int.parse(fecha.substring(5, 7));
   final d = int.parse(fecha.substring(8, 10));
-  var comoUtc = DateTime.utc(y, m, d, 8);
+  var comoUtc = DateTime.utc(y, m, d, hora);
   final off = offsetHabana(comoUtc.subtract(offsetHabana(comoUtc)));
   return comoUtc.subtract(off);
 }
 
-/// Instante del aviso para un debido de [fecha] visto a [ahoraUtc]
-/// (PURO): las 08:00 Habana del día; si ya pasaron, dentro de
-/// 5 minutos.
+/// Instante (UTC) de las 08:00 Habana del día [fecha] (PURO).
+/// Conservado para los llamadores históricos; delega en la
+/// forma general con la hora por defecto.
+DateTime instanteAvisoHabana(String fecha) =>
+    instanteAvisoHabanaHora(fecha, kHoraAvisosPorDefecto);
+
+/// Instante del aviso para un debido de [fecha] visto a
+/// [ahoraUtc] (PURO): las [hora]:00 Habana del día; si ya
+/// pasaron, dentro de 5 minutos.
 DateTime instanteAvisoDebido({
   required String fecha,
   required DateTime ahoraUtc,
+  int hora = kHoraAvisosPorDefecto,
 }) {
-  final manana = instanteAvisoHabana(fecha);
+  final manana = instanteAvisoHabanaHora(fecha, hora);
   if (manana.isAfter(ahoraUtc)) return manana;
   return ahoraUtc.add(const Duration(minutes: 5));
 }
@@ -138,12 +159,52 @@ class AvisosRecordatorios {
     } catch (_) {}
   }
 
+  /// 1.29 (FB-13): la hora vigente de los avisos (0-23),
+  /// leída de su meta; sin meta o con basura, la de siempre
+  /// (08:00). Nunca lanza.
+  static Future<int> horaAvisos() async {
+    try {
+      final raw =
+          await LocalDb.instance.getMeta(kMetaHoraAvisosRecordatorios);
+      final h = int.tryParse((raw ?? '').trim());
+      if (h != null && h >= 0 && h <= 23) return h;
+    } catch (_) {}
+    return kHoraAvisosPorDefecto;
+  }
+
+  /// 1.29 (FB-13): guarda la hora nueva y REPROGRAMA los
+  /// avisos vigentes con ella. La idempotencia por meta
+  /// (`notif_prog_*` con valor) haría que sincronizar()
+  /// saltara los ya programados y la alarma vieja quedara:
+  /// primero se cancelan en nativo y se limpian las marcas,
+  /// y después sincronizar() programa de nuevo con la hora
+  /// vigente (si ya pasó hoy, rige la regla de +5 min, igual
+  /// que para un debido programado tarde). Nunca lanza.
+  static Future<void> fijarHoraAvisos(int hora) async {
+    final h = hora.clamp(0, 23);
+    try {
+      await LocalDb.instance
+          .setMeta(kMetaHoraAvisosRecordatorios, '$h');
+      final programados =
+          await LocalDb.instance.metasConPrefijo('notif_prog_');
+      for (final k in programados) {
+        try {
+          await _canal.invokeMethod('cancelar', {'id': k});
+        } catch (_) {}
+        await LocalDb.instance.setMeta(k, '');
+      }
+    } catch (_) {}
+    await sincronizar();
+  }
+
   static Future<void> _sincronizarReal() async {
     // Sin sesión no se puede atribuir nada: NO tocar los avisos
     // programados (un barrido con la lista vacía los cancelaría
     // todos por error).
     if (!AuthService().loggedIn) return;
     try {
+      // 1.29 (FB-13): la hora de los avisos es la configurada.
+      final hora = await horaAvisos();
       final hoy = hoyHabanaIso();
       final debidos =
           await RecordatoriosService.instance.debidosHoy(hoyHabana: hoy);
@@ -180,7 +241,7 @@ class AvisosRecordatorios {
         // 1.22 R-2: la fecha es la del debido, no un «hoy»
         // recalculado aquí.
         final inst = instanteAvisoDebido(
-            fecha: d.fechaHabana, ahoraUtc: ahoraUtcReal());
+            fecha: d.fechaHabana, ahoraUtc: ahoraUtcReal(), hora: hora);
         await _canal.invokeMethod('programar', {
           'id': clave,
           'titulo': t.titulo,

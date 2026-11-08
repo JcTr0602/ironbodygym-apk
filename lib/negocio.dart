@@ -2903,6 +2903,35 @@ String mensajeWaSegunEstado(Map<String, dynamic> c) {
   return mensajeWaPorVencer(nombre, fechaCorta);
 }
 
+/// 1.29 (Oleada 4, FB-10): mensaje de WhatsApp para avisar
+/// desde la tarjeta de un recordatorio debido (PURO). Reusa
+/// las fuentes únicas de la casa: el vencimiento sale de
+/// mensajeWaSegunEstado con la fila del cliente (sin fila,
+/// el de «vence hoy» con el nombre del debido) y el
+/// cumpleaños es el mismo texto de la bandeja de avisos,
+/// con la línea de mensaje automático de siempre.
+String mensajeWaRecordatorio({
+  required String tipo,
+  required Map<String, dynamic>? cliente,
+  required String nombre,
+}) {
+  final nom = nombre.trim().isNotEmpty
+      ? nombre.trim()
+      : '${cliente?['nombre'] ?? 'Cliente'}'.trim();
+  if (tipo == 'cumpleanos') {
+    return '¡Feliz cumpleaños, $nom! 🎂\n'
+        'De parte de todo el equipo de Iron Body Gym, '
+        'que tengas un día excelente 💪$lineaMensajeAutomatico';
+  }
+  if (cliente != null) return mensajeWaSegunEstado(cliente);
+  return mensajeWaVenceHoy(nom);
+}
+
+/// 1.29 (Oleada 4, FB-10): URL wa.me de un aviso (PURO),
+/// mismo patrón que la bandeja y las campañas.
+String urlWaRecordatorio(String telefonoWa, String mensaje) =>
+    'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}';
+
 /// Arma la bandeja de avisos de WhatsApp del día: cumpleañeros, vencen hoy,
 /// por vencer (3 días) y recibos de pagos de hoy. Cada mapa trae:
 /// tipo, cliente_id, nombre, telefono, detalle y mensaje (texto pre-rellenado
