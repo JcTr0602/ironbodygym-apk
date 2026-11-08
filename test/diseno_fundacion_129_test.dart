@@ -57,20 +57,14 @@ const _superficiesClaro = [
   AppColores.superficieHundidaClaro,
 ];
 
+// 1.29 (Oleada 5, D-23): sin ítems, sin badges — la
+// foto vacía de siempre, con la firma nueva.
 List<DatoModuloPanel> _modulos() => modulosPanel(
-      pendCaja: 0,
+      items: const {},
       pendCajaTotal: 0,
       cajaHoyTotal: 0,
-      solicitudes: 0,
-      reportes: 0,
-      valesPorAprobar: 0,
       clientesActivos: 0,
-      sinReporteHoy: 0,
-      sinReporteAyer: 0,
-      reservas: 0,
       stockCritico: 0,
-      preciosSinFijar: 0,
-      incidencias: 0,
       pendientesSubir: 0,
     );
 

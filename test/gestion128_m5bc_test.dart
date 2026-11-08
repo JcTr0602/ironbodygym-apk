@@ -45,6 +45,7 @@ import 'package:ironbody_gym/ui/panel_cache.dart';
 import 'package:ironbody_gym/ui/panel_dueno_atencion.dart';
 import 'package:ironbody_gym/ui/panel_dueno_swr.dart';
 import 'package:ironbody_gym/ui/panel_modulos.dart';
+import 'package:ironbody_gym/ui/panel_por_revisar.dart';
 import 'package:ironbody_gym/ui/pin_lock.dart';
 import 'package:ironbody_gym/ui/skeleton.dart';
 
@@ -69,6 +70,24 @@ FotoAtencion _foto({int vales = 0, bool valesSinCargar = false}) {
   );
 }
 
+// 1.29 (Oleada 5, D-23): modulosPanel ya no recibe
+// enteros: recibe las LISTAS de ítems y el badge es su
+// longitud. El helper fabrica listas de la longitud
+// pedida para conservar intactas las aserciones de
+// siempre (módulos, orden, badges y estados).
+List<ItemPorRevisar> _fab(
+        ModuloPanel m, DestinoPorRevisar d, int n) =>
+    [
+      for (var i = 0; i < n; i++)
+        ItemPorRevisar(
+            modulo: m,
+            destino: d,
+            icono: Icons.circle_rounded,
+            tinte: Colors.grey,
+            titulo: 'ítem',
+            detalle: 'detalle'),
+    ];
+
 List<DatoModuloPanel> _modulos({
   int pendCaja = 0,
   double pendCajaTotal = 0,
@@ -86,19 +105,30 @@ List<DatoModuloPanel> _modulos({
   int pendientesSubir = 0,
 }) =>
     modulosPanel(
-      pendCaja: pendCaja,
+      items: {
+        ModuloPanel.caja: _fab(
+            ModuloPanel.caja, DestinoPorRevisar.liquidacion, pendCaja),
+        ModuloPanel.clientes: [
+          ..._fab(ModuloPanel.clientes,
+              DestinoPorRevisar.solicitudesInvitados, solicitudes),
+          ..._fab(ModuloPanel.clientes,
+              DestinoPorRevisar.reportesPlus, reportes),
+          ..._fab(ModuloPanel.clientes,
+              DestinoPorRevisar.valesPremios, vales),
+        ],
+        ModuloPanel.equipo: _fab(ModuloPanel.equipo,
+            DestinoPorRevisar.cierreCaja, sinReporteHoy + sinReporteAyer),
+        ModuloPanel.suplementos: _fab(ModuloPanel.suplementos,
+            DestinoPorRevisar.reservas, reservas),
+        ModuloPanel.configuracion: _fab(ModuloPanel.configuracion,
+            DestinoPorRevisar.precios, preciosSinFijar),
+        ModuloPanel.control: _fab(ModuloPanel.control,
+            DestinoPorRevisar.incidenciasSync, incidencias),
+      },
       pendCajaTotal: pendCajaTotal,
       cajaHoyTotal: cajaHoyTotal,
-      solicitudes: solicitudes,
-      reportes: reportes,
-      valesPorAprobar: vales,
       clientesActivos: clientesActivos,
-      sinReporteHoy: sinReporteHoy,
-      sinReporteAyer: sinReporteAyer,
-      reservas: reservas,
       stockCritico: stockCritico,
-      preciosSinFijar: preciosSinFijar,
-      incidencias: incidencias,
       pendientesSubir: pendientesSubir,
     );
 
