@@ -31,6 +31,114 @@ bool resumenBannerProtagonista({
   return !edad.isNegative && edad < const Duration(seconds: 30);
 }
 
+/// 1.29 (Oleada 5, D-04): la variante visual del banner
+/// según la foto del motor. Es la MISMA partición que el
+/// build pintaba a mano (fase + las tres dimensiones de
+/// reposo), extraída a función pura para fijar por test
+/// el gradiente y la letra de cada estado.
+enum VarianteBanner {
+  enviando,
+  descargando,
+  fotos,
+  error,
+  sinConexion,
+  pendientes,
+  novedades,
+  sinSincronizar,
+  alDia,
+}
+
+/// PURO: la variante de una foto del motor.
+VarianteBanner varianteBannerDe(SyncStatus s) {
+  switch (s.phase) {
+    case SyncPhase.uploading:
+      return VarianteBanner.enviando;
+    case SyncPhase.downloading:
+      return VarianteBanner.descargando;
+    case SyncPhase.photos:
+      return VarianteBanner.fotos;
+    case SyncPhase.error:
+      return VarianteBanner.error;
+    case SyncPhase.idle:
+      if (!s.enLinea) return VarianteBanner.sinConexion;
+      if (s.pending > 0) return VarianteBanner.pendientes;
+      if (s.hayNovedades) return VarianteBanner.novedades;
+      if (s.lastOk == null) return VarianteBanner.sinSincronizar;
+      return VarianteBanner.alDia;
+  }
+}
+
+/// PURO (D-04): gradiente tokenizado y color de frente
+/// de cada variante. El frente es blanco salvo en los
+/// dos ámbar («Enviando» y «Pendientes»): ahí el blanco
+/// caía a 2,15 y 1,69 en el extremo claro del gradiente
+/// (GD-04) y el grafito [AppColores.sobreMarca] pasa en
+/// AMBOS extremos (8,11/4,89 y 10,3/5,47). En el resto
+/// de gradientes ningún frente plano pasa en los dos
+/// extremos (cabalgan el punto medio) y el blanco es el
+/// máximo-mínimo o el titular histórico: se conserva.
+({List<Color> gradiente, Color frente}) coloresBanner(
+    VarianteBanner v) {
+  switch (v) {
+    case VarianteBanner.enviando:
+      return (
+        gradiente: const [
+          AppColores.bannerEnviandoA,
+          AppColores.bannerEnviandoB
+        ],
+        frente: AppColores.sobreMarca,
+      );
+    case VarianteBanner.descargando:
+      return (
+        gradiente: const [AppColores.info, AppColores.infoOscuro],
+        frente: Colors.white,
+      );
+    case VarianteBanner.fotos:
+      return (
+        gradiente: const [
+          AppColores.bannerFotosA,
+          AppColores.bannerFotosB
+        ],
+        frente: Colors.white,
+      );
+    case VarianteBanner.error:
+      return (
+        gradiente: const [AppColores.error, AppColores.errorOscuro],
+        frente: Colors.white,
+      );
+    case VarianteBanner.sinConexion:
+    case VarianteBanner.sinSincronizar:
+      return (
+        gradiente: const [
+          AppColores.bannerGrisA,
+          AppColores.bannerGrisB
+        ],
+        frente: Colors.white,
+      );
+    case VarianteBanner.pendientes:
+      return (
+        gradiente: const [
+          AppColores.bannerAlertaA,
+          AppColores.alertaOscuro
+        ],
+        frente: AppColores.sobreMarca,
+      );
+    case VarianteBanner.novedades:
+      return (
+        gradiente: const [
+          AppColores.bannerInfoA,
+          AppColores.bannerInfoB
+        ],
+        frente: Colors.white,
+      );
+    case VarianteBanner.alDia:
+      return (
+        gradiente: const [AppColores.exito, AppColores.exitoOscuro],
+        frente: Colors.white,
+      );
+  }
+}
+
 /// Franja de estado de sincronización (visible en todas las pantallas).
 ///
 /// Tarjeta flotante con gradiente por fase, icono animado, progreso suave
@@ -150,7 +258,12 @@ class _SyncBannerState extends State<SyncBanner>
       initialData: SyncEngine.instance.currentStatus,
       builder: (ctx, snap) {
         final s = snap.data!;
-        List<Color> gradiente;
+        // 1.29 (Oleada 5, D-04): gradiente y frente salen
+        // de la resolución pura por variante (tokens de
+        // diseno.dart; letra segura por fase).
+        final colores = coloresBanner(varianteBannerDe(s));
+        final gradiente = colores.gradiente;
+        final frente = colores.frente;
         IconData icono;
         String titulo;
         String? subtitulo;
@@ -160,37 +273,21 @@ class _SyncBannerState extends State<SyncBanner>
         DateTime? resumenHoraActiva;
         switch (s.phase) {
           case SyncPhase.uploading:
-            gradiente = const [
-              Color(0xFFF59E0B),
-              Color(0xFFEA580C)
-            ];
             icono = Icons.sync_rounded;
             titulo = 'Enviando tus cambios';
             subtitulo = s.detalle;
             break;
           case SyncPhase.downloading:
-            gradiente = const [
-              Color(0xFF3B82F6),
-              Color(0xFF1D4ED8)
-            ];
             icono = Icons.cloud_download_rounded;
             titulo = 'Descargando datos';
             subtitulo = s.detalle;
             break;
           case SyncPhase.photos:
-            gradiente = const [
-              Color(0xFFA855F7),
-              Color(0xFF7C3AED)
-            ];
             icono = Icons.photo_camera_rounded;
             titulo = 'Subiendo fotos';
             subtitulo = s.detalle;
             break;
           case SyncPhase.error:
-            gradiente = const [
-              Color(0xFFEF4444),
-              Color(0xFFB91C1C)
-            ];
             icono = Icons.error_outline_rounded;
             titulo = 'No se pudo sincronizar';
             subtitulo = s.lastError?.mensaje;
@@ -199,20 +296,12 @@ class _SyncBannerState extends State<SyncBanner>
             // v1.2.5 (D11): frase en lenguaje humano según 3 dimensiones.
             titulo = s.frase;
             if (!s.enLinea) {
-              gradiente = const [
-                AppColores.bannerGrisA,
-                AppColores.bannerGrisB
-              ];
               icono = Icons.cloud_off_rounded;
               // v1.2.5 (D12): guardado vs sincronizado, sin tecnicismos.
               subtitulo = s.ultimoGuardado != null
                   ? 'Guardado en este teléfono ${_hace(s.ultimoGuardado)}'
                   : 'Toca para intentar de nuevo';
             } else if (s.pending > 0) {
-              gradiente = const [
-                AppColores.bannerAlertaA,
-                AppColores.alertaOscuro
-              ];
               icono = Icons.schedule_rounded;
               // v1.2.6 (Gemini): prioriza lo pendiente sobre el último sync.
               final nCambios = '${s.pending} cambio${s.pending == 1 ? '' : 's'}';
@@ -220,27 +309,15 @@ class _SyncBannerState extends State<SyncBanner>
                   ? '$nCambios listos para subir · Último respaldo ${_hace(s.ultimoSincronizado)}'
                   : '$nCambios listos para subir';
             } else if (s.hayNovedades) {
-              gradiente = const [
-                AppColores.bannerInfoA,
-                AppColores.bannerInfoB
-              ];
               icono = Icons.cloud_download_rounded;
               titulo = 'Hay cambios nuevos';
               subtitulo = 'Toca para descargar';
             } else if (s.lastOk == null) {
               // v1.1.1: nunca se ha sincronizado: no decir "Todo al día"
-              gradiente = const [
-                AppColores.bannerGrisA,
-                AppColores.bannerGrisB
-              ];
               icono = Icons.cloud_off_rounded;
               titulo = 'Sin sincronizar';
               subtitulo = 'Toca para sincronizar';
             } else {
-              gradiente = const [
-                AppColores.exito,
-                AppColores.exitoOscuro
-              ];
               icono = Icons.check_circle_outline_rounded;
               // v1.0.17: resumen discreto de la última sincronización.
               // 1.28 (M1-C2): recién terminado (< 30 s) el
@@ -323,18 +400,18 @@ class _SyncBannerState extends State<SyncBanner>
                               ? _giro
                               : const AlwaysStoppedAnimation(0),
                           child: Icon(icono,
-                              color: Colors.white, size: 16),
+                              color: frente, size: 16),
                         ),
                         const SizedBox(width: 8),
                         Flexible(
                           child: Text(titulo,
-                              style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+                              style: AppTexto.metadato.copyWith(color: frente, fontWeight: FontWeight.w600),
                               overflow: TextOverflow.ellipsis),
                         ),
                         if (pct != null) ...[
                           const SizedBox(width: 8),
                           Text(pct,
-                              style: AppTexto.metadato.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+                              style: AppTexto.metadato.copyWith(color: frente, fontWeight: FontWeight.bold)),
                         ],
                       ],
                     ),
@@ -387,7 +464,7 @@ class _SyncBannerState extends State<SyncBanner>
                             ? _giro
                             : const AlwaysStoppedAnimation(0),
                         child: Icon(icono,
-                            color: Colors.white, size: 26),
+                            color: frente, size: 26),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -397,7 +474,7 @@ class _SyncBannerState extends State<SyncBanner>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(titulo,
-                                style: AppTexto.cuerpo.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
+                                style: AppTexto.cuerpo.copyWith(color: frente, fontWeight: FontWeight.bold),
                                 // 1.27 (error gráfico de campo): el
                                 // título a UNA línea siempre. La frase
                                 // de «Sin conexión — N cambios…» se
@@ -430,7 +507,7 @@ class _SyncBannerState extends State<SyncBanner>
                                   key: ValueKey<String>(
                                       subtitulo ?? ''),
                                   style: AppTexto.metadato
-                                      .copyWith(color: Colors.white),
+                                      .copyWith(color: frente),
                                   maxLines: _expandido ? 10 : 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -441,10 +518,10 @@ class _SyncBannerState extends State<SyncBanner>
                       ),
                       if (pct != null)
                         Text(pct,
-                            style: AppTexto.titulo.copyWith(color: Colors.white)),
+                            style: AppTexto.titulo.copyWith(color: frente)),
                       if (!enProgreso)
-                        const Icon(Icons.chevron_right_rounded,
-                            color: Colors.white70,
+                        Icon(Icons.chevron_right_rounded,
+                            color: frente.withValues(alpha: 0.7),
                             size: 20),
                     ],
                   ),
@@ -473,10 +550,10 @@ class _SyncBannerState extends State<SyncBanner>
                                     BorderRadius.circular(4),
                                 child: LinearProgressIndicator(
                                   value: s.progreso == null ? null : v,
-                                  backgroundColor: Colors.white30,
+                                  backgroundColor: frente.withValues(alpha: 0.3),
                                   valueColor:
-                                      const AlwaysStoppedAnimation<
-                                          Color>(Colors.white),
+                                      AlwaysStoppedAnimation<Color>(
+                                          frente),
                                   minHeight: 6,
                                 ),
                               ),
@@ -487,14 +564,14 @@ class _SyncBannerState extends State<SyncBanner>
                                 children: [
                                   TextButton.icon(
                                     onPressed: _dispararSync,
-                                    icon: const Icon(
+                                    icon: Icon(
                                         Icons.refresh_rounded,
-                                        color: Colors.white,
+                                        color: frente,
                                         size: 18),
                                     label: Text('Reintentar',
                                         style: AppTexto.metadato
                                             .copyWith(
-                                                color: Colors.white,
+                                                color: frente,
                                                 fontWeight:
                                                     FontWeight.bold)),
                                     style: TextButton.styleFrom(
@@ -511,14 +588,14 @@ class _SyncBannerState extends State<SyncBanner>
                                           builder: (_) =>
                                               const RepararSyncScreen()),
                                     ),
-                                    icon: const Icon(
+                                    icon: Icon(
                                         Icons.build_rounded,
-                                        color: Colors.white,
+                                        color: frente,
                                         size: 18),
                                     label: Text('Ver qué quedó',
                                         style: AppTexto.metadato
                                             .copyWith(
-                                                color: Colors.white,
+                                                color: frente,
                                                 fontWeight:
                                                     FontWeight.bold)),
                                     style: TextButton.styleFrom(
@@ -543,7 +620,7 @@ class _SyncBannerState extends State<SyncBanner>
                             Text(
                               'Qué hacer: ${s.lastError!.accionTexto}',
                               style: AppTexto.metadato.copyWith(
-                                  color: Colors.white,
+                                  color: frente,
                                   fontWeight: FontWeight.w600),
                             ),
                           if (s.lastError!.datosGuardadosLocalmente)
@@ -554,20 +631,20 @@ class _SyncBannerState extends State<SyncBanner>
                                 'Tus cambios están guardados en '
                                 'este teléfono.',
                                 style: AppTexto.metadato.copyWith(
-                                    color: Colors.white),
+                                    color: frente),
                               ),
                             ),
                           Align(
                             alignment: Alignment.centerLeft,
                             child: TextButton.icon(
                               onPressed: _dispararSync,
-                              icon: const Icon(
+                              icon: Icon(
                                   Icons.refresh_rounded,
-                                  color: Colors.white,
+                                  color: frente,
                                   size: 18),
                               label: Text('Reintentar ahora',
                                   style: AppTexto.metadato.copyWith(
-                                      color: Colors.white,
+                                      color: frente,
                                       fontWeight: FontWeight.bold)),
                             ),
                           ),
@@ -593,7 +670,7 @@ class _SyncBannerState extends State<SyncBanner>
                           padding: const EdgeInsets.only(
                               top: AppEspacio.sm),
                           child: Text(det,
-                              style: AppTexto.metadato.copyWith(color: Colors.white)),
+                              style: AppTexto.metadato.copyWith(color: frente)),
                         );
                       },
                     ),
@@ -666,11 +743,12 @@ class SyncPill extends StatelessWidget {
         final IconData icono;
         final String texto;
         if (s.phase == SyncPhase.error) {
-          color = const Color(0xFFEF4444);
+          // 1.29 (Oleada 5, D-04): token, no literal.
+          color = AppColores.error;
           icono = Icons.error_outline_rounded;
           texto = 'Error';
         } else if (enProgreso) {
-          color = const Color(0xFFF59E0B);
+          color = AppColores.alerta;
           icono = Icons.sync_rounded;
           texto = 'Sincronizando';
         } else if (s.pending > 0) {

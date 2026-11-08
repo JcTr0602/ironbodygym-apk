@@ -93,6 +93,19 @@ class AppColores {
   static const bannerInfoA = Color(0xFF60A5FA);
   static const bannerInfoB = Color(0xFF2563EB);
 
+  // 1.29 (Oleada 5, D-04): los dos pares del banner que
+  // NO coincidían con ningún semántico completo dejan de
+  // ser literales en widgets.dart. «Enviando» cabalga
+  // ámbar→naranja quemado y «Fotos» el púrpura de las
+  // subidas; «Descargando» usa info/infoOscuro y «Error»
+  // error/errorOscuro directamente, como ya hacían el
+  // verde (exito) y el ámbar de pendientes (bannerAlertaA
+  // + alertaOscuro).
+  static const bannerEnviandoA = Color(0xFFF59E0B);
+  static const bannerEnviandoB = Color(0xFFEA580C);
+  static const bannerFotosA = Color(0xFFA855F7);
+  static const bannerFotosB = Color(0xFF7C3AED);
+
   // --- Superficies modo claro ---
   static const fondoClaro = Color(0xFFF5F5F5);
   static const superficieClaro = Colors.white;
