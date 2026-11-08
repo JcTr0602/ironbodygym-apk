@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -165,6 +166,16 @@ class _AdminScreenState extends State<AdminScreen> {
   // se conserva como la cifra de la bandeja raíz, que
   // lee la misma foto.
   List<Map<String, dynamic>> _incidenciasFilas = [];
+
+  /// 1.30 (Oleada 5, H-06): señal de «se volvió de una
+  /// herramienta» para la pantalla de módulo abierta: los
+  /// ayudantes de navegación con recarga (_ir, _irConfig,
+  /// _irLigera) la incrementan DESPUÉS de su recarga, y la
+  /// pantalla de módulo (si sigue montada) re-lee su franja
+  /// y sus tarjetas desde los proveedores. Local a este
+  /// archivo: sin RouteObserver global y sin tocar
+  /// main.dart (vía barata verificada, ajuste MEDIA-04).
+  final ValueNotifier<int> _senalRetorno = ValueNotifier<int>(0);
   // 1.29 (Oleada 5, D-23): las claves de precio sin
   // fijar como LISTA (los ítems de Configuración); el
   // entero _preciosSinFijar es su longitud.
@@ -263,6 +274,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   @override
   void dispose() {
+    _senalRetorno.dispose();
     for (final c in _montos.values) {
       c.dispose();
     }
@@ -1077,20 +1089,33 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  void _ir(Widget w) {
-    Navigator.of(context)
+  /// 1.30 (Oleada 5, H-06): devuelve el Future de la
+  /// cadena (antes void): al volver recarga y DESPUÉS
+  /// avisa con la señal de retorno, para que la franja
+  /// del módulo abierto se re-lea sobre la foto fresca.
+  Future<void> _ir(Widget w) {
+    return Navigator.of(context)
         .push(RutaIron(builder: (_) => w))
-        .then((_) => _cargar());
+        .then((_) => _cargar())
+        .then((_) => _notificarRetorno());
+  }
+
+  /// Incrementa la señal de retorno (H-06) si el Panel
+  /// sigue vivo; la escucha la pantalla de módulo abierta.
+  void _notificarRetorno() {
+    if (!mounted) return;
+    _senalRetorno.value++;
   }
 
   /// Navega a un destino estrictamente operativo (sin
   /// mutaciones de dinero/inscripciones/configuración) y al
   /// volver recarga SOLO los contadores. Ver el contrato en
   /// _cargarContadores: ante la duda, usa _ir.
-  void _irLigera(Widget w) {
-    Navigator.of(context)
+  Future<void> _irLigera(Widget w) {
+    return Navigator.of(context)
         .push(RutaIron(builder: (_) => w))
-        .then((_) => _cargarContadores());
+        .then((_) => _cargarContadores())
+        .then((_) => _notificarRetorno());
   }
 
   /// Aplica la foto de configuración a los campos y
@@ -1144,10 +1169,11 @@ class _AdminScreenState extends State<AdminScreen> {
 
   /// Navega a una pantalla de CONFIGURACIÓN y al volver
   /// recarga solo la configuración (B-02).
-  void _irConfig(Widget w) {
-    Navigator.of(context)
+  Future<void> _irConfig(Widget w) {
+    return Navigator.of(context)
         .push(RutaIron(builder: (_) => w))
-        .then((_) => _cargarConfiguracion());
+        .then((_) => _cargarConfiguracion())
+        .then((_) => _notificarRetorno());
   }
 
   /// Navega a un destino de SOLO LECTURA demostrable (sin
@@ -2977,7 +3003,13 @@ class _AdminScreenState extends State<AdminScreen> {
                   datos[i].badge! > (_badgesPrevios[datos[i].titulo] ?? 0),
               onTap: () => _ir(_ModuloAdminScreen(
                   titulo: datos[i].titulo,
-                  itemsPorRevisar: items[ordenModulos[i]] ?? const [],
+                  // 1.30 (Oleada 5, H-06): PROVEEDORES,
+                  // no la foto del momento: al volver de
+                  // una tarjeta, la señal de retorno
+                  // reconstruye la pantalla con la
+                  // derivación y las tarjetas frescas.
+                  obtenerItems: () =>
+                      _itemsPorRevisar()[ordenModulos[i]] ?? const [],
                   onAbrirItem: (item) {
                     // La pantalla del módulo se cierra y
                     // el destino abre sobre el Panel: al
@@ -2987,7 +3019,8 @@ class _AdminScreenState extends State<AdminScreen> {
                     Navigator.of(context).pop();
                     _abrirItemPorRevisar(item);
                   },
-                  tarjetas: tarjetasPorModulo[i]())),
+                  obtenerTarjetas: tarjetasPorModulo[i],
+                  senalRetorno: _senalRetorno)),
             ),
           ],
         ],
@@ -3751,29 +3784,66 @@ class _PendientePanel {
 /// REVISAR», la pantalla abre con su franja (la misma
 /// lista de la que salió el distintivo); sin ítems, la
 /// pantalla es la de siempre.
-class _ModuloAdminScreen extends StatelessWidget {
+/// 1.30 (Oleada 5, H-06): con ESTADO y PROVEEDORES —
+/// recibe obtenerItems/obtenerTarjetas en vez de las
+/// fotos del momento, y escucha la señal de retorno del
+/// Panel: al volver de una herramienta abierta desde una
+/// tarjeta, se reconstruye re-invocando los proveedores
+/// y la franja enseña la foto fresca (antes se quedaba
+/// con la vieja). La vía de la franja (onAbrirItem: pop
+/// de la pantalla + destino sobre el Panel) no cambia.
+/// _irSoloLectura NO dispara la señal: su contrato es
+/// «nada pudo cambiar» y volver de él no reconstruye nada.
+class _ModuloAdminScreen extends StatefulWidget {
   final String titulo;
-  final List<Widget> tarjetas;
-  final List<ItemPorRevisar> itemsPorRevisar;
+  final List<Widget> Function() obtenerTarjetas;
+  final List<ItemPorRevisar> Function() obtenerItems;
   final void Function(ItemPorRevisar item)? onAbrirItem;
+  final ValueListenable<int> senalRetorno;
 
   const _ModuloAdminScreen({
     required this.titulo,
-    required this.tarjetas,
-    this.itemsPorRevisar = const [],
+    required this.obtenerTarjetas,
+    required this.obtenerItems,
+    required this.senalRetorno,
     this.onAbrirItem,
   });
 
   @override
+  State<_ModuloAdminScreen> createState() => _ModuloAdminScreenState();
+}
+
+class _ModuloAdminScreenState extends State<_ModuloAdminScreen> {
+  @override
+  void initState() {
+    super.initState();
+    widget.senalRetorno.addListener(_alVolver);
+  }
+
+  @override
+  void dispose() {
+    widget.senalRetorno.removeListener(_alVolver);
+    super.dispose();
+  }
+
+  /// La señal llega DESPUÉS de la recarga del Panel:
+  /// basta reconstruir re-invocando los proveedores.
+  void _alVolver() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final itemsPorRevisar = widget.obtenerItems();
+    final tarjetas = widget.obtenerTarjetas();
     return Scaffold(
-      appBar: appBarIron(context, titulo),
+      appBar: appBarIron(context, widget.titulo),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
-          if (itemsPorRevisar.isNotEmpty && onAbrirItem != null)
+          if (itemsPorRevisar.isNotEmpty && widget.onAbrirItem != null)
             FranjaPorRevisar(
-                items: itemsPorRevisar, onTapItem: onAbrirItem!),
+                items: itemsPorRevisar, onTapItem: widget.onAbrirItem!),
           ...tarjetas,
         ],
       ),
