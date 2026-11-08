@@ -55,6 +55,11 @@ class ComunidadPanelScreen extends StatefulWidget {
   /// tests; por defecto navega a FichaScreen).
   final void Function(int clienteId)? abrirFicha;
 
+  /// 1.29 (Oleada 8, FB-20 reverso): texto inicial del
+  /// buscador al abrir el panel ya filtrado (la ficha del
+  /// cliente salta aquí con su nombre).
+  final String? busquedaInicial;
+
   const ComunidadPanelScreen({
     super.key,
     this.cargarPerfiles,
@@ -65,6 +70,7 @@ class ComunidadPanelScreen extends StatefulWidget {
     this.verPerfil,
     this.borrarNick,
     this.abrirFicha,
+    this.busquedaInicial,
   });
 
   @override
@@ -101,6 +107,13 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
   @override
   void initState() {
     super.initState();
+    // FB-20 (reverso): el panel puede nacer ya filtrado
+    // por un nombre (salto desde la ficha del cliente).
+    final inicial = widget.busquedaInicial?.trim() ?? '';
+    if (inicial.isNotEmpty) {
+      _busquedaCtrl.text = inicial;
+      _consulta = inicial;
+    }
     // Sin sesión de dueño ni siquiera se disparan las
     // RPC de administración (ver la guarda en build).
     if (AuthService().isOwner) {

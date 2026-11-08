@@ -43,6 +43,7 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha_secciones.dart';
 import 'modal_pin_acceso.dart';
+import 'panel_comunidad.dart';
 import 'vista_previa_cliente.dart';
 
 /// Fila «Plus» de la tarjeta Membresía: consulta SOLA el Plus
@@ -396,6 +397,21 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                   onPressed: _abrirVistaPrevia,
                 ),
               ),
+              // 1.29 (Oleada 6, FB-20): «Ver en Comunidad» —
+              // salta de la ficha del cliente a su tarjeta en
+              // el panel de Comunidad (filtro por nombre). Es
+              // solo del dueño, como todo el panel.
+              if (AuthService().isOwner) ...[
+                const SizedBox(height: AppEspacio.sm),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.groups_rounded, size: 18),
+                    label: const Text('Ver en Comunidad'),
+                    onPressed: _verEnComunidad,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -607,6 +623,18 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
         builder: (_) => VistaPreviaClienteScreen(
           clienteId: widget.clienteId,
           nombreCliente: widget.nombreCliente,
+        ),
+      ),
+    );
+  }
+
+  /// FB-20: salta al panel de Comunidad con el buscador
+  /// filtrado por el nombre de este cliente.
+  void _verEnComunidad() {
+    Navigator.of(context).push(
+      RutaIron(
+        builder: (_) => ComunidadPanelScreen(
+          busquedaInicial: widget.nombreCliente,
         ),
       ),
     );
