@@ -27,6 +27,48 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'reparar_sync_screen.dart';
 
+/// 1.29 (Oleada 6, D-16): el aviso de estado general de
+/// la pantalla, en el lenguaje de estados de la casa
+/// (AvisoEstado: fondo sólido + icono + palabra, nunca
+/// solo color). PURO: el estado sale de estadoSaludSync
+/// y el texto lo nombra sin rodeos.
+({TipoAviso tipo, String texto}) avisoSaludSyncDe(SaludSyncDatos d) {
+  final estado = estadoSaludSync(
+    pendientes: d.pendientes,
+    fallidas: d.fallidas,
+    hayTablasEnRojo:
+        d.tablas.any((t) => t.estado == SemaforoTabla.rojo),
+  );
+  switch (estado) {
+    case EstadoSaludSync.todoSubio:
+      return (
+        tipo: TipoAviso.exito,
+        texto: 'Todo subió: este teléfono está al día.',
+      );
+    case EstadoSaludSync.quedanCambios:
+      return (
+        tipo: TipoAviso.aviso,
+        texto: 'Quedan cambios por subir: ${d.pendientes} '
+            '${d.pendientes == 1 ? 'operación' : 'operaciones'} '
+            'en la cola de este teléfono.',
+      );
+    case EstadoSaludSync.fallo:
+      final partes = <String>[
+        if (d.fallidas > 0)
+          '${d.fallidas} '
+              '${d.fallidas == 1 ? 'operación falló' : 'operaciones fallaron'} '
+              'o esperan decisión',
+        if (d.tablas.any((t) => t.estado == SemaforoTabla.rojo))
+          'hay tablas en rojo en el semáforo',
+      ];
+      return (
+        tipo: TipoAviso.error,
+        texto: 'Falló la sincronización: ${partes.join(' y ')}. '
+            'Revisa la cola y el semáforo de abajo.',
+      );
+  }
+}
+
 class SaludSyncScreen extends StatefulWidget {
   const SaludSyncScreen({super.key});
 
@@ -149,6 +191,15 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
+                  // D-16: el estado general, dicho en el
+                  // lenguaje de estados de la casa antes
+                  // que el detalle por secciones.
+                  Builder(builder: (context) {
+                    final aviso = avisoSaludSyncDe(d);
+                    return AvisoEstado(
+                        tipo: aviso.tipo, texto: aviso.texto);
+                  }),
+                  const SizedBox(height: AppEspacio.lg),
                   seccionAdmin(
                       context, Icons.fact_check_rounded, 'Autocura', [
                     filaAdmin(context, null, 'Última comprobación',

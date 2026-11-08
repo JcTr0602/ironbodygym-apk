@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -107,6 +108,11 @@ class PremiosPanelScreen extends StatefulWidget {
   final Future<Map<String, dynamic>> Function(
       int valeId, String nota)? rechazarVale;
 
+  /// 1.29 (Oleada 6, FB-19): abrir el enlace wa.me del
+  /// aviso de un vale resuelto (costura para los tests;
+  /// por defecto, launchUrl externo como la bandeja).
+  final Future<void> Function(String url)? abrirWhatsApp;
+
   /// 1.27: dentro del hub de Premios (pestañas) la
   /// pantalla no pinta su propia AppBar: la pone el hub.
   final bool embebida;
@@ -116,6 +122,7 @@ class PremiosPanelScreen extends StatefulWidget {
       this.cargarBandeja,
       this.aprobarVale,
       this.rechazarVale,
+      this.abrirWhatsApp,
       this.embebida = false});
 
   @override
@@ -279,6 +286,41 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
     return {};
   }
 
+  /// 1.29 (Oleada 6, FB-19): tras resolver un vale, el
+  /// aviso de éxito ofrece «Avisar por WhatsApp» con el
+  /// mensaje ya compuesto, al teléfono que el propio vale
+  /// trae. Sin teléfono válido no se ofrece (el aviso
+  /// queda como siempre). Enviar es el toque humano
+  /// sobre la acción: aquí solo se abre wa.me con el
+  /// texto puesto.
+  void _ofrecerAvisoWhatsApp({
+    required String textoSnack,
+    required ValePendiente v,
+    required String mensaje,
+  }) {
+    final wa = normalizarTelefonoWaMe(v.telefono);
+    if (wa.isEmpty) {
+      mostrarSnack(context, textoSnack,
+          significado: SignificadoChip.exito);
+      return;
+    }
+    mostrarSnack(
+      context,
+      textoSnack,
+      significado: SignificadoChip.exito,
+      accion: 'Avisar por WhatsApp',
+      alAccion: () async {
+        try {
+          await (widget.abrirWhatsApp ??
+              (u) => launchUrl(Uri.parse(u),
+                  mode: LaunchMode.externalApplication))(
+              urlWaRecordatorio(wa, mensaje));
+        } catch (_) {}
+      },
+      duracion: const Duration(seconds: 10),
+    );
+  }
+
   Future<void> _aprobar(ValePendiente v) async {
     // Argón 1.26 ALTA: la guarda se toma ANTES del
     // primer await (check-and-set síncrono, patrón
@@ -367,9 +409,17 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
       // contador de pendientes al oír el aviso.
       premiosAvisosExternos.value++;
       setState(() => _resueltosLocales = {..._resueltosLocales, v.id});
-      mostrarSnack(
-          context, 'Premio aplicado a ${v.nombre}: se sincroniza solo',
-          significado: SignificadoChip.exito);
+      // FB-19: con el nuevo vencimiento YA calculado para
+      // la confirmación, el aviso ofrece avisar al cliente.
+      _ofrecerAvisoWhatsApp(
+        textoSnack:
+            'Premio aplicado a ${v.nombre}: se sincroniza solo',
+        v: v,
+        mensaje: mensajeWaValeAprobado(
+            nombre: v.nombre,
+            premioDias: v.premioDias,
+            nuevoHastaIso: nuevoHasta),
+      );
     } catch (_) {
       if (mounted) {
         mostrarSnack(context, 'No se pudo aplicar el premio',
@@ -396,8 +446,14 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
           await (widget.rechazarVale ?? _rechazarReal)(v.id, nota);
       if (!mounted) return;
       if (res['ok'] == true) {
-        mostrarSnack(context, 'Vale de ${v.nombre} rechazado',
-            significado: SignificadoChip.exito);
+        // FB-19: el aviso del rechazo lleva el motivo que
+        // el dueño escribió en el diálogo.
+        _ofrecerAvisoWhatsApp(
+          textoSnack: 'Vale de ${v.nombre} rechazado',
+          v: v,
+          mensaje: mensajeWaValeRechazado(
+              nombre: v.nombre, motivo: nota),
+        );
         // 1.28 (M5-B2): el contador del hub se refresca.
         premiosAvisosExternos.value++;
         await _cargar();

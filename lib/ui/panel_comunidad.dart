@@ -7,6 +7,7 @@ import '../comunidad_panel.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'diseno.dart' show AppEspacio, AppRadio;
+import 'ficha.dart';
 
 /// 1.27 (Comunidad MVP, Pieza G): «Comunidad» del
 /// Panel — los perfiles que los clientes han hecho
@@ -49,6 +50,11 @@ class ComunidadPanelScreen extends StatefulWidget {
   final Future<Map<String, dynamic>> Function(int clienteId)?
       borrarNick;
 
+  /// 1.29 (Oleada 6, FB-20): abrir la ficha del cliente
+  /// al tocar su tarjeta de perfil (costura para los
+  /// tests; por defecto navega a FichaScreen).
+  final void Function(int clienteId)? abrirFicha;
+
   const ComunidadPanelScreen({
     super.key,
     this.cargarPerfiles,
@@ -58,6 +64,7 @@ class ComunidadPanelScreen extends StatefulWidget {
     this.cargarHistorial,
     this.verPerfil,
     this.borrarNick,
+    this.abrirFicha,
   });
 
   @override
@@ -578,6 +585,19 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
     return '${d.day}/${d.month}/${d.year}';
   }
 
+  /// FB-20: el destino al tocar una tarjeta de perfil —
+  /// la ficha del cliente en Gestión.
+  void _abrirFichaDe(PerfilComunidadAdmin p) {
+    final abrir = widget.abrirFicha;
+    if (abrir != null) {
+      abrir(p.clienteId);
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => FichaScreen(clienteId: p.clienteId),
+    ));
+  }
+
   Widget _tarjeta(PerfilComunidadAdmin p) {
     final estado = p.ocultoAdmin
         ? 'Oculto por administración'
@@ -588,7 +608,13 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
         _ocupados.contains('n${p.clienteId}');
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
+      // FB-20: tocar la tarjeta abre la ficha del cliente;
+      // los botones de la tarjeta (Ver perfil, Borrar
+      // Nick, Ocultar/Mostrar) siguen siendo suyos y no
+      // disparan la navegación.
+      child: InkWell(
+        onTap: () => _abrirFichaDe(p),
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -629,6 +655,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
               ],
             ),
           ],
+        ),
         ),
       ),
     );

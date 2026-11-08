@@ -130,18 +130,12 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
       ),
       const SizedBox(height: AppEspacio.md),
       if (hallazgos.isEmpty)
-        const Tarjeta(
-          child: Row(
-            children: [
-              Icon(Icons.check_circle_rounded,
-                  color: AppColores.exito),
-              SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: Text(
-                    'Todo está en orden: no hay nada atascado.'),
-              ),
-            ],
-          ),
+        // 1.29 (Oleada 6, D-16): el «todo está bien» de
+        // reparar sync también habla el lenguaje de
+        // estados de la casa (AvisoEstado), como la Salud.
+        const AvisoEstado(
+          tipo: TipoAviso.exito,
+          texto: 'Todo está en orden: no hay nada atascado.',
         ),
       _tarjetaHallazgos(
           'Se repara solo', Icons.build_circle_rounded, auto),
@@ -261,16 +255,17 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
       ),
       const SizedBox(height: AppEspacio.md),
       if (quedanAuto.isEmpty && quedanDueno.isEmpty)
-        const Tarjeta(
-          child: Row(
-            children: [
-              Icon(Icons.check_circle_rounded,
-                  color: AppColores.exito),
-              SizedBox(width: AppEspacio.sm),
-              Expanded(
-                  child: Text('Todo quedó en orden.')),
-            ],
-          ),
+        // D-16: «todo quedó en orden» como AvisoEstado.
+        const AvisoEstado(
+          tipo: TipoAviso.exito,
+          texto: 'Todo quedó en orden.',
+        ),
+      if (quedanAuto.isNotEmpty || quedanDueno.isNotEmpty)
+        // D-16: «quedan cambios» como AvisoEstado.
+        const AvisoEstado(
+          tipo: TipoAviso.aviso,
+          texto: 'Todavía quedan cosas por revisar: están '
+              'listadas justo abajo.',
         ),
       _tarjetaHallazgos('Todavía queda (se repara solo)',
           Icons.build_circle_rounded, quedanAuto),

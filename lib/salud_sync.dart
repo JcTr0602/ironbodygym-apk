@@ -98,6 +98,13 @@ class SaludSyncDatos {
         EstadoSyncTelefono estado,
       })> telefonos;
 
+  /// 1.29 (Oleada 6, D-16): ops por subir y ops fallidas
+  /// de la cola local — la materia del aviso de estado
+  /// general de la pantalla («todo subió», «quedan
+  /// cambios», «falló»).
+  final int pendientes;
+  final int fallidas;
+
   const SaludSyncDatos({
     required this.tablas,
     required this.chequeoEn,
@@ -107,7 +114,27 @@ class SaludSyncDatos {
     required this.copiaUltima,
     required this.copiaError,
     required this.telefonos,
+    this.pendientes = 0,
+    this.fallidas = 0,
   });
+}
+
+/// 1.29 (Oleada 6, D-16): el estado general de la
+/// sincronización en el lenguaje de estados de la casa.
+/// FUNCIÓN PURA. «Falló» manda sobre «quedan cambios»:
+/// una op en error también cuenta como pendiente, pero
+/// lo que el dueño necesita saber primero es que algo
+/// falló. Una tabla espejo en rojo también es fallo.
+enum EstadoSaludSync { todoSubio, quedanCambios, fallo }
+
+EstadoSaludSync estadoSaludSync({
+  required int pendientes,
+  required int fallidas,
+  required bool hayTablasEnRojo,
+}) {
+  if (fallidas > 0 || hayTablasEnRojo) return EstadoSaludSync.fallo;
+  if (pendientes > 0) return EstadoSaludSync.quedanCambios;
+  return EstadoSaludSync.todoSubio;
 }
 
 String _notaTabla({
@@ -245,6 +272,14 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     telefonos = await evaluarTelefonosSync();
   } catch (_) {}
 
+  // D-16: la foto de la cola local para el aviso general.
+  var pendientes = 0;
+  var fallidas = 0;
+  try {
+    pendientes = await db.countPendingOps();
+    fallidas = await db.countOpsFallidas();
+  } catch (_) {}
+
   return SaludSyncDatos(
     tablas: tablas,
     chequeoEn: chequeoEn,
@@ -254,5 +289,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     copiaUltima: copiaUltima,
     copiaError: copiaError,
     telefonos: telefonos,
+    pendientes: pendientes,
+    fallidas: fallidas,
   );
 }

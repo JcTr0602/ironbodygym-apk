@@ -2932,6 +2932,38 @@ String mensajeWaRecordatorio({
 String urlWaRecordatorio(String telefonoWa, String mensaje) =>
     'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}';
 
+/// 1.29 (Oleada 6, FB-19): mensaje de WhatsApp al APROBAR
+/// un vale de Premios (PURO): el premio aplicado y el
+/// NUEVO vencimiento ya calculado, con la línea de
+/// mensaje automático de siempre. Enviarlo es un toque
+/// humano desde la bandeja; aquí solo se compone.
+String mensajeWaValeAprobado({
+  required String nombre,
+  required int premioDias,
+  required String? nuevoHastaIso,
+}) {
+  final nom = nombre.trim().isEmpty ? 'Cliente' : nombre.trim();
+  final hasta = (nuevoHastaIso ?? '').trim();
+  return '🎉 ¡Felicidades, $nom! Tu premio de $premioDias días '
+      'de mensualidad gratis ya se aplicó en Iron Body Gym.'
+      '${hasta.isEmpty ? '' : ' Tu nuevo vencimiento es el ${fmtFecha(hasta)}.'}'
+      '$lineaMensajeAutomatico';
+}
+
+/// 1.29 (Oleada 6, FB-19): mensaje de WhatsApp al RECHAZAR
+/// un vale de Premios (PURO): lleva el motivo que el dueño
+/// escribió al rechazar, tal cual.
+String mensajeWaValeRechazado({
+  required String nombre,
+  required String motivo,
+}) {
+  final nom = nombre.trim().isEmpty ? 'Cliente' : nombre.trim();
+  return 'Hola, $nom. Revisamos tu vale de premio en '
+      'Iron Body Gym y no pudimos aprobarlo. '
+      'Motivo: ${motivo.trim()}'
+      '$lineaMensajeAutomatico';
+}
+
 /// Arma la bandeja de avisos de WhatsApp del día: cumpleañeros, vencen hoy,
 /// por vencer (3 días) y recibos de pagos de hoy. Cada mapa trae:
 /// tipo, cliente_id, nombre, telefono, detalle y mensaje (texto pre-rellenado
