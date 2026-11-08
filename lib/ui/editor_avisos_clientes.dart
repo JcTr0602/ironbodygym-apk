@@ -176,10 +176,71 @@ Future<ResultadoGuardadoAviso> guardarAvisoVerificado({
   }
 }
 
+/// 1.30 (Oleada 3, ítem 3): el resultado de un retiro con
+/// comprobación post-fallo — el espejo de
+/// [ResultadoGuardadoAviso] para retirar.
+enum ResultadoRetiroAviso { retirado, noRetirado, sinConfirmar }
+
+/// ¿La lista recién cargada ya refleja el retiro? El id
+/// YA NO está en la lista (el espejo de
+/// [avisoReflejaGuardado] para retirar).
+bool avisoReflejaRetiro({
+  required List<AvisoCliente> lista,
+  required int id,
+}) =>
+    !lista.any((a) => a.id == id);
+
+/// Motor ÚNICO de la comprobación post-retiro (1.30
+/// Oleada 3 + GEN-08): intenta retirar y, si la llamada
+/// FALLA (p. ej. timeout: la respuesta se perdió pero el
+/// retiro pudo aterrizar), comprueba con [sigueEnLaLista]
+/// antes de declarar el fallo — sin esta comprobación, el
+/// dueño veía un error falso («No se pudo retirar») con el
+/// aviso (o la rutina) ya retirado. La lógica triestado
+/// vive SOLO aquí: la comparten el retiro de avisos (vía
+/// [retirarAvisoVerificado]) y el de rutinas del gym.
+Future<ResultadoRetiroAviso> ejecutarRetiroVerificado({
+  required Future<void> Function() retirar,
+  required Future<bool> Function() sigueEnLaLista,
+}) async {
+  try {
+    await retirar();
+    return ResultadoRetiroAviso.retirado;
+  } catch (_) {
+    final bool sigue;
+    try {
+      sigue = await sigueEnLaLista();
+    } catch (_) {
+      // Ni el retiro ni la comprobación respondieron:
+      // no se sabe — y se dice que no se sabe.
+      return ResultadoRetiroAviso.sinConfirmar;
+    }
+    return sigue
+        ? ResultadoRetiroAviso.noRetirado
+        : ResultadoRetiroAviso.retirado;
+  }
+}
+
+/// Retira un aviso y, si la llamada FALLA, comprueba
+/// contra la lista antes de declarar el fallo. Espejo de
+/// [guardarAvisoVerificado], sobre el motor común
+/// [ejecutarRetiroVerificado].
+Future<ResultadoRetiroAviso> retirarAvisoVerificado({
+  required Future<void> Function() retirar,
+  required Future<List<AvisoCliente>> Function() listar,
+  required int id,
+}) =>
+    ejecutarRetiroVerificado(
+      retirar: retirar,
+      sigueEnLaLista: () async =>
+          !avisoReflejaRetiro(lista: await listar(), id: id),
+    );
+
 class EditorAvisosClientesScreen extends StatefulWidget {
   /// Costuras de red para los tests (D-B3-05): por defecto
   /// van las RPC reales admin_guardar_aviso /
-  /// admin_listar_avisos.
+  /// admin_listar_avisos / admin_retirar_aviso (esta
+  /// última desde la 1.30, Oleada 3).
   final Future<void> Function(
       {int? id,
       required String titulo,
@@ -187,9 +248,13 @@ class EditorAvisosClientesScreen extends StatefulWidget {
       required String nivel,
       String? fechaFin})? guardarAvisoRpc;
   final Future<List<AvisoCliente>> Function()? listarAvisosRpc;
+  final Future<void> Function(int id)? retirarAvisoRpc;
 
   const EditorAvisosClientesScreen(
-      {super.key, this.guardarAvisoRpc, this.listarAvisosRpc});
+      {super.key,
+      this.guardarAvisoRpc,
+      this.listarAvisosRpc,
+      this.retirarAvisoRpc});
 
   @override
   State<EditorAvisosClientesScreen> createState() =>
@@ -239,6 +304,13 @@ class _EditorAvisosClientesScreenState
         .timeout(const Duration(seconds: 12));
   }
 
+  Future<void> _retirarReal(int id) async {
+    await Supabase.instance.client
+        .rpc('admin_retirar_aviso', params: {'p_id': id})
+        // 1.24 Bloque 4: timeout de escritura (12 s).
+        .timeout(const Duration(seconds: 12));
+  }
+
   Future<void> _cargar() async {
     if (mounted) setState(() {
       _cargando = true;
@@ -273,6 +345,7 @@ class _EditorAvisosClientesScreenState
           idsPrevios: {for (final a in _avisos) a.id},
           guardarAvisoRpc: widget.guardarAvisoRpc ?? _guardarReal,
           listarAvisosRpc: widget.listarAvisosRpc ?? _listarReal,
+          retirarAvisoRpc: widget.retirarAvisoRpc ?? _retirarReal,
         ),
       ),
     );
@@ -394,11 +467,13 @@ class _FormularioAvisoScreen extends StatefulWidget {
       required String nivel,
       String? fechaFin}) guardarAvisoRpc;
   final Future<List<AvisoCliente>> Function() listarAvisosRpc;
+  final Future<void> Function(int id) retirarAvisoRpc;
   const _FormularioAvisoScreen({
     this.aviso,
     required this.idsPrevios,
     required this.guardarAvisoRpc,
     required this.listarAvisosRpc,
+    required this.retirarAvisoRpc,
   });
 
   @override
@@ -556,19 +631,39 @@ class _FormularioAvisoScreenState extends State<_FormularioAvisoScreen> {
     );
     if (ok != true || !mounted) return;
     setState(() => _guardando = true);
-    try {
-      await Supabase.instance.client
-          .rpc('admin_retirar_aviso', params: {'p_id': aviso.id})
-          .timeout(const Duration(seconds: 12));
-      if (!mounted) return;
-      mostrarSnack(context, 'Aviso retirado',
-          significado: SignificadoChip.exito);
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _guardando = false);
-      mostrarSnack(context, 'No se pudo retirar: $e',
-          significado: SignificadoChip.error);
+    // 1.30 (Oleada 3, ítem 3): retiro VERIFICADO — si la
+    // llamada falla (timeout), se comprueba si el aviso ya
+    // no está antes de enseñar un error: el error falso con
+    // el aviso ya retirado era el mismo defecto de clase
+    // que D-B3-05 cerró al guardar.
+    final resultado = await retirarAvisoVerificado(
+      retirar: () => widget.retirarAvisoRpc(aviso.id),
+      listar: widget.listarAvisosRpc,
+      id: aviso.id,
+    );
+    if (!mounted) return;
+    switch (resultado) {
+      case ResultadoRetiroAviso.retirado:
+        mostrarSnack(context, 'Aviso retirado',
+            significado: SignificadoChip.exito);
+        Navigator.pop(context, true);
+      case ResultadoRetiroAviso.noRetirado:
+        setState(() => _guardando = false);
+        AppLog.error('avisos_clientes', 'retirar_fallo',
+            d: 'retiro no reflejado tras el fallo');
+        mostrarSnack(context,
+            'No se pudo retirar el aviso. Revisa la conexión '
+            'e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      case ResultadoRetiroAviso.sinConfirmar:
+        // No se sabe si aterrizó: se vuelve a la lista (que
+        // se recarga) para comprobarlo ANTES de repetir —
+        // y el mensaje dice exactamente eso.
+        mostrarSnack(context,
+            'No se pudo confirmar si el aviso se retiró. '
+            'Revisa la lista antes de intentarlo de nuevo.',
+            significado: SignificadoChip.alerta);
+        Navigator.pop(context, true);
     }
   }
 

@@ -41,6 +41,7 @@ import '../config.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'editor_avisos_clientes.dart';
 import 'skeleton.dart';
 import 'diseno.dart';
 
@@ -692,7 +693,18 @@ class _EditorRutinasGymScreenState extends State<EditorRutinasGymScreen> {
 /// directo con la costura del catálogo.
 class FormularioRutinaScreen extends StatefulWidget {
   final RutinaGymAdmin? rutina;
-  const FormularioRutinaScreen({super.key, this.rutina});
+
+  /// Costuras de red para los tests (1.30 Oleada 3,
+  /// GEN-08): por defecto van las RPC reales
+  /// admin_retirar_rutina / admin_listar_rutinas.
+  final Future<void> Function(int id)? retirarRutinaRpc;
+  final Future<List<RutinaGymAdmin>> Function()? listarRutinasRpc;
+
+  const FormularioRutinaScreen(
+      {super.key,
+      this.rutina,
+      this.retirarRutinaRpc,
+      this.listarRutinasRpc});
 
   @override
   State<FormularioRutinaScreen> createState() =>
@@ -905,6 +917,23 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
     }
   }
 
+  Future<void> _retirarReal(int id) async {
+    await Supabase.instance.client
+        .rpc('admin_retirar_rutina', params: {'p_id': id})
+        // 1.24 Bloque 4: timeout de escritura (12 s).
+        .timeout(const Duration(seconds: 12));
+  }
+
+  Future<List<RutinaGymAdmin>> _listarReal() async {
+    final res = await Supabase.instance.client
+        .rpc('admin_listar_rutinas')
+        .timeout(const Duration(seconds: 12));
+    return ((res as List?) ?? const [])
+        .map((e) =>
+            RutinaGymAdmin.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
   Future<void> _retirar() async {
     final rutina = widget.rutina;
     if (rutina == null || _guardando) return;
@@ -922,19 +951,41 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
     );
     if (ok != true || !mounted) return;
     setState(() => _guardando = true);
-    try {
-      await Supabase.instance.client
-          .rpc('admin_retirar_rutina', params: {'p_id': rutina.id})
-          .timeout(const Duration(seconds: 12));
-      if (!mounted) return;
-      mostrarSnack(context, 'Rutina retirada',
-          significado: SignificadoChip.exito);
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _guardando = false);
-      mostrarSnack(context, 'No se pudo retirar: $e',
-          significado: SignificadoChip.error);
+    // 1.30 (Oleada 3, GEN-08): retiro VERIFICADO con el
+    // MISMO motor que estrenan los avisos
+    // (ejecutarRetiroVerificado, en
+    // editor_avisos_clientes.dart): si la llamada falla
+    // (timeout), se comprueba si la rutina ya no está en
+    // la lista antes de enseñar un error falso.
+    final resultado = await ejecutarRetiroVerificado(
+      retirar: () =>
+          (widget.retirarRutinaRpc ?? _retirarReal)(rutina.id),
+      sigueEnLaLista: () async {
+        final lista =
+            await (widget.listarRutinasRpc ?? _listarReal)();
+        return lista.any((r) => r.id == rutina.id);
+      },
+    );
+    if (!mounted) return;
+    switch (resultado) {
+      case ResultadoRetiroAviso.retirado:
+        mostrarSnack(context, 'Rutina retirada',
+            significado: SignificadoChip.exito);
+        Navigator.pop(context, true);
+      case ResultadoRetiroAviso.noRetirado:
+        setState(() => _guardando = false);
+        mostrarSnack(context,
+            'No se pudo retirar la rutina. Revisa la '
+            'conexión e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      case ResultadoRetiroAviso.sinConfirmar:
+        // No se sabe si aterrizó: se vuelve a la lista (que
+        // se recarga) para comprobarlo ANTES de repetir.
+        mostrarSnack(context,
+            'No se pudo confirmar si la rutina se retiró. '
+            'Revisa la lista antes de intentarlo de nuevo.',
+            significado: SignificadoChip.alerta);
+        Navigator.pop(context, true);
     }
   }
 
