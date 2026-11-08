@@ -7,7 +7,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
 
 import '../comprobantes.dart';
 import '../errores_sync.dart';
@@ -42,6 +41,81 @@ String tituloDeOp(Map<String, dynamic> op) {
     }
   } catch (_) {}
   return describirTipoOpConPayload('${op['tipo']}', payload);
+}
+
+/// 1.29 (Oleada 6, D-A3 · migración v68): ¿esta foto de la
+/// cola es visible para el actor de la sesión? REGLA
+/// DECLARADA (vive aquí, junto a su único consumidor):
+/// - El dueño ve todas.
+/// - Un no-dueño solo ve las fotos con SU sello
+///   (fotos_cola.telegram_id = su telegram_id).
+/// - Las fotos SIN sello (NULL) son las previas a v68:
+///   a efectos de visibilidad son DEL DUEÑO — las ve el
+///   dueño y ningún no-dueño, ni en la lista ni en los
+///   contadores.
+/// - Sin identidad numérica de sesión no se acredita
+///   ninguna foto como propia (fail-closed).
+/// Este filtro SOLO decide qué se enseña en esta
+/// pantalla: FotosColaService procesa la cola completa
+/// sin mirar el sello — ocultar una foto a una cuenta
+/// nunca detiene su subida.
+bool fotoVisibleParaActor(Map<String, dynamic> foto,
+    {required bool esDueno, required int? miTelegramId}) {
+  if (esDueno) return true;
+  final sello = foto['telegram_id'];
+  if (sello == null) return false;
+  if (miTelegramId == null) return false;
+  return sello == miTelegramId;
+}
+
+/// 1.29 (Oleada 6, FA-06): etiqueta de autor para una op
+/// pendiente AJENA en la vista del DUEÑO («de Duany ·
+/// suben cuando él entre»): las ops de otra cuenta en
+/// el mismo teléfono solo suben cuando esa cuenta entra
+/// (el push firma con la sesión activa), y sin la
+/// etiqueta el dueño las leía como suyas atascadas.
+/// Devuelve null si la op es mía o no trae evidencia de
+/// otro autor (sin firma = mía, la regla de esOpMia).
+/// El nombre sale de la firma de texto de la propia op;
+/// si solo trae firma numérica (o la columna
+/// telegram_id), se resuelve contra [nombresPorTelegram]
+/// (el directorio de usuarios del pull); si no resuelve,
+/// «de otra cuenta» — nunca un nombre inventado.
+String? etiquetaOpAjena(Map<String, dynamic> op,
+    {required String? miActor,
+    required int? miTelegramId,
+    required Map<int, String> nombresPorTelegram}) {
+  if (!esOpDeOtro(op, miActor: miActor, miTelegramId: miTelegramId)) {
+    return null;
+  }
+  final firma = actorFirmaDeOp(op);
+  if (firma != null && firma.trim().isNotEmpty) {
+    return 'de ${firma.trim()} · suben cuando él entre';
+  }
+  final tid = actorIdNumericoDeOp(op) ??
+      int.tryParse('${op['telegram_id'] ?? ''}');
+  final nombre = tid == null ? null : nombresPorTelegram[tid];
+  if (nombre != null && nombre.trim().isNotEmpty) {
+    return 'de ${nombre.trim()} · suben cuando él entre';
+  }
+  return 'de otra cuenta · suben cuando entre su cuenta';
+}
+
+/// 1.29 (Oleada 6, FA-06): desglose por autor de las ops
+/// pendientes GLOBALES (el conjunto completo de la BD,
+/// no la lista reciente truncada): cuántas son de la
+/// sesión actual y cuántas de otras cuentas. mias +
+/// deOtros suma el total global de pendientes.
+({int mias, int deOtros}) desglosePendientesPorAutor(
+    List<Map<String, dynamic>> pendientes,
+    {required String? miActor, required int? miTelegramId}) {
+  var mias = 0;
+  for (final o in pendientes) {
+    if (esOpMia(o, miActor: miActor, miTelegramId: miTelegramId)) {
+      mias++;
+    }
+  }
+  return (mias: mias, deOtros: pendientes.length - mias);
 }
 
 /// v1.3.4 (detalle ampliable Bajados/Subidos): utilidades de UI
@@ -329,6 +403,14 @@ class _ColaScreenState extends State<ColaScreen> {
   int _fotosPendientes = 0;
   int _fotosSubiendo = 0;
   int _fotosError = 0;
+  // 1.29 (Oleada 6, FA-06): desglose por autor de las
+  // pendientes globales en la vista del DUEÑO (la cifra
+  // de cabecera sigue siendo el total global) y el
+  // directorio telegram_id → nombre para etiquetar las
+  // ops ajenas sin inventar nombres.
+  int _pendientesMias = 0;
+  int _pendientesDeOtros = 0;
+  Map<int, String> _nombresPorTelegram = {};
   // v1.2.9+46: detalle de fotos pendientes/error para gestión.
   List<Map<String, dynamic>> _fotosDetalle = [];
   bool _fotosExpandido = false;
@@ -495,19 +577,20 @@ class _ColaScreenState extends State<ColaScreen> {
       compError =
           await ComprobantesService.instance.comprobantesEnError();
     } catch (_) {}
+    // 1.29 (Oleada 6, D-A3): las filas vivas de la cola se
+    // leen UNA vez, con el sello de autor (v68), y de ahí
+    // salen contadores y detalle. Antes los contadores eran
+    // COUNT(*) globales: un entrenador veía en la cabecera
+    // las fotos de TODOS. Sin límite en la lectura: los
+    // contadores del no-dueño se calculan sobre el conjunto
+    // ya filtrado por autor (la lista truncada a 50 no
+    // puede ser su fuente sin mentir); las filas son
+    // ligeras (sin blobs) y la cola viva es corta por
+    // diseño (lo completado sale de este conjunto).
+    List<Map<String, dynamic>> filasFotos = [];
     try {
       final db = await LocalDb.instance.db;
-      fPend = Sqflite.firstIntValue(await db.rawQuery(
-              "SELECT COUNT(*) FROM fotos_cola WHERE estado='pendiente'")) ??
-          0;
-      fSub = Sqflite.firstIntValue(await db.rawQuery(
-              "SELECT COUNT(*) FROM fotos_cola WHERE estado='subiendo'")) ??
-          0;
-      fErr = Sqflite.firstIntValue(await db.rawQuery(
-              "SELECT COUNT(*) FROM fotos_cola WHERE estado='error'")) ??
-          0;
-      // v1.2.9+46: detalle para gestión (pendientes y con error).
-      fDet = await db.query(
+      filasFotos = await db.query(
         'fotos_cola',
         columns: [
           'id',
@@ -521,13 +604,22 @@ class _ColaScreenState extends State<ColaScreen> {
           'creado_en',
           'proximo_intento_en',
           'forzar_qos',
-          'tamano_bytes'
+          'tamano_bytes',
+          'telegram_id'
         ],
         where: "estado IN ('pendiente', 'subiendo', 'error')",
         orderBy: 'creado_en DESC',
-        limit: 50,
       );
     } catch (_) {}
+    if (_esDueno) {
+      // El dueño ve el total global, como siempre.
+      for (final f in filasFotos) {
+        if (f['estado'] == 'pendiente') fPend++;
+        if (f['estado'] == 'subiendo') fSub++;
+        if (f['estado'] == 'error') fErr++;
+      }
+      fDet = filasFotos.take(50).toList();
+    }
     // v1.12.0 (E1/E2): totales reales (la lista visible tiene
     // límite) + retenidas + la más antigua, para el resumen en
     // sencillo y el botón «Subir ahora».
@@ -543,6 +635,44 @@ class _ColaScreenState extends State<ColaScreen> {
       masAntiguaIso =
           await LocalDb.instance.isoOpPendienteMasAntigua();
     } catch (_) {}
+    // 1.29 (Oleada 6, FA-06): en la vista del DUEÑO, el
+    // desglose por autor de las pendientes GLOBALES (la
+    // cifra de cabecera NO cambia: sigue siendo el total
+    // global de countPendingOps, el mismo de Salud del
+    // sync) y el directorio de nombres para las etiquetas
+    // de las filas. Se lee el conjunto completo de
+    // pendientes (columnas ligeras), no la lista reciente
+    // de 30: el desglose tiene que sumar el total.
+    var pendientesMias = 0;
+    var pendientesDeOtros = 0;
+    var nombresPorTelegram = <int, String>{};
+    if (_esDueno) {
+      try {
+        final db = await LocalDb.instance.db;
+        final pendientes = await db.query('ops_queue',
+            columns: ['op_uuid', 'tipo', 'payload', 'telegram_id'],
+            where: "estado = 'pendiente'");
+        final desg = desglosePendientesPorAutor(pendientes,
+            miActor: _miActor, miTelegramId: _miTelegramId);
+        pendientesMias = desg.mias;
+        pendientesDeOtros = desg.deOtros;
+        final rawDir = await LocalDb.instance.getMeta('usuarios_apk');
+        if (rawDir != null && rawDir.isNotEmpty) {
+          final dec = jsonDecode(rawDir);
+          if (dec is List) {
+            for (final e in dec) {
+              if (e is Map) {
+                final tid = int.tryParse('${e['telegram_id'] ?? ''}');
+                final nombre = '${e['nombre'] ?? ''}'.trim();
+                if (tid != null && nombre.isNotEmpty) {
+                  nombresPorTelegram[tid] = nombre;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
     // Ronda 17 M6-H1: un no-dueño solo ve sus ops (y el banner
     // cuenta solo lo suyo: exacto si la lista no se truncó en 30).
     final opsVisibles = _esDueno
@@ -557,17 +687,25 @@ class _ColaScreenState extends State<ColaScreen> {
             .where((o) => esOpMia(o,
                 miActor: _miActor, miTelegramId: _miTelegramId))
             .toList();
-    // Ronda 17 M6-H1 (extensión): las fotos pendientes de un
-    // cliente protegido tampoco se muestran a un no-dueño
-    // (la fila enseña la miniatura). Sin columna de actor en
-    // fotos_cola, entre entrenadores no se pueden separar.
+    // Ronda 17 M6-H1 (extensión) + 1.29 (Oleada 6, D-A3):
+    // a un no-dueño, la lista Y los contadores de fotos
+    // pasan por DOS filtros que se componen: (1) el de
+    // AUTOR de v68 (fotoVisibleParaActor: suyas selladas;
+    // las previas sin sello son del dueño y no se le
+    // enseñan) y (2) el de cliente protegido vigente (la
+    // fila enseña la miniatura: la foto pendiente de un
+    // protegido no se muestra ni siendo de su autor).
     var fotosVisibles = fDet;
     if (!_esDueno) {
+      var porAutor = filasFotos
+          .where((f) => fotoVisibleParaActor(f,
+              esDueno: false, miTelegramId: _miTelegramId))
+          .toList();
       try {
         // D-03 (1.21): solo hacen falta los clientes de las
-        // fotos visibles (≤50), no el espejo entero.
+        // fotos en juego, no el espejo entero.
         final idsFotos = <int>{
-          for (final f in fDet)
+          for (final f in porAutor)
             if (f['cliente_id'] is int) f['cliente_id'] as int,
         };
         final clientes = idsFotos.isEmpty
@@ -578,13 +716,17 @@ class _ColaScreenState extends State<ColaScreen> {
           for (final c in clientes)
             if (esVistaProtegida(c)) c['id'] as int,
         };
-        fotosVisibles = fDet.where((f) {
+        porAutor = porAutor.where((f) {
           final cid = f['cliente_id'];
           if (cid is int) return !protegidos.contains(cid);
           final n = int.tryParse('$cid');
           return n == null || !protegidos.contains(n);
         }).toList();
       } catch (_) {}
+      fotosVisibles = porAutor;
+      fPend = porAutor.where((f) => f['estado'] == 'pendiente').length;
+      fSub = porAutor.where((f) => f['estado'] == 'subiendo').length;
+      fErr = porAutor.where((f) => f['estado'] == 'error').length;
     }
     // Ronda 17 M6-H1+H3: a un no-dueño, el banner cuenta
     // solo lo suyo (el total de BD es global).
@@ -619,6 +761,9 @@ class _ColaScreenState extends State<ColaScreen> {
         _totalPendientes = totalPendientesFinal;
         _desglosePendientes = desgloseFinal;
         _masAntiguaIso = masAntiguaIso;
+        _pendientesMias = pendientesMias;
+        _pendientesDeOtros = pendientesDeOtros;
+        _nombresPorTelegram = nombresPorTelegram;
       });
     }
   }
@@ -925,6 +1070,19 @@ class _ColaScreenState extends State<ColaScreen> {
             style: AppTexto.cuerpo
                 .copyWith(fontWeight: FontWeight.w600),
           ),
+          // 1.29 (Oleada 6, FA-06): el desglose por autor
+          // junto a la cifra global (solo dueño: en su
+          // vista el total es el de TODAS las cuentas del
+          // teléfono; el de un entrenador ya viene
+          // recortado a lo suyo y no llevaría esta línea).
+          if (_esDueno) ...[
+            const SizedBox(height: 4),
+            Text(
+              '$_totalPendientes pendientes · $_pendientesMias tuyas · '
+              '$_pendientesDeOtros de otros',
+              style: AppTexto.secundario,
+            ),
+          ],
           if (desglose.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(desglose, style: AppTexto.secundario),
@@ -2169,7 +2327,15 @@ class _ColaScreenState extends State<ColaScreen> {
                         ),
                       ],
                     ),
-                    child: ListTile(
+                    // 1.29 (Oleada 6): Material propio y
+                    // transparente — el ListTile quedaba bajo
+                    // el DecoratedBox del Container sin un
+                    // Material intermedio: su tinta no se
+                    // pintaba y el chequeo del framework lo
+                    // marca como error.
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: ListTile(
                       leading: Icon(_iconoEstado(estado),
                           size: 26,
                           color: _colorEstado(estado)),
@@ -2214,6 +2380,31 @@ class _ColaScreenState extends State<ColaScreen> {
                               );
                             },
                           ),
+                        // 1.29 (Oleada 6, FA-06): en la vista
+                        // del dueño, la op pendiente de OTRA
+                        // cuenta se etiqueta con su autor:
+                        // no sube con su sesión, sube cuando
+                        // él entre.
+                        if (esPendiente && _esDueno)
+                          Builder(builder: (context) {
+                            final et = etiquetaOpAjena(op,
+                                miActor: _miActor,
+                                miTelegramId: _miTelegramId,
+                                nombresPorTelegram:
+                                    _nombresPorTelegram);
+                            if (et == null) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                  top: AppEspacio.xs),
+                              child: Text(
+                                et,
+                                style: AppTexto.secundario.copyWith(
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            );
+                          }),
                         if (esPendiente)
                           Padding(
                             padding:
@@ -2251,6 +2442,7 @@ class _ColaScreenState extends State<ColaScreen> {
                           )
                         : _estadoChip(estado),
                     onTap: () => _verDetalle(op),
+                    ),
                     ),
                   ),
                 );
