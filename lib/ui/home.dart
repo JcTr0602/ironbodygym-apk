@@ -29,7 +29,11 @@ import '../sync.dart';
 import '../theme.dart';
 import '../tiempo.dart';
 import 'admin.dart';
+import 'buzon_dueno.dart';
 import 'horario_gym.dart';
+import 'reservas.dart';
+import 'servicios_admin.dart';
+import 'solicitudes_adelanto.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'ajustes.dart';
 import 'bandeja.dart';
@@ -233,6 +237,12 @@ class _HomeScreenState extends State<HomeScreen>
   // señal, como las filas del Panel.
   SenalAtencion _atencion = const SenalAtencion();
   int _atencionGen = 0;
+  // 1.29 (Oleada 5, FB-12): buzón del dueño — reservas,
+  // adelantos y rellenos por responder, contados en
+  // segundo pase SOLO con datos locales (ver
+  // _cargarBuzonDueno). Solo dueño.
+  ConteoBuzon _buzon = const ConteoBuzon();
+  int _buzonGen = 0;
   StreamSubscription? _sub;
   final _auth = AuthService();
 
@@ -963,6 +973,9 @@ class _HomeScreenState extends State<HomeScreen>
       // v1.8.0: señal de atención del dueño en segundo pase (las
       // RPC no bloquean el pintado local; ver _cargarAtencionDueno).
       if (_auth.isOwner) unawaited(_cargarAtencionDueno());
+      // 1.29 (Oleada 5, FB-12): el buzón, también en
+      // segundo pase y solo del dueño.
+      if (_auth.isOwner) unawaited(_cargarBuzonDueno());
       // v1.19 (bandeja): visibilidad y badge en segundo pase (la
       // lectura del espejo no bloquea el pintado del home).
       unawaited(_cargarBandeja());
@@ -1038,6 +1051,98 @@ class _HomeScreenState extends State<HomeScreen>
       _atencion =
           SenalAtencion(solicitudes: solicitudes, reportesPlus: reportes);
     });
+  }
+
+  /// 1.29 (Oleada 5, FB-12): segundo pase del buzón del
+  /// dueño. Cuenta SOLO datos locales ya presentes (el
+  /// espejo de reservas en 'solicitada', el espejo de
+  /// solicitudes_adelanto en 'pendiente' — la misma
+  /// lectura de su bandeja — y el espejo de
+  /// solicitudes_relleno en 'pendiente'): ninguna RPC,
+  /// Home sigue offline-first. Fail-silent POR FUENTE
+  /// con la regla de la bandeja: un fallo de lectura
+  /// conserva el conteo anterior de ESA fuente, nunca
+  /// lo pone a 0 (ocultaría pendientes reales).
+  Future<void> _cargarBuzonDueno() async {
+    final gen = ++_buzonGen;
+    var reservas = _buzon.reservas;
+    var adelantos = _buzon.adelantos;
+    var rellenos = _buzon.rellenos;
+    try {
+      final filas = await LocalDb.instance.allMirror('reservas');
+      reservas =
+          filas.where((r) => r['estado'] == 'solicitada').length;
+    } catch (_) {}
+    try {
+      final todas =
+          await SolicitudesAdelantoService.instance.todasParaDueno();
+      adelantos =
+          todas.where((s) => s.estado == 'pendiente').length;
+    } catch (_) {}
+    try {
+      rellenos = (await SolicitudesRellenoService.instance
+              .pendientesParaDueno())
+          .length;
+    } catch (_) {}
+    if (!mounted || gen != _buzonGen) return;
+    setState(() {
+      _buzon = ConteoBuzon(
+          reservas: reservas, adelantos: adelantos, rellenos: rellenos);
+    });
+  }
+
+  /// 1.29 (Oleada 5, FB-12): la tarjeta del buzón en el
+  /// nivel «Hoy» — una fila por parte no-cero, cada una
+  /// a su bandeja. Sin pendientes no existe.
+  Widget _tarjetaBuzon() {
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.markunread_mailbox_rounded,
+                  color: AppColores.naranja, size: 20),
+              const SizedBox(width: 8),
+              Text('Buzón · por responder',
+                  style: AppTexto.subtitulo),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.xs),
+          for (final parte in _buzon.partes)
+            InkWell(
+              borderRadius: BorderRadius.circular(AppRadio.md),
+              onTap: () => _abrirBuzon(parte.destino),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppEspacio.sm),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(parte.texto,
+                          style: AppTexto.secundario),
+                    ),
+                    const Icon(Icons.chevron_right_rounded,
+                        size: 20),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _abrirBuzon(DestinoBuzon destino) {
+    switch (destino) {
+      case DestinoBuzon.reservas:
+        _ir(const ReservasScreen());
+      case DestinoBuzon.adelantos:
+        _ir(const SolicitudesAdelantoScreen());
+      case DestinoBuzon.rellenos:
+        _ir(const ServiciosAdminScreen());
+    }
   }
 
   Future<void> _salir() async {
@@ -1140,8 +1245,13 @@ class _HomeScreenState extends State<HomeScreen>
     // Argón: controlador en el State, claves estables).
     final items = <Widget>[
       // v1.3.3: cabecera compacta
+      // 1.29 (D-21): con su micro-animación de entrada
+      // (fundido + desplazamiento corto, una sola vez al
+      // montar; la clave estable conserva el estado del
+      // envoltorio entre reconstrucciones).
       KeyedSubtree(
-          key: const ValueKey('home-cabecera'), child: _cabecera()),
+          key: const ValueKey('home-cabecera'),
+          child: _EntradaCabecera(child: _cabecera())),
       // Rediseño Argón: un solo banner de sync (ver
       // _bannerSync): si coexisten fallo y aviso, manda
       // el fallo; al descartarlo reaparece el aviso.
@@ -1241,8 +1351,13 @@ class _HomeScreenState extends State<HomeScreen>
     Widget segmento(int nivel, IconData icono, String texto,
         {int contador = 0}) {
       final activo = _nivelActivo == nivel;
+      // 1.29 (Oleada 5, D-14): el segmento activo va
+      // sobre el gradiente naranja — su letra pasa a
+      // grafito (sobreMarca), la regla fundacional de la
+      // oleada 1 («blanco sobre naranja, prohibido»: daba
+      // 2,75; el grafito da 6,32).
       final colorTexto = activo
-          ? Colors.white
+          ? AppColores.sobreMarca
           : AppColores.textoSecundario(context);
       return Expanded(
         child: InkWell(
@@ -1379,6 +1494,20 @@ class _HomeScreenState extends State<HomeScreen>
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
               child: _botonBandejaWhatsapp(),
+            ),
+          ),
+        // 1.29 (Oleada 5, FB-12): buzón del dueño — solo
+        // si hay algo por responder. No es un bloque de
+        // la estación personalizable: es un aviso
+        // operativo (como la tira de alertas, pero con
+        // destino por parte).
+        if (_auth.isOwner && _buzon.hay)
+          KeyedSubtree(
+            key: const ValueKey('hoy-buzon'),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: _tarjetaBuzon(),
             ),
           ),
         // v1.3.3: tira de alertas (solo si hay algo)
@@ -1597,7 +1726,7 @@ class _HomeScreenState extends State<HomeScreen>
         accion(Icons.today_rounded, 'Pago diario',
             () => _ir(const PagoDiarioScreen())),
         const SizedBox(width: AppEspacio.sm),
-        accion(Icons.person_add_alt_1_rounded, 'Inscribir', () async {
+        accion(Icons.person_add_rounded, 'Inscribir', () async {
           // 1.24 Bloque 3: permiso operativo al tocar.
           // 1.25 Bloque 2: con refresco antes de denegar.
           if (await permisoOperativoOkConRefresco(
@@ -1628,26 +1757,35 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           Row(
             children: [
-              // Avatar tocable -> Ajustes
+              // 1.29 (Oleada 5, D-21): el logo deja de ser
+              // un cuadrado pegado: va en una TARJETA
+              // oscura (grafito profundo sobre el gradiente
+              // carbón) con borde hairline naranja y radio
+              // generoso. El toque sigue yendo a Ajustes —
+              // es el botón «ajustes» del trío de la
+              // cabecera — y el área tocable es 48×48.
               InkWell(
-                borderRadius: BorderRadius.circular(AppRadio.circular),
+                borderRadius: BorderRadius.circular(AppRadio.lg),
                 onTap: () => _ir(const AjustesScreen()),
-                // 1.23 B11: el dibujo sigue en 40×40 pero el
-                // área tocable crece a 48×48 (mínimo cómodo).
-                child: SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: Center(
-                    child: Tooltip(
-                      message: 'Ajustes',
-                      child: ClipRRect(
-                        borderRadius:
-                            BorderRadius.circular(AppRadio.circular),
-                        child: Image.asset('assets/logo.jpg',
-                            height: 40,
-                            width: 40,
-                            fit: BoxFit.cover),
-                      ),
+                child: Tooltip(
+                  message: 'Ajustes',
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: AppColores.carbonProfundo,
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.lg),
+                      border: Border.all(
+                          color: AppColores.naranja
+                              .withValues(alpha: 0.55)),
+                    ),
+                    child: ClipRRect(
+                      borderRadius:
+                          BorderRadius.circular(AppRadio.md),
+                      child: Image.asset('assets/logo.jpg',
+                          fit: BoxFit.cover),
                     ),
                   ),
                 ),
@@ -1659,10 +1797,11 @@ class _HomeScreenState extends State<HomeScreen>
                       CrossAxisAlignment.start,
                   children: [
                     // B9 (1.23): marca en Home — el wordmark
-                    // con la misma voz del login (IRON en
-                    // blanco, BODY en naranja) manda en la
-                    // cabecera; el saludo baja a línea
-                    // personal secundaria con su rol.
+                    // manda en la cabecera; el saludo baja a
+                    // línea personal secundaria con su rol.
+                    // 1.29 (D-21): la jerarquía pasa a
+                    // «IRON BODY» en blanco y «GYM» en
+                    // naranja, con el tracking de siempre.
                     RichText(
                       overflow: TextOverflow.ellipsis,
                       text: TextSpan(
@@ -1671,11 +1810,11 @@ class _HomeScreenState extends State<HomeScreen>
                             letterSpacing: 1),
                         children: const [
                           TextSpan(
-                              text: 'IRON ',
+                              text: 'IRON BODY',
                               style:
                                   TextStyle(color: Colors.white)),
                           TextSpan(
-                              text: 'BODY',
+                              text: ' GYM',
                               style: TextStyle(
                                   color: AppColores.naranja)),
                         ],
@@ -1697,33 +1836,36 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
               ),
-              // 1.25 T116 (F1-06): el icono de sync con badge
-              // salió de la cabecera — la SyncPill de debajo ya
-              // dice «N por subir» / «Al día · hace X» y lleva
-              // a la misma Cola. Dos señales podían discrepar.
+              // 1.29 (Oleada 5, D-21): los iconos de la
+              // cabecera van en botones CIRCULARES con
+              // contenedor (fondo translúcido, toque ≥48).
+              // El de sync VUELVE a la primera fila — la
+              // T116 lo sacó porque dos señales podían
+              // discrepar; este lee la MISMA foto del
+              // motor que la SyncPill de debajo
+              // (statusStream/currentStatus), así que por
+              // construcción dice lo mismo, y la píldora
+              // conserva el detalle en texto.
+              _BotonSyncCabecera(
+                  onTap: () => _ir(const ColaScreen())),
               _campana(),
               // v1.3.6 (Jc): la lupa salió del banner; Buscar cliente vive
               // en el Mostrador Rápido (rediseño Argón, zona 2).
-              IconButton(
+              _BotonCabecera(
+                icono: Icons.help_outline_rounded,
                 tooltip: 'Ayuda',
-                color: Colors.white70,
-                icon: const Icon(Icons.help_outline_rounded),
-                onPressed: () =>
-                    _ir(const AyudaScreen()),
+                onPressed: () => _ir(const AyudaScreen()),
               ),
               ValueListenableBuilder<ThemeMode>(
                 valueListenable: ThemeController.mode,
-                builder: (_, mode, __) => IconButton(
-                  tooltip:
-                      'Tema: claro / oscuro / sistema',
-                  color: Colors.white70,
-                  icon: Icon(mode == ThemeMode.dark
+                builder: (_, mode, __) => _BotonCabecera(
+                  icono: mode == ThemeMode.dark
                       ? Icons.light_mode_rounded
                       : mode == ThemeMode.light
                           ? Icons.dark_mode_rounded
-                          : Icons.brightness_auto_rounded),
-                  onPressed: () =>
-                      ThemeController.ciclo(),
+                          : Icons.brightness_auto_rounded,
+                  tooltip: 'Tema: claro / oscuro / sistema',
+                  onPressed: () => ThemeController.ciclo(),
                 ),
               ),
             ],
@@ -1815,33 +1957,15 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Campana de notificaciones con contador (item 3 del Home).
+  /// 1.29 (D-21): en el botón circular de la cabecera,
+  /// con su contador como insignia.
   Widget _campana() {
-    return Stack(
-      children: [
-        IconButton(
-          tooltip: 'Actividad',
-          color: Colors.white70,
-          icon: const Icon(Icons.notifications_rounded),
-          onPressed: () => _ir(const ActividadScreen()),
-        ),
-        if (_noLeidas > 0)
-          Positioned(
-            right: 8,
-            top: 8,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              decoration: const BoxDecoration(
-                color: AppColores.error,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '${_noLeidas > 9 ? '9+' : _noLeidas}',
-                style: AppTexto.minuscula.copyWith(
-                    color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-      ],
+    return _BotonCabecera(
+      icono: Icons.notifications_rounded,
+      tooltip: 'Actividad',
+      onPressed: () => _ir(const ActividadScreen()),
+      insignia:
+          _noLeidas > 0 ? (_noLeidas > 9 ? '9+' : '$_noLeidas') : null,
     );
   }
 
@@ -3341,7 +3465,7 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                     _accionAnimada(1, Icons.today_rounded, 'Pago diario',
                         () => _irCerrando(widget.onPagoDiario)),
                     const SizedBox(height: 8),
-                    _accionAnimada(2, Icons.person_add_alt_1_rounded,
+                    _accionAnimada(2, Icons.person_add_rounded,
                         'Inscribir', () => _irCerrando(widget.onInscribir)),
                     const SizedBox(height: 12),
                     _accionAnimada(3, Icons.water_drop_rounded,
@@ -3622,6 +3746,213 @@ class _DialogoEstacionDiariaState
             onPressed: () => Navigator.pop(context, _sel),
             child: const Text('Guardar')),
       ],
+    );
+  }
+}
+
+/// 1.29 (Oleada 5, D-21): micro-animación de entrada de
+/// la cabecera — fundido y desplazamiento corto UNA
+/// sola vez al montar la principal. Con «reducir
+/// movimiento» activo, la cabecera nace puesta, sin
+/// animar.
+class _EntradaCabecera extends StatefulWidget {
+  final Widget child;
+
+  const _EntradaCabecera({required this.child});
+
+  @override
+  State<_EntradaCabecera> createState() => _EntradaCabeceraState();
+}
+
+class _EntradaCabeceraState extends State<_EntradaCabecera>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 350));
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.of(context).disableAnimations) return widget.child;
+    final curva =
+        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    return FadeTransition(
+      opacity: curva,
+      child: SlideTransition(
+        position: Tween<Offset>(
+                begin: const Offset(0, -0.06), end: Offset.zero)
+            .animate(curva),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 5, D-21): botón circular de la cabecera
+/// — contenedor translúcido sobre el gradiente carbón,
+/// borde hairline, zona tocable de 48×48 e icono blanco.
+/// Admite una insignia con contador (la campana) o un
+/// punto de estado (el sync).
+class _BotonCabecera extends StatelessWidget {
+  final IconData icono;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final String? insignia;
+  final Color? punto;
+  final Animation<double>? giro;
+
+  const _BotonCabecera({
+    required this.icono,
+    required this.tooltip,
+    required this.onPressed,
+    this.insignia,
+    this.punto,
+    this.giro,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final iconoW = Icon(icono, color: Colors.white, size: 22);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.08),
+        shape: CircleBorder(
+          side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.16)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: giro == null
+                      ? iconoW
+                      : RotationTransition(turns: giro!, child: iconoW),
+                ),
+                if (insignia != null)
+                  Positioned(
+                    right: 2,
+                    top: 2,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: AppColores.error,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        insignia!,
+                        style: AppTexto.minuscula.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                if (punto != null)
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: punto,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: AppColores.carbonProfundo,
+                            width: 2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 5, D-21): el botón de sync de la
+/// cabecera, con estado VIVO: gira mientras el motor
+/// sincroniza y lleva el punto de estado (error /
+/// pendientes / al día). Lee la MISMA foto del motor
+/// que la SyncPill (statusStream con currentStatus de
+/// semilla): las dos señales no pueden discrepar.
+class _BotonSyncCabecera extends StatefulWidget {
+  final VoidCallback onTap;
+
+  const _BotonSyncCabecera({required this.onTap});
+
+  @override
+  State<_BotonSyncCabecera> createState() =>
+      _BotonSyncCabeceraState();
+}
+
+class _BotonSyncCabeceraState extends State<_BotonSyncCabecera>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _giro;
+
+  @override
+  void initState() {
+    super.initState();
+    _giro = AnimationController(
+        vsync: this, duration: const Duration(seconds: 2));
+  }
+
+  @override
+  void dispose() {
+    _giro.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<SyncStatus>(
+      stream: SyncEngine.instance.statusStream,
+      initialData: SyncEngine.instance.currentStatus,
+      builder: (ctx, snap) {
+        final s = snap.data!;
+        final enProgreso = s.phase == SyncPhase.uploading ||
+            s.phase == SyncPhase.downloading ||
+            s.phase == SyncPhase.photos;
+        if (enProgreso && !_giro.isAnimating) {
+          _giro.repeat();
+        } else if (!enProgreso && _giro.isAnimating) {
+          _giro.stop();
+        }
+        final punto = s.phase == SyncPhase.error
+            ? AppColores.error
+            : s.pending > 0
+                ? AppColores.alerta
+                : AppColores.exito;
+        return _BotonCabecera(
+          icono: s.phase == SyncPhase.error
+              ? Icons.sync_problem_rounded
+              : Icons.sync_rounded,
+          tooltip: 'Sincronización',
+          onPressed: widget.onTap,
+          punto: punto,
+          giro: enProgreso ? _giro : null,
+        );
+      },
     );
   }
 }
