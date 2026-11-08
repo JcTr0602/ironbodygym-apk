@@ -7138,6 +7138,12 @@ class LocalDb {
     try {
       await LocalDb.instance.purgarDatosSensibles();
     } catch (_) {}
+    // 1.29 (Oleada 8, FB-23): la caché de «Actividad en la
+    // app de clientes» es del dueño y no debe quedar legible
+    // en el teléfono compartido cuando entra otra cuenta.
+    try {
+      await LocalDb.instance.borrarMetasConPrefijo('fb23_');
+    } catch (_) {}
     try {
       final p = await SharedPreferences.getInstance();
       for (final k in p
@@ -7198,6 +7204,20 @@ class LocalDb {
     final d = txn ?? await db;
     final rows = await d.query('meta', where: 'k=?', whereArgs: [k]);
     return rows.isEmpty ? null : rows.first['v'] as String;
+  }
+
+  /// Borra en UNA transacción todas las metas cuyo nombre
+  /// empieza con [prefijo]. Devuelve cuántas claves había.
+  Future<int> borrarMetasConPrefijo(String prefijo) async {
+    final claves = await metasConPrefijo(prefijo);
+    if (claves.isEmpty) return 0;
+    final d = await db;
+    await d.transaction((txn) async {
+      for (final k in claves) {
+        await txn.delete('meta', where: 'k = ?', whereArgs: [k]);
+      }
+    });
+    return claves.length;
   }
 
   /// 1.28 (M1-A4/R2M1-F8): la pareja de calibración de la hora
