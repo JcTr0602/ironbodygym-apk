@@ -28,11 +28,13 @@ Future<void> _init() async {
 }
 
 void main() {
-  test('v67 limpia: la BD nace en la versión 67', () async {
+  test('v67 limpia: la BD nace en la versión vigente', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 67);
-    expect(await db.getVersion(), 67);
+    // 67 era la vigente al nacer este test; 1.29 (Oleada 6,
+    // D-A3) la subió a 68 (sello de autor en fotos_cola).
+    expect(LocalDb.versionActual, 68);
+    expect(await db.getVersion(), 68);
   });
 
   test('upgrade 66→67: resetea el watermark de '
@@ -49,7 +51,9 @@ void main() {
     await LocalDb.resetParaTest(borrarArchivo: false);
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 67);
+    // La cadena corre 66→67→68: el destino es la vigente y
+    // el efecto de v67 (el reset) queda aplicado.
+    expect(await db.getVersion(), 68);
     expect(
         await LocalDb.instance
             .getWatermarkTabla('espejo_recordatorio_config'),

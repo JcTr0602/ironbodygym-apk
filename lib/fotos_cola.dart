@@ -226,6 +226,9 @@ class FotosColaService {
     final db = await LocalDb.instance.db;
     // v1.3.4 (Argón): hora Habana, estándar obligatorio (no DateTime.now()).
     final ahora = isoHabana(ahoraHabana());
+    // 1.29 (Oleada 6, D-A3): el sello de autor se lee UNA vez,
+    // fuera de la transacción (solo lee la sesión, no la BD).
+    final selloAutor = _identidadSegura()['telegram_id'] as int?;
     // v1.2.9+40 (Gemini): inserts individuales en vez de batch para
     // trazabilidad (son 1-3 filas, el costo es despreciable).
     var n = 0;
@@ -307,6 +310,12 @@ class FotosColaService {
           'suplemento_id': suplementoId,
           'ruta_local': entry.value,
           'tamano_bytes': tamano,
+          // 1.29 (Oleada 6, D-A3 · migración v68): sello de
+          // autor — el telegram_id de la sesión que encola,
+          // el mismo que queueOp pone en las ops. Sin sesión
+          // queda NULL y la lectura lo trata como del dueño
+          // (la regla declarada de las fotos previas a v68).
+          'telegram_id': selloAutor,
           // Fix Luna 5: defaults explícitos, no depender del esquema.
           'estado': 'pendiente',
           'intentos': 0,

@@ -112,7 +112,7 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 67;
+  static const int versionActual = 68;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1574,6 +1574,24 @@ class LocalDb {
               "INSERT OR REPLACE INTO meta (k, v) "
               "VALUES ('wm_espejo_recordatorio_config', '0')");
         }
+        if (oldV < 68) {
+          // 1.29 (Oleada 6, D-A3): sello de autor en
+          // fotos_cola — el telegram_id de quien encoló la
+          // foto, el mismo sello que queueOp pone en las
+          // ops. Sin él, la pantalla de la cola no podía
+          // separar las fotos por autor entre entrenadores
+          // que comparten teléfono (el comentario de
+          // cola.dart lo decía literal: «sin columna de
+          // actor en fotos_cola no se pueden separar»).
+          // Las fotos previas quedan con NULL y la regla
+          // de lectura las trata como DEL DUEÑO: las ve el
+          // dueño y ningún no-dueño (ni en la lista ni en
+          // los contadores). El servicio de subida procesa
+          // la cola completa sin mirar el sello: ocultar
+          // una foto a una cuenta nunca detiene su subida.
+          await _addColumnIfMissing(
+              db, 'fotos_cola', 'telegram_id', 'INTEGER');
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2754,6 +2772,12 @@ class LocalDb {
             'CREATE INDEX IF NOT EXISTS idx_fotos_cola_despachador ON fotos_cola(estado, intentos, creado_en)');
         await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_fotos_cola_op_uuid ON fotos_cola(op_uuid)');
+        // 1.29 (v68, Oleada 6, D-A3): sello de autor de la
+        // foto — paridad con la migración v68 (la definición
+        // sale del MISMO _addColumnIfMissing para que
+        // onCreate y onUpgrade produzcan el mismo esquema).
+        await _addColumnIfMissing(
+            db, 'fotos_cola', 'telegram_id', 'INTEGER');
         // v17 (2026-10-13): bitácora local para diagnóstico forense.
         await db.execute('CREATE TABLE IF NOT EXISTS app_log ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -9671,6 +9695,17 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// 1.29 (Oleada 6, D-16): ops que FALLARON al subir o
+  /// esperan decisión (error, rechazada, necesita_revision)
+  /// — el «falló» del aviso de estado de la Salud del sync.
+  Future<int> countOpsFallidas() async {
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) c FROM ops_queue WHERE estado IN '
+        "('error', 'rechazada', 'necesita_revision')");
+    return Sqflite.firstIntValue(r) ?? 0;
+  }
+
   /// 1.23 (W1): filas crudas de una tabla espejo. El nombre es
   /// siempre una constante interna de la app (nunca entrada
   /// del usuario): sirve al diagnóstico de espejo vacío.
@@ -9798,6 +9833,78 @@ class LocalDb {
   Future<List<Map<String, dynamic>>> recentOps({int limit = 30}) async {
     final d = await db;
     return d.query('ops_queue', orderBy: 'creada_ts DESC', limit: limit);
+  }
+
+  /// 1.29 (Oleada 6, FB-16): un bloque del río de ops para
+  /// la Auditoría, con cursor ESTABLE (creada_ts + rowid):
+  /// la paginación por OFFSET repetía o saltaba filas
+  /// cuando la cola cambiaba entre bloques, y el límite
+  /// fijo de 100 de recentOps dejaba la mañana
+  /// inalcanzable en días con más de 100 operaciones.
+  /// ops_queue no tiene columna `id` (su PK es op_uuid):
+  /// el rowid es la identidad física estable de la fila
+  /// y desempata los creada_ts repetidos. Sin cursor =
+  /// primer bloque. Cada fila trae además `_rowid`.
+  Future<List<Map<String, dynamic>>> opsAuditoriaBloque({
+    ({String ts, int rowid})? cursor,
+    int limite = 100,
+  }) async {
+    final d = await db;
+    if (cursor == null) {
+      return d.rawQuery(
+          'SELECT rowid AS _rowid, * FROM ops_queue '
+          'ORDER BY creada_ts DESC, rowid DESC LIMIT ?',
+          [limite]);
+    }
+    return d.rawQuery(
+        'SELECT rowid AS _rowid, * FROM ops_queue '
+        'WHERE creada_ts < ? OR (creada_ts = ? AND rowid < ?) '
+        'ORDER BY creada_ts DESC, rowid DESC LIMIT ?',
+        [cursor.ts, cursor.ts, cursor.rowid, limite]);
+  }
+
+  /// 1.29 (Oleada 6, FB-16): cuántas ops se crearon el día
+  /// ISO dado (yyyy-MM-dd, prefijo de creada_ts) — el
+  /// denominador honesto del contador de la Auditoría.
+  Future<int> contarOpsDelDia(String diaIso) async {
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) c FROM ops_queue '
+        'WHERE substr(creada_ts, 1, 10) = ?',
+        [diaIso]);
+    return Sqflite.firstIntValue(r) ?? 0;
+  }
+
+  /// 1.29 (Oleada 6, FB-16): las ops creadas el día ISO
+  /// dado, del más reciente al más antiguo. Lo usa la
+  /// Auditoría para el denominador del no-dueño (su total
+  /// de hoy se cuenta sobre SU universo visible, aplicando
+  /// esOpMia en Dart: la firma de actor no es expresable
+  /// en SQL).
+  Future<List<Map<String, dynamic>>> opsDelDia(String diaIso) async {
+    final d = await db;
+    return d.rawQuery(
+        'SELECT * FROM ops_queue '
+        'WHERE substr(creada_ts, 1, 10) = ? '
+        'ORDER BY creada_ts DESC, rowid DESC',
+        [diaIso]);
+  }
+
+  /// 1.29 (Oleada 6, D-B3-09): el río de ops COMPLETO de
+  /// una ventana de días ISO [desdeIso, hastaIso] (por el
+  /// prefijo de fecha de creada_ts), SIN tope de conteo.
+  /// La Auditoría por persona lo carga una vez por ventana
+  /// y filtra en memoria; el recentOps(limit: 500) anterior
+  /// recortaba el río por conteo y las cifras de un mes con
+  /// más de 500 ops salían de un río incompleto sin decirlo.
+  Future<List<Map<String, dynamic>>> opsEntreFechas(
+      String desdeIso, String hastaIso) async {
+    final d = await db;
+    return d.rawQuery(
+        'SELECT * FROM ops_queue '
+        'WHERE substr(creada_ts, 1, 10) BETWEEN ? AND ? '
+        'ORDER BY creada_ts DESC, rowid DESC',
+        [desdeIso, hastaIso]);
   }
 
   /// Cancela una operación propia aún no aplicada ni rechazada

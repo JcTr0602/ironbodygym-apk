@@ -56,11 +56,12 @@ void main() {
     // 1.28 (M1-A5): la versión vigente pasó a 65 (columna
     // reclamada_en); 1.28 (M5-B3): a 66 (pausada_hasta en
     // recordatorio_config); 1.28 (corrección A5-D1): a 67
-    // (reset del watermark de recordatorios). Lo que este
-    // test fija de v64 es que la instalación limpia trae su
-    // columna de backoff.
-    expect(LocalDb.versionActual, 67);
-    expect(await db.getVersion(), 67);
+    // (reset del watermark de recordatorios); 1.29
+    // (Oleada 6, D-A3): a 68 (sello de autor en
+    // fotos_cola). Lo que este test fija de v64 es que la
+    // instalación limpia trae su columna de backoff.
+    expect(LocalDb.versionActual, 68);
+    expect(await db.getVersion(), 68);
     expect(
         await _tieneColumna(db, 'comprobantes_pago', 'proximo_intento_en'),
         isTrue,
@@ -82,10 +83,10 @@ void main() {
     await LocalDb.resetParaTest();
 
     db = await LocalDb.instance.db;
-    // La apertura corre la cadena 63→64→65→66→67: el destino
-    // es la versión vigente y los efectos de v64 quedan
-    // aplicados.
-    expect(await db.getVersion(), 67);
+    // La apertura corre la cadena 63→64→65→66→67→68: el
+    // destino es la versión vigente y los efectos de v64
+    // quedan aplicados.
+    expect(await db.getVersion(), 68);
     expect(
         await LocalDb.instance
             .getWatermarkTabla('espejo_recordatorio_config'),
