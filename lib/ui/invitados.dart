@@ -2126,37 +2126,16 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   }
 
   /// v1.12.0 (B2): diálogo de motivo obligatorio → RPC de rechazo.
+  /// 1.29 (Oleada 4, barrido): el diálogo vive en un
+  /// StatefulWidget dueño de su controlador
+  /// (_DialogoRechazarInvitado); antes se disponía al
+  /// resolver el showDialog con el campo aún reconstruyéndose
+  /// en la animación de salida (defecto D-B1-08).
   Future<void> _rechazar() async {
-    final motivoCtrl = TextEditingController();
     final motivo = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rechazar solicitud'),
-        content: TextField(
-          controller: motivoCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Motivo del rechazo',
-            hintText: 'Ej.: cupo lleno este mes',
-            border: OutlineInputBorder(),
-          ),
-          maxLength: 120,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(ctx).pop(motivoCtrl.text.trim()),
-            child: const Text('Rechazar'),
-          ),
-        ],
-      ),
+      builder: (_) => const _DialogoRechazarInvitado(),
     );
-    // Pasada 2 de Argón (1.20): liberar el controlador del
-    // diálogo al cerrar.
-    motivoCtrl.dispose();
     if (motivo == null || motivo.isEmpty || !mounted) return;
     setState(() => _actuando = true);
     try {
@@ -2963,84 +2942,20 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     // lo oculta; esto frena un cambio de sesión a mitad).
     if (!AuthService().isOwner && !AuthService().isAdmin) return;
     final d = _d!;
-    final ctrl = TextEditingController();
-    var confirmado = false;
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de su controlador
+    // (_DialogoAjustarClaveInvitado); antes se disponía al
+    // resolver el showDialog con el campo aún
+    // reconstruyéndose en la animación de salida (defecto
+    // D-B1-08). Devuelve la clave nueva ya recortada.
+    final claveNueva = await showDialog<String>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => DialogoApp(
-          titulo: 'Ajustar acceso del invitado',
-          iconoTitulo: Icons.key_rounded,
-          contenido: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'El teléfono del invitado NO está verificado. '
-                  'Solo ajusta la clave si la persona confirma '
-                  'estos datos:',
-                  style: AppTexto.cuerpo,
-                ),
-                const SizedBox(height: AppEspacio.md),
-                _linea('Nombre registrado', d.nombre),
-                _linea('Registrado el', fechaAbsoluta(d.creadoEn)),
-                const SizedBox(height: AppEspacio.sm),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: confirmado,
-                  onChanged: (v) =>
-                      setS(() => confirmado = v ?? false),
-                  title: const Text(
-                      'La persona confirmó su nombre y su fecha '
-                      'de registro',
-                      style: AppTexto.cuerpo),
-                ),
-                const SizedBox(height: AppEspacio.sm),
-                CampoTexto(
-                  controller: ctrl,
-                  etiqueta: 'Clave nueva (6–32, sin espacios)',
-                  icono: Icons.lock_outline_rounded,
-                  obscure: true,
-                  onChanged: (_) => setS(() {}),
-                ),
-                const SizedBox(height: AppEspacio.sm),
-                const Text(
-                  'Si quien reclama dice que el teléfono es suyo '
-                  'pero el nombre NO coincide, no ajustes la '
-                  'clave: elimina el invitado (libera el número '
-                  'al instante) o inscribe a la persona '
-                  'directamente como cliente.',
-                  style: AppTexto.secundario,
-                ),
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-              onPressed: confirmado &&
-                      RegExp(r'^\S{6,32}$')
-                          .hasMatch(ctrl.text.trim())
-                  ? () => Navigator.pop(ctx, true)
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Ajustar clave'),
-            ),
-          ],
-        ),
+      builder: (_) => _DialogoAjustarClaveInvitado(
+        nombre: d.nombre,
+        registradoEl: fechaAbsoluta(d.creadoEn),
       ),
     );
-    // Pasada 2 de Argón (1.20): la clave se captura y el
-    // controlador del diálogo se libera al cerrar.
-    final claveNueva = ctrl.text.trim();
-    ctrl.dispose();
-    if (ok != true || !mounted) return;
+    if (claveNueva == null || !mounted) return;
     setState(() => _actuando = true);
     try {
       await _svc.ajustarClave(widget.invitadoId, claveNueva);
@@ -3377,6 +3292,174 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Rechazar
+/// solicitud» de invitado como StatefulWidget DUEÑO de su
+/// controlador, dispuesto en dispose() — el patrón de la
+/// casa. Devuelve el motivo recortado; null al cancelar.
+class _DialogoRechazarInvitado extends StatefulWidget {
+  const _DialogoRechazarInvitado();
+
+  @override
+  State<_DialogoRechazarInvitado> createState() =>
+      _DialogoRechazarInvitadoState();
+}
+
+class _DialogoRechazarInvitadoState
+    extends State<_DialogoRechazarInvitado> {
+  final _motivoCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rechazar solicitud'),
+      content: TextField(
+        controller: _motivoCtrl,
+        decoration: const InputDecoration(
+          labelText: 'Motivo del rechazo',
+          hintText: 'Ej.: cupo lleno este mes',
+          border: OutlineInputBorder(),
+        ),
+        maxLength: 120,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_motivoCtrl.text.trim()),
+          child: const Text('Rechazar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Ajustar acceso del
+/// invitado» como StatefulWidget DUEÑO de su controlador,
+/// dispuesto en dispose() — el patrón de la casa. La regla
+/// anti-fuga no cambia: el botón solo se habilita con la
+/// confirmación marcada y una clave de 6–32 sin espacios.
+/// Devuelve la clave nueva recortada; null al cancelar.
+class _DialogoAjustarClaveInvitado extends StatefulWidget {
+  const _DialogoAjustarClaveInvitado({
+    required this.nombre,
+    required this.registradoEl,
+  });
+
+  final String nombre;
+  final String registradoEl;
+
+  @override
+  State<_DialogoAjustarClaveInvitado> createState() =>
+      _DialogoAjustarClaveInvitadoState();
+}
+
+class _DialogoAjustarClaveInvitadoState
+    extends State<_DialogoAjustarClaveInvitado> {
+  final _ctrl = TextEditingController();
+  bool _confirmado = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  bool get _claveValida =>
+      RegExp(r'^\S{6,32}$').hasMatch(_ctrl.text.trim());
+
+  Widget _linea(String etiqueta, String valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+              width: 130,
+              child: Text(etiqueta, style: AppTexto.secundario)),
+          Expanded(child: Text(valor, style: AppTexto.cuerpo)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Ajustar acceso del invitado',
+      iconoTitulo: Icons.key_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'El teléfono del invitado NO está verificado. '
+              'Solo ajusta la clave si la persona confirma '
+              'estos datos:',
+              style: AppTexto.cuerpo,
+            ),
+            const SizedBox(height: AppEspacio.md),
+            _linea('Nombre registrado', widget.nombre),
+            _linea('Registrado el', widget.registradoEl),
+            const SizedBox(height: AppEspacio.sm),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _confirmado,
+              onChanged: (v) =>
+                  setState(() => _confirmado = v ?? false),
+              title: const Text(
+                  'La persona confirmó su nombre y su fecha '
+                  'de registro',
+                  style: AppTexto.cuerpo),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            CampoTexto(
+              controller: _ctrl,
+              etiqueta: 'Clave nueva (6–32, sin espacios)',
+              icono: Icons.lock_outline_rounded,
+              obscure: true,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            const Text(
+              'Si quien reclama dice que el teléfono es suyo '
+              'pero el nombre NO coincide, no ajustes la '
+              'clave: elimina el invitado (libera el número '
+              'al instante) o inscribe a la persona '
+              'directamente como cliente.',
+              style: AppTexto.secundario,
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        ElevatedButton(
+          onPressed: _confirmado && _claveValida
+              ? () => Navigator.pop(context, _ctrl.text.trim())
+              : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColores.naranja,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Ajustar clave'),
+        ),
+      ],
     );
   }
 }

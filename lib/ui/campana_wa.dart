@@ -454,55 +454,23 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
 
   Future<void> _editarPlantilla({Map<String, dynamic>? existente}) async {
     if (!AuthService().isOwner) return;
-    final nomCtrl =
-        TextEditingController(text: existente?['nombre'] as String? ?? '');
-    final txtCtrl =
-        TextEditingController(text: existente?['texto'] as String? ?? '');
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de sus controladores
+    // (_DialogoPlantillaWa); antes se disponían nada más
+    // resolver el showDialog, con la animación de salida aún
+    // reconstruyendo los campos (defecto D-B1-08).
+    final r = await showDialog<({String nombre, String texto})>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existente == null ? 'Nueva plantilla' : 'Editar plantilla'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nomCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: txtCtrl,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: 'Texto (usa {nombre} para el cliente)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Guardar'),
-          ),
-        ],
+      builder: (_) => _DialogoPlantillaWa(
+        tituloDialogo:
+            existente == null ? 'Nueva plantilla' : 'Editar plantilla',
+        nombreInicial: existente?['nombre'] as String? ?? '',
+        textoInicial: existente?['texto'] as String? ?? '',
       ),
     );
-    if (ok != true || !mounted) {
-      nomCtrl.dispose();
-      txtCtrl.dispose();
-      return;
-    }
-    final nombre = nomCtrl.text.trim();
-    final texto = txtCtrl.text.trim();
-    nomCtrl.dispose();
-    txtCtrl.dispose();
+    if (r == null || !mounted) return;
+    final nombre = r.nombre;
+    final texto = r.texto;
     if (nombre.isEmpty || texto.isEmpty) {
       mostrarSnack(context, 'La plantilla necesita nombre y texto', significado: SignificadoChip.alerta);
       return;
@@ -854,6 +822,86 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): editor de plantilla
+/// de campaña como StatefulWidget DUEÑO de sus
+/// controladores, dispuestos en dispose() — el patrón de la
+/// casa. Devuelve los textos recortados al guardar; null al
+/// cancelar.
+class _DialogoPlantillaWa extends StatefulWidget {
+  const _DialogoPlantillaWa({
+    required this.tituloDialogo,
+    required this.nombreInicial,
+    required this.textoInicial,
+  });
+
+  final String tituloDialogo;
+  final String nombreInicial;
+  final String textoInicial;
+
+  @override
+  State<_DialogoPlantillaWa> createState() =>
+      _DialogoPlantillaWaState();
+}
+
+class _DialogoPlantillaWaState extends State<_DialogoPlantillaWa> {
+  late final TextEditingController _nomCtrl;
+  late final TextEditingController _txtCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nomCtrl = TextEditingController(text: widget.nombreInicial);
+    _txtCtrl = TextEditingController(text: widget.textoInicial);
+  }
+
+  @override
+  void dispose() {
+    _nomCtrl.dispose();
+    _txtCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.tituloDialogo),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nomCtrl,
+              decoration: const InputDecoration(labelText: 'Nombre'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _txtCtrl,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                labelText: 'Texto (usa {nombre} para el cliente)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop((
+            nombre: _nomCtrl.text.trim(),
+            texto: _txtCtrl.text.trim(),
+          )),
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

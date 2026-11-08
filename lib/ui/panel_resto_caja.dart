@@ -219,51 +219,28 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
       }
       return;
     }
-    final montoCtrl =
-        TextEditingController(text: pendiente.toStringAsFixed(0));
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de su controlador
+    // (_DialogoLiquidarEntrega). Antes el controlador se
+    // creaba aquí, sobrevivía entre las vueltas del bucle de
+    // confirmación y se disponía al salir, con la animación
+    // de salida del último diálogo aún reconstruyendo el
+    // campo (defecto D-B1-08). El texto tecleado viaja ahora
+    // de vuelta en vuelta como texto inicial.
+    var textoMonto = pendiente.toStringAsFixed(0);
     var confirmado = false;
     while (!confirmado) {
-      final ok = await showDialog<bool>(
+      final r = await showDialog<String>(
         context: context,
-        builder: (ctx) => DialogoApp(
-          titulo: 'Liquidar entrega',
-          iconoTitulo: Icons.handshake_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$nombre · pendiente actual: '
-                  '${pendiente.toStringAsFixed(0)} CUP'),
-              const SizedBox(height: 4),
-              const Text(
-                'Se registra como movimiento propio de custodia '
-                '(entrega_efectivo_dueno): no es gasto ni adelanto de '
-                'nómina, y no toca el reporte de ingresos.',
-                style: AppTexto.secundario,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                  controller: montoCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Monto entregado en efectivo (CUP)')),
-            ],
-          ),
-          acciones: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancelar')),
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Liquidar')),
-          ],
+        builder: (_) => _DialogoLiquidarEntrega(
+          nombre: nombre,
+          pendiente: pendiente,
+          textoInicial: textoMonto,
         ),
       );
-      if (ok != true) {
-        montoCtrl.dispose();
-        return;
-      }
-      final monto = double.tryParse(montoCtrl.text.trim()) ?? -1;
+      if (r == null) return;
+      textoMonto = r;
+      final monto = double.tryParse(r.trim()) ?? -1;
       // Si el pendiente cambió desde que se abrió el diálogo, se
       // muestra el nuevo y se pide confirmar de nuevo (diseño C1).
       final nuevo = await pendienteDeltaC1(tid);
@@ -273,7 +250,7 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
           mostrarSnack(context, 'El pendiente cambió a '
                   '${nuevo.toStringAsFixed(0)} CUP. Confirma de nuevo.', significado: SignificadoChip.alerta);
         }
-        montoCtrl.text = nuevo.toStringAsFixed(0);
+        textoMonto = nuevo.toStringAsFixed(0);
         continue;
       }
       // Autoauditoría 1.22 #2 (clase N-2): NaN no es <= 0 ni
@@ -300,13 +277,9 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
         if (mounted) {
           mostrarSnack(context, '$err', significado: SignificadoChip.error);
         }
-        montoCtrl.dispose();
         return;
       }
     }
-    // Lote 3 (MEDIO): el controlador se creaba en cada llamado y
-    // nunca se liberaba en ningún camino de salida.
-    montoCtrl.dispose();
   }
 
   /// 1.22 T-03: subtítulo de la tarjeta. Si el pendiente CUP
@@ -367,6 +340,83 @@ class _ArqueoEntregaScreenState extends State<ArqueoEntregaScreen> {
                     ),
               ],
             ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Liquidar entrega»
+/// como StatefulWidget DUEÑO de su controlador, dispuesto
+/// en dispose() — el patrón de la casa. Devuelve el texto
+/// del monto al liquidar; null al cancelar. El bucle de
+/// confirmación (pendiente cambiado / monto inválido) vive
+/// en la pantalla y reabre el diálogo con el texto vigente.
+class _DialogoLiquidarEntrega extends StatefulWidget {
+  const _DialogoLiquidarEntrega({
+    required this.nombre,
+    required this.pendiente,
+    required this.textoInicial,
+  });
+
+  final String nombre;
+  final double pendiente;
+  final String textoInicial;
+
+  @override
+  State<_DialogoLiquidarEntrega> createState() =>
+      _DialogoLiquidarEntregaState();
+}
+
+class _DialogoLiquidarEntregaState
+    extends State<_DialogoLiquidarEntrega> {
+  late final TextEditingController _montoCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _montoCtrl = TextEditingController(text: widget.textoInicial);
+  }
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Liquidar entrega',
+      iconoTitulo: Icons.handshake_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${widget.nombre} · pendiente actual: '
+              '${widget.pendiente.toStringAsFixed(0)} CUP'),
+          const SizedBox(height: 4),
+          const Text(
+            'Se registra como movimiento propio de custodia '
+            '(entrega_efectivo_dueno): no es gasto ni adelanto de '
+            'nómina, y no toca el reporte de ingresos.',
+            style: AppTexto.secundario,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+              controller: _montoCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  labelText: 'Monto entregado en efectivo (CUP)')),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        TextButton(
+            onPressed: () =>
+                Navigator.pop(context, _montoCtrl.text),
+            child: const Text('Liquidar')),
+      ],
     );
   }
 }

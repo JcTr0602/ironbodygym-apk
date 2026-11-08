@@ -426,60 +426,18 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   }
 
   Future<void> _pedirAdelanto() async {
-    final montoCtrl = TextEditingController();
-    final motivoCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de sus controladores
+    // (_DialogoPedirAdelanto). Antes se disponían nada más
+    // resolver el showDialog, con la animación de salida aún
+    // reconstruyendo los campos (defecto D-B1-08).
+    final r = await showDialog<({String monto, String motivo})>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Pedir adelanto'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: montoCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Monto (CUP, pesos enteros)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: AppEspacio.md),
-            TextField(
-              controller: motivoCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Motivo',
-                border: OutlineInputBorder(),
-              ),
-              maxLength: 120,
-            ),
-            const SizedBox(height: AppEspacio.sm),
-            const Text(
-              'La solicitud la decide el dueño. Mientras esté '
-              'pendiente NO descuenta de tu nómina.',
-              style: AppTexto.secundario,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Enviar solicitud'),
-          ),
-        ],
-      ),
+      builder: (_) => const _DialogoPedirAdelanto(),
     );
-    // Argón lote 4 MEDIO: los controladores nunca hacían dispose.
-    // El diálogo ya cerró: se captura el texto y se liberan en
-    // ambos caminos (también al cancelar).
-    final montoTexto = montoCtrl.text.trim();
-    final motivoTexto = motivoCtrl.text.trim();
-    montoCtrl.dispose();
-    motivoCtrl.dispose();
-    if (ok != true || !mounted) return;
+    if (r == null || !mounted) return;
+    final montoTexto = r.monto;
+    final motivoTexto = r.motivo;
     // La etiqueta pide pesos enteros: se parsea entero, no double.
     // Tope 100000 como guarda contra ceros de más (no es un límite
     // de negocio: un adelanto real no llega ahí).
@@ -1242,4 +1200,76 @@ String textoReciboNomina({
     nDosis: nDosis,
     nSuplementos: nSuplementos,
   );
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Pedir adelanto»
+/// (FA-03) como StatefulWidget DUEÑO de sus controladores,
+/// dispuestos en dispose() — el patrón de la casa. Devuelve
+/// los textos recortados al enviar; null al cancelar.
+class _DialogoPedirAdelanto extends StatefulWidget {
+  const _DialogoPedirAdelanto();
+
+  @override
+  State<_DialogoPedirAdelanto> createState() =>
+      _DialogoPedirAdelantoState();
+}
+
+class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
+  final _montoCtrl = TextEditingController();
+  final _motivoCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Pedir adelanto'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _montoCtrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Monto (CUP, pesos enteros)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: AppEspacio.md),
+          TextField(
+            controller: _motivoCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Motivo',
+              border: OutlineInputBorder(),
+            ),
+            maxLength: 120,
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          const Text(
+            'La solicitud la decide el dueño. Mientras esté '
+            'pendiente NO descuenta de tu nómina.',
+            style: AppTexto.secundario,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop((
+            monto: _montoCtrl.text.trim(),
+            motivo: _motivoCtrl.text.trim(),
+          )),
+          child: const Text('Enviar solicitud'),
+        ),
+      ],
+    );
+  }
 }

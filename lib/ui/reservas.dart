@@ -483,49 +483,26 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
   Future<void> _rechazar(ReservaVista r) async {
     if (_bloqueada(r.id)) return;
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de su controlador
+    // (_DialogoRechazarReserva). Antes se creaba aquí y se
+    // disponía tras resolver el showDialog, con la
+    // animación de salida aún reconstruyendo el campo (el
+    // defecto D-B1-08).
+    final nota = await showDialog<String>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Rechazar reserva',
-        iconoTitulo: Icons.bookmark_remove_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${r.clienteNombre} · ${r.cantidad} × '
-                '${r.suplementoNombre}'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              decoration: const InputDecoration(
-                labelText: 'Motivo (opcional, lo ve el cliente)',
-                border: OutlineInputBorder(),
-              ),
-              maxLength: 200,
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Rechazar'),
-          ),
-        ],
+      builder: (_) => _DialogoRechazarReserva(
+        clienteNombre: r.clienteNombre,
+        cantidad: r.cantidad,
+        suplementoNombre: r.suplementoNombre,
       ),
     );
-    if (ok == true && mounted) {
-      final nota = ctrl.text.trim();
+    if (nota != null && mounted) {
       await _encolar(
           'rechazar_reserva',
           {'reserva_id': r.id, if (nota.isNotEmpty) 'nota': nota},
           'Rechazo de la reserva #${r.id} encolado');
     }
-    ctrl.dispose();
   }
 
   Future<void> _cancelar(ReservaVista r) async {
@@ -807,6 +784,73 @@ class _MiniFotoReservaState extends State<_MiniFotoReserva> {
         }
         return const _SinFotoReserva();
       },
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Rechazar reserva»
+/// como StatefulWidget DUEÑO de su controlador, dispuesto
+/// en dispose() — el patrón de la casa. Devuelve el motivo
+/// tecleado (recortado) al confirmar; null al cancelar.
+class _DialogoRechazarReserva extends StatefulWidget {
+  const _DialogoRechazarReserva({
+    required this.clienteNombre,
+    required this.cantidad,
+    required this.suplementoNombre,
+  });
+
+  final String clienteNombre;
+  final int cantidad;
+  final String suplementoNombre;
+
+  @override
+  State<_DialogoRechazarReserva> createState() =>
+      _DialogoRechazarReservaState();
+}
+
+class _DialogoRechazarReservaState
+    extends State<_DialogoRechazarReserva> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Rechazar reserva',
+      iconoTitulo: Icons.bookmark_remove_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${widget.clienteNombre} · ${widget.cantidad} × '
+              '${widget.suplementoNombre}'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            decoration: const InputDecoration(
+              labelText: 'Motivo (opcional, lo ve el cliente)',
+              border: OutlineInputBorder(),
+            ),
+            maxLength: 200,
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.pop(context, _ctrl.text.trim()),
+          child: const Text('Rechazar'),
+        ),
+      ],
     );
   }
 }

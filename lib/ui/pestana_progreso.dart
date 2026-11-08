@@ -519,111 +519,31 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     // en la BD: al EDITAR se reenvían los valores previos de la
     // medición (el RPC es de reemplazo completo y no puede cambiar
     // de firma); al CREAR van en null, como hasta ahora.
-    final pesoCtrl = TextEditingController(
-        text: existente?.pesoKg?.toString() ?? '');
-    final cinturaCtrl = TextEditingController(
-        text: existente?.cinturaCm?.toString() ?? '');
-    final brazoCtrl = TextEditingController(
-        text: existente?.brazoCm?.toString() ?? '');
-    final musloCtrl = TextEditingController(
-        text: existente?.musloCm?.toString() ?? '');
-    final notasCtrl = TextEditingController(
-        text: existente?.notas ?? '');
-
-    final guardar = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el formulario vive en un
+    // StatefulWidget dueño de sus controladores
+    // (_DialogoMedicion). Antes se creaban aquí y se
+    // disponían nada más resolver el showDialog, con la
+    // animación de salida aún reconstruyendo los campos:
+    // el «used after being disposed» que Jc cazó en campo
+    // en «Registrar medida» (el FIX 2 anterior solo evitaba
+    // perder los valores, no el uso tras el dispose).
+    final valores = await showDialog<
+        ({
+          String peso,
+          String cintura,
+          String brazo,
+          String muslo,
+          String notas
+        })>(
       context: context,
-      // F6-08: DialogoApp compartido.
-      builder: (ctx) => DialogoApp(
-        titulo: existente == null
-            ? 'Nueva medición'
-            : 'Editar medición',
-        contenido: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: pesoCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Peso (kg) *',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: cinturaCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Cintura (cm)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: brazoCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Brazo (cm)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: musloCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Pierna (cm)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: notasCtrl,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Notas',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          BotonPrimario(
-            texto: 'Guardar',
-            onPressed: () => Navigator.pop(ctx, true),
-            expandido: false,
-          ),
-        ],
-      ),
+      builder: (_) => _DialogoMedicion(existente: existente),
     );
-
-    // FIX 2 (Argón): capturar valores y liberar controladores
-    final pesoStr = pesoCtrl.text;
-    final cinturaStr = cinturaCtrl.text;
-    final brazoStr = brazoCtrl.text;
-    final musloStr = musloCtrl.text;
-    final notasStr = notasCtrl.text;
-    // Dispose inmediato para evitar fuga de memoria
-    pesoCtrl.dispose();
-    cinturaCtrl.dispose();
-    brazoCtrl.dispose();
-    musloCtrl.dispose();
-    notasCtrl.dispose();
-
-    if (guardar != true || !mounted) return;
+    if (valores == null || !mounted) return;
+    final pesoStr = valores.peso;
+    final cinturaStr = valores.cintura;
+    final brazoStr = valores.brazo;
+    final musloStr = valores.muslo;
+    final notasStr = valores.notas;
 
     final peso = _parseNum(pesoStr);
     if (peso == null) {
@@ -735,5 +655,140 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             significado: SignificadoChip.error);
       }
     }
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): formulario de
+/// medición como StatefulWidget DUEÑO de sus cinco
+/// controladores, dispuestos en dispose() — el patrón de la
+/// casa. Devuelve los textos tecleados por Navigator.pop;
+/// cancelar devuelve null. El parseo, los rangos y la RPC
+/// siguen en la pestaña, como siempre.
+class _DialogoMedicion extends StatefulWidget {
+  const _DialogoMedicion({required this.existente});
+
+  final Medicion? existente;
+
+  @override
+  State<_DialogoMedicion> createState() => _DialogoMedicionState();
+}
+
+class _DialogoMedicionState extends State<_DialogoMedicion> {
+  late final TextEditingController _pesoCtrl;
+  late final TextEditingController _cinturaCtrl;
+  late final TextEditingController _brazoCtrl;
+  late final TextEditingController _musloCtrl;
+  late final TextEditingController _notasCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existente;
+    _pesoCtrl =
+        TextEditingController(text: e?.pesoKg?.toString() ?? '');
+    _cinturaCtrl =
+        TextEditingController(text: e?.cinturaCm?.toString() ?? '');
+    _brazoCtrl =
+        TextEditingController(text: e?.brazoCm?.toString() ?? '');
+    _musloCtrl =
+        TextEditingController(text: e?.musloCm?.toString() ?? '');
+    _notasCtrl = TextEditingController(text: e?.notas ?? '');
+  }
+
+  @override
+  void dispose() {
+    _pesoCtrl.dispose();
+    _cinturaCtrl.dispose();
+    _brazoCtrl.dispose();
+    _musloCtrl.dispose();
+    _notasCtrl.dispose();
+    super.dispose();
+  }
+
+  void _guardar() {
+    Navigator.pop(
+        context,
+        (
+          peso: _pesoCtrl.text,
+          cintura: _cinturaCtrl.text,
+          brazo: _brazoCtrl.text,
+          muslo: _musloCtrl.text,
+          notas: _notasCtrl.text,
+        ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // F6-08: DialogoApp compartido.
+    return DialogoApp(
+      titulo:
+          widget.existente == null ? 'Nueva medición' : 'Editar medición',
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _pesoCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Peso (kg) *',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _cinturaCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Cintura (cm)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _brazoCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Brazo (cm)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _musloCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Pierna (cm)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _notasCtrl,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Notas',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        BotonPrimario(
+          texto: 'Guardar',
+          onPressed: _guardar,
+          expandido: false,
+        ),
+      ],
+    );
   }
 }

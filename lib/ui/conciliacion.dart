@@ -48,153 +48,14 @@ Future<bool> mostrarDialogoConciliar(
   required Map<String, dynamic> pago,
   String? nombreCliente,
 }) async {
-  final actual = estadoConciliacion(pago);
-  const destinos = ['pendiente', 'comprobada', 'problema', 'rechazada'];
-  final opciones = destinos.where((d) => d != actual).toList();
-  var destino = opciones.contains('comprobada')
-      ? 'comprobada'
-      : opciones.first;
-  // FIN-02 de Argón (1.20): la nota previa se precarga (si la
-  // transferencia ya tenía una, el dueño la ve al reabrir).
-  final notaCtrl = TextEditingController(
-      text: '${pago['conciliacion_nota'] ?? ''}');
-  var errorNota = false;
-  // (M2-A A10) guarda en vuelo del Guardar + error de
-  // servicio visible sin cerrar el diálogo.
-  var guardando = false;
-  String? errorGuardado;
+  // 1.29 (Oleada 4, barrido): el diálogo vive en un
+  // StatefulWidget dueño de su controlador (_DialogoConciliar);
+  // ver su doc. El aviso de éxito sigue aquí, como siempre.
   final ok = await showDialog<bool>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) {
-        final notaObligatoria =
-            destino == 'problema' || destino == 'rechazada';
-        return DialogoApp(
-          titulo: 'Conciliar transferencia',
-          iconoTitulo: Icons.fact_check_rounded,
-          contenido: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (nombreCliente != null &&
-                    nombreCliente.isNotEmpty)
-                  Text(nombreCliente, style: AppTexto.subtitulo),
-                Text(
-                  '${fmtMonto(pago['monto'])} CUP · '
-                  '${fmtFecha('${pago['fecha'] ?? ''}')}',
-                  style: AppTexto.secundario,
-                ),
-                const SizedBox(height: AppEspacio.sm),
-                Row(
-                  children: [
-                    const Text('Estado actual: ',
-                        style: AppTexto.secundario),
-                    ChipEstado.semantico(
-                      texto: etiquetaConciliacion(actual),
-                      significado: significadoConciliacion(actual),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppEspacio.lg),
-                const Text('Nuevo estado',
-                    style: AppTexto.etiqueta),
-                const SizedBox(height: AppEspacio.sm),
-                Wrap(
-                  spacing: AppEspacio.sm,
-                  runSpacing: AppEspacio.sm,
-                  children: [
-                    for (final d in opciones)
-                      ChoiceChip(
-                        label: Text(etiquetaConciliacion(d)),
-                        selected: destino == d,
-                        onSelected: (_) => setState(() {
-                          destino = d;
-                          errorNota = false;
-                        }),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: AppEspacio.lg),
-                CampoTexto(
-                  controller: notaCtrl,
-                  etiqueta: notaObligatoria
-                      ? 'Nota (obligatoria)'
-                      : 'Nota (opcional)',
-                  hint: 'Qué pasó con esta transferencia',
-                  maxLineas: 3,
-                  onChanged: (_) {
-                    if (errorNota) setState(() => errorNota = false);
-                  },
-                ),
-                if (errorNota) ...[
-                  const SizedBox(height: AppEspacio.sm),
-                  Text(
-                    'Para marcar «Con problema» o «Rechazada» '
-                    'hay que escribir la nota.',
-                    // 1.29 (Oleada 2): rol de TEXTO de error
-                    // de la Oleada 1 (contraste sobre el
-                    // fondo del tema en claro y en oscuro).
-                    style: AppTexto.metadato.copyWith(
-                        color: AppColores.errorTexto(ctx)),
-                  ),
-                ],
-                if (errorGuardado != null) ...[
-                  const SizedBox(height: AppEspacio.sm),
-                  Text(
-                    errorGuardado!,
-                    style: AppTexto.metadato.copyWith(
-                        color: AppColores.errorTexto(ctx)),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              // (M2-A A10) deshabilitado durante el guardado:
-              // el doble toque encolaba la marca dos veces (la
-              // segunda rebotaba en el servidor y caía a
-              // revisión). El servicio además la rechaza.
-              onPressed: guardando
-                  ? null
-                  : () async {
-                      if (notaObligatoria &&
-                          notaCtrl.text.trim().isEmpty) {
-                        setState(() => errorNota = true);
-                        return;
-                      }
-                      setState(() => guardando = true);
-                      try {
-                        await ConciliacionService.instance.marcar(
-                          pagoId: (pago['id'] as num).toInt(),
-                          estado: destino,
-                          estadoEsperado: actual,
-                          nota: notaCtrl.text,
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx, true);
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          setState(() {
-                            guardando = false;
-                            errorGuardado = '$e'
-                                .replaceFirst('Bad state: ', '');
-                          });
-                        }
-                      }
-                    },
-              child: const Text('Guardar'),
-            ),
-          ],
-        );
-      },
-    ),
+    builder: (_) =>
+        _DialogoConciliar(pago: pago, nombreCliente: nombreCliente),
   );
-  notaCtrl.dispose();
   if (ok == true && context.mounted) {
     mostrarSnack(context, 'Conciliación guardada (se sincronizará)',
         significado: SignificadoChip.exito);
@@ -598,5 +459,185 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
               ],
             ),
     );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Conciliar
+/// transferencia» como StatefulWidget DUEÑO de su
+/// controlador, dispuesto en dispose() — el patrón de la
+/// casa. Antes el controlador se creaba en la función y se
+/// disponía nada más resolver el showDialog, con la
+/// animación de salida aún reconstruyendo el campo
+/// (defecto D-B1-08). El cuerpo del diálogo (chips de
+/// estado, nota obligatoria según destino, guardado en
+/// vuelo con su error visible) se movió verbatim; devuelve
+/// true solo si la marca se guardó.
+class _DialogoConciliar extends StatefulWidget {
+  const _DialogoConciliar({required this.pago, this.nombreCliente});
+
+  final Map<String, dynamic> pago;
+  final String? nombreCliente;
+
+  @override
+  State<_DialogoConciliar> createState() => _DialogoConciliarState();
+}
+
+class _DialogoConciliarState extends State<_DialogoConciliar> {
+  late final String _actual;
+  late final List<String> _opciones;
+  late final TextEditingController _notaCtrl;
+  late String _destino;
+  bool _errorNota = false;
+  // (M2-A A10) guarda en vuelo del Guardar + error de
+  // servicio visible sin cerrar el diálogo.
+  bool _guardando = false;
+  String? _errorGuardado;
+
+  @override
+  void initState() {
+    super.initState();
+    _actual = estadoConciliacion(widget.pago);
+    const destinos = ['pendiente', 'comprobada', 'problema', 'rechazada'];
+    _opciones = destinos.where((d) => d != _actual).toList();
+    _destino =
+        _opciones.contains('comprobada') ? 'comprobada' : _opciones.first;
+    // FIN-02 de Argón (1.20): la nota previa se precarga (si la
+    // transferencia ya tenía una, el dueño la ve al reabrir).
+    _notaCtrl = TextEditingController(
+        text: '${widget.pago['conciliacion_nota'] ?? ''}');
+  }
+
+  @override
+  void dispose() {
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notaObligatoria =
+        _destino == 'problema' || _destino == 'rechazada';
+    return DialogoApp(
+          titulo: 'Conciliar transferencia',
+          iconoTitulo: Icons.fact_check_rounded,
+          contenido: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (widget.nombreCliente != null &&
+                    widget.nombreCliente!.isNotEmpty)
+                  Text(widget.nombreCliente!, style: AppTexto.subtitulo),
+                Text(
+                  '${fmtMonto(widget.pago['monto'])} CUP · '
+                  '${fmtFecha('${widget.pago['fecha'] ?? ''}')}',
+                  style: AppTexto.secundario,
+                ),
+                const SizedBox(height: AppEspacio.sm),
+                Row(
+                  children: [
+                    const Text('Estado _actual: ',
+                        style: AppTexto.secundario),
+                    ChipEstado.semantico(
+                      texto: etiquetaConciliacion(_actual),
+                      significado: significadoConciliacion(_actual),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppEspacio.lg),
+                const Text('Nuevo estado',
+                    style: AppTexto.etiqueta),
+                const SizedBox(height: AppEspacio.sm),
+                Wrap(
+                  spacing: AppEspacio.sm,
+                  runSpacing: AppEspacio.sm,
+                  children: [
+                    for (final d in _opciones)
+                      ChoiceChip(
+                        label: Text(etiquetaConciliacion(d)),
+                        selected: _destino == d,
+                        onSelected: (_) => setState(() {
+                          _destino = d;
+                          _errorNota = false;
+                        }),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppEspacio.lg),
+                CampoTexto(
+                  controller: _notaCtrl,
+                  etiqueta: notaObligatoria
+                      ? 'Nota (obligatoria)'
+                      : 'Nota (opcional)',
+                  hint: 'Qué pasó con esta transferencia',
+                  maxLineas: 3,
+                  onChanged: (_) {
+                    if (_errorNota) setState(() => _errorNota = false);
+                  },
+                ),
+                if (_errorNota) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    'Para marcar «Con problema» o «Rechazada» '
+                    'hay que escribir la nota.',
+                    // 1.29 (Oleada 2): rol de TEXTO de error
+                    // de la Oleada 1 (contraste sobre el
+                    // fondo del tema en claro y en oscuro).
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(context)),
+                  ),
+                ],
+                if (_errorGuardado != null) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    _errorGuardado!,
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(context)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              // (M2-A A10) deshabilitado durante el guardado:
+              // el doble toque encolaba la marca dos veces (la
+              // segunda rebotaba en el servidor y caía a
+              // revisión). El servicio además la rechaza.
+              onPressed: _guardando
+                  ? null
+                  : () async {
+                      if (notaObligatoria &&
+                          _notaCtrl.text.trim().isEmpty) {
+                        setState(() => _errorNota = true);
+                        return;
+                      }
+                      setState(() => _guardando = true);
+                      try {
+                        await ConciliacionService.instance.marcar(
+                          pagoId: (widget.pago['id'] as num).toInt(),
+                          estado: _destino,
+                          estadoEsperado: _actual,
+                          nota: _notaCtrl.text,
+                        );
+                        if (mounted) Navigator.pop(context, true);
+                      } catch (e) {
+                        if (mounted) {
+                          setState(() {
+                            _guardando = false;
+                            _errorGuardado = '$e'
+                                .replaceFirst('Bad state: ', '');
+                          });
+                        }
+                      }
+                    },
+              child: const Text('Guardar'),
+            ),
+          ],
+        );
   }
 }

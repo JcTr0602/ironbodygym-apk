@@ -506,31 +506,6 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     await _cargar();
   }
 
-  /// (M2-BC C4) fila del recibo de confirmación de
-  /// liquidación: etiqueta a la izquierda, cifra tabular a
-  /// la derecha (destacada en el entregado).
-  Widget _filaRecibo(String etiqueta, String valor,
-      {bool destacado = false, Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(etiqueta, style: AppTexto.secundario),
-          Text(
-            valor,
-            style: AppTexto.cuerpo.copyWith(
-              fontWeight: FontWeight.w700,
-              fontSize: destacado ? 18 : null,
-              color: color,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // (M2-A A1) guarda SÍNCRONA al entrar: antes el setState de
   // _liquidando llegaba DESPUÉS del diálogo de confirmación y
   // un doble toque pasaba dos veces por todo el flujo. La
@@ -596,132 +571,23 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     if (!mounted) return;
     // T5 (1.20): la marca de expediente solo tiene sentido
     // con diferencia; el servidor la ignora sin diferencia.
-    var abrirExp = false;
-    final expCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo de confirmación
+    // vive en un StatefulWidget dueño de su controlador
+    // (_DialogoConfirmarLiquidacion); ver su doc.
+    final r = await showDialog<({bool abrirExp, String explicacion})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateDialogo) => AlertDialog(
-        title: const Text('Confirmar liquidación'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // (M2-BC C4) el diálogo como RECIBO: filas
-            // claras esperado / entregado / diferencia o
-            // arrastre dentro de una tarjeta con borde, en
-            // vez de textos sueltos.
-            Container(
-              padding: const EdgeInsets.all(AppEspacio.md),
-              decoration: BoxDecoration(
-                color: AppColores.superficie(ctx),
-                border: Border.all(color: AppColores.borde(ctx)),
-                borderRadius: BorderRadius.circular(AppRadio.md),
-              ),
-              child: Column(
-                children: [
-                  _filaRecibo('Entrenador', widget.nombre),
-                  _filaRecibo('Esperado',
-                      '${fmtMonto(esperado)} $_moneda'),
-                  _filaRecibo(
-                    'Entregado',
-                    '${fmtMonto(entregado)} $_moneda',
-                    destacado: true,
-                  ),
-                  const Divider(height: 16),
-                  _filaRecibo(
-                    parcial ? 'Queda de arrastre' : 'Diferencia',
-                    parcial
-                        ? '${fmtMonto(esperado - entregado)} $_moneda'
-                        : 'Sin diferencia',
-                    color: parcial
-                        ? AppColores.error
-                        : AppColores.exito,
-                  ),
-                ],
-              ),
-            ),
-            // C3 (estéticas 1.19): comparación visual — barra
-            // de cuánto se entregó y diferencia destacada
-            // (verde si cuadra, rojo si falta; lo parcial
-            // queda como arrastre).
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadio.circular),
-              child: LinearProgressIndicator(
-                value: esperado > 0
-                    ? (entregado / esperado).clamp(0.0, 1.0)
-                    : 0,
-                minHeight: 8,
-                backgroundColor:
-                    AppColores.borde(context).withValues(alpha: 0.3),
-                valueColor: AlwaysStoppedAnimation<Color>(
-                    parcial ? AppColores.alerta : AppColores.exito),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              parcial
-                  ? 'Faltan ${fmtMonto(esperado - entregado)} '
-                      '$_moneda · quedan como saldo de arrastre.'
-                  : 'Cuadra exacto.',
-              style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: parcial
-                      ? AppColores.error
-                      : AppColores.exito),
-            ),
-            const SizedBox(height: 8),
-            Text('$totalIds operación(es) incluida(s).',
-                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
-            // T5 (1.20): abrir el expediente AQUÍ, en la
-            // misma op, solo si la diferencia no es el
-            // arrastre normal.
-            if (parcial) ...[
-              const SizedBox(height: AppEspacio.sm),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: abrirExp,
-                onChanged: (v) =>
-                    setStateDialogo(() => abrirExp = v ?? false),
-                title: const Text(
-                    'Abrir expediente por esta diferencia',
-                    style: AppTexto.cuerpo),
-                subtitle: const Text(
-                    'Solo si NO es el arrastre normal: queda '
-                    'registrada con causa y resolución.',
-                    style: AppTexto.metadato),
-              ),
-              if (abrirExp)
-                TextField(
-                  controller: expCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Explicación (opcional)',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 2,
-                ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Liquidar'),
-          ),
-        ],
-        ),
+      builder: (_) => _DialogoConfirmarLiquidacion(
+        nombre: widget.nombre,
+        esperado: esperado,
+        entregado: entregado,
+        parcial: parcial,
+        moneda: _moneda,
+        totalIds: totalIds,
       ),
     );
-    final quiereExpediente = ok == true && abrirExp;
-    final explicacionExpediente = expCtrl.text;
-    expCtrl.dispose();
-    if (ok != true || !mounted) return;
+    if (r == null || !mounted) return;
+    final quiereExpediente = r.abrirExp;
+    final explicacionExpediente = r.explicacion;
     // (M2-BC B1) el resumen para el entrenador se compone
     // con la MISMA foto (opIds frescos) antes de encolar.
     final resumen = resumenLiquidacionTexto(
@@ -1182,6 +1048,195 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Confirmar
+/// liquidación» del arqueo como StatefulWidget DUEÑO de su
+/// controlador (el de la explicación del expediente),
+/// dispuesto en dispose() — el patrón de la casa. Antes el
+/// controlador se creaba en el método y se disponía nada
+/// más resolver el showDialog, con la animación de salida
+/// aún reconstruyendo el campo (defecto D-B1-08). El cuerpo
+/// del diálogo (recibo, barra y marca de expediente) se
+/// movió verbatim; devuelve si se abre expediente y la
+/// explicación tecleada.
+class _DialogoConfirmarLiquidacion extends StatefulWidget {
+  const _DialogoConfirmarLiquidacion({
+    required this.nombre,
+    required this.esperado,
+    required this.entregado,
+    required this.parcial,
+    required this.moneda,
+    required this.totalIds,
+  });
+
+  final String nombre;
+  final double esperado;
+  final double entregado;
+  final bool parcial;
+  final String moneda;
+  final int totalIds;
+
+  @override
+  State<_DialogoConfirmarLiquidacion> createState() =>
+      _DialogoConfirmarLiquidacionState();
+}
+
+class _DialogoConfirmarLiquidacionState
+    extends State<_DialogoConfirmarLiquidacion> {
+  final _expCtrl = TextEditingController();
+  bool _abrirExp = false;
+
+  @override
+  void dispose() {
+    _expCtrl.dispose();
+    super.dispose();
+  }
+
+  /// (M2-BC C4) fila del recibo: la misma de la pantalla.
+  Widget _filaRecibo(String etiqueta, String valor,
+      {bool destacado = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(etiqueta, style: AppTexto.secundario),
+          Text(
+            valor,
+            style: AppTexto.cuerpo.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: destacado ? 18 : null,
+              color: color,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return         AlertDialog(
+        title: const Text('Confirmar liquidación'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // (M2-BC C4) el diálogo como RECIBO: filas
+            // claras widget.esperado / widget.entregado / diferencia o
+            // arrastre dentro de una tarjeta con borde, en
+            // vez de textos sueltos.
+            Container(
+              padding: const EdgeInsets.all(AppEspacio.md),
+              decoration: BoxDecoration(
+                color: AppColores.superficie(context),
+                border: Border.all(color: AppColores.borde(context)),
+                borderRadius: BorderRadius.circular(AppRadio.md),
+              ),
+              child: Column(
+                children: [
+                  _filaRecibo('Entrenador', widget.nombre),
+                  _filaRecibo('Esperado',
+                      '${fmtMonto(widget.esperado)} ${widget.moneda}'),
+                  _filaRecibo(
+                    'Entregado',
+                    '${fmtMonto(widget.entregado)} ${widget.moneda}',
+                    destacado: true,
+                  ),
+                  const Divider(height: 16),
+                  _filaRecibo(
+                    widget.parcial ? 'Queda de arrastre' : 'Diferencia',
+                    widget.parcial
+                        ? '${fmtMonto(widget.esperado - widget.entregado)} ${widget.moneda}'
+                        : 'Sin diferencia',
+                    color: widget.parcial
+                        ? AppColores.error
+                        : AppColores.exito,
+                  ),
+                ],
+              ),
+            ),
+            // C3 (estéticas 1.19): comparación visual — barra
+            // de cuánto se entregó y diferencia destacada
+            // (verde si cuadra, rojo si falta; lo parcial
+            // queda como arrastre).
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadio.circular),
+              child: LinearProgressIndicator(
+                value: widget.esperado > 0
+                    ? (widget.entregado / widget.esperado).clamp(0.0, 1.0)
+                    : 0,
+                minHeight: 8,
+                backgroundColor:
+                    AppColores.borde(context).withValues(alpha: 0.3),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                    widget.parcial ? AppColores.alerta : AppColores.exito),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              widget.parcial
+                  ? 'Faltan ${fmtMonto(widget.esperado - widget.entregado)} '
+                      '${widget.moneda} · quedan como saldo de arrastre.'
+                  : 'Cuadra exacto.',
+              style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: widget.parcial
+                      ? AppColores.error
+                      : AppColores.exito),
+            ),
+            const SizedBox(height: 8),
+            Text('${widget.totalIds} operación(es) incluida(s).',
+                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
+            // T5 (1.20): abrir el expediente AQUÍ, en la
+            // misma op, solo si la diferencia no es el
+            // arrastre normal.
+            if (widget.parcial) ...[
+              const SizedBox(height: AppEspacio.sm),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: _abrirExp,
+                onChanged: (v) =>
+                    setState(() => _abrirExp = v ?? false),
+                title: const Text(
+                    'Abrir expediente por esta diferencia',
+                    style: AppTexto.cuerpo),
+                subtitle: const Text(
+                    'Solo si NO es el arrastre normal: queda '
+                    'registrada con causa y resolución.',
+                    style: AppTexto.metadato),
+              ),
+              if (_abrirExp)
+                TextField(
+                  controller: _expCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Explicación (opcional)',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 2,
+                ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop((
+              abrirExp: _abrirExp,
+              explicacion: _expCtrl.text,
+            )),
+            child: const Text('Liquidar'),
+          ),
+        ],
     );
   }
 }

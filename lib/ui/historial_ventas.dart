@@ -822,66 +822,20 @@ class _HistorialVentasScreenState
     final waNum = normalizarTelefonoWaMe(telCliente);
     // El campo guarda 8 dígitos (como el resto de la app); el 53
     // va solo al armar el wa.me (igual que en ficha.dart).
-    final telCtrl = TextEditingController(
-        text: waNum.length == 10 ? waNum.substring(2) : '');
     if (!mounted) return;
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de su controlador
+    // (_DialogoReciboWa), envío incluido. Antes el
+    // controlador se disponía nada más cerrar el diálogo,
+    // con la animación de salida aún reconstruyendo el
+    // campo (defecto D-B1-08).
     await showDialog<void>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Recibo por WhatsApp',
-        iconoTitulo: Icons.receipt_long_rounded,
-        contenido: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(texto.replaceAll('*', '')),
-              const SizedBox(height: 12),
-              TextField(
-                controller: telCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Móvil del cliente',
-                  prefixText: '+53 ',
-                  hintText: '8 dígitos',
-                ),
-              ),
-            ],
-          ),
-        ),
-        acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.send_rounded),
-            label: const Text('Enviar por WhatsApp'),
-            onPressed: () async {
-              final num =
-                  normalizarTelefonoWaMe(telCtrl.text.trim());
-              if (num.isEmpty) {
-                mostrarSnack(ctx, 'Escribe un móvil válido', significado: SignificadoChip.alerta);
-                return;
-              }
-              final url = Uri.parse(
-                  'https://wa.me/$num?text=${Uri.encodeComponent(texto)}');
-              try {
-                await launchUrl(url,
-                    mode: LaunchMode.externalApplication);
-              } catch (_) {
-                if (ctx.mounted) {
-                  mostrarSnack(ctx, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
-                }
-              }
-            },
-          ),
-        ],
+      builder: (_) => _DialogoReciboWa(
+        texto: texto,
+        telefonoInicial: waNum.length == 10 ? waNum.substring(2) : '',
       ),
     );
-    // FIN-16/18 de Argón (1.20): el controlador del teléfono se
-    // libera al cerrar el diálogo.
-    telCtrl.dispose();
   }
 
   /// Detalle expandido de una venta con inscripción: dos bloques,
@@ -986,6 +940,97 @@ class _HistorialVentasScreenState
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Recibo por
+/// WhatsApp» como StatefulWidget DUEÑO de su controlador,
+/// dispuesto en dispose() — el patrón de la casa. El envío
+/// (validar el móvil, armar el wa.me y abrirlo) vive dentro,
+/// como antes.
+class _DialogoReciboWa extends StatefulWidget {
+  const _DialogoReciboWa({
+    required this.texto,
+    required this.telefonoInicial,
+  });
+
+  final String texto;
+  final String telefonoInicial;
+
+  @override
+  State<_DialogoReciboWa> createState() => _DialogoReciboWaState();
+}
+
+class _DialogoReciboWaState extends State<_DialogoReciboWa> {
+  late final TextEditingController _telCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _telCtrl = TextEditingController(text: widget.telefonoInicial);
+  }
+
+  @override
+  void dispose() {
+    _telCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _enviar() async {
+    final num = normalizarTelefonoWaMe(_telCtrl.text.trim());
+    if (num.isEmpty) {
+      mostrarSnack(context, 'Escribe un móvil válido',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    final url = Uri.parse(
+        'https://wa.me/$num?text=${Uri.encodeComponent(widget.texto)}');
+    try {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo abrir WhatsApp',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Recibo por WhatsApp',
+      iconoTitulo: Icons.receipt_long_rounded,
+      contenido: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.texto.replaceAll('*', '')),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _telCtrl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Móvil del cliente',
+                prefixText: '+53 ',
+                hintText: '8 dígitos',
+              ),
+            ),
+          ],
+        ),
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cerrar'),
+        ),
+        ElevatedButton.icon(
+          icon: const Icon(Icons.send_rounded),
+          label: const Text('Enviar por WhatsApp'),
+          onPressed: _enviar,
+        ),
+      ],
     );
   }
 }

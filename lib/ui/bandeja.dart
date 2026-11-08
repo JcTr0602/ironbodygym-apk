@@ -205,51 +205,22 @@ class _BandejaScreenState extends State<BandejaScreen>
   /// Entrenador con permiso: borrador compartido en texto (el dueño
   /// lo abre luego en el editor y lo publica).
   Future<void> _crearBorrador(Map<String, dynamic> s) async {
-    final tituloCtrl =
-        TextEditingController(text: '${s['tema'] ?? ''}');
-    final textoCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de sus controladores
+    // (_DialogoBorradorBandeja); antes se disponían nada más
+    // resolver el showDialog, con la animación de salida aún
+    // reconstruyendo los campos (defecto D-B1-08).
+    final r = await showDialog<({String titulo, String texto})>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Borrador compartido'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                  controller: tituloCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Título')),
-              const SizedBox(height: 8),
-              TextField(
-                  controller: textoCtrl,
-                  maxLines: 5,
-                  decoration:
-                      const InputDecoration(labelText: 'Texto (opcional)')),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Guardar')),
-        ],
+      builder: (_) => _DialogoBorradorBandeja(
+        tituloDialogo: 'Borrador compartido',
+        tituloInicial: '${s['tema'] ?? ''}',
+        etiquetaTexto: 'Texto (opcional)',
       ),
     );
-    if (ok != true) {
-      tituloCtrl.dispose();
-      textoCtrl.dispose();
-      return;
-    }
-    final titulo = tituloCtrl.text.trim();
-    final texto = textoCtrl.text.trim();
-    // Argón Gmail-15 #4: los controladores se liberan en cuanto
-    // se extrae el texto, en todos los caminos de salida.
-    tituloCtrl.dispose();
-    textoCtrl.dispose();
+    if (r == null) return;
+    final titulo = r.titulo;
+    final texto = r.texto;
     if (titulo.isEmpty) {
       _snack('El borrador necesita un título.');
       return;
@@ -293,51 +264,20 @@ class _BandejaScreenState extends State<BandejaScreen>
   }
 
   Future<void> _editarBorrador(Map<String, dynamic> b) async {
-    final tituloCtrl =
-        TextEditingController(text: '${b['titulo'] ?? ''}');
-    final textoCtrl =
-        TextEditingController(text: '${b['texto'] ?? ''}');
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): mismo StatefulWidget dueño
+    // que _crearBorrador (_DialogoBorradorBandeja).
+    final r = await showDialog<({String titulo, String texto})>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Editar borrador'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                  controller: tituloCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Título')),
-              const SizedBox(height: 8),
-              TextField(
-                  controller: textoCtrl,
-                  maxLines: 5,
-                  decoration:
-                      const InputDecoration(labelText: 'Texto')),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Guardar')),
-        ],
+      builder: (_) => _DialogoBorradorBandeja(
+        tituloDialogo: 'Editar borrador',
+        tituloInicial: '${b['titulo'] ?? ''}',
+        textoInicial: '${b['texto'] ?? ''}',
+        etiquetaTexto: 'Texto',
       ),
     );
-    if (ok != true) {
-      tituloCtrl.dispose();
-      textoCtrl.dispose();
-      return;
-    }
-    final titulo = tituloCtrl.text.trim();
-    final texto = textoCtrl.text.trim();
-    // Argón Gmail-15 #4: ver _crearBorrador.
-    tituloCtrl.dispose();
-    textoCtrl.dispose();
+    if (r == null) return;
+    final titulo = r.titulo;
+    final texto = r.texto;
     if (titulo.isEmpty) {
       _snack('El borrador necesita un título.');
       return;
@@ -687,6 +627,84 @@ class _BandejaScreenState extends State<BandejaScreen>
                     if (_esDueno) _listaPermisos(),
                   ],
                 ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): editor de borrador
+/// de la bandeja (crear y editar) como StatefulWidget
+/// DUEÑO de sus controladores, dispuestos en dispose() —
+/// el patrón de la casa. Devuelve los textos recortados al
+/// guardar; null al cancelar.
+class _DialogoBorradorBandeja extends StatefulWidget {
+  const _DialogoBorradorBandeja({
+    required this.tituloDialogo,
+    required this.tituloInicial,
+    this.textoInicial = '',
+    required this.etiquetaTexto,
+  });
+
+  final String tituloDialogo;
+  final String tituloInicial;
+  final String textoInicial;
+  final String etiquetaTexto;
+
+  @override
+  State<_DialogoBorradorBandeja> createState() =>
+      _DialogoBorradorBandejaState();
+}
+
+class _DialogoBorradorBandejaState
+    extends State<_DialogoBorradorBandeja> {
+  late final TextEditingController _tituloCtrl;
+  late final TextEditingController _textoCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _tituloCtrl = TextEditingController(text: widget.tituloInicial);
+    _textoCtrl = TextEditingController(text: widget.textoInicial);
+  }
+
+  @override
+  void dispose() {
+    _tituloCtrl.dispose();
+    _textoCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.tituloDialogo),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: _tituloCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Título')),
+            const SizedBox(height: 8),
+            TextField(
+                controller: _textoCtrl,
+                maxLines: 5,
+                decoration:
+                    InputDecoration(labelText: widget.etiquetaTexto)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, (
+                  titulo: _tituloCtrl.text.trim(),
+                  texto: _textoCtrl.text.trim(),
+                )),
+            child: const Text('Guardar')),
+      ],
     );
   }
 }

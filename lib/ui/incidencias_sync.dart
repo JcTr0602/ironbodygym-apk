@@ -129,45 +129,20 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   }
 
   Future<void> _descartar(Map<String, dynamic> inc) async {
-    final notaCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de su controlador
+    // (_DialogoDescartarIncidencia). Antes se creaba aquí y
+    // se disponía nada más resolver el showDialog, con la
+    // animación de salida aún reconstruyendo el campo (el
+    // defecto D-B1-08; la captura previa del texto de la
+    // 1.25 T41 solo evitaba perder la nota, no el uso tras
+    // el dispose).
+    final nota = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Descartar incidencia'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-                'Se descartará la operación "${descripcionOp('${inc['tipo'] ?? ''}')}" sin aplicarla.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: notaCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Nota (opcional)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Descartar'),
-          ),
-        ],
-      ),
+      builder: (_) => _DialogoDescartarIncidencia(
+          descripcion: descripcionOp('${inc['tipo'] ?? ''}')),
     );
-    // 1.25 T41: la nota se captura ANTES de liberar el
-    // controlador (el texto se leía DESPUÉS del dispose: la
-    // nota se perdía o reventaba — el mismo patrón corregido
-    // ya dos veces en la casa).
-    final nota = notaCtrl.text.trim();
-    notaCtrl.dispose();
-    if (ok != true || !mounted) return;
+    if (nota == null || !mounted) return;
     setState(() => _procesando = true);
     try {
       await descartarIncidenciaSync('${inc['id']}',
@@ -395,6 +370,65 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Descartar
+/// incidencia» como StatefulWidget DUEÑO de su controlador,
+/// dispuesto en dispose() — el patrón de la casa. Devuelve
+/// la nota tecleada (recortada) al confirmar; null al
+/// cancelar.
+class _DialogoDescartarIncidencia extends StatefulWidget {
+  const _DialogoDescartarIncidencia({required this.descripcion});
+
+  final String descripcion;
+
+  @override
+  State<_DialogoDescartarIncidencia> createState() =>
+      _DialogoDescartarIncidenciaState();
+}
+
+class _DialogoDescartarIncidenciaState
+    extends State<_DialogoDescartarIncidencia> {
+  final _notaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Descartar incidencia'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Se descartará la operación "${widget.descripcion}" '
+              'sin aplicarla.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _notaCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Nota (opcional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_notaCtrl.text.trim()),
+          child: const Text('Descartar'),
+        ),
+      ],
     );
   }
 }

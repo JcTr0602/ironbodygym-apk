@@ -133,66 +133,19 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
     // El contrato pide `monto_cup` en la confirmación: el dueño
     // puede ajustarlo si la transferencia difiere de lo cotizado
     // (por defecto, el monto del reporte).
-    final ctrl = TextEditingController(
-        text: r.monto % 1 == 0
-            ? '${r.monto.toInt()}'
-            : '${r.monto}');
-    var errorMonto = false;
+    // 1.29 (Oleada 4, barrido): el diálogo vive en un
+    // StatefulWidget dueño de su controlador
+    // (_DialogoConfirmarPlus); antes se disponía al resolver
+    // el showDialog con el campo aún reconstruyéndose en la
+    // animación de salida (defecto D-B1-08).
     final monto = await showDialog<double>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateDlg) => DialogoApp(
-          titulo: 'Confirmar pago App Plus',
-          iconoTitulo: Icons.star_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('${r.nombre} reportó ${fmtMonto(r.monto)} CUP '
-                  'por transferencia (referencia ${r.referencia}).'
-                  '\n\nAl confirmar, el invitado recibe 30 días de '
-                  'App Plus desde que el servidor procese la '
-                  'confirmación.'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'Monto confirmado (CUP)',
-                  border: const OutlineInputBorder(),
-                  errorText: errorMonto
-                      ? 'Escribe un monto válido mayor que 0'
-                      : null,
-                ),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final v = double.tryParse(
-                    ctrl.text.trim().replaceAll(',', '.'));
-                // Finito y > 0: tryParse acepta «NaN»/«Infinity»
-                // y con NaN ninguna comparación los frenaría.
-                if (!montoConfirmacionPlusValido(v)) {
-                  setStateDlg(() => errorMonto = true);
-                  return;
-                }
-                Navigator.pop(ctx, v);
-              },
-              child: const Text('Confirmar'),
-            ),
-          ],
-        ),
+      builder: (_) => _DialogoConfirmarPlus(
+        nombre: r.nombre,
+        monto: r.monto,
+        referencia: r.referencia,
       ),
     );
-    ctrl.dispose();
     if (monto != null && mounted) {
       await _decidir(r, true, montoCup: monto);
     }
@@ -200,54 +153,17 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
 
   Future<void> _rechazar(ReportePlus r) async {
     if (_bloqueado(r)) return;
-    final ctrl = TextEditingController();
-    var errorMotivo = false;
+    // 1.29 (Oleada 4, barrido): StatefulWidget dueño de su
+    // controlador (_DialogoRechazarPlus); antes se disponía
+    // al resolver el showDialog (defecto D-B1-08).
     final motivo = await showDialog<String>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setStateDlg) => DialogoApp(
-          titulo: 'Rechazar reporte App Plus',
-          iconoTitulo: Icons.star_border_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('${r.nombre} · ${fmtMonto(r.monto)} CUP · '
-                  'ref. ${r.referencia}'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ctrl,
-                decoration: InputDecoration(
-                  labelText: 'Motivo (obligatorio, lo ve el invitado)',
-                  border: const OutlineInputBorder(),
-                  errorText: errorMotivo
-                      ? 'Escribe el motivo del rechazo'
-                      : null,
-                ),
-                maxLength: 200,
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (ctrl.text.trim().isEmpty) {
-                  setStateDlg(() => errorMotivo = true);
-                  return;
-                }
-                Navigator.pop(ctx, ctrl.text.trim());
-              },
-              child: const Text('Rechazar'),
-            ),
-          ],
-        ),
+      builder: (_) => _DialogoRechazarPlus(
+        nombre: r.nombre,
+        monto: r.monto,
+        referencia: r.referencia,
       ),
     );
-    ctrl.dispose();
     if (motivo != null && mounted) {
       await _decidir(r, false, motivo: motivo);
     }
@@ -443,6 +359,178 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Confirmar pago App
+/// Plus» como StatefulWidget DUEÑO de su controlador,
+/// dispuesto en dispose() — el patrón de la casa. La
+/// validación del monto (finito y > 0) vive dentro, como
+/// antes con el StatefulBuilder. Devuelve el monto
+/// confirmado; null al cancelar.
+class _DialogoConfirmarPlus extends StatefulWidget {
+  const _DialogoConfirmarPlus({
+    required this.nombre,
+    required this.monto,
+    required this.referencia,
+  });
+
+  final String nombre;
+  final double monto;
+  final String referencia;
+
+  @override
+  State<_DialogoConfirmarPlus> createState() =>
+      _DialogoConfirmarPlusState();
+}
+
+class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
+  late final TextEditingController _ctrl;
+  bool _errorMonto = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(
+        text: widget.monto % 1 == 0
+            ? '${widget.monto.toInt()}'
+            : '${widget.monto}');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _confirmar() {
+    final v = double.tryParse(_ctrl.text.trim().replaceAll(',', '.'));
+    // Finito y > 0: tryParse acepta «NaN»/«Infinity» y con
+    // NaN ninguna comparación los frenaría.
+    if (!montoConfirmacionPlusValido(v)) {
+      setState(() => _errorMonto = true);
+      return;
+    }
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Confirmar pago App Plus',
+      iconoTitulo: Icons.star_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${widget.nombre} reportó ${fmtMonto(widget.monto)} CUP '
+              'por transferencia (referencia ${widget.referencia}).'
+              '\n\nAl confirmar, el invitado recibe 30 días de '
+              'App Plus desde que el servidor procese la '
+              'confirmación.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Monto confirmado (CUP)',
+              border: const OutlineInputBorder(),
+              errorText: _errorMonto
+                  ? 'Escribe un monto válido mayor que 0'
+                  : null,
+            ),
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _confirmar,
+          child: const Text('Confirmar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Rechazar reporte
+/// App Plus» como StatefulWidget DUEÑO de su controlador,
+/// dispuesto en dispose() — el patrón de la casa. El motivo
+/// es obligatorio (error en línea, como antes). Devuelve el
+/// motivo recortado; null al cancelar.
+class _DialogoRechazarPlus extends StatefulWidget {
+  const _DialogoRechazarPlus({
+    required this.nombre,
+    required this.monto,
+    required this.referencia,
+  });
+
+  final String nombre;
+  final double monto;
+  final String referencia;
+
+  @override
+  State<_DialogoRechazarPlus> createState() =>
+      _DialogoRechazarPlusState();
+}
+
+class _DialogoRechazarPlusState extends State<_DialogoRechazarPlus> {
+  final _ctrl = TextEditingController();
+  bool _errorMotivo = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _rechazar() {
+    if (_ctrl.text.trim().isEmpty) {
+      setState(() => _errorMotivo = true);
+      return;
+    }
+    Navigator.pop(context, _ctrl.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Rechazar reporte App Plus',
+      iconoTitulo: Icons.star_border_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${widget.nombre} · ${fmtMonto(widget.monto)} CUP · '
+              'ref. ${widget.referencia}'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _ctrl,
+            decoration: InputDecoration(
+              labelText: 'Motivo (obligatorio, lo ve el invitado)',
+              border: const OutlineInputBorder(),
+              errorText:
+                  _errorMotivo ? 'Escribe el motivo del rechazo' : null,
+            ),
+            maxLength: 200,
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _rechazar,
+          child: const Text('Rechazar'),
+        ),
+      ],
     );
   }
 }

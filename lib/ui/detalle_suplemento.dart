@@ -1221,70 +1221,20 @@ Future<bool> _ajustarStock(BuildContext context,
     Map<String, dynamic> suplemento) async {
   final stockActual =
       (suplemento['stock'] as num?)?.toInt() ?? 0;
-  final ctrl =
-      TextEditingController(text: '$stockActual');
-  final notaCtrl = TextEditingController();
-  var motivo = 'merma';
-  final ok = await showDialog<bool>(
+  // 1.29 (Oleada 4, barrido): el diálogo vive en un
+  // StatefulWidget dueño de sus controladores
+  // (_DialogoAjustarStock); antes se disponían nada más
+  // resolver el showDialog, con la animación de salida aún
+  // reconstruyendo los campos (defecto D-B1-08).
+  final r = await showDialog<
+      ({String stockTexto, String nota, String motivo})>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setD) => DialogoApp(
-        titulo: 'Ajustar stock',
-        iconoTitulo: Icons.inventory_2_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Stock actual: $stockActual',
-                style: AppTexto.cuerpo),
-            const SizedBox(height: AppEspacio.md),
-            CampoTexto(
-              controller: ctrl,
-              etiqueta: 'Nuevo stock',
-              teclado: TextInputType.number,
-            ),
-            const SizedBox(height: AppEspacio.md),
-            DropdownButton<String>(
-              value: motivo,
-              isExpanded: true,
-              items: [
-                for (final m in kMotivosAjusteStock)
-                  DropdownMenuItem(
-                      value: m,
-                      child: Text(etiquetaMotivoAjuste(m))),
-              ],
-              onChanged: (v) =>
-                  setD(() => motivo = v ?? 'merma'),
-            ),
-            const SizedBox(height: AppEspacio.md),
-            CampoTexto(
-              controller: notaCtrl,
-              etiqueta: 'Nota (opcional)',
-            ),
-          ],
-        ),
-        acciones: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Ajustar')),
-        ],
-      ),
-    ),
+    builder: (_) => _DialogoAjustarStock(stockActual: stockActual),
   );
-  if (ok != true) {
-    ctrl.dispose();
-    notaCtrl.dispose();
-    return false;
-  }
-  final nuevo = int.tryParse(ctrl.text.trim());
-  final notaTexto = notaCtrl.text;
-  // FIN-16 de Argón (1.20): controladores liberados tras leer
-  // sus valores (antes quedaban sin dispose).
-  ctrl.dispose();
-  notaCtrl.dispose();
+  if (r == null) return false;
+  final nuevo = int.tryParse(r.stockTexto.trim());
+  final notaTexto = r.nota;
+  final motivo = r.motivo;
   if (nuevo == null || nuevo < 0) {
     if (context.mounted) {
       mostrarSnack(context, 'Escribe un stock válido (0 o más).',
@@ -1317,6 +1267,91 @@ Future<bool> _ajustarStock(BuildContext context,
           significado: SignificadoChip.error);
     }
     return false;
+  }
+}
+
+/// 1.29 (Oleada 4, barrido de diálogos): «Ajustar stock»
+/// como StatefulWidget DUEÑO de sus controladores,
+/// dispuestos en dispose() — el patrón de la casa. Devuelve
+/// los textos y el motivo elegidos; null al cancelar. El
+/// parseo, las validaciones y el ajuste siguen en
+/// _ajustarStock, como siempre.
+class _DialogoAjustarStock extends StatefulWidget {
+  const _DialogoAjustarStock({required this.stockActual});
+
+  final int stockActual;
+
+  @override
+  State<_DialogoAjustarStock> createState() =>
+      _DialogoAjustarStockState();
+}
+
+class _DialogoAjustarStockState extends State<_DialogoAjustarStock> {
+  late final TextEditingController _ctrl;
+  final _notaCtrl = TextEditingController();
+  String _motivo = 'merma';
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: '${widget.stockActual}');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DialogoApp(
+      titulo: 'Ajustar stock',
+      iconoTitulo: Icons.inventory_2_rounded,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Stock actual: ${widget.stockActual}',
+              style: AppTexto.cuerpo),
+          const SizedBox(height: AppEspacio.md),
+          CampoTexto(
+            controller: _ctrl,
+            etiqueta: 'Nuevo stock',
+            teclado: TextInputType.number,
+          ),
+          const SizedBox(height: AppEspacio.md),
+          DropdownButton<String>(
+            value: _motivo,
+            isExpanded: true,
+            items: [
+              for (final m in kMotivosAjusteStock)
+                DropdownMenuItem(
+                    value: m, child: Text(etiquetaMotivoAjuste(m))),
+            ],
+            onChanged: (v) => setState(() => _motivo = v ?? 'merma'),
+          ),
+          const SizedBox(height: AppEspacio.md),
+          CampoTexto(
+            controller: _notaCtrl,
+            etiqueta: 'Nota (opcional)',
+          ),
+        ],
+      ),
+      acciones: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, (
+                  stockTexto: _ctrl.text,
+                  nota: _notaCtrl.text,
+                  motivo: _motivo,
+                )),
+            child: const Text('Ajustar')),
+      ],
+    );
   }
 }
 
