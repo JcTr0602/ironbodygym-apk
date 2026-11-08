@@ -16,6 +16,17 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.29.0', [
+    'Inicio con cabecera principal renovada: el logo y el nombre del gym se presentan con más presencia, los botones de arriba son circulares y el de sincronizar muestra su estado en vivo (girando al sincronizar, con su punto de al día, pendientes o error)',
+    'Editor de rutinas del gym nuevo: busca ejercicios por nombre, equipo o músculo y míralos con su foto; añade series con sus valores a la vista, reordena arrastrando, quita con Deshacer y sigue los totales de la rutina mientras la armas',
+    'Avisos a la app de Clientes con fecha de fin: al publicar un aviso puedes elegir hasta qué día se muestra; al terminar ese día deja de entregarse solo, sin tener que retirarlo a mano',
+    'Pedir relleno de pomo: cuando al entrenador se le está acabando un suplemento, su pantalla le ofrece pedir relleno con un toque y tú lo ves en Servicios para rellenar su pomo; la petición no se pierde ni se duplica aunque la conexión falle a mitad de camino',
+    'Gastos de cada quien, bien: el entrenador ve sus gastos —también los que ya se sincronizaron— y solo los suyos; tú sigues viendo los de todos',
+    'Actividad del cliente en su app: desde su ficha puedes consultar lo último que hizo en su aplicación, sin salir de Gestión',
+    'Panel que avisa lo que hay por revisar: cada módulo muestra cuántas decisiones tienes pendientes y, al entrar, te enseña esa misma lista arriba del todo para resolverla sin buscarla',
+    'Diseño más cuidado en toda la app: los textos y botones sobre el naranja se leen con el contraste correcto y los iconos son uniformes; y al inscribir, si el selector de fotos se corta a mitad, la app se recupera y avisa en vez de quedarse muda',
+    'Correcciones de la revisión final: editar un aviso que ya venció ya no cierra la app, y las ventas de servicios que aún están en cola ya cuentan en la nómina con su fecha y su comisión correctas desde el primer momento',
+  ]),
   Novedad('1.28.0', [
     'Sincronización blindada y a la vista: la pantalla «Salud de la sincronización» muestra el estado de cada tabla con un semáforo; si el espejo de un teléfono se desfasa, la app lo detecta y lo repara sola, y la cola de operaciones explica por fila por qué algo no subió y qué hacer',
     'Panel reorganizado: los seis módulos se llaman como los usas —«Caja y dinero», «Clientes e invitados», «Equipo y turnos», «Suplementos y contenido», «Configuración y datos» y «Control y sistema»—, cada uno con su línea de estado en vivo, y el Panel abre al instante con los datos del día',

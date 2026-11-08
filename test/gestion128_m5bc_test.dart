@@ -493,19 +493,20 @@ void main() {
 
     testWidgets('la vitrina pinta tarjetas con su sello', (tester) async {
       // Superficie alta: las dos tarjetas caben y el
-      // ListView perezoso las construye.
-      tester.view.physicalSize = const Size(1200, 3200);
+      // ListView perezoso las construye. (1.29: la tarjeta
+      // de la instalada trae 9 viñetas: superficie mayor.)
+      tester.view.physicalSize = const Size(1200, 5200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: DialogoNovedades(
-              lista: novedadesDeMiVersion('1.28.0')),
+              lista: novedadesDeMiVersion('1.29.0')),
         ),
       ));
+      expect(find.text('Versión 1.29.0'), findsOneWidget);
       expect(find.text('Versión 1.28.0'), findsOneWidget);
-      expect(find.text('Versión 1.27.0'), findsOneWidget);
-      // La instalada (1.28.0+89 en AppConfig) lleva «Nuevo».
+      // La instalada (1.29.0+90 en AppConfig) lleva «Nuevo».
       expect(find.text('Nuevo'), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_rounded),
           findsWidgets);
