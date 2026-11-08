@@ -2508,11 +2508,63 @@ class SyncEngine {
   /// H-08 (1.23): borra las metas derivadas de sync_estado que
   /// un no-admin no debe conservar en el teléfono (usuarios APK
   /// y el feed global de actividad con montos). La llaman la
-  /// descarga (al guardar el estado) y la purga de transición.
+  /// purga de transición y el resync por cambio de huella (la
+  /// identidad cambió: el directorio anterior es de OTRA
+  /// sesión y el pull de estado de este mismo ciclo lo
+  /// repuebla con el de la sesión nueva).
   Future<void> _limpiarMetasEstadoNoAdmin() async {
     await _db.borrarMeta('usuarios_apk');
+    await _limpiarMetasActividadNoAdmin();
+  }
+
+  /// 1.29 (Oleada 4 · adopción del directorio): borra SOLO las
+  /// metas de actividad global (con montos; solo las consume
+  /// el Panel del dueño). El directorio `usuarios_apk` ya NO se
+  /// borra en el pull: desde la pieza de servidor «gastos
+  /// propias» (2026-11-07), la vista sync_estado entrega a
+  /// cada entrenador SOLO su propia entrada (recorte por JWT
+  /// en el servidor), así que el directorio que llega es el
+  /// que el teléfono puede y debe guardar tal cual — sin él,
+  /// D-A1 no puede resolver el nombre canónico del propio
+  /// entrenador y sus gastos sincronizados quedan ocultos
+  /// (fail-closed) en su propio teléfono.
+  Future<void> _limpiarMetasActividadNoAdmin() async {
     await _db.borrarMeta('sync_estado_actividad');
     await _db.borrarMeta('sync_estado_actividad_serie');
+  }
+
+  /// 1.29 (Oleada 4): aplica la fila de sync_estado (ajustes,
+  /// directorio de usuarios y actividad) a las metas locales.
+  /// Extraído del pull como costura testeable (el GET va por
+  /// un cliente HTTP no inyectable): el pull lo llama con la
+  /// fila recibida y los tests lo invocan directo con la
+  /// sesión fijada.
+  ///
+  /// Regla de rol: los AJUSTES se guardan siempre. El
+  /// DIRECTORIO se guarda TAL COMO LLEGA para todo rol — el
+  /// servidor es la autoridad del recorte (admin: completo;
+  /// entrenador: solo su entrada) y la app NO re-filtra. La
+  /// ACTIVIDAD global (con montos) solo se guarda al admin;
+  /// al no-admin se le limpian las metas de actividad que una
+  /// sesión anterior hubiera dejado, pero NUNCA el directorio.
+  Future<void> aplicarEstadoServidor(Map<String, dynamic> fila) async {
+    if (fila['ajustes'] is Map) {
+      await _db.setAjustes(Map<String, dynamic>.from(fila['ajustes'] as Map));
+    }
+    // v1.0.12: lista de usuarios APK (directorio). 1.29: para
+    // TODO rol, tal como llega (ver el doc de arriba).
+    if (fila['usuarios'] is List) {
+      await _db.setMeta('usuarios_apk', jsonEncode(fila['usuarios']));
+    }
+    if (_esAdminSeguro) {
+      // v1.0.15: feed de actividad reciente (solo dueño).
+      if (fila['actividad'] is List) {
+        await _db.setMeta(
+            'sync_estado_actividad', jsonEncode(fila['actividad']));
+      }
+    } else {
+      await _limpiarMetasActividadNoAdmin();
+    }
   }
 
   /// H-08 (1.23): purga de transición por rol, UNA sola vez
@@ -4566,30 +4618,18 @@ class SyncEngine {
       if (r.statusCode == 200) {
         final rows = jsonDecode(r.body) as List;
         if (rows.isNotEmpty) {
-          if (rows.first['ajustes'] is Map) {
-            await _db
-                .setAjustes(Map<String, dynamic>.from(rows.first['ajustes']));
-          }
-          // H-08 (1.23): las tres metas derivadas de sync_estado
-          // que siguen (usuarios APK, feed de actividad y serie)
-          // exponen el negocio entero — cuentas del personal y
-          // actividad global con montos — y solo las consume el
-          // Panel del dueño. En un teléfono de entrenador NO se
-          // guardan (y se borran las que una sesión anterior, p.
-          // ej. el teléfono compartido del dueño, hubiera dejado
-          // escritas). La vista del servidor además las entrega
-          // vacías al no-admin: esto es la defensa en el cliente.
+          // 1.29 (Oleada 4): ajustes + directorio + actividad,
+          // en la costura extraída y testeable. El DIRECTORIO se
+          // guarda tal como llega para todo rol: desde la pieza
+          // de servidor «gastos propias» la vista lo recorta por
+          // JWT (al entrenador solo le baja su propia entrada),
+          // y sin él D-A1 no resuelve su nombre canónico. La
+          // actividad global con montos sigue siendo solo del
+          // dueño (H-08): al no-admin se le limpian esas metas,
+          // nunca el directorio.
+          await aplicarEstadoServidor(
+              Map<String, dynamic>.from(rows.first as Map));
           if (_esAdminSeguro) {
-            // v1.0.12: lista de usuarios APK para gestión
-            if (rows.first['usuarios'] is List) {
-              await _db.setMeta(
-                  'usuarios_apk', jsonEncode(rows.first['usuarios']));
-            }
-            // v1.0.15: feed de actividad reciente
-            if (rows.first['actividad'] is List) {
-              await _db.setMeta('sync_estado_actividad',
-                  jsonEncode(rows.first['actividad']));
-            }
             // v1.4.1 (Pieza 7, D3): serie diaria agregada de 30 días.
             // La columna puede no existir aún en sync_estado (el select
             // la pide igual: PostgREST respondería 400 y el bloque
@@ -4607,8 +4647,6 @@ class SyncEngine {
                 }
               }
             } catch (_) {}
-          } else {
-            await _limpiarMetasEstadoNoAdmin();
           }
           // 1.28 (M1-A9/R3M1-F3): cast tolerante — con `as int?`
           // un server_seq como String/double lanzaba, el catch
