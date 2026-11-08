@@ -1058,13 +1058,26 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
             child: _cargandoCatalogo
                 ? const EstadoCargando(texto: 'Cargando GymPedia…')
                 : _ejercicios.isEmpty
-                    ? const EstadoVacio(
-                        icono: Icons.fitness_center_rounded,
-                        titulo: 'Todavía no hay ejercicios',
-                        subtitulo: 'Elige fichas de GymPedia '
-                            'para armar la rutina: el cliente '
-                            'entrena con las series que pongas '
-                            'aquí.',
+                    // El vacío va en un scroll con alto mínimo:
+                    // en pantallas bajas (o con el aviso del
+                    // catálogo visible) el EstadoVacio no cabe
+                    // en el hueco y desbordaba en vez de
+                    // dejarse desplazar.
+                    ? LayoutBuilder(
+                        builder: (ctx, c) => SingleChildScrollView(
+                          child: ConstrainedBox(
+                            constraints:
+                                BoxConstraints(minHeight: c.maxHeight),
+                            child: const EstadoVacio(
+                              icono: Icons.fitness_center_rounded,
+                              titulo: 'Todavía no hay ejercicios',
+                              subtitulo: 'Elige fichas de GymPedia '
+                                  'para armar la rutina: el cliente '
+                                  'entrena con las series que '
+                                  'pongas aquí.',
+                            ),
+                          ),
+                        ),
                       )
                     : ReorderableListView.builder(
                         buildDefaultDragHandles: false,
