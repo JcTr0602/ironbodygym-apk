@@ -259,11 +259,39 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   // espejo: para ops cuyo payload NO trae cliente_id (inscribir),
   // donde la máscara por id no puede cubrir (Argón Gmail_1-14 #1).
   final Set<String> _protegidosNombres = {};
+  // Espejo de clientes por id, cargado una vez por _cargar y
+  // reutilizado por los bloques siguientes («Ver más»).
+  Map<int, Map<String, dynamic>> _porId = {};
+  bool _esDueno = false;
+
+  // 1.29 (Oleada 6, FB-16): el río se carga POR BLOQUES con
+  // cursor estable (creada_ts + rowid, LocalDb.opsAuditoriaBloque)
+  // en vez del techo fijo de 100 de recentOps: en un día con
+  // más de 100 operaciones, la mañana quedaba inalcanzable y
+  // el contador de la tarjeta contaba solo lo cargado como si
+  // fuera el día entero. [_totalHoy] es el denominador real.
+  static const int _tamBloque = 100;
+  ({String ts, int rowid})? _cursor;
+  bool _hayMas = false;
+  bool _cargandoMas = false;
+  int _totalHoy = 0;
+
+  // 1.29 (Oleada 6, FB-16): búsqueda por nombre de cliente o
+  // tipo dentro de lo CARGADO (no promete lo que aún no bajó:
+  // el botón «Ver más antiguas» amplía el universo buscable).
+  final _busquedaCtrl = TextEditingController();
+  String _busqueda = '';
 
   @override
   void initState() {
     super.initState();
     _cargar();
+  }
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _cargar() async {
@@ -280,24 +308,15 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     }
     // Ronda 17 M1-H1 (decisión Jc 2026-10-28): un no-dueño solo
     // ve lo suyo. Fail-closed: sin dueño confirmado, se recorta.
-    var esDueno = false;
+    _esDueno = false;
     try {
-      esDueno = AuthService().isOwner;
+      _esDueno = AuthService().isOwner;
     } catch (_) {
-      esDueno = false;
+      _esDueno = false;
     }
-    final ops = await LocalDb.instance.recentOps(limit: 100);
-    // Recorte en carga para no-dueños: así ni los contadores
-    // (opsHoy, pendientes) cuentan operaciones ajenas.
-    final opsVisibles = esDueno
-        ? ops
-        : ops
-            .where((o) => esOpMia(o,
-                miActor: _miActor, miTelegramId: _miTelegramId))
-            .toList();
     // Precargar nombres y fotos de clientes mencionados
     final clientes = await LocalDb.instance.allMirror('clientes');
-    final porId = <int, Map<String, dynamic>>{
+    _porId = <int, Map<String, dynamic>>{
       for (final c in clientes) (c['id'] as int): c,
     };
     _protegidosIds.clear();
@@ -311,13 +330,76 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         if (n.isNotEmpty) _protegidosNombres.add(n);
       }
     }
-    for (final op in opsVisibles) {
+    // FB-16: el denominador de hoy, sobre el universo visible
+    // de esta pantalla (para el no-dueño, solo SUS ops de hoy:
+    // la firma de actor no es SQL, se cuenta en Dart).
+    final hoy = hoyHabanaIso();
+    if (_esDueno) {
+      _totalHoy = await LocalDb.instance.contarOpsDelDia(hoy);
+    } else {
+      final delDia = await LocalDb.instance.opsDelDia(hoy);
+      _totalHoy = delDia
+          .where((o) => esOpMia(o,
+              miActor: _miActor, miTelegramId: _miTelegramId))
+          .length;
+    }
+    _ops = [];
+    _cursor = null;
+    _hayMas = false;
+    await _cargarBloque();
+    if (mounted) {
+      setState(() {
+        if (!_esDueno) _filtro = FiltroAuditoria.soloMias;
+        _cargando = false;
+      });
+    }
+  }
+
+  /// FB-16: trae el siguiente bloque del río y lo ANEXA a lo
+  /// cargado. El cursor avanza sobre el río CRUDO (antes del
+  /// recorte del no-dueño): si avanzara sobre lo visible, un
+  /// bloque entero de ops ajenas dejaría el cursor quieto y
+  /// «Ver más» giraría en vacío.
+  Future<void> _cargarBloque() async {
+    final crudas = await LocalDb.instance
+        .opsAuditoriaBloque(cursor: _cursor, limite: _tamBloque);
+    if (crudas.isNotEmpty) {
+      final ultima = crudas.last;
+      _cursor = (
+        ts: '${ultima['creada_ts'] ?? ''}',
+        rowid: (ultima['_rowid'] as num?)?.toInt() ?? 0,
+      );
+    }
+    _hayMas = crudas.length >= _tamBloque;
+    // Recorte en carga para no-dueños: así ni los contadores
+    // cuentan operaciones ajenas.
+    final visibles = _esDueno
+        ? crudas
+        : crudas
+            .where((o) => esOpMia(o,
+                miActor: _miActor, miTelegramId: _miTelegramId))
+            .toList();
+    _precargarNombres(visibles);
+    _ops = [..._ops, ...visibles];
+  }
+
+  Future<void> _verMas() async {
+    if (_cargandoMas || !_hayMas) return;
+    setState(() => _cargandoMas = true);
+    await _cargarBloque();
+    if (mounted) setState(() => _cargandoMas = false);
+  }
+
+  /// Precarga nombre/foto de los clientes que mencionan las
+  /// ops [ops] (las de un bloque recién llegado).
+  void _precargarNombres(List<Map<String, dynamic>> ops) {
+    for (final op in ops) {
       final p = _payload(op);
       final cid = _clienteId(p, '${op['tipo']}');
       if (cid != null &&
           !_nombres.containsKey(cid) &&
           !_protegidosIds.contains(cid)) {
-        final c = porId[cid];
+        final c = _porId[cid];
         if (c != null) {
           // Ronda 17 M1-H2: de un protegido no se precarga ni
           // nombre ni foto (la fila mostraría su avatar).
@@ -329,13 +411,6 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
           }
         }
       }
-    }
-    if (mounted) {
-      setState(() {
-        _ops = opsVisibles;
-        if (!esDueno) _filtro = FiltroAuditoria.soloMias;
-        _cargando = false;
-      });
     }
   }
 
@@ -480,14 +555,22 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         _ops.where((o) => '${o['estado']}' == 'pendiente').length;
 
     // v1.6.0: la lista respeta el filtro elegido (por defecto
-    // «Otros y alertas»). La DETECCIÓN no cambia: _ops trae las
-    // mismas 100 ops de siempre; esto solo filtra la presentación
-    // por ACTOR (mías vs. de otro), no por dispositivo.
+    // «Otros y alertas»); esto solo filtra la presentación por
+    // ACTOR (mías vs. de otro), no por dispositivo. 1.29
+    // (FB-16): _ops crece POR BLOQUES con «Ver más antiguas»
+    // (ya no hay techo de 100) y la búsqueda mira dentro de
+    // lo cargado (detalle con el nombre del cliente y la
+    // descripción del tipo).
+    final busq = _busqueda.trim().toLowerCase();
     final visibles = _ops
         .where((o) => opVisibleEnAuditoria(o, _filtro,
             miActor: _miActor, miTelegramId: _miTelegramId))
         .where((o) => !_soloHoy || _diaOp(o) == hoy)
         .where((o) => _actorFiltro == null || _usuario(o) == _actorFiltro)
+        .where((o) =>
+            busq.isEmpty ||
+            _detalle(o).toLowerCase().contains(busq) ||
+            _descripcionOp('${o['tipo']}').toLowerCase().contains(busq))
         .toList();
 
     // Agrupar por día manteniendo el orden (ya viene DESC).
@@ -535,12 +618,43 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        '$opsHoy operaciones hoy · $pendientes pendientes de sync',
+                        // 1.29 (FB-16): contador HONESTO —
+                        // «viendo N de M de hoy»: N = las de
+                        // hoy ya cargadas, M = las de hoy que
+                        // existen. Antes decía «N operaciones
+                        // hoy» contando solo las 100 cargadas.
+                        'Viendo $opsHoy de $_totalHoy de hoy · '
+                        '$pendientes pendientes de sync',
                         style: AppTexto.subtitulo,
                       ),
                     ),
                   ],
                 ),
+              ),
+            ),
+          // 1.29 (Oleada 6, FB-16): búsqueda por nombre de
+          // cliente o tipo dentro de lo cargado.
+          if (!_cargando && _ops.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: TextField(
+                controller: _busquedaCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por cliente o tipo…',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _busqueda.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear_rounded),
+                          onPressed: () {
+                            _busquedaCtrl.clear();
+                            setState(() => _busqueda = '');
+                          },
+                        ),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: (v) => setState(() => _busqueda = v),
               ),
             ),
           // v1.6.0 (Jc): selector de filtro, visible y cambiable
@@ -722,8 +836,35 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                         : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
-                          itemCount: dias.length,
+                          // FB-16: un ítem extra al final con
+                          // «Ver más antiguas» mientras el río
+                          // tenga más bloques.
+                          itemCount: dias.length + (_hayMas ? 1 : 0),
                           itemBuilder: (ctx, gi) {
+                            if (gi >= dias.length) {
+                              return Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                    16, 8, 16, 24),
+                                child: OutlinedButton.icon(
+                                  onPressed:
+                                      _cargandoMas ? null : _verMas,
+                                  icon: _cargandoMas
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child:
+                                              CircularProgressIndicator(
+                                                  strokeWidth: 2))
+                                      : const Icon(Icons
+                                          .expand_more_rounded),
+                                  label: const Text('Ver más antiguas'),
+                                  style: OutlinedButton.styleFrom(
+                                    minimumSize:
+                                        const Size.fromHeight(48),
+                                  ),
+                                ),
+                              );
+                            }
                             final dia = dias[gi];
                             final items = grupos[dia]!;
                             return Column(
@@ -771,7 +912,14 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
       child: Tarjeta(
         padding: EdgeInsets.zero,
-        child: ListTile(
+        // 1.29 (Oleada 6): Material propio y transparente —
+        // el ListTile quedaba bajo el DecoratedBox de la
+        // Tarjeta sin un Material intermedio: su tinta no
+        // se pintaba y el chequeo del framework lo marca
+        // como error.
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
           leading: tieneFoto
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(20),
@@ -812,6 +960,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
           // identificado (y no protegido) abre su ficha; si no,
           // muestra el detalle completo de la operación.
           onTap: () => _abrirOp(ctx, op, cid),
+          ),
         ),
       ),
     );

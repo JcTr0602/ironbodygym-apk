@@ -28,7 +28,14 @@ import 'diseno.dart';
 class AuditoriaPersonaScreen extends StatefulWidget {
   // 1.25 T112: embebida = pestaña del Centro de control.
   final bool embebida;
-  const AuditoriaPersonaScreen({super.key, this.embebida = false});
+
+  /// 1.29 (Oleada 6, FB-17): persona preseleccionada al
+  /// llegar desde un caso de la auditoría silenciosa (el
+  /// dueño aterriza ya en la persona del caso, sin tener
+  /// que buscarla en el selector).
+  final int? telegramIdInicial;
+  const AuditoriaPersonaScreen(
+      {super.key, this.embebida = false, this.telegramIdInicial});
 
   @override
   State<AuditoriaPersonaScreen> createState() =>
@@ -42,6 +49,30 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   String _modo = 'mes'; // dia | semana | mes | rango
   DateTime? _rangoDesde;
   DateTime? _rangoHasta;
+
+  // 1.29 (Oleada 6, D-B3-09 + regla de ventana H-06): la
+  // BASE (ajustes + los seis espejos) se carga UNA vez por
+  // entrada a la pantalla y el río de ops una vez por
+  // VENTANA cubierta: cambiar de persona o estrechar el
+  // período filtra EN MEMORIA; el río solo se recarga
+  // desde SQLite cuando el período se AMPLÍA más allá de
+  // la ventana ya cubierta (la recarga pide la UNIÓN de
+  // ventanas, así un estrechamiento posterior tampoco
+  // recarga). Antes, cada cambio de persona/período
+  // releía todo y el río venía recortado a 500 ops por
+  // conteo: un mes con más de 500 ops daba cifras de un
+  // río incompleto sin decirlo.
+  bool _baseLista = false;
+  Map<String, dynamic> _ajustesBase = {};
+  List<Map<String, dynamic>> _aperturasBase = [];
+  List<Map<String, dynamic>> _cierresBase = [];
+  List<Map<String, dynamic>> _pagosBase = [];
+  List<Map<String, dynamic>> _diariosBase = [];
+  List<Map<String, dynamic>> _ventasSupBase = [];
+  List<Map<String, dynamic>> _ventasServBase = [];
+  List<Map<String, dynamic>> _rio = [];
+  String? _rioDesdeIso;
+  String? _rioHastaIso;
 
   List<TurnoAuditado> _turnos = [];
   DineroAuditado? _dinero;
@@ -88,7 +119,14 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
     setState(() {
       _personas = personas;
       if (_soyDuenio) {
-        _persona = personas.firstOrNull;
+        // FB-17: si se llega desde un caso, la persona del
+        // caso manda sobre la primera de la lista.
+        final inicial = widget.telegramIdInicial == null
+            ? null
+            : personas
+                .where((p) => p.telegramId == widget.telegramIdInicial)
+                .firstOrNull;
+        _persona = inicial ?? personas.firstOrNull;
       } else {
         // El entrenador solo se ve a sí mismo (por telegram_id).
         final miTg = AuthService().telegramId;
@@ -129,6 +167,55 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
     }
   }
 
+  /// D-B3-09: carga la base (ajustes + seis espejos) si aún
+  /// no se cargó en esta entrada a la pantalla.
+  Future<void> _asegurarBase() async {
+    if (_baseLista) return;
+    final db = LocalDb.instance;
+    _ajustesBase = await db.getAjustes();
+    _aperturasBase = await db.allMirror('turnos_apertura');
+    _cierresBase = await db.allMirror('turnos_cierre');
+    _pagosBase = await db.allMirror('pagos');
+    _diariosBase = await db.allMirror('pagos_diarios');
+    _ventasSupBase = await db.allMirror('ventas_suplementos');
+    _ventasServBase = await db.allMirror('servicio_ventas');
+    _baseLista = true;
+  }
+
+  /// D-B3-09 + H-06: el río se recarga SOLO si la ventana
+  /// pedida se sale de la cubierta (ampliar); la recarga
+  /// pide la unión para que estrechar después no recargue.
+  /// Cambiar de persona nunca pasa por aquí con recarga:
+  /// la ventana no cambia al cambiar de persona.
+  Future<void> _asegurarRio(String desdeIso, String hastaIso) async {
+    final cubierto = _rioDesdeIso != null &&
+        desdeIso.compareTo(_rioDesdeIso!) >= 0 &&
+        hastaIso.compareTo(_rioHastaIso!) <= 0;
+    if (cubierto) return;
+    final nuevoDesde = (_rioDesdeIso == null ||
+            desdeIso.compareTo(_rioDesdeIso!) < 0)
+        ? desdeIso
+        : _rioDesdeIso!;
+    final nuevoHasta = (_rioHastaIso == null ||
+            hastaIso.compareTo(_rioHastaIso!) > 0)
+        ? hastaIso
+        : _rioHastaIso!;
+    _rio = await LocalDb.instance
+        .opsEntreFechas(nuevoDesde, nuevoHasta);
+    _rioDesdeIso = nuevoDesde;
+    _rioHastaIso = nuevoHasta;
+  }
+
+  /// El botón de refrescar SÍ relee todo (es su oficio):
+  /// invalida la base y la ventana del río y recalcula.
+  Future<void> _recargarTodo() async {
+    _baseLista = false;
+    _rio = [];
+    _rioDesdeIso = null;
+    _rioHastaIso = null;
+    await _cargar();
+  }
+
   Future<void> _cargar() async {
     final persona = _persona;
     if (persona == null) return;
@@ -137,14 +224,15 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
       final per = _periodo();
       final desdeIso = isoFechaTurno(per.desde);
       final hastaIso = isoFechaTurno(per.hasta);
-      final db = LocalDb.instance;
-      final ajustes = await db.getAjustes();
-      final aperturas = await db.allMirror('turnos_apertura');
-      final cierres = await db.allMirror('turnos_cierre');
-      final pagos = await db.allMirror('pagos');
-      final diarios = await db.allMirror('pagos_diarios');
-      final ventasSup = await db.allMirror('ventas_suplementos');
-      final ventasServ = await db.allMirror('servicio_ventas');
+      await _asegurarBase();
+      await _asegurarRio(desdeIso, hastaIso);
+      final ajustes = _ajustesBase;
+      final aperturas = _aperturasBase;
+      final cierres = _cierresBase;
+      final pagos = _pagosBase;
+      final diarios = _diariosBase;
+      final ventasSup = _ventasSupBase;
+      final ventasServ = _ventasServBase;
 
       final turnos = auditarTurnosPersona(
         persona: persona,
@@ -167,9 +255,10 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         ventasServicios: ventasServ,
         cierres: cierres,
       );
-      // Bloque 3: el río de ops de ESTE teléfono, filtrado por
-      // actor y tipo sensible (se reutiliza el río tal cual).
-      final ops = await db.recentOps(limit: 500);
+      // Bloque 3: el río de ops de ESTE teléfono (el de la
+      // ventana cubierta, completo), filtrado EN MEMORIA
+      // por actor, tipo sensible y la ventana pedida.
+      final ops = _rio;
       final sensibles = <Map<String, dynamic>>[];
       for (final op in ops) {
         if (!tiposOpSensibles.contains('${op['tipo']}')) continue;
@@ -259,7 +348,8 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         'Auditoría por persona',
         acciones: [
           IconButton(
-              icon: const Icon(Icons.refresh_rounded), onPressed: _cargar),
+              icon: const Icon(Icons.refresh_rounded),
+              onPressed: _recargarTodo),
         ],
       ),
       body: _cargando

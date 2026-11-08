@@ -9,8 +9,11 @@ import '../tiempo.dart';
 import '../turno_service.dart';
 import 'app_bar.dart';
 import 'auditoria.dart' show descripcionOp;
+import 'auditoria_persona.dart';
 import 'cola.dart' show etiquetaEstadoOp;
 import 'componentes.dart';
+import 'ficha.dart';
+import 'salud_sync_screen.dart';
 import 'skeleton.dart';
 import 'diseno.dart';
 
@@ -35,8 +38,49 @@ class _Caso {
   final String titulo;
   final String detalle;
   final String fecha;
-  const _Caso(this.tipo, this.titulo, this.detalle, this.fecha);
+
+  /// 1.29 (Oleada 6, FB-17): la identidad del HECHO fuente
+  /// del que nace el caso (el id del turno, el op_uuid de
+  /// la edición, el valor de last_pull_ok). La huella de
+  /// «ya revisado» se construye con tipo + idFuente: el
+  /// caso marcado no reaparece, pero un hecho NUEVO del
+  /// mismo tipo y persona (otro id fuente) sí vuelve a
+  /// salir — por eso la huella no es tipo+persona.
+  final String idFuente;
+
+  /// Destino al tocar el caso: la ficha de este cliente
+  /// si el hecho lo trae; si no, la auditoría de la
+  /// persona de este telegram_id.
+  final int? clienteId;
+  final int? telegramId;
+
+  const _Caso(this.tipo, this.titulo, this.detalle, this.fecha,
+      {required this.idFuente, this.clienteId, this.telegramId});
+
+  String get huella => huellaCasoAnomalia(tipo, idFuente);
 }
+
+/// 1.29 (Oleada 6, FB-17): huella de un caso para la marca
+/// «ya revisado» (persistida en el almacén local de
+/// metadatos, sin migración). Incluye el id del hecho
+/// fuente, no solo tipo+persona.
+String huellaCasoAnomalia(String tipo, String idFuente) =>
+    '$tipo|$idFuente';
+
+/// 1.29 (Oleada 6, D-B3-04): cómo terminó un detector.
+/// Antes los detectores tragaban sus errores en silencio
+/// y la pantalla decía «Sin anomalías» también cuando NO
+/// había podido revisar: «limpio» y «no pude revisar»
+/// eran indistinguibles.
+enum EstadoDetector { ok, fallo, parcial }
+
+/// Nombre legible de cada detector para el aviso de
+/// «No se pudo revisar X».
+const nombresDetectores = <String, String>{
+  'turnos': 'los turnos cortos',
+  'ediciones': 'las ediciones de pagos',
+  'sync': 'la sincronización',
+};
 
 // v1.3.7 (Fase B, nota de Argón): umbrales centralizados como constantes
 // nombradas (antes literales dispersos). Conservadores para evitar
@@ -59,6 +103,13 @@ class _AuditoriaSilenciosaScreenState
     extends State<AuditoriaSilenciosaScreen> {
   bool _cargando = true;
   final List<_Caso> _casos = [];
+  // 1.29 (Oleada 6, D-B3-04): el resultado de cada
+  // detector en la última carga — la pantalla distingue
+  // «limpio» de «no pude revisar».
+  Map<String, EstadoDetector> _estados = {};
+  // 1.29 (Oleada 6, FB-17): huellas marcadas «ya
+  // revisado» (meta local, sin migración).
+  Set<String> _revisadas = {};
   // 1.25 T123 (F6-05): telegram_id → nombre, desde el meta
   // usuarios_apk (la misma fuente que usa Nómina).
   Map<int, String> _nombresTelegram = {};
@@ -96,17 +147,78 @@ class _AuditoriaSilenciosaScreenState
       _cargando = true;
       _casos.clear();
     });
+    // FB-17: las marcas «ya revisado» viven en meta (una
+    // sola clave con la lista de huellas).
+    try {
+      final raw =
+          await LocalDb.instance.getMeta('anomalias_revisadas');
+      if (raw != null && raw.isNotEmpty) {
+        final dec = jsonDecode(raw);
+        if (dec is List) {
+          _revisadas = {for (final h in dec) '$h'};
+        }
+      }
+    } catch (_) {}
+    final estados = <String, EstadoDetector>{};
     try {
       await _cargarNombres();
-      await _detectarTurnosCortos();
-      await _detectarEdiciones();
-      await _detectarSinSync();
-    } catch (_) {}
+      estados['turnos'] = await _detectarTurnosCortos();
+      estados['ediciones'] = await _detectarEdiciones();
+      estados['sync'] = await _detectarSinSync();
+    } catch (_) {
+      // Un fallo fuera de los detectores no debe pintar
+      // «limpio»: lo que no tenga estado cuenta como fallo.
+      estados.putIfAbsent('turnos', () => EstadoDetector.fallo);
+      estados.putIfAbsent('ediciones', () => EstadoDetector.fallo);
+      estados.putIfAbsent('sync', () => EstadoDetector.fallo);
+    }
+    _estados = estados;
+    // FB-17: lo ya revisado no vuelve a salir (la marca es
+    // por hecho fuente: un hecho nuevo sí reaparece).
+    _casos.removeWhere((c) => _revisadas.contains(c.huella));
     if (mounted) setState(() => _cargando = false);
   }
 
+  /// FB-17: marca un caso como revisado y lo retira de la
+  /// lista. La marca persiste en meta (sin migración).
+  Future<void> _marcarRevisado(_Caso c) async {
+    _revisadas = {..._revisadas, c.huella};
+    try {
+      await LocalDb.instance.setMeta(
+          'anomalias_revisadas', jsonEncode(_revisadas.toList()));
+    } catch (_) {}
+    if (mounted) {
+      setState(() => _casos.removeWhere((x) => x.huella == c.huella));
+    }
+  }
+
+  /// FB-17: tocar un caso lleva a su contexto: la ficha
+  /// del cliente si el hecho lo trae; la auditoría de la
+  /// persona si es de un entrenador; la salud del sync si
+  /// es el caso de sincronización.
+  void _abrirCaso(_Caso c) {
+    if (c.clienteId != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+            builder: (_) => FichaScreen(clienteId: c.clienteId!)),
+      );
+    } else if (c.tipo == 'sin_sync') {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const SaludSyncScreen()),
+      );
+    } else if (c.telegramId != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+            builder: (_) => AuditoriaPersonaScreen(
+                telegramIdInicial: c.telegramId)),
+      );
+    }
+  }
+
   /// (a) Turnos cerrados que duraron menos de [_Umbrales.turnoCortoMin].
-  Future<void> _detectarTurnosCortos() async {
+  /// Tope declarado: 100 turnos (si se alcanza, el estado
+  /// es PARCIAL: se revisó hasta el tope, no todo).
+  Future<EstadoDetector> _detectarTurnosCortos() async {
     final db = await LocalDb.instance.db;
     List<Map<String, dynamic>> turnos = [];
     try {
@@ -115,7 +227,7 @@ class _AuditoriaSilenciosaScreenState
           orderBy: 'fecha_turno DESC',
           limit: 100);
     } catch (_) {
-      return;
+      return EstadoDetector.fallo;
     }
     for (final t in turnos) {
       DateTime ap, ci;
@@ -137,16 +249,23 @@ class _AuditoriaSilenciosaScreenState
               'apertura ${horaCorta('${t['hora_apertura']}')} · '
               'cierre ${horaCorta('${t['hora_cierre']}')}',
           '${t['fecha_turno'] ?? ''}',
+          idFuente: '${t['turno_id'] ?? ''}',
+          telegramId: (t['telegram_id'] as num?)?.toInt() ??
+              int.tryParse('${t['telegram_id'] ?? ''}'),
         ));
       }
     }
+    return turnos.length >= 100
+        ? EstadoDetector.parcial
+        : EstadoDetector.ok;
   }
 
   /// (b) Ediciones de pagos en los últimos [_Umbrales.edicionesDias] días.
   /// Nota de Argón: solo se listan las ediciones SIN movimiento de caja
   /// asociado (un `ajuste` del mismo autor en ±24h la respalda como
   /// corrección legítima con asiento contable).
-  Future<void> _detectarEdiciones() async {
+  /// Tope declarado: 50 ediciones (si se alcanza, PARCIAL).
+  Future<EstadoDetector> _detectarEdiciones() async {
     final db = await LocalDb.instance.db;
     List<Map<String, dynamic>> ops = [];
     try {
@@ -154,14 +273,21 @@ class _AuditoriaSilenciosaScreenState
           .subtract(Duration(days: _Umbrales.edicionesDias))
           .toIso8601String();
       ops = await db.query('ops_queue',
-          columns: ['tipo', 'creada_ts', 'telegram_id', 'estado', 'payload'],
+          columns: [
+            'op_uuid',
+            'tipo',
+            'creada_ts',
+            'telegram_id',
+            'estado',
+            'payload'
+          ],
           where: "tipo IN ('editar_pago', 'editar_pago_diario') "
               "AND creada_ts >= ?",
           whereArgs: [desde],
           orderBy: 'creada_ts DESC',
           limit: 50);
     } catch (_) {
-      return;
+      return EstadoDetector.fallo;
     }
     for (final op in ops) {
       final ts = '${op['creada_ts'] ?? ''}';
@@ -188,25 +314,46 @@ class _AuditoriaSilenciosaScreenState
         } catch (_) {}
       }
       if (respaldada) continue;
+      // FB-17: el cliente del pago editado sale del payload
+      // (editar_pago trae cliente_id): tocar el caso abre
+      // su ficha. Sin cliente_id, el destino es la
+      // auditoría del autor.
+      int? clienteIdEdicion;
+      try {
+        final p = jsonDecode('${op['payload'] ?? ''}');
+        if (p is Map) {
+          clienteIdEdicion =
+              int.tryParse('${p['cliente_id'] ?? ''}');
+        }
+      } catch (_) {}
       _casos.add(_Caso(
         'edicion',
         'Edición sin respaldo: ${descripcionOp('${op['tipo']}')}',
         'Por ${_nombreEntrenador(tid)} · ${etiquetaEstadoOp('${op['estado']}')} · '
             'sin ajuste de caja en ±${_Umbrales.ajusteVentanaHoras}h',
         ts.length >= 10 ? ts.substring(0, 10) : '',
+        idFuente: '${op['op_uuid'] ?? ''}',
+        clienteId: clienteIdEdicion,
+        telegramId:
+            (tid as num?)?.toInt() ?? int.tryParse('${tid ?? ''}'),
       ));
     }
+    return ops.length >= 50
+        ? EstadoDetector.parcial
+        : EstadoDetector.ok;
   }
 
   /// (c) Este dispositivo lleva más de [_Umbrales.sinSyncDias] días
   /// sin sincronizar.
-  Future<void> _detectarSinSync() async {
+  Future<EstadoDetector> _detectarSinSync() async {
     try {
       final ultimo =
           await LocalDb.instance.getMeta('last_pull_ok');
-      if (ultimo == null || ultimo.isEmpty) return;
+      if (ultimo == null || ultimo.isEmpty) {
+        return EstadoDetector.ok;
+      }
       final dt = DateTime.tryParse(ultimo);
-      if (dt == null) return;
+      if (dt == null) return EstadoDetector.ok;
       final dias = ahoraHabana().difference(dt).inDays;
       if (dias > _Umbrales.sinSyncDias) {
         _casos.add(_Caso(
@@ -214,9 +361,16 @@ class _AuditoriaSilenciosaScreenState
           'Sin sincronizar hace $dias días',
           'Último pull exitoso: ${fmtFecha(ultimo.substring(0, 10))}',
           ultimo.substring(0, 10),
+          // El hecho fuente es el último pull: si el
+          // teléfono vuelve a sincronizar y se vuelve a
+          // atrasar, el valor cambia y el caso es NUEVO.
+          idFuente: ultimo,
         ));
       }
-    } catch (_) {}
+      return EstadoDetector.ok;
+    } catch (_) {
+      return EstadoDetector.fallo;
+    }
   }
 
   IconData _iconoCaso(String tipo) {
@@ -261,6 +415,19 @@ class _AuditoriaSilenciosaScreenState
     for (final c in _casos) {
       grupos.putIfAbsent(c.tipo, () => []).add(c);
     }
+    // D-B3-04: «limpio» solo si TODOS los detectores
+    // terminaron bien. Un fallo o un parcial se DICE.
+    final fallos = <String>[
+      for (final e in _estados.entries)
+        if (e.value == EstadoDetector.fallo)
+          nombresDetectores[e.key] ?? e.key,
+    ];
+    final parciales = <String>[
+      for (final e in _estados.entries)
+        if (e.value == EstadoDetector.parcial)
+          nombresDetectores[e.key] ?? e.key,
+    ];
+    final todoOk = fallos.isEmpty && parciales.isEmpty;
     return Scaffold(
       appBar: widget.embebida
           ? null
@@ -280,14 +447,32 @@ class _AuditoriaSilenciosaScreenState
           ? const Padding(
               padding: EdgeInsets.all(AppEspacio.lg),
               child: SkeletonLista(items: 3))
-          : _casos.isEmpty
+          : _casos.isEmpty && todoOk
               ? const EstadoVacio(
                   icono: Icons.verified_rounded,
                   titulo: 'Sin anomalías',
                   subtitulo:
                       'No se detectaron patrones sospechosos.',
                 )
-              : ListView(
+              : _casos.isEmpty
+                  // D-B3-04: sin casos pero con detectores
+                  // que no pudieron revisar: NO es «limpio».
+                  ? EstadoVacio(
+                      icono: Icons.sync_problem_rounded,
+                      titulo: 'Revisión incompleta',
+                      subtitulo: [
+                        if (fallos.isNotEmpty)
+                          'No se pudo revisar: '
+                              '${fallos.join(', ')}.',
+                        if (parciales.isNotEmpty)
+                          'Revisión parcial de: '
+                              '${parciales.join(', ')} '
+                              '(se alcanzó el tope de lectura).',
+                      ].join(' '),
+                      textoAccion: 'Reintentar',
+                      onAccion: _cargar,
+                    )
+                  : ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     Container(
@@ -309,6 +494,39 @@ class _AuditoriaSilenciosaScreenState
                         ),
                       ),
                     ),
+                    // D-B3-04: con casos en la lista, un
+                    // detector que falló o llegó a su tope
+                    // también se dice (la revisión no fue
+                    // completa aunque haya casos que enseñar).
+                    if (!todoOk) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.md,
+                            vertical: AppEspacio.sm),
+                        decoration: BoxDecoration(
+                          color: AppColores.alerta
+                              .withValues(alpha: 0.12),
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.md),
+                        ),
+                        child: Text(
+                          [
+                            if (fallos.isNotEmpty)
+                              'No se pudo revisar: '
+                                  '${fallos.join(', ')}.',
+                            if (parciales.isNotEmpty)
+                              'Revisión parcial de: '
+                                  '${parciales.join(', ')} '
+                                  '(tope de lectura alcanzado).',
+                          ].join(' '),
+                          style: AppTexto.etiqueta.copyWith(
+                            color: AppColores.alerta,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     for (final tipo in grupos.keys) ...[
                       Padding(
@@ -325,39 +543,39 @@ class _AuditoriaSilenciosaScreenState
                         Padding(
                           padding: const EdgeInsets.only(
                               bottom: AppEspacio.sm),
-                          child: Tarjeta(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
-                            child: Row(
-                              children: [
-                                IconoModuloBadge.naranja(
-                                    _iconoCaso(c.tipo)),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment
-                                            .start,
-                                    children: [
-                                      Text(c.titulo,
-                                          style: AppTexto
-                                              .subtitulo
-                                              .copyWith(
-                                                  fontWeight:
-                                                      FontWeight
-                                                          .bold)),
-                                      const SizedBox(
-                                          height: 2),
-                                      Text(c.detalle,
-                                          style: AppTexto
-                                              .etiqueta
-                                              .copyWith(
-                                            color: AppColores
-                                                .textoSecundario(
-                                                    context),
-                                          )),
-                                      if (c.fecha.isNotEmpty)
-                                        Text(c.fecha,
+                          // FB-17: el caso se toca para ir a
+                          // su contexto (ficha / auditoría de
+                          // la persona / salud del sync) y se
+                          // marca «Ya revisado» con el botón:
+                          // la marca es por hecho fuente y no
+                          // vuelve a salir; un hecho nuevo sí.
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _abrirCaso(c),
+                            child: Tarjeta(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              child: Row(
+                                children: [
+                                  IconoModuloBadge.naranja(
+                                      _iconoCaso(c.tipo)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment
+                                              .start,
+                                      children: [
+                                        Text(c.titulo,
+                                            style: AppTexto
+                                                .subtitulo
+                                                .copyWith(
+                                                    fontWeight:
+                                                        FontWeight
+                                                            .bold)),
+                                        const SizedBox(
+                                            height: 2),
+                                        Text(c.detalle,
                                             style: AppTexto
                                                 .etiqueta
                                                 .copyWith(
@@ -365,10 +583,27 @@ class _AuditoriaSilenciosaScreenState
                                                   .textoSecundario(
                                                       context),
                                             )),
-                                    ],
+                                        if (c.fecha.isNotEmpty)
+                                          Text(c.fecha,
+                                              style: AppTexto
+                                                  .etiqueta
+                                                  .copyWith(
+                                                color: AppColores
+                                                    .textoSecundario(
+                                                        context),
+                                              )),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
+                                  IconButton(
+                                    icon: const Icon(Icons
+                                        .check_circle_outline_rounded),
+                                    tooltip: 'Ya revisado',
+                                    onPressed: () =>
+                                        _marcarRevisado(c),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
