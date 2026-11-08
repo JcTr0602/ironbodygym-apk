@@ -188,6 +188,13 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _valesError = false;
   int _valesGen = 0;
 
+  // 1.29 (Comunidad C3, COM-25): reportes NUEVOS de
+  // la Comunidad (pendientes por encima de la marca
+  // de vistos, DF-27) para el distintivo de su
+  // tarjeta. 0 = nada nuevo que enseñar.
+  int _reportesComunidadNuevos = 0;
+  int _reportesComunidadGen = 0;
+
   // 1.28 (M5-B1): la foto de cifras de la visita anterior
   // pinta AL INSTANTE al abrir (con su hora) mientras la
   // carga real refresca en segundo plano. _horaCache no
@@ -452,6 +459,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // plano (su RPC no retrasa el pintado).
     unawaited(_guardarCachePanel());
     unawaited(_cargarValesPremios());
+    unawaited(_cargarReportesComunidad());
   }
 
 
@@ -614,6 +622,7 @@ class _AdminScreenState extends State<AdminScreen> {
     // de Premios pudo resolver alguno por el camino).
     unawaited(_guardarCachePanel());
     unawaited(_cargarValesPremios());
+    unawaited(_cargarReportesComunidad());
   }
 
   /// 1.28 (M5-B2): cuenta los vales por aprobar en
@@ -633,6 +642,20 @@ class _AdminScreenState extends State<AdminScreen> {
         _valesError = true;
       }
     });
+  }
+
+  /// 1.29 (Comunidad C3): el conteo de reportes
+  /// nuevos de la Comunidad, en segundo plano como
+  /// el de vales. null (no se pudo saber) deja la
+  /// cifra anterior: nunca un 0 mentiroso.
+  Future<void> _cargarReportesComunidad() async {
+    if (!AuthService().isOwner) return;
+    final gen = ++_reportesComunidadGen;
+    final n = await contarReportesComunidadNuevos();
+    if (!mounted || gen != _reportesComunidadGen) return;
+    if (n != null) {
+      setState(() => _reportesComunidadNuevos = n);
+    }
   }
 
   /// 1.28 (M5-B1): el mapa de cifras que se guarda como
@@ -918,6 +941,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const PremiosHubScreen());
       case DestinoAtencion.reintentarVales:
         unawaited(_cargarValesPremios());
+    unawaited(_cargarReportesComunidad());
     }
   }
 
@@ -2881,10 +2905,21 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       // 1.27 (Comunidad MVP, Pieza G): los perfiles
       // visibles de la Comunidad y su ocultación.
+      // 1.29 (Comunidad C3, COM-25): el distintivo de
+      // la tarjeta son los reportes NUEVOS por
+      // revisar (pendientes sobre la marca de
+      // vistos, DF-27), en el resumen como en Premios.
       _tarjetaFlujo(
         Icons.groups_rounded,
         'Comunidad',
-        'Perfiles visibles de los clientes y ocultación',
+        _reportesComunidadNuevos > 0
+            ? (_reportesComunidadNuevos == 1
+                ? '1 reporte nuevo por revisar · '
+                    'perfiles de los clientes'
+                : '$_reportesComunidadNuevos reportes '
+                    'nuevos por revisar · perfiles de '
+                    'los clientes')
+            : 'Perfiles visibles de los clientes y ocultación',
         () => _ir(const ComunidadPanelScreen()),
       ),
       // 1.28 (M5 ítem fijo, Pieza G de Anuncios): el

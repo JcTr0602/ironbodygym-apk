@@ -9,6 +9,11 @@
 class PerfilComunidadAdmin {
   final int clienteId;
   final String nombre;
+
+  /// 1.29 (Comunidad C3): el Nick del cliente, si lo
+  /// tiene. Aquí SÍ se ve el nombre real detrás: el
+  /// dueño modera sabiendo quién es quién.
+  final String? nick;
   final bool visible;
   final bool ocultoAdmin;
   final bool mostrarMarcas;
@@ -16,15 +21,37 @@ class PerfilComunidadAdmin {
   final bool mostrarRutina;
   final bool mostrarConstancia;
 
+  /// 1.29 (Comunidad C1/C3): los interruptores que
+  /// nacieron con la 0.19.
+  final bool mostrarFoto;
+  final bool mostrarNivel;
+  final bool mostrarLogros;
+  final bool mostrarCumple;
+
+  /// Alta en la Comunidad (ISO), si el servidor la
+  /// trae (COM-24: la fecha da contexto al moderar).
+  final String? altaEn;
+
+  /// Última vez que la app publicó el resumen
+  /// (ISO), si viene.
+  final String? resumenEn;
+
   const PerfilComunidadAdmin({
     required this.clienteId,
     required this.nombre,
+    this.nick,
     required this.visible,
     required this.ocultoAdmin,
     required this.mostrarMarcas,
     required this.mostrarActividad,
     required this.mostrarRutina,
     required this.mostrarConstancia,
+    this.mostrarFoto = false,
+    this.mostrarNivel = false,
+    this.mostrarLogros = false,
+    this.mostrarCumple = false,
+    this.altaEn,
+    this.resumenEn,
   });
 
   /// Los bloques que el cliente tiene encendidos, en
@@ -34,17 +61,54 @@ class PerfilComunidadAdmin {
         if (mostrarActividad) 'Actividad',
         if (mostrarRutina) 'Rutina',
         if (mostrarConstancia) 'Constancia',
+        if (mostrarNivel) 'Nivel',
+        if (mostrarLogros) 'Logros',
+        if (mostrarFoto) 'Foto',
+        if (mostrarCumple) 'Cumpleaños',
       ];
+
+  /// «Nuevo esta semana» (COM-25): alta en los
+  /// últimos 7 días.
+  bool esNuevo(DateTime ahora) {
+    final a = DateTime.tryParse(altaEn ?? '');
+    if (a == null) return false;
+    return ahora.difference(a).inDays < 7 &&
+        !a.isAfter(ahora);
+  }
 
   PerfilComunidadAdmin conOculto(bool oculto) => PerfilComunidadAdmin(
         clienteId: clienteId,
         nombre: nombre,
+        nick: nick,
         visible: visible,
         ocultoAdmin: oculto,
         mostrarMarcas: mostrarMarcas,
         mostrarActividad: mostrarActividad,
         mostrarRutina: mostrarRutina,
         mostrarConstancia: mostrarConstancia,
+        mostrarFoto: mostrarFoto,
+        mostrarNivel: mostrarNivel,
+        mostrarLogros: mostrarLogros,
+        mostrarCumple: mostrarCumple,
+        altaEn: altaEn,
+        resumenEn: resumenEn,
+      );
+
+  PerfilComunidadAdmin sinNick() => PerfilComunidadAdmin(
+        clienteId: clienteId,
+        nombre: nombre,
+        visible: visible,
+        ocultoAdmin: ocultoAdmin,
+        mostrarMarcas: mostrarMarcas,
+        mostrarActividad: mostrarActividad,
+        mostrarRutina: mostrarRutina,
+        mostrarConstancia: mostrarConstancia,
+        mostrarFoto: mostrarFoto,
+        mostrarNivel: mostrarNivel,
+        mostrarLogros: mostrarLogros,
+        mostrarCumple: mostrarCumple,
+        altaEn: altaEn,
+        resumenEn: resumenEn,
       );
 }
 
@@ -130,16 +194,275 @@ List<PerfilComunidadAdmin> parsePerfilesComunidad(
     // tarjeta sin título que no se podía identificar:
     // cae a «Sin nombre» como el resto de la casa.
     final nombreCrudo = '${e['nombre'] ?? ''}'.trim();
+    final nickCrudo = '${e['nick'] ?? ''}'.trim();
     out.add(PerfilComunidadAdmin(
       clienteId: id,
       nombre: nombreCrudo.isEmpty ? 'Sin nombre' : nombreCrudo,
+      nick: nickCrudo.isEmpty ? null : nickCrudo,
       visible: e['visible'] == true,
       ocultoAdmin: e['oculto_admin'] == true,
       mostrarMarcas: e['mostrar_marcas'] == true,
       mostrarActividad: e['mostrar_actividad'] == true,
       mostrarRutina: e['mostrar_rutina'] == true,
       mostrarConstancia: e['mostrar_constancia'] == true,
+      mostrarFoto: e['mostrar_foto'] == true,
+      mostrarNivel: e['mostrar_nivel'] == true,
+      mostrarLogros: e['mostrar_logros'] == true,
+      mostrarCumple: e['mostrar_cumple'] == true,
+      altaEn: e['alta_en']?.toString(),
+      resumenEn: e['resumen_en']?.toString(),
     ));
   }
   return out;
+}
+
+/// 1.29 (Comunidad C3): la raíz de
+/// admin_comunidad_perfiles — el denominador de
+/// clientes del gym (COM-24) y los reportes
+/// pendientes (COM-25: el distintivo de la tarjeta).
+({int totalClientes, int reportesPendientes})
+    parseRaizComunidad(Map<String, dynamic> json) {
+  int entero(dynamic v) =>
+      v is num ? v.toInt() : int.tryParse('${v ?? ''}') ?? 0;
+  if (json['ok'] != true) {
+    return (totalClientes: 0, reportesPendientes: 0);
+  }
+  return (
+    totalClientes: entero(json['total_clientes']),
+    reportesPendientes: entero(json['reportes_pendientes']),
+  );
+}
+
+/// 1.29 (Comunidad C3, DF-27): reportes NUEVOS = los
+/// pendientes por encima de la marca de vistos que
+/// se guarda al abrir la pantalla de Comunidad. Un
+/// conteo que baja (resoluciones) nunca da negativo.
+int reportesNuevosComunidad(int pendientes, int vistos) {
+  final n = pendientes - vistos;
+  return n < 0 ? 0 : n;
+}
+
+/// La clave de la marca de vistos de reportes
+/// (SharedPreferences), por telegram del dueño.
+String claveReportesComunidadVistos(int telegramId) =>
+    'comunidad_reportes_vistos_$telegramId';
+
+/// El texto humano de un motivo de reporte.
+String motivoReporteTexto(String? motivo) {
+  switch (motivo) {
+    case 'nombre_inadecuado':
+      return 'Nombre o Nick inadecuado';
+    case 'foto_inadecuada':
+      return 'Foto inadecuada';
+    case 'contenido_inadecuado':
+      return 'Contenido inadecuado';
+    case 'otro':
+      return 'Otro motivo';
+    default:
+      return 'Sin motivo';
+  }
+}
+
+/// Un reporte pendiente de la cola (COM-28): trae la
+/// proyección pública compacta del reportado para
+/// juzgar sin salir de la tarjeta (A-08.2).
+class ReporteComunidadAdmin {
+  final int id;
+  final String? creadoEn;
+  final String motivo;
+  final int reportadoId;
+  final String? reportadoNick;
+
+  /// El Nick que el reportado tenía ANTES (si la
+  /// administración ya le borró uno): contexto.
+  final String? reportadoNickAnterior;
+  final String reportadoNombreReal;
+
+  /// La proyección pública compacta, tal cual la
+  /// sirve el servidor (para el resumen de bloques).
+  final Map<String, dynamic> proyeccion;
+  final String? reportanteNick;
+  final String reportanteNombreReal;
+
+  const ReporteComunidadAdmin({
+    required this.id,
+    required this.creadoEn,
+    required this.motivo,
+    required this.reportadoId,
+    required this.reportadoNick,
+    required this.reportadoNickAnterior,
+    required this.reportadoNombreReal,
+    required this.proyeccion,
+    required this.reportanteNick,
+    required this.reportanteNombreReal,
+  });
+
+  /// Los bloques que el reportado comparte, leídos
+  /// de su proyección (las claves presentes).
+  List<String> get bloquesProyeccion => [
+        if (proyeccion['marcas'] != null) 'Marcas',
+        if (proyeccion['actividad'] != null) 'Actividad',
+        if (proyeccion['rutina'] != null) 'Rutina',
+        if (proyeccion['constancia'] != null) 'Constancia',
+        if (proyeccion['nivel'] != null) 'Nivel',
+        if (proyeccion['logros'] != null) 'Logros',
+      ];
+}
+
+List<ReporteComunidadAdmin> parseReportesComunidad(
+    Map<String, dynamic> json) {
+  if (json['ok'] != true) return const [];
+  final lista = json['reportes'];
+  if (lista is! List) return const [];
+  final out = <ReporteComunidadAdmin>[];
+  for (final e in lista) {
+    if (e is! Map) continue;
+    final idCrudo = e['id'];
+    final id = idCrudo is num
+        ? idCrudo.toInt()
+        : int.tryParse('${idCrudo ?? ''}');
+    final rep = e['reportado'];
+    final repMap = rep is Map
+        ? Map<String, dynamic>.from(rep)
+        : const <String, dynamic>{};
+    final repIdCrudo = repMap['cliente_id'];
+    final repId = repIdCrudo is num
+        ? repIdCrudo.toInt()
+        : int.tryParse('${repIdCrudo ?? ''}');
+    if (id == null || repId == null) continue;
+    final rte = e['reportante'];
+    final rteMap = rte is Map
+        ? Map<String, dynamic>.from(rte)
+        : const <String, dynamic>{};
+    String? txt(dynamic v) {
+      final s = '${v ?? ''}'.trim();
+      return s.isEmpty ? null : s;
+    }
+
+    final proy = repMap['proyeccion'];
+    out.add(ReporteComunidadAdmin(
+      id: id,
+      creadoEn: e['creado_en']?.toString(),
+      motivo: '${e['motivo'] ?? ''}',
+      reportadoId: repId,
+      reportadoNick: txt(repMap['nick']),
+      reportadoNickAnterior: txt(repMap['nick_anterior']),
+      reportadoNombreReal:
+          txt(repMap['nombre_real']) ?? 'Sin nombre',
+      proyeccion: proy is Map
+          ? Map<String, dynamic>.from(proy)
+          : const {},
+      reportanteNick: txt(rteMap['nick']),
+      reportanteNombreReal:
+          txt(rteMap['nombre_real']) ?? 'Alguien',
+    ));
+  }
+  return out;
+}
+
+/// Una entrada del historial de moderación (COM-27).
+class EventoModeracionComunidad {
+  final int id;
+  final String? creadoEn;
+  final String accion;
+  final int clienteId;
+  final String? nombreReal;
+  final String? nick;
+  final int? reporteId;
+
+  const EventoModeracionComunidad({
+    required this.id,
+    required this.creadoEn,
+    required this.accion,
+    required this.clienteId,
+    required this.nombreReal,
+    required this.nick,
+    required this.reporteId,
+  });
+
+  /// El texto humano de la acción registrada.
+  String get accionTexto {
+    switch (accion) {
+      case 'ocultar':
+        return 'Perfil ocultado';
+      case 'desocultar':
+        return 'Perfil mostrado de nuevo';
+      case 'nick_borrado':
+        return 'Nick retirado';
+      case 'reporte_oculto':
+        return 'Reporte resuelto ocultando el perfil';
+      case 'reporte_descartado':
+        return 'Reporte descartado';
+      default:
+        return accion;
+    }
+  }
+}
+
+List<EventoModeracionComunidad> parseHistorialComunidad(
+    Map<String, dynamic> json) {
+  if (json['ok'] != true) return const [];
+  final lista = json['eventos'];
+  if (lista is! List) return const [];
+  final out = <EventoModeracionComunidad>[];
+  for (final e in lista) {
+    if (e is! Map) continue;
+    int? entero(dynamic v) =>
+        v is num ? v.toInt() : int.tryParse('${v ?? ''}');
+    final id = entero(e['id']);
+    final cid = entero(e['cliente_id']);
+    if (id == null || cid == null) continue;
+    String? txt(dynamic v) {
+      final s = '${v ?? ''}'.trim();
+      return s.isEmpty ? null : s;
+    }
+
+    out.add(EventoModeracionComunidad(
+      id: id,
+      creadoEn: e['creado_en']?.toString(),
+      accion: '${e['accion'] ?? ''}',
+      clienteId: cid,
+      nombreReal: txt(e['nombre_real']),
+      nick: txt(e['nick']),
+      reporteId: entero(e['reporte_id']),
+    ));
+  }
+  return out;
+}
+
+/// 1.29 (Comunidad C3, COM-26/A-08.3): la respuesta
+/// de admin_comunidad_ver_perfil — la proyección
+/// PÚBLICA del perfil (la misma que ven los
+/// clientes) + el estado administrativo + los
+/// bloques que el cliente tiene APAGADOS, por
+/// nombre, para juzgar con todo el contexto.
+({
+  bool ok,
+  Map<String, dynamic> proyeccion,
+  List<String> apagados,
+  bool visible,
+  bool ocultoAdmin,
+}) parseVerPerfilComunidad(Map<String, dynamic> json) {
+  if (json['ok'] != true) {
+    return (
+      ok: false,
+      proyeccion: const {},
+      apagados: const [],
+      visible: false,
+      ocultoAdmin: false,
+    );
+  }
+  final proy = json['perfil'] ?? json['proyeccion'];
+  final ap = json['apagados'];
+  return (
+    ok: true,
+    proyeccion:
+        proy is Map ? Map<String, dynamic>.from(proy) : const {},
+    apagados: [
+      if (ap is List)
+        for (final a in ap) '$a',
+    ],
+    visible: json['visible'] == true,
+    ocultoAdmin: json['oculto_admin'] == true,
+  );
 }

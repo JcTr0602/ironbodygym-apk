@@ -157,6 +157,211 @@ void main() {
         findsOneWidget);
   });
 
+  group('Comunidad C3 · parseos nuevos', () {
+    test('la raíz trae denominador y pendientes (COM-24/25)',
+        () {
+      final raiz = parseRaizComunidad(const {
+        'ok': true,
+        'total_clientes': 179,
+        'reportes_pendientes': 3,
+        'perfiles': [],
+      });
+      expect(raiz.totalClientes, 179);
+      expect(raiz.reportesPendientes, 3);
+      final degradada = parseRaizComunidad(const {'ok': false});
+      expect(degradada.totalClientes, 0);
+      expect(degradada.reportesPendientes, 0);
+    });
+
+    test('el perfil lee nick, alta y los interruptores '
+        'de la 0.19', () {
+      final perfiles = parsePerfilesComunidad(const {
+        'ok': true,
+        'perfiles': [
+          {
+            'cliente_id': 9,
+            'nombre': 'Mario Ruiz',
+            'nick': 'MarioFit',
+            'alta_en': '2026-11-05T10:00:00Z',
+            'visible': true,
+            'oculto_admin': false,
+            'mostrar_marcas': true,
+            'mostrar_actividad': false,
+            'mostrar_rutina': false,
+            'mostrar_constancia': false,
+            'mostrar_nivel': true,
+            'mostrar_logros': true,
+          },
+        ],
+      });
+      final p = perfiles.single;
+      expect(p.nick, 'MarioFit');
+      expect(p.bloquesActivos, ['Marcas', 'Nivel', 'Logros']);
+      expect(
+          p.esNuevo(DateTime.parse('2026-11-08T10:00:00Z')),
+          isTrue);
+      expect(
+          p.esNuevo(DateTime.parse('2026-12-08T10:00:00Z')),
+          isFalse);
+    });
+
+    test('los reportes parsean con su proyección '
+        'compacta (A-08.2)', () {
+      final reportes = parseReportesComunidad(const {
+        'ok': true,
+        'reportes': [
+          {
+            'id': 7,
+            'creado_en': '2026-11-07T15:00:00Z',
+            'motivo': 'nombre_inadecuado',
+            'reportado': {
+              'cliente_id': 9,
+              'nick': 'MarioFit',
+              'nick_anterior': 'MarioX',
+              'nombre_real': 'Mario Ruiz',
+              'proyeccion': {
+                'cliente_id': 9,
+                'identidad': 'MarioFit',
+                'marcas': {'lista': []},
+              },
+            },
+            'reportante': {
+              'cliente_id': 11,
+              'nick': null,
+              'nombre_real': 'Ana Paz',
+            },
+          },
+          {'id': 'malo'}, // fila rara: se salta.
+        ],
+      });
+      expect(reportes.length, 1);
+      final r = reportes.single;
+      expect(r.reportadoNick, 'MarioFit');
+      expect(r.reportadoNickAnterior, 'MarioX');
+      expect(r.bloquesProyeccion, ['Marcas']);
+      expect(r.reportanteNombreReal, 'Ana Paz');
+      expect(motivoReporteTexto(r.motivo),
+          'Nombre o Nick inadecuado');
+    });
+
+    test('el historial parsea y traduce las acciones '
+        '(COM-27)', () {
+      final eventos = parseHistorialComunidad(const {
+        'ok': true,
+        'eventos': [
+          {
+            'id': 3,
+            'cliente_id': 9,
+            'nombre_real': 'Mario Ruiz',
+            'nick': 'MarioFit',
+            'accion': 'nick_borrado',
+            'creado_en': '2026-11-07T16:00:00Z',
+            'reporte_id': null,
+          },
+        ],
+      });
+      expect(eventos.single.accionTexto, 'Nick retirado');
+    });
+
+    test('ver perfil lee la proyección bajo «perfil» '
+        'y los apagados (COM-26)', () {
+      final v = parseVerPerfilComunidad(const {
+        'ok': true,
+        'perfil': {'identidad': 'MarioFit'},
+        'visible': true,
+        'oculto_admin': true,
+        'apagados': ['rutina', 'foto'],
+      });
+      expect(v.ok, isTrue);
+      expect(v.proyeccion['identidad'], 'MarioFit');
+      expect(v.ocultoAdmin, isTrue);
+      expect(v.apagados, ['rutina', 'foto']);
+    });
+
+    test('reportes nuevos = pendientes sobre vistos, '
+        'sin negativos (DF-27)', () {
+      expect(reportesNuevosComunidad(5, 2), 3);
+      expect(reportesNuevosComunidad(2, 5), 0);
+      expect(reportesNuevosComunidad(0, 0), 0);
+    });
+  });
+
+  testWidgets('C3: la pestaña Reportes resuelve un '
+      'reporte ocultando el perfil', (tester) async {
+    await _fijarSesion(tester, 'jctr0602@ironbody.gym');
+    int? reporteResuelto;
+    String? accionResuelta;
+    await tester.pumpWidget(MaterialApp(
+      home: ComunidadPanelScreen(
+        cargarPerfiles: () async => const {
+          'ok': true,
+          'total_clientes': 179,
+          'reportes_pendientes': 1,
+          'perfiles': [
+            {
+              'cliente_id': 9,
+              'nombre': 'Mario Ruiz',
+              'nick': 'MarioFit',
+              'visible': true,
+              'oculto_admin': false,
+              'mostrar_marcas': true,
+              'mostrar_actividad': false,
+              'mostrar_rutina': false,
+              'mostrar_constancia': false,
+            },
+          ],
+        },
+        cargarReportes: () async => const {
+          'ok': true,
+          'reportes': [
+            {
+              'id': 7,
+              'creado_en': '2026-11-07T15:00:00Z',
+              'motivo': 'nombre_inadecuado',
+              'reportado': {
+                'cliente_id': 9,
+                'nick': 'MarioFit',
+                'nombre_real': 'Mario Ruiz',
+                'proyeccion': {'cliente_id': 9},
+              },
+              'reportante': {
+                'cliente_id': 11,
+                'nombre_real': 'Ana Paz',
+              },
+            },
+          ],
+        },
+        cargarHistorial: () async =>
+            const {'ok': true, 'eventos': []},
+        resolverReporte: (id, accion) async {
+          reporteResuelto = id;
+          accionResuelta = accion;
+          return const {'ok': true};
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // Perfiles enseña el denominador y el Nick.
+    expect(find.textContaining('de 179 clientes'),
+        findsOneWidget);
+    expect(find.textContaining('«MarioFit»'), findsOneWidget);
+
+    await tester.tap(find.text('Reportes'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Reporta: Ana Paz'),
+        findsOneWidget);
+    await tester.tap(find.text('Ocultar perfil'));
+    await tester.pumpAndSettle();
+    expect(reporteResuelto, 7);
+    expect(accionResuelta, 'ocultar');
+    // La tarjeta del reporte desaparece y la cola
+    // queda en su estado vacío.
+    expect(find.textContaining('Reporta: Ana Paz'),
+        findsNothing);
+    expect(find.textContaining('Sin reportes pendientes'),
+        findsOneWidget);
+  });
+
   // Delta Argón 1.27 (#5): sin sesión de dueño la
   // pantalla pinta la guarda y ni siquiera pide los
   // perfiles (la RPC de administración no se dispara).
