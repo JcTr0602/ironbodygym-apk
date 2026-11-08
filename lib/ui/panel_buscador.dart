@@ -27,11 +27,17 @@ class FuncionPanel {
   final List<String> sinonimos;
   final IconData icono;
 
+  /// 1.29 (Oleada 5, FB-15): línea bajo el título que
+  /// dice DÓNDE se ve el resultado de la función (hoy
+  /// solo la usa el anuncio: dónde lo ve el cliente).
+  final String? detalle;
+
   const FuncionPanel({
     required this.id,
     required this.titulo,
     required this.sinonimos,
     required this.icono,
+    this.detalle,
   });
 }
 
@@ -171,11 +177,25 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       titulo: 'Avisos para entrenadores',
       sinonimos: ['avisar al staff', 'mensaje a entrenadores'],
       icono: Icons.campaign_rounded),
+  // 1.29 (Oleada 5, FB-15): renombrada sin ambigüedad —
+  // «avisos» es el CENTRO de avisos (editor de avisos a
+  // clientes); el ANUNCIO de la pantalla principal es
+  // otra entrada, justo debajo.
   FuncionPanel(
       id: 'avisos_clientes',
-      titulo: 'Avisos a clientes',
-      sinonimos: ['mensaje masivo', 'avisar a clientes'],
+      titulo: 'Avisos al centro de avisos',
+      sinonimos: ['mensaje masivo', 'avisar a clientes', 'avisos'],
       icono: Icons.send_rounded),
+  // 1.29 (Oleada 5, FB-15 · D-B3-01): el compositor de
+  // anuncios no existía en el índice: buscar «anuncio»
+  // no llevaba a ninguna parte. Su línea dice dónde lo
+  // ve el cliente.
+  FuncionPanel(
+      id: 'anuncios',
+      titulo: 'Anuncio en la pantalla principal',
+      sinonimos: ['anuncio', 'publicar', 'pantalla principal'],
+      icono: Icons.campaign_rounded,
+      detalle: 'Lo ven los clientes al abrir su app'),
   FuncionPanel(
       id: 'recordatorios',
       titulo: 'Recordatorios automáticos',
@@ -326,9 +346,20 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       titulo: 'Verificación del espejo',
       sinonimos: ['espejo desfasado', 'comprobar datos'],
       icono: Icons.fact_check_rounded),
+  // 1.29 (Oleada 5, D-23): el mismo renombre que la
+  // tarjeta del módulo Control — esta entrada abre los
+  // REPORTES (v1.3.0), no las incidencias de sync; sus
+  // sinónimos viejos describían las de sync y llevaban
+  // a la puerta equivocada. Las de sync ganan su
+  // entrada propia, debajo.
   FuncionPanel(
       id: 'incidencias',
-      titulo: 'Incidencias',
+      titulo: 'Incidencias (reportes)',
+      sinonimos: ['reportes de clientes', 'reportes del equipo'],
+      icono: Icons.warning_amber_rounded),
+  FuncionPanel(
+      id: 'incidencias_sync',
+      titulo: 'Incidencias de sync',
       sinonimos: ['operaciones rechazadas', 'revisar sync', 'errores por aprobar'],
       icono: Icons.sync_problem_rounded),
   FuncionPanel(
@@ -569,6 +600,7 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
   Widget _fila(FuncionPanel f) => ListTile(
         leading: Icon(f.icono, color: AppColores.naranja),
         title: Text(f.titulo),
+        subtitle: f.detalle == null ? null : Text(f.detalle!),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => _elegir(f),
       );

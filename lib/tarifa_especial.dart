@@ -410,6 +410,20 @@ bool tarifaPorRevisar(Map<String, dynamic> fila, String hoyIso) {
   return e == 'vencida' || e == 'por_vencer';
 }
 
+/// 1.29 (Oleada 5, FA-04): cuántas tarifas ACTIVAS piden
+/// revisión hoy (vencidas + por vencer en ≤ 7 días),
+/// sobre la fuente fusionada (espejo + local + ops
+/// pendientes) y con el predicado T14. Es LA cifra del
+/// aviso de la pantalla de Tarifas y de la línea del
+/// módulo «Clientes e invitados» del Panel: un número,
+/// dos escaparates — si mañana cambia el criterio,
+/// cambia aquí y se mueve en los dos sitios.
+Future<int> contarTarifasPorRevisar() async {
+  final hoy = hoyHabanaIso();
+  final activas = await tarifasActivas();
+  return activas.where((f) => tarifaPorRevisar(f, hoy)).length;
+}
+
 /// Todas las filas activas (para la pantalla D1 y el Panel).
 Future<List<Map<String, dynamic>>> tarifasActivas() async {
   final todas = await _todasFusionadas();

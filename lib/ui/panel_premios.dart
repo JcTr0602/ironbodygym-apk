@@ -60,6 +60,18 @@ Future<Set<int>> ocultosPorMarcasLocales(
 /// conexión o respuesta degradada): quien llama NO
 /// enseña un 0 mentiroso.
 Future<int?> contarValesPorAprobar() async {
+  final visibles = await valesVisiblesPorAprobar();
+  return visibles?.length;
+}
+
+/// 1.29 (Oleada 5, D-23): los vales VISIBLES por aprobar
+/// (las mismas filas que [contarValesPorAprobar] cuenta:
+/// una sola fuente, dos escaparates). El Panel los
+/// necesita como filas para derivar los ítems «POR
+/// REVISAR» del módulo Clientes — el distintivo es la
+/// longitud de esta lista, no un entero paralelo.
+/// null = no se pudo saber (misma regla que el conteo).
+Future<List<ValePendiente>?> valesVisiblesPorAprobar() async {
   try {
     final res = await Supabase.instance.client
         .rpc('admin_premios_vales')
@@ -73,7 +85,7 @@ Future<int?> contarValesPorAprobar() async {
     }
     final bandeja = parseBandejaPremios(json);
     final ocultos = await ocultosPorMarcasLocales(bandeja);
-    return valesVisibles(bandeja.vales, ocultos).length;
+    return valesVisibles(bandeja.vales, ocultos);
   } catch (_) {
     return null;
   }

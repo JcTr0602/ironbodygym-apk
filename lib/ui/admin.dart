@@ -32,7 +32,9 @@ import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import 'dialogo_gasto.dart';
 import '../sync.dart';
+import '../tarifa_especial.dart';
 import '../tiempo.dart';
+import '../turnos_resolucion.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -42,6 +44,7 @@ import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
 import 'panel_cache.dart';
 import 'panel_modulos.dart';
+import 'panel_por_revisar.dart';
 import 'skeleton.dart';
 import 'bandeja_whatsapp.dart';
 import 'ficha.dart';
@@ -155,6 +158,33 @@ class _AdminScreenState extends State<AdminScreen> {
   List<String> _sinReporteAyer = [];
   List<String> _sinReporteHoy = [];
   int _incidenciasPend = 0;
+  // 1.29 (Oleada 5, D-23): las FILAS de incidencias de
+  // sync pendientes (no solo su conteo): de ellas salen
+  // los ítems «POR REVISAR» de Control y su distintivo
+  // (= filas.length por construcción). _incidenciasPend
+  // se conserva como la cifra de la bandeja raíz, que
+  // lee la misma foto.
+  List<Map<String, dynamic>> _incidenciasFilas = [];
+  // 1.29 (Oleada 5, D-23): las claves de precio sin
+  // fijar como LISTA (los ítems de Configuración); el
+  // entero _preciosSinFijar es su longitud.
+  List<String> _clavesSinFijar = [];
+  // 1.29 (Oleada 5): los ajustes retenidos de la última
+  // carga completa, para resolver el entrenador
+  // asignado a cada turno sin reporte (plan de turnos)
+  // al derivar los ítems de Equipo. Vacío = aún sin
+  // carga completa: los ítems enseñan solo el día.
+  Map<String, dynamic> _ajustesPanel = const {};
+  // 1.29 (Oleada 5, D-23): padrón id → nombre para los
+  // detalles de ítems (cliente de una incidencia o de
+  // una reserva). Se carga solo si hay ítems que lo
+  // necesitan.
+  Map<int, String> _nombresClientesPanel = {};
+  // 1.29 (Oleada 5, FA-04): tarifas especiales por
+  // revisar (vencidas + por vencer ≤ 7 días) sobre la
+  // MISMA fuente fusionada y el MISMO predicado que la
+  // pantalla de Tarifas: un número, dos escaparates.
+  int _tarifasPorRevisar = 0;
   // 1.25 T97: nombres de los que vencen hoy (bandeja única).
   List<String> _vencenHoyNombres = [];
   // Solicitudes de inscripción de invitados por atender (del
@@ -187,6 +217,11 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _valesCargados = false;
   bool _valesError = false;
   int _valesGen = 0;
+  // 1.29 (Oleada 5, D-23): la foto de los vales como
+  // filas ligeras (nombre + días del premio): los ítems
+  // «POR REVISAR» de Clientes salen de aquí y el conteo
+  // _valesPorAprobar es su longitud cuando hay foto.
+  List<({String nombre, int dias})> _valesFoto = [];
 
   // 1.29 (Comunidad C3, COM-25): reportes NUEVOS de
   // la Comunidad (pendientes por encima de la marca
@@ -325,9 +360,12 @@ class _AdminScreenState extends State<AdminScreen> {
     final aj = ajOk ?? const <String, dynamic>{};
     // 1.25 Panel 10: decisiones pendientes del módulo de
     // Precios = claves C6 sin valor válido.
-    final preciosSinFijar = ajOk == null
-        ? _preciosSinFijar
-        : clavesPrecioSinFijar(aj).length;
+    // 1.29 (Oleada 5, D-23): se conserva la LISTA de
+    // claves (los ítems de Configuración); el entero es
+    // su longitud por construcción.
+    final clavesSinFijar =
+        ajOk == null ? _clavesSinFijar : clavesPrecioSinFijar(aj);
+    final preciosSinFijar = clavesSinFijar.length;
     final tipos = await _seguro(
         () => getTiposPago(soloActivos: false), _tipos);
     final pagoEnt = await _seguro(
@@ -384,12 +422,20 @@ class _AdminScreenState extends State<AdminScreen> {
                 '${c['nombre'] ?? ''}',
             ],
         _vencenHoyNombres);
-    final incidenciasPend = await _seguro(
-        () async => (await incidenciasSyncPendientes()).length,
-        _incidenciasPend);
+    // 1.29 (Oleada 5, D-23): las FILAS pendientes, no
+    // solo su número: el distintivo de Control y su
+    // franja salen de esta misma lista.
+    final incidenciasFilas = await _seguro(
+        incidenciasSyncPendientes, _incidenciasFilas);
+    final incidenciasPend = incidenciasFilas.length;
     // v1.7.0: contador de Cuentas a la Casa (consulta local).
     final casa = await _seguro(
         LocalDb.instance.conteoCuentasCasa, _cuentasCasa);
+    // 1.29 (Oleada 5, FA-04): tarifas por revisar desde
+    // la fuente fusionada y el predicado compartidos
+    // con la pantalla de Tarifas (contarTarifasPorRevisar).
+    final tarifasRev =
+        await _seguro(contarTarifasPorRevisar, _tarifasPorRevisar);
     // 1.23 (B3 Paso 3b): neto de nómina del mes desde la foto
     // compartida (nomina_foto.dart — la misma que arma la
     // pantalla de Nómina). Si la foto falla o aún no hay
@@ -406,6 +452,13 @@ class _AdminScreenState extends State<AdminScreen> {
     } catch (_) {
       netoNomina = null;
     }
+    // 1.29 (Oleada 5, D-23): el padrón id → nombre solo
+    // se lee si algún ítem lo necesita (incidencias o
+    // reservas vivas); si la lectura falla, se conserva
+    // el mapa anterior y los detalles caen a «Cliente
+    // #id», como la pantalla de Reservas.
+    final nombresPanel = await _nombresPanelSiHaceFalta(
+        incidenciasFilas.isNotEmpty || solicitadas.isNotEmpty);
     // Solicitudes de invitados: la bandeja vive en el servidor y
     // su RPC ya NO se espera aquí (panel 1.6.0): con la red
     // colgada, esperar en serie retrasaba TODO el panel aunque
@@ -424,6 +477,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _pagosMes = pagosMes;
         _ingresosMesAnt = ingAnt;
         _preciosSinFijar = preciosSinFijar;
+        _clavesSinFijar = clavesSinFijar;
         _pagosMesAnt = pagosMesAnt;
         _serie7Panel = serie7Panel;
         _netoNominaMes = netoNomina;
@@ -435,6 +489,10 @@ class _AdminScreenState extends State<AdminScreen> {
         _sinReporteHoy = sinHoy;
         _vencenHoyNombres = vencenNombres;
         _incidenciasPend = incidenciasPend;
+        _incidenciasFilas = incidenciasFilas;
+        _tarifasPorRevisar = tarifasRev;
+        _nombresClientesPanel = nombresPanel;
+        if (ajOk != null) _ajustesPanel = aj;
         // B3 (SWR): las bandejas RPC NO se vacían al recargar —
         // conservan su último payload bueno hasta que el
         // segundo pase lo renueve o falle (y si falla, queda la
@@ -505,6 +563,23 @@ class _AdminScreenState extends State<AdminScreen> {
       nombreSupl: nombreSupl,
       criticos: criticos
     );
+  }
+
+  /// 1.29 (Oleada 5, D-23): el padrón id → nombre para
+  /// los detalles de los ítems «POR REVISAR», leído solo
+  /// cuando algún ítem lo necesita. Un fallo conserva el
+  /// mapa vigente (nunca un vacío fingido).
+  Future<Map<int, String>> _nombresPanelSiHaceFalta(
+      bool haceFalta) async {
+    if (!haceFalta) return _nombresClientesPanel;
+    return _seguro(() async {
+      final filas = await LocalDb.instance.allMirror('clientes');
+      return <int, String>{
+        for (final c in filas)
+          if ((c['id'] as num?) != null)
+            (c['id'] as num).toInt(): '${c['nombre'] ?? ''}',
+      };
+    }, _nombresClientesPanel);
   }
 
   /// G2 (v1.7.0): segundo pase — trae los reportes App Plus
@@ -594,9 +669,15 @@ class _AdminScreenState extends State<AdminScreen> {
                 '${c['nombre'] ?? ''}',
             ],
         _vencenHoyNombres);
-    final incidenciasPend = await _seguro(
-        () async => (await incidenciasSyncPendientes()).length,
-        _incidenciasPend);
+    // 1.29 (Oleada 5, D-23): las filas, como en la carga
+    // completa — la franja de Control se refresca también
+    // tras los destinos ligeros (Diagnóstico).
+    final incidenciasFilas = await _seguro(
+        incidenciasSyncPendientes, _incidenciasFilas);
+    final incidenciasPend = incidenciasFilas.length;
+    final nombresPanel = await _nombresPanelSiHaceFalta(
+        incidenciasFilas.isNotEmpty ||
+            fotoRS.solicitadas.isNotEmpty);
     final casa = await _seguro(
         LocalDb.instance.conteoCuentasCasa, _cuentasCasa);
     if (!mounted) return;
@@ -612,6 +693,8 @@ class _AdminScreenState extends State<AdminScreen> {
       _sinReporteAyer = sinAyer;
       _sinReporteHoy = sinHoy;
       _vencenHoyNombres = vencenNombres;
+      _incidenciasFilas = incidenciasFilas;
+      _nombresClientesPanel = nombresPanel;
       _incidenciasPend = incidenciasPend;
       _cuentasCasa = casa;
     });
@@ -631,11 +714,18 @@ class _AdminScreenState extends State<AdminScreen> {
   /// supo, la atención enseña la fila «sin cargar».
   Future<void> _cargarValesPremios() async {
     final gen = ++_valesGen;
-    final n = await contarValesPorAprobar();
+    // 1.29 (Oleada 5, D-23): se traen las FILAS (la
+    // misma lectura que contaba): el conteo es su
+    // longitud y la foto alimenta los ítems de
+    // Clientes. Un fallo conserva foto y conteo buenos.
+    final lista = await valesVisiblesPorAprobar();
     if (!mounted || gen != _valesGen) return;
     setState(() {
-      if (n != null) {
-        _valesPorAprobar = n;
+      if (lista != null) {
+        _valesFoto = [
+          for (final v in lista) (nombre: v.nombre, dias: v.premioDias),
+        ];
+        _valesPorAprobar = lista.length;
         _valesCargados = true;
         _valesError = false;
       } else {
@@ -673,6 +763,18 @@ class _AdminScreenState extends State<AdminScreen> {
         'netoNominaMes': _netoNominaMes,
         'preciosSinFijar': _preciosSinFijar,
         'incidenciasPend': _incidenciasPend,
+        // 1.29 (Oleada 5, D-23): las listas de las que
+        // salen los ítems, para que la foto de apertura
+        // pinte distintivo y franja iguales que la carga
+        // fresca (las cachés viejas no las traen: esos
+        // ítems llegan con la carga real, como ya hacían
+        // las bandejas de segundo pase).
+        'incidenciasFilas': _incidenciasFilas,
+        'clavesSinFijar': _clavesSinFijar,
+        'valesFoto': [
+          for (final v in _valesFoto) {'n': v.nombre, 'd': v.dias},
+        ],
+        'tarifasPorRevisar': _tarifasPorRevisar,
         'cuentasCasa': _cuentasCasa,
         'pendientesSubir': _pendientesSubir,
         'pend': _pend,
@@ -775,8 +877,29 @@ class _AdminScreenState extends State<AdminScreen> {
         : cifraDoble(c, 'netoNominaMes');
     _preciosSinFijar =
         cifraEntera(c, 'preciosSinFijar', _preciosSinFijar);
-    _incidenciasPend =
-        cifraEntera(c, 'incidenciasPend', _incidenciasPend);
+    // 1.29 (Oleada 5, D-23): si la foto trae las listas,
+    // los enteros salen de ellas (misma construcción que
+    // la carga fresca); si es una caché vieja, manda el
+    // entero guardado y los ítems llegan con la carga.
+    if (c['clavesSinFijar'] is List) {
+      _clavesSinFijar = cifraListaTextos(c, 'clavesSinFijar');
+      _preciosSinFijar = _clavesSinFijar.length;
+    }
+    if (c['incidenciasFilas'] is List) {
+      _incidenciasFilas = cifraLista(c, 'incidenciasFilas');
+      _incidenciasPend = _incidenciasFilas.length;
+    } else {
+      _incidenciasPend =
+          cifraEntera(c, 'incidenciasPend', _incidenciasPend);
+    }
+    if (c['valesFoto'] is List) {
+      _valesFoto = [
+        for (final v in cifraLista(c, 'valesFoto'))
+          (nombre: '${v['n'] ?? ''}', dias: (v['d'] as num?)?.toInt() ?? 0),
+      ];
+    }
+    _tarifasPorRevisar =
+        cifraEntera(c, 'tarifasPorRevisar', _tarifasPorRevisar);
     _cuentasCasa = cifraEntera(c, 'cuentasCasa', _cuentasCasa);
     _pendientesSubir =
         cifraEntera(c, 'pendientesSubir', _pendientesSubir);
@@ -799,28 +922,160 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  /// 1.29 (Oleada 5, D-23): la foto de pendientes del
+  /// Panel desde el estado cargado. El entrenador de
+  /// cada turno sin reporte se resuelve AQUÍ, con el
+  /// plan de turnos retenido de la carga completa (la
+  /// misma resolución del hub de turnos); sin ajustes
+  /// retenidos o sin asignación, el ítem enseña solo el
+  /// día — nunca un nombre inventado. El cliente de una
+  /// incidencia sale del payload o del padrón cargado,
+  /// con la precedencia de IncidenciasSyncScreen.
+  FotoPendientesModulos _fotoPendientes() {
+    List<({String turno, String? entrenador})> conAsignado(
+        List<String> turnos, DateTime fecha) {
+      if (_ajustesPanel.isEmpty) {
+        return [for (final t in turnos) (turno: t, entrenador: null)];
+      }
+      final patron = parsePatronTurnos(_ajustesPanel['horario_turnos']);
+      final excepciones =
+          parseExcepcionesTurnos(_ajustesPanel['horario_excepciones']);
+      return [
+        for (final t in turnos)
+          (
+            turno: t,
+            entrenador: programadoEn(
+              fecha: fecha,
+              // Las claves del plan son 'manana'/'tarde';
+              // turnosSinReporte devuelve 'mañana'/'tarde'.
+              franja: t == 'mañana' ? 'manana' : 'tarde',
+              patron: patron,
+              excepciones: excepciones,
+            ),
+          ),
+      ];
+    }
+
+    String? clienteDeIncidencia(Map<String, dynamic> inc) {
+      final raw = inc['payload'];
+      if (raw != null && !(raw is String && raw.isEmpty)) {
+        try {
+          final p = raw is String
+              ? jsonDecode(raw) as Map<String, dynamic>
+              : Map<String, dynamic>.from(raw as Map);
+          final nombreP = (p['nombre'] as String?)?.trim();
+          if (nombreP != null && nombreP.isNotEmpty) return nombreP;
+          final cid = (p['cliente_id'] as num?)?.toInt();
+          if (cid != null) {
+            final n = _nombresClientesPanel[cid];
+            if (n != null && n.isNotEmpty) return n;
+          }
+        } catch (_) {
+          // Payload ilegible: el ítem sale sin cliente,
+          // como la tarjeta de la pantalla destino.
+        }
+      }
+      return null;
+    }
+
+    final hoy = ahoraHabana();
+    final fechaHoy = DateTime(hoy.year, hoy.month, hoy.day);
+    final fechaAyer = DateTime(hoy.year, hoy.month, hoy.day - 1);
+    return FotoPendientesModulos(
+      pendientesLiquidar: [
+        for (final e in _pend)
+          if (((e['total'] as num?)?.toDouble() ?? 0) > 0)
+            (
+              nombre: '${e['nombre'] ?? ''}',
+              total: (e['total'] as num).toDouble(),
+            ),
+      ],
+      solicitudes: [
+        for (final s in _swrSolicitudes.datos)
+          (nombre: s.nombre, desde: s.solicitudDesde),
+      ],
+      reportes: [
+        for (final r in _swrReportes.datos)
+          (nombre: r.nombre, monto: r.monto, referencia: r.referencia),
+      ],
+      vales: _valesFoto,
+      sinReporteHoy: conAsignado(_sinReporteHoy, fechaHoy),
+      sinReporteAyer: conAsignado(_sinReporteAyer, fechaAyer),
+      reservas: [
+        for (final r in _reservasSolicitadas)
+          (
+            suplemento: _nombreSupl['${r['suplemento_id']}'] ??
+                'Suplemento',
+            cliente: _nombresClientesPanel[
+                    (r['cliente_id'] as num?)?.toInt()] ??
+                'Cliente #${r['cliente_id']}',
+            cantidad: (r['cantidad'] as num?)?.toInt() ?? 0,
+          ),
+      ],
+      preciosSinFijar: _clavesSinFijar,
+      incidencias: [
+        for (final f in _incidenciasFilas)
+          (
+            tipo: '${f['tipo'] ?? ''}',
+            cliente: clienteDeIncidencia(f),
+            dispositivo: () {
+              final d = '${f['dispositivo'] ?? ''}'.trim();
+              return d.isEmpty ? null : d;
+            }(),
+            creadaEn: DateTime.tryParse('${f['creada_en'] ?? ''}'),
+          ),
+      ],
+    );
+  }
+
+  /// 1.29 (Oleada 5, D-23): los ítems «POR REVISAR» de
+  /// la foto actual — UNA derivación por construcción,
+  /// compartida por los distintivos (vía [_datosModulos])
+  /// y por las franjas de las pantallas de módulo.
+  Map<ModuloPanel, List<ItemPorRevisar>> _itemsPorRevisar() =>
+      pendientesPorModulo(_fotoPendientes());
+
   /// 1.28 (M5-C1): los descriptores de los 6 módulos con
   /// el estado vivo de la foto actual (función pura en
   /// panel_modulos.dart; aquí solo se le pasa la foto).
-  List<DatoModuloPanel> _datosModulos() => modulosPanel(
-        pendCaja:
-            _pend.where((e) => (e['total'] as double? ?? 0) > 0).length,
+  /// 1.29 (Oleada 5, D-23): los conteos llegan como las
+  /// LISTAS de ítems; cada badge es su longitud.
+  List<DatoModuloPanel> _datosModulos(
+          {Map<ModuloPanel, List<ItemPorRevisar>>? items}) =>
+      modulosPanel(
+        items: items ?? _itemsPorRevisar(),
         pendCajaTotal: _pend.fold<double>(
-            0, (s, e) => s + (e['total'] as double? ?? 0)),
+            0, (s, e) => s + ((e['total'] as num?)?.toDouble() ?? 0)),
         cajaHoyTotal:
             (_caja['efectivo'] ?? 0) + (_caja['transferencia'] ?? 0),
-        solicitudes: _swrSolicitudes.datos.length,
-        reportes: _swrReportes.datos.length,
-        valesPorAprobar: _valesPorAprobar,
         clientesActivos: _clientesActivos,
-        sinReporteHoy: _sinReporteHoy.length,
-        sinReporteAyer: _sinReporteAyer.length,
-        reservas: _reservasSolicitadas.length,
         stockCritico: _stockCritico.length,
-        preciosSinFijar: _preciosSinFijar,
-        incidencias: _incidenciasPend,
         pendientesSubir: _pendientesSubir,
       );
+
+  /// 1.29 (Oleada 5, D-23): el destino de un ítem «POR
+  /// REVISAR» — las mismas pantallas que abren las
+  /// tarjetas de cada módulo.
+  void _abrirItemPorRevisar(ItemPorRevisar item) {
+    switch (item.destino) {
+      case DestinoPorRevisar.liquidacion:
+        _ir(const ArqueoEntregaScreen());
+      case DestinoPorRevisar.solicitudesInvitados:
+        _ir(const InvitadosScreen());
+      case DestinoPorRevisar.reportesPlus:
+        _ir(const ReportesPlusScreen());
+      case DestinoPorRevisar.valesPremios:
+        _ir(const PremiosHubScreen());
+      case DestinoPorRevisar.cierreCaja:
+        _ir(_pantallaCierre());
+      case DestinoPorRevisar.reservas:
+        _ir(const ReservasScreen());
+      case DestinoPorRevisar.precios:
+        _irConfig(const PreciosMetodoScreen());
+      case DestinoPorRevisar.incidenciasSync:
+        _ir(const IncidenciasSyncScreen());
+    }
+  }
 
   void _ir(Widget w) {
     Navigator.of(context)
@@ -1052,6 +1307,10 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const AvisosEntrenadorScreen());
       case 'avisos_clientes':
         _ir(const EditorAvisosClientesScreen());
+      // 1.29 (Oleada 5, FB-15): el compositor de
+      // anuncios, alcanzable por «anuncio».
+      case 'anuncios':
+        _ir(const PanelAnunciosScreen());
       case 'recordatorios':
         _ir(const RecordatoriosScreen());
       case 'info_publica':
@@ -1112,6 +1371,11 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const VerificacionEspejoScreen());
       case 'incidencias':
         _ir(const ListaIncidenciasScreen());
+      // 1.29 (Oleada 5, D-23): las de sync, por su
+      // propio id (antes «incidencias» cargaba con los
+      // sinónimos de sync y abría los reportes).
+      case 'incidencias_sync':
+        _ir(const IncidenciasSyncScreen());
       case 'premios':
         _ir(const PremiosHubScreen());
       case 'comunidad':
@@ -2673,7 +2937,11 @@ class _AdminScreenState extends State<AdminScreen> {
     // salen de la función pura modulosPanel
     // (panel_modulos.dart); las TARJETAS de cada módulo
     // no se mueven: se emparejan por índice, como antes.
-    final datos = _datosModulos();
+    // 1.29 (Oleada 5, D-23): UNA derivación de ítems
+    // por construcción alimenta el distintivo de cada
+    // fila Y la franja «POR REVISAR» de su pantalla.
+    final items = _itemsPorRevisar();
+    final datos = _datosModulos(items: items);
     final tarjetasPorModulo = <List<Widget> Function()>[
       _tarjetasModuloCaja,
       _tarjetasModuloClientes,
@@ -2681,6 +2949,14 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetasModuloSuplementos,
       _tarjetasModuloPrecios,
       _tarjetasModuloControl,
+    ];
+    const ordenModulos = [
+      ModuloPanel.caja,
+      ModuloPanel.clientes,
+      ModuloPanel.equipo,
+      ModuloPanel.suplementos,
+      ModuloPanel.configuracion,
+      ModuloPanel.control,
     ];
     return Container(
       decoration: BoxDecoration(
@@ -2701,6 +2977,16 @@ class _AdminScreenState extends State<AdminScreen> {
                   datos[i].badge! > (_badgesPrevios[datos[i].titulo] ?? 0),
               onTap: () => _ir(_ModuloAdminScreen(
                   titulo: datos[i].titulo,
+                  itemsPorRevisar: items[ordenModulos[i]] ?? const [],
+                  onAbrirItem: (item) {
+                    // La pantalla del módulo se cierra y
+                    // el destino abre sobre el Panel: al
+                    // volver, la recarga del Panel ya trae
+                    // el ítem resuelto fuera de la lista y
+                    // del distintivo, en la misma foto.
+                    Navigator.of(context).pop();
+                    _abrirItemPorRevisar(item);
+                  },
                   tarjetas: tarjetasPorModulo[i]())),
             ),
           ],
@@ -2839,6 +3125,20 @@ class _AdminScreenState extends State<AdminScreen> {
   // -- Módulo 2 · Clientes, Invitados y Comunicación --------------------------
   List<Widget> _tarjetasModuloClientes() {
     return [
+      // 1.29 (Oleada 5, FA-04): la línea viva de tarifas
+      // por revisar, con LA MISMA cifra que el aviso de
+      // la lista de Tarifas (misma fuente fusionada,
+      // mismo predicado): un número, dos escaparates.
+      // Sin nada por revisar, la línea no existe.
+      if (_tarifasPorRevisar > 0)
+        _tarjetaFlujo(
+          Icons.local_offer_rounded,
+          _tarifasPorRevisar == 1
+              ? '1 tarifa especial por revisar'
+              : '$_tarifasPorRevisar tarifas especiales por revisar',
+          'Vencidas o por vencer esta semana',
+          () => _ir(const TarifasScreen()),
+        ),
       _subModulo('CLIENTES'),
       // v1.6.0 (pedido de Jc): Entrenadores, Clientes e Invitados
       // viven en una misma zona «Usuarios» (ControlAccesoScreen con
@@ -3003,6 +3303,16 @@ class _AdminScreenState extends State<AdminScreen> {
         'Horario de apertura',
         'Apertura y cierre del gym (mueve las franjas de turno)',
         () => _ir(const HorarioGym()),
+      ),
+      // 1.29 (Oleada 5, D-23): la puerta que el ítem de
+      // Equipo no tenía dentro de su módulo — los
+      // reportes de caja viven en la pantalla de cierre
+      // (la misma que abre la franja «POR REVISAR»).
+      _tarjetaFlujo(
+        Icons.point_of_sale_rounded,
+        'Reportes de caja del día',
+        'Cierres y reportes por turno, hoy y días pasados',
+        () => _ir(_pantallaCierre()),
       ),
       _subModulo('PERMISOS'),
       // 1.25 T37: la tarjeta PRINCIPAL de permisos: el
@@ -3226,11 +3536,27 @@ class _AdminScreenState extends State<AdminScreen> {
         'Conteos por tabla, con alcance declarado',
         () => _ir(const VerificacionEspejoScreen()),
       ),
+      // 1.29 (Oleada 5, D-23): la tarjeta vieja se
+      // renombra «Incidencias (reportes)» — abre los
+      // REPORTES de clientes y equipo (v1.3.0), no las
+      // de sync; el homónimo confirmaba en falso. La
+      // puerta que faltaba va justo debajo.
       _tarjetaFlujo(
         Icons.warning_amber_rounded,
-        'Incidencias',
-        'Errores que requieren atención',
+        'Incidencias (reportes)',
+        'Reportes de clientes y equipo, con su seguimiento',
         () => _ir(const ListaIncidenciasScreen()),
+      ),
+      _tarjetaFlujo(
+        Icons.sync_problem_rounded,
+        'Incidencias de sync',
+        _incidenciasPend > 0
+            ? (_incidenciasPend == 1
+                ? '1 operación rechazada por revisar'
+                : '$_incidenciasPend operaciones rechazadas '
+                    'por revisar')
+            : 'Operaciones que el servidor rechazó al sincronizar',
+        () => _ir(const IncidenciasSyncScreen()),
       ),
       _tarjetaFlujo(
         Icons.sync_problem_rounded,
@@ -3421,11 +3747,22 @@ class _PendientePanel {
 /// Contenedor de un módulo del Panel del dueño (v1.6.0): lista las
 /// tarjetas de destino existentes del módulo. No añade funciones;
 /// solo agrupa las que ya estaban en el hub.
+/// 1.29 (Oleada 5, D-23): si el módulo tiene ítems «POR
+/// REVISAR», la pantalla abre con su franja (la misma
+/// lista de la que salió el distintivo); sin ítems, la
+/// pantalla es la de siempre.
 class _ModuloAdminScreen extends StatelessWidget {
   final String titulo;
   final List<Widget> tarjetas;
+  final List<ItemPorRevisar> itemsPorRevisar;
+  final void Function(ItemPorRevisar item)? onAbrirItem;
 
-  const _ModuloAdminScreen({required this.titulo, required this.tarjetas});
+  const _ModuloAdminScreen({
+    required this.titulo,
+    required this.tarjetas,
+    this.itemsPorRevisar = const [],
+    this.onAbrirItem,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3433,7 +3770,12 @@ class _ModuloAdminScreen extends StatelessWidget {
       appBar: appBarIron(context, titulo),
       body: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
-        children: tarjetas,
+        children: [
+          if (itemsPorRevisar.isNotEmpty && onAbrirItem != null)
+            FranjaPorRevisar(
+                items: itemsPorRevisar, onTapItem: onAbrirItem!),
+          ...tarjetas,
+        ],
       ),
     );
   }

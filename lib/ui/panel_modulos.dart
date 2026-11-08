@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import '../negocio.dart' show fmtMonto;
 import 'componentes.dart';
 import 'diseno.dart';
+import 'panel_por_revisar.dart';
 
 /// Un módulo del Panel: identidad + estado vivo +
 /// contador (badge) en su sitio de siempre.
@@ -52,24 +53,35 @@ String _conteo(int n, String uno, String varios) =>
 /// reporte de hoy y ayer; el de Suplementos, las
 /// reservas; el de Configuración, los precios sin
 /// fijar; el de Control, las incidencias).
+///
+/// 1.29 (Oleada 5, D-23): los conteos ya no llegan como
+/// enteros sueltos: llegan las LISTAS de ítems de
+/// `pendientesPorModulo` (panel_por_revisar.dart) y cada
+/// badge es `ítems.length` POR CONSTRUCCIÓN — el mismo
+/// número que la franja «POR REVISAR» del módulo lista
+/// al entrar. Las líneas de estado se derivan de esas
+/// mismas listas.
 List<DatoModuloPanel> modulosPanel({
-  required int pendCaja,
+  required Map<ModuloPanel, List<ItemPorRevisar>> items,
   required double pendCajaTotal,
   required double cajaHoyTotal,
-  required int solicitudes,
-  required int reportes,
-  required int valesPorAprobar,
   required int clientesActivos,
-  required int sinReporteHoy,
-  required int sinReporteAyer,
-  required int reservas,
   required int stockCritico,
-  required int preciosSinFijar,
-  required int incidencias,
   required int pendientesSubir,
 }) {
-  final badgeClientes = solicitudes + reportes + valesPorAprobar;
-  final sinReporte = sinReporteHoy + sinReporteAyer;
+  int n(ModuloPanel m) => items[m]?.length ?? 0;
+  int nDestino(ModuloPanel m, DestinoPorRevisar d) =>
+      (items[m] ?? const <ItemPorRevisar>[])
+          .where((i) => i.destino == d)
+          .length;
+  final pendCaja = n(ModuloPanel.caja);
+  final valesPorAprobar =
+      nDestino(ModuloPanel.clientes, DestinoPorRevisar.valesPremios);
+  final sinReporte = n(ModuloPanel.equipo);
+  final reservas = n(ModuloPanel.suplementos);
+  final preciosSinFijar = n(ModuloPanel.configuracion);
+  final incidencias = n(ModuloPanel.control);
+  final badgeClientes = n(ModuloPanel.clientes);
   return [
     DatoModuloPanel(
       icono: Icons.attach_money_rounded,
@@ -248,6 +260,96 @@ class FilaModuloPanel extends StatelessWidget {
             ],
             Icon(Icons.chevron_right_rounded,
                 color: AppColores.textoSecundario(context)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 1.29 (Oleada 5, D-23): la franja «POR REVISAR» que
+/// abre la pantalla de un módulo: una fila por ítem de
+/// la MISMA lista de la que salió el distintivo del
+/// módulo, cada una con su título, su detalle y su
+/// destino al tacto. Sin ítems no pinta nada: la
+/// pantalla del módulo queda como siempre.
+class FranjaPorRevisar extends StatelessWidget {
+  final List<ItemPorRevisar> items;
+  final void Function(ItemPorRevisar item) onTapItem;
+
+  const FranjaPorRevisar({
+    super.key,
+    required this.items,
+    required this.onTapItem,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColores.superficie(context),
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          border: Border.all(color: AppColores.borde(context)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: Text(
+                'POR REVISAR',
+                style: AppTexto.etiqueta.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.6,
+                  color: AppColores.errorTexto(context),
+                ),
+              ),
+            ),
+            for (var i = 0; i < items.length; i++) ...[
+              if (i > 0)
+                Divider(height: 1, color: AppColores.borde(context)),
+              InkWell(
+                onTap: () => onTapItem(items[i]),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.lg,
+                      vertical: AppEspacio.md),
+                  child: Row(
+                    children: [
+                      IconoModuloBadge(
+                        icono: items[i].icono,
+                        tinte: items[i].tinte,
+                        iconoOscuro: items[i].tinte,
+                        iconoClaro: items[i].tinte,
+                        tamanoIcono: 19,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(items[i].titulo,
+                                style: AppTexto.subtitulo),
+                            const SizedBox(height: 2),
+                            Text(items[i].detalle,
+                                style: AppTexto.secundario),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded,
+                          color:
+                              AppColores.textoSecundario(context)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: AppEspacio.xs),
           ],
         ),
       ),
