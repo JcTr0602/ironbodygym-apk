@@ -10,11 +10,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../actividad_cliente.dart' show ActividadClienteService;
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
+import 'actividad_cliente.dart';
 import 'app_bar.dart';
 import 'auditoria_persona.dart';
 import 'diseno.dart';
@@ -221,7 +223,13 @@ bool opVisibleEnAuditoria(Map<String, dynamic> op, FiltroAuditoria filtro,
 class AuditoriaScreen extends StatefulWidget {
   // 1.25 T112: embebida = pestaña del Centro de control.
   final bool embebida;
-  const AuditoriaScreen({super.key, this.embebida = false});
+
+  /// 1.29 (Oleada 8, FB-23): servicio de la sección
+  /// «Actividad en la app de clientes» (costura de test;
+  /// por defecto, el real contra la RPC).
+  final ActividadClienteService? servicioActividad;
+  const AuditoriaScreen(
+      {super.key, this.embebida = false, this.servicioActividad});
 
   @override
   State<AuditoriaScreen> createState() => _AuditoriaScreenState();
@@ -794,8 +802,39 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
               ),
             ),
           Expanded(
-            child: _cargando
+            // 1.29 (Oleada 8, FB-23): con el registro vacío
+            // o filtrado a cero, la sección de actividad del
+            // servidor va BAJO el estado vacío en un scroll
+            // propio (con filas vive como último ítem de la
+            // lista del registro: un solo scroll, sin
+            // anidados).
+            child: _sinFilasVisibles(_cargando, visibles)
+                ? SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Sin acotar: el estado vacío se pinta
+                        // a su alto natural DENTRO del scroll
+                        // (acotarlo en un SizedBox desbordaba
+                        // su Column interna).
+                        _cuerpoRegistroVacio(),
+                        if (esDueno)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                                12, 12, 12, 24),
+                            child: SeccionActividadAppClientes(
+                              servicio: widget.servicioActividad,
+                            ),
+                          ),
+                      ],
+                    ),
+                  )
+                : _cargando
                 // 1.25 T114: esqueleto con la forma de la lista.
+                // (Las ramas vacías de esta cadena ya no se
+                // alcanzan — las captura _sinFilasVisibles —
+                // pero se conservan como red de seguridad.)
                 ? const Padding(
                     padding: EdgeInsets.all(AppEspacio.lg),
                     child: SkeletonLista(items: 4))
@@ -836,12 +875,46 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                         : RefreshIndicator(
                         onRefresh: _cargar,
                         child: ListView.builder(
-                          // FB-16: un ítem extra al final con
-                          // «Ver más antiguas» mientras el río
-                          // tenga más bloques.
-                          itemCount: dias.length + (_hayMas ? 1 : 0),
+                          // FB-16: los primeros ítems son los
+                          // grupos por día; después, mientras
+                          // el río tenga más bloques, el botón
+                          // «Ver más antiguas» y, al final de
+                          // todo, la sección FB-23 de actividad
+                          // del servidor (solo dueño): vive
+                          // DENTRO de esta lista para heredar su
+                          // único scroll — un scroll exterior
+                          // con la lista acotada dentro dejaba
+                          // el botón fuera del área desplazable
+                          // y los toques caían en la tarjeta.
+                          itemCount: dias.length +
+                              (_hayMas ? 1 : 0) +
+                              (esDueno ? 1 : 0),
                           itemBuilder: (ctx, gi) {
-                            if (gi >= dias.length) {
+                            if (gi < dias.length) {
+                              final dia = dias[gi];
+                              final items = grupos[dia]!;
+                              return Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding:
+                                        const EdgeInsets.fromLTRB(
+                                            16, 12, 16, 4),
+                                    child: Text(
+                                      _etiquetaDia(dia),
+                                      style: AppTexto.subtitulo
+                                          .copyWith(
+                                        color: AppColores.naranja,
+                                      ),
+                                    ),
+                                  ),
+                                  for (final op in items)
+                                    _tarjetaOp(ctx, op),
+                                ],
+                              );
+                            }
+                            if (_hayMas && gi == dias.length) {
                               return Padding(
                                 padding: const EdgeInsets.fromLTRB(
                                     16, 8, 16, 24),
@@ -865,25 +938,19 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                 ),
                               );
                             }
-                            final dia = dias[gi];
-                            final items = grupos[dia]!;
-                            return Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                      16, 12, 16, 4),
-                                  child: Text(
-                                    _etiquetaDia(dia),
-                                    style: AppTexto.subtitulo.copyWith(
-                                      color: AppColores.naranja,
-                                    ),
-                                  ),
-                                ),
-                                for (final op
-                                    in items) _tarjetaOp(ctx, op),
-                              ],
+                            // FB-23: la actividad que la app de
+                            // Clientes deja en el SERVIDOR, como
+                            // sección propia al final del
+                            // registro local. Solo dueño (la
+                            // sección misma también se guarda)
+                            // y sin bloquear nada del registro:
+                            // es otra fuente.
+                            return Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                  12, 12, 12, 24),
+                              child: SeccionActividadAppClientes(
+                                servicio: widget.servicioActividad,
+                              ),
                             );
                           },
                         ),
@@ -891,6 +958,59 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// ¿El registro no tiene filas que listar? (cargando, sin
+  /// ops o filtro sin resultados): la rama vacía y la de
+  /// filas pintan árboles distintos — esta decide cuál, y
+  /// [_cuerpoRegistroVacio] pinta la vacía.
+  bool _sinFilasVisibles(
+          bool cargando, List<Map<String, dynamic>> visibles) =>
+      cargando || _ops.isEmpty || visibles.isEmpty;
+
+  /// El cuerpo del registro cuando no hay filas que listar:
+  /// esqueleto cargando, vacío total o vacío por filtro,
+  /// con los textos de siempre.
+  Widget _cuerpoRegistroVacio() {
+    if (_cargando) {
+      // 1.25 T114: esqueleto con la forma de la lista.
+      return const Padding(
+          padding: EdgeInsets.all(AppEspacio.lg),
+          child: SkeletonLista(items: 4));
+    }
+    if (_ops.isEmpty) {
+      return EstadoVacio(
+        icono: Icons.fact_check_rounded,
+        titulo: 'Sin operaciones registradas',
+        textoAccion: 'Actualizar',
+        onAccion: _cargar,
+      );
+    }
+    final esDueno = AuthService().isOwner;
+    return EstadoVacio(
+      icono: Icons.filter_alt_off_rounded,
+      titulo: 'Nada con este filtro',
+      // El texto describe el filtro ACTIVO, no siempre el
+      // de por defecto.
+      subtitulo: switch (_filtro) {
+        FiltroAuditoria.otrosYAlertas =>
+          'No hay operaciones de otros ni '
+              'alertas en el registro reciente.',
+        FiltroAuditoria.soloMias =>
+          'No hay operaciones tuyas en el '
+              'registro reciente.',
+        FiltroAuditoria.todo =>
+          'No hay operaciones en el registro '
+              'reciente.',
+      },
+      textoAccion:
+          (_filtro == FiltroAuditoria.todo || !esDueno)
+              ? null
+              : 'Ver todo',
+      onAccion: (_filtro == FiltroAuditoria.todo || !esDueno)
+          ? null
+          : () => setState(() => _filtro = FiltroAuditoria.todo),
     );
   }
 
