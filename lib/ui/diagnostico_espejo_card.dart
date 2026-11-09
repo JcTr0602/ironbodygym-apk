@@ -52,12 +52,22 @@ class _TarjetaDiagnosticoEspejoState
   }
 
   Future<void> _evaluar() async {
-    final d = await evaluarEspejoVacio();
-    if (!mounted) return;
-    setState(() {
-      _diag = d;
-      _cargado = true;
-    });
+    // Yunque B (cierre de la oleada): la evaluación es un
+    // diagnóstico en segundo plano lanzado sin esperar desde
+    // initState — si la BD se cierra o se reinicia en mitad
+    // de la lectura (cierre de la app, recarga), el error NO
+    // puede quedar como excepción sin atrapar: la tarjeta
+    // simplemente no sale. La suite lo cazó al alargarse la
+    // carga de Home (YB-FLU-01): la evaluación aterrizaba
+    // tras el reinicio de la BD del siguiente test.
+    try {
+      final d = await evaluarEspejoVacio();
+      if (!mounted) return;
+      setState(() {
+        _diag = d;
+        _cargado = true;
+      });
+    } catch (_) {}
   }
 
   Future<void> _sincronizar() async {
