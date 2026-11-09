@@ -128,17 +128,73 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     _cargar();
   }
 
+  /// Reconstruye el modelo del RPC desde las filas planas
+  /// del espejo local (medidas: peso_kg, grasa_pct, ...;
+  /// fecha_medicion). Era el cuerpo del respaldo del catch.
+  List<Medicion> _desdeEspejoLocal(
+      List<Map<String, dynamic>> locales) {
+    return locales.map((r) {
+      final m = (r['medidas'] as Map?) ?? {};
+      return Medicion.fromJson({
+        // 1.28 (M4-A12): el medicion_id viaja CRUDO
+        // (puede ser UUID de la vía de ops): el modelo
+        // lo conserva en idCrudo para editar/borrar;
+        // el int queda solo como respaldo de orden.
+        'id': int.tryParse('${r['medicion_id'] ?? ''}') ?? 0,
+        'medicion_id': '${r['medicion_id'] ?? ''}',
+        'cliente_id': widget.clienteId,
+        'peso_kg': m['peso_kg'],
+        'grasa_pct': m['grasa_pct'],
+        'pecho_cm': m['pecho_cm'],
+        'cintura_cm': m['cintura_cm'],
+        'cadera_cm': m['cadera_cm'],
+        'brazo_cm': m['brazo_cm'],
+        'muslo_cm': m['muslo_cm'],
+        'notas': null,
+        'registrado_por': '',
+        // 1.23 AT-03: created_at = el instante real de
+        // creación (creada_ts de la op / created_at del
+        // espejo) si viene; la fecha plana solo como
+        // último recurso de filas viejas sin instante.
+        'created_at': ('${r['creado_en'] ?? ''}'.isNotEmpty)
+            ? r['creado_en']
+            : r['fecha_medicion'],
+      });
+    }).toList();
+  }
+
   Future<void> _cargar() async {
-    setState(() {
-      _cargando = true;
-      _error = null;
-    });
+    // Yunque B (YB-CLI-12): offline-first, como la ficha —
+    // se pinta PRIMERO con el espejo local y la RPC
+    // enriquece en segundo plano (con su timeout de 12 s).
+    // Antes la pestaña esperaba la RPC y el espejo solo
+    // entraba si esta FALLABA: sin conexión, «Cargando
+    // progreso…» hasta 12 s con las mediciones ya en el
+    // teléfono (la lección de la ficha del 2026-11-02).
+    final cid = int.tryParse(widget.clienteId);
+    var pintoLocal = false;
     try {
-      // Autoauditoría 1.22 #2: con timeout (12 s). El catch de
-      // abajo trae el respaldo del espejo local, pero un cuelgue
-      // no es un error: sin tope, la RPC colgada jamás llegaba al
-      // catch y la pestaña quedaba en «Cargando progreso…» con
-      // las mediciones en el teléfono.
+      final locales = cid == null
+          ? <Map<String, dynamic>>[]
+          : await medicionesClienteLocal(cid);
+      if (mounted && locales.isNotEmpty) {
+        setState(() {
+          _mediciones = _desdeEspejoLocal(locales);
+          _cargando = false;
+          _error = null;
+          pintoLocal = true;
+        });
+      }
+    } catch (_) {
+      // Espejo ilegible: no bloquea; la RPC sigue su curso.
+    }
+    if (!pintoLocal && mounted) {
+      setState(() {
+        _cargando = true;
+        _error = null;
+      });
+    }
+    try {
       final res = await Supabase.instance.client
           .rpc(
             'listar_mediciones_cliente',
@@ -153,49 +209,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         setState(() {
           _mediciones = lista;
           _cargando = false;
+          _error = null;
         });
       }
     } catch (e) {
-      // Argón P1#11: sin red, respaldo con el espejo local
-      // (medicionesClienteLocal): el modelo Medicion del RPC se
-      // reconstruye desde las filas planas del espejo
-      // (medidas: peso_kg, grasa_pct, ...; fecha_medicion).
-      final cid = int.tryParse(widget.clienteId);
-      final locales =
-          cid == null ? <Map<String, dynamic>>[] : await medicionesClienteLocal(cid);
-      if (mounted && locales.isNotEmpty) {
-        setState(() {
-          _mediciones = locales.map((r) {
-            final m = (r['medidas'] as Map?) ?? {};
-            return Medicion.fromJson({
-              // 1.28 (M4-A12): el medicion_id viaja CRUDO
-              // (puede ser UUID de la vía de ops): el modelo
-              // lo conserva en idCrudo para editar/borrar;
-              // el int queda solo como respaldo de orden.
-              'id': int.tryParse('${r['medicion_id'] ?? ''}') ?? 0,
-              'medicion_id': '${r['medicion_id'] ?? ''}',
-              'cliente_id': widget.clienteId,
-              'peso_kg': m['peso_kg'],
-              'grasa_pct': m['grasa_pct'],
-              'pecho_cm': m['pecho_cm'],
-              'cintura_cm': m['cintura_cm'],
-              'cadera_cm': m['cadera_cm'],
-              'brazo_cm': m['brazo_cm'],
-              'muslo_cm': m['muslo_cm'],
-              'notas': null,
-              'registrado_por': '',
-              // 1.23 AT-03: created_at = el instante real de
-              // creación (creada_ts de la op / created_at del
-              // espejo) si viene; la fecha plana solo como
-              // último recurso de filas viejas sin instante.
-              'created_at':
-                  ('${r['creado_en'] ?? ''}'.isNotEmpty)
-                      ? r['creado_en']
-                      : r['fecha_medicion'],
-            });
-          }).toList();
-          _cargando = false;
-        });
+      if (pintoLocal) {
+        // Lo pintado manda: sin red se queda el espejo y el
+        // fallo del refresco solo va a la bitácora.
+        AppLog.error('progreso', 'refresco_fallo', d: '$e');
         return;
       }
       AppLog.error('progreso', 'cargar_fallo', d: '$e');

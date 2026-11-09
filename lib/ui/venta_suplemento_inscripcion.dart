@@ -62,13 +62,24 @@ Map<String, dynamic> payloadInscripcionVentaSuplemento({
     throw ArgumentError(
         'Venta en USD sin tasa válida (usdTasa requerido)');
   }
+  // Yunque B (YB-CLI-09/10): FRONTERA del payload — lo que
+  // viaja a clientes.telefono/carnet va limpio pase lo que
+  // pase en la pantalla: el teléfono sanitizado a sus 8
+  // dígitos (si no sanitiza a un móvil válido, se omite
+  // antes que guardarlo sucio) y el carnet solo dígitos.
+  // La pantalla valida antes de llegar aquí; esto es la red
+  // que hace imposible el dato sucio en esta op.
+  final telLimpio =
+      telefono == null ? null : sanitizarTelefono(telefono);
+  final carnetLimpio =
+      carnet?.replaceAll(RegExp(r'[^0-9]'), '');
   return {
     'cliente': {
       'nombre': nombre,
-      if (telefono != null && telefono.isNotEmpty)
-        'telefono': telefono,
+      if (telLimpio != null && telLimpio.isNotEmpty)
+        'telefono': telLimpio,
       if (sexo != null) 'sexo': sexo,
-      if (carnet != null && carnet.isNotEmpty) 'carnet': carnet,
+      if (carnetLimpio != null && carnetLimpio.isNotEmpty) 'carnet': carnetLimpio,
     },
     'venta': {
       'suplemento_id': suplementoId,
@@ -315,7 +326,14 @@ class _VentaSuplementoInscripcionScreenState
       final opUuid = const Uuid().v4();
       // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
       final hoy = hoyHabanaIso();
-      final telefono = _telefono.text.trim();
+      // Yunque B (YB-CLI-09/10): lo que se GUARDA va limpio —
+      // la validación limpia solo para comprobar y el payload
+      // recibía el texto crudo («5819 1577» nacía sucio en
+      // clientes.telefono, contra la regla de la casa). El
+      // teléfono se sanitiza a sus 8 dígitos y el carnet a
+      // dígitos, como en Inscribir y en la ficha.
+      final telefono = sanitizarTelefono(_telefono.text) ?? '';
+      final carnetLimpio = carnet.replaceAll(RegExp(r'[^0-9]'), '');
       // Argón #9 (ALTO): verificación de stock + descuento + encolado
       // en UNA sola transacción, igual que registrarVentaSuplemento.
       // Antes eran tres pasos sueltos sin validar stock: una venta
@@ -352,7 +370,7 @@ class _VentaSuplementoInscripcionScreenState
               nombre: nombre,
               telefono: telefono,
               sexo: _sexo,
-              carnet: carnet,
+              carnet: carnetLimpio,
               suplementoId: widget.suplemento['id'],
               cantidad: widget.cantidad,
               precio: widget.precio,

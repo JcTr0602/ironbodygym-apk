@@ -16,7 +16,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../acceso_app_cache.dart';
 import '../auth.dart';
-import '../negocio.dart' show validarTelefono;
+import '../negocio.dart' show validarTelefono, sanitizarTelefono;
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -373,7 +373,9 @@ Future<void> _cambiarTelefonoAccesoInterna(
   );
   if (texto == null) return;
   if (!ctx.mounted) return;
-  final nuevoTelefono = texto.trim();
+  // Yunque B (YB-CLI-11): a la RPC viaja el teléfono
+  // SANITIZADO (8 dígitos), no el texto crudo del campo.
+  final nuevoTelefono = sanitizarTelefono(texto) ?? '';
   // 1.28 (M4-A5/R1M4-B18): validación LOCAL de la casa (8
   // dígitos empezando por 5 o 6) ANTES de la RPC — el campo
   // solo limitaba el largo al teclear (maxLength) y un valor

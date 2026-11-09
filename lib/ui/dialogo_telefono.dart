@@ -20,7 +20,8 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
-import '../negocio.dart' show validarTelefono, antesEdicionCliente;
+import '../negocio.dart'
+    show validarTelefono, sanitizarTelefono, antesEdicionCliente;
 import '../sync.dart';
 import 'componentes.dart';
 
@@ -90,7 +91,12 @@ Future<String?> dialogoAgregarTelefono(
   );
   if (crudo == null || !context.mounted) return null;
   {
-    final tel = crudo.trim();
+    // Yunque B (YB-CLI-11): se guarda el teléfono SANITIZADO
+    // (8 dígitos limpios), no el texto crudo — la validación
+    // limpia solo para comprobar. Hoy lo único que impedía
+    // un teléfono sucio era el maxLength del campo; la regla
+    // de la casa se aplica aquí, al guardar.
+    final tel = sanitizarTelefono(crudo) ?? '';
     if (!validarTelefono(tel)) {
       if (context.mounted) {
         mostrarSnack(context,

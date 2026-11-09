@@ -287,13 +287,28 @@ class _AjustesScreenState extends State<AjustesScreen> {
       imageQuality: 75, // Gemini: compresión obligatoria para Cuba
     );
     if (img == null || !mounted) return;
-    final destino = await _perfil.avatarFile();
-    await File(img.path).copy(destino.path);
-    if (!mounted) return;
-    // v1.3.1: invalidar caché de Flutter (misma ruta, imagen nueva).
-    await FileImage(destino).evict();
-    setState(() => _avatar = destino);
-    _msg('Foto de perfil actualizada');
+    // Yunque B (YB-CLI-01): el tramo POST-pick va con
+    // try/catch y aviso visible, como en Suplementos y
+    // Usuarios — sin él, un fallo de E/S al copiar (p. ej.
+    // almacenamiento lleno) moría en silencio en un Future
+    // sin dueño (la función se pasa como tear-off) y el
+    // entrenador no sabía si la foto se puso o no.
+    try {
+      final destino = await _perfil.avatarFile();
+      await File(img.path).copy(destino.path);
+      if (!mounted) return;
+      // v1.3.1: invalidar caché de Flutter (misma ruta, imagen nueva).
+      await FileImage(destino).evict();
+      setState(() => _avatar = destino);
+      _msg('Foto de perfil actualizada');
+    } catch (e) {
+      AppLog.error('ajustes', 'avatar_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo guardar la foto de perfil.',
+            significado: SignificadoChip.error);
+      }
+    }
   }
 
   Future<void> _editarTexto({

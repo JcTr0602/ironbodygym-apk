@@ -4992,7 +4992,19 @@ class LocalDb {
     // en vez de reventar el flujo que la llamó.
     final data = _decodificarDataGuardada(rows.first['data']);
     if (data == null) return;
-    data['telefono'] = telefono;
+    // Yunque B (YB-CLI-11): red de FRONTERA (regla 3 de la
+    // casa: en clientes.telefono solo viven 8 dígitos
+    // limpios). Se normaliza aquí lo que llegue — dígitos, y
+    // fuera el prefijo 53 si viene pegado — para que ningún
+    // llamador futuro guarde un teléfono sucio por esta vía.
+    // (La validación de «móvil válido» es del llamador;
+    // sanitizarTelefono vive en negocio.dart y localdb no lo
+    // importa por el ciclo.)
+    var telLimpio = telefono.replaceAll(RegExp(r'[^0-9]'), '');
+    if (telLimpio.length == 10 && telLimpio.startsWith('53')) {
+      telLimpio = telLimpio.substring(2);
+    }
+    data['telefono'] = telLimpio;
     final nuevoJson = jsonEncode(data);
     await d.update('clientes', {'data': nuevoJson},
         where: 'id=?', whereArgs: [clienteId]);

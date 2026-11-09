@@ -397,7 +397,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
           'Para crear el acceso de la app hace falta un teléfono válido de 8 dígitos.');
       return;
     }
-    final carnet = _carnet.text.trim();
+    // Yunque B (YB-CLI-10): el carnet se guarda LIMPIO de
+    // no-dígitos (la validación limpia solo para comprobar y
+    // el texto crudo — «950220 12345» — llegaba tal cual al
+    // payload y a clientes.carnet). La comprobación y el
+    // aviso de fecha dudosa trabajan sobre los dígitos, que
+    // es lo que esas funciones ya hacían por dentro.
+    final carnet = _carnet.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (carnet.isNotEmpty && !validarCarnet(carnet)) {
       _fijarError('carnet', 'Carnet inválido: 6 a 11 dígitos');
       return;
