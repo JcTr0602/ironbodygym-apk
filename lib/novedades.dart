@@ -16,6 +16,18 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.30.0', [
+    'Diseño renovado en toda la app: los encabezados de sección se ven iguales en todas las pantallas, las listas abren con su franja de resumen, las pantallas de carga muestran la forma real de lo que viene y el movimiento al pasar de una pantalla a otra es suave y uniforme',
+    '«Visto por» en los avisos al equipo: en el aviso ves quién lo vio y cuándo, para saber que llegó sin tener que preguntar (el servidor ya lo soporta, no hace falta tocar nada más)',
+    'Marcas verificadas: en la ficha de cada cliente ves las marcas que registra en su app y las verificas con un toque —queda registrado quién verificó y cuándo—; si el cliente edita una marca ya verificada, el aval se retira solo hasta que la vuelvan a verificar',
+    'Servicios Admin por grupos: precios y comisión se editan por producto, cada grupo se guarda por separado y la propia tarjeta te dice si quedó guardado o si tienes cambios sin guardar',
+    'Catálogo de suplementos más claro: la rejilla ya no recorta nombres ni precios aunque la letra del teléfono sea grande, el stock se lee en palabras («Agotado», «Quedan 3») y los productos sin foto enseñan una imagen genérica marcada como tal, nunca como si fuera la suya',
+    'Buscar y Vencimientos más ligeros: fuera la cabecera grande; arriba ves cuándo se actualizó la lista y el orden vive en un menú junto al buscador',
+    'Ayuda con buscador: escribe unas letras y el tema aparece al momento, con su texto abierto y sin tener que desplegar uno por uno',
+    'Incidencias con una sola tarjeta: las del equipo y las de sincronización se leen igual, con el motivo en lenguaje claro y las acciones siempre en el mismo sitio; y Control suma también los «Cambios por subir» y te lleva directo a la cola',
+    'Eliminar un suplemento lo elimina todo: también sus pomos y lotes abiertos con sus dosis, sin dejar restos por ningún lado; la puerta de «Anuncios» sale del Panel (en la app de Clientes se siguen viendo igual que antes)',
+    'Fotos a prueba de cortes: si Android cierra el selector de fotos a mitad de camino (al elegir foto de un suplemento, el comprobante de un pago, una imagen de GymPedia o un avatar), la app se recupera y avisa en vez de quedarse muda',
+  ]),
   Novedad('1.29.0', [
     'Inicio con cabecera principal renovada: el logo y el nombre del gym se presentan con más presencia, los botones de arriba son circulares y el de sincronizar muestra su estado en vivo (girando al sincronizar, con su punto de al día, pendientes o error)',
     'Editor de rutinas del gym nuevo: busca ejercicios por nombre, equipo o músculo y míralos con su foto; añade series con sus valores a la vista, reordena arrastrando, quita con Deshacer y sigue los totales de la rutina mientras la armas',
