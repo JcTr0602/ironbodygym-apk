@@ -585,33 +585,6 @@ class _SyncBannerState extends State<SyncBanner>
   }
 }
 
-class Campo extends StatelessWidget {
-  final TextEditingController ctrl;
-  final String etiqueta;
-  final TextInputType teclado;
-  final List<TextInputFormatter>? formato;
-  const Campo(
-      {super.key,
-      required this.ctrl,
-      required this.etiqueta,
-      this.teclado = TextInputType.text,
-      this.formato});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppEspacio.md),
-      child: TextField(
-        controller: ctrl,
-        keyboardType: teclado,
-        inputFormatters: formato,
-        decoration: InputDecoration(
-            labelText: etiqueta, border: const OutlineInputBorder()),
-      ),
-    );
-  }
-}
-
 Future<void> copiar(BuildContext context, String texto) async {
   await Clipboard.setData(ClipboardData(text: texto));
   if (context.mounted) {

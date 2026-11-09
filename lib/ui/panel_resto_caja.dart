@@ -1233,31 +1233,28 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
                 for (final k in kClavesPreciosC6)
                   Padding(
                     padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-                    child: TextField(
-                      controller: _ctrls[k],
+                    child: CampoMoneda(
+                      controller: _ctrls[k]!,
                       focusNode: _focos[k],
-                      keyboardType: TextInputType.number,
+                      etiqueta: _kEtiquetasPrecios[k],
+                      moneda: 'CUP',
                       onSubmitted: (_) => _autoguardar(k),
                       onChanged: (_) =>
                           setState(() => _okCampo.remove(k)),
-                      decoration: InputDecoration(
-                        labelText: _kEtiquetasPrecios[k],
-                        suffixText: 'CUP',
-                        suffixIcon: _guardandoCampo == k
-                            ? const Padding(
-                                padding: EdgeInsets.all(12),
-                                child: SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
-                                ),
-                              )
-                            : _okCampo.contains(k)
-                                ? const Icon(Icons.check_circle_rounded,
-                                    color: AppColores.exito, size: 20)
-                                : null,
-                      ),
+                      sufijo: _guardandoCampo == k
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2),
+                              ),
+                            )
+                          : _okCampo.contains(k)
+                              ? const Icon(Icons.check_circle_rounded,
+                                  color: AppColores.exito, size: 20)
+                              : null,
                     ),
                   ),
               ],

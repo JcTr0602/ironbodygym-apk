@@ -372,6 +372,18 @@ void main() {
       expect(tester.getSize(icono).width, greaterThanOrEqualTo(22));
 
       await tester.tap(find.text('Pedir relleno'));
+      // 1.30 (D3, UI130-15): pedir relleno ahora se confirma
+      // en una HojaAccion antes de enviarse (antes era acción
+      // directa). El contrato de la op encolada no cambia:
+      // un toque más en «Enviar pedido» y la op es la misma.
+      expect(await _esperarTexto(tester, 'Enviar pedido'),
+          isTrue,
+          reason: 'la hoja de confirmación se abre');
+      // La hoja entra animada desde abajo: hay que dejarla
+      // asentar antes de tocar (sin esto el toque cae en la
+      // posición de entrada, fuera de la pantalla).
+      await _ciclos(tester, 8);
+      await tester.tap(find.text('Enviar pedido'));
       expect(await _esperarTexto(tester, 'Ya pediste relleno'),
           isTrue);
       final ops = (await tester.runAsync(() async {

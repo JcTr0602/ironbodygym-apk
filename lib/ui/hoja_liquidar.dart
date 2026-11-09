@@ -14,12 +14,12 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../negocio.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'hoja_accion.dart';
 
 /// Lo que la hoja devuelve al liquidar con éxito: lo que
 /// Pendiente necesita para su actualización optimista, su
@@ -217,112 +217,91 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
         (double.tryParse(_entregadoCtrl.text.replaceAll(',', '.')) ??
                 _esperado) <
             _esperado - 0.01;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: AppEspacio.lg,
-        right: AppEspacio.lg,
-        top: AppEspacio.lg,
-        bottom: MediaQuery.of(context).viewInsets.bottom +
-            AppEspacio.lg,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.account_balance_wallet_rounded,
-                  color: AppColores.textoNaranja(context)),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: Text('Liquidar con arrastre · ${widget.nombre}',
-                    style: AppTexto.subtitulo),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          if (_cargando)
-            const Padding(
+    // 1.30 (D3, UI130-15): la hoja compone HojaAccion (asa,
+    // cabecera y pie fijo de la casa); la superficie y el
+    // radio los da el bottomSheetTheme. El monto pasa por
+    // CampoMoneda y la nota por CampoTexto; el parseo y las
+    // validaciones de _liquidar no cambian.
+    return HojaAccion(
+      titulo: 'Liquidar con arrastre · ${widget.nombre}',
+      icono: Icons.account_balance_wallet_rounded,
+      cuerpo: _cargando
+          ? const Padding(
               padding: EdgeInsets.all(AppEspacio.lg),
               child: Center(child: CircularProgressIndicator()),
             )
-          else ...[
-            if (_usd > 0)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'CUP', label: Text('CUP')),
-                    ButtonSegment(value: 'USD', label: Text('USD')),
-                  ],
-                  selected: {_moneda},
-                  onSelectionChanged: (s) {
-                    setState(() {
-                      _moneda = s.first;
-                      _entregadoCtrl.text = _esperado > 0
-                          ? _esperado.toStringAsFixed(
-                              _esperado == _esperado.roundToDouble()
-                                  ? 0
-                                  : 2)
-                          : '';
-                    });
-                  },
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_usd > 0)
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: AppEspacio.sm),
+                    child: SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                            value: 'CUP', label: Text('CUP')),
+                        ButtonSegment(
+                            value: 'USD', label: Text('USD')),
+                      ],
+                      selected: {_moneda},
+                      onSelectionChanged: (s) {
+                        setState(() {
+                          _moneda = s.first;
+                          _entregadoCtrl.text = _esperado > 0
+                              ? _esperado.toStringAsFixed(
+                                  _esperado ==
+                                          _esperado.roundToDouble()
+                                      ? 0
+                                      : 2)
+                              : '';
+                        });
+                      },
+                    ),
+                  ),
+                Text(
+                  'Pendiente confirmado: ${fmtMonto(_esperado)} $_moneda',
+                  style: AppTexto.cuerpo
+                      .copyWith(fontWeight: FontWeight.w600),
                 ),
-              ),
-            Text(
-              'Pendiente confirmado: ${fmtMonto(_esperado)} $_moneda',
-              style: AppTexto.cuerpo
-                  .copyWith(fontWeight: FontWeight.w600),
-            ),
-            Text(
-              'Calculado solo sobre datos confirmados por el '
-              'servidor, con adelantos y arrastres ya neteados '
-              '(la misma cifra del Arqueo).',
-              style: AppTexto.metadato.copyWith(
-                  color: AppColores.textoSecundario(context)),
-            ),
-            const SizedBox(height: AppEspacio.sm),
-            TextField(
-              controller: _entregadoCtrl,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                Text(
+                  'Calculado solo sobre datos confirmados por el '
+                  'servidor, con adelantos y arrastres ya neteados '
+                  '(la misma cifra del Arqueo).',
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
+                const SizedBox(height: AppEspacio.sm),
+                CampoMoneda(
+                  controller: _entregadoCtrl,
+                  etiqueta: 'Monto entregado ($_moneda)',
+                  moneda: _moneda,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: AppEspacio.sm),
+                CampoTexto(
+                  controller: _notaCtrl,
+                  etiqueta: 'Nota (opcional)',
+                ),
+                if (parcial) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    'Liquidación parcial: el resto queda como '
+                    'saldo de arrastre.',
+                    style: AppTexto.metadato
+                        .copyWith(color: AppColores.alerta),
+                  ),
+                ],
               ],
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: 'Monto entregado ($_moneda)',
-                border: const OutlineInputBorder(),
-                suffixText: _moneda,
-              ),
             ),
-            const SizedBox(height: AppEspacio.sm),
-            TextField(
-              controller: _notaCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Nota (opcional)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            if (parcial) ...[
-              const SizedBox(height: AppEspacio.sm),
-              Text(
-                'Liquidación parcial: el resto queda como '
-                'saldo de arrastre.',
-                style: AppTexto.metadato
-                    .copyWith(color: AppColores.alerta),
-              ),
-            ],
-            const SizedBox(height: AppEspacio.md),
-            BotonPrimario(
+      pie: _cargando
+          ? null
+          : BotonPrimario(
               texto: 'Liquidar',
               icono: Icons.point_of_sale_rounded,
               cargando: _liquidando,
               onPressed: _liquidando ? null : _liquidar,
             ),
-          ],
-        ],
-      ),
     );
   }
 }

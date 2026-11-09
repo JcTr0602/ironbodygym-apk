@@ -196,11 +196,17 @@ void main() {
         ];
         if (nombre == 'servicios') {
           // MEDIA-03: «Salida sin venta» (dosisCtrl, notaCtrl)
-          // y «Revertir venta» (motivoCtrl) quedan fuera de la
-          // clase B a propósito — D3 los hará HojaAccion.
-          expect(locales, ['dosisCtrl', 'notaCtrl', 'motivoCtrl'],
-              reason: 'servicios.dart solo conserva los 3 '
-                  'controllers de los diálogos excluidos');
+          // y «Revertir venta» (motivoCtrl) quedaron fuera de
+          // la clase B en la oleada 7 porque D3 los haría
+          // HojaAccion. CUMPLIDO en D3 (UI130-15): ambos son
+          // ya hojas StatefulWidget dueñas de sus controllers
+          // (_HojaSalidaSinVenta / _HojaRevertirVenta, campos
+          // de clase con dispose), así que servicios.dart ya
+          // no conserva NINGÚN controller local suelto.
+          expect(locales, isEmpty,
+              reason: 'servicios.dart sin controllers locales: '
+                  'los de salida y revertir viven en sus hojas '
+                  'dueñas desde D3');
         } else {
           expect(locales, isEmpty,
               reason: '$nombre.dart no debe crear controllers '

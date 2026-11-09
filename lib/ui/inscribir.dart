@@ -941,26 +941,25 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       ),
                       const SizedBox(
                           height: AppEspacio.md),
-                      CampoTexto(
+                      CampoTelefono(
                           controller: _telefono,
                           focusNode: _focoTelefono,
                           errorText: _errTelefono,
                           onChanged: (v) {
                             final t = v.trim();
-                            // 1.29 (FB-07): el aviso en vivo acepta
-                            // lo que el guardado sanitiza («+53 …»
-                            // pegado no se marca inválido: se
-                            // guardará como 8 dígitos limpios).
+                            // 1.29 (FB-07) + 1.30 (D3, UI130-14):
+                            // CampoTelefono limpia los dígitos al
+                            // teclear (el internacional pegado colapsa
+                            // a los 8 locales y el +53 es solo el
+                            // prefijo visual); el aviso en vivo sigue
+                            // aceptando lo que el guardado sanitiza.
                             setState(() => _errTelefono =
                                 (t.isEmpty || sanitizarTelefono(t) != null)
                                     ? null
                                     : 'Teléfono inválido: 8 dígitos empezando con 5 o 6');
                           },
-                          etiqueta:
-                              'Teléfono (8 dígitos)',
-                          icono: Icons.phone_rounded,
-                          teclado:
-                              TextInputType.phone),
+                          etiqueta: 'Teléfono (8 dígitos)',
+                          icono: Icons.phone_rounded),
                       const SizedBox(
                           height: AppEspacio.md),
                       CampoTexto(

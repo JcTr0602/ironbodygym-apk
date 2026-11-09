@@ -21,6 +21,7 @@ import 'componentes.dart';
 import 'iconos_propios.dart';
 import 'aviso_duplicado.dart';
 import 'diseno.dart';
+import 'hoja_accion.dart';
 import 'skeleton.dart';
 import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
@@ -40,6 +41,239 @@ final _reNoDigitosServicios = RegExp(r'[^0-9]');
 /// pomos/agua/precios (Administración) y ve las estadísticas. La
 /// lógica vive en lib/servicios.dart; aquí solo se presenta y se
 /// captura la intención.
+/// (1.30 D3, UI130-15) Hoja de «Salida sin venta»: HojaAccion
+/// con estado propio, dueña de sus controladores (dispose
+/// al cerrar). Devuelve (motivo, dosis, nota) ya validado;
+/// null si se cancela. Nace como hoja: era uno de los dos
+/// diálogos excluidos a propósito de la oleada 7.
+class _HojaSalidaSinVenta extends StatefulWidget {
+  final bool esDueno;
+  const _HojaSalidaSinVenta({required this.esDueno});
+
+  @override
+  State<_HojaSalidaSinVenta> createState() =>
+      _HojaSalidaSinVentaState();
+}
+
+class _HojaSalidaSinVentaState extends State<_HojaSalidaSinVenta> {
+  var _motivo = 'merma';
+  // 1.26 (BAJA): error de validación DENTRO de la hoja
+  // (antes «Registrar» cerraba y validaba después: lo
+  // tecleado se perdía con el aviso de error).
+  String? _errorDosis;
+  final _dosisCtrl = TextEditingController(text: '1');
+  final _notaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _dosisCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  void _registrar() {
+    // 1.26 (BAJA): validar sin cerrar la hoja.
+    final d = int.tryParse(_dosisCtrl.text.trim());
+    if (d == null || d <= 0) {
+      setState(() =>
+          _errorDosis = 'Escribe cuántas dosis salen (1 o más).');
+      return;
+    }
+    final nota = _notaCtrl.text.trim();
+    Navigator.pop(context, (
+      motivo: _motivo,
+      dosis: d,
+      nota: nota.isEmpty ? null : nota,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return HojaAccion(
+      titulo: 'Salida sin venta',
+      icono: Icons.outbox_rounded,
+      cuerpo: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButtonFormField<String>(
+            value: _motivo,
+            decoration: const InputDecoration(labelText: 'Motivo'),
+            items: [
+              const DropdownMenuItem(
+                  value: 'merma', child: Text('Merma / rotura')),
+              if (widget.esDueno) ...[
+                const DropdownMenuItem(
+                    value: 'cortesia',
+                    child: Text('Cortesía (solo dueño)')),
+                const DropdownMenuItem(
+                    value: 'consumo_staff',
+                    child: Text('Consumo del staff (solo dueño)')),
+                const DropdownMenuItem(
+                    value: 'ajuste',
+                    child: Text('Ajuste (solo dueño)')),
+              ],
+            ],
+            onChanged: (v) =>
+                setState(() => _motivo = v ?? 'merma'),
+          ),
+          const SizedBox(height: AppEspacio.md),
+          CampoCantidad(
+            controller: _dosisCtrl,
+            etiqueta: 'Dosis',
+            errorText: _errorDosis,
+            onChanged: (_) {
+              if (_errorDosis != null) {
+                setState(() => _errorDosis = null);
+              }
+            },
+          ),
+          const SizedBox(height: AppEspacio.md),
+          CampoTexto(
+            controller: _notaCtrl,
+            etiqueta: 'Nota (opcional)',
+          ),
+        ],
+      ),
+      pie: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: BotonPrimario(
+              texto: 'Registrar',
+              icono: Icons.check_rounded,
+              onPressed: _registrar,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// (1.30 D3, UI130-15) Hoja de «Revertir venta»: HojaAccion
+/// con estado propio, dueña de su controlador (dispose al
+/// cerrar). Devuelve (motivo, polvoPerdido) ya validado;
+/// null si se cancela. Los guardarraíles (pomo desactivado
+/// / lote cerrado) se comprueban ANTES, en _revertirInterno.
+/// Nace como hoja: era el otro diálogo excluido de la
+/// oleada 7.
+class _HojaRevertirVenta extends StatefulWidget {
+  final Map<String, dynamic> venta;
+  final bool esDueno;
+  const _HojaRevertirVenta(
+      {required this.venta, required this.esDueno});
+
+  @override
+  State<_HojaRevertirVenta> createState() =>
+      _HojaRevertirVentaState();
+}
+
+class _HojaRevertirVentaState extends State<_HojaRevertirVenta> {
+  final _motivoCtrl = TextEditingController();
+  var _polvoPerdido = false;
+  // 1.26 (BAJA): error de validación DENTRO de la hoja
+  // (antes «Revertir» cerraba y el motivo vacío se
+  // avisaba después, perdiendo lo tecleado).
+  String? _errorMotivo;
+
+  @override
+  void dispose() {
+    _motivoCtrl.dispose();
+    super.dispose();
+  }
+
+  void _revertir() {
+    // 1.26 (BAJA): validar sin cerrar la hoja.
+    if (_motivoCtrl.text.trim().isEmpty) {
+      setState(() =>
+          _errorMotivo = 'Escribe el motivo de la reversión');
+      return;
+    }
+    Navigator.pop(context, (
+      motivo: _motivoCtrl.text.trim(),
+      polvoPerdido: _polvoPerdido,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = widget.venta;
+    // Argón #9 (BAJO): la comisión de la hoja es la real
+    // de la fila (la configurable; puede ser 0 para el
+    // dueño, el agua suelta o la Casa), no un texto fijo.
+    final com = (v['comision_monto'] as num?)?.toDouble() ??
+        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
+            ((v['cantidad'] as num?)?.toInt() ?? 0);
+    return HojaAccion(
+      titulo: 'Revertir venta',
+      icono: Icons.undo_rounded,
+      cuerpo: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+              'Se registrará un reverso auditable de esta venta '
+              '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
+              'La dosis vuelve al pomo, el pomo al agua común'
+              '${com > 0 ? ' y se restan los ${fmtMonto(com)} CUP de comisión' : ''}.'),
+          const SizedBox(height: AppEspacio.md),
+          CampoTexto(
+            controller: _motivoCtrl,
+            etiqueta: 'Motivo (obligatorio)',
+            errorText: _errorMotivo,
+            onChanged: (_) {
+              if (_errorMotivo != null) {
+                setState(() => _errorMotivo = null);
+              }
+            },
+          ),
+          // 1.15 V5: «polvo perdido» solo lo marca el dueño
+          // (patrón AuthService().isOwner vía _esDueno). La
+          // regla del servidor no cambia: sin salida por merma
+          // autorizada, la dosis no vuelve al saldo con una
+          // reversión ordinaria. Ventas viejas sin pomo no lo
+          // ofrecen: su merma no se puede atribuir a un pomo.
+          if (mostrarCheckboxPolvoPerdido(widget.esDueno) &&
+              (v['pomo_id'] as num?) != null)
+            CheckboxListTile(
+              value: _polvoPerdido,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('El polvo se perdió físicamente'),
+              subtitle: const Text(
+                  'La reversión anula cobro y comisión y la '
+                  'pérdida queda como salida no vendida.'),
+              onChanged: (x) =>
+                  setState(() => _polvoPerdido = x ?? false),
+            ),
+        ],
+      ),
+      pie: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: BotonPrimario(
+              texto: 'Revertir',
+              icono: Icons.undo_rounded,
+              onPressed: _revertir,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ServiciosScreen extends StatefulWidget {
   /// Ítem 5 (post-1.8.0): el speed dial de Home abre la pantalla ya
   /// posicionada en un tipo de venta ('dosis_sin_agua' |
@@ -1374,99 +1608,25 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (!AuthService().isOwner) return;
     final pomo = await _pomoParaVender();
     if (pomo == null) return;
-    var motivo = 'merma';
-    // 1.26 (BAJA): error de validación DENTRO del diálogo
-    // (antes «Registrar» cerraba y validaba después: lo
-    // tecleado se perdía con el aviso de error).
-    String? errorDosis;
-    final dosisCtrl = TextEditingController(text: '1');
-    final notaCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    if (!mounted) return;
+    // 1.30 (D3, UI130-15): «Salida sin venta» nace como
+    // HojaAccion (era un diálogo de la clase B excluida a
+    // propósito de la oleada 7). La hoja es dueña de sus
+    // controladores y devuelve lo tecleado ya validado;
+    // el registro y sus reglas no cambian.
+    final res = await showModalBottomSheet<
+        ({String motivo, int dosis, String? nota})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => DialogoApp(
-          titulo: 'Salida sin venta',
-          iconoTitulo: Icons.outbox_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                value: motivo,
-                decoration:
-                    const InputDecoration(labelText: 'Motivo'),
-                items: [
-                  const DropdownMenuItem(
-                      value: 'merma', child: Text('Merma / rotura')),
-                  if (_esDueno) ...[
-                    const DropdownMenuItem(
-                        value: 'cortesia',
-                        child: Text('Cortesía (solo dueño)')),
-                    const DropdownMenuItem(
-                        value: 'consumo_staff',
-                        child: Text('Consumo del staff (solo dueño)')),
-                    const DropdownMenuItem(
-                        value: 'ajuste',
-                        child: Text('Ajuste (solo dueño)')),
-                  ],
-                ],
-                onChanged: (v) => setD(() => motivo = v ?? 'merma'),
-              ),
-              TextField(
-                controller: dosisCtrl,
-                keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: 'Dosis'),
-                onChanged: (_) {
-                  if (errorDosis != null) {
-                    setD(() => errorDosis = null);
-                  }
-                },
-              ),
-              if (errorDosis != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(errorDosis!,
-                      style: AppTexto.secundario
-                          .copyWith(color: AppColores.error)),
-                ),
-              TextField(
-                controller: notaCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nota (opcional)'),
-              ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                // 1.26 (BAJA): validar sin cerrar el diálogo.
-                final d = int.tryParse(dosisCtrl.text.trim());
-                if (d == null || d <= 0) {
-                  setD(() => errorDosis =
-                      'Escribe cuántas dosis salen (1 o más).');
-                  return;
-                }
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Registrar'),
-            ),
-          ],
-        ),
-      ),
+      isScrollControlled: true,
+      builder: (ctx) => _HojaSalidaSinVenta(esDueno: _esDueno),
     );
-    if (ok != true) return;
+    if (res == null) return;
     try {
       await registrarSalidaServicio(
         pomoId: (pomo['id'] as num).toInt(),
-        dosis: int.tryParse(dosisCtrl.text.trim()) ?? 0,
-        motivo: motivo,
-        nota: notaCtrl.text.trim().isEmpty
-            ? null
-            : notaCtrl.text.trim(),
+        dosis: res.dosis,
+        motivo: res.motivo,
+        nota: res.nota,
       );
       _aviso('Salida registrada');
       await _cargar();
@@ -1519,104 +1679,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         }
       }
     }
-    final motivoCtrl = TextEditingController();
-    var polvoPerdido = false;
-    // 1.26 (BAJA): error de validación DENTRO del diálogo
-    // (antes «Revertir» cerraba y el motivo vacío se
-    // avisaba después, perdiendo lo tecleado).
-    String? errorMotivo;
-    // Argón #9 (BAJO): la comisión del diálogo era un texto fijo
-    // («50 CUP») aunque la comisión es configurable y puede ser 0
-    // (dueño, agua suelta, Casa). Se usa la real de la fila.
-    final com = (v['comision_monto'] as num?)?.toDouble() ??
-        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
-            ((v['cantidad'] as num?)?.toInt() ?? 0);
-    final ok = await showDialog<bool>(
+    if (!mounted) return;
+    // 1.30 (D3, UI130-15): «Revertir venta» nace como
+    // HojaAccion (era el otro diálogo de la clase B excluida
+    // de la oleada 7). La hoja es dueña de su controlador y
+    // devuelve el motivo ya validado; el reverso y sus
+    // reglas no cambian.
+    final res = await showModalBottomSheet<
+        ({String motivo, bool polvoPerdido})>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => DialogoApp(
-          titulo: 'Revertir venta',
-          iconoTitulo: Icons.undo_rounded,
-          contenido: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                  'Se registrará un reverso auditable de esta venta '
-                  '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
-                  'La dosis vuelve al pomo, el pomo al agua común'
-                  '${com > 0 ? ' y se restan los ${fmtMonto(com)} CUP de comisión' : ''}.'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: motivoCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Motivo (obligatorio)'),
-                onChanged: (_) {
-                  if (errorMotivo != null) {
-                    setD(() => errorMotivo = null);
-                  }
-                },
-              ),
-              if (errorMotivo != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(errorMotivo!,
-                      style: AppTexto.secundario
-                          .copyWith(color: AppColores.error)),
-                ),
-              // 1.15 V5: «polvo perdido» solo lo marca el dueño
-              // (patrón AuthService().isOwner vía _esDueno). La
-              // regla del servidor no cambia: sin salida por merma
-              // autorizada, la dosis no vuelve al saldo con una
-              // reversión ordinaria. Ventas viejas sin pomo no lo
-              // ofrecen: su merma no se puede atribuir a un pomo.
-              if (mostrarCheckboxPolvoPerdido(_esDueno) &&
-                  (v['pomo_id'] as num?) != null)
-                CheckboxListTile(
-                  value: polvoPerdido,
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(
-                      'El polvo se perdió físicamente'),
-                  subtitle: const Text(
-                      'La reversión anula cobro y comisión y la '
-                      'pérdida queda como salida no vendida.'),
-                  onChanged: (x) =>
-                      setD(() => polvoPerdido = x ?? false),
-                ),
-            ],
-          ),
-          acciones: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                // 1.26 (BAJA): validar sin cerrar el diálogo.
-                if (motivoCtrl.text.trim().isEmpty) {
-                  setD(() => errorMotivo =
-                      'Escribe el motivo de la reversión');
-                  return;
-                }
-                Navigator.pop(ctx, true);
-              },
-              child: const Text('Revertir'),
-            ),
-          ],
-        ),
-      ),
+      isScrollControlled: true,
+      builder: (ctx) => _HojaRevertirVenta(venta: v, esDueno: _esDueno),
     );
-    if (ok != true) return;
-    final motivo = motivoCtrl.text.trim();
-    if (motivo.isEmpty) {
-      _aviso('Escribe el motivo de la reversión', error: true);
-      return;
-    }
+    if (res == null) return;
     try {
       await revertirVentaServicio(
         ventaId: (v['id'] as num).toInt(),
-        motivo: motivo,
-        polvoPerdido: polvoPerdido,
+        motivo: res.motivo,
+        polvoPerdido: res.polvoPerdido,
         pomoId: pomoId,
         cantidad: (v['cantidad'] as num?)?.toInt(),
       );
@@ -2077,6 +2157,51 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final supId = (pomo['suplemento_id'] as num?)?.toInt();
     final saldo = (pomo['saldo_local'] as num?)?.toInt();
     if (supId == null || saldo == null) return;
+    // 1.30 (D3, UI130-15): pedir relleno pasa a confirmarse
+    // en una HojaAccion (antes era acción directa al toque).
+    // El saldo solo se enseña si es una cifra real: con el
+    // centinela del pomo ciego (999999) la hoja no muestra
+    // número alguno (la regla del pomo ciego no cambia).
+    final confirma = await showHojaIron<bool>(
+      context,
+      titulo: 'Pedir relleno',
+      icono: Icons.inventory_2_rounded,
+      cuerpo: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+              'Se avisará al dueño de que este pomo necesita '
+              'relleno. Él prepara las dosis y te las entrega.'),
+          if (saldo < 900000) ...[
+            const SizedBox(height: AppEspacio.sm),
+            Text('Saldo actual del pomo: $saldo dosis.',
+                style: AppTexto.cuerpo
+                    .copyWith(fontWeight: FontWeight.w600)),
+          ],
+        ],
+      ),
+      pie: Builder(
+        builder: (ctxHoja) => Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(ctxHoja, false),
+                child: const Text('Cancelar'),
+              ),
+            ),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(
+              child: BotonPrimario(
+                texto: 'Enviar pedido',
+                icono: Icons.send_rounded,
+                onPressed: () => Navigator.pop(ctxHoja, true),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirma != true || !mounted) return;
     setState(() => _pidiendoRelleno = true);
     try {
       await SolicitudesRellenoService.instance

@@ -20,6 +20,7 @@ import 'app_bar.dart';
 import 'arqueo.dart';
 import 'diseno.dart';
 import 'componentes.dart';
+import 'hoja_accion.dart';
 import 'buscar.dart';
 import 'conciliacion.dart';
 import 'skeleton.dart';
@@ -1304,34 +1305,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final n = r.movimientos;
     final total = r.total;
     if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(fmtFecha(fechaIso), style: AppTexto.titulo),
-            const SizedBox(height: 12),
-            _filaDetalle('Efectivo', efectivo),
-            _filaDetalle('Transferencia', transferencia),
-            _filaDetalle('Pago diario', diario),
-            if (suplementos > 0)
-              _filaDetalle('Suplementos', suplementos),
-            if (servicios > 0) _filaDetalle('Servicios', servicios),
-            const Divider(),
-            _filaDetalle('Total', total, negrita: true),
-            const SizedBox(height: 8),
-            Text('$n movimientos registrados',
-                style: AppTexto.secundario.copyWith(
-                    color: AppColores.textoSecundario(ctx))),
-            const SizedBox(height: 16),
-          ],
-        ),
+    // 1.30 (D3, UI130-15): superficie única HojaAccion
+    // (showHojaIron); el radio y el fondo los da el tema.
+    showHojaIron(
+      context,
+      titulo: fmtFecha(fechaIso),
+      icono: Icons.calendar_today_rounded,
+      cuerpo: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _filaDetalle('Efectivo', efectivo),
+          _filaDetalle('Transferencia', transferencia),
+          _filaDetalle('Pago diario', diario),
+          if (suplementos > 0)
+            _filaDetalle('Suplementos', suplementos),
+          if (servicios > 0) _filaDetalle('Servicios', servicios),
+          const Divider(),
+          _filaDetalle('Total', total, negrita: true),
+          const SizedBox(height: 8),
+          Text('$n movimientos registrados',
+              style: AppTexto.secundario.copyWith(
+                  color: AppColores.textoSecundario(context))),
+        ],
       ),
     );
   }

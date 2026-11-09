@@ -771,6 +771,18 @@ class AppTema {
         ),
       ),
       dividerTheme: DividerThemeData(color: borde, thickness: 1, space: 1),
+      // 1.30 D3 (UI130-15): superficie ÚNICA de las hojas:
+      // fondo del tema, radio superior xl y SIN asa del
+      // framework (la pinta HojaAccion, con su geometría).
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: superficie,
+        modalBackgroundColor: superficie,
+        shape: const RoundedRectangleBorder(
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+        ),
+        showDragHandle: false,
+      ),
       dialogTheme: DialogThemeData(
         backgroundColor: superficie,
         shape: RoundedRectangleBorder(

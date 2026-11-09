@@ -9,6 +9,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../tiempo.dart';
 
 import 'diseno.dart';
 
@@ -1058,6 +1061,534 @@ class EstadoCargando extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 // Campo de texto
+// ---------------------------------------------------------------------------
+// Kit de formularios (1.30 D3, UI130-14)
+// ---------------------------------------------------------------------------
+
+/// Decoración ÚNICA de los campos del kit: la misma piel de
+/// [CampoTexto] para que ningún campo nuevo invente la suya.
+InputDecoration _decoracionCampo(
+  BuildContext context, {
+  String? etiqueta,
+  String? hint,
+  String? errorText,
+  IconData? icono,
+  String? prefixText,
+  String? suffixText,
+  Widget? suffixIcon,
+}) {
+  return InputDecoration(
+    labelText: etiqueta,
+    hintText: hint,
+    errorText: errorText,
+    prefixIcon: icono != null ? Icon(icono) : null,
+    prefixText: prefixText,
+    suffixText: suffixText,
+    suffixIcon: suffixIcon,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      borderSide: BorderSide(color: AppColores.borde(context)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      borderSide:
+          const BorderSide(color: AppColores.naranja, width: 2),
+    ),
+    filled: true,
+    fillColor: AppColores.superficie(context),
+    contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppEspacio.lg, vertical: AppEspacio.md),
+  );
+}
+
+/// PURO (1.30 D3): parseo de un campo de moneda de la casa.
+/// Acepta '.' y ',' como separador decimal (el teclado
+/// cubano teclea la coma; [HojaLiquidar] ya parseaba así).
+/// null si no es un número finito.
+double? parseMoneda(String texto) {
+  final t = texto.trim().replaceAll(',', '.');
+  if (t.isEmpty) return null;
+  final v = double.tryParse(t);
+  if (v == null || !v.isFinite) return null;
+  return v;
+}
+
+/// Formateador de moneda: solo dígitos con UN separador
+/// decimal ('.' o ',') y hasta 2 decimales. No agrupa
+/// miles: el texto del controlador sigue siendo parseable
+/// por los parseos vigentes de cada pantalla (la validación
+/// de negocio NO cambia; esto es solo formato de tecleo).
+class FormateadorMoneda extends TextInputFormatter {
+  const FormateadorMoneda();
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final texto = newValue.text;
+    if (texto.isEmpty) return newValue;
+    if (!RegExp(r'^[0-9.,]+$').hasMatch(texto)) return oldValue;
+    final sep = texto.indexOf(RegExp(r'[.,]'));
+    if (sep >= 0) {
+      final resto = texto.substring(sep + 1);
+      if (resto.contains(RegExp(r'[.,]'))) return oldValue;
+      if (resto.length > 2) return oldValue;
+    }
+    return newValue;
+  }
+}
+
+/// Campo de dinero del sistema: sufijo de moneda (CUP/USD),
+/// formato de tecleo de [FormateadorMoneda] y selección
+/// total al enfocar (sobreescribir el monto sin borrar).
+class CampoMoneda extends StatefulWidget {
+  final TextEditingController controller;
+  final String? etiqueta;
+  final String moneda;
+  final IconData? icono;
+  final FocusNode? focusNode;
+  final void Function(String)? onChanged;
+  final void Function(String)? onSubmitted;
+  final String? errorText;
+
+  /// Icono de estado a la derecha (p. ej. el ✓ de guardado
+  /// del Centro de Precios), tras el sufijo de moneda.
+  final Widget? sufijo;
+
+  const CampoMoneda({
+    super.key,
+    required this.controller,
+    this.etiqueta,
+    this.moneda = 'CUP',
+    this.icono,
+    this.focusNode,
+    this.onChanged,
+    this.onSubmitted,
+    this.errorText,
+    this.sufijo,
+  });
+
+  @override
+  State<CampoMoneda> createState() => _CampoMonedaState();
+}
+
+class _CampoMonedaState extends State<CampoMoneda> {
+  late final FocusNode _foco;
+  late final bool _focoPropio;
+
+  @override
+  void initState() {
+    super.initState();
+    _focoPropio = widget.focusNode == null;
+    _foco = widget.focusNode ?? FocusNode();
+    _foco.addListener(_alCambiarFoco);
+  }
+
+  void _alCambiarFoco() {
+    if (!_foco.hasFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_foco.hasFocus) return;
+      widget.controller.selection = TextSelection(
+          baseOffset: 0, extentOffset: widget.controller.text.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _foco.removeListener(_alCambiarFoco);
+    if (_focoPropio) _foco.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: widget.controller,
+      focusNode: _foco,
+      keyboardType:
+          const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: const [FormateadorMoneda()],
+      onChanged: widget.onChanged,
+      onFieldSubmitted: widget.onSubmitted,
+      style: AppTexto.cuerpo,
+      decoration: _decoracionCampo(context,
+        etiqueta: widget.etiqueta,
+        errorText: widget.errorText,
+        icono: widget.icono,
+        suffixText: widget.moneda,
+        suffixIcon: widget.sufijo,
+      ),
+    );
+  }
+}
+
+/// PURO (1.30 D3): limpieza de dígitos de teléfono al
+/// teclear, espejo de la limpieza de `sanitizarTelefono`
+/// (negocio.dart) SIN su validación: quita lo que no sea
+/// dígito; el internacional pegado (10 dígitos empezando
+/// en 53) colapsa a los 8 locales; un número local no
+/// admite más de 8. El controlador NUNCA guarda el prefijo:
+/// el dato guardado son los 8 dígitos limpios y el +53 es
+/// solo el prefijo visual del campo.
+String limpiarDigitosTelefono(String crudo) {
+  var d = crudo.replaceAll(RegExp(r'[^0-9]'), '');
+  if (d.length > 8) {
+    if (d.startsWith('53')) {
+      if (d.length > 10) d = d.substring(0, 10);
+      if (d.length == 10) d = d.substring(2);
+    } else {
+      d = d.substring(0, 8);
+    }
+  }
+  return d;
+}
+
+/// Formateador de teléfono: aplica [limpiarDigitosTelefono]
+/// a cada tecleo o pegado.
+class FormateadorTelefono extends TextInputFormatter {
+  const FormateadorTelefono();
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final limpio = limpiarDigitosTelefono(newValue.text);
+    if (limpio == newValue.text) return newValue;
+    return TextEditingValue(
+      text: limpio,
+      selection: TextSelection.collapsed(offset: limpio.length),
+    );
+  }
+}
+
+/// Campo de teléfono del sistema: prefijo visual «+53»
+/// (nunca entra al controlador) y limpieza de dígitos al
+/// teclear con [FormateadorTelefono].
+class CampoTelefono extends StatelessWidget {
+  final TextEditingController controller;
+  final String? etiqueta;
+  final IconData? icono;
+  final FocusNode? focusNode;
+  final void Function(String)? onChanged;
+  final String? errorText;
+
+  const CampoTelefono({
+    super.key,
+    required this.controller,
+    this.etiqueta,
+    this.icono,
+    this.focusNode,
+    this.onChanged,
+    this.errorText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      focusNode: focusNode,
+      keyboardType: TextInputType.phone,
+      inputFormatters: const [FormateadorTelefono()],
+      onChanged: onChanged,
+      style: AppTexto.cuerpo,
+      decoration: _decoracionCampo(context,
+        etiqueta: etiqueta,
+        hint: '58123456',
+        errorText: errorText,
+        icono: icono,
+        prefixText: '+53 ',
+      ),
+    );
+  }
+}
+
+/// Campo de cantidad entera: solo dígitos y, si [paso] no
+/// es nulo, botones −/+ que suman ese paso sin bajar de
+/// [minimo] ni pasar de [maximo].
+class CampoCantidad extends StatelessWidget {
+  final TextEditingController controller;
+  final String? etiqueta;
+  final IconData? icono;
+  final int? paso;
+  final int minimo;
+  final int? maximo;
+  final void Function(String)? onChanged;
+  final String? errorText;
+
+  const CampoCantidad({
+    super.key,
+    required this.controller,
+    this.etiqueta,
+    this.icono,
+    this.paso,
+    this.minimo = 0,
+    this.maximo,
+    this.onChanged,
+    this.errorText,
+  });
+
+  void _sumar(int delta) {
+    final actual = int.tryParse(controller.text.trim()) ?? minimo;
+    var nuevo = actual + delta;
+    if (nuevo < minimo) nuevo = minimo;
+    final max = maximo;
+    if (max != null && nuevo > max) nuevo = max;
+    controller.text = '$nuevo';
+    onChanged?.call('$nuevo');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      onChanged: onChanged,
+      style: AppTexto.cuerpo,
+      decoration: _decoracionCampo(context,
+        etiqueta: etiqueta,
+        errorText: errorText,
+        icono: icono,
+        suffixIcon: paso == null
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove_rounded),
+                    tooltip: 'Menos',
+                    onPressed: () => _sumar(-paso!),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_rounded),
+                    tooltip: 'Más',
+                    onPressed: () => _sumar(paso!),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Campo de fecha del sistema: solo lectura (tocar abre el
+/// selector del sistema), texto en el formato de la casa
+/// dd/mm/aaaa (el de `fmtFecha`) y botón de limpiar cuando
+/// hay valor y [limpiable] es true. El controlador es
+/// propio y se libera en dispose (regla de la casa).
+class CampoFecha extends StatefulWidget {
+  final DateTime? valor;
+  final ValueChanged<DateTime?> onCambio;
+  final String? etiqueta;
+  final bool limpiable;
+  final DateTime? primera;
+  final DateTime? ultima;
+  final IconData? icono;
+
+  const CampoFecha({
+    super.key,
+    required this.valor,
+    required this.onCambio,
+    this.etiqueta,
+    this.limpiable = true,
+    this.primera,
+    this.ultima,
+    this.icono,
+  });
+
+  @override
+  State<CampoFecha> createState() => _CampoFechaState();
+}
+
+class _CampoFechaState extends State<CampoFecha> {
+  final _ctrl = TextEditingController();
+
+  static String _fmt(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  @override
+  void initState() {
+    super.initState();
+    _sincronizar();
+  }
+
+  @override
+  void didUpdateWidget(CampoFecha oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.valor != widget.valor) _sincronizar();
+  }
+
+  void _sincronizar() {
+    _ctrl.text = widget.valor == null ? '' : _fmt(widget.valor!);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _elegir() async {
+    final f = await showDatePicker(
+      context: context,
+      initialDate: widget.valor ?? ahoraHabana(),
+      firstDate: widget.primera ?? DateTime(1930),
+      lastDate: widget.ultima ?? DateTime(2100),
+    );
+    if (f != null) widget.onCambio(f);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: _ctrl,
+      readOnly: true,
+      onTap: _elegir,
+      style: AppTexto.cuerpo,
+      decoration: _decoracionCampo(context,
+        etiqueta: widget.etiqueta,
+        hint: 'dd/mm/aaaa',
+        icono: widget.icono,
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.limpiable && widget.valor != null)
+              IconButton(
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Limpiar fecha',
+                onPressed: () => widget.onCambio(null),
+              ),
+            IconButton(
+              icon: const Icon(Icons.calendar_month_rounded),
+              tooltip: 'Elegir fecha',
+              onPressed: _elegir,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Sección de un [FormularioIron]: encabezado con icono y
+/// título y sus campos separados por el espacio del sistema.
+class SeccionFormulario extends StatelessWidget {
+  final String titulo;
+  final IconData? icono;
+  final List<Widget> campos;
+
+  const SeccionFormulario({
+    super.key,
+    required this.titulo,
+    this.icono,
+    required this.campos,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (icono != null) ...[
+              Icon(icono,
+                  size: 18, color: AppColores.textoNaranja(context)),
+              const SizedBox(width: AppEspacio.xs),
+            ],
+            Text(titulo,
+                style: AppTexto.etiqueta
+                    .copyWith(fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: AppEspacio.md),
+        for (var i = 0; i < campos.length; i++) ...[
+          if (i > 0) const SizedBox(height: AppEspacio.md),
+          campos[i],
+        ],
+      ],
+    );
+  }
+}
+
+/// Andamio de formulario de pantalla completa (patrón de
+/// Inscribir): secciones desplazables y, fijos abajo, el
+/// resumen de errores EN LÍNEA (nunca un SnackBar tras el
+/// velo), un resumen opcional y la CTA — segura con el
+/// teclado abierto porque el cuerpo sigue desplazable y la
+/// barra sube con SafeArea.
+class FormularioIron extends StatelessWidget {
+  final List<Widget> secciones;
+  final List<String> errores;
+  final String textoCta;
+  final VoidCallback? onCta;
+  final bool cargandoCta;
+  final IconData? iconoCta;
+  final Widget? resumen;
+
+  const FormularioIron({
+    super.key,
+    required this.secciones,
+    this.errores = const [],
+    required this.textoCta,
+    required this.onCta,
+    this.cargandoCta = false,
+    this.iconoCta,
+    this.resumen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppEspacio.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < secciones.length; i++) ...[
+                  if (i > 0) const SizedBox(height: AppEspacio.lg),
+                  secciones[i],
+                ],
+              ],
+            ),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final e in errores) ...[
+                  ErrorInline(e),
+                  const SizedBox(height: AppEspacio.xs),
+                ],
+                if (resumen != null) ...[
+                  resumen!,
+                  const SizedBox(height: AppEspacio.sm),
+                ],
+                BotonPrimario(
+                  texto: textoCta,
+                  icono: iconoCta,
+                  cargando: cargandoCta,
+                  onPressed: onCta,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 /// Campo de texto con el estilo del sistema.

@@ -7,6 +7,7 @@ import '../../sync.dart';
 import '../app_bar.dart';
 import '../diseno.dart';
 import '../componentes.dart';
+import '../hoja_accion.dart';
 import 'widgets/tarjeta_incidencia.dart';
 import 'detalle_incidencia.dart';
 import 'tipos_incidencia.dart';
@@ -386,19 +387,19 @@ class _ListaIncidenciasScreenState
 
   void _mostrarFiltros() {
     // Argón A4: filtros por tipo, prioridad y "solo mías".
+    // 1.30 (D3, UI130-15): la hoja pasa a la superficie
+    // única HojaAccion; controles y estado no cambian.
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setB) => Padding(
-          padding: const EdgeInsets.all(AppEspacio.lg),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+        builder: (ctx, setB) => HojaAccion(
+          titulo: 'Filtros',
+          icono: Icons.filter_list_rounded,
+          cuerpo: Column(
             crossAxisAlignment:
                 CrossAxisAlignment.start,
             children: [
-              const Text('Filtros',
-                  style: AppTexto.titulo),
-              const SizedBox(height: 12),
               const Text('Tipo:'),
               DropdownButton<String?>(
                 value: _filtroTipoId,
@@ -458,8 +459,9 @@ class _ListaIncidenciasScreenState
                 onChanged: (v) =>
                     setB(() => _soloMias = v),
               ),
-              const SizedBox(height: 8),
-              Row(
+            ],
+          ),
+          pie: Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
@@ -488,8 +490,6 @@ class _ListaIncidenciasScreenState
                   ),
                 ],
               ),
-            ],
-          ),
         ),
       ),
     );
