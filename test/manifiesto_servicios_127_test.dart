@@ -74,8 +74,10 @@ void main() {
       // en el pull y en el manifiesto (fijada en m1bc).
       // 1.30 (D2, GEN-10): +1 — sync_avisos_vistos entra en el
       // pull y en el manifiesto (fijada en manifiesto_130).
+      // Congelación 0.5: +1 — sync_cliente_congelaciones entra
+      // en el pull y en el manifiesto (fijada en m1bc).
       expect(SyncEngine.tablasManifiesto.length,
-          historicas.length + esperadasServicios.length + 27);
+          historicas.length + esperadasServicios.length + 28);
     });
 
     test(

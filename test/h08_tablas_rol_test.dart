@@ -1,11 +1,13 @@
 /// Tests de H-08 (1.23, espejo por rol) — parte pura:
-/// - tablas activas por rol: 40 admin / 30 entrenador (las 10
+/// - tablas activas por rol: 42 admin / 30 entrenador (las 12
 ///   del Grupo 1 resuelto fuera; nomina_bonos NO es Grupo 1).
 ///   Eran 39/28 hasta la 1.28; la 1.29 (Oleada 4, FB-09) suma
 ///   solicitudes_relleno, que baja a AMBOS roles; y el ajuste
 ///   H-02 de Argón al código de la 1.29 saca 'gastos' del
 ///   Grupo 1: desde D-A1 su corte es por fila (Grupo 2), así
-///   que el entrenador pasa de 29 a 30 tablas.
+///   que el entrenador pasa de 29 a 30 tablas. La Congelación
+///   0.5 suma cliente_congelaciones SOLO al dueño (Grupo 1):
+///   el dueño pasa de 41 a 42 y el entrenador se queda en 30.
 /// - D-01 (cierre 1.23): servicio_pomos NO es Grupo 1 — la
 ///   fila del pomo es operativa para vender dosis; el conteo
 ///   se oculta vía servicio_lotes, que sí sigue prohibida.
@@ -20,14 +22,18 @@ import 'package:ironbody_gym/sync.dart';
 
 void main() {
   group('H-08: tablas activas por rol', () {
-    test('admin/dueño: las 41 (40 + avisos_vistos)', () {
+    test('admin/dueño: las 42 (41 + cliente_congelaciones)', () {
       // 1.30 (D2, GEN-10): el pull suma el espejo solo-dueño
       // avisos_vistos (40 → 41 tablas activas para el dueño).
+      // Congelación 0.5: el pull suma el espejo solo-dueño
+      // cliente_congelaciones (41 → 42); los motivos pueden
+      // traer datos de salud y NO bajan al staff.
       final t = SyncEngine.tablasEspejoActivasParaRol(true);
-      expect(t.length, 41);
+      expect(t.length, 42);
       expect(t, SyncEngine.tablasEspejo);
       expect(t, contains('solicitudes_relleno'));
       expect(t, contains('avisos_vistos'));
+      expect(t, contains('cliente_congelaciones'));
     });
 
     test('el Grupo 1 resuelto es exactamente el de la decisión', () {
@@ -45,11 +51,15 @@ void main() {
         // 1.30 (D2, GEN-10): los vistos de avisos son
         // solo-dueño por decisión de la oleada.
         'avisos_vistos',
+        // Congelación 0.5: las congelaciones (con su motivo)
+        // son solo-dueño; el staff solo ve la ventana vigente
+        // por la RPC congelacion_vigente_staff, sin motivo.
+        'cliente_congelaciones',
       });
-      expect(LocalDb.tablasProhibidasEntrenador.length, 11);
+      expect(LocalDb.tablasProhibidasEntrenador.length, 12);
     });
 
-    test('entrenador: 41 − 11 = 30, sin ninguna del Grupo 1', () {
+    test('entrenador: 42 − 12 = 30, sin ninguna del Grupo 1', () {
       final t = SyncEngine.tablasEspejoActivasParaRol(false);
       expect(t.length, 30);
       // FB-09: sus propias solicitudes SÍ le bajan.
@@ -117,9 +127,11 @@ void main() {
         expect(LocalDb.tablasProhibidasEntrenador.contains(t), isFalse,
             reason: t);
       }
-      // 10 de las 11 del Grupo 1 están en tablasConWatermark
+      // 10 de las 12 del Grupo 1 están en tablasConWatermark
       // (GEN-10 suma avisos_vistos, que sí lleva watermark);
-      // espejo_gympedia_borradores está exenta de antemano.
+      // espejo_gympedia_borradores está exenta de antemano y
+      // cliente_congelaciones también (secuencia propia: no
+      // entra en tablasConWatermark).
       // (Hasta el ajuste H-02 eran 10 de 11: 'gastos' salió
       // del Grupo 1 y su watermark ya cuenta para el
       // entrenador, como el de nomina_bonos.)

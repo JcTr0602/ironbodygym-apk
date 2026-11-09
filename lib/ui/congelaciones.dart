@@ -24,6 +24,7 @@ import '../app_log.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 
 String _fmtF(DateTime? d) {
   if (d == null) return '—';
@@ -370,9 +371,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
 
   Widget _tituloSeccion(String texto) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
-        child: Text(texto,
-            style: const TextStyle(
-                fontSize: 15, fontWeight: FontWeight.bold)),
+        child: Text(texto, style: AppTexto.subtitulo),
       );
 }
 
@@ -416,8 +415,7 @@ class _TarjetaCongelacion extends StatelessWidget {
                 Expanded(
                   child: Text(
                     c.clienteNombre ?? 'Cliente ${c.clienteId}',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold),
+                    style: AppTexto.titulo,
                   ),
                 ),
                 if (dias != null)
@@ -447,7 +445,7 @@ class _TarjetaCongelacion extends StatelessWidget {
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadio.sm),
                 border: Border.all(color: Colors.amber.shade200),
               ),
               child: Column(

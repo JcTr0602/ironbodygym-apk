@@ -45,18 +45,23 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   group('B1 · manifiesto completo', () {
-    test('son 42 entradas: las 41 del pull + incidencias_mirror', () {
+    test('son 43 entradas: las 42 del pull + incidencias_mirror', () {
       // 1.29 (Oleada 4, FB-09): el pull suma solicitudes_relleno
       // (39 → 40) y el manifiesto la vigila como a las demás.
       // 1.30 (D2, GEN-10): el pull suma avisos_vistos (40 → 41)
       // y el manifiesto la vigila igual (solo-dueño en la RPC).
-      expect(SyncEngine.tablasManifiesto.length, 42);
+      // Congelación 0.5: el pull suma cliente_congelaciones
+      // (41 → 42) y el manifiesto la vigila igual (solo-dueño
+      // en la RPC, con secuencia propia).
+      expect(SyncEngine.tablasManifiesto.length, 43);
       expect(SyncEngine.tablasManifiesto['sync_incidencias'],
           'incidencias_mirror');
       expect(SyncEngine.tablasManifiesto['sync_solicitudes_relleno'],
           'solicitudes_relleno');
       expect(SyncEngine.tablasManifiesto['sync_avisos_vistos'],
           'avisos_vistos');
+      expect(SyncEngine.tablasManifiesto['sync_cliente_congelaciones'],
+          'cliente_congelaciones');
     });
 
     test('toda tabla que baja el pull está vigilada', () {
