@@ -700,21 +700,17 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       // v1.3.1 (Argón pull): desglose por tabla — watermark, filas
       // locales y estado. Es lo que permite identificar qué tabla deja
       // el mínimo en 0.
-      const tablasDiag = [
-        'clientes',
-        'pagos',
-        'pagos_diarios',
-        'gastos',
-        'suplementos',
-        'ventas_suplementos',
-        'categorias_suplemento',
-        'turnos_cierre',
+      // Yunque B (YB-SYNC-07): la lista se CONSTRUYE desde las
+      // listas canónicas del motor (espejos + incidencias +
+      // borrados), no a mano: la lista fija de 14 se quedó atrás
+      // dos veces y dejaba fuera justo las tablas nuevas
+      // (servicio_*, reservas, congelaciones…) — si una tabla
+      // atascada no está en el informe copiable, ni el dueño
+      // puede nombrarla.
+      final tablasDiag = <String>[
+        ...SyncEngine.tablasEspejo,
+        ...SyncEngine.tablasIncidencias,
         'borrados',
-        'incidencias',
-        'incidencias_tipos',
-        'incidencias_comentarios',
-        'liquidaciones_caja', // v1.3.6 (v28, ítem 1B)
-        'incidencias_sync', // v1.3.6 (v28, ítem 1C)
       ];
       for (final t in tablasDiag) {
         final wmt = await db.getWatermarkTabla(t);
