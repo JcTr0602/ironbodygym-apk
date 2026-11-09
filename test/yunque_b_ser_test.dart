@@ -12,10 +12,13 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
 import 'package:ironbody_gym/ui/detalle_suplemento.dart';
 import 'package:ironbody_gym/ui/permisos_ui.dart';
+import 'package:ironbody_gym/ui/venta_suplemento_inscripcion.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
@@ -71,5 +74,58 @@ void main() {
     expect(
         await permisoOperativoOkConRefresco(ctx!, () => true, 'vender'),
         isTrue);
+  });
+
+  // Pieza añadida de la oleada (hermana de YB-SER-01): el
+  // flujo de inscripción + venta exige TAMBIÉN
+  // can_vender_suplementos (el servidor pide inscribir Y
+  // vender para la op compuesta): sin él, la pantalla se
+  // niega antes del diálogo de confirmación y no encola
+  // nada.
+  testWidgets(
+      'YB-SER-01 hermana: inscripción+venta sin permiso de '
+      'vender no llega al diálogo ni encola la op',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.runAsync(() async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      await LocalDb.resetParaTest();
+      await LocalDb.instance.db;
+    });
+    await tester.pumpWidget(const MaterialApp(
+      home: VentaSuplementoInscripcionScreen(
+        suplemento: {
+          'id': 5,
+          'nombre': 'Proteína X',
+          'stock': 10,
+          'precio': 100,
+        },
+        cantidad: 1,
+        precio: 100,
+        moneda: 'CUP',
+        precioOficial: 100,
+      ),
+    ));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).first, 'Cliente Nuevo');
+    await tester.runAsync(() async {
+      await tester
+          .tap(find.text('Confirmar inscripción + venta'));
+      // La guarda hace E/S real (refresco de permisos).
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await tester.pump();
+    // Sin diálogo de confirmación y con el aviso de permiso.
+    expect(find.byType(Dialog), findsNothing);
+    expect(
+        find.textContaining('permiso para vender suplementos'),
+        findsOneWidget);
+    await tester.runAsync(() async {
+      final db = await LocalDb.instance.db;
+      final filas = await db.query('ops_queue');
+      expect(filas, isEmpty,
+          reason: 'sin permiso de vender no se encola la op compuesta');
+    });
   });
 }

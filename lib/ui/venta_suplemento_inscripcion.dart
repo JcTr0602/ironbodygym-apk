@@ -17,11 +17,13 @@ import 'package:uuid/uuid.dart';
 import '../fotos.dart';
 import '../negocio.dart';
 import '../localdb.dart';
+import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'permisos_ui.dart';
 import 'widgets.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
@@ -161,6 +163,21 @@ class _VentaSuplementoInscripcionScreenState
   }
 
   Future<void> _confirmar() async {
+    // Pieza añadida de la oleada (hermana de YB-SER-01): la
+    // op compuesta inscripcion_venta_suplemento exige en el
+    // servidor inscribir Y VENDER; la entrada de Inscribir
+    // solo comprueba el permiso de inscribir. Sin esta
+    // segunda guarda, un entrenador con inscribir pero sin
+    // vender suplementos completaba el flujo, veía éxito y
+    // el servidor rebotaba la op ENTERA (ni cliente ni
+    // venta). Guarda dentro del flujo, antes de cualquier
+    // diálogo, como en ventaRapidaSuplemento.
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canVenderSuplementos,
+        'vender suplementos')) {
+      return;
+    }
+    if (!mounted) return;
     final nombre = _nombre.text.trim();
     if (nombre.isEmpty) {
       await DialogoApp.confirmar(context,
