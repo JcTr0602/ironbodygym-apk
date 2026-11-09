@@ -2676,7 +2676,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           ],
         ),
         subtitle: Text(
-          '${v['cliente_nombre'] ?? 'Sin identificar'}'
+          '${nombreClienteVentaServicio(v)}'
           '${esCasa ? ' · Casa' : ' · ${v['metodo'] ?? ''}'}'
           ' · ${v['registrado_por_nombre'] ?? ''}'
           '${insignia != null ? '\n$insignia' : ''}',
@@ -2766,8 +2766,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              fila('Cliente',
-                  '${v['cliente_nombre'] ?? 'Sin identificar'}'),
+              fila('Cliente', nombreClienteVentaServicio(v)),
               fila('Fecha', fecha10.isEmpty ? '—' : fecha10),
               fila('Hora', horaVentaServicio(v)),
               fila('Pomo', nombrePomoVenta(v, _misPomos)),
@@ -2793,8 +2792,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   'agua_suelta' => 'Agua suelta',
                   _ => '${original['tipo']}',
                 }),
-                fila('Cliente',
-                    '${original['cliente_nombre'] ?? 'Sin identificar'}'),
+                fila('Cliente', nombreClienteVentaServicio(original)),
                 fila('Monto',
                     '${fmtMonto(((original['precio_unitario'] as num?)?.toDouble() ?? 0) * ((original['cantidad'] as num?)?.toDouble() ?? 0))} CUP'),
                 fila('Fecha', (() {

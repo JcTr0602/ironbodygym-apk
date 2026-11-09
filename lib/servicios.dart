@@ -190,6 +190,25 @@ bool mostrarCheckboxPolvoPerdido(bool esDueno) => esDueno;
 /// El llamador ya filtra por rol antes de pasar las listas (el
 /// dueño ve todo; el entrenador solo lo suyo; las salidas solo las
 /// registra el dueño, así que al entrenador no le llega ninguna).
+/// Nombre del comprador de una venta de servicio PARA MOSTRARLO
+/// (PURO; nota de campo G-2, 2026-11-09): el espejo trae
+/// `cliente_nombre` como cadena VACÍA cuando la venta no
+/// identificó cliente (el puente rellena '' desde gym.db, que no
+/// guarda nombre) o cuando el cliente ya no existe — y el
+/// `?? 'Sin identificar'` de las pantallas solo caza el null, así
+/// que el detalle pintaba «Cliente» en blanco y el historial una
+/// línea vacía. Orden: nombre propio no vacío → «Cliente <id>»
+/// si hay id sin nombre (mismo criterio que el ranking) →
+/// 'Sin identificar' (venta de mostrador, legítima: identificar
+/// al comprador es opcional en el flujo de venta).
+String nombreClienteVentaServicio(Map<String, dynamic> v) {
+  final propio = '${v['cliente_nombre'] ?? ''}'.trim();
+  if (propio.isNotEmpty) return propio;
+  final cid = (v['cliente_id'] as num?)?.toInt();
+  if (cid != null) return 'Cliente $cid';
+  return 'Sin identificar';
+}
+
 List<Map<String, dynamic>> entradasHistorialServicios({
   required List<Map<String, dynamic>> ventas,
   required List<Map<String, dynamic>> salidas,
@@ -205,7 +224,7 @@ List<Map<String, dynamic>> entradasHistorialServicios({
       'hora': '${v['hora'] ?? ''}',
       'tipo': '${v['tipo'] ?? ''}',
       'cantidad': (v['cantidad'] as num?)?.toInt() ?? 1,
-      'cliente': '${v['cliente_nombre'] ?? 'Sin identificar'}',
+      'cliente': nombreClienteVentaServicio(v),
       'vendedorId': v['vendedor_id'],
       'registradoPorId': v['registrado_por'],
       'registradoPor': '${v['registrado_por_nombre'] ?? ''}',

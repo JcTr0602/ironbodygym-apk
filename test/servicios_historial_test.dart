@@ -77,4 +77,66 @@ void main() {
     expect(entradas.single['monto'], 600.0);
     expect(entradas.single['cliente'], 'Sin identificar');
   });
+
+  group('G-2 (campo 2026-11-09): el comprador nunca se pinta en blanco',
+      () {
+    // La fila EXACTA que el puente publica de una venta sin
+    // cliente identificado (gym.db no guarda nombre: rellena
+    // cliente_nombre con '' — verificado con la venta real 24,
+    // dosis_con_agua de Gabriel, 2026-11-09 14:24, 900 CUP).
+    Map<String, dynamic> filaEspejo({
+      String? nombre,
+      int? clienteId,
+      bool conClaveNombre = true,
+    }) =>
+        {
+          'id': 24,
+          'fecha': '2026-11-09',
+          'hora': '14:24',
+          'tipo': 'dosis_con_agua',
+          'precio_unitario': 900.0,
+          'cantidad': 1,
+          if (conClaveNombre) 'cliente_nombre': nombre ?? '',
+          if (clienteId != null) 'cliente_id': clienteId,
+        };
+
+    String clienteDe(Map<String, dynamic> fila) =>
+        entradasHistorialServicios(
+          ventas: [fila],
+          salidas: const [],
+          reversadas: const {},
+        ).single['cliente'] as String;
+
+    test('nombre vacío del espejo (sin cliente) → «Sin identificar»',
+        () {
+      expect(clienteDe(filaEspejo()), 'Sin identificar');
+      expect(nombreClienteVentaServicio(filaEspejo()),
+          'Sin identificar');
+    });
+
+    test('sin clave de nombre y sin id → «Sin identificar»', () {
+      expect(clienteDe(filaEspejo(conClaveNombre: false)),
+          'Sin identificar');
+    });
+
+    test('id sin nombre (cliente borrado del padrón) → «Cliente <id>»',
+        () {
+      expect(clienteDe(filaEspejo(clienteId: 137)), 'Cliente 137');
+    });
+
+    test('nombre real manda, también con espacios alrededor', () {
+      expect(clienteDe(filaEspejo(nombre: '  Ana Pérez  ', clienteId: 55)),
+          'Ana Pérez');
+    });
+
+    test('nombre solo espacios cuenta como vacío', () {
+      expect(
+          nombreClienteVentaServicio({'cliente_nombre': '   '}),
+          'Sin identificar');
+      expect(
+          nombreClienteVentaServicio(
+              {'cliente_nombre': ' ', 'cliente_id': 9}),
+          'Cliente 9');
+    });
+  });
 }
