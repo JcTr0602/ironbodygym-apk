@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../congelaciones_gestion.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../perfil.dart';
@@ -1130,6 +1131,24 @@ class _BuscarScreenState extends State<BuscarScreen> {
   /// cliente (o el chat pelado si no hace falta aviso).
   Future<void> _abrirWhatsapp(Map<String, dynamic> c,
       {bool conMensaje = true}) async {
+    // Congelación 0.5 · Yunque B (YB-FLU-02): con mensaje de
+    // vencimiento, el cliente en pausa NO se avisa (está en
+    // pausa aprobada, no vencido). El chat pelado (sin
+    // mensaje) no se toca: hablar con él sigue permitido.
+    if (conMensaje) {
+      final cid = (c['id'] as num?)?.toInt();
+      final congelados = await CongelacionesService.instance
+          .idsCongeladosEnCurso(ahoraHabana());
+      if (!mounted) return;
+      if (cid != null && congelados.contains(cid)) {
+        mostrarSnack(
+            context,
+            'Este cliente está en pausa (congelación aprobada): '
+            'no le corresponde aviso de vencimiento.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+    }
     // 1.29 (FB-01): teléfono efectivo (movil primero).
     final wa = telefonoEfectivoWa(c);
     if (wa.isEmpty) {
@@ -1299,7 +1318,12 @@ class _BuscarScreenState extends State<BuscarScreen> {
     if (!mounted) return;
     final hoy = hoyHabanaIso();
     final tocados = await LocalDb.instance.avisosWaContactados(hoy);
-    var nProtegidos = 0, nCasa = 0, nSinTel = 0, nYaHoy = 0;
+    // Congelación 0.5 · Yunque B (YB-FLU-02): el cliente con
+    // la pausa aprobada EN CURSO queda fuera de la cadena (y
+    // se cuenta y se nombra, como las demás exclusiones).
+    final congelados = await CongelacionesService.instance
+        .idsCongeladosEnCurso(ahoraHabana());
+    var nProtegidos = 0, nCasa = 0, nSinTel = 0, nYaHoy = 0, nPausa = 0;
     final conTel = <Map<String, dynamic>>[];
     for (final c in todosL) {
       final cid = (c['id'] as num?)?.toInt();
@@ -1308,6 +1332,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
         nProtegidos++;
       } else if (esCuentaCasa(c)) {
         nCasa++;
+      } else if (congelados.contains(cid)) {
+        nPausa++;
       } else if (telefonoEfectivoWa(c).isEmpty) {
         // 1.29 (FB-01): sin teléfono EFECTIVO (movil primero):
         // el migrado con número en `movil` SÍ entra en la cadena.
@@ -1327,6 +1353,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       final p = <String>[
         if (nSinTel > 0) '$nSinTel sin teléfono',
         if (nCasa > 0) '$nCasa Cuenta a la Casa',
+        if (nPausa > 0) '$nPausa en pausa (congelación)',
         if (nProtegidos > 0) '$nProtegidos protegido(s)',
         if (nYaHoy > 0) '$nYaHoy ya avisado(s) hoy',
       ];

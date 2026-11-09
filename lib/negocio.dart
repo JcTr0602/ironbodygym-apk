@@ -395,6 +395,21 @@ Future<List<Map<String, dynamic>>> clientesAlDiaPestana(
       .toList();
 }
 
+/// Congelación 0.5 · Yunque B (YB-FLU-01): clientes con la
+/// pausa aprobada EN CURSO ahora. Un cliente en pausa NO está
+/// vencido ni es moroso en NINGÚN listado: la exclusión vive
+/// AQUÍ, dentro de los predicados centrales, y no pantalla a
+/// pantalla (la bandeja ya lo hacía por su cuenta; Listas,
+/// Home, Dashboard, Admin, Mi Día y Cuentas por cobrar salían
+/// sin ella). El conjunto sale del espejo solo-dueño: en el
+/// teléfono de un entrenador viene vacío por diseño y sus
+/// listados no cambian.
+Future<Set<int>> _congeladosEnCurso() =>
+    CongelacionesService.instance.idsCongeladosEnCurso(ahoraHabana());
+
+bool _enPausa(Map<String, dynamic> c, Set<int> congelados) =>
+    congelados.contains((c['id'] as num?)?.toInt());
+
 /// Vencen exactamente hoy.
 /// v1.7.0: la Cuenta a la Casa queda FUERA (nunca vence; no es un
 /// vencimiento cobrable ni entra en recordatorios de cobro).
@@ -405,9 +420,12 @@ Future<List<Map<String, dynamic>>> vencenHoy(
     {List<Map<String, dynamic>>? activosPre}) async {
   final hoy = _hoyIso();
   final rows = activosPre ?? await _activos();
+  final congelados = await _congeladosEnCurso();
   final res = rows
       .where((c) =>
-          !esCuentaCasa(c) && (c['pagado_hasta'] as String?) == hoy)
+          !esCuentaCasa(c) &&
+          !_enPausa(c, congelados) &&
+          (c['pagado_hasta'] as String?) == hoy)
       .toList();
   res.sort(compararPorNombre);
   return res;
@@ -421,19 +439,24 @@ Future<List<Map<String, dynamic>>> atrasados(
   final hoy = _hoyIso();
   final limite = _hace(30);
   final rows = activosPre ?? await _activos();
+  final congelados = await _congeladosEnCurso();
   List<Map<String, dynamic>> res;
   // v1.7.0: la Cuenta a la Casa queda FUERA de atrasados en ambas
   // ramas (su pagado_hasta puede ser NULL o viejo sin que deba
   // nada: excluirla explícitamente, no por accidente del filtro).
+  // Yunque B (YB-FLU-01): el cliente en pausa tampoco es
+  // atrasado, en ninguna de las dos ramas.
   if (masDe30) {
     res = rows.where((c) {
       if (esCuentaCasa(c)) return false;
+      if (_enPausa(c, congelados)) return false;
       final ph = c['pagado_hasta'] as String?;
       return ph != null && ph.compareTo(limite) < 0;
     }).toList();
   } else {
     res = rows.where((c) {
       if (esCuentaCasa(c)) return false;
+      if (_enPausa(c, congelados)) return false;
       final ph = c['pagado_hasta'] as String?;
       return ph == null ||
           (ph.compareTo(hoy) < 0 && ph.compareTo(limite) >= 0);
@@ -2835,9 +2858,12 @@ Future<List<Map<String, dynamic>>> porVencer(
   // no por Duration sobre el wall-clock.
   final limIso = sumarDiasIso(hoy, dias);
   final rows = activosPre ?? await _activos();
+  final congelados = await _congeladosEnCurso();
   final res = rows.where((c) {
     // v1.7.0: la Cuenta a la Casa nunca está «por vencer».
     if (esCuentaCasa(c)) return false;
+    // Yunque B (YB-FLU-01): ni el cliente en pausa.
+    if (_enPausa(c, congelados)) return false;
     final ph = c['pagado_hasta'] as String?;
     // v1.3.7: excluye los que vencen hoy (tienen su propio segmento).
     return ph != null &&
@@ -6763,6 +6789,7 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
   // que la versión anterior con medianoches.
   final hoyIso = _hoyIso();
   final limIso = sumarDiasIso(hoyIso, 7);
+  final congelados = await _congeladosEnCurso();
   final res = <Map<String, dynamic>>[];
   for (final c in await LocalDb.instance.allMirror('clientes')) {
     try {
@@ -6771,6 +6798,8 @@ Future<List<Map<String, dynamic>>> porVencer7Dias() async {
       if (esClienteEliminado(c)) continue;
       // v1.7.0: la Cuenta a la Casa queda fuera (no vence nunca).
       if (esCuentaCasa(c)) continue;
+      // Yunque B (YB-FLU-01): el cliente en pausa tampoco.
+      if (_enPausa(c, congelados)) continue;
       final ph = '${c['pagado_hasta'] ?? ''}';
       if (ph.length < 10) continue;
       final phDia = ph.substring(0, 10);
@@ -7529,9 +7558,12 @@ Future<List<Map<String, dynamic>>> inscripcionesPorEntrenador(
 /// v1.7.0: la Cuenta a la Casa no es morosa (no debe nada).
 Future<int> morosos() async {
   final hoy = _hoyIso();
+  final congelados = await _congeladosEnCurso();
   var c = 0;
   for (final cl in await _activos()) {
     if (esCuentaCasa(cl)) continue;
+    // Yunque B (YB-FLU-01): en pausa no es moroso.
+    if (_enPausa(cl, congelados)) continue;
     final ph = cl['pagado_hasta'] as String?;
     if (ph != null && ph.compareTo(hoy) < 0) c++;
   }
@@ -7545,9 +7577,13 @@ Future<int> morosos() async {
 Future<({int activos, int morosos})> resumenActivosMorosos() async {
   final lista = await _activos();
   final hoy = _hoyIso();
+  final congelados = await _congeladosEnCurso();
   var mor = 0;
   for (final cl in lista) {
     if (esCuentaCasa(cl)) continue;
+    // Yunque B (YB-FLU-01): en pausa no es moroso (sí sigue
+    // contando como activo: la pausa no lo da de baja).
+    if (_enPausa(cl, congelados)) continue;
     final ph = cl['pagado_hasta'] as String?;
     if (ph != null && ph.compareTo(hoy) < 0) mor++;
   }

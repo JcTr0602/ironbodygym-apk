@@ -21,6 +21,7 @@ import '../mediciones_cliente.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import '../tiempo.dart';
+import '../congelaciones_gestion.dart';
 import '../comprobantes.dart';
 import '../conciliacion.dart';
 import '../fotos.dart';
@@ -185,6 +186,13 @@ class FichaScreen extends StatefulWidget {
 
 class _FichaScreenState extends State<FichaScreen> {
   Map<String, dynamic>? _c;
+  // Congelación 0.5 · Yunque B (YB-FLU-02): ¿tiene la pausa
+  // NUEVA aprobada EN CURSO? Se lee del espejo local en
+  // _cargar (en el teléfono de un entrenador el espejo está
+  // prohibido y sale false: su vista no cambia, por diseño)
+  // y manda sobre el badge VENCIDO y el botón de aviso,
+  // igual que el congelado viejo.
+  bool _enPausaCongelacion = false;
   // v1.10.0 (Bloque 2, D6): especial activa mensual + si existe
   // ALGÚN registro en tarifa_especial (para el fallback legacy).
   Map<String, dynamic>? _especialActiva;
@@ -483,6 +491,20 @@ class _FichaScreenState extends State<FichaScreen> {
         tieneFotoVerificado = storageOk;
       }
     }
+    // Congelación 0.5 · Yunque B (YB-FLU-02): pausa NUEVA en
+    // curso, del espejo local (lectura local: no es una RPC
+    // y no viola la regla de pintar offline-first). Tolerante:
+    // si la lectura falla, la ficha abre como siempre.
+    var enPausaCongelacion = false;
+    if (c != null) {
+      try {
+        enPausaCongelacion = clienteCongeladoEnCurso(
+            await CongelacionesService.instance
+                .deCliente(widget.clienteId),
+            widget.clienteId,
+            ahoraHabana());
+      } catch (_) {}
+    }
     // v1.3.9 (F1): el caché de accesos también se carga en
     // _enriquecerDesdeServidor (era el segundo await de red
     // sin timeout antes de pintar; misma causa del cuelgue).
@@ -502,6 +524,7 @@ class _FichaScreenState extends State<FichaScreen> {
         // pasan por aquí.
         _datosVersion++;
         _c = c;
+        _enPausaCongelacion = enPausaCongelacion;
         _pagos = pagos;
         _ultimoPagoReal = ultimoReal;
         _ultimaTransferenciaPorConciliar = ultimaTransfPorConciliar;
@@ -2368,8 +2391,14 @@ class _FichaScreenState extends State<FichaScreen> {
     // sobre el chip dorado y activaba «Renovar 1 mes», que
     // rebotaba contra el bloqueo de Casa. Buscar ya lo hacía
     // bien (badge CASA); la ficha ahora coincide.
-    final vencido =
-        c != null && !esCasa && dias != null && dias < 0;
+    // Congelación 0.5 · Yunque B (YB-FLU-02): la pausa NUEVA
+    // en curso también apaga el «vencido» (no debe nada
+    // mientras dura su pausa aprobada).
+    final vencido = c != null &&
+        !esCasa &&
+        !_enPausaCongelacion &&
+        dias != null &&
+        dias < 0;
     // Cliente protegido (2026-10-26): marca del espejo local.
     final protegido = c != null && clienteEstaProtegido(c);
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
@@ -2377,9 +2406,14 @@ class _FichaScreenState extends State<FichaScreen> {
     // 1.25 T13: congelado manda también en el anillo.
     final congelado =
         c != null && (c['estado'] as String?) == 'congelado';
+    // Congelación 0.5 · Yunque B (YB-FLU-02): la pausa NUEVA
+    // se fusiona con el congelado viejo en todo lo que es
+    // vencimiento (anillo, línea de periodo y botón de
+    // aviso): en pausa no corre vencimiento.
+    final pausado = congelado || _enPausaCongelacion;
     final colorMarco = esCasa
         ? AppColores.alerta
-        : congelado
+        : pausado
             ? AppColores.info
             : dias == null
                 ? AppColores.bannerGrisB // sin pagos: anillo neutro
@@ -2448,6 +2482,7 @@ class _FichaScreenState extends State<FichaScreen> {
             c: c,
             esCasa: esCasa,
             congelado: congelado,
+            pausado: pausado,
             vencido: vencido,
             dias: dias,
             colorMarco: colorMarco,
@@ -2784,6 +2819,7 @@ class _FichaScreenState extends State<FichaScreen> {
     required Map<String, dynamic> c,
     required bool esCasa,
     required bool congelado,
+    required bool pausado,
     required bool vencido,
     required int? dias,
     required Color colorMarco,
@@ -3211,7 +3247,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                     : '${_ultimoPagoReal!['fecha'] ?? ''}',
                                 pagadoHastaRaw:
                                     '${_c?['pagado_hasta'] ?? ''}',
-                                pausada: congelado,
+                                pausada: pausado,
                               ),
                             // 1.30 FICHA-02 (FIJO de Jc): vencido
                             // o por vencer (la ventana de la
@@ -3225,7 +3261,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             // Casa no vence y el congelado no
                             // corre vencimiento: fuera.
                             if (!esCasa &&
-                                !congelado &&
+                                !pausado &&
                                 (vencido ||
                                     (dias != null && dias <= 3)) &&
                                 _telefonoEfectivoWa(c).isNotEmpty)
@@ -3645,6 +3681,7 @@ class _FichaScreenState extends State<FichaScreen> {
     required Map<String, dynamic> c,
     required bool esCasa,
     required bool congelado,
+    required bool pausado,
     required bool vencido,
     required int? dias,
     required Color colorMarco,
@@ -3656,6 +3693,7 @@ class _FichaScreenState extends State<FichaScreen> {
       c: c,
       esCasa: esCasa,
       congelado: congelado,
+      pausado: pausado,
       vencido: vencido,
       dias: dias,
       colorMarco: colorMarco,
