@@ -22,6 +22,8 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
+import '../permisos_entrenador.dart';
+import 'permisos_ui.dart';
 import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
@@ -49,6 +51,17 @@ import '../errores_sync.dart';
 Future<bool> ventaRapidaSuplemento(
     BuildContext context, Map<String, dynamic> s,
     [double? tasaUsd, int? clienteId, String? clienteNombre]) async {
+  // Yunque B (YB-SER-01): el servidor exige
+  // can_vender_suplementos para venta_suplemento. Esta es
+  // la función compartida de venta rápida (detalle,
+  // catálogo, ficha): la guarda vive aquí dentro (H-02) y
+  // ningún llamador vende sin permiso enseñando éxito.
+  if (!await permisoOperativoOkConRefresco(context,
+      () => PermisosEntrenador().canVenderSuplementos,
+      'vender suplementos')) {
+    return false;
+  }
+  if (!context.mounted) return false;
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   if (stock <= 0) {
     mostrarSnack(context, 'Sin stock disponible para venta rápida', significado: SignificadoChip.alerta);

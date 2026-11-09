@@ -1312,12 +1312,34 @@ class _HomeScreenState extends State<HomeScreen>
       // combo): Cobrar / Pago diario / Inscribir viven en
       // el mostrador, que es el sistema primario único.
       floatingActionButton: _FabAccionesRapidas(
-        onVenderAgua: () =>
-            _ir(const ServiciosScreen(tipoInicial: 'agua_suelta')),
-        onVenderRacion: () =>
-            _ir(const ServiciosScreen(tipoInicial: 'dosis_sin_agua')),
-        onVenderCombo: () =>
-            _ir(const ServiciosScreen(tipoInicial: 'dosis_con_agua')),
+        // Yunque B (YB-SER-01): vender (también el agua) exige
+        // can_vender_suplementos en el servidor; la entrada
+        // comprueba antes de navegar, como «Inscribir», y el
+        // flujo de Servicios re-verifica dentro (H-02).
+        onVenderAgua: () async {
+          if (await permisoOperativoOkConRefresco(
+              context,
+              () => PermisosEntrenador().canVenderSuplementos,
+              'vender servicios')) {
+            _ir(const ServiciosScreen(tipoInicial: 'agua_suelta'));
+          }
+        },
+        onVenderRacion: () async {
+          if (await permisoOperativoOkConRefresco(
+              context,
+              () => PermisosEntrenador().canVenderSuplementos,
+              'vender servicios')) {
+            _ir(const ServiciosScreen(tipoInicial: 'dosis_sin_agua'));
+          }
+        },
+        onVenderCombo: () async {
+          if (await permisoOperativoOkConRefresco(
+              context,
+              () => PermisosEntrenador().canVenderSuplementos,
+              'vender servicios')) {
+            _ir(const ServiciosScreen(tipoInicial: 'dosis_con_agua'));
+          }
+        },
       ),
       body: SafeArea(
         // 1.30 (Oleada D2): ámbito de la fundación de
@@ -1708,8 +1730,15 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }),
         const SizedBox(width: AppEspacio.sm),
-        accion(Icons.science_rounded, 'Dosis',
-            () => _ir(const ServiciosScreen())),
+        accion(Icons.science_rounded, 'Dosis', () async {
+          // Yunque B (YB-SER-01): misma guarda que el dial.
+          if (await permisoOperativoOkConRefresco(
+              context,
+              () => PermisosEntrenador().canVenderSuplementos,
+              'vender servicios')) {
+            _ir(const ServiciosScreen());
+          }
+        }),
       ],
     );
   }

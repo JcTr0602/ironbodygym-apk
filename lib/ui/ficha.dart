@@ -1149,6 +1149,17 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _venderDesdeFicha() async {
     final c = _c;
     if (c == null) return;
+    // Yunque B (YB-SER-01): las CUATRO opciones de esta hoja
+    // (dosis, agua y bote) exigen can_vender_suplementos en
+    // el servidor. Antes solo el bote se condicionaba y las
+    // dosis se ofrecían a quien no podía vender: la venta se
+    // registraba en pantalla y el servidor la rebotaba.
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canVenderSuplementos,
+        'vender')) {
+      return;
+    }
+    if (!mounted) return;
     final puedeBotes = AuthService().isOwner ||
         PermisosEntrenador().canVenderSuplementos;
     final eleccion = await showModalBottomSheet<String>(

@@ -28,6 +28,8 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../auth.dart';
 import '../permisos.dart';
+import '../permisos_entrenador.dart';
+import 'permisos_ui.dart';
 import '../tiempo.dart';
 import '../cliente_protegido.dart';
 import 'app_bar.dart';
@@ -284,6 +286,16 @@ class _VentaSuplementoScreenState
     // las validaciones y el diálogo de confirmación. Activarlo antes dejaba
     // el botón muerto si una validación fallaba.
     if (_guardando) return;
+    // Yunque B (YB-SER-01): el servidor exige
+    // can_vender_suplementos para venta_suplemento y
+    // rebotaría la op tras el «Venta registrada». La guarda
+    // va antes de validar y registrar nada (H-02).
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canVenderSuplementos,
+        'vender suplementos')) {
+      return;
+    }
+    if (!mounted) return;
     // Argón P1#2-parte: pre-chequeo de stock antes de confirmar
     // (la transacción ya lanza «Stock insuficiente», pero sin esto
     // el usuario llegaba al final para enterarse).

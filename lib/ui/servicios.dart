@@ -29,6 +29,7 @@ import 'servicios_estadisticas.dart';
 import 'servicios_historial.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
+import 'permisos_ui.dart';
 
 /// 1.23 (Delta Argón 4ª#6): un solo RegExp reutilizado en el
 /// buscador de clientes — antes se construía uno nuevo por
@@ -791,6 +792,19 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _venderInterno(String tipo) async {
+    // Yunque B (YB-SER-01): el servidor exige
+    // can_vender_suplementos para TODA venta de servicio
+    // (dosis y agua; mapa de permisos_ops). Sin la guarda,
+    // el entrenador sin permiso vendía, veía «Venta
+    // registrada» y el servidor rebotaba cada op. Guarda
+    // DENTRO del flujo (lección H-02): cubre Home, la ficha
+    // y esta pantalla, que embocan aquí.
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canVenderSuplementos,
+        'vender servicios')) {
+      return;
+    }
+    if (!mounted) return;
     // 1.25 Bloque 2: sin pomo a la vista, primero refrescar
     // el espejo (ver _pomoParaVender); el aviso sale de ahí.
     if (tipo != 'agua_suelta' && await _pomoParaVender() == null) {
@@ -1106,6 +1120,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   Future<void> _ventaMultipleInterno() async {
+    // Yunque B (YB-SER-01): misma guarda que _venderInterno.
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canVenderSuplementos,
+        'vender servicios')) {
+      return;
+    }
+    if (!mounted) return;
     final pomo = await _pomoParaVender();
     if (pomo == null) return;
     final topeDosis =

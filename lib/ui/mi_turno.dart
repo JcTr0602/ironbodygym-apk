@@ -425,6 +425,16 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   Future<void> _repetirVenta() async {
     final u = _ultimaVenta;
     if (u == null || _repitiendo) return;
+    // Yunque B (YB-SER-01): repetir una venta también es
+    // vender — el servidor exige can_vender_suplementos
+    // para venta_servicio y rebotaría la op tras enseñar
+    // «Venta repetida». Guarda dentro del flujo (H-02).
+    if (!await permisoOperativoOkConRefresco(context,
+        () => PermisosEntrenador().canVenderSuplementos,
+        'vender servicios')) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _repitiendo = true);
     try {
       final agua = await svc.stockAguaLocal();
