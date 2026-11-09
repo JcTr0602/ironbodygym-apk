@@ -396,6 +396,19 @@ String etiquetaEstadoOp(String estado) => switch (estado) {
       _ => estado,
     };
 
+/// 1.31 (Yunque A): «dd/MM HH:mm» de un sello de sincronización
+/// en hora de La Habana. Los sellos se parsean en UTC y antes se
+/// imprimían crudos (16:35 por las 11:35 de La Habana).
+/// Conversión canónica de la casa ([aHabana]); un instante que
+/// no venga en UTC no se toca. Función pura, la usa
+/// [_ColaScreenState._hora].
+String horaCortaHabana(DateTime? d) {
+  if (d == null) return '—';
+  final h = d.isUtc ? aHabana(d) : d;
+  return '${h.day.toString().padLeft(2, '0')}/${h.month.toString().padLeft(2, '0')} '
+      '${h.hour.toString().padLeft(2, '0')}:${h.minute.toString().padLeft(2, '0')}';
+}
+
 Widget chipEstadoOp(String estado) {
   Color color;
   IconData icono;
@@ -1516,14 +1529,10 @@ class _ColaScreenState extends State<ColaScreen> {
   // compartida etiquetaEstadoOp (la copia local de v1.2.9+46
   // quedó sin uso y se retiró en la 1.25 T123/F6-05).
 
+  String _hora(DateTime? d) => horaCortaHabana(d);
+
   /// v1.2.9+46 (Gemini): delega al mapa centralizado.
   String _tipo(String t) => describirTipoOp(t);
-
-  String _hora(DateTime? d) {
-    if (d == null) return '—';
-    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')} '
-        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-  }
 
   /// v1.2.9+46: tarjeta expandible con gestión completa de fotos.
   /// Muestra cada foto pendiente: miniatura, entidad, cuándo se solicitó,
