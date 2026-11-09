@@ -193,7 +193,14 @@ Future<SaludSyncDatos> cargarSaludSync() async {
 
   final tablas = <EstadoTablaSalud>[];
   var divergentes = 0;
-  for (final t in SyncEngine.tablasEspejo) {
+  // Yunque B (YB-SYNC-03): la Salud lista TAMBIÉN las 4
+  // tablas de incidencias (bajan por su propio camino y
+  // cada una persiste su wm_err_): sin esto, un fallo suyo
+  // no tenía semáforo en ninguna pantalla del dueño.
+  for (final t in [
+    ...SyncEngine.tablasEspejo,
+    ...SyncEngine.tablasIncidencias,
+  ]) {
     var filas = 0;
     var corruptas = 0;
     var wm = 0;
@@ -204,7 +211,10 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     var sinVerificar = false;
     var atascada = false;
     try {
-      filas = await db.contarFilasMirror(t);
+      // 'incidencias' se guarda en SQLite como
+      // incidencias_local (el resto usa su propio nombre).
+      filas = await db
+          .contarFilasMirror(t == 'incidencias' ? 'incidencias_local' : t);
     } catch (_) {}
     try {
       corruptas =
@@ -222,6 +232,15 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       sinVerificar = man == 'sin_verificar';
     } catch (_) {}
     if (divergente) divergentes++;
+    // Yunque B (YB-SYNC-06): las tablas de secuencia propia
+    // (bandeja, congelaciones, incidencias) jamás se
+    // comparan contra el server_seq GLOBAL: su watermark
+    // vive en otra escala y la comparación las pintaba en
+    // ámbar eterno («Faltan cambios por bajar») en un
+    // teléfono sano, enseñando a ignorar el ámbar. Su salud
+    // la juzgan su wm_err_, el manifiesto y las corruptas.
+    final serverSeqTabla =
+        SyncEngine.tablasConSecuenciaPropia.contains(t) ? 0 : serverSeq;
     final s = semaforoTabla(
       hayError: hayError,
       corruptas: corruptas,
@@ -230,7 +249,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       sinPermiso: sinPermiso,
       sinVerificar: sinVerificar,
       watermark: wm,
-      serverSeq: serverSeq,
+      serverSeq: serverSeqTabla,
       filas: filas,
       atascadaSinVerificar: atascada,
     );
@@ -250,7 +269,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
         sinPermiso: sinPermiso,
         sinVerificar: sinVerificar,
         watermark: wm,
-        serverSeq: serverSeq,
+        serverSeq: serverSeqTabla,
         filas: filas,
         atascadaSinVerificar: atascada,
       ),

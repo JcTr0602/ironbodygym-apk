@@ -1172,6 +1172,14 @@ class SyncEngine {
   final _auth = AuthService();
   final _db = LocalDb.instance;
 
+  /// Yunque B (YB-SYNC-03): resultado de la pasada de
+  /// incidencias de la ÚLTIMA llamada a `_doPull` en esta
+  /// instancia. `run()` lo lee fresco tras cada intento: si
+  /// la pasada falló, la corrida NO se sella completa aunque
+  /// el watermark haya alcanzado al servidor.
+  bool _incidenciasOkUltimaPasada = true;
+  String? _errorIncidenciasUltimaPasada;
+
   /// v1.2.9+43: cliente HTTP singleton para reutilizar conexiones TCP/TLS
   /// (Keep-Alive). Evita el handshake de 800ms-2s por cada petición.
   static final _httpClient = http.Client();
@@ -1815,9 +1823,14 @@ class SyncEngine {
             continue;
           }
           // H-08: «completo» se juzga con las tablas del rol.
+          // Yunque B (YB-SYNC-03): y con la pasada de
+          // incidencias de ESTE intento — su fallo ya no se
+          // sella en verde aunque el watermark alcance.
           final wm = await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
           final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-          if (wm >= ss) {
+          if (cicloCompleto(
+              watermarkAlcanza: wm >= ss,
+              incidenciasOk: _incidenciasOkUltimaPasada)) {
             completo = true;
             break;
           }
@@ -1849,6 +1862,21 @@ class SyncEngine {
         } else if (errPull != null) {
           await _db.setMeta('last_sync_error', errPull);
           errorCorrida = errPull;
+        } else if (!_incidenciasOkUltimaPasada) {
+          // Yunque B (YB-SYNC-03): la bajada principal llegó
+          // al watermark pero la pasada de incidencias falló
+          // en los intentos: la corrida no es completa y el
+          // veredicto lo dice con su nombre (el sello
+          // last_sync_ok no se escribe y el error queda para
+          // la UI; el detalle técnico vive en
+          // last_pull_incidencias_error y en los wm_err_ de
+          // cada tabla de incidencias).
+          const msgIncidencias = 'La descarga de incidencias '
+              'falló; se reintentará en el próximo ciclo.';
+          AppLog.error('sync', 'corrida_incidencias_fallo',
+              d: _errorIncidenciasUltimaPasada ?? '');
+          await _db.setMeta('last_sync_error', msgIncidencias);
+          errorCorrida = msgIncidencias;
         } else {
           // 1.28 (M1-A7/R1M1-H2): push OK y pull SIN
           // excepciones pero INCOMPLETO (el watermark no
@@ -2951,11 +2979,18 @@ class SyncEngine {
             isoHabana(ahoraHabana()));
       } catch (e) {
         incidenciasOk = false;
+        // Yunque B (YB-SYNC-03): el error de ESTA pasada,
+        // fresco para el veredicto de la corrida.
+        _errorIncidenciasUltimaPasada = '$e';
         AppLog.error(
             'sync', 'pull_incidencias_fallo', d: '$e');
         await _db.setMeta(
             'last_pull_incidencias_error', '$e');
       }
+      // Yunque B (YB-SYNC-03): la corrida (run) juzga su
+      // sello con ESTA pasada, no solo con el watermark.
+      _incidenciasOkUltimaPasada = incidenciasOk;
+      if (incidenciasOk) _errorIncidenciasUltimaPasada = null;
 
       // Fix #11: solo marcar OK si todo (incl. incidencias) funcionó.
       // 1.24.2: y sin filas fallidas en la bajada principal.
@@ -4643,6 +4678,51 @@ class SyncEngine {
     'cliente_congelaciones',
   ];
 
+  /// Yunque B (YB-SYNC-06): tablas cuya sync_seq es una
+  /// secuencia POR TABLA, no la global: su watermark jamás se
+  /// compara contra el server_seq global — ni para el salto
+  /// del pull (H-02: saltar las congelaría para siempre), ni
+  /// en el mínimo global, ni en el semáforo de la Salud
+  /// (compararlas las pintaba en ámbar eterno en un teléfono
+  /// sano). Fuente única: `_download` usa este mismo conjunto.
+  /// Las 4 de incidencias van aquí por el mismo motivo: su
+  /// pull corre por vistas propias con su propia secuencia.
+  static const Set<String> tablasConSecuenciaPropia = {
+    'gympedia_solicitudes',
+    'permisos_bandeja',
+    'espejo_gympedia_borradores',
+    'cliente_congelaciones',
+    'incidencias_tipos',
+    'incidencias',
+    'incidencias_comentarios',
+    'incidencias_fotos',
+  };
+
+  /// Yunque B (YB-SYNC-03): las 4 tablas de incidencias bajan
+  /// por su propio camino dentro de `_doPull` (fuera de
+  /// `tablasEspejo`), y cada sub-pull ya persiste su
+  /// `wm_err_<tabla>`. La Salud y el Diagnóstico las listan
+  /// aparte para que un fallo suyo tenga semáforo y nombre.
+  static const List<String> tablasIncidencias = [
+    'incidencias_tipos',
+    'incidencias',
+    'incidencias_comentarios',
+    'incidencias_fotos',
+  ];
+
+  /// Yunque B (YB-SYNC-03): el sello «completo» de una
+  /// corrida exige AMBAS cosas: el watermark mínimo alcanzó
+  /// al servidor Y la pasada de incidencias de ESTA corrida
+  /// no falló. FUNCIÓN PURA. Antes solo mandaba el watermark
+  /// y un 400/500 persistente de incidencias quedaba sellado
+  /// en verde para siempre (las tablas de incidencias no
+  /// están en tablasConWatermark).
+  static bool cicloCompleto({
+    required bool watermarkAlcanza,
+    required bool incidenciasOk,
+  }) =>
+      watermarkAlcanza && incidenciasOk;
+
   /// H-08 (1.23, capa 3 del diseño de Argón): espejos que un rol
   /// puede tener en el teléfono. Admin/dueño: las 39. Entrenador:
   /// las 39 menos las 12 del Grupo 1
@@ -4737,14 +4817,10 @@ class SyncEngine {
     // de LocalDb: un mínimo global no puede compararse con
     // secuencias por tabla (mismo motivo por el que 'borrados' se
     // excluye del cartel de novedades).
-    const tablasSecuenciaPropia = {
-      'gympedia_solicitudes',
-      'permisos_bandeja',
-      'espejo_gympedia_borradores',
-      // Congelación 0.5: su sync_seq nace de la secuencia
-      // propia cliente_congelaciones_seq en Supabase.
-      'cliente_congelaciones',
-    };
+    // Yunque B (YB-SYNC-06): fuente única en la clase
+    // (tablasConSecuenciaPropia); antes este conjunto vivía
+    // solo aquí y la Salud no podía conocerlo.
+    const tablasSecuenciaPropia = SyncEngine.tablasConSecuenciaPropia;
     const tablasPurgables = {
       'clientes',
       'pagos',
@@ -5778,6 +5854,15 @@ class SyncEngine {
           AppLog.error('sync', 'pull_borrados_400',
               d: 'borrados http=400 (error de contrato)');
           borradosOk = false;
+          // Yunque B (YB-SYNC-04): el 400 de borrados se trata
+          // como el de una tabla de datos — deja su wm_err_
+          // (el Diagnóstico lo pinta desde ahí: antes salía
+          // «OK») y suma a erroresTablas para que _download
+          // lance y la corrida NO selle last_pull_ok con las
+          // eliminaciones paradas para siempre.
+          await _db.setMeta('wm_err_borrados',
+              'HTTP 400 (error de contrato en sync_borrados)');
+          erroresTablas.add('borrados: HTTP 400 (error de contrato)');
           break;
         }
         if (r.statusCode == 404) {
@@ -5953,12 +6038,32 @@ class SyncEngine {
           // v1.12.0 (G2): como en _download, una tabla ausente (404)
           // marca su flag para que getWatermarkMinimo no la evalúe
           // (si no, el mínimo quedaría clavado en 0 para siempre).
-          if (r.statusCode == 404 || r.statusCode == 400) {
+          if (r.statusCode == 404) {
             await _db.setMeta('wm_gympedia_borrados_ausente', '1');
             break;
           }
-          if (r.statusCode != 200) break; // ausente/sin permiso: omitir
+          // Yunque B (YB-SYNC-05): el 400 ya NO se disfraza de
+          // «tabla ausente» (esa categoría los paneles la
+          // ignoran a propósito): es un error de contrato y
+          // queda en su meta de error + bitácora. Y cualquier
+          // otro código ≠200 (429/500…) tampoco se omite en
+          // silencio: se registra igual antes de cortar.
+          if (r.statusCode == 400) {
+            AppLog.error('sync', 'pull_gympedia_borrados_400',
+                d: 'http=400 (error de contrato)');
+            await _db.setMeta('wm_err_gympedia_borrados',
+                'HTTP 400 (error de contrato)');
+            break;
+          }
+          if (r.statusCode != 200) {
+            AppLog.error('sync', 'pull_gympedia_borrados_http',
+                d: 'http=${r.statusCode}');
+            await _db.setMeta('wm_err_gympedia_borrados',
+                'HTTP ${r.statusCode}');
+            break;
+          }
           await _db.setMeta('wm_gympedia_borrados_ausente', '');
+          await _db.setMeta('wm_err_gympedia_borrados', '');
           final rows = jsonDecode(r.body) as List;
           if (rows.isEmpty) break;
           var paginaCortada = false;
@@ -5985,7 +6090,18 @@ class SyncEngine {
         if (gbMax > cursorGb) {
           await _db.setMeta('wm_gympedia_borrados', '$gbMax');
         }
-      } catch (_) {}
+      } catch (e) {
+        // Yunque B (YB-SYNC-05): fuera el catch mudo — el
+        // fallo de las tumbas queda en la bitácora y en su
+        // meta de error (la pasada sigue siendo tolerante:
+        // GymPedia no rompe el pull principal).
+        AppLog.error('sync', 'pull_gympedia_borrados_fallo', d: '$e');
+        try {
+          final errTxt = '$e';
+          await _db.setMeta('wm_err_gympedia_borrados',
+              errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
+        } catch (_) {}
+      }
     }
     // Biblioteca / Guía (v47): tombstones de fichas. Misma forma
     // que GymPedia (tabla propia sync_guia_borrados, cursor propio
@@ -6000,12 +6116,29 @@ class SyncEngine {
           final r = await _getAuth(Uri.parse(
               '$_base/rest/v1/sync_guia_borrados?select=id,sync_seq'
               '&sync_seq=gt.$guiaMax&order=sync_seq.asc&limit=100'));
-          if (r.statusCode == 404 || r.statusCode == 400) {
+          if (r.statusCode == 404) {
             await _db.setMeta('wm_guia_borrados_ausente', '1');
             break;
           }
-          if (r.statusCode != 200) break; // ausente/sin permiso: omitir
+          // Yunque B (YB-SYNC-05): ídem GymPedia — 400 =
+          // contrato (meta de error + bitácora), nunca
+          // «ausente»; el resto de códigos ≠200 se registran.
+          if (r.statusCode == 400) {
+            AppLog.error('sync', 'pull_guia_borrados_400',
+                d: 'http=400 (error de contrato)');
+            await _db.setMeta(
+                'wm_err_guia_borrados', 'HTTP 400 (error de contrato)');
+            break;
+          }
+          if (r.statusCode != 200) {
+            AppLog.error('sync', 'pull_guia_borrados_http',
+                d: 'http=${r.statusCode}');
+            await _db.setMeta(
+                'wm_err_guia_borrados', 'HTTP ${r.statusCode}');
+            break;
+          }
           await _db.setMeta('wm_guia_borrados_ausente', '');
+          await _db.setMeta('wm_err_guia_borrados', '');
           final rows = jsonDecode(r.body) as List;
           if (rows.isEmpty) break;
           var paginaCortada = false;
@@ -6027,7 +6160,15 @@ class SyncEngine {
         if (guiaMax > cursorGuia) {
           await _db.setMeta('wm_guia_borrados', '$guiaMax');
         }
-      } catch (_) {}
+      } catch (e) {
+        // Yunque B (YB-SYNC-05): ídem GymPedia — sin catch mudo.
+        AppLog.error('sync', 'pull_guia_borrados_fallo', d: '$e');
+        try {
+          final errTxt = '$e';
+          await _db.setMeta('wm_err_guia_borrados',
+              errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
+        } catch (_) {}
+      }
     }
     // Argón v1.3.0: bajadas viejas v1.2.4/v1.2.5 DESACTIVADAS.
     // Ahora se usan _pullTiposIncidencia(), _pullIncidencias(),
@@ -6763,8 +6904,12 @@ class SyncEngine {
         }
         await _aplicarEstadoServidor(op, rec);
       }
-    } catch (_) {
-      // No bloquea la sincronización si falla
+    } catch (e) {
+      // No bloquea la sincronización si falla — pero Yunque B
+      // (YB-SYNC-08): tampoco es mudo. Sin este registro, una
+      // deriva de contrato en la confirmación dejaba las ops
+      // en 'enviada' para siempre sin ninguna pista local.
+      AppLog.error('sync', 'sync_op_status_fallo', d: '$e');
     }
   }
 
