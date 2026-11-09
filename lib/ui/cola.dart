@@ -2202,7 +2202,14 @@ class _ColaScreenState extends State<ColaScreen> {
       iconoEstado = Icons.warning_amber_rounded;
       titulo = 'Falló la última sincronización';
       // v1.2.9+46: mensaje en lenguaje natural, no genérico.
-      subtitulo = describirError(errorReciente);
+      // Pieza añadida (incidencia de Jc, 2026-11-09): con el
+      // contrafuerte A4-D2 de la corrida — si hay internet
+      // confirmado, un error de transporte se presenta como
+      // «No se pudo contactar el servidor», no como «No hay
+      // conexión a internet» (la misma corrección que el
+      // motivo de las ops ya aplicaba en esta pantalla).
+      subtitulo =
+          describirErrorCorrida(errorReciente, hayInternet: _hayInternet);
     } else if (totalPendiente > 0) {
       estadoSync = 'pendiente';
       colorEstado = AppColores.alerta;

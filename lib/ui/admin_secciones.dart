@@ -726,6 +726,17 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         } else if (await db.getMeta('wm_${t}_ausente') == '1') {
           estado = 'ausente';
         }
+        // Pieza añadida de la oleada: la marca de atasco del
+        // pull (wm_sinverificar_<tabla>, nacida en las Altas
+        // con SYNC-02) también viaja en el diagnóstico
+        // copiable — sin ella, el informe que el dueño pega
+        // para soporte no nombra la fila que clavó la tabla.
+        final sinVer = await db.getMeta('wm_sinverificar_$t');
+        if (sinVer != null && sinVer.isNotEmpty) {
+          estado = estado == 'OK'
+              ? 'SIN VERIFICAR ($sinVer)'
+              : '$estado · SIN VERIFICAR ($sinVer)';
+        }
         String filas;
         // v1.3.1 (Argón pull r2): 'borrados' no es tabla local;
         // 'incidencias' en SQLite se llama incidencias_local.

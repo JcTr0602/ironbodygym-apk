@@ -518,6 +518,31 @@ String describirError(Object error) {
   }
 }
 
+/// Pieza añadida de la oleada (incidencia de campo de Jc,
+/// 2026-11-09): el contrafuerte A4-D2 aplicado a la BANDA
+/// de la corrida (la cabecera «Falló la última
+/// sincronización» de la pantalla de Sincronización). El
+/// error guardado de la corrida se clasificó al capturarse
+/// — quizá en el mismo apagón de transporte que tumbó
+/// también la comprobación de internet de ese instante —
+/// y la banda lo re-pintaba crudo: «No hay conexión a
+/// internet» con 4G activo y WhatsApp funcionando, cuando
+/// lo que falló fue contactar el SERVIDOR. Si el error se
+/// clasifica «sin conexión» y AHORA hay internet
+/// confirmado, la banda dice la verdad de ahora. Sin dato
+/// de internet (null) se conserva la traducción. Función
+/// pura, el mismo patrón que el motivo de las ops (A4-D2).
+String describirErrorCorrida(Object error, {bool? hayInternet}) {
+  try {
+    final t = traducirErrorSync(error);
+    if (t.codigo == 'sin_conexion' && hayInternet == true) {
+      return 'No se pudo contactar el servidor. '
+          'Tus cambios están guardados en el teléfono.';
+    }
+  } catch (_) {}
+  return describirError(error);
+}
+
 /// 1.30 Oleada 8 (ítem añadido «Errores amables» + GEN-09):
 /// traduce CUALQUIER error a UN texto breve y en sencillo para
 /// enseñar en un snack o un campo de error de pantalla. Es el

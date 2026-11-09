@@ -63,6 +63,15 @@ class EstadoTablaSalud {
   /// Explicación corta en lenguaje llano.
   final String nota;
 
+  /// Pieza añadida de la oleada (incidencia de campo de Jc,
+  /// 2026-11-09): el texto REAL del último error de bajada
+  /// de la tabla (la meta wm_err_<tabla> tal cual la dejó el
+  /// motor). La Salud es pantalla del dueño: enseñarle solo
+  /// el genérico «la última bajada falló» le ocultaba si fue
+  /// transporte, un 400 o una fila mala — el diagnóstico por
+  /// WhatsApp nacía ciego. '' = sin error registrado.
+  final String errorBajada;
+
   const EstadoTablaSalud({
     required this.tablaLocal,
     required this.nombre,
@@ -71,6 +80,7 @@ class EstadoTablaSalud {
     required this.watermark,
     required this.estado,
     required this.nota,
+    this.errorBajada = '',
   });
 }
 
@@ -144,6 +154,7 @@ EstadoSaludSync estadoSaludSync({
 String _notaTabla({
   required SemaforoTabla s,
   required bool hayError,
+  String errorTexto = '',
   required int corruptas,
   required bool divergente,
   required bool ausente,
@@ -163,6 +174,15 @@ String _notaTabla({
       // Yunque B (YB-SYNC-02): el atasco tiene su propia nota.
       if (atascadaSinVerificar) {
         return 'Atascada: una fila no se pudo verificar al bajar';
+      }
+      // Pieza añadida (incidencia de Jc): con el texto real
+      // del error, la nota lo trae (recortado: la meta puede
+      // guardar trazas largas) en vez del genérico solo.
+      if (errorTexto.isNotEmpty) {
+        final corto = errorTexto.length > 160
+            ? '${errorTexto.substring(0, 160)}…'
+            : errorTexto;
+        return 'La última bajada de esta tabla falló: $corto';
       }
       return 'La última bajada de esta tabla falló';
     case SemaforoTabla.ambar:
@@ -205,6 +225,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     var corruptas = 0;
     var wm = 0;
     var hayError = false;
+    var errorBajada = '';
     var ausente = false;
     var sinPermiso = false;
     var divergente = false;
@@ -220,7 +241,8 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       corruptas =
           int.tryParse(await db.getMeta('mirror_corruptas_$t') ?? '') ?? 0;
       wm = await db.getWatermarkTabla(t);
-      hayError = (await db.getMeta('wm_err_$t') ?? '').isNotEmpty;
+      errorBajada = await db.getMeta('wm_err_$t') ?? '';
+      hayError = errorBajada.isNotEmpty;
       // Yunque B (YB-SYNC-02): el atasco persistido por el
       // pull (distinto del «sin verificar» del manifiesto).
       atascada =
@@ -260,9 +282,11 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       corruptas: corruptas,
       watermark: wm,
       estado: s,
+      errorBajada: errorBajada,
       nota: _notaTabla(
         s: s,
         hayError: hayError,
+        errorTexto: errorBajada,
         corruptas: corruptas,
         divergente: divergente,
         ausente: ausente,
