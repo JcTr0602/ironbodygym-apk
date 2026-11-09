@@ -3041,6 +3041,14 @@ class LocalDb {
     await db.execute('CREATE TABLE IF NOT EXISTS avisos_entrenadores ('
         'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
         'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
+    // 1.30 (D2, GEN-10): espejo SOLO-DUEÑO de los vistos de los
+    // avisos (sync_avisos_vistos): el respaldo que le dice al
+    // dueño quién vio cada aviso. Genérico (id/data/sync_seq)
+    // como el resto de espejos planos convertidos por el pull;
+    // prohibido para entrenadores (tablasProhibidasEntrenador).
+    await db.execute('CREATE TABLE IF NOT EXISTS avisos_vistos ('
+        'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL, op_uuid TEXT)');
     // F4: vistos puramente LOCALES (nunca viajan por sync_ops).
     // En modo 'una_vez' se inserta al MONTARSE el PopUp; en modo
     // 'descartable', al tocar «Entendido / Cerrar». Así un reintento
@@ -3081,6 +3089,7 @@ class LocalDb {
       'solicitudes_adelanto',
       'solicitudes_relleno',
       'avisos_entrenadores',
+      'avisos_vistos',
       'servicio_botes',
       'servicio_lotes',
       'servicio_ventas',
@@ -3105,6 +3114,8 @@ class LocalDb {
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_solicitudes_relleno', '0')");
     await db.rawInsert(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_avisos_entrenadores', '0')");
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_avisos_vistos', '0')");
     await db.rawInsert(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('wm_gympedia_articulos', '0')");
     await db.rawInsert(
@@ -8537,6 +8548,10 @@ class LocalDb {
     'turnos_apertura',
     'turnos_cierre',
     'espejo_gympedia_borradores',
+    // 1.30 (D2, GEN-10): los vistos de los avisos son del dueño;
+    // el entrenador no descarga ni el suyo por esta vía (su
+    // marca vive en avisos_vistos_local y sube por la op).
+    'avisos_vistos',
   };
 
   static const tablasConWatermark = [
@@ -8593,6 +8608,7 @@ class LocalDb {
     // 1.29 (Oleada 4, FB-09): espejo de solicitudes de relleno.
     'solicitudes_relleno',
     'avisos_entrenadores',
+    'avisos_vistos', // 1.30 (D2, GEN-10): espejo solo-dueño
     // Fase A 2026-10-25 (v45): mismo motivo para los espejos de
     // bonos, tarifas, entregas y recordatorios. Una tabla ausente
     // en Supabase (p. ej. sync_nomina_bonos antes de que el
@@ -8685,7 +8701,8 @@ class LocalDb {
     // tabla y deben descargarse desde cero, por el mismo motivo.
     if (tabla == 'solicitudes_adelanto' ||
         tabla == 'solicitudes_relleno' ||
-        tabla == 'avisos_entrenadores') {
+        tabla == 'avisos_entrenadores' ||
+        tabla == 'avisos_vistos') {
       return 0;
     }
     // Fase A 2026-10-25 (v45): los espejos de bonos, tarifas,
@@ -10379,10 +10396,12 @@ class LocalDb {
   /// F4: marca un aviso como visto en SQLite local. INSERT OR IGNORE:
   /// el PRIMER visto es el que manda (un segundo PopUp jamás debe
   /// reescribir la fecha ni revivir el aviso).
-  Future<void> marcarAvisoVisto(String avisoId,
+  /// Devuelve true SOLO si la fila se insertó (primer visto);
+  /// false si ya estaba (INSERT OR IGNORE no insertó nada).
+  Future<bool> marcarAvisoVisto(String avisoId,
       {bool descartado = false}) async {
     final d = await db;
-    await d.insert(
+    final fila = await d.insert(
       'avisos_vistos_local',
       {
         'aviso_id': avisoId,
@@ -10391,6 +10410,7 @@ class LocalDb {
       },
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
+    return fila > 0;
   }
 
   Future<Set<String>> avisosVistosIds() async {

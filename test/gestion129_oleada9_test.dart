@@ -190,19 +190,28 @@ void main() {
   });
 
   group('Cabos de diseño · dock y FAB (fuente y token)', () {
-    test('el dock _mostradorRapido va en sobreMarca, no en blanco',
-        () {
+    test('el mostrador ya no es naranja pleno: superficie '
+        'elevada con el icono en naranja', () {
+      // 1.30 (Oleada D2, UI130-06): el mostrador deja de
+      // ser superficie de marca — el cabo O5 de la 1.29
+      // (sobreMarca sobre el naranja) queda sin objeto:
+      // ahora es superficie elevada (cardColor) con el
+      // icono en naranja y la etiqueta en su color
+      // normal. El naranja pleno se reserva a una acción
+      // primaria por pantalla.
       final home = File('lib/ui/home.dart').readAsStringSync();
       final ini = home.indexOf('Widget _mostradorRapido()');
       final fin = home.indexOf('Widget _cabecera()', ini);
       expect(ini, greaterThanOrEqualTo(0));
       expect(fin, greaterThan(ini));
       final dock = home.substring(ini, fin);
-      expect(dock.contains('foregroundColor: AppColores.sobreMarca'),
-          isTrue,
-          reason: 'sobre la marca va sobreMarca (D-01)');
-      expect(dock.contains('foregroundColor: Colors.white'), isFalse,
-          reason: 'el blanco sobre naranja (2,75:1) era el cabo');
+      expect(dock.contains('backgroundColor: AppColores.naranja'),
+          isFalse,
+          reason: 'UI130-06: fuera el naranja pleno del dock');
+      expect(dock.contains('ElevatedButton'), isFalse,
+          reason: 'el dock ya no es un botón de marca');
+      expect(dock.contains('color: AppColores.naranja'), isTrue,
+          reason: 'el acento vive en el icono');
     });
 
     test('el FAB del dial usa el token propio gradienteDial', () {

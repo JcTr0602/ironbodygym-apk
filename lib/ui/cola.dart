@@ -2042,13 +2042,21 @@ class _ColaScreenState extends State<ColaScreen> {
     // v1.1: icono Material en vez de emoji
     // v1.2.9+46: cinco estados (error, limbo, error reciente, pendiente, ok)
     final String estadoSync;
-    final List<Color> colores;
+    // 1.30 (Oleada D2, UI130-07): el héroe ya no es un
+    // gradiente semántico: color del estado (franja e
+    // icono), su fondo *Fondo y la cifra protagonista
+    // del estado (null cuando no hay conteo que decir).
+    final Color colorEstado;
+    final Color fondoEstado;
+    final int? cifraHeroe;
     final IconData iconoEstado;
     final String titulo;
     final String subtitulo;
     if (totalError > 0) {
       estadoSync = 'error';
-      colores = [AppColores.error, AppColores.errorOscuro];
+      colorEstado = AppColores.error;
+      fondoEstado = AppColores.errorFondo;
+      cifraHeroe = totalError;
       iconoEstado = Icons.warning_amber_rounded;
       titulo = 'Atención requerida';
       subtitulo = totalError == 1
@@ -2056,7 +2064,9 @@ class _ColaScreenState extends State<ColaScreen> {
           : '$totalError elementos fallaron y necesitan tu revisión';
     } else if (enLimbo > 0) {
       estadoSync = 'limbo';
-      colores = [AppColores.alerta, AppColores.alertaOscuro];
+      colorEstado = AppColores.alerta;
+      fondoEstado = AppColores.avisoFondo;
+      cifraHeroe = enLimbo;
       iconoEstado = Icons.sync_problem_rounded;
       titulo = 'Confirmación pendiente';
       subtitulo = enLimbo == 1
@@ -2064,14 +2074,18 @@ class _ColaScreenState extends State<ColaScreen> {
           : '$enLimbo operaciones se enviaron pero no se confirmaron';
     } else if (errorReciente != null && errorReciente.isNotEmpty) {
       estadoSync = 'error';
-      colores = [AppColores.error, AppColores.errorOscuro];
+      colorEstado = AppColores.error;
+      fondoEstado = AppColores.errorFondo;
+      cifraHeroe = null;
       iconoEstado = Icons.warning_amber_rounded;
       titulo = 'Falló la última sincronización';
       // v1.2.9+46: mensaje en lenguaje natural, no genérico.
       subtitulo = describirError(errorReciente);
     } else if (totalPendiente > 0) {
       estadoSync = 'pendiente';
-      colores = [AppColores.alerta, AppColores.alertaOscuro];
+      colorEstado = AppColores.alerta;
+      fondoEstado = AppColores.avisoFondo;
+      cifraHeroe = totalPendiente;
       iconoEstado = Icons.schedule_rounded;
       titulo = 'Pendiente de sincronizar';
       subtitulo = totalPendiente == 1
@@ -2079,7 +2093,9 @@ class _ColaScreenState extends State<ColaScreen> {
           : '$totalPendiente elementos esperando conexión';
     } else {
       estadoSync = 'ok';
-      colores = [AppColores.exito, AppColores.exitoOscuro];
+      colorEstado = AppColores.exito;
+      fondoEstado = AppColores.exitoFondo;
+      cifraHeroe = null;
       iconoEstado = Icons.check_circle_rounded;
       titulo = 'Sincronizado';
       subtitulo = 'Todo al día';
@@ -2092,63 +2108,113 @@ class _ColaScreenState extends State<ColaScreen> {
           padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             // Cabecera de estado visual (v1.0.14: tres estados)
+            // 1.30 (Oleada D2, UI130-07): nivel 3 del
+            // lenguaje único de sync — héroe NEUTRO:
+            // superficie de tarjeta con borde, el color
+            // del estado en una franja lateral de 4 dp y
+            // en el icono sobre su fondo *Fondo; la cifra
+            // del estado en grande y los textos en los
+            // colores de siempre. Las acciones son los
+            // botones de debajo (Sincronizar ahora / Subir
+            // ahora), que no cambian.
             Container(
-              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: colores,
-                ),
+                color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: colores[0].withValues(alpha: 0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                border:
+                    Border.all(color: Theme.of(context).dividerColor),
               ),
-              child: Column(
-                children: [
-                  Icon(
-                    iconoEstado,
-                    size: 48,
-                    color: Colors.white,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(width: 4, color: colorEstado),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(
+                                    AppEspacio.md),
+                                decoration: BoxDecoration(
+                                  color: fondoEstado,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  iconoEstado,
+                                  size: 34,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              if (cifraHeroe != null) ...[
+                                const SizedBox(height: 8),
+                                Text('$cifraHeroe',
+                                    style: AppTexto.display),
+                              ],
+                              const SizedBox(height: 8),
+                              Text(
+                                titulo,
+                                style: AppTexto.displayPequeno,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                subtitulo,
+                                style: AppTexto.cuerpo.copyWith(
+                                    color: AppColores.textoSecundario(
+                                        context)),
+                                textAlign: TextAlign.center,
+                              ),
+                              // v1.0.14: guía contextual según el estado
+                              if (estadoSync == 'pendiente') ...[
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Se subirán automáticamente cuando haya conexión. '
+                                  'Puedes seguir trabajando sin internet.',
+                                  style: AppTexto.metadato.copyWith(
+                                      color: AppColores.textoSecundario(
+                                          context)),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                              if (estadoSync == 'error') ...[
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Revisa las operaciones marcadas abajo. '
+                                  'Puedes reintentarlas o cancelarlas.',
+                                  style: AppTexto.metadato.copyWith(
+                                      color: AppColores.textoSecundario(
+                                          context)),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                              if (_sincronizando) ...[
+                                const SizedBox(height: 12),
+                                LinearProgressIndicator(
+                                  value: (_progresoSync?.actual !=
+                                              null &&
+                                          _progresoSync?.total !=
+                                              null &&
+                                          _progresoSync!.total! > 0)
+                                      ? _progresoSync!.actual! /
+                                          _progresoSync!.total!
+                                      : null,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(
+                                          colorEstado),
+                                  backgroundColor: colorEstado
+                                      .withValues(alpha: 0.15),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    titulo,
-                    style: AppTexto.displayPequeno.copyWith(
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitulo,
-                    style: AppTexto.cuerpo.copyWith(color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-                  // v1.0.14: guía contextual según el estado
-                  if (estadoSync == 'pendiente') ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Se subirán automáticamente cuando haya conexión. '
-                      'Puedes seguir trabajando sin internet.',
-                      style: AppTexto.metadato.copyWith(color: Colors.white70),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                  if (estadoSync == 'error') ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      'Revisa las operaciones marcadas abajo. '
-                      'Puedes reintentarlas o cancelarlas.',
-                      style: AppTexto.metadato.copyWith(color: Colors.white70),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
             const SizedBox(height: 16),

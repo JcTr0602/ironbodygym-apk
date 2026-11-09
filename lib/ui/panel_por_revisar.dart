@@ -50,6 +50,13 @@ enum DestinoPorRevisar {
   reservas,
   precios,
   incidenciasSync,
+
+  /// 1.30 (Oleada D2, GEN-03): las transferencias por
+  /// comprobar del módulo Caja — completa UI130-33 (la
+  /// cuarta fuente del buzón) en el «Por revisar» del
+  /// Panel: el mismo conteo espejo
+  /// (`ConciliacionService.conteoPorComprobar()`).
+  conciliaciones,
 }
 
 /// Un pendiente concreto y accionable de un módulo:
@@ -81,6 +88,13 @@ class ItemPorRevisar {
 class FotoPendientesModulos {
   /// Caja: entrenadores con efectivo por entregar (> 0).
   final List<({String nombre, double total})> pendientesLiquidar;
+
+  /// 1.30 (D2, GEN-03): Caja — transferencias por
+  /// comprobar (conteo único, no lista: el ítem es uno
+  /// solo con el conteo en su detalle, como la parte del
+  /// buzón). Solo dueño: quien carga lo deja en 0 para
+  /// el resto de roles.
+  final int conciliacionesPorComprobar;
 
   /// Clientes: solicitudes de invitado por atender.
   final List<({String nombre, DateTime? desde})> solicitudes;
@@ -121,6 +135,7 @@ class FotoPendientesModulos {
 
   const FotoPendientesModulos({
     this.pendientesLiquidar = const [],
+    this.conciliacionesPorComprobar = 0,
     this.solicitudes = const [],
     this.reportes = const [],
     this.vales = const [],
@@ -159,6 +174,21 @@ Map<ModuloPanel, List<ItemPorRevisar>> pendientesPorModulo(
         tinte: AppColores.moduloCaja,
         titulo: 'Liquidar a ${p.nombre}',
         detalle: '${fmtMonto(p.total)} CUP por entregar',
+      ),
+    // 1.30 (D2, GEN-03): UN ítem con el conteo (la
+    // bandeja de Conciliación es la lista; aquí basta la
+    // señal, como en el buzón de Hoy).
+    if (foto.conciliacionesPorComprobar > 0)
+      ItemPorRevisar(
+        modulo: ModuloPanel.caja,
+        destino: DestinoPorRevisar.conciliaciones,
+        icono: Icons.fact_check_rounded,
+        tinte: AppColores.moduloCaja,
+        titulo: 'Transferencias por comprobar',
+        detalle: foto.conciliacionesPorComprobar == 1
+            ? '1 transferencia esperando tu comprobación'
+            : '${foto.conciliacionesPorComprobar} transferencias '
+                'esperando tu comprobación',
       ),
   ];
 

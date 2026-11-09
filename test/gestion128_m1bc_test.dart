@@ -45,14 +45,18 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   group('B1 · manifiesto completo', () {
-    test('son 41 entradas: las 40 del pull + incidencias_mirror', () {
+    test('son 42 entradas: las 41 del pull + incidencias_mirror', () {
       // 1.29 (Oleada 4, FB-09): el pull suma solicitudes_relleno
       // (39 → 40) y el manifiesto la vigila como a las demás.
-      expect(SyncEngine.tablasManifiesto.length, 41);
+      // 1.30 (D2, GEN-10): el pull suma avisos_vistos (40 → 41)
+      // y el manifiesto la vigila igual (solo-dueño en la RPC).
+      expect(SyncEngine.tablasManifiesto.length, 42);
       expect(SyncEngine.tablasManifiesto['sync_incidencias'],
           'incidencias_mirror');
       expect(SyncEngine.tablasManifiesto['sync_solicitudes_relleno'],
           'solicitudes_relleno');
+      expect(SyncEngine.tablasManifiesto['sync_avisos_vistos'],
+          'avisos_vistos');
     });
 
     test('toda tabla que baja el pull está vigilada', () {
@@ -440,9 +444,16 @@ void main() {
     });
   });
 
-  group('C1 · banner de altura fija', () {
-    testWidgets('la franja inferior existe y mide 38; la '
-        'altura total no cambia con el ancho', (tester) async {
+  // 1.30 (Oleada D2, UI130-07): la franja fija de 38 de
+  // M1-C1 existía para que el banner CON GRADIENTE no
+  // cambiara de altura entre estados. El lenguaje nuevo
+  // no tiene franja: en «al día» el banner no existe y la
+  // fila neutra reserva el hueco del subtítulo (minHeight
+  // 17, el truco de M1-C1 que SÍ sobrevive) con el título
+  // a una línea: su altura tampoco depende del ancho.
+  group('C1 · banner de altura fija (contrato UI130-07)', () {
+    testWidgets('sin franja fija; la fila neutra mide lo '
+        'mismo a cualquier ancho', (tester) async {
       Future<double> alturaConAncho(double ancho) async {
         tester.view.physicalSize = Size(ancho, 800);
         tester.view.devicePixelRatio = 1.0;
@@ -451,19 +462,20 @@ void main() {
           home: Scaffold(body: SyncBanner()),
         ));
         await tester.pump();
-        final franja = find.byKey(const Key('sync_banner_franja'));
-        expect(franja, findsOneWidget,
-            reason: 'la franja fija debe existir en reposo');
-        expect(tester.getSize(franja).height, 38);
+        expect(find.byKey(const Key('sync_banner_franja')),
+            findsNothing,
+            reason: 'UI130-07: la franja de gradiente se '
+                'retiró con el banner de D-04');
         return tester.getSize(find.byType(SyncBanner)).height;
       }
 
       final h1 = await alturaConAncho(400);
       final h2 = await alturaConAncho(280);
       expect(h1, h2,
-          reason: 'con el título a 1 línea y los huecos '
-              'reservados, el banner mide lo mismo a cualquier '
-              'ancho: la pantalla de debajo no salta');
+          reason: 'con el título a 1 línea y el hueco del '
+              'subtítulo reservado, la fila neutra mide lo '
+              'mismo a cualquier ancho: la pantalla de '
+              'debajo no salta');
     });
   });
 }

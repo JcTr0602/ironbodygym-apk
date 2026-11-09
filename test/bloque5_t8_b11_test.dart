@@ -164,7 +164,12 @@ void main() {
       // la fija el widget test de la oleada 5; aquí se
       // ancla su rastro en la fuente.
       expect('1.23 B11'.allMatches(home).length, 5);
-      expect(home.contains('hairline naranja'), isTrue);
+      // 1.30 (D2, UI130-05): la cabecera se rehízo en dos
+      // niveles y el comentario «borde hairline naranja» del
+      // logo D-21 salió con ella; el rastro anclado pasa a
+      // ser la insignia de engranaje del logo nuevo (el área
+      // tocable de 48 la fijan los widget tests de cabecera).
+      expect(home.contains('insignia de engranaje'), isTrue);
       // Garantías de alto mínimo exactas: las 3 de B11
       // más la fila tocable del buzón del dueño (FB-12).
       expect('minHeight: 48'.allMatches(home).length, 4);

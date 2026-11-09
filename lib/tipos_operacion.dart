@@ -114,6 +114,9 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Resolución de adelanto', Icons.rule_rounded),
   'upsert_aviso_entrenador':
       TipoOperacionInfo('Aviso para entrenadores', Icons.campaign_rounded),
+  // 1.30 (D2, GEN-10): acuse de visto (respaldo del dueño).
+  'marcar_aviso_visto':
+      TipoOperacionInfo('Aviso visto', Icons.visibility_rounded),
   'crear_suplemento':
       TipoOperacionInfo('Nuevo suplemento', Icons.fitness_center_rounded),
   'editar_suplemento':

@@ -27,6 +27,8 @@ class _AvisosEntrenadorScreenState
     extends State<AvisosEntrenadorScreen> {
   bool _cargando = true;
   List<AvisoEntrenador> _avisos = [];
+  // GEN-10: vistos del espejo (solo bajan al dueño).
+  List<VistoAviso> _vistos = [];
 
   @override
   void initState() {
@@ -37,9 +39,11 @@ class _AvisosEntrenadorScreenState
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     final avisos = await AvisosEntrenadorService.instance.todos();
+    final vistos = await AvisosEntrenadorService.instance.vistos();
     if (!mounted) return;
     setState(() {
       _avisos = avisos;
+      _vistos = vistos;
       _cargando = false;
     });
   }
@@ -209,6 +213,12 @@ class _AvisosEntrenadorScreenState
                     '${a.vigenteDesde != null ? ' · desde ${a.vigenteDesde}' : ''}'
                     '${a.vigenteHasta != null ? ' · hasta ${a.vigenteHasta}' : ''}'
                     ' · Para: ${nombreDestinoAviso(a.destinatarioTelegramId)}',
+                    style: AppTexto.secundario,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Visto por: '
+                    '${textoVistoPor(a, vistosDeAviso(_vistos, a.id))}',
                     style: AppTexto.secundario,
                   ),
                   const SizedBox(height: AppEspacio.sm),

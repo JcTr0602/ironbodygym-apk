@@ -22,6 +22,7 @@ import '../app_log.dart';
 import '../auth.dart';
 import '../config.dart' show AppConfig;
 import '../bloque2_resto.dart';
+import '../conciliacion.dart';
 import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
 import '../localdb.dart';
@@ -57,6 +58,7 @@ import 'buscar.dart';
 import 'admin_secciones.dart';
 import 'salud_sync_screen.dart';
 import 'cola.dart';
+import 'conciliacion.dart';
 import 'arqueo.dart';
 import 'guia.dart';
 import 'auditoria.dart';
@@ -166,6 +168,12 @@ class _AdminScreenState extends State<AdminScreen> {
   // se conserva como la cifra de la bandeja raíz, que
   // lee la misma foto.
   List<Map<String, dynamic>> _incidenciasFilas = [];
+
+  /// 1.30 (Oleada D2, GEN-03): transferencias por
+  /// comprobar (solo dueño): alimenta el ítem de Caja
+  /// del «Por revisar» con el MISMO conteo espejo del
+  /// buzón de Hoy (UI130-33).
+  int _conciliacionesPorComprobar = 0;
 
   /// 1.30 (Oleada 5, H-06): señal de «se volvió de una
   /// herramienta» para la pantalla de módulo abierta: los
@@ -448,6 +456,16 @@ class _AdminScreenState extends State<AdminScreen> {
     // con la pantalla de Tarifas (contarTarifasPorRevisar).
     final tarifasRev =
         await _seguro(contarTarifasPorRevisar, _tarifasPorRevisar);
+    // 1.30 (Oleada D2, GEN-03): el conteo de
+    // conciliaciones por comprobar, solo del dueño (la
+    // conciliación es su control, no contabilidad) y
+    // fail-silent como el resto: un fallo conserva el
+    // conteo anterior, nunca lo pone a 0.
+    final conciliacionesRev = AuthService().isOwner
+        ? await _seguro(
+            ConciliacionService.instance.conteoPorComprobar,
+            _conciliacionesPorComprobar)
+        : 0;
     // 1.23 (B3 Paso 3b): neto de nómina del mes desde la foto
     // compartida (nomina_foto.dart — la misma que arma la
     // pantalla de Nómina). Si la foto falla o aún no hay
@@ -502,6 +520,7 @@ class _AdminScreenState extends State<AdminScreen> {
         _vencenHoyNombres = vencenNombres;
         _incidenciasPend = incidenciasPend;
         _incidenciasFilas = incidenciasFilas;
+        _conciliacionesPorComprobar = conciliacionesRev;
         _tarifasPorRevisar = tarifasRev;
         _nombresClientesPanel = nombresPanel;
         if (ajOk != null) _ajustesPanel = aj;
@@ -687,6 +706,15 @@ class _AdminScreenState extends State<AdminScreen> {
     final incidenciasFilas = await _seguro(
         incidenciasSyncPendientes, _incidenciasFilas);
     final incidenciasPend = incidenciasFilas.length;
+    // 1.30 (Oleada D2, GEN-03): el conteo de
+    // conciliaciones se refresca también en esta vía
+    // (la franja de Caja se re-lee al volver, como la
+    // de Control con las incidencias).
+    final conciliacionesLigero = AuthService().isOwner
+        ? await _seguro(
+            ConciliacionService.instance.conteoPorComprobar,
+            _conciliacionesPorComprobar)
+        : 0;
     final nombresPanel = await _nombresPanelSiHaceFalta(
         incidenciasFilas.isNotEmpty ||
             fotoRS.solicitadas.isNotEmpty);
@@ -706,6 +734,7 @@ class _AdminScreenState extends State<AdminScreen> {
       _sinReporteHoy = sinHoy;
       _vencenHoyNombres = vencenNombres;
       _incidenciasFilas = incidenciasFilas;
+      _conciliacionesPorComprobar = conciliacionesLigero;
       _nombresClientesPanel = nombresPanel;
       _incidenciasPend = incidenciasPend;
       _cuentasCasa = casa;
@@ -994,6 +1023,7 @@ class _AdminScreenState extends State<AdminScreen> {
     final fechaHoy = DateTime(hoy.year, hoy.month, hoy.day);
     final fechaAyer = DateTime(hoy.year, hoy.month, hoy.day - 1);
     return FotoPendientesModulos(
+      conciliacionesPorComprobar: _conciliacionesPorComprobar,
       pendientesLiquidar: [
         for (final e in _pend)
           if (((e['total'] as num?)?.toDouble() ?? 0) > 0)
@@ -1086,6 +1116,10 @@ class _AdminScreenState extends State<AdminScreen> {
         _irConfig(const PreciosMetodoScreen());
       case DestinoPorRevisar.incidenciasSync:
         _ir(const IncidenciasSyncScreen());
+      // 1.30 (D2, GEN-03): el ítem de Caja abre la
+      // bandeja de Conciliación.
+      case DestinoPorRevisar.conciliaciones:
+        _ir(const ConciliacionScreen());
     }
   }
 

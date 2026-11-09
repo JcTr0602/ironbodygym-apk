@@ -115,71 +115,55 @@ void main() {
     });
   });
 
-  group('D-04 · gradientes tokenizados y letra segura', () {
-    test('cada variante pinta su par de tokens', () {
-      expect(coloresBanner(VarianteBanner.enviando).gradiente,
-          [AppColores.bannerEnviandoA, AppColores.bannerEnviandoB]);
-      expect(coloresBanner(VarianteBanner.descargando).gradiente,
-          [AppColores.info, AppColores.infoOscuro]);
-      expect(coloresBanner(VarianteBanner.fotos).gradiente,
-          [AppColores.bannerFotosA, AppColores.bannerFotosB]);
-      expect(coloresBanner(VarianteBanner.error).gradiente,
-          [AppColores.error, AppColores.errorOscuro]);
-      expect(coloresBanner(VarianteBanner.pendientes).gradiente,
-          [AppColores.bannerAlertaA, AppColores.alertaOscuro]);
-      expect(coloresBanner(VarianteBanner.novedades).gradiente,
-          [AppColores.bannerInfoA, AppColores.bannerInfoB]);
-      expect(coloresBanner(VarianteBanner.sinConexion).gradiente,
-          [AppColores.bannerGrisA, AppColores.bannerGrisB]);
-      expect(coloresBanner(VarianteBanner.sinSincronizar).gradiente,
-          [AppColores.bannerGrisA, AppColores.bannerGrisB]);
-      expect(coloresBanner(VarianteBanner.alDia).gradiente,
-          [AppColores.exito, AppColores.exitoOscuro]);
-    });
-
-    test('sobre los dos ámbar la letra es grafito y pasa '
-        'AA en AMBOS extremos (el blanco daba 2,15 y 1,69)',
-        () {
-      for (final v in [
-        VarianteBanner.enviando,
-        VarianteBanner.pendientes,
-      ]) {
-        final c = coloresBanner(v);
-        expect(c.frente, AppColores.sobreMarca, reason: '$v');
-        for (final extremo in c.gradiente) {
-          expect(_contraste(c.frente, extremo),
-              greaterThanOrEqualTo(4.5),
-              reason: '$v sobre $extremo');
-        }
-        // La cuenta del defecto que se corrige.
-        expect(_contraste(Colors.white, c.gradiente.first),
-            lessThan(2.2),
-            reason: 'el blanco era ilegible en el extremo '
-                'claro de $v');
-      }
-    });
-
+  // 1.30 (Oleada D2, UI130-07): el grupo D-04 fijaba los
+  // gradientes del banner y su letra segura. UI130-07
+  // RETIRA el gradiente (la auditoría: «un solo lenguaje,
+  // silencioso por defecto»): el mapa variante → nivel y
+  // el color de estado viven en el test de la oleada D2;
+  // aquí queda lo que sobrevive de D-04: ningún literal
+  // en widgets.dart y la letra segura donde el color
+  // pleno sigue existiendo (AvisoEstado sobre *Fondo).
+  group('D-04 · letra segura tras UI130-07 (sin gradientes)', () {
     test('widgets.dart no conserva ningún literal de color', () {
       final src = File('lib/ui/widgets.dart').readAsStringSync();
       expect(src.contains('Color(0x'), isFalse,
-          reason: 'D-04: todo gradiente del banner y de la '
-              'píldora sale de tokens de diseno.dart');
+          reason: 'D-04/UI130-07: la fila neutra y la píldora '
+              'viven de tokens de diseno.dart');
+      expect(src.contains('coloresBanner'), isFalse,
+          reason: 'UI130-07: el gradiente del banner se retiró');
     });
 
-    testWidgets('el banner pinta el título con el frente '
-        'de su variante (reposo sin sincronizar = blanco)',
-        (tester) async {
+    test('el blanco sobre los fondos de AvisoEstado pasa AA '
+        '(es la letra que queda sobre color pleno)', () {
+      for (final fondo in [
+        AppColores.errorFondo,
+        AppColores.avisoFondo,
+        AppColores.exitoFondo,
+        AppColores.infoFondo,
+      ]) {
+        expect(_contraste(Colors.white, fondo),
+            greaterThanOrEqualTo(4.5),
+            reason: 'blanco sobre $fondo');
+      }
+    });
+
+    testWidgets('el banner en reposo sin sincronizar pinta '
+        'la fila NEUTRA: título en color de texto, sin '
+        'gradiente (antes: blanco sobre gris)', (tester) async {
       await tester.pumpWidget(const MaterialApp(
         home: Scaffold(body: SyncBanner()),
       ));
       await tester.pump();
       final titulo = tester.widget<Text>(find.text('Sin sincronizar'));
-      expect(titulo.style?.color, Colors.white);
-      expect(
-          coloresBanner(varianteBannerDe(
-                  const SyncStatus()))
-              .frente,
-          Colors.white);
+      expect(titulo.style?.color, isNot(Colors.white),
+          reason: 'UI130-07: el texto va sobre la superficie, '
+              'no sobre un gradiente');
+      // Ningún contenedor del banner lleva gradiente.
+      final conGradiente = find.byWidgetPredicate((w) =>
+          w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration as BoxDecoration).gradient != null);
+      expect(conGradiente, findsNothing);
     });
   });
 
@@ -524,12 +508,11 @@ void main() {
       final zona = home.substring(desde, hasta);
       expect(zona.contains('Color(0x'), isFalse,
           reason: 'D-21: la cabecera vive de tokens');
-      // Los tres ayudantes nuevos tampoco.
-      for (final clase in [
-        '_EntradaCabecera',
-        '_BotonCabecera',
-        '_BotonSyncCabecera'
-      ]) {
+      // Los ayudantes tampoco. (1.30 D2, UI130-05/07:
+      // _BotonSyncCabecera salió de la lista porque la
+      // clase desaparece: el botón-icono de sync deja la
+      // cabecera y la píldora es la única señal.)
+      for (final clase in ['_EntradaCabecera', '_BotonCabecera']) {
         final i = home.indexOf('class $clase');
         expect(i, greaterThanOrEqualTo(0), reason: 'falta $clase');
         final fin = home.indexOf('\n}\n', i);
@@ -602,10 +585,12 @@ void main() {
       Finder enCabecera(Finder f) =>
           find.descendant(of: cabecera, matching: f);
 
-      // El botón de sync de la cabecera (con la SyncPill
-      // conviviendo debajo) lleva a la Cola.
-      expect(find.byTooltip('Sincronización'), findsOneWidget);
-      await tester.tap(enCabecera(find.byIcon(Icons.sync_rounded)));
+      // La sincronización vive en la píldora de la fila
+      // de estado y lleva a la Cola. (1.30 D2, UI130-05:
+      // el botón-icono separado de la 1.29 desaparece; la
+      // píldora es la única puerta y la única señal.)
+      expect(enCabecera(find.byType(SyncPill)), findsOneWidget);
+      await tester.tap(enCabecera(find.byType(SyncPill)));
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(ColaScreen), findsOneWidget);
@@ -655,8 +640,8 @@ void main() {
       }
     });
 
-    testWidgets('D-14: el dial abre y su «Inscribir» es el '
-        'glifo canónico y navega', (tester) async {
+    testWidgets('D-14: el dial abre solo con Servicios y el '
+        '«Inscribir» del mostrador navega', (tester) async {
       _mockAppLinks();
       await tester.runAsync(() async {
         await _bdVacia();
@@ -682,11 +667,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 700));
       // Abierto: el mismo botón ahora cierra.
       expect(find.byTooltip('Cerrar'), findsOneWidget);
-      // Las píldoras del dial, con sus textos.
+      // Las píldoras del dial, con sus textos. (1.30 D2,
+      // UI130-06: el dial queda SOLO con las tres ventas
+      // de Servicios; Cobrar / Pago diario / Inscribir
+      // salen del dial — viven en el mostrador, que es el
+      // sistema primario único.)
       for (final texto in [
-        'Cobrar',
-        'Pago diario',
-        'Inscribir',
         'Vender agua',
         'Vender ración',
         'Vender combo',
@@ -694,19 +680,13 @@ void main() {
         expect(find.text(texto), findsWidgets,
             reason: 'píldora «$texto» del dial');
       }
-      // La píldora «Inscribir» (la de más abajo: el
-      // mostrador también rotula una) lleva el glifo
-      // canónico y navega a Inscribir.
-      final candidatos = find.text('Inscribir');
-      var pildora = candidatos.first;
-      var mayorY = double.negativeInfinity;
-      for (final e in candidatos.evaluate()) {
-        final y = tester.getRect(find.byWidget(e.widget)).top;
-        if (y > mayorY) {
-          mayorY = y;
-          pildora = find.byWidget(e.widget);
-        }
-      }
+      // Se cierra el dial y el «Inscribir» del MOSTRADOR
+      // (ahora el único de la pantalla) lleva el glifo
+      // canónico de D-14 y navega a Inscribir.
+      await tester.tap(find.byTooltip('Cerrar'));
+      await tester.pump(const Duration(milliseconds: 700));
+      final pildora = find.text('Inscribir');
+      expect(pildora, findsOneWidget);
       final fila = find.ancestor(
           of: pildora, matching: find.byType(Row)).first;
       expect(

@@ -23,6 +23,7 @@ import '../novedades.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import '../cierre_automatico.dart';
+import '../conciliacion.dart';
 import 'diagnostico_espejo_card.dart';
 import 'cierre_sesion.dart';
 import '../sync.dart';
@@ -42,6 +43,7 @@ import 'ayuda.dart';
 import 'buscar.dart';
 import 'bandeja_whatsapp.dart';
 import 'cola.dart';
+import 'conciliacion.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'cumpleanos.dart';
@@ -1058,8 +1060,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// dueño. Cuenta SOLO datos locales ya presentes (el
   /// espejo de reservas en 'solicitada', el espejo de
   /// solicitudes_adelanto en 'pendiente' — la misma
-  /// lectura de su bandeja — y el espejo de
-  /// solicitudes_relleno en 'pendiente'): ninguna RPC,
+  /// lectura de su bandeja —, el espejo de
+  /// solicitudes_relleno en 'pendiente' y, desde la
+  /// 1.30, el conteo de conciliaciones por comprobar
+  /// sobre el espejo de pagos): ninguna RPC,
   /// Home sigue offline-first. Fail-silent POR FUENTE
   /// con la regla de la bandeja: un fallo de lectura
   /// conserva el conteo anterior de ESA fuente, nunca
@@ -1069,6 +1073,7 @@ class _HomeScreenState extends State<HomeScreen>
     var reservas = _buzon.reservas;
     var adelantos = _buzon.adelantos;
     var rellenos = _buzon.rellenos;
+    var conciliaciones = _buzon.conciliaciones;
     try {
       final filas = await LocalDb.instance.allMirror('reservas');
       reservas =
@@ -1085,10 +1090,27 @@ class _HomeScreenState extends State<HomeScreen>
               .pendientesParaDueno())
           .length;
     } catch (_) {}
+    // 1.30 (Oleada D2, UI130-33): la cuarta fuente — las
+    // transferencias por comprobar, con el MISMO conteo
+    // espejo que alimenta la fila de urgencia del
+    // Dashboard (ConciliacionService.conteoPorComprobar:
+    // pendiente + problema según conciliacionAccionable,
+    // con el overlay de marcas en cola, así que lo que el
+    // dueño marca en su teléfono deja de contar al
+    // instante). En su propio try y con la regla de la
+    // casa: un fallo conserva el conteo anterior de ESTA
+    // fuente, nunca lo pone a 0.
+    try {
+      conciliaciones =
+          await ConciliacionService.instance.conteoPorComprobar();
+    } catch (_) {}
     if (!mounted || gen != _buzonGen) return;
     setState(() {
       _buzon = ConteoBuzon(
-          reservas: reservas, adelantos: adelantos, rellenos: rellenos);
+          reservas: reservas,
+          adelantos: adelantos,
+          rellenos: rellenos,
+          conciliaciones: conciliaciones);
     });
   }
 
@@ -1143,6 +1165,11 @@ class _HomeScreenState extends State<HomeScreen>
         _ir(const SolicitudesAdelantoScreen());
       case DestinoBuzon.rellenos:
         _ir(const ServiciosAdminScreen());
+      // 1.30 (D2, UI130-33): la cuarta parte abre la
+      // bandeja de Conciliación (la misma pantalla que
+      // la fila de urgencia del Dashboard).
+      case DestinoBuzon.conciliaciones:
+        _ir(const ConciliacionScreen());
     }
   }
 
@@ -1280,17 +1307,11 @@ class _HomeScreenState extends State<HomeScreen>
       // v1.3.6 (Jc): el dock fijo de abajo se reemplaza por un botón
       // flotante de acciones rápidas (speed dial): al tocarlo despliega
       // en horizontal Cobrar / Pago diario / Inscribir.
+      // 1.30 (Oleada D2, UI130-06): el dial queda como
+      // acceso directo SOLO de Servicios (agua, ración,
+      // combo): Cobrar / Pago diario / Inscribir viven en
+      // el mostrador, que es el sistema primario único.
       floatingActionButton: _FabAccionesRapidas(
-        onCobrar: () => _ir(const PagoScreen()),
-        onPagoDiario: () => _ir(const PagoDiarioScreen()),
-        onInscribir: () async {
-          // 1.24 Bloque 3: permiso operativo al tocar.
-          // 1.25 Bloque 2: con refresco antes de denegar.
-          if (await permisoOperativoOkConRefresco(
-        context, () => PermisosEntrenador().canInscribirClientes, 'inscribir clientes')) {
-            _ir(const InscribirScreen());
-          }
-        },
         onVenderAgua: () =>
             _ir(const ServiciosScreen(tipoInicial: 'agua_suelta')),
         onVenderRacion: () =>
@@ -1299,14 +1320,21 @@ class _HomeScreenState extends State<HomeScreen>
             _ir(const ServiciosScreen(tipoInicial: 'dosis_con_agua')),
       ),
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () => _cargar(forceRefresh: true),
-          child: ListView.builder(
-            controller: _scrollCtrl,
-            physics: const AlwaysScrollableScrollPhysics(),
-            itemCount: items.length,
-            itemBuilder: (context, i) =>
-                RepaintBoundary(child: items[i]),
+        // 1.30 (Oleada D2): ámbito de la fundación de
+        // movimiento de D1 — las secciones de Hoy entran
+        // en cascada (ItemCascada) al abrir la app; el
+        // ámbito decide una sola vez y luego todo pinta
+        // directo.
+        child: EntradaCascada(
+          child: RefreshIndicator(
+            onRefresh: () => _cargar(forceRefresh: true),
+            child: ListView.builder(
+              controller: _scrollCtrl,
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: items.length,
+              itemBuilder: (context, i) =>
+                  RepaintBoundary(child: items[i]),
+            ),
           ),
         ),
       ),
@@ -1443,101 +1471,32 @@ class _HomeScreenState extends State<HomeScreen>
   /// dentro de un SingleChildScrollView.
   List<Widget> _seccionesNivel(bool esDueno) {
     if (_nivelActivo == 0) {
-      // Nivel 1 «Hoy»: operación inmediata — buscar, cobrar,
-      // el dinero del día, la bandeja y la tira de alertas.
-      return [
-        // Zona 2 — Mostrador rápido (rediseño Argón):
-        // buscar + 4 acciones a 1 toque, antes de la
-        // tarjeta financiera.
-        KeyedSubtree(
-          key: const ValueKey('hoy-mostrador'),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: Column(
-              children: [
-                _botonBuscarCliente(),
-                if (_bloquesHoy.contains('mostrador')) ...[
-                  const SizedBox(height: AppEspacio.sm),
-                  _mostradorRapido(),
-                ],
-              ],
-            ),
-          ),
-        ),
-        // v1.3.3: tarjeta financiera por rol
-        if (_bloquesHoy.contains('finanzas'))
-          KeyedSubtree(
-            key: const ValueKey('hoy-finanzas'),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-              child: _tarjetaFinanciera(esDueno),
-            ),
-          ),
-        // Zona 4 — Atención hoy (rediseño Argón): la
-        // bandeja del dueño sube aquí, sobre la tira de
-        // alertas. SOLO del dueño (abre su WhatsApp y el
-        // check vive en su teléfono; si un entrenador la
-        // usara, el dueño re-escribiría al mismo cliente
-        // sin saberlo).
-        if (_auth.isOwner && _bloquesHoy.contains('bandeja'))
-          KeyedSubtree(
-            key: const ValueKey('hoy-bandeja'),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-              child: _botonBandejaWhatsapp(),
-            ),
-          ),
-        // 1.29 (Oleada 5, FB-12): buzón del dueño — solo
-        // si hay algo por responder. No es un bloque de
-        // la estación personalizable: es un aviso
-        // operativo (como la tira de alertas, pero con
-        // destino por parte).
-        if (_auth.isOwner && _buzon.hay)
-          KeyedSubtree(
-            key: const ValueKey('hoy-buzon'),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-              child: _tarjetaBuzon(),
-            ),
-          ),
-        // v1.3.3: tira de alertas (solo si hay algo)
-        if (_bloquesHoy.contains('alertas'))
-          KeyedSubtree(
-            key: const ValueKey('hoy-alertas'),
-            child: _tiraAlertas(),
-          ),
-        // Panel 19: si la estación quedó vacía por
-        // elección, se dice y se ofrece reabrir el editor.
-        if (_bloquesHoy.isEmpty)
-          KeyedSubtree(
-            key: const ValueKey('hoy-vacio'),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
-              child: Center(
-                child: Column(
-                  children: [
-                    const Text('Tu día está vacío: ocultaste '
-                        'todos los bloques.',
-                        textAlign: TextAlign.center,
-                        style: AppTexto.secundario),
-                    TextButton.icon(
-                      onPressed: _personalizarEstacion,
-                      icon: const Icon(Icons.tune_rounded, size: 18),
-                      label: const Text('Personalizar mi día'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        // Aire inferior para que el FAB no tape el final.
-        const SizedBox(key: ValueKey('hoy-aire'), height: 96),
-      ];
+      // Nivel 1 «Hoy»: la vista se parte por rol (1.30
+      // D2, UI130-31) — HomeScreen sigue siendo el
+      // contenedor único de estado y cada vista recibe
+      // SOLO las secciones que pinta, ya construidas.
+      if (esDueno) {
+        return _VistaHoyDueno(
+          bloquesHoy: _bloquesHoy,
+          buscar: _botonBuscarCliente(),
+          mostrador: _mostradorRapido(),
+          tarjetaAdministracion: _tarjetaAdministracionHoy(),
+          finanzas: _tarjetaFinanciera(true),
+          bandeja: _botonBandejaWhatsapp(),
+          buzon: _tarjetaBuzon(),
+          hayBuzon: _buzon.hay,
+          alertas: _tiraAlertas(),
+          onPersonalizar: _personalizarEstacion,
+        ).secciones();
+      }
+      return _VistaHoyEntrenador(
+        bloquesHoy: _bloquesHoy,
+        buscar: _botonBuscarCliente(),
+        mostrador: _mostradorRapido(),
+        finanzas: _tarjetaFinanciera(false),
+        alertas: _tiraAlertas(),
+        onPersonalizar: _personalizarEstacion,
+      ).secciones();
     }
     // Nivel 2 «Módulos»: herramientas de gestión y consulta.
     // Sin tarjetas que abran en crudo Cobrar / Pago diario /
@@ -1676,40 +1635,52 @@ class _HomeScreenState extends State<HomeScreen>
   /// Zona 2 — Mostrador rápido (rediseño Argón): 4 acciones a 1
   /// toque en fila de 52 px. En teléfonos estrechos, si la fila
   /// aprieta las etiquetas, el plan B es cuadrícula 2x2.
+  /// 1.30 (Oleada D2, UI130-06): el mostrador es EL
+  /// sistema primario de Home — y el único: las cuatro
+  /// acciones dejan el naranja pleno (cuatro botones de
+  /// marca gritando a la vez) por la superficie elevada
+  /// con el icono en naranja y la etiqueta en su color
+  /// normal. El naranja pleno se reserva a UNA acción
+  /// primaria por pantalla.
   Widget _mostradorRapido() {
     Widget accion(IconData icono, String texto, VoidCallback ir) {
       return Expanded(
-        child: SizedBox(
-          height: 52,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColores.naranja,
-              // 1.29 O9 (cabo O5): sobre la marca va sobreMarca
-              // (grafito, 6,32:1) — el blanco daba 2,75:1 y era
-              // la última superficie del dock fuera de la regla
-              // D-01 que la Oleada 1 fijó para el tema.
-              foregroundColor: AppColores.sobreMarca,
-              padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xs),
-            ),
-            onPressed: ir,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icono, size: 20),
-                const SizedBox(height: 2),
-                // 1.25 T116 (F1-13): la etiqueta ya NO se
-                // encoge por debajo del tamaño del usuario
-                // (FittedBox anulaba su letra grande): crece
-                // a 2 líneas centradas y solo recorta si ni
-                // así cabe.
-                Flexible(
-                  child: Text(texto,
-                      maxLines: 2,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTexto.etiqueta),
-                ),
-              ],
+        child: Material(
+          color: Theme.of(context).cardColor,
+          elevation: 2,
+          shadowColor: Colors.black.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(AppRadio.md),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            onTap: ir,
+            child: Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.xs),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+                border: Border.all(
+                    color: Theme.of(context).dividerColor),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icono, size: 20, color: AppColores.naranja),
+                  const SizedBox(height: 2),
+                  // 1.25 T116 (F1-13): la etiqueta ya NO se
+                  // encoge por debajo del tamaño del
+                  // usuario (FittedBox anulaba su letra
+                  // grande): crece a 2 líneas centradas y
+                  // solo recorta si ni así cabe.
+                  Flexible(
+                    child: Text(texto,
+                        maxLines: 2,
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTexto.etiqueta),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1733,12 +1704,23 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }),
         const SizedBox(width: AppEspacio.sm),
-        accion(Icons.bolt_rounded, 'Dosis',
+        accion(Icons.science_rounded, 'Dosis',
             () => _ir(const ServiciosScreen())),
       ],
     );
   }
 
+  /// 1.30 (Oleada D2, UI130-05): cabecera en DOS niveles
+  /// honestos. Nivel 1: el logo con su destino VISIBLE
+  /// (la insignia de engranaje dice que abre Ajustes) y
+  /// el wordmark con el saludo con aire — fuera los
+  /// botones de sync/ayuda/tema de la primera fila.
+  /// Debajo, la línea de contexto (fecha + mi turno) y
+  /// la FILA DE ESTADO: la píldora de sync A LO ANCHO
+  /// (nivel 1 de UI130-07: el botón-icono separado
+  /// desaparece), la campana con su contador y el menú
+  /// «más» (⋯) que recoge Ayuda y Tema: no desaparecen,
+  /// dejan de competir con el título en cada arranque.
   Widget _cabecera() {
     final nombre = _nombreVisible ?? _auth.displayName;
     return Container(
@@ -1749,55 +1731,70 @@ class _HomeScreenState extends State<HomeScreen>
             bottom: Radius.circular(AppRadio.xl)),
       ),
       padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
-          AppEspacio.sm, AppEspacio.lg, AppEspacio.md),
+          AppEspacio.md, AppEspacio.lg, AppEspacio.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              // 1.29 (Oleada 5, D-21): el logo deja de ser
-              // un cuadrado pegado: va en una TARJETA
-              // oscura (grafito profundo sobre el gradiente
-              // carbón) con borde hairline naranja y radio
-              // generoso. El toque sigue yendo a Ajustes —
-              // es el botón «ajustes» del trío de la
-              // cabecera — y el área tocable es 48×48.
+              // El logo abre Ajustes y ahora lo DICE: la
+              // insignia de engranaje sobre su esquina.
               InkWell(
                 borderRadius: BorderRadius.circular(AppRadio.lg),
                 onTap: () => _ir(const AjustesScreen()),
                 child: Tooltip(
                   message: 'Ajustes',
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: AppColores.carbonProfundo,
-                      borderRadius:
-                          BorderRadius.circular(AppRadio.lg),
-                      border: Border.all(
-                          color: AppColores.naranja
-                              .withValues(alpha: 0.55)),
-                    ),
-                    child: ClipRRect(
-                      borderRadius:
-                          BorderRadius.circular(AppRadio.md),
-                      child: Image.asset('assets/logo.jpg',
-                          fit: BoxFit.cover),
-                    ),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: AppColores.carbonProfundo,
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.lg),
+                          border: Border.all(
+                              color: AppColores.naranja
+                                  .withValues(alpha: 0.55)),
+                        ),
+                        child: ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(AppRadio.md),
+                          child: Image.asset('assets/logo.jpg',
+                              fit: BoxFit.cover),
+                        ),
+                      ),
+                      Positioned(
+                        right: -4,
+                        bottom: -4,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: AppColores.naranja,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: AppColores.carbonProfundo,
+                                width: 2),
+                          ),
+                          child: const Icon(
+                              Icons.settings_rounded,
+                              size: 11,
+                              color: AppColores.sobreMarca),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
               const SizedBox(width: AppEspacio.md),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // B9 (1.23): marca en Home — el wordmark
-                    // manda en la cabecera; el saludo baja a
-                    // línea personal secundaria con su rol.
-                    // 1.29 (D-21): la jerarquía pasa a
+                    // El wordmark de D-21, intacto:
                     // «IRON BODY» en blanco y «GYM» en
                     // naranja, con el tracking de siempre.
                     RichText(
@@ -1834,69 +1831,45 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
               ),
-              // 1.29 (Oleada 5, D-21): los iconos de la
-              // cabecera van en botones CIRCULARES con
-              // contenedor (fondo translúcido, toque ≥48).
-              // El de sync VUELVE a la primera fila — la
-              // T116 lo sacó porque dos señales podían
-              // discrepar; este lee la MISMA foto del
-              // motor que la SyncPill de debajo
-              // (statusStream/currentStatus), así que por
-              // construcción dice lo mismo, y la píldora
-              // conserva el detalle en texto.
-              _BotonSyncCabecera(
-                  onTap: () => _ir(const ColaScreen())),
-              _campana(),
-              // v1.3.6 (Jc): la lupa salió del banner; Buscar cliente vive
-              // en el Mostrador Rápido (rediseño Argón, zona 2).
-              _BotonCabecera(
-                icono: Icons.help_outline_rounded,
-                tooltip: 'Ayuda',
-                onPressed: () => _ir(const AyudaScreen()),
-              ),
-              ValueListenableBuilder<ThemeMode>(
-                valueListenable: ThemeController.mode,
-                builder: (_, mode, __) => _BotonCabecera(
-                  icono: mode == ThemeMode.dark
-                      ? Icons.light_mode_rounded
-                      : mode == ThemeMode.light
-                          ? Icons.dark_mode_rounded
-                          : Icons.brightness_auto_rounded,
-                  tooltip: 'Tema: claro / oscuro / sistema',
-                  onPressed: () => ThemeController.ciclo(),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  _fechaHoy(),
+                  style: AppTexto.metadato
+                      .copyWith(color: Colors.white60),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
+              _chipTurno(),
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
           Row(
             children: [
               Expanded(
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(_fechaHoy(),
-                          style: AppTexto.metadato.copyWith(color: Colors.white60),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                    const SizedBox(width: 8),
-                    _chipTurno(),
-                  ],
+                child: SyncPill(
+                  anchoCompleto: true,
+                  onTap: () => _ir(const ColaScreen()),
                 ),
               ),
-              SyncPill(
-                  onTap: () =>
-                      _ir(const ColaScreen())),
+              const SizedBox(width: AppEspacio.sm),
+              _campana(),
+              _menuMasCabecera(),
             ],
           ),
-          // B9: acento de marca cerrando la cabecera.
+          const SizedBox(height: AppEspacio.sm),
+          // B9: acento cerrando la cabecera.
           // 1.25 T49: el filete es VIVO — su color dice el
           // estado del día antes de leer un solo número:
           // verde sin atrasados ni vencimientos de hoy,
           // ámbar si vencen hoy o hay atrasados leves, rojo
           // si hay vencidos de +30 días (la prioridad de
-          // urgenciaVencimientos).
-          const SizedBox(height: AppEspacio.sm),
+          // urgenciaVencimientos). Se conserva tal cual.
           Container(
             height: 3,
             decoration: BoxDecoration(
@@ -1909,6 +1882,65 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 1.30 (Oleada D2, UI130-05): el menú «más» (⋯) de la
+  /// cabecera — recoge Ayuda y Tema con el mismo botón
+  /// circular que el resto de la cabecera.
+  Widget _menuMasCabecera() {
+    return PopupMenuButton<String>(
+      tooltip: 'Más opciones',
+      onSelected: (valor) {
+        if (valor == 'ayuda') {
+          _ir(const AyudaScreen());
+        } else if (valor == 'tema') {
+          ThemeController.ciclo();
+        }
+      },
+      itemBuilder: (ctx) => [
+        const PopupMenuItem<String>(
+          value: 'ayuda',
+          child: Row(
+            children: [
+              Icon(Icons.help_outline_rounded, size: 20),
+              SizedBox(width: AppEspacio.sm),
+              Text('Ayuda'),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'tema',
+          child: Row(
+            children: [
+              Icon(
+                  ThemeController.mode.value == ThemeMode.dark
+                      ? Icons.light_mode_rounded
+                      : ThemeController.mode.value ==
+                              ThemeMode.light
+                          ? Icons.dark_mode_rounded
+                          : Icons.brightness_auto_rounded,
+                  size: 20),
+              const SizedBox(width: AppEspacio.sm),
+              const Text('Cambiar tema'),
+            ],
+          ),
+        ),
+      ],
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.08),
+        shape: CircleBorder(
+          side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.16)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: const SizedBox(
+          width: 48,
+          height: 48,
+          child: Icon(Icons.more_vert_rounded,
+              color: Colors.white, size: 22),
+        ),
       ),
     );
   }
@@ -2995,6 +3027,89 @@ class _HomeScreenState extends State<HomeScreen>
   /// H1 (estéticas 1.19): módulos agrupados con encabezado pequeño
   /// en vez de una lista plana. Cada grupo es su propio grid de
   /// 2 columnas; un grupo sin hijos no se pinta.
+  /// 1.30 (Oleada D2, UI130-23): la tarjeta de
+  /// Administración en Hoy — el acceso rápido que el
+  /// diseño aprobado pone entre el mostrador y
+  /// Estadísticas Rápidas, con su subtítulo de siempre
+  /// («Precios y tarifas · Plus · Usuarios y permisos»)
+  /// y el contador de atención del Panel. Se construye
+  /// solo para el dueño y NO es un bloque de la
+  /// estación personalizable: no se puede ocultar.
+  Widget _tarjetaAdministracionHoy() {
+    return Tarjeta(
+      onTap: () => _ir(const AdminScreen()),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.md),
+      child: Row(
+        children: [
+          IconoModuloBadge.naranja(
+              Icons.admin_panel_settings_rounded,
+              tamanoIcono: 22),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Administración',
+                    style: AppTexto.secundario
+                        .copyWith(fontWeight: FontWeight.w600)),
+                Text(
+                    'Precios y tarifas · Plus · Usuarios y permisos',
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.textoSecundario(context))),
+              ],
+            ),
+          ),
+          if (_atencion.total > 0) ...[
+            ContadorUrgente(numero: _atencion.total),
+            const SizedBox(width: 4),
+          ],
+          Icon(Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColores.textoSecundario(context)),
+        ],
+      ),
+    );
+  }
+
+  /// 1.30 (Oleada D2, UI130-23): rejilla que CIERRA —
+  /// filas de [columnas] fichas con la misma altura; la
+  /// última fila, si queda incompleta, ensancha sus
+  /// fichas a lo ancho en vez de dejar la celda vacía
+  /// que dejaba GridView.count (el hueco de «El gym
+  /// hoy», con 3 módulos, y el de MÁS según el rol).
+  Widget _rejillaCerrada(
+      List<Widget> hijos, int columnas, double ratio) {
+    if (hijos.isEmpty) return const SizedBox.shrink();
+    return LayoutBuilder(builder: (ctx, cons) {
+      final anchoFicha =
+          (cons.maxWidth - (columnas - 1) * AppEspacio.sm) /
+              columnas;
+      final altoFicha = anchoFicha / ratio;
+      final filas = <Widget>[];
+      for (var i = 0; i < hijos.length; i += columnas) {
+        final fin =
+            i + columnas < hijos.length ? i + columnas : hijos.length;
+        final fila = hijos.sublist(i, fin);
+        filas.add(Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var j = 0; j < fila.length; j++) ...[
+              if (j > 0) const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                  child:
+                      SizedBox(height: altoFicha, child: fila[j])),
+            ],
+          ],
+        ));
+        if (fin < hijos.length) {
+          filas.add(const SizedBox(height: AppEspacio.sm));
+        }
+      }
+      return Column(mainAxisSize: MainAxisSize.min, children: filas);
+    });
+  }
+
   Widget _gridModulos() {
     Widget grupo(String titulo, List<Widget> hijos) {
       if (hijos.isEmpty) return const SizedBox.shrink();
@@ -3005,15 +3120,9 @@ class _HomeScreenState extends State<HomeScreen>
               style: AppTexto.secundario.copyWith(
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: AppEspacio.sm),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: AppEspacio.sm,
-            crossAxisSpacing: AppEspacio.sm,
-            childAspectRatio: 2.4,
-            children: hijos,
-          ),
+          // 1.30 D2 (UI130-23): rejilla cerrada — sin la
+          // celda vacía del conteo impar.
+          _rejillaCerrada(hijos, 2, 2.4),
           const SizedBox(height: AppEspacio.md),
         ],
       );
@@ -3221,14 +3330,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// el botón era redundante. La pantalla sigue en el código por
   /// si se recupera, pero sin entrada en el grid.
   Widget _gridMas() {
-    return GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: AppEspacio.sm,
-      crossAxisSpacing: AppEspacio.sm,
-      childAspectRatio: 1.4,
-      children: [
+    // 1.30 D2 (UI130-23): rejilla cerrada de 3 columnas
+    // (el conteo varía por rol: sin huecos en ninguno).
+    return _rejillaCerrada([
+
         _herramienta(Icons.account_balance_rounded,
             'Transferencia',
             () => _ir(const TransferenciaScreen())),
@@ -3262,8 +3367,7 @@ class _HomeScreenState extends State<HomeScreen>
             () => _ir(const PapeleraScreen())),
         _herramienta(Icons.logout_rounded, 'Salir', _salir,
             color: AppColores.error),
-      ],
-    );
+    ], 3, 1.4);
   }
 
   /// Herramienta pequeña (badge + etiqueta). v1.3.6 (Argón, diseño): mismo
@@ -3302,25 +3406,285 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
+/// 1.30 (Oleada D2, UI130-31 + UI130-23): la vista de
+/// «Hoy» del DUEÑO. Recibe las secciones ya construidas
+/// y solo las ordena: mostrador → Administración →
+/// Estadísticas Rápidas → bandeja → buzón → alertas.
+/// La tarjeta de Administración NO depende de los
+/// bloques de la estación personalizable (no se puede
+/// ocultar): es el acceso rápido fijo del rol. Las
+/// secciones entran en cascada (fundación de D1) con
+/// sus ValueKey estables de siempre.
+class _VistaHoyDueno extends StatelessWidget {
+  final Set<String> bloquesHoy;
+  final Widget buscar;
+  final Widget mostrador;
+  final Widget tarjetaAdministracion;
+  final Widget finanzas;
+  final Widget bandeja;
+  final Widget buzon;
+  final bool hayBuzon;
+  final Widget alertas;
+  final VoidCallback onPersonalizar;
+
+  const _VistaHoyDueno({
+    required this.bloquesHoy,
+    required this.buscar,
+    required this.mostrador,
+    required this.tarjetaAdministracion,
+    required this.finanzas,
+    required this.bandeja,
+    required this.buzon,
+    required this.hayBuzon,
+    required this.alertas,
+    required this.onPersonalizar,
+  });
+
+  List<Widget> secciones() {
+    return [
+      // Zona 2 — Mostrador rápido: buscar + 4 acciones a
+      // 1 toque, antes de la tarjeta financiera.
+      KeyedSubtree(
+        key: const ValueKey('hoy-mostrador'),
+        child: ItemCascada(
+          indice: 0,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: Column(
+              children: [
+                buscar,
+                if (bloquesHoy.contains('mostrador')) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  mostrador,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      // 1.30 D2 (UI130-23): Administración, entre el
+      // mostrador y Estadísticas Rápidas. Solo dueño
+      // (esta vista solo se construye para él).
+      KeyedSubtree(
+        key: const ValueKey('hoy-admin'),
+        child: ItemCascada(
+          indice: 1,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: tarjetaAdministracion,
+          ),
+        ),
+      ),
+      // v1.3.3: tarjeta financiera por rol.
+      if (bloquesHoy.contains('finanzas'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-finanzas'),
+          child: ItemCascada(
+            indice: 2,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: finanzas,
+            ),
+          ),
+        ),
+      // Zona 4 — Atención hoy: la bandeja del dueño,
+      // sobre la tira de alertas. SOLO del dueño (abre
+      // su WhatsApp y el check vive en su teléfono).
+      if (bloquesHoy.contains('bandeja'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-bandeja'),
+          child: ItemCascada(
+            indice: 3,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: bandeja,
+            ),
+          ),
+        ),
+      // 1.29 (Oleada 5, FB-12): buzón del dueño — solo
+      // si hay algo por responder. No es un bloque de
+      // la estación personalizable: es un aviso
+      // operativo, con destino por parte.
+      if (hayBuzon)
+        KeyedSubtree(
+          key: const ValueKey('hoy-buzon'),
+          child: ItemCascada(
+            indice: 4,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: buzon,
+            ),
+          ),
+        ),
+      // v1.3.3: tira de alertas (solo si hay algo).
+      if (bloquesHoy.contains('alertas'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-alertas'),
+          child: ItemCascada(indice: 5, child: alertas),
+        ),
+      // Panel 19: si la estación quedó vacía por
+      // elección, se dice y se ofrece reabrir el editor.
+      if (bloquesHoy.isEmpty)
+        KeyedSubtree(
+          key: const ValueKey('hoy-vacio'),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
+            child: Center(
+              child: Column(
+                children: [
+                  const Text('Tu día está vacío: ocultaste '
+                      'todos los bloques.',
+                      textAlign: TextAlign.center,
+                      style: AppTexto.secundario),
+                  TextButton.icon(
+                    onPressed: onPersonalizar,
+                    icon: const Icon(Icons.tune_rounded, size: 18),
+                    label: const Text('Personalizar mi día'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      // Aire inferior para que el FAB no tape el final.
+      const SizedBox(key: ValueKey('hoy-aire'), height: 96),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Column(children: secciones());
+}
+
+/// 1.30 (Oleada D2, UI130-31): la vista de «Hoy» del
+/// ENTRENADOR, a su medida: tras el mostrador van
+/// primero SUS vencimientos de hoy (la tira de alertas)
+/// y después su tarjeta de turno y dinero (su pendiente
+/// a entregar vive ahí). Recibe solo las secciones que
+/// pinta: ni la bandeja ni el buzón del dueño existen
+/// en esta vista, y ningún dato de stock de Servicios
+/// entra por sus parámetros — la tarjeta financiera se
+/// construye en HomeScreen con lo de siempre.
+class _VistaHoyEntrenador extends StatelessWidget {
+  final Set<String> bloquesHoy;
+  final Widget buscar;
+  final Widget mostrador;
+  final Widget finanzas;
+  final Widget alertas;
+  final VoidCallback onPersonalizar;
+
+  const _VistaHoyEntrenador({
+    required this.bloquesHoy,
+    required this.buscar,
+    required this.mostrador,
+    required this.finanzas,
+    required this.alertas,
+    required this.onPersonalizar,
+  });
+
+  List<Widget> secciones() {
+    return [
+      // Zona 2 — Mostrador rápido: buscar + 4 acciones.
+      KeyedSubtree(
+        key: const ValueKey('hoy-mostrador'),
+        child: ItemCascada(
+          indice: 0,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: Column(
+              children: [
+                buscar,
+                if (bloquesHoy.contains('mostrador')) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  mostrador,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      // Primero lo suyo de hoy: la tira de alertas con
+      // sus vencimientos por delante (la propia tira ya
+      // ordena por rol al construirse en HomeScreen).
+      if (bloquesHoy.contains('alertas'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-alertas'),
+          child: ItemCascada(indice: 1, child: alertas),
+        ),
+      // Su tarjeta de turno y dinero (cobrado hoy, su
+      // pendiente a entregar, pagaron el mes, su base).
+      if (bloquesHoy.contains('finanzas'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-finanzas'),
+          child: ItemCascada(
+            indice: 2,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: finanzas,
+            ),
+          ),
+        ),
+      // Panel 19: estación vacía por elección.
+      if (bloquesHoy.isEmpty)
+        KeyedSubtree(
+          key: const ValueKey('hoy-vacio'),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
+            child: Center(
+              child: Column(
+                children: [
+                  const Text('Tu día está vacío: ocultaste '
+                      'todos los bloques.',
+                      textAlign: TextAlign.center,
+                      style: AppTexto.secundario),
+                  TextButton.icon(
+                    onPressed: onPersonalizar,
+                    icon: const Icon(Icons.tune_rounded, size: 18),
+                    label: const Text('Personalizar mi día'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      const SizedBox(key: ValueKey('hoy-aire'), height: 96),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Column(children: secciones());
+}
+
 /// v1.3.6 (Jc): botón flotante de acciones rápidas (speed dial) que
 /// reemplaza al dock inferior fijo de la v1.3.5. Cerrado muestra un solo
 /// FAB naranja (rayo); v1.3.7 (Jc): al tocarlo despliega en VERTICAL las
 /// 3 acciones más usadas (Cobrar, Pago diario, Inscribir) con aparición
 /// escalonada suave. Elegir una acción (o el botón Atrás) lo cierra.
+/// 1.30 (Oleada D2, UI130-06): el dial, especializado.
+/// Nació como atajo general (membresías + servicios) y
+/// duplicaba el mostrador: desde esta oleada es SOLO el
+/// acceso directo de Servicios — agua, ración y combo —
+/// con su icono propio de dosis en el FAB (el rayo era
+/// el icono «de dosis» y confundía). Cobrar, Pago
+/// diario e Inscribir viven únicamente en el mostrador.
 class _FabAccionesRapidas extends StatefulWidget {
-  final VoidCallback onCobrar;
-  final VoidCallback onPagoDiario;
-  final VoidCallback onInscribir;
-  // Ítem 5 (post-1.8.0, pedido de Jc): Servicios protagonistas en el
-  // rayo — venta directa de agua, ración y combo.
+  // Ítem 5 (post-1.8.0, pedido de Jc): Servicios protagonistas —
+  // venta directa de agua, ración y combo.
   final VoidCallback onVenderAgua;
   final VoidCallback onVenderRacion;
   final VoidCallback onVenderCombo;
 
   const _FabAccionesRapidas({
-    required this.onCobrar,
-    required this.onPagoDiario,
-    required this.onInscribir,
     required this.onVenderAgua,
     required this.onVenderRacion,
     required this.onVenderCombo,
@@ -3352,7 +3716,7 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    const total = 6;
+    const total = 3;
     _animsPildora = [
       for (var index = 0; index < total; index++)
         CurvedAnimation(
@@ -3462,27 +3826,18 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    // Rediseño Argón: membresías primero (las 3
-                    // más usadas) y dosis después, con separador
-                    // de 12 px entre bloques.
-                    _accionAnimada(0, Icons.payments_rounded, 'Cobrar',
-                        () => _irCerrando(widget.onCobrar)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(1, Icons.today_rounded, 'Pago diario',
-                        () => _irCerrando(widget.onPagoDiario)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(2, Icons.person_add_rounded,
-                        'Inscribir', () => _irCerrando(widget.onInscribir)),
-                    const SizedBox(height: 12),
-                    _accionAnimada(3, Icons.water_drop_rounded,
+                    // 1.30 (Oleada D2, UI130-06): solo las
+                    // tres ventas de Servicios, en el orden
+                    // de siempre (agua junto al FAB).
+                    _accionAnimada(0, Icons.water_drop_rounded,
                         'Vender agua',
                         () => _irCerrando(widget.onVenderAgua)),
                     const SizedBox(height: 8),
-                    _accionAnimada(4, Icons.science_rounded,
+                    _accionAnimada(1, Icons.science_rounded,
                         'Vender ración',
                         () => _irCerrando(widget.onVenderRacion)),
                     const SizedBox(height: 8),
-                    _accionAnimada(5, Icons.local_drink_rounded,
+                    _accionAnimada(2, Icons.local_drink_rounded,
                         'Vender combo',
                         () => _irCerrando(widget.onVenderCombo)),
                   ],
@@ -3516,7 +3871,13 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                 turns: _abierto ? 0.125 : 0.0,
                 duration: const Duration(milliseconds: 220),
                 child: Icon(
-                  _abierto ? Icons.close_rounded : Icons.bolt_rounded,
+                  // 1.30 D2 (UI130-06): el FAB lleva el
+                  // icono propio de DOSIS (el frasco): el
+                  // rayo era el icono de las dosis y el
+                  // dial ya es solo de Servicios.
+                  _abierto
+                      ? Icons.close_rounded
+                      : Icons.science_rounded,
                   // 1.30 D1 (UI130-01): el glifo del dial va
                   // en sobreMarca (7,35/4,88 sobre el
                   // gradiente), no en blanco (2,36/3,56).
@@ -3540,11 +3901,11 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
   /// escalonada según su índice (la de arriba sale última).
   Widget _accionAnimada(
       int index, IconData icono, String texto, VoidCallback onTap) {
-    // Orden visual (rediseño Argón): Cobrar (0) arriba …
-    // Vender combo (5) junto al rayo. La animación entra de abajo
-    // hacia arriba. Con 6 píldoras el escalonado se reparte en el
-    // mismo tramo total (0.3) que con 3 para que ningún Interval
-    // pase de 1.0.
+    // Orden visual (1.30 D2, UI130-06): «Vender agua»
+    // (0) arriba … «Vender combo» (2) junto al FAB. La
+    // animación entra de abajo hacia arriba; con 3
+    // píldoras el escalonado se reparte en el tramo
+    // total (0.3) para que ningún Interval pase de 1.0.
     final itemAnim = _animsPildora[index];
     return FadeTransition(
       opacity: itemAnim,
@@ -3808,8 +4169,10 @@ class _EntradaCabeceraState extends State<_EntradaCabecera>
 /// 1.29 (Oleada 5, D-21): botón circular de la cabecera
 /// — contenedor translúcido sobre el gradiente carbón,
 /// borde hairline, zona tocable de 48×48 e icono blanco.
-/// Admite una insignia con contador (la campana) o un
-/// punto de estado (el sync).
+/// Admite una insignia con contador (la campana). El
+/// punto de estado del sync vivía aquí hasta UI130-05:
+/// ahora lo lleva la píldora, única señal de sync de la
+/// cabecera, y los parámetros punto/giro se retiran.
 class _BotonCabecera extends StatelessWidget {
   final IconData icono;
   final String tooltip;
@@ -3819,16 +4182,12 @@ class _BotonCabecera extends StatelessWidget {
   /// el ContadorUrgente único; antes era un texto suelto
   /// sobre el rojo brillante). Null o 0 = sin insignia.
   final int? insignia;
-  final Color? punto;
-  final Animation<double>? giro;
 
   const _BotonCabecera({
     required this.icono,
     required this.tooltip,
     required this.onPressed,
     this.insignia,
-    this.punto,
-    this.giro,
   });
 
   @override
@@ -3852,11 +4211,7 @@ class _BotonCabecera extends StatelessWidget {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                Center(
-                  child: giro == null
-                      ? iconoW
-                      : RotationTransition(turns: giro!, child: iconoW),
-                ),
+                Center(child: iconoW),
                 if (insignia != null && insignia! > 0)
                   Positioned(
                     right: 2,
@@ -3866,94 +4221,11 @@ class _BotonCabecera extends StatelessWidget {
                     child: ContadorUrgente(
                         numero: insignia!, conBorde: true),
                   ),
-                if (punto != null)
-                  Positioned(
-                    right: 4,
-                    top: 4,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: punto,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: AppColores.carbonProfundo,
-                            width: 2),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 1.29 (Oleada 5, D-21): el botón de sync de la
-/// cabecera, con estado VIVO: gira mientras el motor
-/// sincroniza y lleva el punto de estado (error /
-/// pendientes / al día). Lee la MISMA foto del motor
-/// que la SyncPill (statusStream con currentStatus de
-/// semilla): las dos señales no pueden discrepar.
-class _BotonSyncCabecera extends StatefulWidget {
-  final VoidCallback onTap;
-
-  const _BotonSyncCabecera({required this.onTap});
-
-  @override
-  State<_BotonSyncCabecera> createState() =>
-      _BotonSyncCabeceraState();
-}
-
-class _BotonSyncCabeceraState extends State<_BotonSyncCabecera>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _giro;
-
-  @override
-  void initState() {
-    super.initState();
-    _giro = AnimationController(
-        vsync: this, duration: const Duration(seconds: 2));
-  }
-
-  @override
-  void dispose() {
-    _giro.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<SyncStatus>(
-      stream: SyncEngine.instance.statusStream,
-      initialData: SyncEngine.instance.currentStatus,
-      builder: (ctx, snap) {
-        final s = snap.data!;
-        final enProgreso = s.phase == SyncPhase.uploading ||
-            s.phase == SyncPhase.downloading ||
-            s.phase == SyncPhase.photos;
-        if (enProgreso && !_giro.isAnimating) {
-          _giro.repeat();
-        } else if (!enProgreso && _giro.isAnimating) {
-          _giro.stop();
-        }
-        final punto = s.phase == SyncPhase.error
-            ? AppColores.error
-            : s.pending > 0
-                ? AppColores.alerta
-                : AppColores.exito;
-        return _BotonCabecera(
-          icono: s.phase == SyncPhase.error
-              ? Icons.sync_problem_rounded
-              : Icons.sync_rounded,
-          tooltip: 'Sincronización',
-          onPressed: widget.onTap,
-          punto: punto,
-          giro: enProgreso ? _giro : null,
-        );
-      },
     );
   }
 }

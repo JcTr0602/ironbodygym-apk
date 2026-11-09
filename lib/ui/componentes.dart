@@ -1366,11 +1366,29 @@ class AvisoEstado extends StatelessWidget {
   final String texto;
   final IconData? icono;
 
+  /// 1.30 (Oleada D2, UI130-07): segunda línea opcional
+  /// bajo el texto (el mensaje del error en el banner
+  /// de sync), en metadato sobre el mismo fondo.
+  final String? detalle;
+
+  /// 1.30 (Oleada D2, UI130-07): acciones opcionales
+  /// bajo el texto (Reintentar / Ver qué quedó / Ver
+  /// detalle en el error de sync). El llamador les da el
+  /// frente (sobre los fondos *Fondo, blanco).
+  final List<Widget>? acciones;
+
+  /// 1.30 (Oleada D2, UI130-07): contenido extra al
+  /// final del aviso (el detalle desplegado del error).
+  final Widget? pie;
+
   const AvisoEstado({
     super.key,
     required this.tipo,
     required this.texto,
     this.icono,
+    this.detalle,
+    this.acciones,
+    this.pie,
   });
 
   Color get _fondo {
@@ -1408,18 +1426,51 @@ class AvisoEstado extends StatelessWidget {
         color: _fondo,
         borderRadius: BorderRadius.circular(AppRadio.lg),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icono ?? _iconoCanonico, size: 20, color: Colors.white),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Text(
-              texto,
-              style: AppTexto.cuerpo.copyWith(
-                  color: Colors.white, fontWeight: FontWeight.w600),
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icono ?? _iconoCanonico,
+                  size: 20, color: Colors.white),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      texto,
+                      style: AppTexto.cuerpo.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    if (detalle != null && detalle!.isNotEmpty) ...[
+                      const SizedBox(height: AppEspacio.xs),
+                      Text(
+                        detalle!,
+                        style: AppTexto.metadato
+                            .copyWith(color: Colors.white),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
           ),
+          if (acciones != null && acciones!.isNotEmpty) ...[
+            const SizedBox(height: AppEspacio.sm),
+            Wrap(
+              spacing: AppEspacio.sm,
+              runSpacing: AppEspacio.xs,
+              children: acciones!,
+            ),
+          ],
+          if (pie != null) ...[
+            const SizedBox(height: AppEspacio.sm),
+            pie!,
+          ],
         ],
       ),
     );

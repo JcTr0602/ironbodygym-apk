@@ -1,13 +1,14 @@
 /// Gestión 1.30 — Oleada 1: el manifiesto deja de mentir por
 /// omisión (plan §2.4: tests de la app).
 ///
-/// - Inventario: `SyncEngine.tablasManifiesto` (las 41 que pide
-///   la app) ⊆ allowlist de la RPC `sync_manifiesto` (42
+/// - Inventario: `SyncEngine.tablasManifiesto` (las 42 que pide
+///   la app) ⊆ allowlist de la RPC `sync_manifiesto` (43
 ///   entradas: las 40 de la Oleada 1 del servidor, fijadas
 ///   contra la lista del plan §2.1/§2.2 y contra la definición
 ///   aplicada el 2026-11-08, + las 2 que publicó la ventana
 ///   §10 — GEN-07: `sync_servicio_lotes` y
-///   `sync_servicio_compras`). Si la RPC pierde una tabla,
+///   `sync_servicio_compras` — + la de GEN-10 en la oleada D2:
+///   `sync_avisos_vistos`, solo-dueño). Si la RPC pierde una tabla,
 ///   este test lo canta antes de que un teléfono la deje
 ///   «sin verificar» para siempre.
 /// - Paridad inversa con el pull: toda tabla del manifiesto
@@ -75,6 +76,8 @@ void main() {
       'sync_incidencias_sync',
       'sync_permisos_bandeja',
       'sync_avisos_entrenadores',
+      // GEN-10 (D2): vistos de avisos, solo-dueño en la RPC.
+      'sync_avisos_vistos',
       'sync_solicitudes_adelanto',
       'sync_solicitudes_relleno',
       'sync_nomina_bonos',
@@ -83,10 +86,10 @@ void main() {
       'sync_recordatorio_config',
     };
 
-    test('la app pide 41 y la RPC permite 42: las 41 pedidas '
+    test('la app pide 42 y la RPC permite 43: las 42 pedidas '
         'están dentro y la única de más es sync_borrados', () {
-      expect(SyncEngine.tablasManifiesto.length, 41);
-      expect(allowlistRpc.length, 42);
+      expect(SyncEngine.tablasManifiesto.length, 42);
+      expect(allowlistRpc.length, 43);
       // servicio_lotes y servicio_compras YA existen como
       // tablas sync_* en Supabase: la ventana §10 (GEN-07) las
       // publicó en el puente y entraron en el allowlist de la
@@ -98,8 +101,8 @@ void main() {
           SyncEngine.tablasManifiesto.keys.toSet().difference(allowlistRpc);
       expect(diferencia, isEmpty,
           reason: 'toda tabla que la app pide debe estar en el '
-              'allowlist de la RPC (contrato tras la ventana '
-              '§10: 41 pedidas ⊆ 42 permitidas)');
+              'allowlist de la RPC (contrato tras GEN-10: '
+              '42 pedidas ⊆ 43 permitidas)');
       // La RPC además cubre sync_borrados: la app la verifica
       // por su propio camino (el manifiesto de borrados viaja
       // en la misma RPC, fuera de tablasManifiesto). Es la

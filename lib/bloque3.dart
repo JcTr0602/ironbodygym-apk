@@ -59,6 +59,14 @@ const String kTipoOpResolverSolicitudAdelanto = 'resolver_solicitud_adelanto';
 const String kTipoOpSolicitarRelleno = 'solicitar_relleno';
 const String kTipoOpUpsertAvisoEntrenador = 'upsert_aviso_entrenador';
 
+/// 1.30 (D2, GEN-10): acuse de visto de un aviso. Registrada en
+/// el CHECK de sync_ops (101 tipos) por el SQL de la oleada
+/// ANTES de que ningún teléfono la envíe. El «visto» local
+/// (avisos_vistos_local) sigue siendo la fuente inmediata que
+/// apaga el PopUp; la op es solo el respaldo que baja al dueño
+/// por el espejo avisos_vistos.
+const String kTipoOpMarcarAvisoVisto = 'marcar_aviso_visto';
+
 // ---------------------------------------------------------------------------
 // B3/B4: los 3 estados del convertido (puros, testeables)
 // ---------------------------------------------------------------------------
@@ -360,6 +368,120 @@ class AvisoEntrenador {
       };
 }
 
+/// GEN-10: un «visto» de aviso tal como baja por el espejo
+/// `avisos_vistos`. La identidad la selló el servidor desde el
+/// dispositivo (telegram_id + nombre); el nombre visible prefiere
+/// el canónico de [kEntrenadoresAviso].
+class VistoAviso {
+  final String avisoId;
+  final int telegramId;
+  final String nombreServidor;
+  final String? vistoEn; // ISO Habana tal como lo guardó el servidor
+  final bool descartado;
+
+  const VistoAviso({
+    required this.avisoId,
+    required this.telegramId,
+    this.nombreServidor = '',
+    this.vistoEn,
+    this.descartado = false,
+  });
+
+  factory VistoAviso.fromMirror(Map<String, dynamic> m) {
+    final telRaw = m['telegram_id'];
+    final tel = telRaw is num ? telRaw.toInt() : int.tryParse('$telRaw');
+    return VistoAviso(
+      avisoId: '${m['aviso_id'] ?? ''}',
+      telegramId: tel ?? 0,
+      nombreServidor: '${m['nombre'] ?? ''}',
+      vistoEn: (m['visto_en'] as String?)?.isEmpty ?? true
+          ? null
+          : m['visto_en'] as String?,
+      descartado: (m['descartado'] as num?)?.toInt() == 1 ||
+          '${m['descartado'] ?? ''}' == '1' ||
+          m['descartado'] == true,
+    );
+  }
+
+  String get nombreVisible {
+    final canonico = kEntrenadoresAviso[telegramId];
+    if (canonico != null) return canonico;
+    return nombreServidor.isNotEmpty ? nombreServidor : 'Entrenador';
+  }
+}
+
+/// Vistos de UN aviso (los demás se quedan fuera).
+List<VistoAviso> vistosDeAviso(List<VistoAviso> vistos, String avisoId) =>
+    [for (final v in vistos) if (v.avisoId == avisoId) v];
+
+const List<String> _mesesVistoCorto = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+];
+
+/// '2026-11-08T07:42:…' → '8 nov, 07:42'. Se lee de la propia
+/// cadena ISO (hora Habana guardada) sin convertir zonas; si
+/// no rima con el formato, cadena vacía.
+String fechaVistoCorta(String? iso) {
+  if (iso == null) return '';
+  final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})')
+      .firstMatch(iso);
+  if (m == null) return '';
+  final mes = int.parse(m[2]!);
+  if (mes < 1 || mes > 12) return '';
+  return '${int.parse(m[3]!)} ${_mesesVistoCorto[mes - 1]}, '
+      '${m[4]}:${m[5]}';
+}
+
+String _uneNombres(List<String> nombres) {
+  if (nombres.length <= 1) return nombres.join();
+  if (nombres.length == 2) return '${nombres[0]} y ${nombres[1]}';
+  return '${nombres.sublist(0, nombres.length - 1).join(', ')} '
+      'y ${nombres.last}';
+}
+
+/// GEN-10: la frase «Visto por …» de la tarjeta del aviso.
+/// - Dirigido: «Visto por Duany · 8 nov, 07:42» o «Aún no lo vio».
+/// - Para todos: «Visto por Duany y Gabriel», «Visto por Duany
+///   · falta Gabriel» o «Aún no lo vio nadie».
+String textoVistoPor(AvisoEntrenador aviso, List<VistoAviso> vistos) {
+  final dest = aviso.destinatarioTelegramId;
+  if (dest != null) {
+    for (final v in vistos) {
+      if (v.telegramId != dest) continue;
+      final fecha = fechaVistoCorta(v.vistoEn);
+      return fecha.isEmpty
+          ? 'Visto por ${v.nombreVisible}'
+          : 'Visto por ${v.nombreVisible} · $fecha';
+    }
+    return 'Aún no lo vio';
+  }
+  if (vistos.isEmpty) return 'Aún no lo vio nadie';
+  final vistosPorId = {for (final v in vistos) v.telegramId: v};
+  final nombresVistos = <String>[];
+  final faltan = <String>[];
+  for (final e in kEntrenadoresAviso.entries) {
+    final v = vistosPorId[e.key];
+    if (v != null) {
+      nombresVistos.add(v.nombreVisible);
+    } else {
+      faltan.add(e.value);
+    }
+  }
+  // Vistos de alguien fuera de la siembra canónica también
+  // cuentan como vistos (su nombre viaja en la fila).
+  for (final v in vistos) {
+    if (!kEntrenadoresAviso.containsKey(v.telegramId) &&
+        !nombresVistos.contains(v.nombreVisible)) {
+      nombresVistos.add(v.nombreVisible);
+    }
+  }
+  if (nombresVistos.isEmpty) return 'Aún no lo vio nadie';
+  if (faltan.isEmpty) return 'Visto por ${_uneNombres(nombresVistos)}';
+  return 'Visto por ${_uneNombres(nombresVistos)} · '
+      'falta ${_uneNombres(faltan)}';
+}
+
 class AvisosEntrenadorService {
   AvisosEntrenadorService._();
   static final AvisosEntrenadorService instance =
@@ -392,9 +514,19 @@ class AvisosEntrenadorService {
   /// «Entendido / Cerrar» (modo 'descartable'). Transacción SQLite,
   /// nunca RAM ni acoplado al sync.
   Future<void> marcarVisto(AvisoEntrenador aviso,
-      {bool descartado = false}) =>
-      LocalDb.instance
-          .marcarAvisoVisto(aviso.id, descartado: descartado);
+      {bool descartado = false}) async {
+    final insertado = await LocalDb.instance
+        .marcarAvisoVisto(aviso.id, descartado: descartado);
+    // GEN-10: solo el primer visto sube, y solo desde un
+    // entrenador (el dueño no emite acuses de sus propios
+    // avisos). La op nunca bloquea el PopUp: es respaldo.
+    if (!insertado || AuthService().isOwner) return;
+    await LocalDb.instance.queueOp(
+      opUuid: const Uuid().v4(),
+      tipo: kTipoOpMarcarAvisoVisto,
+      payload: {'aviso_id': aviso.id, 'descartado': descartado},
+    );
+  }
 
   /// Crear o editar un aviso (SOLO dueño; el servidor lo refuerza).
   /// Viaja por sync_ops para que suba aunque el dueño esté sin red;
@@ -443,6 +575,14 @@ class AvisosEntrenadorService {
     final out = [for (final f in filas) AvisoEntrenador.fromMirror(f)];
     out.sort((a, b) => b.titulo.compareTo(a.titulo));
     return out;
+  }
+
+  /// GEN-10: vistos que bajaron por el espejo `avisos_vistos`
+  /// (solo lo descarga el dueño; en un entrenador devuelve la
+  /// lista vacía porque su teléfono ni pide la tabla).
+  Future<List<VistoAviso>> vistos() async {
+    final filas = await LocalDb.instance.allMirror('avisos_vistos');
+    return [for (final f in filas) VistoAviso.fromMirror(f)];
   }
 }
 

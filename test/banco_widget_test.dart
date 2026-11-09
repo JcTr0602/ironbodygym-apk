@@ -196,7 +196,12 @@ void main() {
       }
       await avanzarTiempo(tester);
       expect(find.text('MÓDULOS'), findsOneWidget);
-      expect(find.byType(GridView), findsWidgets);
+      // 1.30 (D2, UI130-23): Módulos ya no es un GridView —
+      // es la rejilla cerrada de filas de igual altura (sin
+      // celdas vacías); la garantía pasa a ser que el nivel
+      // se pinta SIN GridView (la rejilla la fija por fuente
+      // el test de la oleada D2).
+      expect(find.byType(GridView), findsNothing);
     });
 
     testWidgets('Servicios: construye con título y estado de carga',

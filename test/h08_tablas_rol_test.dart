@@ -20,11 +20,14 @@ import 'package:ironbody_gym/sync.dart';
 
 void main() {
   group('H-08: tablas activas por rol', () {
-    test('admin/dueño: las 40 (39 + solicitudes_relleno)', () {
+    test('admin/dueño: las 41 (40 + avisos_vistos)', () {
+      // 1.30 (D2, GEN-10): el pull suma el espejo solo-dueño
+      // avisos_vistos (40 → 41 tablas activas para el dueño).
       final t = SyncEngine.tablasEspejoActivasParaRol(true);
-      expect(t.length, 40);
+      expect(t.length, 41);
       expect(t, SyncEngine.tablasEspejo);
       expect(t, contains('solicitudes_relleno'));
+      expect(t, contains('avisos_vistos'));
     });
 
     test('el Grupo 1 resuelto es exactamente el de la decisión', () {
@@ -39,11 +42,14 @@ void main() {
         'turnos_apertura',
         'turnos_cierre',
         'espejo_gympedia_borradores',
+        // 1.30 (D2, GEN-10): los vistos de avisos son
+        // solo-dueño por decisión de la oleada.
+        'avisos_vistos',
       });
-      expect(LocalDb.tablasProhibidasEntrenador.length, 10);
+      expect(LocalDb.tablasProhibidasEntrenador.length, 11);
     });
 
-    test('entrenador: 40 − 10 = 30, sin ninguna del Grupo 1', () {
+    test('entrenador: 41 − 11 = 30, sin ninguna del Grupo 1', () {
       final t = SyncEngine.tablasEspejoActivasParaRol(false);
       expect(t.length, 30);
       // FB-09: sus propias solicitudes SÍ le bajan.
@@ -104,19 +110,20 @@ void main() {
           LocalDb.tablasConWatermark);
     });
 
-    test('entrenador: fuera el Grupo 1 que lleva watermark (9)', () {
+    test('entrenador: fuera el Grupo 1 que lleva watermark (10)', () {
       final admin = LocalDb.tablasConWatermarkParaRol(true);
       final ent = LocalDb.tablasConWatermarkParaRol(false);
       for (final t in ent) {
         expect(LocalDb.tablasProhibidasEntrenador.contains(t), isFalse,
             reason: t);
       }
-      // 9 de las 10 del Grupo 1 están en tablasConWatermark;
+      // 10 de las 11 del Grupo 1 están en tablasConWatermark
+      // (GEN-10 suma avisos_vistos, que sí lleva watermark);
       // espejo_gympedia_borradores está exenta de antemano.
       // (Hasta el ajuste H-02 eran 10 de 11: 'gastos' salió
       // del Grupo 1 y su watermark ya cuenta para el
       // entrenador, como el de nomina_bonos.)
-      expect(admin.length - ent.length, 9);
+      expect(admin.length - ent.length, 10);
       expect(ent, contains('nomina_bonos'));
       expect(ent, contains('gastos'));
       expect(ent, contains('clientes'));

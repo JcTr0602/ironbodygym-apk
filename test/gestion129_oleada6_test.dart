@@ -287,6 +287,16 @@ void main() {
       // Solo f-propia cuenta: la ajena es de otro, la
       // previa es del dueño y la protegida no se enseña
       // ni a su autor.
+      // 1.30 (D2, UI130-07): el héroe nuevo es más alto y
+      // la tarjeta de Fotos queda bajo el pliegue de la
+      // lista perezosa: se baja hasta ella antes de contar
+      // (la garantía — solo cuenta lo visible — no cambia).
+      await tester.scrollUntilVisible(
+        find.text('1 pendientes · 0 subiendo'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _pumps(tester);
       expect(find.text('1 pendientes · 0 subiendo'),
           findsOneWidget);
       await _drenarBanner(tester);
@@ -302,6 +312,14 @@ void main() {
       await _sesionDueno(tester);
       await tester.pumpWidget(
           const MaterialApp(home: ColaScreen()));
+      await _pumps(tester);
+      // 1.30 (D2, UI130-07): mismo motivo que en el caso
+      // del entrenador — la tarjeta de Fotos nace al bajar.
+      await tester.scrollUntilVisible(
+        find.text('4 pendientes · 0 subiendo'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await _pumps(tester);
       expect(find.text('4 pendientes · 0 subiendo'),
           findsOneWidget);
@@ -421,11 +439,24 @@ void main() {
           findsOneWidget,
           reason: 'la cifra de cabecera no cambia (total '
               'global) y el desglose nace junto a ella');
-      await tester.scrollUntilVisible(
-        find.text('de Duany · suben cuando él entre'),
-        300,
-        scrollable: find.byType(Scrollable).first,
-      );
+      // 1.30 (D2): scrollUntilVisible ya no sirve aquí —
+      // las DOS ops de Duany llevan la misma etiqueta y su
+      // buscador exige exactamente una coincidencia (con el
+      // héroe nuevo ambas fichas nacen antes o ninguna,
+      // según el pliegue). Se baja a arrastres acotados
+      // hasta que la etiqueta exista; la afirmación final
+      // (findsWidgets) no cambia.
+      for (var intentoFa06 = 0;
+          intentoFa06 < 10 &&
+              find
+                  .text('de Duany · suben cuando él entre')
+                  .evaluate()
+                  .isEmpty;
+          intentoFa06++) {
+        await tester.drag(
+            find.byType(Scrollable).first, const Offset(0, -300));
+        await _pumps(tester);
+      }
       await _pumps(tester, 4);
       expect(find.text('de Duany · suben cuando él entre'),
           findsWidgets);

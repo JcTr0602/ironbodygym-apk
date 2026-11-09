@@ -160,7 +160,12 @@ void main() {
       // segmentos/acciones y no pintan sobre el gradiente).
       final i = f.indexOf('gradient: AppColores.gradienteDial');
       expect(i, isNonNegative);
-      expect(f.substring(i, i + 1200),
+      // 1.30 (D2, UI130-06): la ventana crece a 2000 — el
+      // bloque del FAB ganó los comentarios de la oleada
+      // (el frasco de dosis) y el color del glifo quedaba
+      // fuera de los 1200 originales; la garantía es la
+      // misma: el glifo del FAB va en sobreMarca.
+      expect(f.substring(i, i + 2000),
           contains('color: AppColores.sobreMarca'));
     });
 

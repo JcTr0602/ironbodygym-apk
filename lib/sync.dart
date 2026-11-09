@@ -4135,7 +4135,8 @@ class SyncEngine {
     // se arma con las columnas exactas del espejo.
     if (tabla == 'solicitudes_adelanto' ||
         tabla == 'solicitudes_relleno' ||
-        tabla == 'avisos_entrenadores') {
+        tabla == 'avisos_entrenadores' ||
+        tabla == 'avisos_vistos') {
       final id = '${m['id'] ?? ''}';
       if (id.isEmpty) return null;
       final data = <String, dynamic>{'id': id};
@@ -4172,6 +4173,18 @@ class SyncEngine {
           // 1.30 (Oleada 2): la llave de la op que originó la
           // solicitud (deduplicación exacta en bloque3).
           'op_uuid': m['op_uuid'],
+        });
+      } else if (tabla == 'avisos_vistos') {
+        // 1.30 (D2, GEN-10): columnas exactas del espejo
+        // sync_avisos_vistos (id compuesto aviso:telegram que
+        // publica el puente; el JSON local lleva las columnas
+        // planas para que bloque3 las lea sin decodificar más).
+        data.addAll({
+          'aviso_id': m['aviso_id'],
+          'telegram_id': m['telegram_id'],
+          'nombre': m['nombre'],
+          'visto_en': m['visto_en'],
+          'descartado': m['descartado'],
         });
       } else {
         data.addAll({
@@ -4480,6 +4493,10 @@ class SyncEngine {
     'solicitudes_adelanto',
     'solicitudes_relleno', // 1.29 (Oleada 4, FB-09)
     'avisos_entrenadores',
+    // 1.30 (D2, GEN-10): vistos de avisos (solo-dueño: el pull
+    // lo salta para entrenadores vía tablasProhibidasEntrenador
+    // y la RPC/RLS lo deniegan en el servidor).
+    'avisos_vistos',
     // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): mismo patrón de
     // tabla ausente (el puente ya publica las tres de Fase A;
     // sync_nomina_bonos la publica cuando el servidor la tenga).
@@ -4808,6 +4825,7 @@ class SyncEngine {
       'solicitudes_adelanto': 'sync_solicitudes_adelanto',
       'solicitudes_relleno': 'sync_solicitudes_relleno',
       'avisos_entrenadores': 'sync_avisos_entrenadores',
+      'avisos_vistos': 'sync_avisos_vistos',
       // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): espejos planos
       // del puente (columnas exactas en la rama de select y en
       // _prepararFilaMirror). Los nombres locales llevan el
@@ -4931,6 +4949,9 @@ class SyncEngine {
               'id,titulo,mensaje,modo,activo,vigente_desde,vigente_hasta,'
                   'destinatario_telegram_id,'
                   'creado_por,creada_ts,actualizada_ts,sync_seq',
+            // 1.30 (D2, GEN-10): espejo de vistos (solo-dueño).
+            'avisos_vistos' =>
+              'id,aviso_id,telegram_id,nombre,visto_en,descartado,sync_seq',
             // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): columnas
             // exactas del puente (publicar_tarifas_especiales,
             // publicar_entregas_efectivo, publicar_recordatorio_
@@ -6092,6 +6113,9 @@ class SyncEngine {
     'sync_solicitudes_adelanto': 'solicitudes_adelanto',
     'sync_solicitudes_relleno': 'solicitudes_relleno',
     'sync_avisos_entrenadores': 'avisos_entrenadores',
+    // 1.30 (D2, GEN-10): vistos de avisos; la RPC lo admite
+    // solo para el dueño (allowlist 43 tras el SQL GEN-10).
+    'sync_avisos_vistos': 'avisos_vistos',
     'sync_nomina_bonos': 'nomina_bonos',
     'sync_tarifas_especiales': 'espejo_tarifas_especiales',
     'sync_cliente_mediciones': 'cliente_mediciones',

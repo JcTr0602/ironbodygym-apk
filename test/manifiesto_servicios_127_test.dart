@@ -72,8 +72,10 @@ void main() {
       // aquí solo se actualiza el total con esa justificación.
       // 1.29 (Oleada 4, FB-09): +1 — solicitudes_relleno entra
       // en el pull y en el manifiesto (fijada en m1bc).
+      // 1.30 (D2, GEN-10): +1 — sync_avisos_vistos entra en el
+      // pull y en el manifiesto (fijada en manifiesto_130).
       expect(SyncEngine.tablasManifiesto.length,
-          historicas.length + esperadasServicios.length + 26);
+          historicas.length + esperadasServicios.length + 27);
     });
 
     test(
