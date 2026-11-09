@@ -2506,6 +2506,96 @@ Color colorDeMetodo(String? metodo) {
 /// («Mensualidad — transferencia»): la lista de dinero se
 /// escanea de un vistazo sin leer cada fila, y el método
 /// nunca va SOLO por color (la palabra sigue ahí).
+/// (1.30 D4 · UI130-12/13) Fila de libro mayor de la casa:
+/// la fila de las pantallas de dinero — icono tintado
+/// opcional, concepto (+ detalle) a la izquierda y monto
+/// alineado a la derecha. Nace de la fila que la vista del
+/// entrenador de Pendiente ya usaba (_filaDesglose, C2 de la
+/// 1.19) y la comparten Pendiente (ambos roles) y Nómina,
+/// para que el dinero se lea igual en todas partes.
+/// [metodo] pinta el punto categórico junto al concepto
+/// (D-11 de la 1.29).
+class FilaLibro extends StatelessWidget {
+  final IconData? icono;
+  final Color? colorIcono;
+  final String concepto;
+  final String? detalle;
+  final String monto;
+  final Color? colorMonto;
+  final String? metodo;
+  final TextStyle? estiloConcepto;
+  final TextStyle? estiloMonto;
+
+  const FilaLibro({
+    super.key,
+    this.icono,
+    this.colorIcono,
+    required this.concepto,
+    this.detalle,
+    required this.monto,
+    this.colorMonto,
+    this.metodo,
+    this.estiloConcepto,
+    this.estiloMonto,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final estiloMontoFinal = estiloMonto ??
+        AppTexto.cuerpo.copyWith(
+          fontWeight: FontWeight.bold,
+          color: colorMonto,
+        );
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(vertical: AppEspacio.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (icono != null) ...[
+            CircleAvatar(
+              radius: 14,
+              backgroundColor:
+                  (colorIcono ?? AppColores.naranja)
+                      .withValues(alpha: 0.15),
+              child: Icon(icono,
+                  size: 16,
+                  color: colorIcono ?? AppColores.naranja),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (metodo == null)
+                  Text(concepto,
+                      style: estiloConcepto ?? AppTexto.cuerpo)
+                else
+                  Row(
+                    children: [
+                      PuntoMetodo(metodo: metodo!),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(concepto,
+                            style: estiloConcepto ??
+                                AppTexto.cuerpo),
+                      ),
+                    ],
+                  ),
+                if (detalle != null)
+                  Text(detalle!, style: AppTexto.secundario),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(monto, style: estiloMontoFinal),
+        ],
+      ),
+    );
+  }
+}
+
 class PuntoMetodo extends StatelessWidget {
   final String? metodo;
   const PuntoMetodo({super.key, required this.metodo});

@@ -1570,12 +1570,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!_esDueno) return _buildEntrenador();
     // Argón Estadísticas #5: acotados siempre. Hoy morosos()
     // sale de los propios _activos (no puede excederlos),
-    // pero si una definición cambia, un pct fuera de [0,1]
-    // revienta el LinearProgressIndicator y un alDia
-    // negativo se vería como un dato, no como un error.
+    // pero si una definición cambia, un alDia negativo se
+    // vería como un dato, no como un error.
     final alDia = (_activos - _morosos).clamp(0, _activos);
-    final pctAlDia =
-        _activos > 0 ? (alDia / _activos).clamp(0.0, 1.0) : 0.0;
     return Scaffold(
       appBar: appBarIron(
         context,
@@ -1694,23 +1691,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(AppRadio.sm),
-                            child: LinearProgressIndicator(
-                              value: pctAlDia,
-                              minHeight: 10,
-                              backgroundColor: AppColores.error
-                                  .withValues(alpha: 0.2),
-                              valueColor:
-                                  const AlwaysStoppedAnimation<Color>(
-                                      AppColores.exito),
-                            ),
+                          // (1.30 D4 · UI130-11) barra apilada de
+                          // tres segmentos disjuntos con leyenda:
+                          // la vieja pintaba todo lo no-«al día»
+                          // sobre error y llamaba morosos también
+                          // a los por vencer.
+                          BarraClientesSegmentos(
+                            activos: _activos,
+                            porVencer: _porVencer,
+                            morosos: _morosos,
+                            onAlDia: () =>
+                                _ir(const BuscarScreen()),
+                            onPorVencer: () => _ir(
+                                const ListasScreen(inicial: 1)),
+                            onVencidos: () => _ir(
+                                const ListasScreen(inicial: 2)),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                              '${(pctAlDia * 100).toStringAsFixed(0)}% al día',
-                              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
-                                      context))),
                           // v1.0.15: nuevos este mes + inactivos
                           if (_nuevos > 0 || _inactivos > 0) ...[
                             const SizedBox(height: 8),
@@ -1786,6 +1782,131 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
       ),
+    );
+  }
+}
+
+/// (1.30 D4 · UI130-11) Partición DISJUNTA de los activos
+/// para la barra de Clientes del Dashboard. El «al día» del
+/// conteo de la tarjeta es activos − vencidos (incluye a
+/// los por vencer, y esa cifra NO cambia); el segmento
+/// «al día» de la barra es el resto tras quitar por vencer
+/// y vencidos, como en el mockup aprobado (128 = 96 al
+/// día + 19 por vencer + 13 vencidos). Con las
+/// acotaciones, los tres segmentos suman SIEMPRE el
+/// total de activos y ninguno sale negativo aunque un
+/// conteo venga desfasado.
+({int alDia, int porVencer, int vencidos}) segmentosBarraClientes({
+  required int activos,
+  required int porVencer,
+  required int morosos,
+}) {
+  final a = activos < 0 ? 0 : activos;
+  final v = morosos.clamp(0, a);
+  final p = porVencer.clamp(0, a - v);
+  return (alDia: a - p - v, porVencer: p, vencidos: v);
+}
+
+/// (1.30 D4 · UI130-11) Barra apilada de tres segmentos
+/// de la tarjeta de Clientes: al día (verde), por vencer
+/// (naranja) y vencidos (rojo), con su leyenda de conteos
+/// debajo. Cada segmento es tocable a su lista, como ya
+/// lo son los conteos de la tarjeta. Con 0 activos,
+/// barra neutra sin segmentos.
+class BarraClientesSegmentos extends StatelessWidget {
+  final int activos;
+  final int porVencer;
+  final int morosos;
+  final VoidCallback? onAlDia;
+  final VoidCallback? onPorVencer;
+  final VoidCallback? onVencidos;
+
+  const BarraClientesSegmentos({
+    super.key,
+    required this.activos,
+    required this.porVencer,
+    required this.morosos,
+    this.onAlDia,
+    this.onPorVencer,
+    this.onVencidos,
+  });
+
+  Widget _segmento(String clave, int conteo, Color color,
+      VoidCallback? alTocar) {
+    return Expanded(
+      flex: conteo,
+      child: GestureDetector(
+        key: ValueKey(clave),
+        onTap: alTocar,
+        child: Container(height: 10, color: color),
+      ),
+    );
+  }
+
+  Widget _leyenda(
+      BuildContext context, Color color, String texto) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+              color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(texto,
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.textoSecundario(context))),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seg = segmentosBarraClientes(
+        activos: activos,
+        porVencer: porVencer,
+        morosos: morosos);
+    return Column(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          child: activos <= 0
+              ? Container(
+                  key: const ValueKey('seg-neutra'),
+                  height: 10,
+                  color: AppColores.borde(context)
+                      .withValues(alpha: 0.35),
+                )
+              : Row(
+                  children: [
+                    if (seg.alDia > 0)
+                      _segmento('seg-al-dia', seg.alDia,
+                          AppColores.exito, onAlDia),
+                    if (seg.porVencer > 0)
+                      _segmento('seg-por-vencer', seg.porVencer,
+                          AppColores.naranja, onPorVencer),
+                    if (seg.vencidos > 0)
+                      _segmento('seg-vencidos', seg.vencidos,
+                          AppColores.error, onVencidos),
+                  ],
+                ),
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 12,
+          children: [
+            _leyenda(context, AppColores.exito,
+                '${seg.alDia} al día'),
+            _leyenda(context, AppColores.naranja,
+                '${seg.porVencer} por vencer'),
+            _leyenda(context, AppColores.error,
+                '${seg.vencidos} vencidos'),
+          ],
+        ),
+      ],
     );
   }
 }

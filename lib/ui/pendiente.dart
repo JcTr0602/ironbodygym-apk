@@ -809,17 +809,12 @@ class _PendienteScreenState extends State<PendienteScreen> {
     // hasta su cifra cuando cambia (MontoAnimado, 300 ms)
     // en vez de saltar de golpe: al cobrar o liquidar se
     // nota al instante si el número se movió y a cuánto.
-    // El formato final es exactamente el de antes (CUP y
-    // USD por separado, sin mezclar); el USD no se anima
-    // (es el acompañante fijo del total CUP).
-    String formatoTotal(double v) {
-      final montos = <String>[];
-      if (v > 0) montos.add('${fmtMonto(v)} CUP');
-      if (_totalUsd > 0) {
-        montos.add('${_totalUsd.toStringAsFixed(2)} USD');
-      }
-      return montos.isEmpty ? '0 CUP' : montos.join(' · ');
-    }
+    // (1.30 D4 · UI130-13): el animado formatea SOLO el
+    // CUP; el USD deja de viajar pegado en esta cadena y
+    // se pinta en su propia línea bajo el total, como
+    // métrica secundaria y sin animar.
+    String formatoTotal(double v) =>
+        v > 0 ? '${fmtMonto(v)} CUP' : '0 CUP';
 
     return Padding(
       padding: const EdgeInsets.all(AppEspacio.md),
@@ -855,6 +850,17 @@ class _PendienteScreenState extends State<PendienteScreen> {
                 style: AppTexto.secundario.copyWith(
                     color:
                         AppColores.textoSecundario(context))),
+            // (1.30 D4 · UI130-13) USD como métrica propia:
+            // su línea, con su formato de siempre (dos
+            // decimales), sin mezclarse con el total CUP.
+            if (_totalUsd > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
+                child: Text(
+                    '${_totalUsd.toStringAsFixed(2)} USD',
+                    style: AppTexto.subtitulo.copyWith(
+                        color: AppColores.textoSecundario(context))),
+              ),
             // H11 (Argón caja): desglose solo cuando el autoritativo
             // difiere del bruto (adelantos, parciales, arrastres).
             if (_ajusteNetoCup != null && _ajusteNetoCup!.abs() > 0.01)
@@ -872,140 +878,124 @@ class _PendienteScreenState extends State<PendienteScreen> {
     );
   }
 
-  /// Vista entrenador: sin cambios (su propio pendiente).
-  /// C2 (estéticas 1.19): fila del desglose — icono tintado,
-  /// concepto + detalle a la izquierda y monto alineado a la
-  /// derecha, como una cuenta (antes ListTile con hueco vacío
-  /// donde iría el icono y montos dentro del título).
-  Widget _filaDesglose({
-    required IconData icono,
-    required Color color,
+  // (1.30 D4 · UI130-13) la fila del desglose vive ahora
+  // en componentes.dart como FilaLibro, compartida con
+  // Nómina: el libro de pendiente se lee igual en los
+  // dos roles y en las dos pantallas de dinero.
+
+  /// (1.30 D4 · UI130-13) Tarjeta de un concepto del
+  /// desglose del entrenador: título y sus filas de
+  /// libro, con el mismo patrón que el resto de
+  /// pantallas de dinero.
+  Widget _tarjetaConceptoPendiente({
     required String titulo,
-    required String subtitulo,
-    required String monto,
-    // 1.29 (Oleada 2, D-11): método de la fila cuando el
-    // título ya lo escribe («Mensualidad — transferencia»):
-    // se pinta su punto categórico junto a la palabra.
-    String? metodo,
+    required List<Widget> filas,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 14,
-            backgroundColor: color.withValues(alpha: 0.15),
-            child: Icon(icono, size: 16, color: color),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (metodo == null)
-                  Text(titulo, style: AppTexto.cuerpo)
-                else
-                  Row(
-                    children: [
-                      PuntoMetodo(metodo: metodo),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(titulo, style: AppTexto.cuerpo),
-                      ),
-                    ],
-                  ),
-                Text(subtitulo, style: AppTexto.secundario),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(monto,
-              style: AppTexto.cuerpo
-                  .copyWith(fontWeight: FontWeight.bold)),
-        ],
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
+      child: Tarjeta(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(titulo, style: AppTexto.subtitulo),
+            const SizedBox(height: AppEspacio.xs),
+            ...filas,
+          ],
+        ),
       ),
     );
   }
 
+  /// Vista del entrenador: su propio pendiente, agrupado
+  /// por concepto en tarjetas con FilaLibro (UI130-13);
+  /// los datos y los montos son los de siempre.
   Widget _listaEntrenador() {
+    if (_mens.isEmpty &&
+        _diarios.isEmpty &&
+        _servicios.isEmpty &&
+        _suplementos.isEmpty) {
+      return ListView(
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
+        children: const [
+          EstadoVacio(
+            icono: Icons.account_balance_wallet_rounded,
+            titulo: 'Sin pagos pendientes de entrega.',
+          ),
+        ],
+      );
+    }
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
+      padding:
+          const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
       children: [
-        if (_mens.isNotEmpty) ...[
-          const Text('Mensualidades en efectivo:',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          for (final p in _mens)
-            _filaDesglose(
-              icono: Icons.payments_rounded,
-              color: AppColores.exito,
-              metodo: '${p['metodo'] ?? ''}',
-              titulo: 'Mensualidad — ${p['metodo']}',
-              subtitulo:
-                  '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)',
-              monto: '${fmtMonto(p['monto'])} CUP',
-            ),
-          const SizedBox(height: 12),
-        ],
-        if (_diarios.isNotEmpty) ...[
-          const Text('Pagos diarios:',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          for (final d in _diarios)
-            _filaDesglose(
-              icono: Icons.today_rounded,
-              color: AppColores.info,
-              titulo: 'Pago diario',
-              subtitulo:
-                  '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}',
-              monto: '${fmtMonto(d['total'])} CUP',
-            ),
-        ],
-        if (_servicios.isNotEmpty) ...[
-          const Text('Servicios (dosis y agua):',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          for (final s in _servicios)
-            _filaDesglose(
-              icono: Icons.bolt_rounded,
-              color: AppColores.naranja,
-              titulo: switch ('${s['tipo']}') {
-                'dosis_con_agua' => 'Combo',
-                'agua_suelta' => 'Pomo de agua',
-                _ => 'Ración',
-              },
-              subtitulo: '${fmtFecha(s['fecha'] as String?)}'
-                  '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}',
-              monto:
-                  '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
-            ),
-        ],
+        if (_mens.isNotEmpty)
+          _tarjetaConceptoPendiente(
+            titulo: 'Mensualidades en efectivo',
+            filas: [
+              for (final p in _mens)
+                FilaLibro(
+                  icono: Icons.payments_rounded,
+                  colorIcono: AppColores.exito,
+                  metodo: '${p['metodo'] ?? ''}',
+                  concepto: 'Mensualidad — ${p['metodo']}',
+                  detalle:
+                      '${fmtFecha(p['fecha'] as String?)} · ${p['meses'] ?? 1} mes(es)',
+                  monto: '${fmtMonto(p['monto'])} CUP',
+                ),
+            ],
+          ),
+        if (_diarios.isNotEmpty)
+          _tarjetaConceptoPendiente(
+            titulo: 'Pagos diarios',
+            filas: [
+              for (final d in _diarios)
+                FilaLibro(
+                  icono: Icons.today_rounded,
+                  colorIcono: AppColores.info,
+                  concepto: 'Pago diario',
+                  detalle:
+                      '${fmtFecha(d['fecha'] as String?)} · ${d['turno'] ?? ''} x${d['cantidad'] ?? '?'}',
+                  monto: '${fmtMonto(d['total'])} CUP',
+                ),
+            ],
+          ),
+        if (_servicios.isNotEmpty)
+          _tarjetaConceptoPendiente(
+            titulo: 'Servicios (dosis y agua)',
+            filas: [
+              for (final s in _servicios)
+                FilaLibro(
+                  icono: Icons.bolt_rounded,
+                  colorIcono: AppColores.naranja,
+                  concepto: switch ('${s['tipo']}') {
+                    'dosis_con_agua' => 'Combo',
+                    'agua_suelta' => 'Pomo de agua',
+                    _ => 'Ración',
+                  },
+                  detalle: '${fmtFecha(s['fecha'] as String?)}'
+                      '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}',
+                  monto:
+                      '${fmtMonto(((s['precio_unitario'] as num?)?.toDouble() ?? 0) * ((s['cantidad'] as num?)?.toDouble() ?? 0))} CUP',
+                ),
+            ],
+          ),
         // Ronda 17 M4-H2: suplementos en efectivo en CUP.
-        if (_suplementos.isNotEmpty) ...[
-          const Text('Suplementos en efectivo:',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          for (final s in _suplementos)
-            _filaDesglose(
-              icono: Icons.shopping_bag_rounded,
-              color: AppColores.naranja,
-              titulo: 'Suplemento',
-              subtitulo: '${s['descripcion'] ?? 'Venta suplemento'} · '
-                  '${fmtFecha(s['creada_en'] as String?)}',
-              monto: '${fmtMonto(s['monto'])} CUP',
-            ),
-        ],
-        if (_mens.isEmpty &&
-            _diarios.isEmpty &&
-            _servicios.isEmpty &&
-            _suplementos.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: AppEspacio.xxl),
-            child: Text(
-                'Sin pagos pendientes de entrega.',
-                textAlign: TextAlign.center,
-                style: AppTexto.secundario),
+        if (_suplementos.isNotEmpty)
+          _tarjetaConceptoPendiente(
+            titulo: 'Suplementos en efectivo',
+            filas: [
+              for (final s in _suplementos)
+                FilaLibro(
+                  icono: Icons.shopping_bag_rounded,
+                  colorIcono: AppColores.naranja,
+                  concepto: 'Suplemento',
+                  detalle: '${s['descripcion'] ?? 'Venta suplemento'} · '
+                      '${fmtFecha(s['creada_en'] as String?)}',
+                  monto: '${fmtMonto(s['monto'])} CUP',
+                ),
+            ],
           ),
       ],
     );
@@ -1352,25 +1342,15 @@ class _EntrenadorCard extends StatelessWidget {
                 // línea — un resto sin pagos concretos
                 // nunca queda invisible.
                 if (arrastreCup > 0.01) ...[
-                  Row(
-                    children: [
-                      Icon(Icons.autorenew_rounded,
-                          size: 16,
-                          color:
-                              AppColores.textoNaranja(context)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Saldo de cobros parciales: ${fmtMonto(arrastreCup)} CUP',
-                          style: AppTexto.secundario.copyWith(
-                              color: AppColores.textoNaranja(
-                                  context),
-                              fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
+                  // (1.30 D4 · UI130-13) la línea del saldo
+                  // adopta la FilaLibro del libro único.
+                  FilaLibro(
+                    icono: Icons.autorenew_rounded,
+                    colorIcono: AppColores.textoNaranja(context),
+                    concepto: 'Saldo de cobros parciales',
+                    monto: '${fmtMonto(arrastreCup)} CUP',
+                    colorMonto: AppColores.textoNaranja(context),
                   ),
-                  const SizedBox(height: 8),
                 ],
                 if (totalCup > 0 || arrastreCup > 0.01) ...[
                   SizedBox(

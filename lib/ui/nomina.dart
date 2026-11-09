@@ -24,6 +24,7 @@ import 'cierre_mes.dart';
 import 'cierre_nomina_imagen.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'hoja_accion.dart';
 import 'mi_nomina.dart';
 import 'skeleton.dart';
 import '../errores_sync.dart';
@@ -51,9 +52,6 @@ class _NominaScreenState extends State<NominaScreen> {
   String _mesEtiqueta = '';
   // v1.3.9: lista de bonos por entrenador [{id, entrenador, monto, nota}]
   List<Map<String, dynamic>> _bonos = [];
-  final _bonoMontoCtrl = TextEditingController();
-  final _bonoNotaCtrl = TextEditingController();
-  String _bonoEntrenador = 'ambos'; // 'duany', 'gabriel', 'ambos'
   final _tarifaCtrl = TextEditingController();
   double _tarifa = 150;
   // v1.8.0: comisión por dosis del mes por entrenador (clave
@@ -80,8 +78,6 @@ class _NominaScreenState extends State<NominaScreen> {
 
   @override
   void dispose() {
-    _bonoMontoCtrl.dispose();
-    _bonoNotaCtrl.dispose();
     _tarifaCtrl.dispose();
     super.dispose();
   }
@@ -272,30 +268,25 @@ class _NominaScreenState extends State<NominaScreen> {
   double _bonoPara(String entrenador) =>
       NominaCalc.bonosPara(_bonos, entrenador);
 
-  Future<void> _agregarBono() async {
+  /// (1.30 D4 · UI130-12) Guarda el bono que trae la hoja
+  /// [HojaAgregarBono] ya validado y capturado por ella (la
+  /// captura síncrona anti-doble-toque de la Pasada 2 de
+  /// Argón vive ahora en la hoja, dueña de los campos).
+  /// Aquí queda la operación, con las mismas guardas
+  /// (dueño, _operando, mes liquidado N-6), el mismo
+  /// servicio y los mismos mensajes que tenía el
+  /// formulario en línea. Devuelve si el bono quedó
+  /// agregado, para que la hoja sepa si puede cerrarse.
+  Future<bool> _agregarBonoDesdeHoja({
+    required String entrenador,
+    required double monto,
+    required String nota,
+  }) async {
     // Ronda 17 M4-H1: agregar bonos es solo del dueño
     // (la UI ya oculta el botón; esto cubre pantalla abierta
     // con cambio de sesión).
-    if (!AuthService().isOwner) return;
-    if (_operando) return;
-    final texto =
-        _bonoMontoCtrl.text.trim().replaceAll(',', '.');
-    // Autoauditoría 1.22 #1: montoTolerante (N-2) en vez del
-    // tryParse crudo: un 'Infinity'/'NaN' pegado en el campo
-    // pasaba el filtro (≠0) y reventaba al encolar el bono
-    // (JSON no codifica infinitos) sin aviso al dueño.
-    final monto = NominaCalc.montoTolerante(texto) ?? 0;
-    if (monto == 0) {
-      mostrarSnack(context, 'Ingresa un monto válido', significado: SignificadoChip.alerta);
-      return;
-    }
-    // Pasada 2 de Argón (1.20): capturar la nota y LIMPIAR los
-    // controladores sincrónicamente, antes del primer await;
-    // con la limpieza tras el await, un doble toque insertaba
-    // el bono dos veces.
-    final notaBono = _bonoNotaCtrl.text.trim();
-    _bonoMontoCtrl.clear();
-    _bonoNotaCtrl.clear();
+    if (!AuthService().isOwner) return false;
+    if (_operando) return false;
     _operando = true;
     // Panel Zen pieza 1 (MEDIO): la guarda se libera en
     // finally: si agregar o la relectura lanzan (BD/encolado),
@@ -306,35 +297,46 @@ class _NominaScreenState extends State<NominaScreen> {
       final pref = hoyHabanaIso().substring(0, 7);
       // N-6 (1.22): un mes ya liquidado no admite bonos: el bono
       // descuadraría la foto de liquidación y el Dashboard.
-      final objetivosBono = _bonoEntrenador == 'ambos'
+      final objetivosBono = entrenador == 'ambos'
           ? const ['duany', 'gabriel']
-          : [_bonoEntrenador];
+          : [entrenador];
       if (objetivosBono.any((c) => _nominaLiquidadaMes[c] == true)) {
         mostrarSnack(context,
             'La nómina de este mes ya está liquidada: no se pueden agregar bonos',
             significado: SignificadoChip.alerta);
-        return;
+        return false;
       }
       await BonosNominaService.instance.agregar(
         mes: pref,
-        entrenador: _bonoEntrenador,
+        entrenador: entrenador,
         monto: monto,
-        nota: notaBono,
+        nota: nota,
       );
       final actualizados =
           await BonosNominaService.instance.leerBonos(pref);
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _bonos = actualizados;
-        _bonoMontoCtrl.clear();
-        _bonoNotaCtrl.clear();
       });
       if (mounted) {
         mostrarSnack(context, 'Bono agregado', significado: SignificadoChip.exito);
       }
+      return true;
     } finally {
       _operando = false;
     }
+  }
+
+  /// (1.30 D4 · UI130-12) Abre la hoja de agregar bono
+  /// (patrón de HojaLiquidar: hoja con estado propio que
+  /// compone HojaAccion y se abre directa).
+  Future<void> _abrirHojaAgregarBono(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) =>
+          HojaAgregarBono(alGuardar: _agregarBonoDesdeHoja),
+    );
   }
 
   Future<void> _eliminarBono(String id) async {
@@ -392,117 +394,234 @@ class _NominaScreenState extends State<NominaScreen> {
     return (m >= 1 && m <= 12) ? meses[m] : '';
   }
 
-  /// Filas por entrenador con su total (base + sus bonos).
-  List<Widget> _buildFilasEntrenadores(
-      BuildContext context, double base) {
+  /// Claves de entrenador que esta sesión ve en la
+  /// nómina: el dueño, las dos; el entrenador, solo la
+  /// suya ('mi' como respaldo si su username no es de un
+  /// entrenador conocido). (Ajuste Argón, revisión Paso 1:
+  /// antes la vista 'mi' sumaba los bonos de ambos y
+  /// duplicaba los bonos marcados 'ambos'.)
+  List<String> _clavesEntrenadoresNomina() {
     final esDueno = AuthService().isOwner;
-    // El dueño ve las dos filas. El entrenador ve solo la suya: SÍ se
-    // puede identificar por AuthService().username ('duany'/'gabriel').
-    // (Ajuste Argón, revisión Paso 1: antes la vista 'mi' sumaba los
-    // bonos de ambos y duplicaba los bonos marcados 'ambos', además de
-    // mezclar los bonos individuales del otro entrenador.)
     final yo = AuthService().username;
-    final entrenadores = esDueno
+    return esDueno
         ? ['duany', 'gabriel']
         : [
             if (yo == 'duany' || yo == 'gabriel') yo else 'mi',
           ];
-    return entrenadores.map((ent) {
-      final nombre = ent == 'duany'
-          ? 'Duany'
-          : ent == 'gabriel'
-              ? 'Gabriel'
-              : 'Pago por entrenador';
-      // 'mi' solo como respaldo si el username no es de un entrenador
-      // conocido: en ese caso únicamente los bonos generales ('ambos'),
-      // contados UNA sola vez.
-      final bono = ent == 'mi' ? _bonoSoloAmbos() : _bonoPara(ent);
-      // v1.8.0: la comisión por dosis se suma a la nómina del mes.
-      final comision = _comisionDosis[ent] ?? (dosis: 0, total: 0.0);
-      // v1.8.0: los adelantos del mes (por mes_nomina) y la deuda
-      // arrastrada DESCUENTAN; el total mostrado es el neto a
-      // pagar (nunca negativo: el exceso queda como deuda).
-      final libro = _libroMes[ent];
-      final adelantosMes = libro?.adelantos ?? 0;
-      final deudaEntrante = libro?.deudaEntrante ?? 0;
-      // 1.14 (M5.1): la fórmula vive en NominaCalc.totalVivo.
-      final total = NominaCalc.totalVivo(
-        base: base,
-        bono: bono,
-        comision: comision.total,
-        adelantos: adelantosMes,
-        deudaEntrante: deudaEntrante,
-      );
-      final liquidada = _nominaLiquidadaMes[ent] ?? false;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-        // 1.25 T25: bajo las cifras, la barra de composición
-        // (la misma de Mi Nómina): el «por qué» del neto de
-        // un vistazo, no solo cuatro numeritos.
+  }
+
+  /// (1.30 D4 · UI130-12) Tarjeta breve de resumen de la
+  /// nómina: pagados × tarifa en filas de libro, total
+  /// base, el aviso de proyección con su texto intacto y
+  /// el sello del pre-cálculo. Ninguna cifra se calcula
+  /// aquí que no viviera ya en la pantalla (la base es
+  /// la de build: clientes pagados × tarifa).
+  Widget _tarjetaResumenNomina(
+      BuildContext context, double base, String proyeccion) {
+    final esDueno = AuthService().isOwner;
+    // Ronda 17 M4-H1 (decisión Jc 2026-10-28): sin
+    // can_ver_cifras no se muestran las cifras globales;
+    // el entrenador ve solo su propia tarjeta.
+    final verCifras =
+        esDueno || PermisosEntrenador().canVerCifras;
+    return Tarjeta(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconoModuloBadge.naranja(Icons.payments_rounded),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  esDueno
+                      ? 'Nómina por entrenador'
+                      : 'Mi nómina',
+                  style: AppTexto.titulo,
+                ),
+              ),
+            ],
+          ),
+          if (verCifras) ...[
+            const SizedBox(height: 8),
+            FilaLibro(
+              concepto: 'Clientes pagados en $_mesEtiqueta',
+              monto: '$_clientesPagados',
+            ),
+            FilaLibro(
+              concepto: 'Tarifa por cliente',
+              monto: '${fmtMonto(_tarifa)} CUP',
+            ),
+            const Divider(height: 16),
+            FilaLibro(
+              concepto: 'Total base',
+              monto: '${fmtMonto(base)} CUP',
+              estiloConcepto: AppTexto.subtitulo,
+              estiloMonto: AppTexto.tituloPagina,
+            ),
+          ],
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+            decoration: BoxDecoration(
+              color: AppColores.naranja.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadio.md),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.info_rounded,
+                    size: 16, color: AppColores.info),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '$proyeccion — no es la cifra final. '
+                    'El pago se hace el último día del mes.',
+                    style: AppTexto.etiqueta.copyWith(
+                      color: AppColores.textoSecundario(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // v1.4.0: sello del pre-cálculo automático.
+          Text(
+            'Actualizado: $_actualizadoEtiqueta',
+            style: AppTexto.etiqueta.copyWith(
+              color: AppColores.textoSecundario(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// (1.30 D4 · UI130-12) Una tarjeta por entrenador:
+  /// base, bonos, comisión, adelantos y deuda en filas
+  /// de libro (FilaLibro), el neto protagonista con su
+  /// barra de composición (1.25 T25) y, si la persona
+  /// tiene libro de adelantos, su sección incrustada
+  /// sin cambios (lista, deuda saliente, acuse y
+  /// liquidación viven ahí). Las cifras salen de las
+  /// mismas fuentes y de la misma fórmula de siempre
+  /// (NominaCalc.totalVivo): solo cambia la pintura.
+  Widget _tarjetaEntrenadorNomina(
+      BuildContext context, String ent, double base) {
+    final nombre = ent == 'duany'
+        ? 'Duany'
+        : ent == 'gabriel'
+            ? 'Gabriel'
+            : 'Pago por entrenador';
+    // 'mi' solo como respaldo si el username no es de un
+    // entrenador conocido: en ese caso únicamente los
+    // bonos generales ('ambos'), contados UNA sola vez.
+    final bono = ent == 'mi' ? _bonoSoloAmbos() : _bonoPara(ent);
+    // v1.8.0: la comisión por dosis se suma a la nómina
+    // del mes; los adelantos y la deuda arrastrada
+    // DESCUENTAN (el exceso queda como deuda, nunca un
+    // neto negativo: lo fija totalVivo).
+    final comision = _comisionDosis[ent] ?? (dosis: 0, total: 0.0);
+    final libro = _libroMes[ent];
+    final adelantosMes = libro?.adelantos ?? 0;
+    final deudaEntrante = libro?.deudaEntrante ?? 0;
+    // 1.14 (M5.1): la fórmula vive en NominaCalc.totalVivo.
+    final total = NominaCalc.totalVivo(
+      base: base,
+      bono: bono,
+      comision: comision.total,
+      adelantos: adelantosMes,
+      deudaEntrante: deudaEntrante,
+    );
+    final liquidada = _nominaLiquidadaMes[ent] ?? false;
+    // Ronda 17 M4-H1: el detalle de la base (conteo ×
+    // tarifa) es cifra global: solo con permiso de
+    // cifras, como la línea del resumen.
+    final verCifras = AuthService().isOwner ||
+        PermisosEntrenador().canVerCifras;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.lg),
+      child: Tarjeta(
+        padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-          children: [
-            Expanded(
-              child: Text(
-                nombre,
-                style: AppTexto.cuerpo.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  '${fmtMonto(total)} CUP',
-                  style: AppTexto.tituloPagina.copyWith(
-                      color: colorCifraNomina(total)),
+                Expanded(
+                  child:
+                      Text(nombre, style: AppTexto.subtitulo),
                 ),
-                if (bono != 0)
-                  Text(
-                    '${bono > 0 ? '+' : ''}${fmtMonto(bono)} bono',
-                    style: AppTexto.metadato.copyWith(
-                        color: colorCifraNomina(bono)),
-                  ),
-                if (comision.total != 0)
-                  Text(
-                    '${comision.total > 0 ? '+' : ''}'
-                    '${fmtMonto(comision.total)} comisión dosis '
-                    '(${comision.dosis})',
-                    style: AppTexto.metadato.copyWith(
-                        color: colorCifraNomina(comision.total)),
-                  ),
-                if (adelantosMes != 0)
-                  Text(
-                    '−${fmtMonto(adelantosMes)} adelantos',
-                    style: AppTexto.metadato.copyWith(color: AppColores.error),
-                  ),
-                if (deudaEntrante > 0)
-                  Text(
-                    '−${fmtMonto(deudaEntrante)} deuda anterior',
-                    style: AppTexto.metadato.copyWith(color: AppColores.error),
-                  ),
                 if (liquidada)
-                  Text(
-                    '✓ nómina pagada',
-                    style: AppTexto.metadato.copyWith(color: AppColores.exito),
+                  const ChipEstado.semantico(
+                    texto: '✓ nómina pagada',
+                    significado: SignificadoChip.exito,
                   ),
               ],
             ),
-          ],
-        ),
             const SizedBox(height: AppEspacio.sm),
+            FilaLibro(
+              concepto: 'Base',
+              detalle: verCifras
+                  ? '$_clientesPagados clientes × '
+                      '${fmtMonto(_tarifa)} CUP'
+                  : null,
+              monto: '${fmtMonto(base)} CUP',
+            ),
+            if (bono != 0)
+              FilaLibro(
+                concepto: 'Bonos',
+                monto:
+                    '${bono > 0 ? '+' : ''}${fmtMonto(bono)} CUP',
+                colorMonto: colorCifraNomina(bono),
+              ),
+            if (comision.total != 0)
+              FilaLibro(
+                concepto: 'Comisión dosis',
+                detalle: '${comision.dosis} dosis',
+                monto: '${comision.total > 0 ? '+' : ''}'
+                    '${fmtMonto(comision.total)} CUP',
+                colorMonto: colorCifraNomina(comision.total),
+              ),
+            if (adelantosMes != 0)
+              FilaLibro(
+                concepto: 'Adelantos del mes',
+                monto: '−${fmtMonto(adelantosMes)} CUP',
+                colorMonto: AppColores.error,
+              ),
+            if (deudaEntrante > 0)
+              FilaLibro(
+                concepto: 'Deuda anterior',
+                monto: '−${fmtMonto(deudaEntrante)} CUP',
+                colorMonto: AppColores.error,
+              ),
+            const Divider(height: 16),
+            FilaLibro(
+              concepto: 'NETO A PAGAR',
+              monto: '${fmtMonto(total)} CUP',
+              estiloConcepto: AppTexto.subtitulo,
+              estiloMonto: AppTexto.tituloPagina
+                  .copyWith(color: colorCifraNomina(total)),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            // 1.25 T25: bajo las cifras, la barra de
+            // composición (la misma de Mi Nómina): el
+            // «por qué» del neto de un vistazo, no solo
+            // cuatro numeritos.
             BarraComposicionNomina(
               bruto: base + bono + comision.total,
               neto: total,
               descuentos: adelantosMes + deudaEntrante,
             ),
+            if (_personasAdelantos.containsKey(ent))
+              _seccionAdelantos(context, ent),
           ],
         ),
-      );
-    }).toList();
+      ),
+    );
   }
 
   /// Nombre legible del destino del bono.
@@ -667,99 +786,23 @@ class _NominaScreenState extends State<NominaScreen> {
                   ),
                   const SizedBox(height: AppEspacio.lg),
                 ],
-                Tarjeta(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          IconoModuloBadge.naranja(
-                              Icons.payments_rounded),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              esDueno
-                                  ? 'Nómina por entrenador'
-                                  : 'Mi nómina',
-                              style: AppTexto.titulo,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      // Ronda 17 M4-H1 (decisión Jc 2026-10-28):
-                      // sin can_ver_cifras no se muestra el conteo
-                      // global; el entrenador ve solo su monto base.
-                      if (esDueno ||
-                          PermisosEntrenador().canVerCifras)
-                        Text(
-                          '$_clientesPagados clientes pagados en $_mesEtiqueta '
-                          '× ${fmtMonto(pagoPorCliente)} CUP',
-                          style: AppTexto.cuerpo.copyWith(
-                            color: AppColores.textoSecundario(
-                                context),
-                          ),
-                        ),
-                      const SizedBox(height: 4),
-                      // v1.4.0: sello del pre-cálculo automático.
-                      Text(
-                        'Actualizado: $_actualizadoEtiqueta',
-                        style: AppTexto.etiqueta.copyWith(
-                          color: AppColores.textoSecundario(
-                              context),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Desglose por entrenador
-                      ..._buildFilasEntrenadores(
-                          context, base),
-                      // v1.8.0: adelantos del mes por entrenador.
-                      ..._buildSeccionesAdelantos(context),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-                        decoration: BoxDecoration(
-                          color: AppColores.naranja
-                              .withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(
-                              AppRadio.md),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                                Icons.info_rounded,
-                                size: 16,
-                                color: AppColores.info),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                '$proyeccion — no es la cifra final. '
-                                'El pago se hace el último día del mes.',
-                                style: AppTexto.etiqueta.copyWith(
-                                  color: AppColores
-                                      .textoSecundario(context),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                // (1.30 D4 · UI130-12) la megatarjeta se
+                // parte en tres piezas: resumen breve,
+                // una tarjeta por entrenador y las
+                // tarjetas de bonos y tarifa.
+                _tarjetaResumenNomina(context, base, proyeccion),
+                const SizedBox(height: 16),
+                for (final ent in _clavesEntrenadoresNomina())
+                  _tarjetaEntrenadorNomina(context, ent, base),
                 // v1.3.9: bonos por entrenador (solo dueño)
                 if (esDueno) ...[
-                  const SizedBox(height: 16),
                   Tarjeta(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     child: Column(
                       crossAxisAlignment:
                           CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        const Text(
                           'Bonos del mes',
                           style: AppTexto.titulo,
                         ),
@@ -775,67 +818,14 @@ class _NominaScreenState extends State<NominaScreen> {
                         for (final b in _bonos)
                           _buildFilaBono(context, b),
                         const Divider(height: 24),
-                        Text(
-                          'Agregar bono',
-                          style: AppTexto.cuerpo
-                              .copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        // Selector de entrenador
-                        DropdownButtonFormField<String>(
-                          value: _bonoEntrenador,
-                          decoration: const InputDecoration(
-                            labelText: 'Para',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                                value: 'ambos',
-                                child: Text('Ambos')),
-                            DropdownMenuItem(
-                                value: 'duany',
-                                child: Text('Duany')),
-                            DropdownMenuItem(
-                                value: 'gabriel',
-                                child: Text('Gabriel')),
-                          ],
-                          onChanged: (v) => setState(
-                              () => _bonoEntrenador =
-                                  v ?? 'ambos'),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              // N1 (estéticas 1.19): campo del
-                              // sistema; el 'CUP' va en el hint
-                              // (CampoTexto no tiene afijos).
-                              child: CampoTexto(
-                                controller:
-                                    _bonoMontoCtrl,
-                                teclado: const TextInputType
-                                    .numberWithOptions(
-                                        decimal: true,
-                                        signed: true),
-                                hint: 'Monto en CUP '
-                                    '(Ej: 2000 o -500)',
-                                icono: Icons.payments_rounded,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        CampoTexto(
-                          controller: _bonoNotaCtrl,
-                          hint: 'Nota: por qué se otorga...',
-                          icono: Icons.note_rounded,
-                          maxLineas: 2,
-                        ),
-                        const SizedBox(height: 8),
+                        // (1.30 D4 · UI130-12) el formulario
+                        // en línea sale de la tarjeta:
+                        // agregar un bono es una hoja.
                         BotonPrimario(
                           texto: 'Agregar bono',
                           icono: Icons.add_rounded,
-                          onPressed: _agregarBono,
+                          onPressed: () =>
+                              _abrirHojaAgregarBono(context),
                         ),
                       ],
                     ),
@@ -857,21 +847,21 @@ class _NominaScreenState extends State<NominaScreen> {
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
+                              child: const Text(
                                 'CUP por cada cliente que pagó:',
                                 style: AppTexto.cuerpo,
                               ),
                             ),
                             SizedBox(
-                              width: 100,
-                              // N1 (estéticas 1.19): campo del
-                              // sistema (la etiqueta vive en el
-                              // texto de la fila).
-                              child: CampoTexto(
-                                controller:
-                                    _tarifaCtrl,
-                                teclado:
-                                    TextInputType.number,
+                              width: 150,
+                              // (1.30 D4 · UI130-12) la
+                              // tarifa gasta CampoMoneda
+                              // del kit (D3): sufijo CUP
+                              // dentro del campo y el
+                              // mismo texto limpio que
+                              // _guardarTarifa ya parsea.
+                              child: CampoMoneda(
+                                controller: _tarifaCtrl,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -895,21 +885,6 @@ class _NominaScreenState extends State<NominaScreen> {
   // v1.8.0: Adelantos — sección por entrenador (lista del mes,
   // registrar/anular solo dueño, marcar nómina como pagada).
   // ----------------------------------------------------------------
-
-  List<Widget> _buildSeccionesAdelantos(BuildContext context) {
-    final esDueno = AuthService().isOwner;
-    final yo = AuthService().username;
-    final claves = esDueno
-        ? ['duany', 'gabriel']
-        : [
-            if (yo == 'duany' || yo == 'gabriel') yo,
-          ];
-    return [
-      for (final ent in claves)
-        if (_personasAdelantos.containsKey(ent))
-          _seccionAdelantos(context, ent),
-    ];
-  }
 
   /// T22 (1.20): línea de acuse de la nómina liquidada: si
   /// el entrenador ya confirmó (espejo), su fecha; si no,
@@ -1888,6 +1863,141 @@ class _DialogoRegistrarAdelantoState
           child: const Text('Registrar'),
         ),
       ],
+    );
+  }
+}
+
+/// (1.30 D4 · UI130-12) Hoja para agregar un bono de
+/// nómina: dueña de sus controladores y de la selección
+/// de entrenador (la regla de la casa para hojas con
+/// campos), raíz HojaAccion del kit (D3). La validación
+/// del monto usa la misma regla y el mismo mensaje que
+/// tenía el formulario en línea (montoTolerante: un
+/// 'Infinity'/'NaN' pegado no pasa); el guardado lo
+/// ejecuta la pantalla vía [alGuardar], que conserva
+/// las guardas de dueño, doble toque y mes liquidado.
+/// El monto admite negativos (un bono de -500
+/// descuenta), por eso el campo es CampoTexto con
+/// teclado con signo y no CampoMoneda: el formateador
+/// del kit rechaza el signo.
+class HojaAgregarBono extends StatefulWidget {
+  final Future<bool> Function({
+    required String entrenador,
+    required double monto,
+    required String nota,
+  }) alGuardar;
+
+  const HojaAgregarBono({super.key, required this.alGuardar});
+
+  @override
+  State<HojaAgregarBono> createState() => _HojaAgregarBonoState();
+}
+
+class _HojaAgregarBonoState extends State<HojaAgregarBono> {
+  final _montoCtrl = TextEditingController();
+  final _notaCtrl = TextEditingController();
+  String _entrenador = 'ambos'; // 'duany', 'gabriel', 'ambos'
+  bool _guardando = false;
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    if (_guardando) return;
+    final texto = _montoCtrl.text.trim().replaceAll(',', '.');
+    // Autoauditoría 1.22 #1: montoTolerante (N-2) en vez
+    // del tryParse crudo, la misma regla del formulario
+    // en línea que esta hoja sustituye.
+    final monto = NominaCalc.montoTolerante(texto) ?? 0;
+    if (monto == 0) {
+      mostrarSnack(context, 'Ingresa un monto válido',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    // Captura síncrona de la nota y del destino antes
+    // del primer await (Pasada 2 de Argón, 1.20: con la
+    // captura tras el await, un doble toque duplicaba).
+    final nota = _notaCtrl.text.trim();
+    final entrenador = _entrenador;
+    setState(() => _guardando = true);
+    try {
+      final ok = await widget.alGuardar(
+          entrenador: entrenador, monto: monto, nota: nota);
+      if (ok && mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return HojaAccion(
+      titulo: 'Agregar bono',
+      icono: Icons.star_rounded,
+      cuerpo: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Selector de entrenador (el mismo del
+          // formulario en línea).
+          DropdownButtonFormField<String>(
+            value: _entrenador,
+            decoration: const InputDecoration(
+              labelText: 'Para',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(
+                  value: 'ambos', child: Text('Ambos')),
+              DropdownMenuItem(
+                  value: 'duany', child: Text('Duany')),
+              DropdownMenuItem(
+                  value: 'gabriel', child: Text('Gabriel')),
+            ],
+            onChanged: (v) =>
+                setState(() => _entrenador = v ?? 'ambos'),
+          ),
+          const SizedBox(height: 8),
+          CampoTexto(
+            controller: _montoCtrl,
+            teclado: const TextInputType.numberWithOptions(
+                decimal: true, signed: true),
+            hint: 'Monto en CUP (Ej: 2000 o -500)',
+            icono: Icons.payments_rounded,
+          ),
+          const SizedBox(height: 8),
+          CampoTexto(
+            controller: _notaCtrl,
+            hint: 'Nota: por qué se otorga...',
+            icono: Icons.note_rounded,
+            maxLineas: 2,
+          ),
+        ],
+      ),
+      pie: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _guardando
+                  ? null
+                  : () => Navigator.of(context).maybePop(),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          const SizedBox(width: AppEspacio.md),
+          Expanded(
+            child: BotonPrimario(
+              texto: 'Guardar bono',
+              icono: Icons.add_rounded,
+              cargando: _guardando,
+              onPressed: _guardando ? null : _guardar,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
