@@ -44,7 +44,8 @@ class _CuentasCobrarScreenState
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final hoy = ahoraHabana();
+    // Yunque B (YB-CLI-08): la hora de pared ya no se usa
+    // aquí — el atraso sale de diasRestantes (días UTC).
     final todos = <Map<String, dynamic>>[
       ...await atrasados(masDe30: false),
       ...await atrasados(masDe30: true),
@@ -60,14 +61,13 @@ class _CuentasCobrarScreenState
       final ph = '${c['pagado_hasta'] ?? ''}';
       int dias = 0;
       if (ph.length >= 10) {
-        final f = DateTime.tryParse(ph.substring(0, 10));
-        if (f != null) {
-          dias = hoy
-              .difference(
-                  DateTime(f.year, f.month, f.day))
-              .inDays;
-          if (dias < 0) dias = 0;
-        }
+        // Yunque B (YB-CLI-08): el atraso sale del cálculo
+        // canónico (días en UTC): antes se restaba
+        // ahoraHabana() CON hora contra una medianoche local
+        // — instante contra día — y el conteo heredaba el
+        // sesgo del cambio de hora.
+        final dr = diasRestantes(ph);
+        if (dr != null && dr < 0) dias = -dr;
       }
       // P2#5: precioCobroParaCliente respeta tarifas especiales
       // (el esMenor?menores:mensual viejo las ignoraba). Casa ya

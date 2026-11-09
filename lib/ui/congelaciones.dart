@@ -43,7 +43,13 @@ String _haceCuando(String? creadoEn) {
   if (creadoEn == null) return '';
   final t = DateTime.tryParse(creadoEn);
   if (t == null) return '';
-  final dif = ahoraHabana().difference(t.toLocal());
+  // Yunque B (YB-CLI-06 / YB-FLU-05): antes se convertía el
+  // instante del servidor a la zona DEL DISPOSITIVO
+  // (toLocal) y se restaba de ahoraHabana(): con el teléfono
+  // en otra zona, el «Pedida hace X» salía corrido por la
+  // diferencia. Patrón de la casa: aHabana() sobre el
+  // instante, como en hace().
+  final dif = ahoraHabana().difference(t.isUtc ? aHabana(t) : t);
   if (dif.inMinutes < 60) return 'hace ${dif.inMinutes} min';
   if (dif.inHours < 24) return 'hace ${dif.inHours} h';
   return 'hace ${dif.inDays} d';

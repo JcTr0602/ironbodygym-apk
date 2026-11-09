@@ -911,9 +911,15 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
               final ph =
                   normalizarFechaCobro(cliente['pagado_hasta']);
               if (ph != null && ph.compareTo(fpIso) > 0) {
-                final diasRest = DateTime.parse(ph)
-                    .difference(DateTime.parse(fpIso))
-                    .inDays;
+                // Yunque B (YB-CLI-08): días en UTC vía
+                // fechaIsoEstricta (antes: resta de
+                // medianoches locales, con el desfase del
+                // cambio de hora).
+                final phD = fechaIsoEstricta(ph);
+                final fpD = fechaIsoEstricta(fpIso);
+                final diasRest = (phD != null && fpD != null)
+                    ? phD.difference(fpD).inDays
+                    : 0;
                 return Container(
                   margin: const EdgeInsets.only(
                       top: AppEspacio.sm, bottom: AppEspacio.xs),

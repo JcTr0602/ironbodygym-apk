@@ -69,6 +69,12 @@ class PerfilComunidadAdmin {
 
   /// «Nuevo esta semana» (COM-25): alta en los
   /// últimos 7 días.
+  /// Yunque B (YB-FLU-05): la comparación es entre INSTANTES
+  /// — [ahora] debe ser el instante real (ahoraUtcReal) y
+  /// [altaEn] el instante del servidor. Antes el llamador
+  /// pasaba ahoraHabana() (hora de pared en el marco del
+  /// dispositivo) y el conteo «nuevos» se adelantaba o
+  /// atrasaba horas en el borde de los 7 días.
   bool esNuevo(DateTime ahora) {
     final a = DateTime.tryParse(altaEn ?? '');
     if (a == null) return false;

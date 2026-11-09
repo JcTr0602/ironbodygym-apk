@@ -89,15 +89,18 @@ String _hace(int dias) {
 
 /// v1.3.8: días de atraso entre pagado_hasta y hoy (formato YYYY-MM-DD).
 /// Retorna 0 si la fecha es inválida o futura.
+/// Yunque B (YB-CLI-05): la resta se hace entre días UTC
+/// (vía fechaIsoEstricta, como diasRestantes) — con
+/// medianoches locales, un atraso que cruzaba el cambio de
+/// hora de marzo se contaba un día menos y la bandeja
+/// agrupaba mal («Vencido hace 7 días» en el subgrupo 1–7
+/// cuando eran 8).
 int _diasAtraso(String pagadoHasta, String hoyIso) {
-  try {
-    final ph = DateTime.parse(pagadoHasta.substring(0, 10));
-    final hoy = DateTime.parse(hoyIso.substring(0, 10));
-    final d = hoy.difference(ph).inDays;
-    return d > 0 ? d : 0;
-  } catch (_) {
-    return 0;
-  }
+  final ph = fechaIsoEstricta(pagadoHasta);
+  final hoy = fechaIsoEstricta(hoyIso);
+  if (ph == null || hoy == null) return 0;
+  final d = hoy.difference(ph).inDays;
+  return d > 0 ? d : 0;
 }
 
 /// Ejecuta [fn] capturando errores de SQLite. Si la BD falla (I/O,

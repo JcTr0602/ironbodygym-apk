@@ -557,7 +557,12 @@ class _EditarIncidenciaScreenState
   }
 
   Future<void> _elegirFecha() async {
-    final hoy = DateTime.now();
+    // Yunque B (YB-CLI-07): los límites del selector son una
+    // fecha de NEGOCIO (la fecha límite de la incidencia):
+    // salen de ahoraHabana(), no del reloj del dispositivo —
+    // con la zona del teléfono fuera de La Habana, el primer
+    // día válido podía ser mañana-Habana o permitir «ayer».
+    final hoy = ahoraHabana();
     final f = await showDatePicker(
       context: context,
       initialDate: _fechaLimite ??

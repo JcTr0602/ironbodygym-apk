@@ -385,7 +385,12 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     if (ts == null) {
       frescura = 'Sin registro de actualización';
     } else {
-      final diff = ahoraHabana().difference(ts);
+      // Yunque B (YB-CLI-06): el sello viene como instante
+      // UTC (ISO con offset) y ahoraHabana() es hora de pared
+      // en el marco del dispositivo: restarlos crudos corre
+      // la frescura por la diferencia de zonas. Se normaliza
+      // el instante con aHabana, como en hace().
+      final diff = ahoraHabana().difference(ts.isUtc ? aHabana(ts) : ts);
       if (diff.inMinutes < 1) {
         frescura = 'Actualizado ahora mismo';
       } else if (diff.inMinutes < 60) {

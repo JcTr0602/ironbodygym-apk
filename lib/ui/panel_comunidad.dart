@@ -525,8 +525,10 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
     final conteos = conteosComunidad(_perfiles);
     final visibles =
         filtrarPerfilesComunidad(_perfiles, _consulta);
+    // Yunque B (YB-FLU-05): esNuevo compara instantes: el
+    // instante real UTC, no la hora de pared habanera.
     final nuevos = _perfiles
-        .where((p) => p.esNuevo(ahoraHabana()))
+        .where((p) => p.esNuevo(ahoraUtcReal()))
         .length;
     return Column(
       children: [

@@ -1346,6 +1346,16 @@ class _VerificacionEspejoScreenState
     return mapa;
   }
 
+  /// Yunque B (YB-CLI-03): el sello de la última bajada se
+  /// guarda convertido a La Habana. `detalle()` parsea
+  /// `last_pull_ok` (ISO con offset) como instante UTC y el
+  /// `toIso8601String()` crudo lo re-serializaba en UTC:
+  /// `_ts` imprimía la hora UTC (4–5 h en el futuro) justo en
+  /// la pantalla de diagnóstico del espejo.
+  static String? _isoEnHabana(DateTime? d) => d == null
+      ? null
+      : (d.isUtc ? aHabana(d) : d).toIso8601String();
+
   Future<void> _cargar() async {
     setState(() {
       _cargando = true;
@@ -1358,7 +1368,7 @@ class _VerificacionEspejoScreenState
       if (!mounted) return;
       setState(() {
         _conteos = conteos;
-        _ultimaPull = det.ultimaPull?.toIso8601String();
+        _ultimaPull = _isoEnHabana(det.ultimaPull);
         _errorSync = det.error;
         _pendientes = pend;
         _cargando = false;
@@ -1407,7 +1417,7 @@ class _VerificacionEspejoScreenState
       setState(() {
         _antes = antes;
         _conteos = despues;
-        _ultimaPull = det.ultimaPull?.toIso8601String();
+        _ultimaPull = _isoEnHabana(det.ultimaPull);
         _errorSync = det.error;
         _pendientes = pend;
         _resultado = [

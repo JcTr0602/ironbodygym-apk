@@ -338,18 +338,16 @@ class _PagoScreenState extends State<PagoScreen> {
     }
   }
 
-  int _diasRestantes(Map<String, dynamic> c) {
-    try {
-      final ph = '${c['pagado_hasta'] ?? ''}';
-      if (ph.length < 10) return 999;
-      final v = DateTime.parse(ph.substring(0, 10));
-      final hoy = ahoraHabana();
-      final hoyDia = DateTime(hoy.year, hoy.month, hoy.day);
-      return v.difference(hoyDia).inDays;
-    } catch (_) {
-      return 999;
-    }
-  }
+  /// Yunque B (YB-CLI-04): delega en el cálculo CANÓNICO
+  /// (`diasRestantes` de negocio, aritmética en UTC). La
+  /// copia local que vivía aquí restaba medianoches LOCALES:
+  /// el domingo del cambio de hora de marzo (día de 23 h) un
+  /// cliente vencido AYER daba 0 («vence hoy») y desaparecía
+  /// del filtro de vencidos de esta pantalla. Sin fecha
+  /// legible, el canónico devuelve null y aquí vale 999
+  /// («sin vencimiento»), como hacía el catch de la copia.
+  int _diasRestantes(Map<String, dynamic> c) =>
+      diasRestantes('${c['pagado_hasta'] ?? ''}') ?? 999;
 
   Future<void> _pagar(Map<String, dynamic> c) async {
     // 1.24 Bloque 4: anti-doble-toque síncrono — sin esto, dos

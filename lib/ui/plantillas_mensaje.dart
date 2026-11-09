@@ -232,12 +232,14 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
         cliente: cliente, periodo: 'mensual', metodo: 'efectivo');
     final ph = '${cliente['pagado_hasta'] ?? ''}';
     var dias = '—';
-    if (ph.length >= 10) {
-      try {
-        final hasta = DateTime.parse(ph.substring(0, 10));
-        final hoy = DateTime.parse(hoyHabanaIso());
-        dias = '${hasta.difference(hoy).inDays}';
-      } catch (_) {}
+    // Yunque B (YB-CLI-08): días contados en UTC vía
+    // fechaIsoEstricta — con medianoches locales, la variable
+    // {dias} del mensaje salía con un día de desfase al
+    // cruzar el cambio de hora.
+    final hastaD = fechaIsoEstricta(ph);
+    final hoyD = fechaIsoEstricta(hoyHabanaIso());
+    if (hastaD != null && hoyD != null) {
+      dias = '${hastaD.difference(hoyD).inDays}';
     }
     final datos = {
       'nombre': '${cliente['nombre'] ?? ''}',

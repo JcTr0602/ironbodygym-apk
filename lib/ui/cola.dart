@@ -2907,19 +2907,21 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
   }
 
   /// dd/MM HH:mm, '—' si no hay fecha.
-  String _fmtHora(String? iso) {
-    final d = parseFecha(iso);
-    if (d == null) return '—';
-    String p(int n) => n.toString().padLeft(2, '0');
-    return '${p(d.day)}/${p(d.month)} ${p(d.hour)}:${p(d.minute)}';
-  }
+  /// Yunque B (YB-CLI-02): los sellos se guardan con
+  /// isoHabana (offset explícito) y parseFecha los devuelve
+  /// como instante UTC: imprimirlos crudos enseñaba la hora
+  /// UTC (4–5 h por delante). Se delega en horaCortaHabana,
+  /// la conversión canónica de esta misma pantalla.
+  String _fmtHora(String? iso) => horaCortaHabana(parseFecha(iso));
 
   /// HH:mm, '—' si no hay fecha.
+  /// Yunque B (YB-CLI-02): misma conversión a La Habana.
   String _fmtHoraCorta(String? iso) {
     final d = parseFecha(iso);
     if (d == null) return '—';
+    final h = d.isUtc ? aHabana(d) : d;
     String p(int n) => n.toString().padLeft(2, '0');
-    return '${p(d.hour)}:${p(d.minute)}';
+    return '${p(h.hour)}:${p(h.minute)}';
   }
 
   /// Motivo de rechazo legible para una op rechazada.

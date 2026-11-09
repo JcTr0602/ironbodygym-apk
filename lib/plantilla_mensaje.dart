@@ -95,7 +95,12 @@ String? avisoFrescura({
   }
   final ts = DateTime.tryParse(ultimoPullIso);
   if (ts == null) return null;
-  final horas = ahora.difference(ts).inHours;
+  // Yunque B (YB-CLI-06): `ahora` llega como ahoraHabana()
+  // (hora de pared) y el sello parseado es un instante UTC:
+  // se normaliza con aHabana antes de restar, como en hace(),
+  // para que el aviso de «sync vieja» no salte ni se duerma
+  // por la zona del teléfono.
+  final horas = ahora.difference(ts.isUtc ? aHabana(ts) : ts).inHours;
   if (horas > 2) {
     return '⚠️ Última sync hace $horas h. '
         'Confirma si el cliente ya pagó en el turno antes de enviar';

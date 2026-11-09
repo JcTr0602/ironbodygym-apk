@@ -823,8 +823,11 @@ bool venceEnVentana(
   if (pagadoHasta == null || pagadoHasta.length < 10) return false;
   final hasta = pagadoHasta.substring(0, 10);
   if (hasta.compareTo(hoyHabana) < 0) return false;
-  final hoy = DateTime.tryParse(hoyHabana);
-  final ven = DateTime.tryParse(hasta);
+  // Yunque B (YB-CLI-08): días en UTC vía fechaIsoEstricta —
+  // la resta de medianoches locales se corría un día al
+  // cruzar el cambio de hora y el recordatorio disparaba mal.
+  final hoy = fechaIsoEstricta(hoyHabana);
+  final ven = fechaIsoEstricta(hasta);
   if (hoy == null || ven == null) return false;
   return ven.difference(hoy).inDays <= diasAnticipacion;
 }
