@@ -16,6 +16,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../acceso_bloqueo.dart';
 import '../auth.dart';
 import '../app_log.dart';
 import '../comprobantes.dart';
@@ -1125,7 +1126,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
           // 3. Copia de recuperación de la base actual.
           await LocalDb.instance.close();
       final destino = await LocalDb.instance.dbPath();
-      final rollback = File('${tmp.path}/ironbody-antes-de-importar.db');
+      // Yunque B (YB-TRA-02): la copia de recuperación vive
+      // JUNTO a la base (directorio duradero), no en el
+      // temporal que el sistema puede barrer.
+      final rollback = File('$destino.antes-de-importar.db');
       if (await rollback.exists()) await rollback.delete();
       final actual = File(destino);
       if (await actual.exists()) await actual.copy(rollback.path);
@@ -1134,7 +1138,30 @@ class _AjustesScreenState extends State<AjustesScreen> {
         final f = File('$destino$suf');
         if (await f.exists()) await f.delete();
       }
-      await File(tmpPath).copy(destino);
+      // Yunque B (YB-TRA-02): NUNCA copiar directamente
+      // sobre la base viva — una muerte del proceso a mitad
+      // de copia la dejaba truncada «como buena» y nadie lo
+      // comprobaba al arrancar. La copia va a un temporal EN
+      // EL MISMO directorio, se le pasa integrity_check y
+      // solo entonces se RENOMBRA sobre el destino (rename
+      // atómico en el mismo sistema de archivos): si el
+      // proceso muere copiando, la base viva queda intacta.
+      final tmpDestino = File('$destino.importando');
+      if (await tmpDestino.exists()) await tmpDestino.delete();
+      await File(tmpPath).copy(tmpDestino.path);
+      final chkDb = await openDatabase(tmpDestino.path, readOnly: true);
+      try {
+        final integ = await chkDb.rawQuery('PRAGMA integrity_check');
+        final integOk = integ.isNotEmpty &&
+            '${integ.first.values.first}'.toLowerCase() == 'ok';
+        if (!integOk) {
+          throw 'la copia del respaldo quedó dañada al '
+              'escribirla; la base actual no se tocó';
+        }
+      } finally {
+        await chkDb.close();
+      }
+      await tmpDestino.rename(destino);
       await tmpFile.delete();
       // 5. Reabrir: si la nueva base no abre, restaurar la anterior.
       try {
@@ -1147,6 +1174,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
         }
         throw 'el respaldo no se pudo abrir; se restauró la base anterior';
       }
+      // Yunque B (YB-TRA-10): la base importada trae el
+      // espejo del candado TAL COMO estaba al hacerse la
+      // copia: un bloqueo dictado después no está en él y el
+      // candado se evalúa solo contra ese espejo. Se marca
+      // como NO fiable hasta el primer pull que refresque
+      // acceso_bloqueos (la marca la levanta el motor de
+      // sync); mientras tanto la raíz lo avisa. El PIN no se
+      // afecta: vive fuera de la BD.
+      try {
+        await LocalDb.instance
+            .setMeta(kMetaCandadoTrasImportar, '1');
+        unawaited(AccesoBloqueoService.instance.reevaluar());
+      } catch (_) {}
         } finally {
           // El candado vivía en la base VIEJA (ya reemplazada):
           // liberarlo escribe sobre la base reabierta y limpia

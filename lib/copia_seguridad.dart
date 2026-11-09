@@ -34,7 +34,13 @@ String nombreCopiaManual(DateTime ahora) {
 /// archivo copiado (la pantalla lo comparte y audita; la
 /// copia automática semanal lo re-copia a su carpeta con
 /// su rotación propia).
-Future<File> exportarCopiaFria() async {
+///
+/// [destinoDirecto] (Yunque B, YB-TRA-03): si se pasa, la
+/// copia en frío se escribe DIRECTAMENTE ahí y no queda
+/// ninguna copia intermedia en `copias_manuales` — la vía
+/// automática dejaba una BD completa sin rotar por semana
+/// y teléfono, para siempre.
+Future<File> exportarCopiaFria({File? destinoDirecto}) async {
   // 1.24 Bloque 5 (F5): el mismo rigor que el export de Ajustes
   // y que la importación — candado de sync tomado durante el
   // checkpoint y la copia (ningún ciclo hace checkpoint a
@@ -59,7 +65,7 @@ Future<File> exportarCopiaFria() async {
     // checkpoint automático a media copia mezclaba páginas de
     // dos instantes. Si el lock se pierde, la copia se aborta.
     return await LocalDb.instance.conLatidoSyncLock(
-        candado, () => _copiarConCandado());
+        candado, () => _copiarConCandado(destinoDirecto: destinoDirecto));
   } finally {
     try {
       await LocalDb.instance.liberarSyncLock(candado);
@@ -69,7 +75,7 @@ Future<File> exportarCopiaFria() async {
 
 /// El volcado del WAL y la copia del archivo, ya con el
 /// candado de sync tomado (ver [exportarCopiaFria]).
-Future<File> _copiarConCandado() async {
+Future<File> _copiarConCandado({File? destinoDirecto}) async {
     final d = await LocalDb.instance.db;
     // Panel 1.14 (Luna + Kimi): si el WAL no se puede volcar (otra
     // conexión leyendo), NO se comparte una copia sin los últimos
@@ -97,6 +103,15 @@ Future<File> _copiarConCandado() async {
     // reconstruía a mano como getDatabasesPath() + 'ironbody.db',
     // lo que en los tests paralelos (P1) apuntaba a otro archivo.
     final origen = File(await LocalDb.instance.dbPath());
+    // Yunque B (YB-TRA-03): destino directo (la vía
+    // automática): se escribe ahí y NO queda copia en
+    // copias_manuales.
+    if (destinoDirecto != null) {
+      final dirD = destinoDirecto.parent;
+      if (!await dirD.exists()) await dirD.create(recursive: true);
+      await origen.copy(destinoDirecto.path);
+      return destinoDirecto;
+    }
     // 1.29 (Oleada 6, D-B3-06): destino DURADERO en el
     // directorio de documentos (el mismo hogar que la copia
     // automática semanal de la 1.28), subcarpeta propia

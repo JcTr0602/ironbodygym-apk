@@ -22,6 +22,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'app_log.dart';
+import 'auth.dart';
 import 'copia_seguridad.dart';
 import 'localdb.dart';
 import 'tiempo.dart';
@@ -76,17 +77,30 @@ String _nombreCopia(DateTime ahora) {
 Future<bool> copiaAutomaticaSiToca() async {
   final db = LocalDb.instance;
   try {
+    // Yunque B (YB-TRA-03): la copia automática SOLO corre
+    // en el teléfono del dueño. En el de un entrenador
+    // generaba copias íntegras de la BD fuera de todo
+    // control de rotación (y de necesidad: su respaldo es
+    // el servidor, no su teléfono).
+    var esDueno = false;
+    try {
+      esDueno = AuthService().isOwner;
+    } catch (_) {}
+    if (!esDueno) return false;
     final ultimaTxt = await db.getMeta(metaCopiaAutoUltima);
     final ultima = ultimaTxt == null ? null : DateTime.tryParse(ultimaTxt);
     final ahora = ahoraHabana();
     if (!copiaAutoToca(ultima: ultima, ahora: ahora)) return false;
 
-    final fria = await exportarCopiaFria();
+    // Yunque B (YB-TRA-03): la copia en frío se escribe
+    // DIRECTAMENTE en copias_auto — antes pasaba por
+    // copias_manuales y la intermedia quedaba sin rotar
+    // para siempre (+1 BD completa por semana y teléfono).
     final docs = await getApplicationDocumentsDirectory();
     final dir = Directory(p.join(docs.path, 'copias_auto'));
     if (!await dir.exists()) await dir.create(recursive: true);
     final destino = File(p.join(dir.path, _nombreCopia(ahora)));
-    await fria.copy(destino.path);
+    await exportarCopiaFria(destinoDirecto: destino);
 
     // Rotación: conservar las últimas N.
     final nombres = <String>[

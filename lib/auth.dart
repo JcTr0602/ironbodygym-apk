@@ -101,7 +101,14 @@ class AuthService {
 
   Future<void> signIn(String username, String password) async {
     final email = usernameToEmail(username);
-    await _c.auth.signInWithPassword(email: email, password: password);
+    // Yunque B (YB-TRA-04): con timeout de 12 s, como el
+    // resto de llamadas de red de la casa — sin él, una
+    // conexión colgada (TCP abierto que nunca responde) no
+    // es un error y el botón «Entrar» giraba para siempre
+    // sin llegar jamás al catch de la pantalla.
+    await _c.auth
+        .signInWithPassword(email: email, password: password)
+        .timeout(const Duration(seconds: 12));
     // v1.3.3: reportar la versión de la app para que el dueño la vea
     // en "Usuarios APK" (no bloquea el login si falla).
     unawaited(reportAppVersion());
@@ -176,8 +183,15 @@ class AuthService {
       throw StateError('sin sesión');
     }
     // Re-autentica con la contraseña actual.
-    await _c.auth.signInWithPassword(email: email, password: actual);
-    await _c.auth.updateUser(UserAttributes(password: nueva));
+    // Yunque B (YB-TRA-04): ambas llamadas con el timeout
+    // de la casa (12 s): un cuelgue aquí dejaba el cambio de
+    // contraseña esperando para siempre.
+    await _c.auth
+        .signInWithPassword(email: email, password: actual)
+        .timeout(const Duration(seconds: 12));
+    await _c.auth
+        .updateUser(UserAttributes(password: nueva))
+        .timeout(const Duration(seconds: 12));
   }
 
   Future<void> signOut() async {
