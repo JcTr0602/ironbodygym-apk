@@ -41,7 +41,6 @@ import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'config_precios_bancarios.dart';
-import 'panel_anuncios.dart';
 import 'panel_dueno_swr.dart';
 import 'panel_dueno_atencion.dart';
 import 'panel_cache.dart';
@@ -1375,10 +1374,6 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const AvisosEntrenadorScreen());
       case 'avisos_clientes':
         _ir(const EditorAvisosClientesScreen());
-      // 1.29 (Oleada 5, FB-15): el compositor de
-      // anuncios, alcanzable por «anuncio».
-      case 'anuncios':
-        _ir(const PanelAnunciosScreen());
       case 'recordatorios':
         _ir(const RecordatoriosScreen());
       case 'info_publica':
@@ -3090,14 +3085,6 @@ class _AdminScreenState extends State<AdminScreen> {
                     'los clientes')
             : 'Perfiles visibles de los clientes y ocultación',
         () => _ir(const ComunidadPanelScreen()),
-      ),
-      // 1.28 (M5 ítem fijo, Pieza G de Anuncios): el
-      // compositor de anuncios de la app de Clientes.
-      _tarjetaFlujo(
-        Icons.campaign_rounded,
-        'Anuncio a clientes',
-        'Avisos en la app de Clientes: texto, audiencia y vigencia',
-        () => _ir(const PanelAnunciosScreen()),
       ),
       _tarjetaFlujo(
         Icons.event_rounded,

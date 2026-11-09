@@ -411,18 +411,17 @@ void main() {
     List<String> idsDe(String consulta) =>
         buscarFuncionesPanel(consulta).map((f) => f.id).toList();
 
-    test('«anuncio» lleva al compositor, no al centro de avisos', () {
-      final ids = idsDe('anuncio');
-      expect(ids, contains('anuncios'));
-      expect(ids, isNot(contains('avisos_clientes')));
-      final entrada = buscarFuncionesPanel('anuncio')
-          .firstWhere((f) => f.id == 'anuncios');
-      expect(entrada.titulo, 'Anuncio en la pantalla principal');
-      // La línea que dice dónde lo ve el cliente (FB-15).
-      expect(entrada.detalle, 'Lo ven los clientes al abrir su app');
-      // También por «publicar» y «pantalla principal».
-      expect(idsDe('publicar'), contains('anuncios'));
-      expect(idsDe('pantalla principal'), contains('anuncios'));
+    test('«anuncio» ya no lleva a ninguna puerta (§15)', () {
+      // 1.30 (§15, decisión de Jc 2026-11-08): la puerta
+      // «Anuncios» del Panel se retiró — la tabla
+      // cliente_anuncios nació vacía y el compositor
+      // nunca se usó; la puerta viva de avisos es el
+      // centro de avisos. La pantalla del compositor
+      // queda en el árbol, sin puerta.
+      expect(idsDe('anuncio'), isEmpty);
+      expect(idsDe('publicar'), isNot(contains('anuncios')));
+      expect(idsDe('pantalla principal'),
+          isNot(contains('anuncios')));
     });
 
     test('«avisos» lleva al centro de avisos renombrado', () {
@@ -447,10 +446,13 @@ void main() {
           isNot(contains('incidencias_sync')));
     });
 
-    test('el resolvedor del Panel abre los dos destinos nuevos', () {
+    test('el resolvedor del Panel: incidencias_sync sí; '
+        'anuncios ya no (§15)', () {
       final admin = File('lib/ui/admin.dart').readAsStringSync();
-      expect(admin, contains("case 'anuncios':"));
-      expect(admin, contains('const PanelAnunciosScreen()'));
+      // 1.30 (§15): la ruta «anuncios» se retiró del
+      // Panel con la puerta (decisión de Jc).
+      expect(admin, isNot(contains("case 'anuncios':")));
+      expect(admin, isNot(contains('PanelAnunciosScreen')));
       expect(admin, contains("case 'incidencias_sync':"));
       expect(admin, contains('const IncidenciasSyncScreen()'));
     });

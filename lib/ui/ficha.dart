@@ -40,6 +40,7 @@ import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'diseno.dart';
 import 'ficha_acceso_app.dart';
+import 'ficha_marcas.dart';
 import 'servicios.dart';
 import 'venta_suplemento.dart';
 import 'ficha_que_falta.dart';
@@ -3378,6 +3379,44 @@ class _FichaScreenState extends State<FichaScreen> {
                           telefonoEfectivoWa:
                               _telefonoEfectivoWa(c),
                         ),
+                      const SizedBox(height: AppEspacio.md),
+                      // 1.30 (§14): las marcas que el
+                      // cliente registra en su app y su
+                      // verificación por el personal
+                      // (entrenadores y dueño: la guarda
+                      // vive en el servidor).
+                      Tarjeta(
+                        // Material propio transparente: un
+                        // ListTile desnudo dentro de la caja
+                        // tintada de Tarjeta dispara la
+                        // aserción de fondo y tinta en debug
+                        // (la familia cazada en D5).
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(
+                              Icons.emoji_events_rounded,
+                              color: AppColores.naranja),
+                          title: const Text('Marcas en la app',
+                              style: AppTexto.subtitulo),
+                          subtitle: const Text(
+                              'Marcas personales del cliente y '
+                              'su verificación por el personal',
+                              style: AppTexto.secundario),
+                          trailing: const Icon(
+                              Icons.chevron_right_rounded),
+                          onTap: () => Navigator.of(context).push(
+                            RutaIron(
+                              builder: (_) => MarcasClienteScreen(
+                                clienteId: widget.clienteId,
+                                nombreCliente: nombre,
+                              ),
+                            ),
+                          ),
+                          ),
+                        ),
+                      ),
                       // Etapa 4 · F3: tarjeta «Acciones» (antes
                       // botones sueltos): mismas acciones, mismas
                       // condiciones y mismos callbacks.

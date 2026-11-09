@@ -179,23 +179,17 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       icono: Icons.campaign_rounded),
   // 1.29 (Oleada 5, FB-15): renombrada sin ambigüedad —
   // «avisos» es el CENTRO de avisos (editor de avisos a
-  // clientes); el ANUNCIO de la pantalla principal es
-  // otra entrada, justo debajo.
+  // clientes). 1.30 (§15): la puerta del compositor de
+  // anuncios se retiró del Panel; esta es la puerta de
+  // avisos que queda.
   FuncionPanel(
       id: 'avisos_clientes',
       titulo: 'Avisos al centro de avisos',
       sinonimos: ['mensaje masivo', 'avisar a clientes', 'avisos'],
       icono: Icons.send_rounded),
-  // 1.29 (Oleada 5, FB-15 · D-B3-01): el compositor de
-  // anuncios no existía en el índice: buscar «anuncio»
-  // no llevaba a ninguna parte. Su línea dice dónde lo
-  // ve el cliente.
-  FuncionPanel(
-      id: 'anuncios',
-      titulo: 'Anuncio en la pantalla principal',
-      sinonimos: ['anuncio', 'publicar', 'pantalla principal'],
-      icono: Icons.campaign_rounded,
-      detalle: 'Lo ven los clientes al abrir su app'),
+  // 1.30 (§15): la entrada «anuncios» se retiró del
+  // índice junto con la puerta del Panel (decisión de
+  // Jc); la pantalla del compositor queda en el árbol.
   FuncionPanel(
       id: 'recordatorios',
       titulo: 'Recordatorios automáticos',
