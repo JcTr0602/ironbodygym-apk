@@ -289,62 +289,46 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
     );
   }
 
+  // 1.30 D5 (UI130-19): la tarjeta adopta la anatomía común
+  // [TarjetaDecision] que comparte con la incidencia
+  // operativa: cabecera (icono + título + chip de estado),
+  // contexto (dispositivo · fecha), el motivo en la
+  // superficie de aviso y el pie con Descartar (destructiva)
+  // y Aprobar (primaria) SOLO si sigue pendiente. Las
+  // acciones y sus diálogos no cambian.
   Widget _tarjeta(Map<String, dynamic> inc) {
     final pendiente = (inc['estado'] as String?) == 'pendiente';
     final resumen = _resumenPayload(inc);
+    final resueltaPor = (inc['resuelta_por'] as String?) ?? '';
+    final resumenCompleto = [
+      if (resumen.isNotEmpty) resumen,
+      if (!pendiente && resueltaPor.isNotEmpty)
+        'Resuelta por $resueltaPor · ${inc['resuelta_en'] ?? ''}',
+    ].join('\n');
     return Padding(
       padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: Tarjeta(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.sync_problem_rounded,
-                    color: AppColores.alerta, size: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  // F6-05: el tipo de op traducido, no la
-                  // clave cruda («pago_mensual»).
-                  child: Text(descripcionOp('${inc['tipo'] ?? ''}'),
-                      style: AppTexto.subtitulo),
-                ),
-                if (!pendiente)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppEspacio.sm, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (inc['estado'] == 'aprobada'
-                              ? Colors.green
-                              : AppColores.textoSecundario(context))
-                          .withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(AppRadio.md),
-                    ),
-                    child: Text('${inc['estado']}',
-                        style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w600)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if ((inc['error'] as String?)?.isNotEmpty == true)
-              Text('Motivo: ${errorSyncLegible('${inc['error']}')}',
-                  style: AppTexto.secundario),
-            if (resumen.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: AppEspacio.xs),
-                child: Text(resumen,
-                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
-              ),
-            Padding(
-              padding: const EdgeInsets.only(top: AppEspacio.xs),
-              child: Text(
-                '${inc['dispositivo'] ?? '—'} · ${inc['creada_en'] ?? ''}',
-                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
-              ),
-            ),
-            if (pendiente) ...[
-              const SizedBox(height: 8),
-              Row(
+      child: TarjetaDecision(
+        icono: Icons.sync_problem_rounded,
+        colorIcono: AppColores.alerta,
+        // F6-05: el tipo de op traducido, no la clave cruda
+        // («pago_mensual»).
+        titulo: descripcionOp('${inc['tipo'] ?? ''}'),
+        chipEstado: ChipEstado.semantico(
+          texto: pendiente ? 'Pendiente' : '${inc['estado']}',
+          significado: pendiente
+              ? SignificadoChip.alerta
+              : inc['estado'] == 'aprobada'
+                  ? SignificadoChip.exito
+                  : SignificadoChip.neutral,
+        ),
+        contexto:
+            '${inc['dispositivo'] ?? '—'} · ${inc['creada_en'] ?? ''}',
+        motivo: (inc['error'] as String?)?.isNotEmpty == true
+            ? 'Motivo: ${errorSyncLegible('${inc['error']}')}'
+            : null,
+        resumen: resumenCompleto.isEmpty ? null : resumenCompleto,
+        pie: pendiente
+            ? Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton.icon(
@@ -359,20 +343,8 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                     onPressed: () => _aprobar(inc),
                   ),
                 ],
-              ),
-            ] else ...[
-              if ((inc['resuelta_por'] as String?)?.isNotEmpty == true)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppEspacio.xs),
-                  child: Text(
-                    'Resuelta por ${inc['resuelta_por']} · '
-                    '${inc['resuelta_en'] ?? ''}',
-                    style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
-                  ),
-                ),
-            ],
-          ],
-        ),
+              )
+            : null,
       ),
     );
   }

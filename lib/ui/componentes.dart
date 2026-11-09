@@ -2613,6 +2613,198 @@ class PuntoMetodo extends StatelessWidget {
   }
 }
 
+/// (1.30 D5 · UI130-19) Tarjeta de decisión compartida: la
+/// anatomía única de las tarjetas que piden una decisión —
+/// la incidencia operativa (lista de incidencias) y la
+/// incidencia de sincronización comparten forma SIN
+/// fusionar sus flujos (cada pantalla conserva permisos,
+/// acciones y diálogos). Cabecera: icono del tipo, título y
+/// chip de estado. Contexto: antigüedad/SLA, responsable o
+/// dispositivo, con la prioridad como punto + palabra. El
+/// motivo va en lenguaje llano sobre una superficie de
+/// aviso; el resumen, en metadato; y el pie lleva las
+/// acciones que construye quien llama (una primaria y una
+/// destructiva). La selección se lee por el fondo
+/// (primaryContainer), como en el resto de listas.
+class TarjetaDecision extends StatelessWidget {
+  final IconData icono;
+  final Color? colorIcono;
+  final String titulo;
+  final String? subtitulo;
+  final ChipEstado chipEstado;
+  final String? contexto;
+  final IconData? iconoContexto;
+  final Color? colorContexto;
+  final bool contextoDestacado;
+  final String? contextoSecundario;
+  final IconData? iconoContextoSecundario;
+  final String? prioridadTexto;
+  final Color? colorPrioridad;
+  final String? motivo;
+  final String? resumen;
+  final Widget? pie;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final bool seleccionada;
+
+  const TarjetaDecision({
+    super.key,
+    required this.icono,
+    this.colorIcono,
+    required this.titulo,
+    this.subtitulo,
+    required this.chipEstado,
+    this.contexto,
+    this.iconoContexto,
+    this.colorContexto,
+    this.contextoDestacado = false,
+    this.contextoSecundario,
+    this.iconoContextoSecundario,
+    this.prioridadTexto,
+    this.colorPrioridad,
+    this.motivo,
+    this.resumen,
+    this.pie,
+    this.onTap,
+    this.onLongPress,
+    this.seleccionada = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final secundario = AppColores.textoSecundario(context);
+    final contenido = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: (colorIcono ?? AppColores.naranja)
+                    .withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(AppRadio.sm),
+              ),
+              child: Icon(icono,
+                  color: colorIcono ?? AppColores.naranja, size: 20),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(titulo,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.cuerpo
+                          .copyWith(fontWeight: FontWeight.w600)),
+                  if (subtitulo != null)
+                    Text(subtitulo!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTexto.metadato
+                            .copyWith(color: secundario)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            chipEstado,
+          ],
+        ),
+        if (contexto != null || prioridadTexto != null) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (contexto != null) ...[
+                if (iconoContexto != null) ...[
+                  Icon(iconoContexto,
+                      size: 14, color: colorContexto ?? secundario),
+                  const SizedBox(width: 4),
+                ],
+                Text(contexto!,
+                    style: AppTexto.metadato.copyWith(
+                      color: colorContexto ?? secundario,
+                      fontWeight:
+                          contextoDestacado ? FontWeight.bold : null,
+                    )),
+              ],
+              if (contextoSecundario != null) ...[
+                const SizedBox(width: 8),
+                if (iconoContextoSecundario != null) ...[
+                  Icon(iconoContextoSecundario,
+                      size: 14, color: secundario),
+                  const SizedBox(width: 2),
+                ],
+                Flexible(
+                  child: Text(contextoSecundario!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.metadato
+                          .copyWith(color: secundario)),
+                ),
+              ],
+              const Spacer(),
+              if (prioridadTexto != null) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: colorPrioridad ?? secundario,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(prioridadTexto!, style: AppTexto.metadato),
+              ],
+            ],
+          ),
+        ],
+        if (motivo != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppEspacio.sm),
+            decoration: BoxDecoration(
+              color: colorSignificadoChip(
+                      SignificadoChip.alerta,
+                      Theme.of(context).brightness == Brightness.dark)
+                  .withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+            ),
+            child: Text(motivo!, style: AppTexto.secundario),
+          ),
+        ],
+        if (resumen != null) ...[
+          const SizedBox(height: AppEspacio.xs),
+          Text(resumen!,
+              style: AppTexto.metadato.copyWith(color: secundario)),
+        ],
+        if (pie != null) ...[
+          const SizedBox(height: 8),
+          pie!,
+        ],
+      ],
+    );
+    final tarjeta = Tarjeta(
+      padding: const EdgeInsets.all(AppEspacio.md),
+      color: seleccionada
+          ? Theme.of(context).colorScheme.primaryContainer
+          : null,
+      onTap: onTap,
+      child: contenido,
+    );
+    if (onLongPress == null) return tarjeta;
+    // Tarjeta no expone onLongPress (su InkWell es de toque):
+    // el gesto largo se escucha fuera, sin tocar el kit.
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: tarjeta,
+    );
+  }
+}
+
 /// 1.25 T65: la línea de corte punteada del ticket,
 /// compartida por el Preview y el Recibo del cobro (el
 /// mismo trazo que el comprobante ya usaba).

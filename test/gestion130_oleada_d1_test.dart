@@ -117,11 +117,19 @@ void main() {
           BorderRadius.circular(AppRadio.chip));
     });
 
-    test('la insignia artesanal de incidencias adopta AppRadio.chip '
-        '(fuente)', () {
+    // Actualizado en D5 (UI130-19) CON MOTIVO: la insignia artesanal
+    // de la tarjeta de incidencia ya no existe — la tarjeta adopta la
+    // anatomía común TarjetaDecision y su chip de estado es el
+    // ChipEstado del kit, cuya geometría AppRadio.chip queda cubierta
+    // por el test de widget hermano ('ChipEstado pinta con radio
+    // circular'). El contrato nuevo: la fuente delega en ambos
+    // componentes compartidos en vez de pintar su propia insignia.
+    test('la tarjeta de incidencia delega en TarjetaDecision y '
+        'ChipEstado (fuente)', () {
       final f = File('lib/ui/incidencias/widgets/tarjeta_incidencia.dart')
           .readAsStringSync();
-      expect(f, contains('AppRadio.chip'));
+      expect(f, contains('TarjetaDecision'));
+      expect(f, contains('ChipEstado'));
     });
   });
 

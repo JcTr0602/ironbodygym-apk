@@ -768,34 +768,42 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                     itemBuilder: (ctx, i) => Padding(
                       padding:
                           const EdgeInsets.only(bottom: AppEspacio.sm),
-                      child: _FilaSuplemento(
+                      child: _TarjetaSuplemento.fila(
                         key: ValueKey(items[i]['id']),
                         sup: items[i],
                         onVender: () => _irVender(items[i]),
                         onTap: () => _irDetalle(items[i]),
                         tasaUsd: _tasaUsd,
+                        categoriaNombre: _nombreCategoria(
+                            items[i]['categoria_id'] as int?),
                       ),
                     ),
                   )
-                : GridView.builder(
-                    padding: const EdgeInsets.all(AppEspacio.md),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      // SU1: el BotonPrimario (52 px de alto) es
-                      // más alto que el ElevatedButton anterior;
-                      // 0.52 da aire a nombre + precio + botón.
-                      childAspectRatio: 0.52,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                    ),
-                    itemCount: items.length,
-                    itemBuilder: (ctx, i) => _TarjetaSuplemento(
-                      key: ValueKey(items[i]['id']),
-                      sup: items[i],
-                      onVender: () => _irVender(items[i]),
-                      onTap: () => _irDetalle(items[i]),
-                      tasaUsd: _tasaUsd,
+                : LayoutBuilder(
+                    builder: (ctx, cons) => GridView.builder(
+                      padding: const EdgeInsets.all(AppEspacio.md),
+                      gridDelegate:
+                          SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        // 1.30 D5 (UI130-18): el alto de la celda
+                        // sale del contenido a la escala de texto
+                        // vigente (altoCeldaCatalogo), no de un
+                        // ratio fijo que recortaba a escala grande.
+                        mainAxisExtent: altoCeldaCatalogo(
+                            cons.maxWidth, MediaQuery.textScalerOf(ctx)),
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                      ),
+                      itemCount: items.length,
+                      itemBuilder: (ctx, i) => _TarjetaSuplemento(
+                        key: ValueKey(items[i]['id']),
+                        sup: items[i],
+                        onVender: () => _irVender(items[i]),
+                        onTap: () => _irDetalle(items[i]),
+                        tasaUsd: _tasaUsd,
+                        categoriaNombre: _nombreCategoria(
+                            items[i]['categoria_id'] as int?),
+                      ),
                     ),
                   ),
           ),
@@ -909,149 +917,113 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 // v1.3.4 (C5): tarjeta de catálogo — vista única de suplementos.
 // ---------------------------------------------------------------------------
 
+/// (1.30 D5 · UI130-18, ALTA-02) ¿El suplemento no tiene foto
+/// propia? Sin foto local ni remota, el catálogo enseña la
+/// genérica de su clase — marcada como genérica en la
+/// tarjeta, nunca como si fuera su foto.
+bool supSinFotoPropia(Map<String, dynamic> sup) {
+  final local = '${sup['foto_local'] ?? ''}'.trim();
+  final remota = '${sup['foto_storage'] ?? ''}'.trim();
+  return local.isEmpty && remota.isEmpty;
+}
+
+String _sinAcentosFoto(String t) {
+  const mapa = {
+    'á': 'a',
+    'é': 'e',
+    'í': 'i',
+    'ó': 'o',
+    'ú': 'u',
+    'ü': 'u',
+    'ñ': 'n',
+  };
+  var r = t.toLowerCase();
+  mapa.forEach((k, v) => r = r.replaceAll(k, v));
+  return r;
+}
+
+/// (1.30 D5 · UI130-18, ALTA-02) La foto genérica que le toca
+/// a un suplemento sin foto propia, por su nombre y su
+/// categoría: creatina, pre-entreno, shaker, barritas y
+/// botella tienen la suya; todo lo demás (proteínas y lo no
+/// reconocido) cae a la de proteína. PURO.
+String assetFotoGenericaSuplemento(String nombre, {String? categoria}) {
+  final t = _sinAcentosFoto('$nombre ${categoria ?? ''}');
+  if (t.contains('creatin')) return 'assets/sup_generica_creatina.jpg';
+  if (t.contains('pre-entreno') ||
+      t.contains('preentreno') ||
+      t.contains('pre-workout') ||
+      t.contains('pre workout')) {
+    return 'assets/sup_generica_preentreno.jpg';
+  }
+  if (t.contains('shaker') || t.contains('vaso') || t.contains('termo')) {
+    return 'assets/sup_generica_shaker.jpg';
+  }
+  if (t.contains('barra') || t.contains('barrita')) {
+    return 'assets/sup_generica_barritas.jpg';
+  }
+  if (t.contains('bebida') || t.contains('botella')) {
+    return 'assets/sup_generica_botella.jpg';
+  }
+  return 'assets/sup_generica_proteina.jpg';
+}
+
+/// (1.30 D5 · UI130-18) Alto de la celda de la cuadrícula del
+/// catálogo, calculado por contenido: la foto (ancho / 1,1)
+/// más el cuerpo dimensionado para el PEOR caso — nombre,
+/// precio, presentación, chip de stock y botón, cada línea a
+/// la escala de texto vigente. Sustituye al childAspectRatio
+/// fijo 0,52, que con la escala de texto grande recortaba el
+/// contenido de la celda (el nombre «a una línea» de F4-07
+/// era el parche de aquel alto fijo).
+double altoCeldaCatalogo(double anchoVista, TextScaler escala) {
+  double linea(double tamano, double altura) => escala.scale(tamano) * altura;
+  final anchoCelda = (anchoVista - AppEspacio.md * 2 - 12) / 2;
+  final foto = anchoCelda / 1.1;
+  // ChipEstado: etiqueta (12 × 1,2) + relleno vertical xs ×2
+  // + borde.
+  final chip = linea(12, 1.2) + AppEspacio.xs * 2 + 2;
+  // BotonPrimario: su texto (~14 × 1,5) + relleno vertical
+  // md ×2, con su mínimo de 52.
+  final botonCrudo = linea(14, 1.5) + AppEspacio.md * 2;
+  final boton = botonCrudo > 52 ? botonCrudo : 52.0;
+  final cuerpo = AppEspacio.sm +
+      linea(13, 1.4) + // nombre (secundario)
+      4 +
+      linea(15, 1.3) + // precio (subtitulo)
+      linea(11, 1.4) + // presentación (minuscula)
+      4 +
+      chip +
+      AppEspacio.sm +
+      boton +
+      AppEspacio.sm +
+      4; // holgura
+  return foto + cuerpo;
+}
+
 /// Tarjeta de catálogo (spec Argón):
 /// - Mitad superior: foto AspectRatio(1.1), bordes superiores 12px,
 ///   BoxFit.cover, con triestado de carga (ver _FotoSuplemento).
 /// - Badge de stock flotante (sup. derecha): chip negro + punto semántico.
 /// SU2 (estéticas 1.19): fila compacta de la vista lista —
 /// foto pequeña + nombre + precio + Vender en una fila.
-class _FilaSuplemento extends StatelessWidget {
-  final Map<String, dynamic> sup;
-  final VoidCallback onVender;
-  final VoidCallback onTap;
-  final double? tasaUsd;
-
-  const _FilaSuplemento({
-    super.key,
-    required this.sup,
-    required this.onVender,
-    required this.onTap,
-    this.tasaUsd,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final nombre = '${sup['nombre'] ?? 'Sin nombre'}';
-    final stock = (sup['stock'] as num?)?.toInt() ?? 0;
-    final precio = (sup['precio_oficial'] as num?)?.toDouble() ??
-        (sup['precio'] as num?)?.toDouble() ??
-        0;
-    final act = sup['activo'];
-    final inactivo = act == 0 ||
-        act == false ||
-        sup['eliminado'] == 1 ||
-        sup['eliminado'] == true;
-    final hayStock = stock > 0 && !inactivo;
-    final moneda = LocalDb.monedaDe(sup);
-    final cup = moneda == 'USD'
-        ? precioOficialEn('CUP', precio, tasaUsd)
-        : null;
-    final presentacion = textoPresentacion(sup);
-    final estado = estadoStockSuplemento(sup);
-    return Opacity(
-      opacity: hayStock ? 1.0 : 0.55,
-      child: Tarjeta(
-        onTap: onTap,
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 56,
-              height: 56,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadio.sm),
-                child: _FotoSuplemento(sup: sup),
-              ),
-            ),
-            const SizedBox(width: AppEspacio.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    nombre,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTexto.secundario
-                        .copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 2),
-                  Text.rich(
-                    TextSpan(children: [
-                      TextSpan(
-                        text: precio.toStringAsFixed(2),
-                        style: AppTexto.subtitulo.copyWith(
-                          fontWeight: FontWeight.bold,
-                          // 1.30 D1 (UI130-03): precio con el
-                          // rol de texto de la marca, no la
-                          // marca a pelo (2,52 en claro).
-                          color: AppColores.textoNaranja(context),
-                        ),
-                      ),
-                      TextSpan(
-                        text: ' $moneda'
-                            '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
-                        style: AppTexto.metadato.copyWith(
-                            color:
-                                AppColores.textoSecundario(context)),
-                      ),
-                    ]),
-                  ),
-                  if (presentacion.isNotEmpty)
-                    Text(
-                      presentacion,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTexto.minuscula.copyWith(
-                        color: AppColores.textoSecundario(context),
-                      ),
-                    ),
-                  if (estado != EstadoStockSuplemento.disponible)
-                    Text(
-                      textoEstadoStock(sup),
-                      style: AppTexto.minuscula.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: switch (estado) {
-                          EstadoStockSuplemento.inactivo =>
-                            AppColores.textoSecundario(context),
-                          EstadoStockSuplemento.agotado =>
-                            AppColores.error,
-                          EstadoStockSuplemento.bajo =>
-                            AppColores.alerta,
-                          EstadoStockSuplemento.disponible =>
-                            AppColores.exito,
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(width: AppEspacio.sm),
-            BotonPrimario(
-              texto: hayStock
-                  ? 'Vender'
-                  : inactivo
-                      ? 'Inactivo'
-                      : 'Sin stock',
-              onPressed: hayStock ? onVender : null,
-              expandido: false,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// - Mitad inferior: nombre (2 líneas), precio oficial grande, botón Vender.
-/// - Elevación 2, borde 1px (white10 oscuro / black12 claro).
+/// 1.30 D5 (UI130-18): UN componente con dos densidades y el
+/// mismo esqueleto — foto, nombre, precio con el rol de
+/// UI130-03, presentación, el estado como ChipEstado con
+/// palabra (ya no solo la opacidad 0,55) y «Vender» como
+/// acción única destacada. La fila separa zonas: el cuerpo
+/// lleva al detalle y el botón vive en su propia zona (fuera
+/// el toque anidado sobre la tarjeta entera). Sin foto
+/// propia, la genérica de su clase (ALTA-02), marcada
+/// «Foto genérica».
 class _TarjetaSuplemento extends StatelessWidget {
   final Map<String, dynamic> sup;
   final VoidCallback onVender;
   final VoidCallback onTap;
   // Ronda 3-9 #8: tasa para el equivalente CUP en USD.
   final double? tasaUsd;
+  final String? categoriaNombre;
+  final bool esFila;
 
   const _TarjetaSuplemento({
     super.key,
@@ -1059,33 +1031,230 @@ class _TarjetaSuplemento extends StatelessWidget {
     required this.onVender,
     required this.onTap,
     this.tasaUsd,
-  });
+    this.categoriaNombre,
+  }) : esFila = false;
 
-  @override
-  Widget build(BuildContext context) {
-    final nombre = '${sup['nombre'] ?? 'Sin nombre'}';
-    final stock = (sup['stock'] as num?)?.toInt() ?? 0;
-    // B3 (Argón): el precio mostrado es SIEMPRE precio_oficial
-    // (fallback legacy a `precio`); ultimo_precio no se usa.
-    final precio = (sup['precio_oficial'] as num?)?.toDouble() ??
-        (sup['precio'] as num?)?.toDouble() ??
-        0;
-    // Lógica tolerante (igual que _compartirCatalogo): 'activo' puede
-    // venir como int, bool o faltar (null) sin romper ni marcar
-    // falso "Agotado".
+  const _TarjetaSuplemento.fila({
+    super.key,
+    required this.sup,
+    required this.onVender,
+    required this.onTap,
+    this.tasaUsd,
+    this.categoriaNombre,
+  }) : esFila = true;
+
+  String get _nombre => '${sup['nombre'] ?? 'Sin nombre'}';
+
+  int get _stock => (sup['stock'] as num?)?.toInt() ?? 0;
+
+  // B3 (Argón): el precio mostrado es SIEMPRE precio_oficial
+  // (fallback legacy a `precio`); ultimo_precio no se usa.
+  double get _precio =>
+      (sup['precio_oficial'] as num?)?.toDouble() ??
+      (sup['precio'] as num?)?.toDouble() ??
+      0;
+
+  // Lógica tolerante (igual que _compartirCatalogo): 'activo'
+  // puede venir como int, bool o faltar (null) sin romper ni
+  // marcar falso "Agotado".
+  bool get _inactivo {
     final act = sup['activo'];
-    final inactivo = act == 0 ||
+    return act == 0 ||
         act == false ||
         sup['eliminado'] == 1 ||
         sup['eliminado'] == true;
-    final hayStock = stock > 0 && !inactivo;
-    final oscuro = Theme.of(context).brightness == Brightness.dark;
+  }
 
+  bool get _hayStock => _stock > 0 && !_inactivo;
+
+  bool get _sinFoto => supSinFotoPropia(sup);
+
+  String? get _assetGenerica => _sinFoto
+      ? assetFotoGenericaSuplemento(_nombre, categoria: categoriaNombre)
+      : null;
+
+  /// El precio con el rol de UI130-03 (D1): la cifra
+  /// protagonista en el texto de marca accesible y la moneda
+  /// como metadato (la rejilla lo llevaba aún a pelo, en
+  /// AppColores.naranja: 2,52 en claro).
+  Widget _precioTexto(BuildContext context, {int? maxLines}) {
+    final moneda = LocalDb.monedaDe(sup);
+    // Ronda 3-9 #8: en USD, equivalente CUP redondeado.
+    final cup = moneda == 'USD' ? precioOficialEn('CUP', _precio, tasaUsd) : null;
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(
+          text: _precio.toStringAsFixed(2),
+          style: AppTexto.subtitulo.copyWith(
+            fontWeight: FontWeight.bold,
+            color: AppColores.textoNaranja(context),
+          ),
+        ),
+        TextSpan(
+          text: ' $moneda'
+              '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
+          style: AppTexto.metadato
+              .copyWith(color: AppColores.textoSecundario(context)),
+        ),
+      ]),
+      maxLines: maxLines,
+      overflow: maxLines == null ? null : TextOverflow.ellipsis,
+    );
+  }
+
+  /// El estado del stock como chip con palabra (la regla
+  /// única de negocio), cuando no está simplemente
+  /// disponible.
+  Widget? _chipStock() {
+    final estado = estadoStockSuplemento(sup);
+    if (estado == EstadoStockSuplemento.disponible) return null;
+    return ChipEstado.semantico(
+      texto: textoEstadoStock(sup),
+      significado: switch (estado) {
+        EstadoStockSuplemento.inactivo => SignificadoChip.agotado,
+        EstadoStockSuplemento.agotado => SignificadoChip.error,
+        EstadoStockSuplemento.bajo => SignificadoChip.alerta,
+        EstadoStockSuplemento.disponible => SignificadoChip.exito,
+      },
+    );
+  }
+
+  Widget _botonVender({required bool expandido}) => BotonPrimario(
+        texto: _hayStock
+            ? 'Vender'
+            : _inactivo
+                ? 'Inactivo'
+                : 'Sin stock',
+        onPressed: _hayStock ? onVender : null,
+        expandido: expandido,
+      );
+
+  /// La marca de la foto genérica en la rejilla: pastilla
+  /// oscura flotante, como el badge de stock.
+  Widget _marcaGenerica() => Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(AppRadio.chip),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.photo_library_outlined,
+                size: 11, color: Colors.white),
+            const SizedBox(width: 4),
+            Text('Foto genérica',
+                style: AppTexto.minuscula.copyWith(
+                    color: Colors.white, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+
+  Widget _buildFila(BuildContext context) {
+    final presentacion = textoPresentacion(sup);
+    final chip = _chipStock();
     return Opacity(
-      // SU3 (estéticas 1.19): sin stock la tarjeta se atenúa para
-      // distinguirse al pasar la vista (antes solo el botón
-      // cambiaba a «Agotado» y la tarjeta se veía igual).
-      opacity: hayStock ? 1.0 : 0.55,
+      // SU3 (estéticas 1.19): sin stock la tarjeta se atenúa;
+      // desde D5 el estado va además en el chip con palabra.
+      opacity: _hayStock ? 1.0 : 0.55,
+      child: Tarjeta(
+        padding: EdgeInsets.zero,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Zona del cuerpo: foto + datos → detalle.
+                Expanded(
+                  child: InkWell(
+                    onTap: onTap,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppEspacio.md,
+                          vertical: AppEspacio.sm),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 56,
+                            height: 56,
+                            child: ClipRRect(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadio.sm),
+                              child: _FotoSuplemento(
+                                  sup: sup, assetGenerica: _assetGenerica),
+                            ),
+                          ),
+                          const SizedBox(width: AppEspacio.md),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _nombre,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTexto.secundario.copyWith(
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 2),
+                                _precioTexto(context),
+                                if (presentacion.isNotEmpty)
+                                  Text(
+                                    presentacion,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTexto.minuscula.copyWith(
+                                      color: AppColores.textoSecundario(
+                                          context),
+                                    ),
+                                  ),
+                                if (chip != null) ...[
+                                  const SizedBox(height: 4),
+                                  chip,
+                                ],
+                                if (_sinFoto) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Foto genérica',
+                                    style: AppTexto.minuscula.copyWith(
+                                      color: AppColores.textoSecundario(
+                                          context),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Container(
+                    width: 1, height: 64, color: AppColores.borde(context)),
+                // Zona de la acción: «Vender», única y destacada.
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.md),
+                  child: Center(child: _botonVender(expandido: false)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRejilla(BuildContext context) {
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    final presentacion = textoPresentacion(sup);
+    final chip = _chipStock();
+    return Opacity(
+      opacity: _hayStock ? 1.0 : 0.55,
       child: Card(
         elevation: 2,
         margin: EdgeInsets.zero,
@@ -1107,113 +1276,73 @@ class _TarjetaSuplemento extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    _FotoSuplemento(sup: sup),
+                    _FotoSuplemento(sup: sup, assetGenerica: _assetGenerica),
                     Positioned(
                       top: 8,
                       right: 8,
                       child: _BadgeStock(sup: sup),
                     ),
+                    if (_sinFoto)
+                      Positioned(
+                        left: 8,
+                        bottom: 8,
+                        child: _marcaGenerica(),
+                      ),
                   ],
                 ),
               ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(AppEspacio.sm),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 1.25 T120 (F4-07): el nombre va a UNA
-                    // línea en la cuadrícula — la celda tiene
-                    // alto fijo (childAspectRatio) y no crece
-                    // con la escala de texto del sistema: a
-                    // 150-200 % el nombre en 2 líneas empujaba
-                    // el precio y el botón fuera de la celda.
-                    // El nombre completo se ve en la vista de
-                    // lista y en el detalle.
-                    Text(
-                      nombre,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTexto.secundario.copyWith(
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    // Ronda 3-9 #8: en USD, equivalente CUP
-                    // redondeado a decenas (precioOficialEn).
-                    Builder(builder: (_) {
-                      final moneda = LocalDb.monedaDe(sup);
-                      final cup = moneda == 'USD'
-                          ? precioOficialEn('CUP', precio, tasaUsd)
-                          : null;
-                      return Text(
-                        '${precio.toStringAsFixed(2)} $moneda'
-                        '${cup != null ? ' (≈ ${cup.toStringAsFixed(0)} CUP)' : ''}',
-                        style: AppTexto.subtitulo.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: AppColores.naranja,
-                        ),
-                      );
-                    }),
-                    Builder(builder: (ctx) {
-                      final pres = textoPresentacion(sup);
-                      if (pres.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      return Text(
-                        pres,
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppEspacio.sm),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 1.25 T120 (F4-07): el nombre va a UNA
+                      // línea en la cuadrícula — la celda la
+                      // dimensiona altoCeldaCatalogo (D5) para
+                      // el peor caso a la escala vigente; el
+                      // nombre completo se ve en la vista de
+                      // lista y en el detalle.
+                      Text(
+                        _nombre,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTexto.minuscula.copyWith(
-                          color: AppColores.textoSecundario(ctx),
+                        style: AppTexto.secundario
+                            .copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      _precioTexto(context, maxLines: 1),
+                      if (presentacion.isNotEmpty)
+                        Text(
+                          presentacion,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTexto.minuscula.copyWith(
+                            color: AppColores.textoSecundario(context),
+                          ),
                         ),
-                      );
-                    }),
-                    Builder(builder: (ctx) {
-                      final estado = estadoStockSuplemento(sup);
-                      if (estado ==
-                          EstadoStockSuplemento.disponible) {
-                        return const SizedBox.shrink();
-                      }
-                      return Text(
-                        textoEstadoStock(sup),
-                        style: AppTexto.minuscula.copyWith(
-                          fontWeight: FontWeight.w600,
-                          height: 1.2,
-                          color: switch (estado) {
-                            EstadoStockSuplemento.inactivo =>
-                              AppColores.textoSecundario(ctx),
-                            EstadoStockSuplemento.agotado =>
-                              AppColores.error,
-                            EstadoStockSuplemento.bajo =>
-                              AppColores.alerta,
-                            EstadoStockSuplemento.disponible =>
-                              AppColores.exito,
-                          },
-                        ),
-                      );
-                    }),
-                    const Spacer(),
-                    // SU1 (estéticas 1.19): botón de venta con el
-                    // estilo primario del sistema; en «Agotado»
-                    // queda deshabilitado con su gris del tema.
-                    BotonPrimario(
-                      texto: hayStock
-                          ? 'Vender'
-                          : inactivo
-                              ? 'Inactivo'
-                              : 'Sin stock',
-                      onPressed: hayStock ? onVender : null,
-                    ),
-                  ],
+                      if (chip != null) ...[
+                        const SizedBox(height: 4),
+                        chip,
+                      ],
+                      const Spacer(),
+                      // SU1 (estéticas 1.19): botón de venta con
+                      // el estilo primario del sistema.
+                      _botonVender(expandido: true),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) =>
+      esFila ? _buildFila(context) : _buildRejilla(context);
 }
 
 /// Foto con triestado estricto (condición C4/B4 de Argón):
@@ -1300,7 +1429,12 @@ class _FotoMiniTopState extends State<_FotoMiniTop> {
 
 class _FotoSuplemento extends StatefulWidget {
   final Map<String, dynamic> sup;
-  const _FotoSuplemento({required this.sup});
+
+  /// 1.30 D5 (UI130-18, ALTA-02): foto genérica de la clase
+  /// del producto, para cuando no hay foto propia que
+  /// resolver (la tarjeta la marca «Foto genérica»).
+  final String? assetGenerica;
+  const _FotoSuplemento({required this.sup, this.assetGenerica});
 
   @override
   State<_FotoSuplemento> createState() => _FotoSuplementoState();
@@ -1344,6 +1478,17 @@ class _FotoSuplementoState extends State<_FotoSuplemento> {
         if (f != null) {
           return Image.file(
             f,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
+          );
+        }
+        // 1.30 D5 (UI130-18, ALTA-02): sin foto propia, la
+        // genérica de su clase (la tarjeta la marca como
+        // genérica); si ni eso, el placeholder de siempre.
+        final generica = widget.assetGenerica;
+        if (generica != null) {
+          return Image.asset(
+            generica,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
           );

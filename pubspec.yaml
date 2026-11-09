@@ -56,3 +56,11 @@ flutter:
     - assets/gympedia_suplementos.jpg
     - assets/gympedia_descanso.jpg
     - assets/gympedia_tecnica.jpg
+    # 1.30 D5 (UI130-18, ALTA-02): las 6 fotos genéricas del
+    # catálogo de suplementos sin foto propia.
+    - assets/sup_generica_proteina.jpg
+    - assets/sup_generica_creatina.jpg
+    - assets/sup_generica_preentreno.jpg
+    - assets/sup_generica_shaker.jpg
+    - assets/sup_generica_barritas.jpg
+    - assets/sup_generica_botella.jpg

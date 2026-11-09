@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
 import '../../../modelos/incidencia.dart';
+import '../../componentes.dart';
 import '../../diseno.dart';
 
 /// Tarjeta de incidencia con SLA visual, prioridad y estado.
 /// v1.3.0
+/// 1.30 D5 (UI130-19): la tarjeta adopta la anatomía común
+/// [TarjetaDecision] que comparte con la cola de incidencias
+/// de sincronización: cabecera (icono del tipo + título +
+/// chip de estado del vocabulario), contexto (SLA +
+/// responsable) y prioridad como punto + palabra. Salen la
+/// insignia artesanal y los bordes de acento hechos a mano
+/// (la selección se lee por el fondo, como en el resto de
+/// listas); el significado y las acciones no cambian.
 class TarjetaIncidencia extends StatelessWidget {
   final Incidencia incidencia;
   final TipoIncidencia? tipo;
@@ -20,29 +29,29 @@ class TarjetaIncidencia extends StatelessWidget {
     this.seleccionada = false,
   });
 
-  Color get _colorPrioridad {
+  Color _colorPrioridad(BuildContext context) {
     switch (incidencia.prioridad) {
       case 'alta':
-        return Colors.redAccent;
+        return AppColores.error;
       case 'media':
-        return Colors.orangeAccent;
+        return AppColores.alerta;
       default:
-        return Colors.grey;
+        return AppColores.textoSecundario(context);
     }
   }
 
-  Color get _colorEstado {
+  SignificadoChip get _significadoEstado {
     switch (incidencia.estado) {
       case 'pendiente':
-        return Colors.orange;
+        return SignificadoChip.alerta;
       case 'en_proceso':
-        return Colors.blue;
+        return SignificadoChip.info;
       case 'bloqueada':
-        return Colors.red;
+        return SignificadoChip.error;
       case 'resuelta':
-        return Colors.green;
+        return SignificadoChip.exito;
       default:
-        return Colors.grey;
+        return SignificadoChip.neutral;
     }
   }
 
@@ -85,173 +94,35 @@ class TarjetaIncidencia extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.md, vertical: AppEspacio.xs),
-      child: InkWell(
+      child: TarjetaDecision(
+        // Sin tipo conocido, el icono genérico del modelo.
+        icono: tipo?.iconoData ?? Icons.label_rounded,
+        colorIcono: tipo?.colorData,
+        titulo: incidencia.descripcion,
+        subtitulo: (tipo != null || incidencia.ubicacion != null)
+            ? [
+                if (tipo != null) tipo!.nombre,
+                if (incidencia.ubicacion != null)
+                  '📍 ${incidencia.ubicacion}',
+              ].join(' · ')
+            : null,
+        chipEstado: ChipEstado.semantico(
+          texto: _etiquetaEstado,
+          significado: _significadoEstado,
+        ),
+        contexto: slaTexto,
+        iconoContexto: Icons.schedule_rounded,
+        colorContexto: incidencia.vencida ? AppColores.error : null,
+        contextoDestacado: incidencia.vencida,
+        contextoSecundario: _nombreResponsable != null
+            ? '👤 $_nombreResponsable'
+            : null,
+        iconoContextoSecundario: Icons.person_rounded,
+        prioridadTexto: _etiquetaPrioridad(incidencia.prioridad),
+        colorPrioridad: _colorPrioridad(context),
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(AppRadio.md),
-        child: Container(
-          padding: const EdgeInsets.all(AppEspacio.md),
-          decoration: BoxDecoration(
-            color: seleccionada
-                ? Theme.of(context)
-                    .colorScheme
-                    .primaryContainer
-                : AppColores.fondo(context),
-            borderRadius:
-                BorderRadius.circular(AppRadio.md),
-            border: seleccionada
-                ? Border.all(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary,
-                    width: 2.5)
-                : Border(
-                    left: BorderSide(
-                      color: _colorPrioridad,
-                      width: 3.5,
-                    ),
-                  ),
-          ),
-          child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  // Icono del tipo
-                  if (tipo != null)
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: tipo!.colorData
-                            .withValues(alpha: 0.15),
-                        borderRadius:
-                            BorderRadius.circular(AppRadio.sm),
-                      ),
-                      child: Icon(
-                        tipo!.iconoData,
-                        color: tipo!.colorData,
-                        size: 20,
-                      ),
-                    ),
-                  if (tipo != null)
-                    const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
-                      children: [
-                        Text(
-                          incidencia.descripcion,
-                          maxLines: 2,
-                          overflow: TextOverflow
-                              .ellipsis,
-                          style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                        if (tipo != null ||
-                            incidencia
-                                    .ubicacion !=
-                                null)
-                          Text(
-                            [
-                              if (tipo != null)
-                                tipo!.nombre,
-                              if (incidencia
-                                      .ubicacion !=
-                                  null)
-                                '📍 ${incidencia.ubicacion}',
-                            ].join(' · '),
-                            style: AppTexto.metadato.copyWith(color: Colors.grey[500]),
-                          ),
-                      ],
-                    ),
-                  ),
-                  // Badge de estado
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: AppEspacio.xs),
-                    decoration: BoxDecoration(
-                      color: _colorEstado
-                          .withValues(alpha: 0.15),
-                      // 1.30 D1 (UI130-09): la insignia
-                      // artesanal (radio 20 suelto) adopta la
-                      // geometría del vocabulario de chips.
-                      borderRadius:
-                          BorderRadius.circular(AppRadio.chip),
-                    ),
-                    child: Text(
-                      _etiquetaEstado,
-                      style: AppTexto.minuscula.copyWith(color: _colorEstado, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  // SLA
-                  Icon(
-                    Icons.schedule_rounded,
-                    size: 14,
-                    color: incidencia.vencida
-                        ? Colors.redAccent
-                        : Colors.grey[500],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    slaTexto,
-                    style: AppTexto.metadato.copyWith(color: incidencia.vencida
-                          ? Colors.redAccent
-                          : Colors.grey[500],
-                        fontWeight: incidencia.vencida
-                            ? FontWeight.bold
-                            : null),
-                  ),
-                  // v1.3.3: responsable
-                  if (_nombreResponsable != null) ...[
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.person_rounded,
-                      size: 14,
-                      color: Colors.grey[500],
-                    ),
-                    const SizedBox(width: 2),
-                    Flexible(
-                      child: Text(
-                        '👤 $_nombreResponsable',
-                        maxLines: 1,
-                        overflow:
-                            TextOverflow.ellipsis,
-                        style: AppTexto.metadato.copyWith(color: Colors.grey[500]),
-                      ),
-                    ),
-                  ],
-                  const Spacer(),
-                  // Prioridad
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: _colorPrioridad,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    // Fix #24 (Sol): mapa seguro, sin [0] directo.
-                    _etiquetaPrioridad(
-                        incidencia.prioridad),
-                    style: AppTexto.metadato,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        seleccionada: seleccionada,
       ),
     );
   }

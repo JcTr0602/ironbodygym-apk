@@ -8,6 +8,7 @@ import '../app_bar.dart';
 import '../diseno.dart';
 import '../componentes.dart';
 import '../hoja_accion.dart';
+import '../skeleton.dart';
 import 'widgets/tarjeta_incidencia.dart';
 import 'detalle_incidencia.dart';
 import 'tipos_incidencia.dart';
@@ -174,6 +175,13 @@ class _ListaIncidenciasScreenState
   @override
   Widget build(BuildContext context) {
     final filtradas = _filtradas;
+    // 1.30 D5 (UI130-19): el vacío distingue «no hay nada»
+    // de «nada coincide con la búsqueda o los filtros».
+    final hayFiltros = _busqueda.isNotEmpty ||
+        _filtroEstado != null ||
+        _filtroTipoId != null ||
+        _filtroPrioridad != null ||
+        _soloMias;
     // Contadores por estado
     final nPend = _todas
         .where((i) => i.estado == 'pendiente')
@@ -224,24 +232,15 @@ class _ListaIncidenciasScreenState
       ),
       body: Column(
         children: [
-          // Buscador
+          // Buscador — 1.30 D5 (UI130-19): el campo crudo
+          // adopta el CampoTexto del kit (D3), como el resto
+          // de buscadores de la casa.
           Padding(
             padding: const EdgeInsets.all(AppEspacio.md),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: 'Buscar incidencia...',
-                prefixIcon:
-                    const Icon(Icons.search_rounded),
-                border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md),
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(
-                        horizontal: AppEspacio.md),
-              ),
-              onChanged: (v) =>
-                  setState(() => _busqueda = v),
+            child: CampoTexto(
+              hint: 'Buscar incidencia...',
+              icono: Icons.search_rounded,
+              onChanged: (v) => setState(() => _busqueda = v),
             ),
           ),
           // Chips de estado
@@ -267,16 +266,24 @@ class _ListaIncidenciasScreenState
             ),
           ),
           const SizedBox(height: 8),
-          // Lista
+          // Lista — 1.30 D5 (UI130-19): cargando con el
+          // esqueleto de filas de la casa y vacío con
+          // EstadoVacio (antes, spinner y texto pelados).
           Expanded(
             child: _cargando
-                ? const Center(
-                    child:
-                        CircularProgressIndicator())
+                ? const SingleChildScrollView(
+                    padding: EdgeInsets.all(AppEspacio.md),
+                    child: SkeletonLista(items: 4),
+                  )
                 : filtradas.isEmpty
-                    ? const Center(
-                        child: Text(
-                            'Sin incidencias'))
+                    ? EstadoVacio(
+                        icono: Icons.report_off_rounded,
+                        titulo: 'Sin incidencias',
+                        subtitulo: hayFiltros
+                            ? 'Ninguna incidencia coincide con la '
+                                'búsqueda o los filtros.'
+                            : 'No hay incidencias registradas.',
+                      )
                     : ListView.builder(
                         padding:
                             const EdgeInsets.only(
