@@ -32,6 +32,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'avisos.dart';
 import 'componentes.dart';
+import 'foto_elegir.dart';
 import 'panel_buscador.dart';
 import 'diseno.dart';
 import 'importar_respaldo.dart';
@@ -274,11 +275,17 @@ class _AjustesScreenState extends State<AjustesScreen> {
       ),
     );
     if (origen == null || !mounted) return;
-    final img = await ImagePicker().pickImage(
-        source: origen,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 75); // Gemini: compresión obligatoria para Cuba
+    // Cierre §17 (×30): por la vía segura de la casa
+    // (foto_elegir.dart) — try/catch con aviso visible,
+    // recuperación con retrieveLostData y guarda
+    // anti-doble-toque. Era un pickImage pelado.
+    final img = await elegirFotoSegura(
+      context,
+      origen: origen,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 75, // Gemini: compresión obligatoria para Cuba
+    );
     if (img == null || !mounted) return;
     final destino = await _perfil.avatarFile();
     await File(img.path).copy(destino.path);

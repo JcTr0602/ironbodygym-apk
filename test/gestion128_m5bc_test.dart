@@ -559,8 +559,10 @@ void main() {
       // 67 desde la corrección A5-D1 (reset del watermark de
       // espejo_recordatorio_config para que pausada_hasta
       // baje por el pull); 68 desde la 1.29 (Oleada 6,
-      // D-A3: sello de autor en fotos_cola).
-      expect(LocalDb.versionActual, 68);
+      // D-A3: sello de autor en fotos_cola); 69 desde la
+      // 1.30 (cierre §17: paso de migración del espejo
+      // avisos_vistos).
+      expect(LocalDb.versionActual, 69);
       final cols = await db
           .rawQuery("PRAGMA table_info(recordatorio_config)");
       expect(cols.map((c) => c['name']),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../diseno.dart';
+import '../../foto_elegir.dart';
 import '../../../modelos/incidencia.dart';
 
 /// Diálogo de resolución: nota obligatoria + foto condicional.
@@ -130,10 +131,15 @@ class _DialogoResolverState
   }
 
   Future<void> _tomarFoto() async {
-    final picker = ImagePicker();
-    final img = await picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 70);
+    // Cierre §17 (×30): por la vía segura de la casa
+    // (foto_elegir.dart) — try/catch con aviso visible,
+    // recuperación con retrieveLostData y guarda
+    // anti-doble-toque. Era un pickImage pelado.
+    final img = await elegirFotoSegura(
+      context,
+      origen: ImageSource.camera,
+      imageQuality: 70,
+    );
     if (img != null && mounted) {
       setState(() => _fotoPath = img.path);
     }

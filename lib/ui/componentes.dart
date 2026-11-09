@@ -533,7 +533,19 @@ class Tarjeta extends StatelessWidget {
           border: Border.all(color: AppColores.borde(context)),
           boxShadow: [sombra],
         ),
-        child: Padding(padding: padding, child: child),
+        // Cierre §17 (×30): el contenido va sobre un Material
+        // transparente PROPIO. Sin él, cualquier ListTile o
+        // ExpansionTile dentro de una Tarjeta (p. ej. las
+        // secciones de Ayuda) dispara la aserción «ListTile
+        // background color» porque su fondo y su tinta caían
+        // tras esta caja decorada; y un InkWell descendiente
+        // pintaba su onda sobre el Material de la pantalla en
+        // vez de dentro de la tarjeta. Transparente: ni un
+        // píxel del diseño cambia.
+        child: Material(
+          type: MaterialType.transparency,
+          child: Padding(padding: padding, child: child),
+        ),
       );
     }
     // 1.30 D1 (UI130-08): el ripple cae POR FIN sobre la

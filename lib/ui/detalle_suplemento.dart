@@ -685,19 +685,28 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
               ),
             ],
           ),
-          CheckboxListTile(
-            value: _aceptaSinPromo,
-            onChanged: _guardando
-                ? null
-                : (v) =>
-                    setState(() => _aceptaSinPromo = v == true),
-            title: const Text(
-              'Entiendo: esta venta no aplica la promo',
-              style: AppTexto.secundario,
+          // Cierre §17 (×30): el tile va sobre un Material
+          // transparente PROPIO. Sin él, Flutter avisa (y en
+          // debug afirma) que el fondo y la tinta del
+          // CheckboxListTile caen tras la caja tintada de la
+          // advertencia y pueden no verse: la aserción
+          // «ListTile background color» que D5 documentó.
+          Material(
+            type: MaterialType.transparency,
+            child: CheckboxListTile(
+              value: _aceptaSinPromo,
+              onChanged: _guardando
+                  ? null
+                  : (v) =>
+                      setState(() => _aceptaSinPromo = v == true),
+              title: const Text(
+                'Entiendo: esta venta no aplica la promo',
+                style: AppTexto.secundario,
+              ),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
             ),
-            controlAffinity: ListTileControlAffinity.leading,
-            contentPadding: EdgeInsets.zero,
-            dense: true,
           ),
         ],
       ),

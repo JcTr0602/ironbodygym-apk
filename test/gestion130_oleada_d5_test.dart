@@ -366,13 +366,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.byType(DetalleSuplementoScreen), findsNothing);
-      // El diálogo de venta rápida arrastra una aserción de
-      // ListTile PREEXISTENTE (salta igual entrando desde el
-      // detalle, código que D5 no toca: un ListTile dentro de
-      // una caja tintada sin Material propio). Se drena para
-      // que no contamine este test; queda anotada en el
-      // informe de la oleada.
-      expect(tester.takeException(), isNotNull);
+      // Cierre §17 (×30): la aserción «ListTile background
+      // color» que este diálogo arrastraba (el CheckboxListTile
+      // de la advertencia sin promo dentro de su caja tintada)
+      // quedó corregida en el sitio (Material transparente
+      // propio). El test ya no la drena: afirma que NO salta.
+      expect(tester.takeException(), isNull);
       // Cerrar el diálogo tocando la barrera.
       await tester.tapAt(const Offset(20, 20));
       await tester.pumpAndSettle();

@@ -563,9 +563,11 @@ void main() {
       // (pausada_hasta); 1.28 (corrección A5-D1): a 67
       // (reset del watermark de recordatorios); 1.29
       // (Oleada 6, D-A3): a 68 (sello de autor en
-      // fotos_cola). La columna de v65 sigue naciendo en
-      // el esquema limpio, que es lo que aquí se fija.
-      expect(LocalDb.versionActual, 68);
+      // fotos_cola); 1.30 (cierre §17): a 69 (paso de
+      // migración del espejo avisos_vistos). La columna de
+      // v65 sigue naciendo en el esquema limpio, que es lo
+      // que aquí se fija.
+      expect(LocalDb.versionActual, 69);
     });
   });
 

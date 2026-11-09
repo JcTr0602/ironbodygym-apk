@@ -488,6 +488,19 @@ void main() {
       });
       expect(nOps, 2, reason: '«Pedir igual» sí encola');
       expect(tester.takeException(), isNull);
+      // Cierre §17 (×30): el push que dispara «Pedir igual»
+      // corre en segundo plano y su ciclo, al fallar sin red
+      // en el arnés, deja armados los temporizadores del
+      // motor (el respiro de 2 s del catch de _doPull y el
+      // sondeo de red de 5 s de _hayInternet al emitir la
+      // foto de estado) — en esta VM el test cerraba antes
+      // de que vencieran y el binding los marcaba como
+      // pendientes. Se dejan vencer en bucle; no cambia
+      // ninguna aserción del test.
+      for (var i = 0; i < 15; i++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      await tester.pump();
     });
   });
 }

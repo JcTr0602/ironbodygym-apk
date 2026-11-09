@@ -241,21 +241,19 @@ void main() {
         ),
       );
       await tester.pump();
-      // La aserción ListTile-sobre-DecoratedBox de
-      // Tarjeta+ExpansionTile es PREEXISTENTE (la misma
-      // familia documentada en D5 para la venta rápida):
-      // salta al pintar las secciones y no es de esta
-      // oleada; se drena y se acota a esa firma.
-      void drenar() {
-        var e = tester.takeException();
-        while (e != null) {
-          expect(e.toString(),
-              contains('ListTile background color'));
-          e = tester.takeException();
-        }
+      // Cierre §17 (×30): la aserción ListTile-sobre-
+      // DecoratedBox de Tarjeta+ExpansionTile quedó
+      // CORREGIDA en la raíz (Tarjeta sin onTap da ahora un
+      // Material transparente propio a su contenido). Este
+      // test ya no drena nada: afirma que no salta ninguna
+      // excepción al pintar ni al buscar.
+      void sinAserciones() {
+        expect(tester.takeException(), isNull,
+            reason: 'la aserción «ListTile background color» '
+                'no debe volver');
       }
 
-      drenar();
+      sinAserciones();
       // Los 5 temas viven en la fila fija de chips.
       for (final tema in [
         'Tu trabajo diario',
@@ -271,7 +269,7 @@ void main() {
       await tester.enterText(
           find.byType(TextField), 'renovación rápida');
       await tester.pump(const Duration(milliseconds: 350));
-      drenar();
+      sinAserciones();
       expect(find.text('Cobrar una mensualidad'),
           findsOneWidget);
       expect(find.text('1 resultado'), findsOneWidget);
@@ -286,12 +284,12 @@ void main() {
       await tester.enterText(
           find.byType(TextField), 'sincronizacion');
       await tester.pump(const Duration(milliseconds: 350));
-      drenar();
+      sinAserciones();
       expect(find.text('Sincronización'), findsOneWidget);
       // Sin resultados: el vacío de la casa.
       await tester.enterText(find.byType(TextField), 'zzzqq');
       await tester.pump(const Duration(milliseconds: 350));
-      drenar();
+      sinAserciones();
       expect(find.text('Sin resultados'), findsOneWidget);
     });
 

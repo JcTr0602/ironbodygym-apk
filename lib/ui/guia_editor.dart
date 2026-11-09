@@ -24,6 +24,7 @@ import '../localdb.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'foto_elegir.dart';
 import 'diseno.dart';
 
 class GuiaEditorScreen extends StatefulWidget {
@@ -652,8 +653,16 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       _aviso('Primero define el identificador de la ficha.');
       return;
     }
-    final img = await ImagePicker().pickImage(
-        source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024);
+    // Cierre §17 (×30): por la vía segura de la casa
+    // (foto_elegir.dart) — try/catch con aviso visible,
+    // recuperación con retrieveLostData y guarda
+    // anti-doble-toque. Era un pickImage pelado.
+    final img = await elegirFotoSegura(
+      context,
+      origen: ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+    );
     if (img == null || !mounted) return;
     setState(() => _ocupado = true);
     try {
