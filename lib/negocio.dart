@@ -1115,6 +1115,13 @@ double montoEfectivoOp(
         payload['tipo_id'] as String?);
   }
   if (tipo == 'inscribir') {
+    // Yunque B (YB-DIN-01): la inscripción de una Cuenta a la
+    // Casa no cobra nada: su payload no trae dinero, solo la
+    // marca cuenta_casa. Sin este corte caía en los defaults
+    // y se valoraba como una mensualidad de 2000 a entregar.
+    if (payload['cuenta_casa'] == 1 || payload['cuenta_casa'] == true) {
+      return 0;
+    }
     // v1.3.9 (Bug 2): si fue por transferencia no es efectivo a entregar.
     if ('${payload['metodo_pago'] ?? 'efectivo'}' == 'transferencia') return 0;
     return mensualidad(
@@ -1340,7 +1347,12 @@ Future<double> montoCobradoCupOp(Map<String, dynamic> op) async {
         '${payload['metodo_pago'] ?? 'efectivo'}',
         (payload['monto'] as num?)?.toDouble(),
         payload['tipo_id'] as String?,
-        esCasa: payload['casa'] == true ||
+        // Yunque B (YB-DIN-01): la marca que el payload Casa
+        // real trae es cuenta_casa (sin casa ni cliente_id):
+        // sin ella, esCasa salía false y se contaban 2000.
+        esCasa: payload['cuenta_casa'] == 1 ||
+            payload['cuenta_casa'] == true ||
+            payload['casa'] == true ||
             await _esCuentaCasaEspejo(payload['cliente_id']));
   }
   if (tipo == 'pago_diario' || tipo == 'diario') {
