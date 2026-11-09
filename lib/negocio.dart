@@ -3213,24 +3213,38 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
 /// formato del recibo de la bandeja, pero para cualquier
 /// fecha (no solo hoy). Lo usa la ficha para reenviar el
 /// recibo de un pago del historial.
+///
+/// 1.31 (Yunque A, aprobado por Jc): plantilla embellecida
+/// (🧾/🏋️/━ y un emoji por dato) con la línea NUEVA
+/// «✅ Vigente hasta»: el llamador pasa el `pagado_hasta`
+/// resultante en [vigenteHastaIso]; sin fecha, la línea no
+/// sale. El cierre automático 🤖 de siempre no cambia.
 String textoReciboPago({
   required String nombre,
   required num monto,
   required String metodo,
   required String fechaIso,
   required String cobradoPor,
+  String? vigenteHastaIso,
 }) {
   final metodoTxt = metodo == 'transferencia'
       ? 'Transferencia'
       : metodo == 'cortesia'
           ? 'Cortesía (regalo)'
           : 'Efectivo';
-  return ('*Iron Body Gym* — Recibo\n'
-          'Cliente: $nombre\n'
-          'Monto: ${fmtMonto(monto)} CUP\n'
-          'Método: $metodoTxt\n'
-          'Fecha: ${fmtFecha(fechaIso)}\n'
-          'Cobrado por: $cobradoPor'
+  final vigente = (vigenteHastaIso ?? '').trim();
+  final lineaVigente = vigente.isEmpty
+      ? ''
+      : '✅ Vigente hasta: ${fmtFecha(vigente)}\n';
+  return ('🧾 *Recibo de pago*\n'
+          '🏋️ *Iron Body Gym*\n'
+          '━━━━━━━━━━━━\n'
+          '👤 Cliente: $nombre\n'
+          '💵 Monto: ${fmtMonto(monto)} CUP\n'
+          '💳 Método: $metodoTxt\n'
+          '📆 Fecha: ${fmtFecha(fechaIso)}\n'
+          '$lineaVigente'
+          '🙋 Cobrado por: $cobradoPor'
           '$lineaMensajeAutomatico')
       .trim();
 }

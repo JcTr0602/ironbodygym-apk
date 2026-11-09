@@ -4001,6 +4001,9 @@ class _FichaScreenState extends State<FichaScreen> {
       metodo: '${p['metodo'] ?? ''}',
       fechaIso: '${p['fecha'] ?? ''}',
       cobradoPor: '${p['registrado_por'] ?? ''}',
+      // 1.31 (Yunque A): la línea «✅ Vigente hasta» del recibo
+      // lleva el pagado_hasta vigente del cliente.
+      vigenteHastaIso: '${c['pagado_hasta'] ?? ''}',
     );
     // 1.25 T17: el recibo va al teléfono EFECTIVO (movil
     // primero), el mismo que la ficha enseña.

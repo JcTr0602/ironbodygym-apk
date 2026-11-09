@@ -180,5 +180,31 @@ void main() {
     expect(t, contains('Fecha: 15/10/2026'));
     expect(t, contains('Cobrado por: Gabriel'));
     expect(t.endsWith(_cierre), isTrue);
+    // 1.31 (Yunque A): sin pagado_hasta no sale la línea de
+    // vigencia.
+    expect(t, isNot(contains('Vigente hasta')));
+  });
+
+  test(
+      '1.31 (Yunque A): el recibo embellecido trae cabecera, un '
+      'emoji por dato y la línea «✅ Vigente hasta»', () {
+    final t = textoReciboPago(
+      nombre: 'Ana Prueba',
+      monto: 2500,
+      metodo: 'transferencia',
+      fechaIso: '2026-10-15',
+      cobradoPor: 'Gabriel',
+      vigenteHastaIso: '2026-11-15',
+    );
+    expect(t, startsWith('🧾 *Recibo de pago*'));
+    expect(t, contains('🏋️ *Iron Body Gym*'));
+    expect(t, contains('━'));
+    expect(t, contains('👤 Cliente: Ana Prueba'));
+    expect(t, contains('💵 Monto: 2500 CUP'));
+    expect(t, contains('💳 Método: Transferencia'));
+    expect(t, contains('📆 Fecha: 15/10/2026'));
+    expect(t, contains('✅ Vigente hasta: 15/11/2026'));
+    expect(t, contains('🙋 Cobrado por: Gabriel'));
+    expect(t.endsWith(_cierre), isTrue);
   });
 }
