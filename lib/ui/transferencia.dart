@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -111,8 +112,11 @@ class _TransferenciaScreenState extends State<TransferenciaScreen> {
       if (mounted) {
         final banc = AppConfig.datosBancarios(aj);
         setState(() {
-          _efectivo = (aj['mensualidad'] as num?)?.toDouble() ?? 2000;
-          _transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
+          // Yunque B (YB-DIN-02): lector tolerante — con el
+          // cast duro, un importe como texto impedía cargar
+          // hasta los datos bancarios de esta pantalla.
+          _efectivo = montoAjusteTolerante(aj['mensualidad']) ?? 2000;
+          _transfer = montoAjusteTolerante(aj['transferencia']) ?? 2500;
           _bandec = banc['bandec']!;
           _bpa = banc['bpa']!;
           _movil = banc['movil']!;

@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../auth.dart';
+import '../app_log.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../precio_cobro.dart';
@@ -263,7 +264,11 @@ Future<Map<String, dynamic>?> pagoDialogo(
     String? metodoInicial,
     bool repetirDirecto = false}) async {
   final aj = await LocalDb.instance.getAjustes();
-  final transfer = (aj['transferencia'] as num?)?.toDouble() ?? 2500;
+  // Yunque B (YB-DIN-02): lector tolerante de la casa — el
+  // blob de ajustes también se edita desde el bot/SQL y un
+  // importe puede llegar como TEXTO: el cast duro `as num?`
+  // lanzaba TypeError y bloqueaba el cobro.
+  final transfer = montoAjusteTolerante(aj['transferencia']) ?? 2500;
   // 1.14 (D9): respetar los métodos aceptados en Ajustes (H1).
   // Antes el ajuste se guardaba pero nadie lo leía y el diálogo
   // ofrecía transferencia siempre. Sin dato (o lista vacía) se
@@ -306,10 +311,28 @@ Future<Map<String, dynamic>?> pagoDialogo(
   // (antes el payload hacía un cast directo a int? sin bloqueo).
   final clienteId = idClienteCobro(cliente);
   var filasEspecial = <Map<String, dynamic>>[];
+  var especialSinVerificar = false;
   if (clienteId > 0) {
     try {
       filasEspecial = await tarifasDeCliente(clienteId);
-    } catch (_) {}
+    } catch (e) {
+      // Yunque B (YB-DIN-03): antes este catch era MUDO y el
+      // diálogo seguía con la lista vacía: calcularPrecioCobro
+      // caía a la tarifa estándar y se cobraba de más sin que
+      // nadie lo viera (el caso Kevin: su especial de 1000 en
+      // efectivo pasaba a 2000 estándar). Ahora el fallo queda
+      // en la bitácora y el cobrador recibe un aviso no
+      // bloqueante ANTES de abrir el diálogo.
+      especialSinVerificar = true;
+      AppLog.error('pago', 'tarifa_especial_fallo', d: '$e');
+    }
+  }
+  if (especialSinVerificar && context.mounted) {
+    mostrarSnack(
+        context,
+        'No se pudo comprobar la tarifa especial de este '
+        'cliente. Revisa el importe antes de cobrar.',
+        significado: SignificadoChip.alerta);
   }
   double montoTipo(String id, double def) {
     for (final t in tipos) {

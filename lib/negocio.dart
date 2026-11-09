@@ -3790,6 +3790,18 @@ Future<Map<String, List<Map<String, dynamic>>>> clientesPorEntrenador() async {
 /// calendario actual (espejo `pagos`).
 /// v1.3.3: excluye pagos con monto 0 (regalos de cumpleaños, promos) para
 /// que no inflen el conteo que alimenta la comisión de entrenadores.
+///
+/// ⚠ Yunque B (YB-DIN-04): esto es un conteo CONTABLE (todo pago
+/// del mes con monto > 0, incluidos semanal/quincenal y cortos),
+/// NO la definición de «pagaron el mes» de la nómina. La
+/// definición ÚNICA para Home, Panel, Nómina y listados es
+/// `NominaCalc.clientesQuePagaronElMes` (solo mensualidades,
+/// con la excepción de vencimiento dentro del propio mes —
+/// decisión de Jc, Panel 1.6.0). NO usar esta función para
+/// nómina ni KPIs de «pagaron»: discreparía de Home el mismo
+/// mes. Se conserva con su sentido contable por decisión
+/// registrada; sus únicos consumidores vivos son los tests
+/// del overlay de anulaciones y de Casa.
 Future<int> pagosRealizadosMes() async {
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
@@ -3809,7 +3821,19 @@ Future<int> pagosRealizadosMes() async {
     if (f != null && fechaNegocioHabana(f).startsWith(pref)) {
       // v1.3.3: los regalos/promos (monto 0) no cuentan como pago cobrado.
       if ((p['monto'] as num? ?? 0) <= 0) continue;
-      final cid = p['cliente_id'] as int?;
+      // Yunque B (YB-DIN-04): parseo tolerante con la misma
+      // semántica que NominaCalc.idTolerante (num o texto,
+      // también '10.0') — el cast duro `as int?` descartaba en
+      // silencio un cliente_id llegado como texto/double por
+      // JSON. Inline a propósito: negocio no importa
+      // nomina_calc (ciclo documentado en tipos_pago).
+      final rawCid = p['cliente_id'];
+      final int? cid = rawCid is num
+          ? rawCid.toInt()
+          : rawCid is String
+              ? (int.tryParse(rawCid.trim()) ??
+                  double.tryParse(rawCid.trim())?.toInt())
+              : null;
       if (cid != null && !_esPagoCasa(p, casas)) ids.add(cid);
     }
   }

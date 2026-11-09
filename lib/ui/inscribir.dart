@@ -682,12 +682,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
 
   Future<Map<String, double>> _precios() async {
     final aj = await LocalDb.instance.getAjustes();
+    // Yunque B (YB-DIN-02): lector tolerante (ver
+    // dialogo_pago): un importe como texto no puede tumbar
+    // el alta con un TypeError.
     return {
-      'mensual': (aj['mensualidad'] as num?)?.toDouble() ?? 2000,
-      'semanal': (aj['pago_semanal'] as num?)?.toDouble() ?? 600,
-      'quincenal': (aj['pago_quincenal'] as num?)?.toDouble() ?? 1200,
+      'mensual': montoAjusteTolerante(aj['mensualidad']) ?? 2000,
+      'semanal': montoAjusteTolerante(aj['pago_semanal']) ?? 600,
+      'quincenal': montoAjusteTolerante(aj['pago_quincenal']) ?? 1200,
       // v1.3.9 (Bug 2): tarifa por transferencia (difiere del efectivo).
-      'transfer': (aj['transferencia'] as num?)?.toDouble() ?? 2500,
+      'transfer': montoAjusteTolerante(aj['transferencia']) ?? 2500,
     };
   }
 
