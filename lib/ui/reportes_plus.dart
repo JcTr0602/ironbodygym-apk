@@ -144,6 +144,11 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
         nombre: r.nombre,
         monto: r.monto,
         referencia: r.referencia,
+        // Yunque B (YB-FLU-03): con la cotización vencida el
+        // diálogo exige aceptarlo expresamente (checkbox)
+        // antes de habilitar «Confirmar».
+        cotizacionVencida: cotizacionPlusSeguramenteVencida(
+            creadoEn: r.creadoEn, ahora: ahoraHabana()),
       ),
     );
     if (monto != null && mounted) {
@@ -309,6 +314,33 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
                   ],
                 ),
               ),
+            // Yunque B (YB-FLU-03): la cotización de este
+            // reporte venció seguro (reporte de más de 24 h):
+            // se avisa en la tarjeta y el diálogo de
+            // confirmación exigirá aceptarlo expresamente.
+            if (!bloqueado &&
+                cotizacionPlusSeguramenteVencida(
+                    creadoEn: r.creadoEn, ahora: ahoraHabana()))
+              Padding(
+                padding: EdgeInsets.only(top: AppEspacio.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.timer_off_rounded,
+                        size: 16, color: AppColores.alerta),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'La cotización de este reporte ya venció '
+                        '(más de 24 h): el precio puede haber '
+                        'cambiado. Al confirmar aceptas el monto '
+                        'reportado tal cual.',
+                        style: AppTexto.metadato.copyWith(color: AppColores.alerta, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: AppEspacio.sm),
             if (bloqueado)
               Row(
@@ -374,11 +406,17 @@ class _DialogoConfirmarPlus extends StatefulWidget {
     required this.nombre,
     required this.monto,
     required this.referencia,
+    this.cotizacionVencida = false,
   });
 
   final String nombre;
   final double monto;
   final String referencia;
+
+  /// Yunque B (YB-FLU-03): la cotización del reporte venció
+  /// seguro (>24 h): el diálogo lo dice y exige marcar la
+  /// aceptación expresa antes de confirmar.
+  final bool cotizacionVencida;
 
   @override
   State<_DialogoConfirmarPlus> createState() =>
@@ -388,6 +426,7 @@ class _DialogoConfirmarPlus extends StatefulWidget {
 class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
   late final TextEditingController _ctrl;
   bool _errorMonto = false;
+  bool _aceptoVencida = false;
 
   @override
   void initState() {
@@ -429,6 +468,29 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
               '\n\nAl confirmar, el invitado recibe 30 días de '
               'App Plus desde que el servidor procese la '
               'confirmación.'),
+          // Yunque B (YB-FLU-03): reconfirmación expresa con
+          // la cotización vencida — sin marcarla, «Confirmar»
+          // queda deshabilitado.
+          if (widget.cotizacionVencida) ...[
+            const SizedBox(height: 12),
+            Text(
+              '⚠️ La cotización de este reporte ya venció '
+              '(pasaron más de 24 h desde el reporte): el '
+              'precio pudo haber cambiado.',
+              style: TextStyle(
+                  color: AppColores.alerta,
+                  fontWeight: FontWeight.w600),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _aceptoVencida,
+              onChanged: (v) =>
+                  setState(() => _aceptoVencida = v ?? false),
+              title: const Text(
+                  'Confirmo de todos modos, al monto reportado'),
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: _ctrl,
@@ -450,7 +512,11 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: _confirmar,
+          // Yunque B (YB-FLU-03): con la cotización vencida,
+          // sin la aceptación expresa no se confirma.
+          onPressed: (widget.cotizacionVencida && !_aceptoVencida)
+              ? null
+              : _confirmar,
           child: const Text('Confirmar'),
         ),
       ],

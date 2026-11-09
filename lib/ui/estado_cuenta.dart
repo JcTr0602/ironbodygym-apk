@@ -97,10 +97,25 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
               params: {'p_cliente_id': widget.clienteId},
             )
             .timeout(const Duration(seconds: 12));
-        final r = plusResidualDe(res);
-        plusTxt = textoPlusResidual(
-            activo: r.activo, hasta: r.hasta, hoyIso: hoyHabanaIso());
-      } catch (_) {}
+        // Yunque B (YB-FLU-04): una respuesta null SIN lanzar
+        // tampoco es «sin Plus»: es «no se pudo verificar»,
+        // como ya distingue la ficha (R1M4-B7).
+        if (res == null) {
+          plusTxt = 'sin verificar';
+        } else {
+          final r = plusResidualDe(res);
+          plusTxt = textoPlusResidual(
+              activo: r.activo, hasta: r.hasta, hoyIso: hoyHabanaIso());
+        }
+      } catch (_) {
+        // Yunque B (YB-FLU-04): el fallo de la RPC ya no omite
+        // la línea en silencio: el texto que sale por WhatsApp
+        // dice «Plus: sin verificar», el mismo criterio que la
+        // ficha («Sin verificar en esta visita»). Omitirla
+        // dejaba al cliente con un estado de cuenta que parece
+        // completo y no lo es.
+        plusTxt = 'sin verificar';
+      }
     }
     final texto = textoEstadoCuenta(
       cliente: cliente,

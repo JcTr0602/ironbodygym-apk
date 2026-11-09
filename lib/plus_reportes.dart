@@ -92,6 +92,28 @@ bool puedeDecidirReportesPlus({required bool esDueno}) => esDueno;
 bool montoConfirmacionPlusValido(num? v) =>
     v != null && v.isFinite && v > 0;
 
+/// Yunque B (YB-FLU-03): ¿la cotización de un reporte está
+/// SEGURAMENTE vencida? El reporte solo pudo nacer con su
+/// cotización viva (el servidor lo exige en `plus_reportar`)
+/// y la cotización vive 24 h desde SU creación, siempre
+/// anterior a la del reporte: si el reporte tiene más de
+/// 24 h, la cotización venció sí o sí, y confirmar sería
+/// aceptar un precio que ya no está vigente. Con menos de
+/// 24 h de reporte la cotización puede estar viva o vencida
+/// — la app no recibe su `expira_en` (plus_reportes_listar
+/// no lo trae; que lo traiga y que `plus_confirmar` lo
+/// imponga al confirmar es la mitad SERVIDOR de este
+/// arreglo, verificada ausente el 2026-11-09 y anotada como
+/// pendiente fuera de esta oleada). Función pura: ambos
+/// instantes van en el mismo marco (creadoEn nace de
+/// instanteServidorHabana; el llamador pasa ahoraHabana()).
+bool cotizacionPlusSeguramenteVencida({
+  required DateTime? creadoEn,
+  required DateTime ahora,
+}) =>
+    creadoEn != null &&
+    ahora.difference(creadoEn) > const Duration(hours: 24);
+
 /// Un reporte de pago App Plus pendiente, tal como lo devuelve
 /// `plus_reportes_listar` (el parseo es tolerante: campos
 /// ausentes caen a vacío/0 y la fila se descarta solo si falta el

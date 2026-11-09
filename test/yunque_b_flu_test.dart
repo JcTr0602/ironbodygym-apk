@@ -17,6 +17,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
+import 'package:ironbody_gym/plus_reportes.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -138,5 +139,73 @@ void main() {
     final resumen = await resumenActivosMorosos();
     expect(resumen.morosos, 2);
     expect(resumen.activos, 8);
+  });
+
+  // ── Yunque B · Medias (Gestión 1.31): FLU-03 y FLU-04 ──
+  group('YB-FLU-03 cotizacionPlusSeguramenteVencida', () {
+    final creado = DateTime(2026, 11, 8, 10, 0);
+
+    test('a las 24 h exactas aún no se puede asegurar', () {
+      expect(
+          cotizacionPlusSeguramenteVencida(
+              creadoEn: creado,
+              ahora: creado.add(const Duration(hours: 24))),
+          isFalse);
+    });
+
+    test('pasadas las 24 h la cotización venció seguro', () {
+      expect(
+          cotizacionPlusSeguramenteVencida(
+              creadoEn: creado,
+              ahora: creado.add(const Duration(hours: 24, seconds: 1))),
+          isTrue);
+      expect(
+          cotizacionPlusSeguramenteVencida(
+              creadoEn: creado,
+              ahora: creado.add(const Duration(days: 3))),
+          isTrue);
+    });
+
+    test('sin fecha de reporte no se afirma nada', () {
+      expect(
+          cotizacionPlusSeguramenteVencida(
+              creadoEn: null, ahora: creado.add(const Duration(days: 9))),
+          isFalse);
+    });
+
+    test('recién reportado: no vencida', () {
+      expect(
+          cotizacionPlusSeguramenteVencida(
+              creadoEn: creado,
+              ahora: creado.add(const Duration(hours: 2))),
+          isFalse);
+    });
+  });
+
+  group('YB-FLU-04 estado de cuenta con Plus sin verificar', () {
+    test('el texto lleva la línea «Plus: sin verificar»', () {
+      final texto = textoEstadoCuenta(
+        cliente: const {'nombre': 'Ana', 'pagado_hasta': '2026-12-01'},
+        pagos: const [],
+        ventas: const [],
+        servicios: const [],
+        fiadoPendiente: const {},
+        plusResidualTexto: 'sin verificar',
+        hoyIso: '2026-11-09',
+      );
+      expect(texto, contains('Plus: sin verificar'));
+    });
+
+    test('sin texto Plus no aparece la línea (no-dueño)', () {
+      final texto = textoEstadoCuenta(
+        cliente: const {'nombre': 'Ana', 'pagado_hasta': '2026-12-01'},
+        pagos: const [],
+        ventas: const [],
+        servicios: const [],
+        fiadoPendiente: const {},
+        hoyIso: '2026-11-09',
+      );
+      expect(texto, isNot(contains('Plus:')));
+    });
   });
 }
