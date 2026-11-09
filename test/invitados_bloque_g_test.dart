@@ -910,6 +910,55 @@ void main() {
       expect(rpc.llamadas, isEmpty);
     });
 
+    test(
+        '1.31 (Yunque A): si confirmar en el servidor FALLA, el '
+        'error queda guardado en el registro (visible) y el '
+        'reintento sano confirma y lo limpia', () async {
+      await _insertarOpConversion(
+        opUuid: 'op-1',
+        estado: 'aplicada',
+        resultadoServidor: '{"cliente_id": 33}',
+      );
+      final rpc = _RpcFalsa()
+        ..errores['invitado_confirmar_conversion'] =
+            Exception('caída de red simulada');
+      final svc = InvitadosService(rpc: rpc.call);
+      // La pasada confirma 0, pero ya no en silencio: el
+      // registro conserva el estado y el motivo, persistido.
+      expect(await svc.verificarConversiones(), 0);
+      var reg = await ConversionInvitadoStore().leer('inv-1');
+      expect(reg, isNotNull);
+      expect(reg!.estado, EstadoConversion.opEncolada);
+      expect(reg.errorConfirmacion, isNotNull);
+      expect(reg.errorConfirmacion, isNotEmpty);
+      expect(confirmacionConversionPendiente(reg), isTrue);
+
+      // Reintento (el «Sincronizar / verificar ahora» de la
+      // ficha llama a este mismo barrido): confirma y limpia.
+      rpc.errores.remove('invitado_confirmar_conversion');
+      expect(await svc.verificarConversiones(), 1);
+      reg = await ConversionInvitadoStore().leer('inv-1');
+      expect(reg!.estado, EstadoConversion.confirmada);
+      expect(reg.errorConfirmacion, isNull);
+      expect(confirmacionConversionPendiente(reg), isFalse);
+    });
+
+    test(
+        '1.31 (Yunque A): errorConfirmacion sobrevive al JSON '
+        'del registro y los registros viejos (sin la llave) '
+        'leen null', () {
+      final c = conv(EstadoConversion.opEncolada, opUuid: 'op-1')
+        ..errorConfirmacion = 'Sin conexión o error del servidor.';
+      final vuelta = ConversionInvitado.fromJson(c.toJson());
+      expect(vuelta.errorConfirmacion,
+          'Sin conexión o error del servidor.');
+      final viejo = ConversionInvitado.fromJson(
+          conv(EstadoConversion.opEncolada, opUuid: 'op-1').toJson());
+      expect(viejo.errorConfirmacion, isNull);
+      expect(confirmacionConversionPendiente(viejo), isFalse);
+      expect(confirmacionConversionPendiente(null), isFalse);
+    });
+
     test('G3: cancelar con CONVERSION_INVALIDA cierra el '
         'registro local y no lanza', () async {
       await ConversionInvitadoStore()

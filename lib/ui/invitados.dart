@@ -314,7 +314,12 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         // v1.12.0 (B5): wording del veredicto.
         return 'Conversión en curso';
       case EstadoConversion.opEncolada:
-        return 'Conversión en curso (pendiente de sincronizar)';
+        // 1.31 (Yunque A): con un fallo de confirmación ya
+        // registrado, la insignia dice el problema, no un
+        // genérico «en curso».
+        return confirmacionConversionPendiente(c)
+            ? 'Conversión pendiente de confirmar'
+            : 'Conversión en curso (pendiente de sincronizar)';
       case EstadoConversion.confirmada:
         return 'Convertido desde este teléfono';
       case EstadoConversion.opRechazada:
@@ -1817,7 +1822,18 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       await SyncEngine.instance.push();
       await _svc.verificarConversiones();
       await _cargar();
-      _snack('Sincronización revisada');
+      // 1.31 (Yunque A): si la confirmación de la conversión
+      // sigue pendiente por un fallo registrado, el aviso lo
+      // dice con su motivo en vez de un genérico «revisada».
+      final reg = await ConversionInvitadoStore()
+          .leer(widget.invitadoId);
+      if (!mounted) return;
+      if (confirmacionConversionPendiente(reg)) {
+        _snack('La conversión sigue pendiente de confirmar: '
+            '${reg!.errorConfirmacion}');
+      } else {
+        _snack('Sincronización revisada');
+      }
     } finally {
       if (mounted) setState(() => _actuando = false);
     }
@@ -2349,6 +2365,28 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                 'resultado de las medidas.',
                 style: AppTexto.cuerpo,
               ),
+              // 1.31 (Yunque A): la confirmación en el servidor
+              // ya se intentó y FALLÓ (el mensaje quedó
+              // guardado): se enseña aquí, con el motivo, junto
+              // al reintento de abajo.
+              if (confirmacionConversionPendiente(_local)) ...[
+                const SizedBox(height: AppEspacio.sm),
+                Text(
+                  '⚠ Conversión pendiente de confirmar',
+                  style: AppTexto.cuerpo.copyWith(
+                      color: AppColores.error,
+                      fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'El cliente ya se creó, pero la confirmación '
+                  'en el servidor falló: '
+                  '${_local!.errorConfirmacion} En su app aún '
+                  'no aparece como cliente. Reinténtalo con el '
+                  'botón de abajo.',
+                  style: AppTexto.cuerpo,
+                ),
+              ],
               const SizedBox(height: AppEspacio.md),
               BotonPrimario(
                 texto: 'Sincronizar / verificar ahora',

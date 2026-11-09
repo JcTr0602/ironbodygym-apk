@@ -860,6 +860,14 @@ class ConversionInvitado {
   String? opUuid;
   int? clienteId;
   ResultadoMedidasInvitado? resultadoMedidas;
+
+  /// 1.31 (Yunque A): mensaje legible del último intento de
+  /// confirmar la conversión en el servidor que FALLÓ. Antes el
+  /// barrido se tragaba el error y la conversión quedaba «en
+  /// curso» para siempre sin que nadie viera por qué; ahora el
+  /// fallo queda guardado y la ficha lo enseña con su reintento.
+  /// Se limpia al confirmar.
+  String? errorConfirmacion;
   final String creadaEn;
   String actualizadaEn;
 
@@ -870,6 +878,7 @@ class ConversionInvitado {
     this.opUuid,
     this.clienteId,
     this.resultadoMedidas,
+    this.errorConfirmacion,
     required this.creadaEn,
     required this.actualizadaEn,
   });
@@ -882,6 +891,8 @@ class ConversionInvitado {
         if (clienteId != null) 'cliente_id': clienteId,
         if (resultadoMedidas != null)
           'resultado_medidas': resultadoMedidas!.toJson(),
+        if (errorConfirmacion != null)
+          'error_confirmacion': errorConfirmacion,
         'creada_en': creadaEn,
         'actualizada_en': actualizadaEn,
       };
@@ -901,11 +912,22 @@ class ConversionInvitado {
           ? ResultadoMedidasInvitado.fromJson(
               rm.map((k, v) => MapEntry('$k', v)))
           : null,
+      errorConfirmacion: j['error_confirmacion'] as String?,
       creadaEn: '${j['creada_en'] ?? ''}',
       actualizadaEn: '${j['actualizada_en'] ?? ''}',
     );
   }
 }
+
+/// 1.31 (Yunque A): ¿la conversión quedó con la confirmación en
+/// el servidor PENDIENTE por un fallo ya registrado? Es el caso
+/// que la ficha y la insignia de la lista enseñan como
+/// «Conversión pendiente de confirmar» (distinto del «en curso»
+/// normal que aún espera su sync). Función PURA.
+bool confirmacionConversionPendiente(ConversionInvitado? c) =>
+    c != null &&
+    c.estado == EstadoConversion.opEncolada &&
+    (c.errorConfirmacion ?? '').isNotEmpty;
 
 /// Qué hacer con una conversión `opEncolada` según el estado que
 /// la op tiene en la cola local y su resultado del servidor.
@@ -1957,13 +1979,22 @@ class InvitadosService {
         try {
           await confirmarConversion(
               conv.conversionUuid, clienteId, conv.opUuid);
-        } catch (_) {
-          // Sin conexión en este momento: se reintenta en la
-          // próxima verificación (la RPC es idempotente).
+        } catch (e) {
+          // 1.31 (Yunque A): el fallo ya NO muere en silencio
+          // (antes un catch mudo lo dejaba «para la próxima
+          // pasada» sin rastro: el cliente existía pero el
+          // invitado seguía siendo invitado en su app y nadie
+          // veía por qué). Se guarda el mensaje legible en el
+          // registro y la ficha lo enseña como «Conversión
+          // pendiente de confirmar» con su reintento. El
+          // reintento en la próxima verificación se conserva.
+          conv.errorConfirmacion = mapearErrorInvitado(e).mensaje;
+          await store.guardar(conv);
           continue;
         }
         conv.estado = EstadoConversion.confirmada;
         conv.clienteId = clienteId;
+        conv.errorConfirmacion = null;
         conv.resultadoMedidas = resultadoMedidasDeOp(resultado);
         await store.guardar(conv);
         confirmadas++;
