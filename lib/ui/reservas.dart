@@ -96,6 +96,19 @@ class ReservaVista {
     return vence != null && vence.isBefore(ahora);
   }
 
+  /// Yunque B (YB-SER-07): SOLICITUD cuyo plazo ya pasó pero
+  /// el espejo aún la trae como 'solicitada' (el servidor la
+  /// expira en su barrido). Confirmarla encolaría un
+  /// confirmar_reserva condenado al rebote por expirada, con
+  /// el cliente esperando respuesta — la reservada vencida
+  /// tenía su defensa en tres capas (apartadoVencido) y la
+  /// solicitada no tenía ninguna.
+  bool solicitudVencida(DateTime ahora) {
+    if (estado != 'solicitada') return false;
+    final vence = expiraEn == null ? null : DateTime.tryParse(expiraEn!);
+    return vence != null && vence.isBefore(ahora);
+  }
+
   /// Diferencia total contra el precio vigente del catálogo
   /// (null si el suplemento ya no está en el espejo, o si la
   /// moneda del catálogo difiere de la snapshot: restar unidades
@@ -203,6 +216,30 @@ const tiposOpReserva = {
   'cancelar_reserva',
   'cobrar_reserva',
 };
+
+/// Yunque B (YB-SER-06): conteo de reservas SOLICITADAS
+/// visibles para quien mira, con el MISMO filtro de
+/// protegidos de [construirBandeja]. El contador de la
+/// pestaña de Suplementos contaba todas las del espejo y la
+/// insignia del entrenador («3») no cuadraba con su bandeja
+/// («2»): el número solo ya revelaba que existía una
+/// solicitud más, de un cliente protegido. Función pura.
+int contarSolicitadasVisibles(
+  List<Map<String, dynamic>> reservas,
+  List<Map<String, dynamic>> clientes, {
+  bool esDueno = true,
+}) {
+  final clientePorId = {
+    for (final c in clientes) _entero(c['id']): c,
+  };
+  return reservas.where((r) {
+    if (r['estado'] != 'solicitada') return false;
+    if (esDueno) return true;
+    return !esVistaProtegida(
+        clientePorId[_entero(r['cliente_id'])] ?? {},
+        esDueno: esDueno);
+  }).length;
+}
 
 /// Aviso de «precio hoy» cuando la moneda del catálogo difiere
 /// de la snapshot de la reserva: el precio vigente va con SU
@@ -464,6 +501,16 @@ class _ReservasScreenState extends State<ReservasScreen> {
 
   Future<void> _confirmar(ReservaVista r) async {
     if (_bloqueada(r.id)) return;
+    // Yunque B (YB-SER-07): defensa en el propio flujo, como
+    // _cobrar con el apartado vencido — una solicitud vencida
+    // no se confirma aunque la tarjeta se hubiera pintado
+    // antes del vencimiento.
+    if (r.solicitudVencida(ahoraHabana())) {
+      mostrarSnack(context,
+          'Esta solicitud ya venció: el servidor la expira sola y no se puede confirmar.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Confirmar reserva',
@@ -1061,7 +1108,22 @@ class TarjetaReserva extends StatelessWidget {
                   icono: Icons.hourglass_top_rounded,
                 ),
               ),
-            if (solicitada && !bloqueada)
+            if (solicitada && !bloqueada && r.solicitudVencida(ahora))
+              // Yunque B (YB-SER-07): solicitud vencida que el
+              // servidor aún no expira en el espejo: SIN
+              // botones (confirmarla encolaría un
+              // confirmar_reserva condenado al rebote), el
+              // mismo tratamiento que el apartado vencido.
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.sm),
+                child: Text(
+                  'Solicitud vencida: el servidor la expira '
+                  'sola; ya no se puede confirmar.',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.alertaTexto(context)),
+                ),
+              ),
+            if (solicitada && !bloqueada && !r.solicitudVencida(ahora))
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [

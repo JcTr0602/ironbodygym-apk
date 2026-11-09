@@ -169,7 +169,23 @@ class AccesoCliente {
 }
 
 class AccesoAppCache {
-  AccesoAppCache._();
+  AccesoAppCache._() {
+    // Yunque B (YB-SER-04): al perderse la sesión por
+    // CUALQUIER vía (vencimiento incluido, no solo el
+    // «Cerrar sesión» de signOut), la foto de accesos se
+    // limpia sola — el mismo patrón que PermisosEntrenador.
+    // Sin esto, en el teléfono compartido la lista
+    // solo-dueño sobrevivía al vencimiento de la sesión del
+    // dueño y el siguiente usuario la veía en las fichas.
+    try {
+      Supabase.instance.client.auth.onAuthStateChange.listen((d) {
+        if (d.session == null) limpiar();
+      });
+    } catch (_) {
+      // Sin Supabase inicializado (tests): la limpieza por
+      // signOut() explícito sigue activa.
+    }
+  }
   static final AccesoAppCache instance = AccesoAppCache._();
 
   Map<int, AccesoCliente>? _porCliente;

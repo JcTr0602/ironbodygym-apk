@@ -1559,6 +1559,62 @@ String mensajeConfirmacionCascada(String nombre, CuentasCascada c) {
 /// menos auditados MENOR: sin él, un doble toque encolaba dos borrados).
 final _eliminandoSuplementos = <int>{};
 
+/// Yunque B (YB-SER-05): ops VIVAS que referencian al
+/// suplemento, a cualquiera de sus pomos o a sus reservas
+/// vivas — la guarda previa al borrado. La versión anterior
+/// solo contaba venta_suplemento / inscripcion_venta_suplemento
+/// / abrir_bote_servicio (suplemento_id en el payload): una
+/// venta de DOSIS en cola (venta_servicio: referencia el
+/// POMO), un relleno (reponer_pomo) o una decisión de reserva
+/// no bloqueaban nada; el dueño veía «Suplemento eliminado»,
+/// el servidor rebotaba el borrado por su guarda y el
+/// suplemento «resucitaba» al sincronizar. Solo cuentan ops
+/// vivas (aplicada ya está en el espejo; rechazada no se
+/// aplicará).
+Future<int> opsVivasQueReferencianSuplemento(
+    LocalDb db, int suplementoId) async {
+  final d = await db.db;
+  final pomos = await db.allMirror('servicio_pomos');
+  final pomoIds = <int>[
+    for (final p in pomos)
+      if ((p['suplemento_id'] as num?)?.toInt() == suplementoId)
+        if ((p['id'] as num?)?.toInt() case final pid?) pid,
+  ];
+  final reservas = await db.allMirror('reservas');
+  final reservaIds = <int>[
+    for (final r in reservas)
+      if ((r['suplemento_id'] as num?)?.toInt() == suplementoId &&
+          (r['estado'] == 'solicitada' || r['estado'] == 'reservada'))
+        if ((r['id'] as num?)?.toInt() case final rid?) rid,
+  ];
+  final condiciones = <String>[
+    "(tipo IN ('venta_suplemento', 'inscripcion_venta_suplemento', "
+        "'abrir_bote_servicio', 'reponer_pomo') AND "
+        "(json_extract(payload, '\$.suplemento_id') = ? OR "
+        "json_extract(payload, '\$.venta.suplemento_id') = ?))",
+  ];
+  final args = <Object?>[suplementoId, suplementoId];
+  if (pomoIds.isNotEmpty) {
+    condiciones.add("(tipo IN ('venta_servicio', 'salida_servicio', "
+        "'revertir_venta_servicio') AND json_extract(payload, "
+        "'\$.pomo_id') IN (${pomoIds.map((_) => '?').join(',')}))");
+    args.addAll(pomoIds);
+  }
+  if (reservaIds.isNotEmpty) {
+    condiciones.add("(tipo IN ('confirmar_reserva', "
+        "'rechazar_reserva', 'cancelar_reserva', 'cobrar_reserva') "
+        "AND json_extract(payload, '\$.reserva_id') IN "
+        "(${reservaIds.map((_) => '?').join(',')}))");
+    args.addAll(reservaIds);
+  }
+  final filas = await d.rawQuery(
+    "SELECT COUNT(*) as n FROM ops_queue WHERE estado NOT IN "
+    "('aplicada', 'rechazada') AND (${condiciones.join(' OR ')})",
+    args,
+  );
+  return (filas.first['n'] as int?) ?? 0;
+}
+
 Future<void> _eliminarSuplemento(
     BuildContext context, Map<String, dynamic> s) async {
   // Argón menos auditados MENOR: guarda de dueño en el método (el
@@ -1567,7 +1623,6 @@ Future<void> _eliminarSuplemento(
   final id = (s['id'] as num?)?.toInt();
   if (id == null) return;
   final db = LocalDb.instance;
-  final d = await db.db;
 
   // Argón: verificar localmente que no tenga ventas antes de
   // borrar (guarda de ventas de §5.3 punto 1, vía helper).
@@ -1588,15 +1643,11 @@ Future<void> _eliminarSuplemento(
   // 1.30 (Oleada 4): los botes abiertos YA NO bloquean — la
   // cascada los borra con el suplemento (§5.2 paso 5) y la
   // confirmación enseña antes sus cuentas (§5.3 punto 2).
-  final pendientes = await d.rawQuery(
-    "SELECT COUNT(*) as n FROM ops_queue WHERE tipo IN "
-    "('venta_suplemento', 'inscripcion_venta_suplemento', "
-    "'abrir_bote_servicio') AND estado NOT IN ('aplicada', 'rechazada') "
-    "AND (json_extract(payload, '\$.suplemento_id') = ? "
-    "OR json_extract(payload, '\$.venta.suplemento_id') = ?)",
-    [id, id],
-  );
-  final nPendientes = (pendientes.first['n'] as int?) ?? 0;
+  // Yunque B (YB-SER-05): el conteo vive en
+  // opsVivasQueReferencianSuplemento y cubre también las ops
+  // de dosis por pomo, los rellenos y las de reserva.
+  final nPendientes =
+      await opsVivasQueReferencianSuplemento(db, id);
   if (nPendientes > 0) {
     if (!context.mounted) return;
     mostrarSnack(context, 'No se puede eliminar: tiene operaciones pendientes de sincronizar.', significado: SignificadoChip.alerta);

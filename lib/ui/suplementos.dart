@@ -89,10 +89,17 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   Future<void> _cargarReservasPendientes() async {
     if (!_puedeReservas) return;
     final reservas = await LocalDb.instance.allMirror('reservas');
+    final clientes = await LocalDb.instance.allMirror('clientes');
     if (!mounted) return;
     setState(() {
-      _reservasSolicitadas =
-          reservas.where((r) => r['estado'] == 'solicitada').length;
+      // Yunque B (YB-SER-06): el contador aplica el filtro de
+      // protegidos de la bandeja (contarSolicitadasVisibles):
+      // sin él, la insignia del entrenador contaba también
+      // las solicitudes de clientes protegidos que su
+      // bandeja oculta — el número revelaba su existencia.
+      _reservasSolicitadas = contarSolicitadasVisibles(
+          reservas, clientes,
+          esDueno: _esDueno);
     });
   }
 

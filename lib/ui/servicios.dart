@@ -815,15 +815,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final metodoInicial =
         primerMetodoServicioActivo(_ajustes, tipo) ?? 'efectivo';
     // 1.25 T34: tope SILENCIOSO del selector de cantidad de
-    // dosis = saldo del pomo a la vista (el entrenador no ve
-    // el número — regla de la casa — pero el selector no le
-    // deja pasarse; el agua ya enseñaba el suyo). Sin pomo o
-    // sin saldo conocido, 1: los guardas de registro mandan.
+    // dosis = saldo del pomo a la vista SOLO para el dueño
+    // (él sí ve el número). Yunque B (YB-SER-03): para el
+    // entrenador el tope era el saldo y el selector se
+    // apagaba justo en él: la cifra «ciega» se infería
+    // contando toques. El entrenador topa contra el centinela
+    // del pomo ciego (999999), como en la venta múltiple, y
+    // el servidor sigue validando el stock de verdad. Sin
+    // pomo o sin saldo conocido, 1: los guardas de registro
+    // mandan.
     var topeCantidad = 1;
     if (tipo != 'agua_suelta' && _pomoActual != null) {
-      final saldo = await saldoPomoLocal(
-          (_pomoActual!['id'] as num).toInt());
-      if (saldo > 1) topeCantidad = saldo;
+      if (_esDueno) {
+        final saldo = await saldoPomoLocal(
+            (_pomoActual!['id'] as num).toInt());
+        if (saldo > 1) topeCantidad = saldo;
+      } else {
+        topeCantidad = 999999;
+      }
     }
     // Ítem 8 (solo el dueño los usa): roles de la venta. Precarga de
     // Argón: la venta nace «a nombre de» el titular del pomo (para el
@@ -2177,25 +2186,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (supId == null || saldo == null) return;
     // 1.30 (D3, UI130-15): pedir relleno pasa a confirmarse
     // en una HojaAccion (antes era acción directa al toque).
-    // El saldo solo se enseña si es una cifra real: con el
-    // centinela del pomo ciego (999999) la hoja no muestra
-    // número alguno (la regla del pomo ciego no cambia).
+    // Yunque B (YB-SER-02): la hoja NO enseña el saldo: el
+    // `saldo_local` de aquí es la cifra REAL derivada, no el
+    // centinela del pomo ciego, y pintarla («Saldo actual del
+    // pomo: 3 dosis») rompía la regla dura de Jc — el
+    // entrenador no ve cuántas dosis tiene su pomo. La banda
+    // que abre la hoja ya dice «menos de 5» sin cifra; la
+    // hoja se queda igual de ciega. dosis_al_pedir sigue
+    // viajando al servidor sin mostrarse.
     final confirma = await showHojaIron<bool>(
       context,
       titulo: 'Pedir relleno',
       icono: Icons.inventory_2_rounded,
-      cuerpo: Column(
+      cuerpo: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
               'Se avisará al dueño de que este pomo necesita '
               'relleno. Él prepara las dosis y te las entrega.'),
-          if (saldo < 900000) ...[
-            const SizedBox(height: AppEspacio.sm),
-            Text('Saldo actual del pomo: $saldo dosis.',
-                style: AppTexto.cuerpo
-                    .copyWith(fontWeight: FontWeight.w600)),
-          ],
         ],
       ),
       pie: Builder(
