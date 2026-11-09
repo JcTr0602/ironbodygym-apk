@@ -382,6 +382,7 @@ class _EditorAvisosClientesScreenState
                 )
               : _avisos.isEmpty
                   ? const EstadoVacio(
+                      ilustracion: 'assets/vacio_megafono.jpg',
                       icono: Icons.campaign_rounded,
                       titulo: 'Sin avisos publicados',
                       subtitulo: 'Publica el primer aviso para '

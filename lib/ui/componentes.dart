@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../fotos.dart';
 import '../tiempo.dart';
 
 import 'diseno.dart';
@@ -419,8 +420,9 @@ class _FadeEntradaState extends State<FadeEntrada> {
     if (!_animar) return widget.child;
     return AnimatedOpacity(
       opacity: _visible ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
+      // 1.30 D6 (UI130-32): duración y curva del token.
+      duration: AppMovimiento.media,
+      curve: AppMovimiento.curvaSuave,
       child: widget.child,
     );
   }
@@ -448,9 +450,11 @@ class CruceEstados extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
+      // 1.30 D6 (UI130-32): los valores de siempre, por el
+      // token (220 ms = AppMovimiento.media).
+      duration: AppMovimiento.media,
+      switchInCurve: AppMovimiento.curva,
+      switchOutCurve: AppMovimiento.curvaReversa,
       child: KeyedSubtree(key: ValueKey<String>(estado), child: child),
     );
   }
@@ -874,6 +878,18 @@ class EstadoVacio extends StatelessWidget {
   final String? textoAccion;
   final VoidCallback? onAccion;
 
+  /// 1.30 D6 (UI130-22): el vacío vive DENTRO de una
+  /// sección (una zona con su propio fondo): sin el
+  /// medallón ni el acolchado de pantalla completa — el
+  /// doble fondo que la auditoría señala en Servicios.
+  final bool sinMarco;
+
+  /// 1.30 D6 (UI130-22, ALTA-02): ilustración de la
+  /// lámina de vacíos (`assets/vacio_*.jpg`) que sustituye
+  /// a la figura de icono cuando el estado tiene una
+  /// asignada. Sin asignar, el icono de siempre.
+  final String? ilustracion;
+
   const EstadoVacio({
     super.key,
     required this.icono,
@@ -881,47 +897,77 @@ class EstadoVacio extends StatelessWidget {
     this.subtitulo,
     this.textoAccion,
     this.onAccion,
+    this.sinMarco = false,
+    this.ilustracion,
   });
 
   @override
   Widget build(BuildContext context) {
     final secundario = AppColores.textoSecundario(context);
+    // La figura: la ilustración asignada si la hay; si
+    // no, el icono — con su medallón en el vacío de
+    // pantalla y suelto en el sin marco (la sección que
+    // lo aloja ya trae su propio fondo).
+    final Widget figura;
+    if (ilustracion != null) {
+      final lado = sinMarco ? 96.0 : 128.0;
+      figura = ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        child: Image.asset(ilustracion!,
+            width: lado, height: lado, fit: BoxFit.cover),
+      );
+    } else if (sinMarco) {
+      figura = Icon(icono,
+          size: 30, color: AppColores.textoSecundario(context));
+    } else {
+      figura = Container(
+        width: 72,
+        height: 72,
+        decoration: BoxDecoration(
+          color:
+              AppColores.textoSecundario(context).withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icono,
+            size: 36, color: AppColores.textoSecundario(context)),
+      );
+    }
+    final columna = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        figura,
+        SizedBox(height: sinMarco ? AppEspacio.md : AppEspacio.lg),
+        Text(titulo,
+            style: AppTexto.subtitulo,
+            textAlign: TextAlign.center),
+        if (subtitulo != null) ...[
+          const SizedBox(height: AppEspacio.sm),
+          Text(subtitulo!,
+              style: AppTexto.secundario.copyWith(
+                  color: secundario),
+              textAlign: TextAlign.center),
+        ],
+        if (textoAccion != null &&
+            onAccion != null) ...[
+          const SizedBox(height: AppEspacio.lg),
+          BotonSecundario(
+              texto: textoAccion!, onPressed: onAccion),
+        ],
+      ],
+    );
+    // Sin marco: ni el Center de pantalla completa ni su
+    // acolchado xxl — solo el aire de la sección.
+    if (sinMarco) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.lg, vertical: AppEspacio.md),
+        child: columna,
+      );
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.xxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color:
-                    AppColores.textoSecundario(context).withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icono,
-                  size: 36, color: AppColores.textoSecundario(context)),
-            ),
-            const SizedBox(height: AppEspacio.lg),
-            Text(titulo,
-                style: AppTexto.subtitulo,
-                textAlign: TextAlign.center),
-            if (subtitulo != null) ...[
-              const SizedBox(height: AppEspacio.sm),
-              Text(subtitulo!,
-                  style: AppTexto.secundario.copyWith(
-                      color: secundario),
-                  textAlign: TextAlign.center),
-            ],
-            if (textoAccion != null &&
-                onAccion != null) ...[
-              const SizedBox(height: AppEspacio.lg),
-              BotonSecundario(
-                  texto: textoAccion!, onPressed: onAccion),
-            ],
-          ],
-        ),
+        child: columna,
       ),
     );
   }
@@ -1729,55 +1775,166 @@ class AvisoFechaCarnet extends StatelessWidget {
 // Encabezado de sección (título + acción opcional "ver todo")
 // ---------------------------------------------------------------------------
 
-class EncabezadoSeccion extends StatelessWidget {
-  final String titulo;
-  final String? accionTexto;
-  final VoidCallback? onAccion;
-  final IconData? accionIcono;
-  final String? accionTooltip;
-  const EncabezadoSeccion(
-      {super.key,
-      required this.titulo,
-      this.accionTexto,
-      this.onAccion,
-      this.accionIcono,
-      this.accionTooltip});
+/// Franja de resumen de una línea del patrón de lista de
+/// trabajo (1.30 D6, UI130-20): el total a la izquierda y
+/// la frescura a la derecha, en registro de metadato —
+/// sustituye a los héroes que repetían el total en grande.
+/// Los conteos por estado viven en los chips de filtro,
+/// no aquí.
+class FranjaResumenLista extends StatelessWidget {
+  final String principal;
+  final String? secundario;
+
+  const FranjaResumenLista(
+      {super.key, required this.principal, this.secundario});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.sm),
+      padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+          AppEspacio.sm, AppEspacio.lg, AppEspacio.xs),
       child: Row(
         children: [
           Expanded(
-            child: Text(titulo, style: AppTexto.subtitulo),
+            child: Text(principal,
+                style: AppTexto.etiqueta
+                    .copyWith(fontWeight: FontWeight.w700)),
           ),
-          if (accionTexto != null && onAccion != null)
-            TextButton(
-              onPressed: onAccion,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: AppEspacio.sm),
-                minimumSize: const Size(48, 44),
-              ),
-              child: Text(accionTexto!,
-                  style: AppTexto.etiqueta.copyWith(
-                      color: AppColores.naranja)),
-            ),
-          if (accionIcono != null && onAccion != null)
-            IconButton(
-              tooltip: accionTooltip,
-              iconSize: 20,
-              padding: const EdgeInsets.all(AppEspacio.md),
-              constraints: const BoxConstraints(
-                  minWidth: 44, minHeight: 44),
-              color: Colors.grey,
-              icon: Icon(accionIcono),
-              onPressed: onAccion,
-            ),
+          if (secundario != null)
+            Text(secundario!,
+                style: AppTexto.metadato.copyWith(
+                    color: AppColores.textoSecundario(context))),
         ],
       ),
+    );
+  }
+}
+
+/// Variante del [EncabezadoSeccion] (1.30 D6, UI130-10):
+/// un solo encabezado para toda la app; lo que cambia es
+/// quién pone el acolchado horizontal y el registro
+/// tipográfico.
+enum VarianteEncabezado {
+  /// Dentro de un contenedor que ya acolcha (ListView con
+  /// padding): sin acolchado horizontal propio — el
+  /// titular nace alineado con sus tarjetas.
+  seccion,
+
+  /// Vive fuera de un contenedor acolchado: trae su lg.
+  pagina,
+
+  /// El registro del Panel: mayúsculas (etiqueta w800 con
+  /// tracking), metadato a la derecha y variante de aviso
+  /// en naranja. Absorbe el `_tituloSeccion` privado que
+  /// vivía en admin.dart.
+  panel,
+}
+
+class EncabezadoSeccion extends StatelessWidget {
+  final String titulo;
+  final VarianteEncabezado variante;
+  final String? accionTexto;
+  final VoidCallback? onAccion;
+  final IconData? accionIcono;
+  final String? accionTooltip;
+
+  /// Solo variante panel: metadato alineado a la derecha.
+  final String? derecha;
+
+  /// Solo variante panel: registro de aviso (icono de
+  /// advertencia + título en naranja), el «NECESITA TU
+  /// ATENCIÓN» del Panel.
+  final bool aviso;
+
+  const EncabezadoSeccion(
+      {super.key,
+      required this.titulo,
+      this.variante = VarianteEncabezado.seccion,
+      this.accionTexto,
+      this.onAccion,
+      this.accionIcono,
+      this.accionTooltip,
+      this.derecha,
+      this.aviso = false});
+
+  @override
+  Widget build(BuildContext context) {
+    // Ritmo único (UI130-10): 24 dp antes / 8 dp después
+    // en las tres variantes. El acolchado horizontal lo
+    // pone el contenedor, salvo la variante de página
+    // (lg) y la de panel (xs, el aire histórico de admin).
+    final horizontal = switch (variante) {
+      VarianteEncabezado.seccion => 0.0,
+      VarianteEncabezado.pagina => AppEspacio.lg,
+      VarianteEncabezado.panel => AppEspacio.xs,
+    };
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          horizontal, AppEspacio.xl, horizontal, AppEspacio.sm),
+      child: variante == VarianteEncabezado.panel
+          ? _filaPanel(context)
+          : _filaSeccion(context),
+    );
+  }
+
+  Widget _filaSeccion(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(titulo, style: AppTexto.subtitulo),
+        ),
+        if (accionTexto != null && onAccion != null)
+          TextButton(
+            onPressed: onAccion,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppEspacio.sm),
+              minimumSize: const Size(48, 44),
+            ),
+            child: Text(accionTexto!,
+                style: AppTexto.etiqueta.copyWith(
+                    color: AppColores.naranja)),
+          ),
+        if (accionIcono != null && onAccion != null)
+          IconButton(
+            tooltip: accionTooltip,
+            iconSize: 20,
+            padding: const EdgeInsets.all(AppEspacio.md),
+            constraints: const BoxConstraints(
+                minWidth: 44, minHeight: 44),
+            color: Colors.grey,
+            icon: Icon(accionIcono),
+            onPressed: onAccion,
+          ),
+      ],
+    );
+  }
+
+  Widget _filaPanel(BuildContext context) {
+    return Row(
+      children: [
+        if (aviso) ...[
+          const Icon(Icons.warning_amber_rounded,
+              size: 15, color: AppColores.naranja),
+          const SizedBox(width: 8),
+        ],
+        Expanded(
+          child: Text(
+            titulo,
+            style: AppTexto.etiqueta.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.6,
+              color: aviso
+                  ? AppColores.naranja
+                  : AppColores.textoSecundario(context),
+            ),
+          ),
+        ),
+        if (derecha != null)
+          Text(derecha!,
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.textoSecundario(context))),
+      ],
     );
   }
 }
@@ -2295,6 +2452,81 @@ class AvatarCliente extends StatelessWidget {
   }
 }
 
+/// Avatar que resuelve SOLO la miniatura del cliente
+/// desde la caché de fotos (1.30 D6, UI130-28): el mismo
+/// patrón de la fila de Buscar — primero la caché; si hay
+/// referencia sin caché, la descarga corre en segundo
+/// plano y la miniatura aparece cuando aterriza. Sin
+/// referencia, sin caché o con la descarga en curso se
+/// pintan las iniciales de [AvatarCliente]: quien lo usa
+/// nunca espera red para pintarse (offline-first).
+class AvatarClienteConFoto extends StatefulWidget {
+  final String nombre;
+  final String? fotoStorage;
+  final TamanoAvatar tamano;
+
+  const AvatarClienteConFoto({
+    super.key,
+    required this.nombre,
+    required this.fotoStorage,
+    this.tamano = TamanoAvatar.m,
+  });
+
+  @override
+  State<AvatarClienteConFoto> createState() =>
+      _AvatarClienteConFotoState();
+}
+
+class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
+  File? _foto;
+  String? _resueltoPara;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolverFoto();
+  }
+
+  @override
+  void didUpdateWidget(AvatarClienteConFoto old) {
+    super.didUpdateWidget(old);
+    // Como la fila: re-resolver siempre — si la foto se
+    // descargó en la ficha, la miniatura aparece al
+    // volver sin recrear la pantalla.
+    _resolverFoto();
+  }
+
+  Future<void> _resolverFoto() async {
+    final sp = widget.fotoStorage;
+    // Si ESTA foto ya está resuelta y mostrada, la
+    // re-comprobación por reconstrucción no aporta nada.
+    if (sp == _resueltoPara && _foto != null) return;
+    if (sp != _resueltoPara && _foto != null && mounted) {
+      setState(() => _foto = null);
+    }
+    _resueltoPara = sp;
+    if (sp == null || sp.isEmpty) return;
+    final enCache = await FotoCache.instance.enCache(sp);
+    if (!mounted || _resueltoPara != sp) return;
+    if (enCache != null) {
+      setState(() => _foto = enCache);
+      return;
+    }
+    final descargada = await FotoCache.instance.obtener(sp);
+    if (!mounted || _resueltoPara != sp) return;
+    if (descargada != null) setState(() => _foto = descargada);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AvatarCliente(
+      nombre: widget.nombre,
+      foto: _foto,
+      tamano: widget.tamano,
+    );
+  }
+}
+
 /// Monto con animación funcional breve (V14): cuando el valor
 /// cambia con el widget ya montado (una recarga, un pull-to-refresh),
 /// la cifra cuenta hacia el nuevo valor en 300 ms, sin rebotes. En
@@ -2526,6 +2758,14 @@ class FilaLibro extends StatelessWidget {
   final TextStyle? estiloConcepto;
   final TextStyle? estiloMonto;
 
+  /// 1.30 (Oleada D6, UI130-32): monto animado opcional
+  /// — si llegan los dos, la cifra cuenta hasta su valor
+  /// con MontoAnimado (mismo formato final y mismo
+  /// estilo); el [monto] en texto sigue siendo el
+  /// contrato del resto de filas.
+  final double? valorAnimado;
+  final String Function(double)? formatoAnimado;
+
   const FilaLibro({
     super.key,
     this.icono,
@@ -2537,6 +2777,8 @@ class FilaLibro extends StatelessWidget {
     this.metodo,
     this.estiloConcepto,
     this.estiloMonto,
+    this.valorAnimado,
+    this.formatoAnimado,
   });
 
   @override
@@ -2589,7 +2831,13 @@ class FilaLibro extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Text(monto, style: estiloMontoFinal),
+          if (valorAnimado != null && formatoAnimado != null)
+            MontoAnimado(
+                valor: valorAnimado!,
+                formato: formatoAnimado!,
+                style: estiloMontoFinal)
+          else
+            Text(monto, style: estiloMontoFinal),
         ],
       ),
     );

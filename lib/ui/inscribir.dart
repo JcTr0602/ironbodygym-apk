@@ -745,17 +745,27 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       final ctx = pasos[i].clave.currentContext;
                       if (ctx != null) {
                         Scrollable.ensureVisible(ctx,
-                            duration:
-                                const Duration(milliseconds: 350),
-                            curve: Curves.easeOut,
+                            duration: AppMovimiento.larga,
+                            curve: AppMovimiento.curvaSuave,
                             alignment: 0.05);
                       }
                     },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.xs,
-                          vertical: AppEspacio.xs),
-                      child: Row(
+                    // 1.30 (Oleada D6, UI130-22): el paso
+                    // se anuncia como botón y su objetivo
+                    // táctil mide al menos 48 dp de alto
+                    // (antes ~30: círculo de 22 + 4 y 4).
+                    child: Semantics(
+                      button: true,
+                      label: 'Ir al paso ${pasos[i].etiqueta}',
+                      child: ConstrainedBox(
+                        constraints:
+                            const BoxConstraints(minHeight: 48),
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppEspacio.xs,
+                                vertical: AppEspacio.xs),
+                            child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           CircleAvatar(
@@ -786,9 +796,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                   fontWeight: i == activo
                                       ? FontWeight.w800
                                       : null)),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
+                  ),
                   ),
                 ],
               ],

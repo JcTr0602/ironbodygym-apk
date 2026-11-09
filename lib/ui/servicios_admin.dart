@@ -18,6 +18,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'iconos_propios.dart';
+import 'skeleton.dart';
 
 /// v1.8.0: Administración de Servicios por dosis (SOLO DUEÑO):
 /// precios y comisión, stock común de agua (CPP), pomos y botes.
@@ -648,7 +649,10 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando servicios…')
+          // 1.30 (Oleada D6, UI130-22): la carga de una
+          // pantalla de ajustes enseña SU esqueleto
+          // (grupos con filas), no el rótulo genérico.
+          ? const SkeletonAjustes(grupos: 4)
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [

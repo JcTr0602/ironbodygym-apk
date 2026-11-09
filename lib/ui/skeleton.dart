@@ -640,3 +640,89 @@ class SkeletonPremiosDetalle extends StatelessWidget {
     );
   }
 }
+
+/// Esqueleto genérico de AJUSTES (1.30 D6, UI130-22):
+/// grupos de filas con su interruptor — la forma de las
+/// pantallas de configuración y administración (Servicios
+/// Admin lo adopta al cerrar D6). Variante genérica: no
+/// espeja una pantalla concreta, espeja el PATRÓN.
+class SkeletonAjustes extends StatelessWidget {
+  final int grupos;
+  const SkeletonAjustes({super.key, this.grupos = 2});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: [
+        for (var g = 0; g < grupos; g++) ...[
+          if (g > 0) const SizedBox(height: AppEspacio.lg),
+          const SkeletonLinea(ancho: 130, alto: 14),
+          const SizedBox(height: AppEspacio.sm),
+          const Tarjeta(
+            child: Column(
+              children: [
+                _FilaAjusteEsqueleto(),
+                SizedBox(height: AppEspacio.md),
+                _FilaAjusteEsqueleto(),
+                SizedBox(height: AppEspacio.md),
+                _FilaAjusteEsqueleto(),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Una fila de ajuste del esqueleto: línea + pastilla de
+/// interruptor a la derecha.
+class _FilaAjusteEsqueleto extends StatelessWidget {
+  const _FilaAjusteEsqueleto();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      children: [
+        Expanded(child: SkeletonLinea(ancho: 170)),
+        SizedBox(width: AppEspacio.md),
+        SkeletonLinea(ancho: 46, alto: 26),
+      ],
+    );
+  }
+}
+
+/// Esqueleto genérico de FICHA (1.30 D6, UI130-22):
+/// cabecera con el avatar grande y el nombre, y las
+/// tarjetas de sección debajo — la forma de la ficha del
+/// cliente en su primera carga.
+class SkeletonFicha extends StatelessWidget {
+  const SkeletonFicha({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: const [
+        Tarjeta(
+          child: Column(
+            children: [
+              // La línea de 96×96 con radio alto/2 ES el
+              // círculo del avatar.
+              SkeletonLinea(ancho: 96, alto: 96),
+              SizedBox(height: AppEspacio.md),
+              SkeletonLinea(ancho: 180, alto: 20),
+              SizedBox(height: AppEspacio.sm),
+              SkeletonLinea(ancho: 120),
+            ],
+          ),
+        ),
+        SizedBox(height: AppEspacio.md),
+        SkeletonTarjeta(),
+        SizedBox(height: AppEspacio.md),
+        SkeletonTarjeta(),
+      ],
+    );
+  }
+}

@@ -538,7 +538,7 @@ class _SyncBannerState extends State<SyncBanner>
                     TweenAnimationBuilder<double>(
                       tween: Tween<double>(
                           begin: 0, end: s.progreso ?? 0),
-                      duration: const Duration(milliseconds: 400),
+                      duration: AppMovimiento.larga,
                       builder: (c, v, _) => ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(

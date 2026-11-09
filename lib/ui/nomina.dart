@@ -457,6 +457,11 @@ class _NominaScreenState extends State<NominaScreen> {
             FilaLibro(
               concepto: 'Total base',
               monto: '${fmtMonto(base)} CUP',
+              // 1.30 (Oleada D6, UI130-32): el total del
+              // resumen cuenta hasta su cifra (mismo
+              // formato final que el texto).
+              valorAnimado: base,
+              formatoAnimado: (v) => '${fmtMonto(v)} CUP',
               estiloConcepto: AppTexto.subtitulo,
               estiloMonto: AppTexto.tituloPagina,
             ),

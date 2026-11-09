@@ -185,6 +185,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     }
     expect(find.text('Hoy'), findsOneWidget);
+    // 1.30 (Oleada D6): ensureVisible antes de tocar —
+    // el bucle de arrastres paraba cuando «Hoy» existía
+    // en el árbol aunque siguiera fuera de pantalla
+    // (cacheExtent), y el ritmo nuevo de encabezados
+    // (UI130-10) desplazó el aterrizaje: el tap caía en
+    // el vacío. El contrato (offset por nivel) es el
+    // mismo; solo se toca cuando se VE de verdad.
+    await tester.ensureVisible(find.text('Hoy'));
+    await tester.pump(const Duration(milliseconds: 300));
     final offsetAlSalir = _offsetHome(tester);
     expect(offsetAlSalir, greaterThan(40));
     await tester.tap(find.text('Hoy'));

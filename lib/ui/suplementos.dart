@@ -688,6 +688,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           _filtroCategoria != null ||
           _filtroStock != 'todos';
       return EstadoVacio(
+        ilustracion: 'assets/vacio_pomo.jpg',
         icono: Icons.medication_rounded,
         titulo: 'Sin suplementos',
         subtitulo: hayFiltros
@@ -780,7 +781,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                     ),
                   )
                 : LayoutBuilder(
-                    builder: (ctx, cons) => GridView.builder(
+                    // 1.30 (Oleada D6, UI130-32): la rejilla
+                    // del catálogo adopta la cascada de la
+                    // fundación, como el Home.
+                    builder: (ctx, cons) => EntradaCascada(
+                        child: GridView.builder(
                       padding: const EdgeInsets.all(AppEspacio.md),
                       gridDelegate:
                           SliverGridDelegateWithFixedCrossAxisCount(
@@ -795,7 +800,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         mainAxisSpacing: 12,
                       ),
                       itemCount: items.length,
-                      itemBuilder: (ctx, i) => _TarjetaSuplemento(
+                      itemBuilder: (ctx, i) => ItemCascada(
+                          indice: i,
+                          child: _TarjetaSuplemento(
                         key: ValueKey(items[i]['id']),
                         sup: items[i],
                         onVender: () => _irVender(items[i]),
@@ -803,7 +810,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                         tasaUsd: _tasaUsd,
                         categoriaNombre: _nombreCategoria(
                             items[i]['categoria_id'] as int?),
+                        ),
                       ),
+                    ),
                     ),
                   ),
           ),
@@ -823,8 +832,8 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
-          padding: EdgeInsets.fromLTRB(
-              AppEspacio.md, AppEspacio.sm, AppEspacio.md, 4),
+          padding:
+              EdgeInsets.symmetric(horizontal: AppEspacio.md),
           child:
               EncabezadoSeccion(titulo: 'Más vendidos'),
         ),
@@ -2002,7 +2011,9 @@ class _EditarSuplementoScreenState
             padding: EdgeInsets.symmetric(horizontal: AppEspacio.lg),
             child: SyncBanner(compact: true, alcance: 'suplementos'),
           ),
-          const EncabezadoSeccion(titulo: 'Identificación'),
+          const EncabezadoSeccion(
+              titulo: 'Identificación',
+              variante: VarianteEncabezado.pagina),
           Padding(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppEspacio.lg),
@@ -2115,7 +2126,8 @@ class _EditarSuplementoScreenState
             ),
           ),
           const EncabezadoSeccion(
-              titulo: 'Presentación del envase'),
+              titulo: 'Presentación del envase',
+              variante: VarianteEncabezado.pagina),
           Padding(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppEspacio.lg),
@@ -2178,7 +2190,9 @@ class _EditarSuplementoScreenState
               ],
             ),
           ),
-          const EncabezadoSeccion(titulo: 'Precio'),
+          const EncabezadoSeccion(
+              titulo: 'Precio',
+              variante: VarianteEncabezado.pagina),
           Padding(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppEspacio.lg),
@@ -2235,7 +2249,9 @@ class _EditarSuplementoScreenState
               ],
             ),
           ),
-          const EncabezadoSeccion(titulo: 'Inventario'),
+          const EncabezadoSeccion(
+              titulo: 'Inventario',
+              variante: VarianteEncabezado.pagina),
           Padding(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppEspacio.lg),

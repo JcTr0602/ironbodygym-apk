@@ -1809,21 +1809,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ),
                   const SizedBox(height: AppEspacio.sm),
                   if (_ventasHoy.isEmpty)
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(AppEspacio.lg),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(AppRadio.md),
-                          color: AppColores.textoSecundario(context)
-                              .withValues(alpha: 0.08),
-                        ),
-                        child: const EstadoVacio(
-                          icono: Icons.receipt_long_rounded,
-                          titulo: 'Sin ventas registradas hoy.',
-                          subtitulo:
-                              'Las ventas de hoy aparecen aquí.',
-                        ),
-                      ),
+                    // 1.30 (Oleada D6, UI130-22): fuera el
+                    // doble fondo (contenedor tintado con el
+                    // vacío dentro): el vacío va sin marco y
+                    // con la caja registradora de la lámina.
+                    const EstadoVacio(
+                      sinMarco: true,
+                      ilustracion: 'assets/vacio_caja.jpg',
+                      icono: Icons.receipt_long_rounded,
+                      titulo: 'Sin ventas registradas hoy.',
+                      subtitulo:
+                          'Las ventas de hoy aparecen aquí.',
                     )
                   else
                     for (final v in _ventasHoy) _filaVenta(v),
@@ -1851,8 +1847,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     return TextButton.icon(
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm),
-        minimumSize: const Size(0, 40),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        // 1.30 (Oleada D6, UI130-22): objetivo táctil de
+        // 48 dp, sin shrinkWrap (antes 40 encogido).
+        minimumSize: const Size(0, 48),
       ),
       onPressed: _salida,
       icon: const Icon(Icons.outbox_rounded, size: 18),
@@ -2760,7 +2757,6 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 fila('Comisión', '${fmtMonto(com)} CUP'),
               if (motivo.isNotEmpty) fila('Motivo', motivo),
               if (original != null) ...[
-                const SizedBox(height: AppEspacio.md),
                 const EncabezadoSeccion(titulo: 'Venta original'),
                 fila('Tipo', switch ('${original['tipo']}') {
                   'dosis_sin_agua' => 'Dosis sin agua',

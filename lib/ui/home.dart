@@ -1504,7 +1504,9 @@ class _HomeScreenState extends State<HomeScreen>
     // grupo «Cobrar y clientes» es de gestión y auditoría.
     return [
       const EncabezadoSeccion(
-          key: ValueKey('mod-encabezado'), titulo: 'MÓDULOS'),
+          key: ValueKey('mod-encabezado'),
+          titulo: 'MÓDULOS',
+          variante: VarianteEncabezado.pagina),
       KeyedSubtree(
         key: const ValueKey('mod-grid'),
         child: Padding(
@@ -1515,7 +1517,9 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
       const EncabezadoSeccion(
-          key: ValueKey('mas-encabezado'), titulo: 'MÁS'),
+          key: ValueKey('mas-encabezado'),
+          titulo: 'MÁS',
+          variante: VarianteEncabezado.pagina),
       KeyedSubtree(
         key: const ValueKey('mas-grid'),
         child: Padding(
@@ -3798,7 +3802,7 @@ class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
                 // quedaba a medias, sin _ctrl.reverse()).
                 onTap: _toggle,
                 child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 200),
+                  duration: AppMovimiento.media,
                   opacity: _abierto ? 1.0 : 0.0,
                   child: Container(
                     color: Colors.black.withValues(alpha: 0.55),

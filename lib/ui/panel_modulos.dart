@@ -80,7 +80,18 @@ List<DatoModuloPanel> modulosPanel({
   final sinReporte = n(ModuloPanel.equipo);
   final reservas = n(ModuloPanel.suplementos);
   final preciosSinFijar = n(ModuloPanel.configuracion);
-  final incidencias = n(ModuloPanel.control);
+  // GEN-06: las incidencias se cuentan por DESTINO,
+  // no por módulo — la lista de Control también trae
+  // el ítem de la Cola desde esta oleada.
+  final incidencias = nDestino(
+      ModuloPanel.control, DestinoPorRevisar.incidenciasSync);
+  // 1.30 (Oleada D6, GEN-06): el distintivo de Control
+  // suma incidencias + cambios por subir — y «cambios»
+  // es el CONTEO de operaciones (el parámetro, que es
+  // el mismo número con el que la foto armó su ítem de
+  // la Cola), no la presencia del ítem: con 37 cambios
+  // el distintivo enseña 37 + incidencias.
+  final badgeControl = incidencias + pendientesSubir;
   final badgeClientes = n(ModuloPanel.clientes);
   return [
     DatoModuloPanel(
@@ -152,7 +163,7 @@ List<DatoModuloPanel> modulosPanel({
               ? _conteo(pendientesSubir, 'cambio por subir',
                   'cambios por subir')
               : 'Sistema al día',
-      badge: incidencias > 0 ? incidencias : null,
+      badge: badgeControl > 0 ? badgeControl : null,
     ),
   ];
 }

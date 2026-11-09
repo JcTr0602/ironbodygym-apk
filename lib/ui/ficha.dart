@@ -49,6 +49,7 @@ import 'fotos_progreso_nube_ficha.dart';
 import 'foto_elegir.dart';
 import 'medidas_cliente.dart';
 import 'pestana_progreso.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
@@ -2560,8 +2561,10 @@ class _FichaScreenState extends State<FichaScreen> {
           const SyncBanner(),
           Expanded(
             child: c == null && !_cargaLocalTerminada
-                ? const Center(
-                    child: CircularProgressIndicator())
+                // 1.30 (Oleada D6, UI130-22): la primera
+                // carga de la ficha enseña su esqueleto
+                // (cabecera + tarjetas), no un spinner.
+                ? const SkeletonFicha()
                 : c == null
                     ? _clienteNoEncontrado()
                     : Stack(
@@ -2699,12 +2702,12 @@ class _FichaScreenState extends State<FichaScreen> {
       ignoring: !mostrar,
       child: AnimatedSlide(
         offset: mostrar ? Offset.zero : const Offset(0, -1),
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
+        duration: AppMovimiento.media,
+        curve: AppMovimiento.curvaSuave,
         child: AnimatedOpacity(
           opacity: mostrar ? 1 : 0,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
+          duration: AppMovimiento.media,
+          curve: AppMovimiento.curvaSuave,
           child: Material(
             elevation: 6,
             color: Theme.of(context).cardColor,

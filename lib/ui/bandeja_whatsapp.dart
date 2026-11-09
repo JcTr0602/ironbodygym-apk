@@ -652,29 +652,16 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                         onAccion: _cargar,
                       )
                     : _avisos.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(AppEspacio.xxl),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.mark_chat_read_rounded,
-                                  size: 56, color: AppColores.exito),
-                              const SizedBox(height: 12),
-                              const Text('Sin avisos por hoy.',
-                                  style: AppTexto.subtitulo),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Cuando haya cumpleaños, vencimientos o '
-                                'cobros del día, aparecerán aquí.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    color: AppColores.textoSecundario(
-                                        context)),
-                              ),
-                            ],
-                          ),
-                        ),
+                    // 1.30 (Oleada D6, UI130-22): el vacío
+                    // artesanal pasa al EstadoVacio de la
+                    // casa, con el sobre de la lámina.
+                    ? const EstadoVacio(
+                        ilustracion: 'assets/vacio_sobre.jpg',
+                        icono: Icons.mark_chat_read_rounded,
+                        titulo: 'Sin avisos por hoy.',
+                        subtitulo:
+                            'Cuando haya cumpleaños, vencimientos '
+                            'o cobros del día, aparecerán aquí.',
                       )
                     : _avisosFiltrados.isEmpty
                     ? const Center(
@@ -831,6 +818,15 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                   ),
                 ),
               ),
+              // 1.30 (Oleada D6, UI130-28): la bandeja era
+              // la última lista sin foto — avatar con la
+              // foto del aviso (o iniciales, como en
+              // Buscar y Vencimientos).
+              AvatarClienteConFoto(
+                nombre: '${a['nombre'] ?? ''}',
+                fotoStorage: a['foto_storage'] as String?,
+              ),
+              const SizedBox(width: AppEspacio.sm),
               // v1.3.8: tocar la tarjeta abre la ficha del cliente.
               Expanded(
                 child: InkWell(

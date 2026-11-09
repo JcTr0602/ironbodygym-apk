@@ -3004,6 +3004,9 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'cliente_id': cid,
       'nombre': nombreDe(c),
       'telefono': telDe(c),
+      // 1.30 (Oleada D6, UI130-28): la foto viaja con el
+      // aviso para el avatar de la bandeja.
+      'foto_storage': c['foto_storage'],
       // v1.13.0 (Bloque 4): días de atraso numéricos para los
       // subgrupos de la bandeja (1–7 / 8–30 días).
       'dias_atraso': dias,
@@ -3029,6 +3032,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'cliente_id': cidCumple,
       'nombre': nombreDe(c),
       'telefono': telDe(c),
+      'foto_storage': c['foto_storage'],
       'detalle': regalo != null
           ? 'Cumple ${c['_cumple']} años · Mes regalado 🎁'
           : 'Cumple ${c['_cumple']} años',
@@ -3055,6 +3059,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'cliente_id': cid,
       'nombre': nombreDe(c),
       'telefono': telDe(c),
+      'foto_storage': c['foto_storage'],
       'detalle': 'Su mensualidad vence hoy',
       'mensaje': mensajeWaVenceHoy(nombreDe(c)),
     });
@@ -3073,6 +3078,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'cliente_id': cid,
       'nombre': nombreDe(c),
       'telefono': telDe(c),
+      'foto_storage': c['foto_storage'],
       'detalle': 'Vence el $fechaCorta',
       'mensaje': mensajeWaPorVencer(nombreDe(c), fechaCorta),
     });
@@ -3123,6 +3129,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
       'cliente_id': cid,
       'nombre': nombre,
       'telefono': c != null ? telDe(c) : '',
+      'foto_storage': c?['foto_storage'],
       'detalle': 'Recibo: ${fmtMonto(monto)} CUP',
       'mensaje': '*Iron Body Gym* — Recibo\n'
           'Cliente: $nombre\n'
@@ -3174,6 +3181,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
         'cliente_id': cid,
         'nombre': nombre,
         'telefono': c != null ? telDe(c) : '',
+        'foto_storage': c?['foto_storage'],
         'detalle': 'Recibo: ${fmtMonto(monto)} CUP',
         'mensaje': '*Iron Body Gym* — Recibo\n'
             'Cliente: $nombre\n'

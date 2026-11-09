@@ -689,7 +689,6 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
         const EncabezadoSeccion(titulo: 'Progreso del ciclo'),
         if (d.logroBarraId == null)
           const Text(
@@ -732,7 +731,6 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
             style: AppTexto.secundario,
           ),
         ],
-        const SizedBox(height: 16),
         const EncabezadoSeccion(titulo: 'Historial de vales'),
         if (d.vales.isEmpty)
           const Text('Sin vales todavía.',
@@ -757,7 +755,6 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
               ),
             ),
         ],
-        const SizedBox(height: 8),
         const EncabezadoSeccion(titulo: 'Medallas (sello)'),
         if (d.sello.isEmpty)
           const Text(
@@ -789,7 +786,6 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           ),
         ],
         if (d.marcas.isNotEmpty) ...[
-          const SizedBox(height: 16),
           const EncabezadoSeccion(titulo: 'Reinicios de ciclo'),
           for (final m in d.marcas)
             ListTile(

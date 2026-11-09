@@ -57,6 +57,12 @@ enum DestinoPorRevisar {
   /// Panel: el mismo conteo espejo
   /// (`ConciliacionService.conteoPorComprobar()`).
   conciliaciones,
+
+  /// 1.30 (Oleada D6, GEN-06): los cambios locales por
+  /// subir del módulo Control — el número que el Panel
+  /// solo enseñaba en la línea de estado pasa a ser un
+  /// ítem con destino (la Cola), como manda GEN-06.
+  colaSincronizacion,
 }
 
 /// Un pendiente concreto y accionable de un módulo:
@@ -122,6 +128,13 @@ class FotoPendientesModulos {
   /// Configuración: claves de precio C6 sin fijar.
   final List<String> preciosSinFijar;
 
+  /// Control: cambios locales por subir (la cola de
+  /// operaciones pendientes). Lo alimenta quien carga
+  /// desde el mismo conteo que ya enseñaba la línea de
+  /// estado de Control (`countPendingOps`): ninguna
+  /// lectura nueva.
+  final int cambiosPorSubir;
+
   /// Control: filas pendientes del espejo
   /// incidencias_sync, con el cliente ya resuelto por
   /// quien carga (payload o padrón) cuando se pudo.
@@ -143,6 +156,7 @@ class FotoPendientesModulos {
     this.sinReporteAyer = const [],
     this.reservas = const [],
     this.preciosSinFijar = const [],
+    this.cambiosPorSubir = 0,
     this.incidencias = const [],
   });
 }
@@ -273,6 +287,21 @@ Map<ModuloPanel, List<ItemPorRevisar>> pendientesPorModulo(
   ];
 
   final control = <ItemPorRevisar>[
+    // 1.30 (Oleada D6, GEN-06): UN ítem con el conteo
+    // (la Cola es la lista; aquí basta la señal, como
+    // las transferencias de GEN-03 en Caja).
+    if (foto.cambiosPorSubir > 0)
+      ItemPorRevisar(
+        modulo: ModuloPanel.control,
+        destino: DestinoPorRevisar.colaSincronizacion,
+        icono: Icons.cloud_upload_rounded,
+        tinte: AppColores.moduloControl,
+        titulo: 'Cambios por subir',
+        detalle: foto.cambiosPorSubir == 1
+            ? '1 cambio esperando conexión'
+            : '${foto.cambiosPorSubir} cambios '
+                'esperando conexión',
+      ),
     for (final inc in foto.incidencias)
       ItemPorRevisar(
         modulo: ModuloPanel.control,

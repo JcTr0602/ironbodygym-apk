@@ -207,8 +207,8 @@ class _ConfirmacionOperacionScreenState
                 // 350 ms; confirmación visual inmediata.
                 TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0.5, end: 1.0),
-                  duration: const Duration(milliseconds: 350),
-                  curve: Curves.easeOutBack,
+                  duration: AppMovimiento.larga,
+                  curve: AppMovimiento.curvaPop,
                   builder: (context, escala, hijo) =>
                       Transform.scale(scale: escala, child: hijo),
                   child: Container(

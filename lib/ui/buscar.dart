@@ -382,6 +382,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       );
     }
     return EstadoVacio(
+      ilustracion: 'assets/vacio_lupa.jpg',
       icono: Icons.search_off_rounded,
       titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
       subtitulo: _busco
@@ -512,6 +513,20 @@ class _BuscarScreenState extends State<BuscarScreen> {
     super.dispose();
   }
 
+  /// Frescura de la lista para la franja de resumen:
+  /// las mismas palabras del SyncBanner («hace X min»).
+  String get _frescura {
+    final u = _ultimoPull;
+    if (u == null) return 'Actualizado nunca';
+    final d = ahoraHabana().difference(u);
+    if (d.inMinutes < 1) return 'Actualizado ahora mismo';
+    if (d.inMinutes < 60) {
+      return 'Actualizado hace ${d.inMinutes} min';
+    }
+    if (d.inHours < 24) return 'Actualizado hace ${d.inHours} h';
+    return 'Actualizado hace ${d.inDays} d';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -557,123 +572,98 @@ class _BuscarScreenState extends State<BuscarScreen> {
                   onPressed: () => setState(
                       () => _mostrarAvanzada = !_mostrarAvanzada),
                 ),
+                // 1.30 (Oleada D6, UI130-20): la fila de
+                // iconos pasa de 4 a 2 — embudo de avanzada
+                // y UN menú «más» con ordenar (las 4
+                // opciones, con su marca), la vista
+                // compacta/normal y seleccionar varios.
+                // Todo se conserva; cambia dónde vive.
                 PopupMenuButton<String>(
-                  tooltip: 'Ordenar la lista',
-                  icon: const Icon(Icons.sort_rounded),
-                  initialValue: _orden,
-                  onSelected: (v) {
-                    setState(() => _orden = v);
-                    LocalDb.instance.setMeta('buscar_orden', v);
-                    _buscar();
+                  tooltip: 'Más acciones',
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onSelected: (sel) {
+                    if (sel.startsWith('orden:')) {
+                      final v = sel.substring(6);
+                      setState(() => _orden = v);
+                      LocalDb.instance.setMeta('buscar_orden', v);
+                      _buscar();
+                    } else if (sel == 'vista') {
+                      setState(() => _compacta = !_compacta);
+                      LocalDb.instance.setMeta(
+                        'buscar_compacta', _compacta ? '1' : '0');
+                    } else if (sel == 'seleccionar') {
+                      setState(() => _modoSeleccion = true);
+                    }
                   },
-                  itemBuilder: (ctx) => const [
+                  itemBuilder: (ctx) => [
+                    CheckedPopupMenuItem(
+                        value: 'orden:nombre',
+                        checked: _orden == 'nombre',
+                        child: const Text('Por nombre (A–Z)')),
+                    CheckedPopupMenuItem(
+                        value: 'orden:venceAntes',
+                        checked: _orden == 'venceAntes',
+                        child:
+                            const Text('Vence antes primero')),
+                    CheckedPopupMenuItem(
+                        value: 'orden:vencidosPrimero',
+                        checked: _orden == 'vencidosPrimero',
+                        child: const Text('Vencidos primero')),
+                    CheckedPopupMenuItem(
+                        value: 'orden:recientes',
+                        checked: _orden == 'recientes',
+                        child: const Text(
+                            'Más recientes primero')),
+                    const PopupMenuDivider(),
                     PopupMenuItem(
-                        value: 'nombre',
-                        child: Text('Por nombre (A–Z)')),
-                    PopupMenuItem(
-                        value: 'venceAntes',
-                        child: Text('Vence antes primero')),
-                    PopupMenuItem(
-                        value: 'vencidosPrimero',
-                        child: Text('Vencidos primero')),
-                    PopupMenuItem(
-                        value: 'recientes',
-                        child: Text('Más recientes primero')),
+                        value: 'vista',
+                        child: Text(_compacta
+                            ? 'Vista normal'
+                            : 'Vista compacta')),
+                    if (!_modoSeleccion)
+                      const PopupMenuItem(
+                          value: 'seleccionar',
+                          child: Text(
+                              'Seleccionar varios para avisar')),
                   ],
                 ),
-                IconButton(
-                  tooltip: _compacta
-                      ? 'Vista normal'
-                      : 'Vista compacta',
-                  icon: Icon(_compacta
-                      ? Icons.density_medium_rounded
-                      : Icons.density_small_rounded),
-                  onPressed: () {
-                    setState(() => _compacta = !_compacta);
-                    LocalDb.instance.setMeta(
-                        'buscar_compacta', _compacta ? '1' : '0');
-                  },
-                ),
-                if (!_modoSeleccion)
-                  IconButton(
-                    tooltip: 'Seleccionar varios para avisar',
-                    icon: const Icon(Icons.checklist_rounded),
-                    onPressed: () =>
-                        setState(() => _modoSeleccion = true),
-                  ),
               ],
             ),
           ),
-          // 1.25 T51: cabecera protagonista — una sola
-          // franja con el degradado de la casa, el conteo
-          // grande de clientes y los estados como pastillas.
-          // La línea «en esta vista» vive dentro de la
-          // franja; la frescura accionable sigue siendo el
-          // cartel de 24 h de abajo (no se dice tres veces).
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: AppColores.gradienteCarbon,
-                borderRadius: BorderRadius.circular(AppRadio.lg),
-              ),
-              padding: const EdgeInsets.fromLTRB(AppEspacio.md,
-                  AppEspacio.md, AppEspacio.md, AppEspacio.sm),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('${_conteos['todos'] ?? 0}',
-                          style: AppTexto.displayPequeno
-                              .copyWith(color: Colors.white)),
-                      const SizedBox(width: 6),
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 3),
-                        child: Text('clientes',
-                            style: TextStyle(color: Colors.white70)),
-                      ),
-                      const Spacer(),
-                      Text('${_res.length} en esta vista',
-                          style: AppTexto.metadato
-                              .copyWith(color: Colors.white70)),
-                    ],
-                  ),
-                  const SizedBox(height: AppEspacio.sm),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _chipFiltro('todos',
-                            'Todos (${_conteos['todos'] ?? 0})',
-                            sobreOscuro: true),
-                        const SizedBox(width: 8),
-                        _chipFiltro('aldia',
-                            'Al día (${_conteos['aldia'] ?? 0})',
-                            punto: AppColores.exito,
-                            sobreOscuro: true),
-                        const SizedBox(width: 8),
-                        _chipFiltro('porvencer',
-                            'Por vencer (${_conteos['porvencer'] ?? 0})',
-                            punto: AppColores.alerta,
-                            sobreOscuro: true),
-                        const SizedBox(width: 8),
-                        _chipFiltro('vencidos',
-                            'Vencidos (${_conteos['vencidos'] ?? 0})',
-                            punto: AppColores.error,
-                            sobreOscuro: true),
-                        const SizedBox(width: 8),
-                        _chipFiltro('sinfoto',
-                            'Sin foto (${_conteos['sinfoto'] ?? 0})',
-                            sobreOscuro: true),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+          // 1.30 (Oleada D6, UI130-20): fuera el héroe
+          // carbón de la 1.25 T51 — en su lugar, la franja
+          // de resumen de UNA línea (total + frescura) y
+          // los chips de filtro en su propia fila, sin
+          // contenedor: los conteos por estado viven SOLO
+          // en los chips.
+          FranjaResumenLista(
+            principal: '${_conteos['todos'] ?? 0} clientes',
+            secundario: _frescura,
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.xs, AppEspacio.lg, AppEspacio.sm),
+            child: Row(
+              children: [
+                _chipFiltro('todos',
+                    'Todos (${_conteos['todos'] ?? 0})'),
+                const SizedBox(width: 8),
+                _chipFiltro('aldia',
+                    'Al día (${_conteos['aldia'] ?? 0})',
+                    punto: AppColores.exito),
+                const SizedBox(width: 8),
+                _chipFiltro('porvencer',
+                    'Por vencer (${_conteos['porvencer'] ?? 0})',
+                    punto: AppColores.alerta),
+                const SizedBox(width: 8),
+                _chipFiltro('vencidos',
+                    'Vencidos (${_conteos['vencidos'] ?? 0})',
+                    punto: AppColores.error),
+                const SizedBox(width: 8),
+                _chipFiltro('sinfoto',
+                    'Sin foto (${_conteos['sinfoto'] ?? 0})'),
+              ],
             ),
           ),
           // Bloque 1: cartel de lista vieja a las 24 h sin bajar

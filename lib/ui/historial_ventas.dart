@@ -916,7 +916,6 @@ class _HistorialVentasScreenState
                   'El perfil completo aparecerá al sincronizar.',
                   style: AppTexto.secundario,
                 ),
-              const SizedBox(height: AppEspacio.md),
               const EncabezadoSeccion(titulo: 'Venta'),
               fila('Producto',
                   '${prod?['nombre'] ?? 'Producto $prodId'}'),

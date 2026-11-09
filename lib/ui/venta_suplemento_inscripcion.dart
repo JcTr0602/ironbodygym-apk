@@ -435,7 +435,6 @@ class _VentaSuplementoInscripcionScreenState
               ],
             ),
           ),
-          const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
               titulo: 'Datos del cliente'),
           CampoTexto(
@@ -497,7 +496,6 @@ class _VentaSuplementoInscripcionScreenState
           // v1.5.0 (Bloque G): aviso de fecha imposible (no bloquea).
           if (carnetFechaInvalida(_carnet.text))
             const AvisoFechaCarnet(),
-          const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
               titulo: 'Método de pago'),
           const Text(
@@ -526,7 +524,6 @@ class _VentaSuplementoInscripcionScreenState
               ),
             ],
           ),
-          const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(
               titulo: 'Mensualidad inicial'),
           Tarjeta(

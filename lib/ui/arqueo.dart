@@ -714,8 +714,7 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                   TweenAnimationBuilder<double>(
                                     tween:
                                         Tween(begin: 0.0, end: 1.0),
-                                    duration: const Duration(
-                                        milliseconds: 350),
+                                    duration: AppMovimiento.larga,
                                     builder: (ctx, t, _) => Opacity(
                                       opacity: t,
                                       child: Transform.scale(

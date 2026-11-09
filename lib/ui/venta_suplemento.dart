@@ -808,7 +808,6 @@ class _VentaSuplementoScreenState
               ],
             ),
           ),
-          const SizedBox(height: AppEspacio.md),
           const EncabezadoSeccion(titulo: 'Cantidad y cobro'),
           _stepperCantidad(stock),
           const SizedBox(height: AppEspacio.sm),
@@ -835,7 +834,6 @@ class _VentaSuplementoScreenState
           // v1.3.4 (candado b): motivo del precio distinto. Obligatorio
           // (mín. 5 caracteres) si quien vende NO es el dueño.
           if (_precioDifiere) ...[
-            const SizedBox(height: AppEspacio.sm),
             const EncabezadoSeccion(titulo: 'Nota de precio'),
             CampoTexto(
               controller: _notaPrecio,
@@ -862,7 +860,6 @@ class _VentaSuplementoScreenState
               onChanged: (_) => setState(() {}),
             ),
           ],
-          const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Comprador'),
           _selectorComprador(),
           const SizedBox(height: AppEspacio.xs),
@@ -917,7 +914,6 @@ class _VentaSuplementoScreenState
               ),
           ],
           // v1.2.1: nota opcional de la venta.
-          const SizedBox(height: AppEspacio.sm),
           const EncabezadoSeccion(titulo: 'Nota (opcional)'),
           CampoTexto(
             controller: _nota,

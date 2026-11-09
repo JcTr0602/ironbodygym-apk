@@ -595,6 +595,13 @@ class AppMovimiento {
 
   /// Curva suave para contadores y fundidos cortos.
   static const curvaSuave = Curves.easeOut;
+
+  /// Curva con rebote para celebraciones breves (el sello
+  /// de un cobro, la confirmación de una inscripción).
+  /// Nace en D6 (UI130-32) al tokenizar las dos superficies
+  /// que ya compartían `Curves.easeOutBack` literal: el
+  /// gesto es del sistema, no de cada pantalla.
+  static const curvaPop = Curves.easeOutBack;
 }
 
 /// Sombras sutiles (gama media: permitidas, sin exagerar).

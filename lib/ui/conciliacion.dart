@@ -423,15 +423,24 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                             ),
                           ),
                         if (_porComprobar.isEmpty)
-                          const Tarjeta(
-                            child: Text(
-                                'No hay transferencias esperando '
-                                'comprobación.'),
+                          // 1.30 (Oleada D6, UI130-22): la
+                          // cola por revisar vacía pasa del
+                          // texto plano en tarjeta al
+                          // EstadoVacio sin marco, con el
+                          // calendario de la lámina. (La
+                          // FranjaPorRevisar no pinta nada
+                          // sin ítems, por diseño D-23.)
+                          const EstadoVacio(
+                            sinMarco: true,
+                            ilustracion:
+                                'assets/vacio_calendario.jpg',
+                            icono: Icons.event_available_rounded,
+                            titulo: 'No hay transferencias '
+                                'esperando comprobación.',
                           )
                         else
                           for (final p in _porComprobar) _fila(p),
                         if (_resueltas.isNotEmpty) ...[
-                          const SizedBox(height: AppEspacio.lg),
                           const EncabezadoSeccion(
                               titulo: 'Resueltas recientes'),
                           for (final p in _resueltas) _fila(p),

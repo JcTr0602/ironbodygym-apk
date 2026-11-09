@@ -673,9 +673,13 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
   Widget _listaAccesos(List<AccesoCliente> lista) {
     if (lista.isEmpty) {
-      return const Center(
-        child: Text('Sin resultados con estos filtros.',
-            style: AppTexto.secundario),
+      // 1.30 (Oleada D6, UI130-22): el texto plano pasa
+      // al EstadoVacio de la casa, con el escudo de la
+      // lámina.
+      return const EstadoVacio(
+        ilustracion: 'assets/vacio_escudo.jpg',
+        icono: Icons.shield_rounded,
+        titulo: 'Sin resultados con estos filtros.',
       );
     }
     return ListView.builder(

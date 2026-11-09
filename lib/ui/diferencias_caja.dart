@@ -341,7 +341,6 @@ class _DiferenciasCajaScreenState
                   else
                     for (final e in _abiertas) _fila(e),
                   if (_resueltas.isNotEmpty) ...[
-                    const SizedBox(height: AppEspacio.lg),
                     const EncabezadoSeccion(titulo: 'Resueltas'),
                     for (final e in _resueltas) _fila(e),
                   ],

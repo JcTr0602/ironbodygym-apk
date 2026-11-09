@@ -414,9 +414,7 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                   style: AppTexto.secundario.copyWith(
                       color: AppColores.textoSecundario(context)),
                 ),
-                const SizedBox(height: AppEspacio.lg),
                 const EncabezadoSeccion(titulo: 'Candados activos'),
-                const SizedBox(height: AppEspacio.sm),
                 if (_activos.isEmpty)
                   const EstadoVacio(
                     icono: Icons.lock_open_rounded,
@@ -456,9 +454,7 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                         ],
                       ),
                     ),
-                const SizedBox(height: AppEspacio.xl),
                 const EncabezadoSeccion(titulo: 'Aplicar un candado'),
-                const SizedBox(height: AppEspacio.sm),
                 Tarjeta(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,

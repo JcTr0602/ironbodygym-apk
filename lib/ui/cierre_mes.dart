@@ -10,6 +10,7 @@ import 'cola.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'nomina.dart';
+import 'skeleton.dart';
 import 'pendiente.dart';
 
 /// 1.23 (W2): pantalla del cierre de mes guiado. Una lista de
@@ -150,7 +151,9 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Cierre de mes'),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          // 1.30 (Oleada D6, UI130-22): esqueleto de
+          // lista en vez del spinner pelado.
+          ? const SkeletonLista()
           : e == null
               ? Center(
                   child: Padding(

@@ -1024,6 +1024,10 @@ class _AdminScreenState extends State<AdminScreen> {
     final fechaAyer = DateTime(hoy.year, hoy.month, hoy.day - 1);
     return FotoPendientesModulos(
       conciliacionesPorComprobar: _conciliacionesPorComprobar,
+      // 1.30 (Oleada D6, GEN-06): el MISMO conteo que el
+      // Panel ya carga para la línea de estado de
+      // Control — ninguna lectura nueva.
+      cambiosPorSubir: _pendientesSubir,
       pendientesLiquidar: [
         for (final e in _pend)
           if (((e['total'] as num?)?.toDouble() ?? 0) > 0)
@@ -1120,6 +1124,10 @@ class _AdminScreenState extends State<AdminScreen> {
       // bandeja de Conciliación.
       case DestinoPorRevisar.conciliaciones:
         _ir(const ConciliacionScreen());
+      // 1.30 (Oleada D6, GEN-06): el ítem de cambios por
+      // subir abre la Cola (la misma puerta del módulo).
+      case DestinoPorRevisar.colaSincronizacion:
+        _ir(const ColaScreen());
     }
   }
 
@@ -2070,15 +2078,21 @@ class _AdminScreenState extends State<AdminScreen> {
                       children: [
                         _cabeceraPanel(),
                         _bloqueAtencion(),
-                        _tituloSeccion('ESTACIÓN DIARIA'),
+                        const EncabezadoSeccion(
+                          titulo: 'ESTACIÓN DIARIA',
+                          variante: VarianteEncabezado.panel),
                         _estacionDiaria(),
-                        _tituloSeccion('PULSO DEL MES',
-                            derecha: _textoActualizado()),
+                        EncabezadoSeccion(
+                          titulo: 'PULSO DEL MES',
+                          variante: VarianteEncabezado.panel,
+                          derecha: _textoActualizado()),
                         _resumenMes(),
                         _lineaCuentasCasa(),
                         _lineaNomina(),
                         _miniTendencia7(),
-                        _tituloSeccion('MÓDULOS'),
+                        const EncabezadoSeccion(
+                          titulo: 'MÓDULOS',
+                          variante: VarianteEncabezado.panel),
                         _tarjetasModulos(),
                         // 1.25 T121 (F5-26): fuera la nota
                         // sobre el propio diseño (no ayuda a
@@ -2177,37 +2191,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Widget _tituloSeccion(String titulo,
-      {bool naranja = false, String? derecha}) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
-      child: Row(
-        children: [
-          if (naranja) ...[
-            const Icon(Icons.warning_amber_rounded,
-                size: 15, color: AppColores.naranja),
-            const SizedBox(width: 8),
-          ],
-          Expanded(
-            child: Text(
-              titulo,
-              style: AppTexto.etiqueta.copyWith(
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.6,
-                color: naranja
-                    ? AppColores.naranja
-                    : AppColores.textoSecundario(context),
-              ),
-            ),
-          ),
-          if (derecha != null)
-            Text(derecha,
-                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
-        ],
-      ),
-    );
-  }
-
   /// Bloque 1 · Necesita tu atención: SOLO decisiones del dueño, cada
   /// una con su botón de acción, máx. 5 visibles (consenso del panel
   /// de diseño). Sin pendientes: una línea discreta, no una tarjeta.
@@ -2264,7 +2247,10 @@ class _AdminScreenState extends State<AdminScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _tituloSeccion('NECESITA TU ATENCIÓN', naranja: true),
+        const EncabezadoSeccion(
+          titulo: 'NECESITA TU ATENCIÓN',
+          variante: VarianteEncabezado.panel,
+          aviso: true),
         if (pendientes.isEmpty && !_swrSolicitudes.cargando)
           Container(
             padding:
@@ -2826,7 +2812,11 @@ class _AdminScreenState extends State<AdminScreen> {
       ModuloPanel.configuracion,
       ModuloPanel.control,
     ];
-    return Container(
+    // 1.30 (Oleada D6, UI130-32): la lista de módulos
+    // adopta la cascada de la fundación (como el Home):
+    // las filas aparecen escalonadas solo al abrir.
+    return EntradaCascada(
+      child: Container(
       decoration: BoxDecoration(
         color: AppColores.superficie(context),
         borderRadius: BorderRadius.circular(AppRadio.lg),
@@ -2837,7 +2827,9 @@ class _AdminScreenState extends State<AdminScreen> {
           for (var i = 0; i < datos.length; i++) ...[
             if (i > 0)
               Divider(height: 1, color: AppColores.borde(context)),
-            FilaModuloPanel(
+            ItemCascada(
+              indice: i,
+              child: FilaModuloPanel(
               dato: datos[i],
               // Pulso sutil si el contador SUBIÓ desde
               // la última visita (M5-C1).
@@ -2863,9 +2855,11 @@ class _AdminScreenState extends State<AdminScreen> {
                   },
                   obtenerTarjetas: tarjetasPorModulo[i],
                   senalRetorno: _senalRetorno)),
+              ),
             ),
           ],
         ],
+      ),
       ),
     );
   }

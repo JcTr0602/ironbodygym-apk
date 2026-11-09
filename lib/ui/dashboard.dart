@@ -627,7 +627,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // lo ocultaba todo.
             if (_salaCargada) ...[
               const EncabezadoSeccion(titulo: 'Hoy en sala'),
-              const SizedBox(height: 8),
               _bloqueHoyEnSala(),
               const SizedBox(height: 8),
             ],
@@ -682,12 +681,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // sin candado, antes de las cifras.
                   if (_salaCargada) ...[
                     const EncabezadoSeccion(titulo: 'Hoy en sala'),
-                    const SizedBox(height: 8),
                     _bloqueHoyEnSala(),
                     const SizedBox(height: 16),
                   ],
                   const EncabezadoSeccion(titulo: 'Mis cobros'),
-                  const SizedBox(height: 8),
                   Row(
                     children: [
                       _tarjetaSimple('Hoy', _miHoy, Icons.today_rounded),
@@ -699,10 +696,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Icons.calendar_month_rounded),
                     ],
                   ),
-                  const SizedBox(height: 16),
                   const EncabezadoSeccion(
                       titulo: 'Mi pendiente a entregar'),
-                  const SizedBox(height: 8),
                   Tarjeta(
                     // Q4 (Argón): el pendiente propio abre su
                     // desglose. (El onTap de las 3 tarjetas
@@ -730,10 +725,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // tiene: transparencia (el expediente no
                   // descuenta nada automáticamente).
                   if (_misDiferencias.isNotEmpty) ...[
-                    const SizedBox(height: 16),
                     const EncabezadoSeccion(
                         titulo: 'Mis diferencias de caja'),
-                    const SizedBox(height: 8),
                     Tarjeta(
                       child: Column(
                         crossAxisAlignment:
@@ -767,10 +760,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 16),
                   const EncabezadoSeccion(
                       titulo: 'Desglose del mes'),
-                  const SizedBox(height: 8),
                   Tarjeta(
                     child: Column(
                       crossAxisAlignment:
@@ -1191,7 +1182,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 : esMejor
                     ? AppColores.alerta
                     : AppColores.naranja;
-            return GestureDetector(
+            // 1.30 (Oleada D6, UI130-22): la barra se
+            // anuncia como botón con su detalle (día y
+            // monto): era un GestureDetector sin etiqueta.
+            return Semantics(
+              button: true,
+              label: 'Ingresos del ${fmtFecha(fecha)}: '
+                  '${fmtMonto(monto)} CUP',
+              child: GestureDetector(
               // v1.0.15: tocar barra muestra el detalle.
               // (M2-BC C2) ahora selecciona el día y abre la
               // burbuja con su desglose bajo el gráfico (la
@@ -1225,9 +1223,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       key: ValueKey(
                           'barra-$fecha-$_periodoGrafico'),
                       tween: Tween(begin: 0.0, end: 1.0),
-                      duration:
-                          const Duration(milliseconds: 450),
-                      curve: Curves.easeOut,
+                      duration: AppMovimiento.larga,
+                      curve: AppMovimiento.curvaSuave,
                       builder: (ctx, f, _) => Container(
                         width: es30 ? 12 : 28,
                         height: altura * f,
@@ -1244,6 +1241,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
+              ),
               ),
             );
               }).toList(),
@@ -1606,11 +1604,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 16),
                   // H1 (Argón): el bloque de urgencias abre el panel.
                   const EncabezadoSeccion(titulo: 'Hoy hay que…'),
-                  const SizedBox(height: 8),
                   _bloqueHoyHayQue(),
-                  const SizedBox(height: 16),
                   const EncabezadoSeccion(titulo: 'Ingresos'),
-                  const SizedBox(height: 8),
                   Row(
                     children: [
                       _tarjetaIngreso('Hoy', _hoy, Icons.today_rounded,
@@ -1657,9 +1652,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 8),
                   _graficoDias(),
-                  const SizedBox(height: 16),
                   const EncabezadoSeccion(titulo: 'Clientes'),
-                  const SizedBox(height: 8),
                   Tarjeta(
                       child: Column(
                         children: [
@@ -1744,7 +1737,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   // Q2 (Argón): balance y desglose unificados.
                   const EncabezadoSeccion(
                       titulo: 'Balance y desglose del mes'),
-                  const SizedBox(height: 8),
                   _desgloses(),
                   const SizedBox(height: 16),
                   // Fila Plus/Casa (propuesta punto 9, solo conteos).
@@ -1768,7 +1760,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   if (_ranking.length > 1) ...[
                     const EncabezadoSeccion(
                         titulo: 'Ranking del mes'),
-                    const SizedBox(height: 8),
                     Tarjeta(
                       padding: const EdgeInsets.all(AppEspacio.md),
                       child: Text(
@@ -1832,13 +1823,20 @@ class BarraClientesSegmentos extends StatelessWidget {
   });
 
   Widget _segmento(String clave, int conteo, Color color,
-      VoidCallback? alTocar) {
+      String etiqueta, VoidCallback? alTocar) {
     return Expanded(
       flex: conteo,
-      child: GestureDetector(
-        key: ValueKey(clave),
-        onTap: alTocar,
-        child: Container(height: 10, color: color),
+      // 1.30 (Oleada D6, UI130-22): el segmento se
+      // anuncia con su leyenda y su conteo (era un
+      // GestureDetector sin etiqueta sobre 10 dp).
+      child: Semantics(
+        button: alTocar != null,
+        label: '$etiqueta: $conteo',
+        child: GestureDetector(
+          key: ValueKey(clave),
+          onTap: alTocar,
+          child: Container(height: 10, color: color),
+        ),
       ),
     );
   }
@@ -1883,13 +1881,15 @@ class BarraClientesSegmentos extends StatelessWidget {
                   children: [
                     if (seg.alDia > 0)
                       _segmento('seg-al-dia', seg.alDia,
-                          AppColores.exito, onAlDia),
+                          AppColores.exito, 'Al día', onAlDia),
                     if (seg.porVencer > 0)
                       _segmento('seg-por-vencer', seg.porVencer,
-                          AppColores.naranja, onPorVencer),
+                          AppColores.naranja, 'Por vencer',
+                          onPorVencer),
                     if (seg.vencidos > 0)
                       _segmento('seg-vencidos', seg.vencidos,
-                          AppColores.error, onVencidos),
+                          AppColores.error, 'Vencidos',
+                          onVencidos),
                   ],
                 ),
         ),

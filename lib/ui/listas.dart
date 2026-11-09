@@ -758,38 +758,12 @@ class _ListasScreenState extends State<ListasScreen>
       ),
       body: Column(
         children: [
-          const SyncBanner(),
-          Padding(
-            padding:
-                const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Row(
-              children: [
-                const Text('Ordenar: ',
-                    style: AppTexto.secundario),
-                DropdownButton<String>(
-                  value: _orden,
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'nombre',
-                        child: Text('Nombre')),
-                    DropdownMenuItem(
-                        value: 'vencimiento',
-                        child: Text('Vencimiento')),
-                    DropdownMenuItem(
-                        value: 'dias',
-                        child: Text('Días restantes')),
-                  ],
-                  onChanged: (v) => setState(() {
-                        // F1-24: la elección manual manda
-                        // sobre el defecto por pestaña.
-                        _ordenManual = true;
-                        _orden = v ?? 'nombre';
-                        _recalcularVisibles();
-                      }),
-                ),
-              ],
-            ),
-          ),
+          // 1.30 (Oleada D6, UI130-20): banner compacto,
+          // como en Buscar, y la fila «Ordenar:» se funde
+          // en la fila del buscador como menú de orden
+          // (los mismos 3 órdenes y la misma semántica
+          // F1-24: la elección manual manda).
+          const SyncBanner(compact: true),
           // 16/25: buscador (nombre o teléfono, en las 5 pestañas).
           Padding(
             padding:
@@ -820,6 +794,31 @@ class _ListasScreenState extends State<ListasScreen>
                       });
                     },
                   ),
+                PopupMenuButton<String>(
+                  tooltip: 'Ordenar la lista',
+                  icon: const Icon(Icons.sort_rounded),
+                  onSelected: (v) => setState(() {
+                    // F1-24: la elección manual manda
+                    // sobre el defecto por pestaña.
+                    _ordenManual = true;
+                    _orden = v;
+                    _recalcularVisibles();
+                  }),
+                  itemBuilder: (ctx) => [
+                    CheckedPopupMenuItem(
+                        value: 'nombre',
+                        checked: _orden == 'nombre',
+                        child: const Text('Nombre')),
+                    CheckedPopupMenuItem(
+                        value: 'vencimiento',
+                        checked: _orden == 'vencimiento',
+                        child: const Text('Vencimiento')),
+                    CheckedPopupMenuItem(
+                        value: 'dias',
+                        checked: _orden == 'dias',
+                        child: const Text('Días restantes')),
+                  ],
+                ),
               ],
             ),
           ),
@@ -838,7 +837,8 @@ class _ListasScreenState extends State<ListasScreen>
               controller: _tab,
               children: [
                 _lista(_visHoy, Icons.celebration_rounded,
-                    'Nadie vence hoy', 'Todo al día.'),
+                    'Nadie vence hoy', 'Todo al día.',
+                    ilustracionVacio: 'assets/vacio_reloj.jpg'),
                 // 1.25 T116 (F1-25): fuera la celebración
                 // en pestañas de deuda y en «Por vencer»:
                 // icono tranquilo y, en atrasados, el paso
@@ -1001,6 +1001,9 @@ class _ListasScreenState extends State<ListasScreen>
       String tituloVacio, String subtituloVacio,
       {// 1.25 T46: cabecera de cola de cobro (atrasados).
       bool esColaCobro = false,
+      // 1.30 (Oleada D6, UI130-22): ilustración del
+      // vacío de ESTA pestaña (solo «Hoy» la trae).
+      String? ilustracionVacio,
       double estimado = 0,
       List<Map<String, dynamic>>? cola,
       String? tituloCola,
@@ -1046,6 +1049,7 @@ class _ListasScreenState extends State<ListasScreen>
         );
       }
       return EstadoVacio(
+          ilustracion: ilustracionVacio,
           icono: iconoVacio,
           titulo: tituloVacio,
           subtitulo: subtituloVacio,
@@ -1326,9 +1330,10 @@ class _NumeroAnimadoState extends State<_NumeroAnimado>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
+        vsync: this, duration: AppMovimiento.larga);
     _anim = Tween<double>(begin: 0, end: widget.valor)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+        .animate(CurvedAnimation(
+            parent: _ctrl, curve: AppMovimiento.curvaSuave));
     _ctrl.forward();
   }
 
@@ -1337,8 +1342,8 @@ class _NumeroAnimadoState extends State<_NumeroAnimado>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.valor != widget.valor) {
       _anim = Tween<double>(begin: _anim.value, end: widget.valor)
-          .animate(
-              CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+          .animate(CurvedAnimation(
+              parent: _ctrl, curve: AppMovimiento.curvaSuave));
       _ctrl
         ..reset()
         ..forward();
@@ -1431,7 +1436,7 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
             Positioned.fill(
               child: AnimatedOpacity(
                 opacity: _sello ? 1 : 0,
-                duration: const Duration(milliseconds: 200),
+                duration: AppMovimiento.media,
                 child: Container(
                   color: AppColores.exito.withValues(alpha: 0.14),
                   alignment: Alignment.center,

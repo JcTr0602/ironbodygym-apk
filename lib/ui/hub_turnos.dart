@@ -1154,7 +1154,6 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 // intermedia del Panel deja de ser el
                 // único camino al patrón.
                 if (_soyDueno) ...[
-                  const SizedBox(height: 12),
                   const EncabezadoSeccion(
                       titulo: 'Plan y ajustes de turnos'),
                   Tarjeta(

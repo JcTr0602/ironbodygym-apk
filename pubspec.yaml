@@ -64,3 +64,17 @@ flutter:
     - assets/sup_generica_shaker.jpg
     - assets/sup_generica_barritas.jpg
     - assets/sup_generica_botella.jpg
+    # 1.30 D6 (UI130-22, ALTA-02): las 12 ilustraciones de
+    # la lámina de vacíos, una por estado vacío asignado.
+    - assets/vacio_papelera.jpg
+    - assets/vacio_caja.jpg
+    - assets/vacio_escudo.jpg
+    - assets/vacio_sobre.jpg
+    - assets/vacio_lupa.jpg
+    - assets/vacio_recepcion.jpg
+    - assets/vacio_pomo.jpg
+    - assets/vacio_reloj.jpg
+    - assets/vacio_calendario.jpg
+    - assets/vacio_cable.jpg
+    - assets/vacio_pastel.jpg
+    - assets/vacio_megafono.jpg

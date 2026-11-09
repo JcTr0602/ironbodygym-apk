@@ -417,7 +417,6 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                 onChanged: (_) => setState(() {}),
               ),
             ],
-            const SizedBox(height: AppEspacio.md),
             const EncabezadoSeccion(
                 titulo: 'Cliente del gym (opcional)'),
             if (!_conCliente) ...[
@@ -1174,7 +1173,6 @@ class DetalleSuplementoScreen extends StatelessWidget {
               );
             }),
           // F5 (1.20): historial de ajustes de stock.
-          const SizedBox(height: AppEspacio.lg),
           const EncabezadoSeccion(titulo: 'Movimientos de stock'),
           _MovimientosStock(
               suplementoId:

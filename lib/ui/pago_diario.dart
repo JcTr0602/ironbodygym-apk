@@ -668,8 +668,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       // 1.25 T68: el check de confirmación
                       // entra y sale dentro de la tarjeta.
                       AnimatedSwitcher(
-                        duration:
-                            const Duration(milliseconds: 300),
+                        duration: AppMovimiento.larga,
                         child: _recienRegistrado
                             ? Padding(
                                 key: const ValueKey('ok'),

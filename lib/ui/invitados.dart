@@ -893,6 +893,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       // subtítulo y, si la vista es un filtro, la acción
       // que lo deshace).
       return EstadoVacio(
+        ilustracion: 'assets/vacio_recepcion.jpg',
         icono: Icons.people_outline_rounded,
         titulo: 'No hay invitados en esta vista',
         subtitulo: 'Los registros nuevos desde la app de '

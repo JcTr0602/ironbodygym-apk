@@ -124,8 +124,10 @@ class CabeceraFicha extends StatelessWidget {
                     // la confirmación visual de que el cobro
                     // cuajó, sin un diálogo más.
                     child: TweenAnimationBuilder<double>(
-                      duration: const Duration(milliseconds: 650),
-                      curve: Curves.easeOut,
+                      // 1.30 (Oleada D6, UI130-32): duración
+                      // y curva a los tokens de movimiento.
+                      duration: AppMovimiento.larga,
+                      curve: AppMovimiento.curvaSuave,
                       tween: Tween<double>(
                           end: fraccionPeriodo!.clamp(0.0, 1.0)),
                       builder: (context, valor, hijo) => CustomPaint(
@@ -1408,12 +1410,12 @@ class _EntradaSeccionFichaState extends State<EntradaSeccionFicha> {
     }
     return AnimatedSlide(
       offset: _visible ? Offset.zero : const Offset(0, 0.05),
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOut,
+      duration: AppMovimiento.media,
+      curve: AppMovimiento.curvaSuave,
       child: AnimatedOpacity(
         opacity: _visible ? 1 : 0,
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOut,
+        duration: AppMovimiento.media,
+        curve: AppMovimiento.curvaSuave,
         child: widget.child,
       ),
     );

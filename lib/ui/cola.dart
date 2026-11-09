@@ -2416,6 +2416,7 @@ class _ColaScreenState extends State<ColaScreen> {
             const SizedBox(height: 8),
             if (_ops.isEmpty)
               const EstadoVacio(
+                ilustracion: 'assets/vacio_cable.jpg',
                 icono: Icons.inbox_rounded,
                 titulo: 'Sin operaciones todavía',
                 subtitulo:
