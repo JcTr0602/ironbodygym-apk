@@ -13,6 +13,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/fotos.dart';
+import 'package:ironbody_gym/sync.dart';
 
 String _src(String ruta) => File(ruta).readAsStringSync();
 
@@ -171,6 +172,60 @@ void main() {
       cola.encolar(['x']);
       await Future<void>.delayed(Duration.zero);
       expect(llamadas, 0);
+    });
+  });
+
+  group('pieza 3 · presupuesto del sync de arranque', () {
+    test('el arranque llama a run(esArranque: true) y el resto no', () {
+      final main = _src('lib/main.dart');
+      expect(main.contains('SyncEngine.instance.run(esArranque: true)'),
+          isTrue);
+    });
+
+    test('run() crea el corte con 60 s y 3 fallos y lo enhebra al pull',
+        () {
+      final sync = _src('lib/sync.dart');
+      expect(sync.contains('presupuesto: const Duration(seconds: 60)'),
+          isTrue);
+      expect(sync.contains('maxFallosTransporte: 3)'), isTrue);
+      expect(sync.contains('_doPull(corte: corteArranque)'), isTrue);
+      expect(sync.contains('_download(silencioso: silencioso, corte: corte)'),
+          isTrue);
+      // La guarda vive en el bucle de tablas y en borrados, y
+      // cada tabla alimenta el cortacircuitos.
+      expect(sync.contains('pull_corte_arranque'), isTrue);
+      expect(sync.contains('corte.registrarTransporte('), isTrue);
+      expect(sync.contains('noIntentadas'), isTrue,
+          reason: 'las tablas no intentadas no reciben sello ok');
+    });
+
+    test('el cortacircuitos salta por racha y por presupuesto', () {
+      var t = Duration.zero;
+      final corte = CorteManifiesto(
+        presupuesto: const Duration(seconds: 60),
+        maxFallosTransporte: 3,
+        reloj: () => t,
+      );
+      expect(corte.agotado, isFalse);
+      corte.registrarTransporte(false);
+      corte.registrarTransporte(false);
+      expect(corte.agotado, isFalse);
+      corte.registrarTransporte(true); // el servidor respondió: reinicia
+      corte.registrarTransporte(false);
+      corte.registrarTransporte(false);
+      expect(corte.agotado, isFalse);
+      corte.registrarTransporte(false); // 3 seguidos
+      expect(corte.agotado, isTrue);
+
+      var t2 = Duration.zero;
+      final porTiempo = CorteManifiesto(
+        presupuesto: const Duration(seconds: 60),
+        reloj: () => t2,
+      );
+      t2 = const Duration(seconds: 59);
+      expect(porTiempo.agotado, isFalse);
+      t2 = const Duration(seconds: 60);
+      expect(porTiempo.agotado, isTrue);
     });
   });
 }

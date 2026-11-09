@@ -1730,7 +1730,20 @@ class SyncEngine {
   Future<SyncResultado> run({
     bool forzar = false,
     void Function(SyncProgress)? onProgreso,
+    // 1.31 (campo 2026-11-09): el ciclo de ARRANQUE lleva
+    // presupuesto total + cortacircuitos (la clase de
+    // A4-D1, la misma del manifiesto): en red «en negro» el
+    // pull dejaba de quemar timeouts tabla a tabla durante
+    // minutos robándole el enlace a todo lo demás. Los
+    // ciclos normales/manuales no llevan corte: corren
+    // hasta completar o fallar de verdad.
+    bool esArranque = false,
   }) async {
+    final corteArranque = esArranque
+        ? CorteManifiesto(
+            presupuesto: const Duration(seconds: 60),
+            maxFallosTransporte: 3)
+        : null;
     // v1.3.1 (E1): si es manual y hay un ciclo en curso, esperar hasta 30s.
     if (forzar) {
       var espera = 0;
@@ -1812,7 +1825,7 @@ class SyncEngine {
             // v1.8.0: sumar lo bajado en CADA intento (un intento
             // que avanza el watermark y falla después ya bajó
             // filas reales).
-            bajados += await _doPull();
+            bajados += await _doPull(corte: corteArranque);
           } catch (e) {
             // 1.28 (M1-A1): la pérdida del lock no es un fallo
             // de pull reintentable: aborta el ciclo entero.
@@ -2908,7 +2921,8 @@ class SyncEngine {
   /// mantenimiento tras un push; el usuario no pidió ver el proceso).
   /// v1.8.0 (Frente 5): devuelve las filas aplicadas en ESTA
   /// corrida (mismo conteo que alimentaba last_downloaded).
-  Future<int> _doPull({bool silencioso = false}) async {
+  Future<int> _doPull(
+      {bool silencioso = false, CorteManifiesto? corte}) async {
     // v1.2.9+47 (AppLog): instrumentación del pull.
     AppLog.info('sync', 'pull_ini');
     // H-08 (1.23): preparación del espejo por rol ANTES de bajar.
@@ -2939,7 +2953,8 @@ class SyncEngine {
     }
     try {
       if (!silencioso) _emit(SyncPhase.downloading);
-      final resDownload = await _download(silencioso: silencioso);
+      final resDownload =
+          await _download(silencioso: silencioso, corte: corte);
       final n = resDownload.aplicadas;
       // Yunque B (YB-TRA-10): esta bajada acaba de procesar
       // acceso_bloqueos; si su marca de error quedó limpia,
@@ -4772,7 +4787,12 @@ class SyncEngine {
 
   Future<({int aplicadas, Map<String, int> porTabla, int fallidas})>
       _download(
-      {bool silencioso = false, List<String>? tablasFiltro}) async {
+      {bool silencioso = false,
+      List<String>? tablasFiltro,
+      // 1.31: corte del ciclo de arranque (presupuesto +
+      // cortacircuitos de transporte, clase A4-D1). Null en
+      // ciclos normales: la bajada corre completa.
+      CorteManifiesto? corte}) async {
     // v1.2.8 (Paso 1): si se pasa tablasFiltro (scope), solo esas tablas.
     // H-08 (1.23): sin filtro explícito, el pull completo pide
     // solo las tablas activas del rol (el entrenador ni gasta
@@ -5049,11 +5069,28 @@ class SyncEngine {
       'espejo_recordatorio_config': 'sync_recordatorio_config',
     };
     var ti = 0;
+    // 1.31: tablas que el corte del arranque dejó sin
+    // intentar (el cierre no les estampa «ok»: no se sabe).
+    final noIntentadas = <String>{};
     for (final tabla in tablas) {
       // 1.28 (M1-A1): punto de control del ciclo zombi entre
       // tablas (fuera del try por tabla: no debe quedar
       // registrado como error de ESA tabla).
       _exigirLockVivo();
+      // 1.31 (campo 2026-11-09): corte del ciclo de arranque
+      // — agotado el presupuesto o la racha de fallos de
+      // transporte, el resto de tablas NO toca la red: la
+      // bajada se declara incompleta (el throw del cierre)
+      // y el próximo ciclo (el temporizador de 2 min, ya sin
+      // corte) reintenta con la red que haya entonces.
+      if (corte != null && corte.agotado) {
+        AppLog.aviso('sync', 'pull_corte_arranque',
+            d: 'corte tras $ti de ${tablas.length} tablas');
+        erroresTablas.add('arranque: corte por presupuesto o '
+            'red caída (tras $ti tablas)');
+        noIntentadas.addAll(tablas.skip(ti));
+        break;
+      }
       ti++;
       // Ajuste preventivo Gemini (veredicto final): si un scope futuro
       // incluye una tabla no declarada en supTablas, saltarla en vez de
@@ -5640,6 +5677,14 @@ class SyncEngine {
         await _db.setMeta('wm_err_$tabla',
             errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       }
+      // 1.31: el desenlace de ESTA tabla alimenta el
+      // cortacircuitos del arranque (sin error registrado =
+      // el servidor respondió, la racha se reinicia; con
+      // error = la llamada murió sin respuesta útil).
+      if (corte != null) {
+        corte.registrarTransporte(
+            !erroresTablas.any((e) => e.startsWith('$tabla:')));
+      }
       // Yunque B (YB-SYNC-02): si la pasada dejó filas sin
       // verificar, el atasco se PERSISTE (menor sync_seq
       // fallido + cuántas filas): hasta hoy vivía solo en la
@@ -5856,6 +5901,10 @@ class SyncEngine {
     var borradosOk = true;
     try {
       while (true) {
+        // 1.31: con el corte del arranque agotado, la pasada
+        // de borrados tampoco toca la red (la bajada ya se
+        // declaró incompleta en el bucle de tablas).
+        if (corte != null && corte.agotado) break;
         final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
             '?select=entidad,entidad_id,sync_seq'
             '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
@@ -6213,6 +6262,8 @@ class SyncEngine {
         // tablas que completaron sin error, sin estar ausentes
         // y sin falta de permiso; antes se estampaban TODAS,
         // incluidas las que dieron 403/404.
+        // 1.31: ni a las que el corte del arranque no intentó.
+        if (noIntentadas.contains(tabla)) continue;
         if (erroresTablas.any((e) => e.startsWith('$tabla:'))) {
           continue;
         }

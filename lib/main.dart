@@ -370,9 +370,13 @@ class _IronBodyAppState extends State<IronBodyApp>
     // Push: subir cambios propios cada hora o manual.
     _iniciarTimers();
     // primer intento al arrancar (si hay sesión guardada)
+    // 1.31 (campo 2026-11-09): con presupuesto (esArranque):
+    // en red «en negro» este ciclo aborta en segundos en vez
+    // de quemar los timeouts de las ~44 tablas durante
+    // minutos; el temporizador de 2 min reintenta sin corte.
     _inicioTimer = Timer(const Duration(seconds: 2), () {
       if (!mounted) return;
-      if (_auth.loggedIn) SyncEngine.instance.run();
+      if (_auth.loggedIn) SyncEngine.instance.run(esArranque: true);
     });
   }
 
