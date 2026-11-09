@@ -431,6 +431,25 @@ void main() {
           jsonDecode(ops.first['payload'] as String) as Map<String, dynamic>;
       expect(payload['suplemento_id'], 5);
     });
+
+    test(
+        '1.31 (Yunque A): el blob desvinculado no lleva la llave '
+        '`id` dentro del JSON', () async {
+      await _limpiar();
+      await _sembrarGrafo();
+      await LocalDb.instance.eliminarSuplementoLocal(5);
+      final raw = await LocalDb.instance.db;
+      // La reserva histórica 108 se desvincula (suplemento_id a
+      // NULL reescribiendo solo `data`): el blob resultante no
+      // puede arrastrar `id` — es la columna, no un campo.
+      final filas = await raw.query('reservas',
+          columns: ['data'], where: 'id = ?', whereArgs: [108]);
+      expect(filas.length, 1);
+      final blob = jsonDecode(filas.first['data'] as String)
+          as Map<String, dynamic>;
+      expect(blob.containsKey('id'), isFalse);
+      expect(blob['suplemento_id'], isNull);
+    });
   });
 
   group('restauración si el servidor no aplica (§5.3 punto 4)', () {

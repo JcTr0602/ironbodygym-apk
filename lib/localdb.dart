@@ -4090,6 +4090,11 @@ class LocalDb {
   Future<void> _desvincularEspejoEnTxn(DatabaseExecutor txn,
       String tabla, Map<String, dynamic> fila, List<String> campos) async {
     final data = Map<String, dynamic>.from(fila);
+    // 1.31 (Yunque A, Argón 1.30): el blob no lleva la llave `id`
+    // dentro: `id` es la columna de la fila, no un campo del JSON
+    // (mirrorPorCampo la repone al leer; llevarla dentro ensucia
+    // el dato hasta el siguiente pull).
+    data.remove('id');
     for (final c in campos) {
       data[c] = null;
     }
@@ -7618,7 +7623,7 @@ class LocalDb {
     try {
       final f = await _archivoMantenimiento();
       await f.writeAsString(
-          DateTime.now().toUtc().toIso8601String());
+          ahoraUtcReal().toIso8601String());
     } catch (_) {}
   }
 
@@ -7634,7 +7639,7 @@ class LocalDb {
       final f = await _archivoMantenimiento();
       if (!await f.exists()) return false;
       final mod = await f.lastModified();
-      return DateTime.now().difference(mod) <
+      return ahoraDispositivoParaFs().difference(mod) <
           const Duration(minutes: 15);
     } catch (_) {
       return false;

@@ -475,25 +475,41 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   /// (revocado/inactivo/bloqueado) también confirma: la RPC
   /// es la misma que regenera y sus efectos también.
   Future<void> _confirmarYGenerar() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Generar PIN nuevo'),
-        content: const Text(
-            'Se invalidará el PIN anterior y se cerrará la '
-            'sesión del cliente en su app. ¿Continuar?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Generar PIN')),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      await _generarPin();
+    // 1.31 (Yunque A, Argón 1.30): la bandera se levanta ANTES
+    // del diálogo, igual que en _confirmarRegenerar (patrón
+    // D-B1-09): un doble toque rápido no abre dos
+    // confirmaciones ni llega dos veces a la RPC.
+    if (_generandoPin || _revocando) return;
+    setState(() => _generandoPin = true);
+    var confirmado = false;
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Generar PIN nuevo'),
+          content: const Text(
+              'Se invalidará el PIN anterior y se cerrará la '
+              'sesión del cliente en su app. ¿Continuar?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Generar PIN')),
+          ],
+        ),
+      );
+      confirmado = ok == true;
+    } finally {
+      // Sin confirmación, la bandera cae aquí; con ella, la
+      // cae el finally de _generarPinCuerpo al terminar la RPC.
+      if (!confirmado && mounted) {
+        setState(() => _generandoPin = false);
+      }
+    }
+    if (confirmado && mounted) {
+      await _generarPinCuerpo();
     }
   }
 
