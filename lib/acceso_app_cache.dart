@@ -177,9 +177,25 @@ class AccesoAppCache {
     // Sin esto, en el teléfono compartido la lista
     // solo-dueño sobrevivía al vencimiento de la sesión del
     // dueño y el siguiente usuario la veía en las fichas.
+    //
+    // Cierre de la oleada (regresión cazada por la suite
+    // completa, test P3 de permisos_115b): la limpieza va
+    // SOLO en la TRANSICIÓN sesión → sin sesión (el mismo
+    // criterio que la raíz en main.dart). El stream emite
+    // su evento inicial con sesión null al arrancar sin
+    // sesión guardada; limpiar ahí subía la generación y
+    // abortaba cualquier cargar() en vuelo (devolvía
+    // false), rompiendo la carga legítima sin sesión
+    // previa que perder.
+    var huboSesion = false;
     try {
       Supabase.instance.client.auth.onAuthStateChange.listen((d) {
-        if (d.session == null) limpiar();
+        if (d.session != null) {
+          huboSesion = true;
+        } else if (huboSesion) {
+          huboSesion = false;
+          limpiar();
+        }
       });
     } catch (_) {
       // Sin Supabase inicializado (tests): la limpieza por
