@@ -220,6 +220,20 @@ class AvisosRecordatorios {
             await _canal.invokeMethod('pedirPermisoNotificacion');
             await LocalDb.instance.setMeta('notif_permiso_pedido', '1');
           }
+          // Yunque B (YB-TRA-06): si tras la petición única el
+          // permiso SIGUE denegado, queda una señal PERSISTENTE
+          // (la lee la pantalla de recordatorios aunque el
+          // canal falle al leer): sin ella, denegar una vez
+          // apagaba todos los recordatorios para siempre sin
+          // que nadie se enterara fuera de «Mis avisos».
+          final sigue =
+              await _canal.invokeMethod<bool>('tienePermisoNotificacion');
+          if (sigue == false) {
+            await LocalDb.instance
+                .setMeta('notif_permiso_denegado', '1');
+          }
+        } else {
+          await LocalDb.instance.setMeta('notif_permiso_denegado', '');
         }
       } catch (_) {}
       final vigentes = <String>{};
@@ -270,12 +284,37 @@ class AvisosRecordatorios {
   /// 1.22 R-9: ¿hay permiso de notificaciones? (true si el
   /// canal no responde: no alarmar por un fallo de plataforma).
   static Future<bool> tienePermiso() async {
+    return await estadoPermiso() != 'denegado';
+  }
+
+  /// Yunque B (YB-TRA-06): el permiso en TRES estados —
+  /// 'concedido', 'denegado' o 'desconocido' (el canal no
+  /// respondió). tienePermiso() fundía denegado y canal roto
+  /// en el mismo `true`, así que ni la única tarjeta que
+  /// avisa aparecía cuando lo que fallaba era el canal. La
+  /// política visible no cambia (ante la duda no se alarma),
+  /// pero el estado ya es distinguible.
+  static Future<String> estadoPermiso() async {
     try {
-      return await _canal
-              .invokeMethod<bool>('tienePermisoNotificacion') ??
-          true;
+      final r = await _canal
+          .invokeMethod<bool>('tienePermisoNotificacion');
+      if (r == null) return 'desconocido';
+      return r ? 'concedido' : 'denegado';
     } catch (_) {
-      return true;
+      return 'desconocido';
+    }
+  }
+
+  /// Yunque B (YB-TRA-06): la señal persistente de denegación
+  /// que deja la sincronización de avisos (meta
+  /// notif_permiso_denegado): sobrevive a reinicios y a un
+  /// canal momentáneamente ilegible.
+  static Future<bool> permisoDenegadoPersistente() async {
+    try {
+      return await LocalDb.instance.getMeta('notif_permiso_denegado') ==
+          '1';
+    } catch (_) {
+      return false;
     }
   }
 

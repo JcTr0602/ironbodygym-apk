@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import 'app_log.dart';
 import 'auth.dart';
 import 'localdb.dart';
 import 'tiempo.dart';
@@ -63,8 +64,9 @@ class AvisoPendientesSync {
   /// Lo invoca la UI al volver a primer plano: si hay marca
   /// DEL USUARIO ACTUAL y la cola propia sigue con pendientes,
   /// programa la notificación (importancia baja, una sola
-  /// alerta) para dentro de un minuto. En cualquier otro caso
-  /// limpia la marca en silencio.
+  /// alerta) para dentro de un minuto. La marca se consume
+  /// solo al programar o al descartarla con motivo (otra
+  /// cuenta, ya sin pendientes) — Yunque B (YB-TRA-05).
   static Future<void> mostrarSiPendiente() {
     return _serial(() async {
       try {
@@ -75,35 +77,54 @@ class AvisoPendientesSync {
         final n = partes.length >= 3
             ? (int.tryParse(partes[1]) ?? 0)
             : (int.tryParse(partes.first) ?? 0);
-        // La marca se consume siempre: mostrarla o descartarla.
-        await LocalDb.instance.setMeta(_metaMarca, '');
         String? uid;
         try {
           uid = AuthService().userId;
         } catch (_) {}
         if (uid == null || uid.isEmpty || duenoMarca != uid) {
           // Sin sesión o la marca es de OTRA cuenta: no se
-          // muestra nada (y ya quedó limpia).
+          // muestra nada y la marca se descarta (consumida).
+          await LocalDb.instance.setMeta(_metaMarca, '');
           return;
         }
         // Revalidación: ¿siguen existiendo pendientes propios?
         final conteo =
             await LocalDb.instance.conteoPendientesSync(uid);
         final propios = conteo.porSubir + conteo.conError;
-        if (propios <= 0) return;
+        if (propios <= 0) {
+          // Ya no hay nada que avisar: descarte legítimo.
+          await LocalDb.instance.setMeta(_metaMarca, '');
+          return;
+        }
         final destino =
             ahoraUtcReal().add(const Duration(minutes: 1));
-        await _canal.invokeMethod('programar', {
-          'id': _claveAviso,
-          'titulo': 'Sincronización pendiente',
-          'texto': 'Quedaron ${n > 0 ? n : propios} operación(es) '
-              'sin subir por falta de conexión. Abre la app con '
-              'internet y se envían solas.',
-          'epochMillis': destino.millisecondsSinceEpoch,
-          'baja': true,
-        });
-      } catch (_) {
-        // Sin canal en este isolate o sin permiso: silencio.
+        // Yunque B (YB-TRA-05): la marca se consume SOLO tras
+        // programar con éxito. Antes se borraba antes de
+        // programar y un fallo del canal (que cae en silencio)
+        // se llevaba el único aviso de «quedó algo sin subir».
+        // Si programar falla, la marca SOBREVIVE para el
+        // próximo primer plano y el fallo queda en bitácora.
+        try {
+          await _canal.invokeMethod('programar', {
+            'id': _claveAviso,
+            'titulo': 'Sincronización pendiente',
+            'texto': 'Quedaron ${n > 0 ? n : propios} operación(es) '
+                'sin subir por falta de conexión. Abre la app con '
+                'internet y se envían solas.',
+            'epochMillis': destino.millisecondsSinceEpoch,
+            'baja': true,
+          });
+        } catch (e) {
+          AppLog.error('sync', 'aviso_pendientes_programar_fallo',
+              d: '$e');
+          return;
+        }
+        await LocalDb.instance.setMeta(_metaMarca, '');
+      } catch (e) {
+        // Sin canal en este isolate o sin permiso: la marca
+        // no se tocó (salvo en los descartes deliberados) y
+        // el fallo queda registrado, no en silencio total.
+        AppLog.error('sync', 'aviso_pendientes_fallo', d: '$e');
       }
     });
   }

@@ -39,6 +39,10 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   // resto era invisible; ahora se despliega la lista entera.
   bool _verTodosVencimientos = false;
   double _cobrado = 0;
+  // Yunque B (YB-TRA-08): ops de hoy que miTurnoHoy no pudo
+  // sumar (payload ilegible): si > 0, el «Cobrado hoy» se
+  // avisa como incompleto en vez de presentarse definitivo.
+  int _sumaIncompleta = 0;
   double _efectivoHoy = 0;
   double _transferHoy = 0;
   double _pendiente = 0;
@@ -267,6 +271,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     if (mounted) {
       setState(() {
         _cobrado = t.$1;
+        _sumaIncompleta = noCalculadasCaja;
         _pendiente = t.$2;
         _efectivoHoy = ef;
         _transferHoy = tr;
@@ -1075,6 +1080,18 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           'Transferencia: ${fmtMonto(_transferHoy)}',
                           style: AppTexto.secundario,
                         ),
+                        // Yunque B (YB-TRA-08): suma incompleta
+                        // visible junto a la cifra que afecta.
+                        if (_sumaIncompleta > 0) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '⚠ $_sumaIncompleta operación(es) de '
+                            'hoy no se pudieron sumar: el total '
+                            'puede estar incompleto.',
+                            style: AppTexto.secundario.copyWith(
+                                color: AppColores.alerta),
+                          ),
+                        ],
                       ],
                     ),
                   ),

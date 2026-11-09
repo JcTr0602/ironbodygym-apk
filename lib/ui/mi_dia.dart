@@ -28,6 +28,9 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   List<Map<String, dynamic>> _porCobrar = [];
   double _totalHoy = 0;
   double _efectivo = 0;
+  // Yunque B (YB-TRA-08): ops que cobradoHoyPorMetodo no
+  // pudo sumar: el desglose por método se avisa incompleto.
+  int _sumaIncompleta = 0;
   double _transferencia = 0;
   // v1.3.2: desglose por entrenador y turnos.
   Map<String, Map<String, dynamic>> _porEntrenador = {};
@@ -144,6 +147,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         _totalHoy = total;
         _efectivo = porMetodo['efectivo'] ?? 0;
         _transferencia = porMetodo['transferencia'] ?? 0;
+        _sumaIncompleta = noCalculadasCaja;
         _porEntrenador = porEntrenador;
         _diariosPorTurno = diariosPorTurno;
         _turnosSinReporte = sinReporte;
@@ -750,6 +754,16 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                             style: AppTexto.minuscula.copyWith(
                                 color: Colors.white.withValues(
                                     alpha: 0.85))),
+                        // Yunque B (YB-TRA-08): desglose
+                        // incompleto, avisado en la misma
+                        // tarjeta que presenta las cifras.
+                        if (_sumaIncompleta > 0)
+                          Text(
+                              '⚠ $_sumaIncompleta operación(es) '
+                              'no se pudieron sumar: el desglose '
+                              'puede estar incompleto',
+                              style: AppTexto.minuscula.copyWith(
+                                  color: Colors.white)),
                       ],
                     ),
                   ),

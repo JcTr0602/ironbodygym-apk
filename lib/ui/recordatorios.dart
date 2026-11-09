@@ -83,7 +83,13 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
               _soyDueno ||
               c['creado_por'] == _yo)
           .toList();
-      final permiso = await AvisosRecordatorios.tienePermiso();
+      // Yunque B (YB-TRA-06): la tarjeta sale si el permiso
+      // está denegado AHORA (triestado: el canal roto ya no
+      // se funde con «hay permiso») o si quedó la señal
+      // persistente de denegación de la última sincronización.
+      final permiso = await AvisosRecordatorios.estadoPermiso();
+      final denegadoPersistente =
+          await AvisosRecordatorios.permisoDenegadoPersistente();
       // 1.29 (FB-10): filas de los clientes debidos, del
       // espejo local (sin red): su teléfono efectivo decide
       // si la tarjeta ofrece «WhatsApp».
@@ -108,7 +114,8 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
           _configs = visibles;
           _clientesDebidos = clientesDebidos;
           _horaAvisos = hora;
-          _sinPermisoNotif = !permiso;
+          _sinPermisoNotif =
+              permiso == 'denegado' || denegadoPersistente;
           _cargando = false;
         });
       }

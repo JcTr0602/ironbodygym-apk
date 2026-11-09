@@ -111,6 +111,14 @@ BloqueoVigente? evaluarBloqueoLocal(
   return mejor;
 }
 
+/// Yunque B (YB-TRA-10): meta que marca el espejo de
+/// bloqueos como NO fiable tras importar un respaldo
+/// ('1' = pendiente del primer pull que refresque
+/// acceso_bloqueos). La pone el flujo de importación, la
+/// levanta el motor de sync tras la bajada y la lee
+/// [AccesoBloqueoService] en cada evaluación.
+const String kMetaCandadoTrasImportar = 'candado_tras_importar';
+
 /// Servicio del candado para la app de Gestión: evalúa el espejo
 /// al arrancar, al cambiar la sesión y tras cada ciclo de sync,
 /// y publica el resultado en [vigente] (lo escucha main.dart).
@@ -122,9 +130,16 @@ class AccesoBloqueoService {
   final ValueNotifier<BloqueoVigente?> vigente =
       ValueNotifier<BloqueoVigente?>(null);
 
+  /// Yunque B (YB-TRA-10): el espejo de bloqueos viene de
+  /// una copia importada y aún NO lo ha refrescado ningún
+  /// pull: no es fiable (un bloqueo posterior a la copia no
+  /// está en él). Lo publica la evaluación y lo pinta la
+  /// raíz como aviso hasta que la sync lo levante.
+  final ValueNotifier<bool> espejoSinVerificar =
+      ValueNotifier<bool>(false);
+
   static const String _kAnclaServer = 'bloqueo_ancla_server';
   static const String _kAnclaPared = 'bloqueo_ancla_pared';
-
   bool _iniciado = false;
   bool _despertando = false;
   // 1.28 (M4-A15): serialización de reevaluar() — la
@@ -275,6 +290,18 @@ class AccesoBloqueoService {
 
   Future<void> _evaluarUnaVez() async {
     final secuencia = _secuencia;
+    // Yunque B (YB-TRA-10): la marca de espejo sin verificar
+    // se publica ANTES de tocar la sesión: no depende de que
+    // haya sesión válida para ser cierta (la base importada
+    // es la que es, haya quien haya entrado).
+    try {
+      final marca =
+          await LocalDb.instance.getMeta(kMetaCandadoTrasImportar);
+      final sinVerificar = marca == '1';
+      if (espejoSinVerificar.value != sinVerificar) {
+        espejoSinVerificar.value = sinVerificar;
+      }
+    } catch (_) {}
     try {
       final auth = AuthService();
       // Identidad de la sesión al INICIO de la pasada.

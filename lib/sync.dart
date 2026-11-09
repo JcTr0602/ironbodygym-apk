@@ -2941,6 +2941,19 @@ class SyncEngine {
       if (!silencioso) _emit(SyncPhase.downloading);
       final resDownload = await _download(silencioso: silencioso);
       final n = resDownload.aplicadas;
+      // Yunque B (YB-TRA-10): esta bajada acaba de procesar
+      // acceso_bloqueos; si su marca de error quedó limpia,
+      // el espejo del candado vuelve a ser fiable tras una
+      // importación y se levanta la marca que esta dejó.
+      try {
+        if (await _db.getMeta(kMetaCandadoTrasImportar) == '1') {
+          final errBloq = await _db.getMeta('wm_err_acceso_bloqueos');
+          if (errBloq == null || errBloq.isEmpty) {
+            await _db.setMeta(kMetaCandadoTrasImportar, '');
+            AppLog.info('sync', 'candado_tras_importar_verificado');
+          }
+        }
+      } catch (_) {}
       // v1.3.0: acumulativo para bajados.
       final prevBajados =
           int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;

@@ -132,7 +132,15 @@ void callbackDispatcher() {
 
 Future<void> _programarSubidaFondo() async {
   try {
-    await Workmanager().initialize(callbackDispatcher);
+    // Yunque B (YB-TRA-09): timeout corto sobre el canal de
+    // Workmanager — un cuelgue (que no lanza) dejaba el
+    // arranque en negro antes del primer pintado, porque
+    // esto se espera en serie antes de runApp. Registrar la
+    // tarea de fondo no es imprescindible para pintar: la
+    // app ya sincroniza al abrir.
+    await Workmanager()
+        .initialize(callbackDispatcher)
+        .timeout(const Duration(seconds: 5));
     await Workmanager().registerPeriodicTask(
       'ironbody-sync-fondo',
       'subirPendientes',
@@ -142,7 +150,7 @@ Future<void> _programarSubidaFondo() async {
       // cambio futuro de frecuencia/restricciones jamás se
       // aplicaría a la tarea ya registrada.
       existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
-    );
+    ).timeout(const Duration(seconds: 5));
   } catch (_) {
     // sin segundo plano no se rompe nada: la app sincroniza al abrirse
   }
@@ -393,12 +401,57 @@ class _IronBodyAppState extends State<IronBodyApp>
               return ValueListenableBuilder<BloqueoVigente?>(
                 valueListenable: AccesoBloqueoService.instance.vigente,
                 builder: (_, bloqueo, __) {
-                  if (bloqueo == null) return app;
-                  return Stack(
-                    children: [
-                      app,
-                      Positioned.fill(child: CapaCandado(bloqueo: bloqueo)),
-                    ],
+                  if (bloqueo != null) {
+                    return Stack(
+                      children: [
+                        app,
+                        Positioned.fill(child: CapaCandado(bloqueo: bloqueo)),
+                      ],
+                    );
+                  }
+                  // Yunque B (YB-TRA-10): espejo del candado
+                  // sin verificar tras importar una copia —
+                  // aviso fino y persistente hasta que el
+                  // primer pull lo refresque (sin bloquear el
+                  // uso: la decisión de exigir sync antes de
+                  // abrir queda como decisión de producto).
+                  return ValueListenableBuilder<bool>(
+                    valueListenable:
+                        AccesoBloqueoService.instance.espejoSinVerificar,
+                    builder: (_, sinVerificar, ___) {
+                      if (!sinVerificar) return app;
+                      return Stack(
+                        children: [
+                          app,
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            child: SafeArea(
+                              bottom: false,
+                              child: Material(
+                                color: const Color(0xFFF9A825),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
+                                  child: Text(
+                                    '⚠ Copia importada: el candado '
+                                    'de acceso se verifica al '
+                                    'sincronizar. Conéctate para '
+                                    'confirmar tu acceso.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        color: Colors.black87,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   );
                 },
               );

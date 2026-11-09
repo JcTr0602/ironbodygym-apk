@@ -4506,6 +4506,30 @@ Future<List<Map<String, dynamic>>> totalesDiariosUltimos(
   return res;
 }
 
+/// Yunque B (YB-TRA-08): ops NO calculadas por la última
+/// suma de caja del día ejecutada (miTurnoHoy,
+/// conteoPagosDia o cobradoHoyPorMetodo): su bucle de ops
+/// pendientes envuelve cada op en try/catch y una op con el
+/// payload ilegible desaparecía del total EN SILENCIO — el
+/// cuadre salía corto y nadie sabía qué faltaba. Ahora cada
+/// suma anota su conteo aquí y lo registra en AppLog, el
+/// mismo patrón que desglosePendientes() con su
+/// incompleto/noCalculados. Las pantallas lo leen tras
+/// calcular (ver el getter) para no presentar una suma
+/// parcial como definitiva.
+int _noCalculadasCaja = 0;
+
+/// Ops no calculadas por la última suma de caja del día.
+int get noCalculadasCaja => _noCalculadasCaja;
+
+void _registrarNoCalculadasCaja(int n, String origen) {
+  _noCalculadasCaja = n;
+  if (n > 0) {
+    AppLog.error('negocio', 'suma_caja_incompleta',
+        d: '$origen n=$n');
+  }
+}
+
 /// Resumen del turno del entrenador: (cobrado hoy, pendiente a entregar).
 /// [fecha] opcional (YYYY-MM-DD): si se omite usa hoy. El cierre de
 /// turno la fija a fecha_turno para que el dinero contado coincida con
@@ -4570,6 +4594,7 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   // total de la op (montoCobradoCupOp, con los montos reales
   // del payload), igual que el espejo. Y si el payload no trae
   // fecha raíz, se usa la fecha de creación de la op.
+  var noCalculadasTurno = 0;
   for (final op in await LocalDb.instance.pendingOpsLectura()) {
     if (op['telegram_id'] != telegramId) continue;
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
@@ -4591,8 +4616,12 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
         continue;
       }
       cobrado += await montoCobradoCupOp(op);
-    } catch (_) {}
+    } catch (_) {
+      // Yunque B (YB-TRA-08): contada, no tragada.
+      noCalculadasTurno++;
+    }
   }
+  _registrarNoCalculadasCaja(noCalculadasTurno, 'miTurnoHoy');
   final pendiente = await pendienteEntrega(telegramId);
   return (cobrado, pendiente);
 }
@@ -4681,6 +4710,7 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
   // salía corto frente a lo que miTurnoHoy sí sumaba. Ahora:
   // pendingOpsLectura() + fallback a creada_ts si el payload no
   // trae fecha (mismo criterio que miTurnoHoy).
+    var noCalculadasConteo = 0;
   for (final op in await LocalDb.instance.pendingOpsLectura()) {
     if (op['telegram_id'] != telegramId) continue;
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
@@ -4723,8 +4753,12 @@ Future<int> conteoPagosDia(int? telegramId, {String? fecha}) async {
         }
       }
       if (cuenta) n++;
-    } catch (_) {}
+    } catch (_) {
+      // Yunque B (YB-TRA-08): contada, no tragada.
+      noCalculadasConteo++;
+    }
   }
+  _registrarNoCalculadasCaja(noCalculadasConteo, 'conteoPagosDia');
   return n;
 }
 
@@ -7976,6 +8010,7 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
   // partido por método). En la cola se usa el criterio de
   // miTurnoHoy (fecha del payload con fallback a creada_ts,
   // por día de negocio), el mismo «hoy» de los bucles espejo.
+    var noCalculadasMetodo = 0;
   for (final op in await LocalDb.instance.pendingOpsLectura()) {
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
     if (soloTelegramId != null &&
@@ -8017,8 +8052,12 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
       } else {
         ef += monto;
       }
-    } catch (_) {}
+    } catch (_) {
+      // Yunque B (YB-TRA-08): contada, no tragada.
+      noCalculadasMetodo++;
+    }
   }
+  _registrarNoCalculadasCaja(noCalculadasMetodo, 'cobradoHoyPorMetodo');
   return {'efectivo': ef, 'transferencia': tr};
 }
 

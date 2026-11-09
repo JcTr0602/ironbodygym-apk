@@ -257,7 +257,13 @@ class FotosColaService {
               raw is String ? jsonDecode(raw) : raw as Map);
           opUuidAnterior = data['foto_uuid'] as String?;
         }
-      } catch (_) {}
+      } catch (e) {
+        // Yunque B (YB-TRA-07): sin esta lectura, la foto
+        // anterior no se invalida y sus variantes obsoletas
+        // pueden seguir subiendo: que el fallo se vea.
+        AppLog.error('fotos', 'lectura_foto_anterior_fallo',
+            d: '$e');
+      }
     }
     await db.transaction((txn) async {
       // Caza Fotos L1-ALTA (Argón): una foto NUEVA invalida las
@@ -366,7 +372,15 @@ class FotosColaService {
             whereArgs: [clienteId],
           );
         }
-      } catch (_) {}
+      } catch (e) {
+        // Yunque B (YB-TRA-07): el vínculo foto↔cliente no
+        // se persistió: la ficha pierde la vista local hasta
+        // sincronizar y la próxima foto puede no invalidar
+        // esta. Antes el catch era mudo y la bitácora
+        // asentaba «encolada» en verde igual.
+        AppLog.error('fotos', 'vinculo_espejo_cliente_fallo',
+            d: '$e');
+      }
     }
     // v1.3.3 (Argón): persistir foto_uuid y foto_local en el suplemento
     // al encolar (igual que se hace con clientes arriba):
@@ -399,7 +413,11 @@ class FotosColaService {
             whereArgs: [suplementoId],
           );
         }
-      } catch (_) {}
+      } catch (e) {
+        // Yunque B (YB-TRA-07): idem vínculo de clientes.
+        AppLog.error('fotos', 'vinculo_espejo_suplemento_fallo',
+            d: '$e');
+      }
     }
     // v1.2.9+46 (AppLog): bitácora de encolado.
     AppLog.info('fotos', 'encolada',
