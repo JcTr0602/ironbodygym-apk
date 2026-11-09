@@ -26,7 +26,12 @@ ReservaVista _vista({
       monedaVigente: monedaVigente,
       estado: estado,
       creadaTs: '2026-10-21T10:00:00-04:00',
-      expiraEn: '2026-10-22T10:00:00-04:00',
+      // Vigente siempre: la fecha fija 2026-10-22 se volvió
+      // una bomba de relojería con YB-SER-07 (la solicitada
+      // vencida ya no ofrece Confirmar/Rechazar, por diseño):
+      // la fixture «solicitada» debe nacer NO vencida.
+      expiraEn:
+          DateTime.now().add(const Duration(days: 2)).toIso8601String(),
       notaResolucion: null,
     );
 
