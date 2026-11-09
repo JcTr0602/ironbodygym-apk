@@ -430,20 +430,19 @@ class _IronBodyAppState extends State<IronBodyApp>
                             child: SafeArea(
                               bottom: false,
                               child: Material(
-                                color: const Color(0xFFF9A825),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
+                                color: AppColores.alerta,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: AppEspacio.md,
+                                      vertical: 6),
                                   child: Text(
                                     '⚠ Copia importada: el candado '
                                     'de acceso se verifica al '
                                     'sincronizar. Conéctate para '
                                     'confirmar tu acceso.',
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                        color: Colors.black87,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600),
+                                    style: AppTexto.etiqueta.copyWith(
+                                        color: Colors.black87),
                                   ),
                                 ),
                               ),
