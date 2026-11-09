@@ -33,8 +33,12 @@ SemaforoTabla semaforoTabla({
   required int watermark,
   required int serverSeq,
   required int filas,
+  // Yunque B (YB-SYNC-02): la tabla quedó atascada en la
+  // bajada con filas sin verificar (rastro del pull). No es
+  // un atraso que se cure solo como el ámbar: es rojo.
+  bool atascadaSinVerificar = false,
 }) {
-  if (hayError || corruptas > 0 || divergente) {
+  if (hayError || corruptas > 0 || divergente || atascadaSinVerificar) {
     return SemaforoTabla.rojo;
   }
   if (ausente ||
@@ -148,6 +152,7 @@ String _notaTabla({
   required int watermark,
   required int serverSeq,
   required int filas,
+  bool atascadaSinVerificar = false,
 }) {
   switch (s) {
     case SemaforoTabla.rojo:
@@ -155,6 +160,10 @@ String _notaTabla({
         return '$corruptas ${corruptas == 1 ? 'fila dañada' : 'filas dañadas'} en el espejo';
       }
       if (divergente) return 'No coincide con el servidor: se re-descarga sola';
+      // Yunque B (YB-SYNC-02): el atasco tiene su propia nota.
+      if (atascadaSinVerificar) {
+        return 'Atascada: una fila no se pudo verificar al bajar';
+      }
       return 'La última bajada de esta tabla falló';
     case SemaforoTabla.ambar:
       if (ausente) return 'El servidor aún no tiene esta tabla';
@@ -193,6 +202,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     var sinPermiso = false;
     var divergente = false;
     var sinVerificar = false;
+    var atascada = false;
     try {
       filas = await db.contarFilasMirror(t);
     } catch (_) {}
@@ -201,6 +211,10 @@ Future<SaludSyncDatos> cargarSaludSync() async {
           int.tryParse(await db.getMeta('mirror_corruptas_$t') ?? '') ?? 0;
       wm = await db.getWatermarkTabla(t);
       hayError = (await db.getMeta('wm_err_$t') ?? '').isNotEmpty;
+      // Yunque B (YB-SYNC-02): el atasco persistido por el
+      // pull (distinto del «sin verificar» del manifiesto).
+      atascada =
+          (await db.getMeta('wm_sinverificar_$t') ?? '').isNotEmpty;
       ausente = await db.getMeta('wm_${t}_ausente') == '1';
       sinPermiso = await db.getMeta('wm_${t}_sin_permiso') == '1';
       final man = await db.getMeta('manifiesto_tabla_$t');
@@ -218,6 +232,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       watermark: wm,
       serverSeq: serverSeq,
       filas: filas,
+      atascadaSinVerificar: atascada,
     );
     tablas.add(EstadoTablaSalud(
       tablaLocal: t,
@@ -237,6 +252,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
         watermark: wm,
         serverSeq: serverSeq,
         filas: filas,
+        atascadaSinVerificar: atascada,
       ),
     ));
   }

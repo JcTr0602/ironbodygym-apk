@@ -8796,22 +8796,37 @@ class LocalDb {
   /// la lista completa.
   Future<int> getWatermarkMinimo(
       {Set<String> excluir = const {}, bool? esAdmin}) async {
+    final r = await tablaMasAtrasada(excluir: excluir, esAdmin: esAdmin);
+    return r.wm;
+  }
+
+  /// Yunque B (YB-SYNC-01): la tabla que REALIZA el mínimo de
+  /// [getWatermarkMinimo], con exactamente sus mismos
+  /// criterios (rol, ausentes y sin permiso no bloquean,
+  /// [excluir] se salta). Es la tabla que retiene el
+  /// «completo» — y la que el entrenador necesita poder
+  /// NOMBRAR cuando su teléfono no termina de bajar (caso
+  /// Duany: sin esto, su atasco no tenía nombre posible en
+  /// su pantalla). `tabla` null = ninguna tabla calificó
+  /// (wm 0, como el histórico de [getWatermarkMinimo]).
+  Future<({String? tabla, int wm})> tablaMasAtrasada(
+      {Set<String> excluir = const {}, bool? esAdmin}) async {
     var m = 1 << 62;
-    var hay = false;
+    String? cual;
     final tablas = esAdmin == null
         ? tablasConWatermark
         : tablasConWatermarkParaRol(esAdmin);
     for (final t in tablas) {
       if (excluir.contains(t)) continue;
       if (await getMeta('wm_${t}_ausente') == '1') continue;
-      // v1.3.1 (Argón pull): las tablas sin permiso (403 para entrenadores)
-      // tampoco bloquean el "completo".
       if (await getMeta('wm_${t}_sin_permiso') == '1') continue;
       final w = await getWatermarkTabla(t);
-      if (w < m) m = w;
-      hay = true;
+      if (w < m) {
+        m = w;
+        cual = t;
+      }
     }
-    return hay ? m : 0;
+    return (tabla: cual, wm: cual == null ? 0 : m);
   }
 
   Future<Map<String, dynamic>> getAjustes({DatabaseExecutor? txn}) async {

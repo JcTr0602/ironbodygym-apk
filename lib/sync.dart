@@ -223,6 +223,18 @@ class SyncStatus {
   final int watermarkMinimo;
   final int serverSeq;
 
+  /// Yunque B (YB-SYNC-01): nombre amigable de la tabla que
+  /// realiza el watermark mínimo cuando el servidor va por
+  /// delante — la que retiene el «al día». El entrenador por
+  /// fin puede NOMBRAR su tabla atrasada (caso Duany).
+  /// null = al día o sin dato.
+  final String? tablaAtrasada;
+
+  /// Yunque B (YB-SYNC-02): nombre amigable de una tabla
+  /// atascada con filas sin verificar (el rastro persistente
+  /// `wm_sinverificar_<tabla>` del pull). null = ninguna.
+  final String? tablaSinVerificar;
+
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
@@ -238,7 +250,9 @@ class SyncStatus {
       this.ultimoSincronizado,
       this.calculadoEn,
       this.watermarkMinimo = 0,
-      this.serverSeq = 0});
+      this.serverSeq = 0,
+      this.tablaAtrasada,
+      this.tablaSinVerificar});
 
   /// v1.2.5 (D11): frase en lenguaje humano según las 3 dimensiones.
   String get frase {
@@ -1312,7 +1326,9 @@ class SyncEngine {
           // foto: hereda su sello y sus valores tal cual.
           calculadoEn: _current.calculadoEn,
           watermarkMinimo: _current.watermarkMinimo,
-          serverSeq: _current.serverSeq);
+          serverSeq: _current.serverSeq,
+          tablaAtrasada: _current.tablaAtrasada,
+          tablaSinVerificar: _current.tablaSinVerificar);
       _emitAplicada = seqEmision;
       _status.add(_current);
       return;
@@ -1326,6 +1342,40 @@ class SyncEngine {
     if (foto == null) return;
     _current = foto;
     _status.add(_current);
+  }
+
+  /// Yunque B (YB-SYNC-02): el atasco «sin verificar»
+  /// persistido por el pull (`wm_sinverificar_<tabla>`), si
+  /// lo hay en alguna tabla del rol: tabla interna, nombre
+  /// amigable, menor sync_seq fallido y nº de filas. Es la
+  /// lectura que comparten la foto de estado, el veredicto
+  /// de la corrida y la pantalla de Sincronización — el
+  /// atasco tiene el mismo nombre en todas partes.
+  Future<({String? tabla, String? nombre, int? seq, int filas})>
+      atascoSinVerificar() async {
+    try {
+      final tablas = LocalDb.tablasConWatermarkParaRol(_esAdminSeguro);
+      for (final t in tablas) {
+        final v = await _db.getMeta('wm_sinverificar_$t');
+        if (v == null || v.isEmpty) continue;
+        int? seq;
+        var filas = 0;
+        for (final parte in v.split(' ')) {
+          if (parte.startsWith('seq=')) {
+            seq = int.tryParse(parte.substring(4));
+          } else if (parte.startsWith('filas=')) {
+            filas = int.tryParse(parte.substring(6)) ?? 0;
+          }
+        }
+        return (
+          tabla: t,
+          nombre: nombreAmigableTabla(t),
+          seq: seq,
+          filas: filas
+        );
+      }
+    } catch (_) {}
+    return (tabla: null, nombre: null, seq: null, filas: 0);
   }
 
   /// 1.28 (M1-B5): construye la FOTO completa del estado
@@ -1350,6 +1400,10 @@ class SyncEngine {
     bool novedades = false;
     int wmObs = 0;
     int ssObs = 0;
+    // Yunque B (YB-SYNC-01/02): nombres de la tabla que
+    // retiene el mínimo y de la atascada sin verificar.
+    String? atrasadaObs;
+    String? sinVerificarObs;
     try {
       // v1.4.4: el cartel excluye 'borrados' del mínimo. El cursor
       // de tumbas solo avanza hasta la última tumba bajada y desde
@@ -1360,12 +1414,19 @@ class SyncEngine {
       // pantalla de Sincronización dijera «Todo al día».
       // H-08: el mínimo se mide sobre las tablas del rol (las
       // prohibidas del entrenador no lo bloquean para siempre).
-      final wm = await _db.getWatermarkMinimo(
+      // Yunque B (YB-SYNC-01): se lee la tabla que realiza el
+      // mínimo, no solo el número (mismo cálculo: delega).
+      final minR = await _db.tablaMasAtrasada(
           excluir: {'borrados'}, esAdmin: _esAdminSeguro);
+      final wm = minR.wm;
       final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       wmObs = wm;
       ssObs = ss;
       novedades = ss > wm;
+      if (novedades && minR.tabla != null) {
+        atrasadaObs = nombreAmigableTabla(minR.tabla!);
+      }
+      sinVerificarObs = (await atascoSinVerificar()).nombre;
     } catch (_) {}
     // v1.0.17: conservar el último resumen salvo que se pase uno nuevo
     final res = resumen ?? _current.ultimoResumen;
@@ -1404,7 +1465,9 @@ class SyncEngine {
         ultimoSincronizado: sincronizado,
         calculadoEn: ahoraHabana(),
         watermarkMinimo: wmObs,
-        serverSeq: ssObs);
+        serverSeq: ssObs,
+        tablaAtrasada: atrasadaObs,
+        tablaSinVerificar: sinVerificarObs);
   }
 
   /// 1.28 (M1-B5): cálculo de foto en curso, compartido por
@@ -1776,8 +1839,14 @@ class SyncEngine {
           // con la descarga a medias. Los sellos estrictos de
           // _doPull (last_pull_ok/ultimo_pull_ts) no se tocan:
           // ellos ya solo se escriben con la bajada limpia.
-          const msgIncompleto = 'La descarga quedó incompleta; '
-              'se reintentará en el próximo ciclo.';
+          // Yunque B (YB-SYNC-02): si el atasco tiene nombre
+          // (tabla con filas sin verificar), el veredicto lo
+          // dice: «incompleta» a secas no le servía a nadie
+          // para saber QUÉ tabla quedó clavada.
+          final atasco = await atascoSinVerificar();
+          final msgIncompleto = 'La descarga quedó incompleta; '
+              'se reintentará en el próximo ciclo.'
+              '${atasco.nombre != null ? ' Tabla atascada: ${atasco.nombre}.' : ''}';
           await _db.setMeta('last_sync_error', msgIncompleto);
           errorCorrida = msgIncompleto;
         }
@@ -4916,6 +4985,10 @@ class SyncEngine {
       // global del pull: una fila mala en otra tabla no debe
       // bloquear la purga de esta).
       var fallidasTabla = 0;
+      // Yunque B (YB-SYNC-02): el menor sync_seq sin verificar
+      // de TODA la pasada (el de página se reinicia por página):
+      // es el rastro que se persiste al cerrar la tabla.
+      int? minSinVerificarTabla;
       try {
         while (true) {
           // gastos y turnos_cierre tienen esquema plano en Supabase
@@ -5312,6 +5385,12 @@ class SyncEngine {
           // purga ni salto a serverSeq, ver abajo).
           if (minSinVerificar != null) {
             tablaConSinVerificar = true;
+            // Yunque B (YB-SYNC-02): el mínimo de la pasada
+            // entera, para el rastro persistente del cierre.
+            final minT = minSinVerificarTabla;
+            if (minT == null || minSinVerificar < minT) {
+              minSinVerificarTabla = minSinVerificar;
+            }
             paginaMax = topePaginaSeguro(paginaMax, pageWm, minSinVerificar);
           }
           // Commit atómico: filas + watermark de la página juntos.
@@ -5435,6 +5514,22 @@ class SyncEngine {
         final errTxt = '$e';
         await _db.setMeta('wm_err_$tabla',
             errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
+      }
+      // Yunque B (YB-SYNC-02): si la pasada dejó filas sin
+      // verificar, el atasco se PERSISTE (menor sync_seq
+      // fallido + cuántas filas): hasta hoy vivía solo en la
+      // variable en memoria y la tabla quedaba clavada sin
+      // nombre en ningún panel (la Salud la pintaba ámbar,
+      // como un atraso cualquiera). Con pasada limpia el
+      // rastro se borra: el atasco se curó solo.
+      if (tablaConSinVerificar) {
+        await _db.setMeta('wm_sinverificar_$tabla',
+            'seq=${minSinVerificarTabla ?? ''} filas=$fallidasTabla');
+        AppLog.error('sync', 'pull_sin_verificar',
+            d: '$tabla seq=${minSinVerificarTabla ?? '-'} '
+                'filas=$fallidasTabla');
+      } else if (!erroresTablas.any((e) => e.startsWith('$tabla:'))) {
+        await _db.setMeta('wm_sinverificar_$tabla', '');
       }
       // FIX (Gemini auditoría funcional BUG 3): si la tabla se descargó
       // sin errores, sincronizar su watermark con serverSeq. Evita que

@@ -514,6 +514,14 @@ class _ColaScreenState extends State<ColaScreen> {
   List<Map<String, dynamic>> _fotosIncError = [];
   bool _reintentandoFotosInc = false;
   StreamSubscription<SyncStatus>? _syncSub;
+  // Yunque B (YB-SYNC-01/02): la BAJADA también se atasca, y
+  // ese atasco es del propio teléfono: su tabla se nombra
+  // aquí para cualquier rol (no son datos del dueño: es el
+  // diagnóstico de este aparato). Lo alimenta _cargar desde
+  // el rastro persistente del pull y la foto del motor.
+  ({String? tabla, String? nombre, int? seq, int filas}) _atasco =
+      (tabla: null, nombre: null, seq: null, filas: 0);
+  String? _tablaAtrasada;
 
   @override
   void initState() {
@@ -657,6 +665,15 @@ class _ColaScreenState extends State<ColaScreen> {
     final ops = await LocalDb.instance.recentOps();
     final bloqueadas = await LocalDb.instance.opsNecesitanRevision();
     final det = await SyncEngine.instance.detalle();
+    // Yunque B (YB-SYNC-01/02): el estado de la BAJADA de
+    // este teléfono (tabla atascada sin verificar y tabla
+    // más atrasada), tolerante: si la lectura falla, la
+    // tarjeta simplemente no sale.
+    try {
+      _atasco = await SyncEngine.instance.atascoSinVerificar();
+      _tablaAtrasada =
+          (await SyncEngine.instance.fotoEstado()).tablaAtrasada;
+    } catch (_) {}
     // v1.2.9+46: contadores y detalle de fotos.
     int fPend = 0, fSub = 0, fErr = 0;
     List<Map<String, dynamic>> fDet = [];
@@ -1204,6 +1221,51 @@ class _ColaScreenState extends State<ColaScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Yunque B (YB-SYNC-01/02): la bajada de ESTE teléfono,
+  /// en sencillo y con nombre. Si hay una tabla atascada
+  /// (filas sin verificar), tarjeta roja con el paso de
+  /// salida; si solo hay atraso, línea ámbar con la tabla
+  /// más atrasada. Es la superficie que le faltaba al
+  /// entrenador: Salud y Diagnóstico son del dueño, pero
+  /// este atasco es suyo.
+  Widget _tarjetaBajada() {
+    final nombre = _atasco.nombre;
+    if (nombre != null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppEspacio.md),
+        decoration: BoxDecoration(
+          color: AppColores.error.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppRadio.md),
+        ),
+        child: Text(
+          '⚠ La tabla «$nombre» quedó atascada al bajar: una '
+          'fila no se pudo verificar'
+          '${_atasco.seq != null ? ' (posición ${_atasco.seq})' : ''}'
+          '${_atasco.filas > 0 ? ' · ${_atasco.filas} fila(s) con problema' : ''}. '
+          'El resto de la app sigue funcionando y esa tabla se '
+          'reintenta sola en cada ciclo. Toca «Sincronizar '
+          'ahora» para reintentar ya; si el atasco sigue, dile '
+          'este nombre al dueño para que lo revise.',
+          style: AppTexto.cuerpo,
+        ),
+      );
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppEspacio.md),
+      decoration: BoxDecoration(
+        color: AppColores.alerta.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppRadio.md),
+      ),
+      child: Text(
+        'Faltan cambios por bajar. La tabla más atrasada es '
+        '«$_tablaAtrasada».',
+        style: AppTexto.cuerpo,
       ),
     );
   }
@@ -2260,6 +2322,12 @@ class _ColaScreenState extends State<ColaScreen> {
             // y desde cuándo (totales reales, no solo la lista
             // visible que tiene límite). Sin operaciones, lo dice.
             _tarjetaColaEnSencillo(),
+            // Yunque B (YB-SYNC-01/02): la bajada atascada o
+            // atrasada, con el nombre de SU tabla.
+            if (_atasco.nombre != null || _tablaAtrasada != null) ...[
+              const SizedBox(height: 16),
+              _tarjetaBajada(),
+            ],
             const SizedBox(height: 16),
             // Botón sincronizar
             BotonPrimario(
