@@ -669,11 +669,11 @@ class _ColaScreenState extends State<ColaScreen> {
     // este teléfono (tabla atascada sin verificar y tabla
     // más atrasada), tolerante: si la lectura falla, la
     // tarjeta simplemente no sale.
-    try {
-      _atasco = await SyncEngine.instance.atascoSinVerificar();
-      _tablaAtrasada =
-          (await SyncEngine.instance.fotoEstado()).tablaAtrasada;
-    } catch (_) {}
+    // Yunque B (YB-SYNC-01/02): el diagnóstico de la bajada
+    // se enriquece EN SEGUNDO PLANO (ver _cargarBajada): la
+    // cola pinta primero con sus datos locales y la tarjeta
+    // llega cuando la lectura ligera termina. Esperarlo aquí
+    // retrasaba toda la pantalla (y rompía su arnés).
     // v1.2.9+46: contadores y detalle de fotos.
     int fPend = 0, fSub = 0, fErr = 0;
     List<Map<String, dynamic>> fDet = [];
@@ -878,6 +878,36 @@ class _ColaScreenState extends State<ColaScreen> {
         _nombresPorTelegram = nombresPorTelegram;
       });
     }
+    unawaited(_cargarBajada());
+  }
+
+  /// Yunque B (YB-SYNC-01/02): lee el diagnóstico de la
+  /// BAJADA de este teléfono sin bloquear la carga de la
+  /// cola: el rastro persistente del atasco
+  /// ([SyncEngine.atascoSinVerificar]) y la tabla más
+  /// atrasada, calculada directa de los watermarks (la foto
+  /// completa del motor incluye red y no debe esperarse
+  /// para pintar una pantalla local). Tolerante: si la
+  /// lectura falla, la tarjeta simplemente no sale.
+  Future<void> _cargarBajada() async {
+    try {
+      final atasco = await SyncEngine.instance.atascoSinVerificar();
+      final minR = await LocalDb.instance.tablaMasAtrasada(
+          excluir: {'borrados'}, esAdmin: _esDueno);
+      final ss =
+          int.tryParse(await LocalDb.instance.getMeta('server_seq') ?? '0') ??
+              0;
+      final atrasada = minR.tabla != null && ss > minR.wm
+          ? SyncEngine.nombreAmigableTabla(minR.tabla!)
+          : null;
+      if (!mounted) return;
+      if (_atasco != atasco || _tablaAtrasada != atrasada) {
+        setState(() {
+          _atasco = atasco;
+          _tablaAtrasada = atrasada;
+        });
+      }
+    } catch (_) {}
   }
 
   /// v1.2.9+46: reintenta una foto específica (resetea backoff).
