@@ -4,8 +4,19 @@
 /// descargan bajo demanda con la sesión del entrenador y se guardan en
 /// el almacenamiento de la app. En las listas solo se usa el caché
 /// (sin descargas automáticas); la ficha descarga si hace falta.
+///
+/// 1.31 (campo 2026-11-09): la cabecera vuelve a ser verdad. Las
+/// listas pintan SOLO desde disco (foto_local → caché) y piden la
+/// red a través de la cola de precarga de [FotoCache] (concurrencia
+/// baja, timeout corto, caché negativa con backoff, deduplicación
+/// en vuelo); [FotoCache.obtener] queda para la ficha, que es la
+/// descarga deliberada. Antes la fila descargaba con un GET de
+/// 30 s relanzado en cada reconstrucción: con 3G de 1–5 KB/s la
+/// foto moría a mitad de cuerpo y el avatar quedaba en iniciales
+/// toda la sesión, inundando además el enlace malo.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -52,6 +63,105 @@ Future<File?> resolverFotoSuplemento(
   return FotoCache.instance.obtener(storage);
 }
 
+/// Cola ÚNICA de precarga de fotos (1.31, campo 2026-11-09):
+/// las descargas que piden las LISTAS pasan por aquí, nunca
+/// directas desde la fila. Política:
+/// - concurrencia baja ([concurrencia], 3 por defecto): la
+///   lista no inunda el enlace;
+/// - timeout corto por descarga ([timeoutDescarga], 10 s):
+///   en red «en negro» el intento muere rápido en vez de
+///   quemar 30 s a mitad de cuerpo;
+/// - deduplicación en vuelo: la misma ruta no se descarga
+///   dos veces a la vez ni se encola dos veces;
+/// - caché negativa con backoff ([backoffFallo], 3 min): una
+///   foto que falló no se reintenta hasta que el backoff
+///   pasa — el scroll dejaba de relanzar intentos condenados;
+/// - aviso de aterrizaje ([aterrizajes]): cuando una foto
+///   llega, las filas visibles repintan por escucha.
+/// La descarga real la inyecta FotoCache; la política se
+/// prueba sola, sin red ni disco.
+class ColaPrecargaFotos {
+  ColaPrecargaFotos({
+    required Future<File?> Function(String ruta, Duration timeout)
+        descargador,
+    this.concurrencia = 3,
+    this.timeoutDescarga = const Duration(seconds: 10),
+    this.backoffFallo = const Duration(minutes: 3),
+    DateTime Function()? ahora,
+  })  : _descargador = descargador,
+        _ahora = ahora ?? DateTime.now;
+
+  final Future<File?> Function(String ruta, Duration timeout)
+      _descargador;
+  final int concurrencia;
+  final Duration timeoutDescarga;
+  final Duration backoffFallo;
+  final DateTime Function() _ahora;
+
+  final _cola = <String>[];
+  final _enCurso = <String, Future<File?>>{};
+  final _falloEn = <String, DateTime>{};
+  final _avisos = StreamController<String>.broadcast();
+
+  /// Rutas cuya foto acaba de aterrizar en la caché.
+  Stream<String> get aterrizajes => _avisos.stream;
+
+  /// ¿La ruta falló hace menos que el backoff?
+  bool enBackoff(String ruta) {
+    final f = _falloEn[ruta];
+    return f != null && _ahora().difference(f) < backoffFallo;
+  }
+
+  /// ¿La ruta está encolada o descargándose ahora mismo?
+  bool pendiente(String ruta) =>
+      _enCurso.containsKey(ruta) || _cola.contains(ruta);
+
+  /// Registra un fallo venido de fuera de la cola (la ficha
+  /// con obtener): las listas tampoco reintentan esa ruta
+  /// hasta que pase el backoff.
+  void registrarFallo(String ruta) => _falloEn[ruta] = _ahora();
+
+  /// Olvida el fallo de una ruta (foto nueva o invalidación
+  /// explícita): el próximo encolado puede reintentar ya.
+  void olvidarFallo(String ruta) => _falloEn.remove(ruta);
+
+  void encolar(Iterable<String> rutas) {
+    for (final r in rutas) {
+      if (r.isEmpty || pendiente(r) || enBackoff(r)) continue;
+      _cola.add(r);
+    }
+    _bombear();
+  }
+
+  void _bombear() {
+    while (_enCurso.length < concurrencia && _cola.isNotEmpty) {
+      final ruta = _cola.removeAt(0);
+      final fut = _descargarUna(ruta);
+      _enCurso[ruta] = fut;
+      fut.whenComplete(() {
+        _enCurso.remove(ruta);
+        _bombear();
+      });
+    }
+  }
+
+  Future<File?> _descargarUna(String ruta) async {
+    File? f;
+    try {
+      f = await _descargador(ruta, timeoutDescarga);
+    } catch (_) {
+      f = null;
+    }
+    if (f != null) {
+      _falloEn.remove(ruta);
+      if (!_avisos.isClosed) _avisos.add(ruta);
+    } else {
+      _falloEn[ruta] = _ahora();
+    }
+    return f;
+  }
+}
+
 class FotoCache {
   FotoCache._();
   static final FotoCache instance = FotoCache._();
@@ -63,6 +173,32 @@ class FotoCache {
   final _memoria = <String, File>{};
   // Fix Luna 8: lock simple para evitar evicciones concurrentes.
   bool _evictando = false;
+
+  /// 1.31: descargas de red en vuelo, por ruta (deduplicación:
+  /// la ficha y la cola nunca descargan lo mismo a la vez).
+  final _enVuelo = <String, Future<File?>>{};
+
+  /// 1.31: la cola de precarga de las listas (ver su doc). Su
+  /// descargador mira primero la caché (la ruta pudo aterrizar
+  /// por otra vía entre el encolado y el turno) y luego baja
+  /// con el timeout corto de la cola.
+  late final ColaPrecargaFotos _colaPrecarga = ColaPrecargaFotos(
+    descargador: (String ruta, Duration t) async {
+      final File? c = await enCache(ruta);
+      if (c != null) return c;
+      return _descargaCompartida(ruta, timeout: t);
+    },
+  );
+
+  /// Rutas cuya foto acaba de aterrizar (las filas repintan
+  /// por escucha al llegar la suya).
+  Stream<String> get aterrizajes => _colaPrecarga.aterrizajes;
+
+  /// 1.31: pide la descarga de fondo de [rutas] para las
+  /// listas (sin esperar nada: el resultado llega por
+  /// [aterrizajes] y por la caché). Respeta la caché
+  /// negativa y la deduplicación de la cola.
+  void precargar(Iterable<String> rutas) => _colaPrecarga.encolar(rutas);
 
   /// 1.23 (Delta Argón 3ª#7): tope de entradas del índice en
   /// memoria. El Map conserva el orden de inserción y
@@ -141,9 +277,43 @@ class FotoCache {
   /// Descarga la foto si no está en caché. Null si falla.
   /// v1.0.9: mejor manejo de errores.
   /// v1.2.8: aplica LRU tras guardar.
+  /// 1.31: SOLO para descargas deliberadas (la ficha): las
+  /// listas usan [precargar]. Deduplica en vuelo con la cola
+  /// y alimenta su caché negativa si falla (las listas no
+  /// deben reintentar tras el fallo de la ficha).
   Future<File?> obtener(String? storagePath) async {
     final ya = await enCache(storagePath);
-    if (ya != null || storagePath == null || storagePath.isEmpty) return ya;
+    if (ya != null || storagePath == null || storagePath.isEmpty) {
+      return ya;
+    }
+    final f = await _descargaCompartida(storagePath,
+        timeout: const Duration(seconds: 30));
+    if (f != null) {
+      _colaPrecarga.olvidarFallo(storagePath);
+    } else {
+      _colaPrecarga.registrarFallo(storagePath);
+    }
+    return f;
+  }
+
+  /// Descarga compartida en vuelo: si la ruta ya se está
+  /// bajando (la ficha o la cola), el llamador se une a ESE
+  /// futuro en vez de abrir otra descarga (manda el timeout
+  /// del que llegó primero). Null si falla.
+  Future<File?> _descargaCompartida(String storagePath,
+      {required Duration timeout}) {
+    final enVuelo = _enVuelo[storagePath];
+    if (enVuelo != null) return enVuelo;
+    final fut = _descargarRed(storagePath, timeout: timeout);
+    _enVuelo[storagePath] = fut;
+    fut.whenComplete(() => _enVuelo.remove(storagePath));
+    return fut;
+  }
+
+  /// La descarga de red en sí (sin caché previa ni negativa:
+  /// de eso se encargan [obtener] y la cola). Null si falla.
+  Future<File?> _descargarRed(String storagePath,
+      {required Duration timeout}) async {
     try {
       final token = _auth.session?.accessToken ?? '';
       final r = await http.get(
@@ -153,7 +323,7 @@ class FotoCache {
           'apikey': AppConfig.anonKey,
           if (token.isNotEmpty) 'Authorization': 'Bearer $token',
         },
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(timeout);
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
         // AA2: a la bitácora, no print (queda en diagnóstico).
         AppLog.error('fotos', 'cache_http',
@@ -184,6 +354,9 @@ class FotoCache {
   Future<void> invalidar(String? storagePath) async {
     if (storagePath == null || storagePath.isEmpty) return;
     _memoria.remove(storagePath);
+    // 1.31: una foto invalidada (nueva en la misma ruta) no
+    // hereda el backoff de la anterior.
+    _colaPrecarga.olvidarFallo(storagePath);
     try {
       final d = await _dir();
       final f = _archivoCache(d, storagePath);

@@ -219,7 +219,16 @@ Future<void> main() async {
   AppLog.info('app', 'inicio', d: 'IronBody Gym ${AppConfig.appVersion}');
   await ThemeController.load();
   // Subida en segundo plano (punto 21): aunque cierren la app.
-  await _programarSubidaFondo();
+  // 1.31 (campo 2026-11-09): el registro de WorkManager SALE
+  // de la cadena previa a runApp — con el canal colgado, los
+  // dos timeouts de 5 s de YB-TRA-09 en serie dejaban hasta
+  // ~10 s de pantalla de logo con 3G malo (sin datos, en
+  // cambio, todo moría al instante y la app abría al
+  // momento). Pintar nunca espera tareas de fondo: se
+  // dispara sin await y el registro se completa detrás del
+  // primer frame; sus timeouts quedan como cota del propio
+  // registro, ya fuera del camino crítico.
+  unawaited(_programarSubidaFondo());
   // Sesión vencida -> volver al login con aviso. v1.4.4: la raíz
   // (RaizSesion) ya vuelve a Login sola al desaparecer la sesión;
   // aquí solo se repliegan las pantallas apiladas y se avisa.

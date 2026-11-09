@@ -2475,12 +2475,19 @@ class AvatarCliente extends StatelessWidget {
 class AvatarClienteConFoto extends StatefulWidget {
   final String nombre;
   final String? fotoStorage;
+
+  /// 1.31 (campo 2026-11-09): la foto recién tomada en este
+  /// teléfono (clientes.foto_local), si el llamador la tiene:
+  /// es la fase disco 1 del resolvedor, como en la ficha y en
+  /// la fila de Buscar.
+  final String? fotoLocal;
   final TamanoAvatar tamano;
 
   const AvatarClienteConFoto({
     super.key,
     required this.nombre,
     required this.fotoStorage,
+    this.fotoLocal,
     this.tamano = TamanoAvatar.m,
   });
 
@@ -2493,10 +2500,23 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
   File? _foto;
   String? _resueltoPara;
 
+  // 1.31: escucha de aterrizajes de la cola de precarga,
+  // como la fila de Buscar.
+  StreamSubscription<String>? _subFoto;
+
   @override
   void initState() {
     super.initState();
+    _subFoto = FotoCache.instance.aterrizajes.listen((ruta) {
+      if (ruta == _resueltoPara && _foto == null) _resolverFoto();
+    });
     _resolverFoto();
+  }
+
+  @override
+  void dispose() {
+    _subFoto?.cancel();
+    super.dispose();
   }
 
   @override
@@ -2508,6 +2528,10 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
     _resolverFoto();
   }
 
+  /// Dos fases (1.31, campo 2026-11-09), como la fila de
+  /// Buscar: el widget solo espera DISCO (foto_local →
+  /// caché); la red va por la cola de precarga y la
+  /// miniatura entra por la escucha de aterrizajes.
   Future<void> _resolverFoto() async {
     final sp = widget.fotoStorage;
     // Si ESTA foto ya está resuelta y mostrada, la
@@ -2517,6 +2541,15 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
       setState(() => _foto = null);
     }
     _resueltoPara = sp;
+    final local = widget.fotoLocal;
+    if (local != null && local.isNotEmpty) {
+      final f = File(local);
+      if (await f.exists()) {
+        if (!mounted || _resueltoPara != sp) return;
+        setState(() => _foto = f);
+        return;
+      }
+    }
     if (sp == null || sp.isEmpty) return;
     final enCache = await FotoCache.instance.enCache(sp);
     if (!mounted || _resueltoPara != sp) return;
@@ -2524,9 +2557,7 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
       setState(() => _foto = enCache);
       return;
     }
-    final descargada = await FotoCache.instance.obtener(sp);
-    if (!mounted || _resueltoPara != sp) return;
-    if (descargada != null) setState(() => _foto = descargada);
+    FotoCache.instance.precargar([sp]);
   }
 
   @override

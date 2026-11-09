@@ -1710,10 +1710,25 @@ class _FilaClienteState extends State<_FilaCliente> {
   File? _foto;
   String? _resueltoPara;
 
+  // 1.31 (campo 2026-11-09): escucha de aterrizajes de la
+  // cola de precarga — cuando la foto de ESTA fila llega a
+  // la caché, se re-resuelve desde disco y la miniatura
+  // aparece sin esperar a un scroll o a volver de la ficha.
+  StreamSubscription<String>? _subFoto;
+
   @override
   void initState() {
     super.initState();
+    _subFoto = FotoCache.instance.aterrizajes.listen((ruta) {
+      if (ruta == _resueltoPara && _foto == null) _resolverFoto();
+    });
     _resolverFoto();
+  }
+
+  @override
+  void dispose() {
+    _subFoto?.cancel();
+    super.dispose();
   }
 
   @override
@@ -1725,10 +1740,16 @@ class _FilaClienteState extends State<_FilaCliente> {
     _resolverFoto();
   }
 
-  /// Lee la caché; si hay foto_storage sin caché, la descarga en
-  /// segundo plano. Así la miniatura aparece aunque la fila ya se
-  /// hubiera construido antes (al volver de la ficha, Flutter reutiliza
-  /// el estado y el initState no se repite).
+  /// Resuelve la foto en DOS FASES (1.31, campo 2026-11-09):
+  /// la fila solo espera DISCO — primero `foto_local` (la foto
+  /// recién tomada en ESTE teléfono, el paso que la ficha
+  /// tiene desde 1.28 y la lista nunca heredó) y luego la
+  /// caché de FotoCache. Si no está en disco, la red va por
+  /// la cola de precarga (concurrencia baja, timeout corto,
+  /// caché negativa) y la miniatura entra por la escucha de
+  /// aterrizajes. Antes la fila esperaba un GET de 30 s que
+  /// con 3G malo moría a mitad y dejaba iniciales toda la
+  /// sesión, relanzado en cada reconstrucción.
   Future<void> _resolverFoto() async {
     final sp = widget.cliente['foto_storage'] as String?;
     // D-09 (1.21): si ESTA foto ya está resuelta y mostrada, la
@@ -1742,7 +1763,19 @@ class _FilaClienteState extends State<_FilaCliente> {
       setState(() => _foto = null);
     }
     _resueltoPara = sp;
+    // FASE DISCO 1: la foto local de este teléfono manda
+    // (vale aunque foto_storage aún sea null: no ha subido).
+    final local = widget.cliente['foto_local'] as String?;
+    if (local != null && local.isNotEmpty) {
+      final f = File(local);
+      if (await f.exists()) {
+        if (!mounted || _resueltoPara != sp) return;
+        setState(() => _foto = f);
+        return;
+      }
+    }
     if (sp == null || sp.isEmpty) return;
+    // FASE DISCO 2: la caché descargada.
     final enCache =
         await FotoCache.instance.enCache(sp);
     if (!mounted || _resueltoPara != sp) return;
@@ -1750,9 +1783,8 @@ class _FilaClienteState extends State<_FilaCliente> {
       setState(() => _foto = enCache);
       return;
     }
-    final descargada = await FotoCache.instance.obtener(sp);
-    if (!mounted || _resueltoPara != sp) return;
-    if (descargada != null) setState(() => _foto = descargada);
+    // FASE RED (fuera de la fila): precarga encolada.
+    FotoCache.instance.precargar([sp]);
   }
 
   @override

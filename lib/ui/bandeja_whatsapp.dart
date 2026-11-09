@@ -825,6 +825,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
               AvatarClienteConFoto(
                 nombre: '${a['nombre'] ?? ''}',
                 fotoStorage: a['foto_storage'] as String?,
+                fotoLocal: a['foto_local'] as String?,
               ),
               const SizedBox(width: AppEspacio.sm),
               // v1.3.8: tocar la tarjeta abre la ficha del cliente.
