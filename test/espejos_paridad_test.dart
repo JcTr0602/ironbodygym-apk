@@ -35,6 +35,9 @@ const exentasDeWatermark = {
   'permisos_bandeja',
   'espejo_gympedia_borradores',
   'cliente_mediciones',
+  // Congelación 0.5: secuencia propia (cliente_congelaciones_
+  // seq en Supabase), como las tres de bandeja.
+  'cliente_congelaciones',
 };
 
 const tablas120 = {

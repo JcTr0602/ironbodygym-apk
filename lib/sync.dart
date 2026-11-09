@@ -4075,6 +4075,8 @@ class SyncEngine {
         tabla == 'nomina_liquidada' ||
         tabla == 'turnos_apertura' ||
         tabla == 'diferencias_caja' ||
+        // Congelación 0.5: id TEXT (uuid) + data jsonb.
+        tabla == 'cliente_congelaciones' ||
         // 1.21: candado de acceso (id TEXT + data jsonb).
         tabla == 'acceso_bloqueos') {
       final id = '${m['id'] ?? ''}';
@@ -4529,6 +4531,11 @@ class SyncEngine {
     // en las tres listas y en la rama de id TEXT (lección A-01:
     // un espejo fuera de alguna no baja nunca).
     'acceso_bloqueos',
+    // Congelación 0.5: solicitudes de congelación (SOLO dueño:
+    // RLS es_dueno() en el espejo + denegación en el manifiesto
+    // + tablasProhibidasEntrenador; los motivos pueden traer
+    // datos de salud y jamás llegan al teléfono del staff).
+    'cliente_congelaciones',
   ];
 
   /// H-08 (1.23, capa 3 del diseño de Argón): espejos que un rol
@@ -4629,6 +4636,9 @@ class SyncEngine {
       'gympedia_solicitudes',
       'permisos_bandeja',
       'espejo_gympedia_borradores',
+      // Congelación 0.5: su sync_seq nace de la secuencia
+      // propia cliente_congelaciones_seq en Supabase.
+      'cliente_congelaciones',
     };
     const tablasPurgables = {
       'clientes',
@@ -4667,6 +4677,9 @@ class SyncEngine {
       // tablasSecuenciaPropia: su sync_seq es el global, no una
       // secuencia por tabla como los 3 espejos de bandeja.
       'cliente_mediciones',
+      // Congelación 0.5: la app nunca inserta filas optimistas
+      // en este espejo (todo viaja por RPC), purgar es seguro.
+      'cliente_congelaciones',
     };
     try {
       // Programación idempotente por tabla (panel v1.4.4): la
@@ -4826,6 +4839,7 @@ class SyncEngine {
       'solicitudes_relleno': 'sync_solicitudes_relleno',
       'avisos_entrenadores': 'sync_avisos_entrenadores',
       'avisos_vistos': 'sync_avisos_vistos',
+      'cliente_congelaciones': 'sync_cliente_congelaciones',
       // Fase A 2026-10-25 (A4 + pulls 1.10/1.11): espejos planos
       // del puente (columnas exactas en la rama de select y en
       // _prepararFilaMirror). Los nombres locales llevan el
@@ -6116,6 +6130,9 @@ class SyncEngine {
     // 1.30 (D2, GEN-10): vistos de avisos; la RPC lo admite
     // solo para el dueño (allowlist 43 tras el SQL GEN-10).
     'sync_avisos_vistos': 'avisos_vistos',
+    // Congelación 0.5: la RPC sync_manifiesto lo admite solo
+    // para el dueño (allowlist 44 tras el SQL de la pieza).
+    'sync_cliente_congelaciones': 'cliente_congelaciones',
     'sync_nomina_bonos': 'nomina_bonos',
     'sync_tarifas_especiales': 'espejo_tarifas_especiales',
     'sync_cliente_mediciones': 'cliente_mediciones',

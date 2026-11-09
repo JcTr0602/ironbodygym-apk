@@ -117,7 +117,7 @@ class LocalDb {
   /// (el mismo hueco que v62 cazó en `acceso_blequeos`): la flota
   /// en v68 no lo creaba nunca. El paso oldV<69 llama al MISMO
   /// método que onCreate (idempotente).
-  static const int versionActual = 69;
+  static const int versionActual = 70;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1610,6 +1610,13 @@ class LocalDb {
           // watermark y no toca lo ya creado).
           await _crearTablasBloque3(db);
         }
+        if (oldV < 70) {
+          // Congelación 0.5: espejo local de las solicitudes de
+          // congelación (solo-dueño). MISMO método que onCreate
+          // (idempotente: paridad garantizada, siembra su
+          // watermark y no toca lo ya creado).
+          await _crearTablaCongelaciones(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2844,6 +2851,10 @@ class LocalDb {
         // Bandeja GymPedia (1.19, v49). MISMO método en onCreate y
         // en onUpgrade (ver _crearTablasBandeja).
         await _crearTablasBandeja(db);
+        // Congelación 0.5 (v70): espejo solo-dueño de las
+        // solicitudes de congelación. MISMO método en onCreate y
+        // en onUpgrade (ver _crearTablaCongelaciones).
+        await _crearTablaCongelaciones(db);
         // Registro de envíos de transferencia (1.19, v50). MISMO
         // método en onCreate y en onUpgrade (ver
         // _crearTablaEnviosTransferencia).
@@ -3246,6 +3257,23 @@ class LocalDb {
   /// segura: la app nunca inserta filas optimistas en estos
   /// espejos, y permisos la NECESITA para que una revocación
   /// (fila borrada del espejo) llegue al teléfono.
+  /// Congelación 0.5 (v70): espejo local de
+  /// sync_cliente_congelaciones — id TEXT (uuid), la fila
+  /// entera en `data` (jsonb) y sync_seq de su secuencia
+  /// propia. Solo baja en el teléfono del dueño (RLS +
+  /// manifiesto + tablasProhibidasEntrenador): los motivos
+  /// pueden traer datos de salud.
+  static Future<void> _crearTablaCongelaciones(Database db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS cliente_congelaciones ('
+        'id TEXT PRIMARY KEY, data TEXT NOT NULL, '
+        'sync_seq INTEGER NOT NULL)');
+    await db.execute('CREATE INDEX IF NOT EXISTS '
+        'idx_cliente_congelaciones_seq ON cliente_congelaciones(sync_seq)');
+    await db.rawInsert(
+        "INSERT OR IGNORE INTO meta (k, v) VALUES "
+        "('wm_cliente_congelaciones', '0')");
+  }
+
   static Future<void> _crearTablasBandeja(Database db) async {
     for (final t in [
       'gympedia_solicitudes',
@@ -8570,6 +8598,9 @@ class LocalDb {
     // el entrenador no descarga ni el suyo por esta vía (su
     // marca vive en avisos_vistos_local y sube por la op).
     'avisos_vistos',
+    // Congelación 0.5: las solicitudes (con su motivo, que puede
+    // traer datos de salud) son SOLO del dueño, como los gastos.
+    'cliente_congelaciones',
   };
 
   static const tablasConWatermark = [

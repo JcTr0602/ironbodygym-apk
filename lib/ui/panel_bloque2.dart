@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../cliente_protegido.dart';
+import '../congelaciones_gestion.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
@@ -311,10 +312,19 @@ class _VencimientosProximosScreenState
     // 1.24 B2: límite por aritmética de fecha pura (sumarDiasIso).
     final limite = sumarDiasIso(hoy, 7);
     final todos = await LocalDb.instance.allMirror('clientes');
+    // Congelación 0.5 (M2): con la pausa aprobada EN CURSO el
+    // cliente no está vencido ni por vencer: su fecha se
+    // mueve al terminar. Solo excluye en el teléfono del
+    // dueño (su espejo trae las filas; el del entrenador no).
+    final congelados = await CongelacionesService.instance
+        .idsCongeladosEnCurso(ahoraHabana());
     final vencidos = <Map<String, dynamic>>[];
     final proximos = <Map<String, dynamic>>[];
     for (final c in todos) {
       if (c['cuenta_casa'] == 1 || c['cuenta_casa'] == true) continue;
+      if (congelados.contains((c['id'] as num?)?.toInt() ?? 0)) {
+        continue;
+      }
       // P2#5: solo activos (esto ya excluye congelado, inactivo y
       // la cáscara 'eliminado'), y nunca protegidos para no-dueño.
       if ((c['estado'] as String?) != 'activo') continue;

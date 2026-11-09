@@ -81,6 +81,7 @@ import 'historial_caja.dart';
 import 'app_bar.dart';
 import 'invitados.dart';
 import 'solicitudes_adelanto.dart';
+import 'congelaciones.dart';
 import 'avisos_entrenador.dart';
 import 'editor_avisos_clientes.dart';
 import 'editor_rutinas_gym.dart';
@@ -1348,6 +1349,8 @@ class _AdminScreenState extends State<AdminScreen> {
         _ir(const AdelantosListaScreen());
       case 'solicitudes_adelanto':
         _ir(const SolicitudesAdelantoScreen());
+      case 'congelaciones':
+        _ir(const CongelacionesScreen());
       case 'usuarios':
         _ir(const ControlAccesoScreen());
       case 'candado':
@@ -2983,6 +2986,16 @@ class _AdminScreenState extends State<AdminScreen> {
         'Aprobar (Nómina / Pendiente) o rechazar',
         () => _ir(const SolicitudesAdelantoScreen()),
       ),
+      // Congelación 0.5: SOLO el dueño (los motivos pueden
+      // traer datos de salud; el espejo ni siquiera baja al
+      // teléfono de un entrenador).
+      if (AuthService().isOwner)
+        _tarjetaFlujo(
+          Icons.ac_unit_rounded,
+          'Congelaciones',
+          'Pausas de mensualidad pedidas desde la app de Clientes',
+          () => _ir(const CongelacionesScreen()),
+        ),
     ];
   }
 

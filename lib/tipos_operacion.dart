@@ -117,6 +117,11 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
   // 1.30 (D2, GEN-10): acuse de visto (respaldo del dueño).
   'marcar_aviso_visto':
       TipoOperacionInfo('Aviso visto', Icons.visibility_rounded),
+  // Congelación 0.5: la genera el servidor (barrido del puente)
+  // con el dispositivo del dueño; ningún teléfono la encola,
+  // pero la cola y el historial la etiquetan.
+  'congelar_extender':
+      TipoOperacionInfo('Congelación: días devueltos', Icons.ac_unit_rounded),
   'crear_suplemento':
       TipoOperacionInfo('Nuevo suplemento', Icons.fitness_center_rounded),
   'editar_suplemento':

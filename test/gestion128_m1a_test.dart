@@ -567,7 +567,7 @@ void main() {
       // migración del espejo avisos_vistos). La columna de
       // v65 sigue naciendo en el esquema limpio, que es lo
       // que aquí se fija.
-      expect(LocalDb.versionActual, 69);
+      expect(LocalDb.versionActual, 70);
     });
   });
 

@@ -14,6 +14,7 @@ import 'app_log.dart';
 import 'auth.dart';
 import 'cobro_parcial.dart';
 import 'cliente_protegido.dart';
+import 'congelaciones_gestion.dart';
 import 'entrenador_identidad.dart';
 import 'localdb.dart';
 import 'adelantos.dart';
@@ -2981,6 +2982,15 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   // _activos() por su cuenta: 4 lecturas completas del espejo).
   final activos = await _activos();
 
+  // Congelación 0.5 (M2/M5): un cliente con la pausa aprobada
+  // EN CURSO no recibe avisos de vencimiento (vencido, vence
+  // hoy y por vencer salen; el cumpleaños NO se toca: es
+  // social, no de cobro). El conjunto sale del espejo
+  // solo-dueño: en el teléfono de un entrenador viene vacío
+  // por diseño y sus secciones no cambian.
+  final congeladosHoy = await CongelacionesService.instance
+      .idsCongeladosEnCurso(ahoraHabana());
+
   String nombreDe(Map<String, dynamic> c) =>
       '${c['nombre'] ?? 'Cliente'}'.trim();
   String telDe(Map<String, dynamic> c) => '${c['telefono'] ?? ''}';
@@ -2996,6 +3006,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
     // pero la función no debe fiarse de eso).
     if (esVistaProtegida(c, esDueno: esDueno)) continue;
     final cid = (c['id'] as num?)?.toInt() ?? 0;
+    if (congeladosHoy.contains(cid)) continue;
     idsVencidos.add(cid);
     final ph = '${c['pagado_hasta'] ?? ''}';
     final dias = _diasAtraso(ph, hoy);
@@ -3053,6 +3064,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   for (final c in await vencenHoy(activosPre: activos)) {
     if (esVistaProtegida(c, esDueno: esDueno)) continue;
     final cid = (c['id'] as num?)?.toInt() ?? 0;
+    if (congeladosHoy.contains(cid)) continue;
     idsVenceHoy.add(cid);
     avisos.add({
       'tipo': 'vence_hoy',
@@ -3069,6 +3081,7 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   for (final c in await porVencer(dias: 3, activosPre: activos)) {
     if (esVistaProtegida(c, esDueno: esDueno)) continue;
     final cid = (c['id'] as num?)?.toInt() ?? 0;
+    if (congeladosHoy.contains(cid)) continue;
     if (idsVenceHoy.contains(cid)) continue;
     final ph = '${c['pagado_hasta'] ?? ''}';
     final fechaCorta =

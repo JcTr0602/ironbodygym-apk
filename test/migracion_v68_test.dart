@@ -77,8 +77,8 @@ void main() {
     // migración del espejo avisos_vistos); lo que este
     // test protege (la columna telegram_id de v68) no
     // cambia — solo el número al que termina la apertura.
-    expect(LocalDb.versionActual, 69);
-    expect(await db.getVersion(), 69);
+    expect(LocalDb.versionActual, 70);
+    expect(await db.getVersion(), 70);
     final info = await _infoFotosCola(db);
     expect(info['telegram_id'], startsWith('INTEGER'),
         reason: 'sin la columna, la cola no puede separar '
@@ -102,7 +102,7 @@ void main() {
     // Cierre §17: la apertura sigue hasta la 69 (ver el
     // test de la limpia); el paso 67→68 corre igual en
     // la cadena y es lo que protege este test.
-    expect(await db.getVersion(), 69);
+    expect(await db.getVersion(), 70);
     final filas = await db.query('fotos_cola',
         columns: ['op_uuid', 'telegram_id', 'estado'],
         orderBy: 'op_uuid');

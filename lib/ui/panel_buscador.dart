@@ -110,6 +110,12 @@ const catalogoFuncionesPanel = <FuncionPanel>[
       titulo: 'Solicitudes de adelanto',
       sinonimos: ['aprobar adelanto', 'peticiones de adelanto'],
       icono: Icons.request_quote_rounded),
+  FuncionPanel(
+      id: 'congelaciones',
+      titulo: 'Congelaciones',
+      sinonimos: ['congelar mensualidad', 'pausar mensualidad',
+        'solicitudes de congelación'],
+      icono: Icons.ac_unit_rounded),
   // Clientes e invitados.
   FuncionPanel(
       id: 'usuarios',

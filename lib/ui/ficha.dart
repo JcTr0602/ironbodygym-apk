@@ -40,6 +40,7 @@ import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'diseno.dart';
 import 'ficha_acceso_app.dart';
+import 'ficha_congelacion.dart';
 import 'ficha_marcas.dart';
 import 'servicios.dart';
 import 'venta_suplemento.dart';
@@ -3379,6 +3380,15 @@ class _FichaScreenState extends State<FichaScreen> {
                           telefonoEfectivoWa:
                               _telefonoEfectivoWa(c),
                         ),
+                      const SizedBox(height: AppEspacio.md),
+                      // Congelación 0.5: sello y acciones de la
+                      // pausa aprobada / solicitud pendiente
+                      // (widget con estado propio; sin nada
+                      // vigente no ocupa espacio; el entrenador
+                      // solo ve la ventana, nunca el motivo).
+                      SeccionCongelacionFicha(
+                        clienteId: widget.clienteId,
+                      ),
                       const SizedBox(height: AppEspacio.md),
                       // 1.30 (§14): las marcas que el
                       // cliente registra en su app y su
