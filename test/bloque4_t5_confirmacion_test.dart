@@ -163,4 +163,44 @@ void main() {
     expect(find.byType(MontoAnimado), findsOneWidget);
     expect(find.text('2500 CUP'), findsOneWidget);
   });
+
+  testWidgets(
+      '1.31 (Yunque A, Pieza 3): con comprobantePie el recibo '
+      'ofrece «Enviar comprobante» junto al envío de texto; sin '
+      'él, no aparece', (t) async {
+    t.view.physicalSize = const Size(1080, 2400);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      t.view.resetPhysicalSize();
+      t.view.resetDevicePixelRatio();
+    });
+    await t.pumpWidget(_arnes(ConfirmacionCobroScreen(
+      nombreCliente: 'María Pérez',
+      monto: '2000 CUP',
+      nuevoVencimiento: '2026-12-03',
+      accionExtra: AccionExtraConfirmacion(
+        texto: 'Enviar recibo por WhatsApp',
+        icono: Icons.send_rounded,
+        alPulsar: () {},
+      ),
+      comprobantePie: 'Recibo de pago de prueba',
+    )));
+    await t.pump(const Duration(milliseconds: 400));
+    // Los dos botones conviven: texto (wa.me) e imagen.
+    expect(find.text('Enviar recibo por WhatsApp'), findsOneWidget);
+    expect(find.text('Enviar comprobante'), findsOneWidget);
+    expect(find.byIcon(Icons.image_rounded), findsOneWidget);
+    // El ticket queda envuelto en su RepaintBoundary de captura.
+    expect(find.byType(RepaintBoundary), findsWidgets);
+
+    await t.pumpWidget(_arnes(const ConfirmacionCobroScreen(
+      nombreCliente: 'María Pérez',
+      monto: '2000 CUP',
+      nuevoVencimiento: '2026-12-03',
+    )));
+    await t.pump(const Duration(milliseconds: 400));
+    expect(find.text('Enviar comprobante'), findsNothing,
+        reason: 'sin comprobantePie (venta y llamadas viejas) '
+            'el botón no existe');
+  });
 }

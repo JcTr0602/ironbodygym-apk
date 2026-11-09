@@ -798,6 +798,19 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
   // pantalla se haya cerrado, el cobro EXISTE → guardado.
   if (!context.mounted) return ResultadoCobro.guardado;
 
+  // 1.31 (Yunque A, Pieza 3): el pie del comprobante en imagen
+  // es el mismo texto del recibo que se envía por WhatsApp.
+  final pieComprobante = textoReciboCobroWa(
+    nombreCliente: nombreCliente,
+    montoTxt: '${fmtMonto(monto)} CUP',
+    metodoTxt: '${payload['metodo'] ?? ''}' == 'transferencia'
+        ? 'Transferencia'
+        : 'Efectivo',
+    periodoTxt: periodoTextoPreview(payload),
+    vencimientoTxt:
+        vencRaw.length >= 10 ? fmtFecha(vencRaw) : vencRaw,
+  );
+
   final resultado = await Navigator.of(context).push<String>(
     RutaIron(
       builder: (_) => ConfirmacionCobroScreen(
@@ -817,6 +830,9 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         // 1.25 T66: el escalón también en el recibo.
         escalonTexto:
             escalonTextoPreview('${payload['_escalon'] ?? ''}'),
+        // 1.31 (Yunque A, Pieza 3): «Enviar comprobante» con
+        // la foto del ticket y este texto como pie.
+        comprobantePie: pieComprobante,
         // 1.25 T69: enviar el recibo por WhatsApp si el
         // cliente tiene teléfono en su ficha.
         // 1.30 (Oleada 10, FICHA-06): sin teléfono, el

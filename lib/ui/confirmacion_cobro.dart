@@ -17,11 +17,22 @@
 /// se esconde y la corrección queda solo en el panel separado
 /// del dueño. Al cerrar la pantalla, la ventana termina. El
 /// Deshacer solo lo usa el cobro (único llamador con opUuid).
+/// 1.31 (Yunque A, Pieza 3): con [ConfirmacionOperacionScreen.comprobantePie]
+/// la pantalla ofrece además «Enviar comprobante»: fotografía el
+/// ticket (RepaintBoundary, patrón de la foto de nómina) y lo
+/// comparte como PNG por el selector del sistema con el texto del
+/// recibo como pie. Convive con el botón de texto (wa.me no admite
+/// imágenes). Solo el cobro lo activa.
 library;
 
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../localdb.dart';
 import 'componentes.dart';
@@ -75,6 +86,12 @@ class ConfirmacionOperacionScreen extends StatefulWidget {
   /// Acción extra opcional (WhatsApp en la venta).
   final AccionExtraConfirmacion? accionExtra;
 
+  /// 1.31 (Yunque A, Pieza 3): pie de texto del comprobante en
+  /// imagen. Si viene, la pantalla muestra «Enviar comprobante»
+  /// bajo la acción extra: captura el ticket a PNG y lo comparte
+  /// por el selector del sistema con este texto como pie.
+  final String? comprobantePie;
+
   /// Op local del cobro. null = confirmación sin deshacer.
   final String? opUuid;
 
@@ -89,6 +106,7 @@ class ConfirmacionOperacionScreen extends StatefulWidget {
     this.comprobanteTitulo,
     this.comprobanteTexto,
     this.accionExtra,
+    this.comprobantePie,
     this.opUuid,
   });
 
@@ -104,6 +122,37 @@ class _ConfirmacionOperacionScreenState
   int _segundos = _ventanaSegundos;
   bool _puedeDeshacer = false;
   bool _yaSubio = false;
+
+  /// 1.31 (Yunque A, Pieza 3): la foto del ticket del recibo.
+  final GlobalKey _ticketKey = GlobalKey();
+  bool _compartiendoComprobante = false;
+
+  /// Fotografía el ticket y lo comparte como PNG con el texto
+  /// del recibo como pie (patrón de la foto de nómina, M3-C3).
+  Future<void> _enviarComprobante() async {
+    if (_compartiendoComprobante) return;
+    setState(() => _compartiendoComprobante = true);
+    try {
+      final boundary = _ticketKey.currentContext!
+          .findRenderObject() as RenderRepaintBoundary;
+      final imagen = await boundary.toImage(pixelRatio: 3.0);
+      final datos =
+          await imagen.toByteData(format: ui.ImageByteFormat.png);
+      if (datos == null) throw 'sin imagen';
+      final dir = await getTemporaryDirectory();
+      final f = await File('${dir.path}/comprobante_cobro.png')
+          .writeAsBytes(datos.buffer.asUint8List());
+      await Share.shareXFiles([XFile(f.path)],
+          text: widget.comprobantePie);
+    } catch (_) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo compartir la imagen',
+            significado: SignificadoChip.error);
+      }
+    } finally {
+      if (mounted) setState(() => _compartiendoComprobante = false);
+    }
+  }
 
   @override
   void initState() {
@@ -241,7 +290,11 @@ class _ConfirmacionOperacionScreenState
                 // separa del detalle.
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xxl),
-                  child: Container(
+                  child: RepaintBoundary(
+                    // 1.31 (Yunque A, Pieza 3): el ticket es lo
+                    // que se fotografía para «Enviar comprobante».
+                    key: _ticketKey,
+                    child: Container(
                     decoration: BoxDecoration(
                       color: AppColores.superficie(context),
                       borderRadius:
@@ -284,6 +337,7 @@ class _ConfirmacionOperacionScreenState
                             ),
                           ),
                       ],
+                    ),
                     ),
                   ),
                 ),
@@ -339,6 +393,26 @@ class _ConfirmacionOperacionScreenState
                         icon: Icon(widget.accionExtra!.icono),
                         label: Text(widget.accionExtra!.texto),
                         onPressed: widget.accionExtra!.alPulsar,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                // 1.31 (Yunque A, Pieza 3): el comprobante en
+                // imagen, junto al envío de texto (wa.me no
+                // admite imágenes: conviven los dos botones).
+                if (widget.comprobantePie != null) ...[
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 48),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.image_rounded),
+                        label: const Text('Enviar comprobante'),
+                        onPressed: _compartiendoComprobante
+                            ? null
+                            : _enviarComprobante,
                       ),
                     ),
                   ),
@@ -504,6 +578,11 @@ class ConfirmacionCobroScreen extends StatelessWidget {
   /// recibo por WhatsApp), la misma vía de la venta.
   final AccionExtraConfirmacion? accionExtra;
 
+  /// 1.31 (Yunque A, Pieza 3): pie del comprobante en imagen
+  /// (el texto del recibo); activa el botón «Enviar
+  /// comprobante» de la pantalla.
+  final String? comprobantePie;
+
   const ConfirmacionCobroScreen({
     super.key,
     required this.nombreCliente,
@@ -515,6 +594,7 @@ class ConfirmacionCobroScreen extends StatelessWidget {
     this.montoFormato,
     this.escalonTexto,
     this.accionExtra,
+    this.comprobantePie,
   });
 
   @override
@@ -534,6 +614,7 @@ class ConfirmacionCobroScreen extends StatelessWidget {
       ],
       opUuid: opUuid,
       accionExtra: accionExtra,
+      comprobantePie: comprobantePie,
     );
   }
 }
