@@ -20,6 +20,7 @@ import '../tarifa_especial.dart';
 import '../tiempo.dart';
 import '../tipos_pago.dart';
 import 'componentes.dart';
+import 'foto_elegir.dart';
 import 'diseno.dart';
 
 /// Selección de período hecha en el diálogo.
@@ -1208,8 +1209,18 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                       ),
                     );
                     if (origen == null) return;
-                    final img = await ImagePicker().pickImage(
-                      source: origen == 'camera'
+                    if (!context.mounted) return;
+                    // Cierre §17 (×10): por la vía segura de la
+                    // casa (foto_elegir.dart) — try/catch con
+                    // aviso visible, recuperación con
+                    // retrieveLostData y guarda anti-doble-toque.
+                    // Era un pickImage pelado en el flujo de
+                    // cobro diario: el patrón del fallo de
+                    // campo 2026-11-07 (selector colgado = toque
+                    // muerto en silencio).
+                    final img = await elegirFotoSegura(
+                      context,
+                      origen: origen == 'camera'
                           ? ImageSource.camera
                           : ImageSource.gallery,
                     );

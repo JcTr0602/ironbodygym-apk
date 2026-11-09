@@ -16,6 +16,7 @@ import '../tiempo.dart' show ahoraHabana, aHabana;
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
+import 'foto_elegir.dart';
 
 /// Gestión de usuarios APK (v1.0.12, mejoras v1.0.14).
 /// Lista desde sync_estado (publicada por el puente), acciones directas
@@ -341,9 +342,13 @@ Hola $username, estas son tus credenciales para la app del gym:
       mostrarSnack(context, 'Solo el dueño puede gestionar usuarios.', significado: SignificadoChip.alerta);
       return;
     }
-    final picker = ImagePicker();
-    final img = await picker.pickImage(
-      source: ImageSource.gallery,
+    // Cierre §17 (×10): por la vía segura de la casa
+    // (foto_elegir.dart) — try/catch con aviso, recuperación
+    // con retrieveLostData y guarda anti-doble-toque. El
+    // pickImage vivía fuera del try que cubre el resto.
+    final img = await elegirFotoSegura(
+      context,
+      origen: ImageSource.gallery,
       maxWidth: 800,
       maxHeight: 800,
       imageQuality: 75, // Gemini: compresión obligatoria para Cuba

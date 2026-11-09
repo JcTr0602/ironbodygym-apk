@@ -112,7 +112,12 @@ class LocalDb {
   /// A P-1 de Argón) y se resetea a 0 el watermark de
   /// turnos_cierre (trampa E-01: sin reset, los teléfonos con la
   /// 1.23 jamás bajarían las 7 columnas nuevas de los cierres).
-  static const int versionActual = 68;
+  /// v69 (1.30, cierre §17): el espejo `avisos_vistos` de GEN-10
+  /// nació en _crearTablasBloque3 sin paso de migración ni bump
+  /// (el mismo hueco que v62 cazó en `acceso_blequeos`): la flota
+  /// en v68 no lo creaba nunca. El paso oldV<69 llama al MISMO
+  /// método que onCreate (idempotente).
+  static const int versionActual = 69;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1591,6 +1596,19 @@ class LocalDb {
           // una foto a una cuenta nunca detiene su subida.
           await _addColumnIfMissing(
               db, 'fotos_cola', 'telegram_id', 'INTEGER');
+        }
+        if (oldV < 69) {
+          // 1.30 (D2, GEN-10) + cierre §17 (auditoría ×10):
+          // el espejo avisos_vistos nació dentro de
+          // _crearTablasBloque3 SIN paso de migración propio
+          // y la versión no subió: una instalación ya en v68
+          // (toda la flota con la 1.29) jamás disparaba el
+          // camino que lo crea y la tabla no nacía nunca —
+          // «Visto por» muerto y un error por ciclo en el
+          // pull del dueño. MISMO método que onCreate
+          // (idempotente: paridad garantizada, siembra su
+          // watermark y no toca lo ya creado).
+          await _crearTablasBloque3(db);
         }
       },
     );

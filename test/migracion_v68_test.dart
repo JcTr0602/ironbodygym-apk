@@ -73,8 +73,12 @@ void main() {
       'telegram_id INTEGER', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 68);
-    expect(await db.getVersion(), 68);
+    // Cierre §17: versionActual subió a 69 (paso de
+    // migración del espejo avisos_vistos); lo que este
+    // test protege (la columna telegram_id de v68) no
+    // cambia — solo el número al que termina la apertura.
+    expect(LocalDb.versionActual, 69);
+    expect(await db.getVersion(), 69);
     final info = await _infoFotosCola(db);
     expect(info['telegram_id'], startsWith('INTEGER'),
         reason: 'sin la columna, la cola no puede separar '
@@ -95,7 +99,10 @@ void main() {
     await LocalDb.resetParaTest(borrarArchivo: false);
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 68);
+    // Cierre §17: la apertura sigue hasta la 69 (ver el
+    // test de la limpia); el paso 67→68 corre igual en
+    // la cadena y es lo que protege este test.
+    expect(await db.getVersion(), 69);
     final filas = await db.query('fotos_cola',
         columns: ['op_uuid', 'telegram_id', 'estado'],
         orderBy: 'op_uuid');

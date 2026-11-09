@@ -24,6 +24,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
+import 'foto_elegir.dart';
 
 class _RefEdit {
   final titulo = TextEditingController();
@@ -681,8 +682,16 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     }
     // Tope real de 1024 px (panel): el selector ya entrega la
     // imagen acotada y la compresión no la agranda.
-    final img = await ImagePicker().pickImage(
-        source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024);
+    // Cierre §17 (×10): por la vía segura de la casa
+    // (foto_elegir.dart). El pickImage vivía FUERA del try de
+    // la compresión: un fallo del selector (already_active)
+    // salía del handler sin aviso.
+    final img = await elegirFotoSegura(
+      context,
+      origen: ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+    );
     if (img == null || !mounted) return;
     setState(() => _ocupado = true);
     try {

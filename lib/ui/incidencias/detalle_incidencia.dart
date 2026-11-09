@@ -11,6 +11,7 @@ import '../../modelos/incidencia.dart';
 import '../app_bar.dart';
 import '../diseno.dart';
 import '../componentes.dart';
+import '../foto_elegir.dart';
 import '../ficha.dart';
 import 'widgets/dialogo_resolver_incidencia.dart';
 import 'editar_incidencia.dart';
@@ -438,10 +439,17 @@ class _DetalleIncidenciaScreenState
   /// Agrega una foto a la incidencia (Argón A4).
   Future<void> _agregarFoto() async {
     try {
-      final picker = ImagePicker();
-      final xfile = await picker.pickImage(
-          source: ImageSource.camera,
-          maxWidth: 1280);
+      // Cierre §17 (×10): por la vía segura de la casa
+      // (foto_elegir.dart): suma la recuperación con
+      // retrieveLostData y la guarda anti-doble-toque a
+      // este handler, que ya tenía su try/catch con aviso.
+      // Si devuelve null (cancelación o fallo ya avisado
+      // por la propia vía), no hay nada que agregar.
+      final xfile = await elegirFotoSegura(
+        context,
+        origen: ImageSource.camera,
+        maxWidth: 1280,
+      );
       if (xfile == null) return;
       final db = LocalDb.instance;
       final d = await db.db;

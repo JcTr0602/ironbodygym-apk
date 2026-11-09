@@ -79,6 +79,82 @@ Future<XFile?> _selectorReal(ImageSource origen) => ImagePicker().pickImage(
       imageQuality: 75,
     ); // Compresión obligatoria para Cuba.
 
+/// (Cierre §17, auditoría ×10) La misma red de seguridad de
+/// [elegirFotoEditada] SIN el editor de recorte ni la copia a
+/// documentos: para los flujos que solo necesitan la foto
+/// elegida tal cual (foto de un suplemento, comprobante de
+/// una transferencia, imagen de GymPedia, foto de un usuario,
+/// evidencia de una incidencia). Comparte la guarda global
+/// con la editada: el plugin es único y un flujo en curso
+/// bloquea a los demás (ese bloqueo es justo lo que evita el
+/// `already_active`).
+///
+/// Devuelve la foto elegida o la recuperada de una petición
+/// interrumpida; null si el usuario cancela (silencio
+/// correcto) o si algo falló (con SnackBar visible en
+/// lenguaje llano y registro en AppLog). Nunca lanza.
+Future<XFile?> elegirFotoSegura(
+  BuildContext context, {
+  required ImageSource origen,
+  double? maxWidth,
+  double? maxHeight,
+  int? imageQuality,
+  SelectorFoto? selector,
+  RecuperadorFotoPerdida? recuperador,
+}) async {
+  if (_elegirFotoEnCurso) return null;
+  _elegirFotoEnCurso = true;
+  try {
+    try {
+      // Datos perdidos primero: recupera la foto de una
+      // petición interrumpida y limpia el estado colgado
+      // del plugin (el que mataba en silencio todo toque
+      // posterior — fallo de campo 2026-11-07).
+      final perdida = await (recuperador ??
+          () => ImagePicker().retrieveLostData())();
+      if (perdida.exception != null) {
+        AppLog.aviso('foto_elegir', 'datos_perdidos_con_error',
+            d: '${perdida.exception}');
+      }
+      if (perdida.file != null) return perdida.file;
+      return await (selector ??
+          (o) => ImagePicker().pickImage(
+                source: o,
+                maxWidth: maxWidth,
+                maxHeight: maxHeight,
+                imageQuality: imageQuality,
+              ))(origen);
+    } on PlatformException catch (e, stack) {
+      AppLog.error('foto_elegir', 'abrir_foto_segura_fallo',
+          d: '$e', stack: stack);
+      if (context.mounted) {
+        mostrarSnack(
+          context,
+          e.code == 'already_active'
+              ? 'No se pudo abrir la foto. Cierra la app y '
+                  'vuelve a intentarlo.'
+              : 'No se pudo abrir la foto. Inténtalo de nuevo.',
+          significado: SignificadoChip.error,
+        );
+      }
+      return null;
+    } catch (e, stack) {
+      AppLog.error('foto_elegir', 'abrir_foto_segura_fallo',
+          d: '$e', stack: stack);
+      if (context.mounted) {
+        mostrarSnack(
+          context,
+          'No se pudo abrir la foto. Inténtalo de nuevo.',
+          significado: SignificadoChip.error,
+        );
+      }
+      return null;
+    }
+  } finally {
+    _elegirFotoEnCurso = false;
+  }
+}
+
 Future<File?> _elegirFotoFlujo(
   BuildContext context,
   ImageSource origen, {

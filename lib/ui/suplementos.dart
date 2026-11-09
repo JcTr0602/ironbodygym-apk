@@ -25,6 +25,8 @@ import '../negocio.dart';
 import '../sync.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import '../errores_sync.dart';
+import 'foto_elegir.dart';
 import 'categorias_suplemento.dart';
 import 'cuentas_por_cobrar.dart';
 import 'por_cobrar.dart';
@@ -1763,18 +1765,33 @@ class _EditarSuplementoScreenState
   }
 
   Future<void> _elegirFoto() async {
-    final img = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 800,
-        maxHeight: 800,
-        imageQuality: 75); // Gemini: compresión obligatoria para Cuba
+    // Cierre §17 (×10): por la vía segura de la casa
+    // (foto_elegir.dart) — try/catch con aviso visible,
+    // recuperación con retrieveLostData y guarda
+    // anti-doble-toque. Antes era un pickImage pelado: el
+    // patrón exacto del fallo de campo 2026-11-07 (un
+    // selector colgado mataba en silencio todo toque
+    // posterior de foto en esta pantalla).
+    final img = await elegirFotoSegura(
+      context,
+      origen: ImageSource.gallery,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 75, // Gemini: compresión obligatoria para Cuba
+    );
     if (img == null || !mounted) return;
-    final bytes = await img.readAsBytes();
-    if (mounted) {
-      setState(() {
-        _fotoNueva = bytes;
-        _fotoNuevaPath = img.path;
-      });
+    try {
+      final bytes = await img.readAsBytes();
+      if (mounted) {
+        setState(() {
+          _fotoNueva = bytes;
+          _fotoNuevaPath = img.path;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo leer la foto: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
+      }
     }
   }
 
