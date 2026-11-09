@@ -507,6 +507,12 @@ class SyncResultado {
   /// cuando esa persona inicie sesión.
   final int deOtroUsuario;
 
+  /// Yunque B (YB-TRA-01): el conteo de pendientes al cierre
+  /// FALLÓ (p. ej. la BD ocupada). Los conteos valen 0 pero no
+  /// significan «cola vacía»: jamás «al día», jamás cancelar
+  /// el aviso de pendientes, jamás dar la subida por hecha.
+  final bool conteoIndeterminado;
+
   const SyncResultado({
     required this.corrio,
     this.motivoNoCorrio,
@@ -519,6 +525,7 @@ class SyncResultado {
     this.porSubir = 0,
     this.conError = 0,
     this.deOtroUsuario = 0,
+    this.conteoIndeterminado = false,
   });
 
   /// La corrida no llegó a ejecutarse: NUNCA es un éxito.
@@ -533,11 +540,16 @@ class SyncResultado {
         esperandoConfirmacion = 0,
         porSubir = 0,
         conError = 0,
-        deOtroUsuario = 0;
+        deOtroUsuario = 0,
+        conteoIndeterminado = false;
 
-  /// «Al día» SOLO si el ciclo corrió, no falló y la cola quedó
-  /// vacía. Con pendientes restantes o error, jamás.
-  bool get alDia => corrio && error == null && pendientesRestantes == 0;
+  /// «Al día» SOLO si el ciclo corrió, no falló, la cola quedó
+  /// vacía Y el conteo de la cola se pudo hacer (YB-TRA-01).
+  bool get alDia =>
+      corrio &&
+      error == null &&
+      !conteoIndeterminado &&
+      pendientesRestantes == 0;
 
   /// Resumen corto y VERAZ de la corrida. El «Todo estaba al día»
   /// solo aparece cuando [alDia] y no se movió nada.
@@ -548,6 +560,9 @@ class SyncResultado {
           : 'Ya hay una sincronización en curso';
     }
     if (error != null) return 'No se pudo sincronizar';
+    if (conteoIndeterminado) {
+      return 'No se pudo verificar la cola de pendientes';
+    }
     if (pendientesRestantes > 0) {
       return 'Sincronización parcial: quedan $pendientesRestantes '
           'operación${pendientesRestantes == 1 ? '' : 'es'} por sincronizar';
@@ -560,6 +575,11 @@ class SyncResultado {
   /// (cadena vacía si no queda nada). Una línea por categoría con
   /// conteo, para que el usuario sepa QUÉ falta y qué hacer.
   String get textoPendientes {
+    // YB-TRA-01: conteo fallido — se dice, no se disfraza de vacío.
+    if (conteoIndeterminado) {
+      return 'No se pudo verificar la cola de pendientes: '
+          'se reintentará en la próxima sincronización.';
+    }
     if (pendientesRestantes <= 0) return '';
     final lineas = <String>[
       'Quedan $pendientesRestantes operación'
@@ -1910,19 +1930,26 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
+      conteoIndeterminado: conteo.indeterminado,
     );
   }
 
-  /// Conteo de pendientes al cierre de una corrida, tolerante a
-  /// fallos (ante cualquier error devuelve ceros: el resumen no
-  /// debe romperse por contar la cola).
+  /// Conteo de pendientes al cierre de una corrida.
+  /// Yunque B (YB-TRA-01): TRIESTADO. Antes, ante cualquier
+  /// error devolvía ceros y el resultado decía «Todo estaba
+  /// al día», el push cancelaba el aviso de pendientes y
+  /// WorkManager daba la subida por hecha: error ≠ cero
+  /// (regla de la casa). Ahora el fallo se marca
+  /// [indeterminado], queda en el registro y los consumidores
+  /// lo tratan como «no se sabe: reintentar».
   Future<
       ({
         int total,
         int esperandoConfirmacion,
         int porSubir,
         int conError,
-        int deOtroUsuario
+        int deOtroUsuario,
+        bool indeterminado
       })> _conteoPendientesSeguro() async {
     try {
       String? uid;
@@ -1939,14 +1966,17 @@ class SyncEngine {
         porSubir: c.porSubir,
         conError: c.conError,
         deOtroUsuario: c.deOtroUsuario,
+        indeterminado: false,
       );
-    } catch (_) {
+    } catch (e) {
+      AppLog.error('sync', 'conteo_pendientes_fallo: $e');
       return (
         total: 0,
         esperandoConfirmacion: 0,
         porSubir: 0,
         conError: 0,
-        deOtroUsuario: 0
+        deOtroUsuario: 0,
+        indeterminado: true,
       );
     }
   }
@@ -2270,11 +2300,16 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
+      conteoIndeterminado: conteo.indeterminado,
     );
     // Sello de Argón (fusión 1+4): un push que deja la cola
     // propia en cero CANCELA el aviso de pendientes que el
     // cortacircuitos del FGS hubiera dejado programado.
-    if (resultado.porSubir == 0 && resultado.conError == 0) {
+    // YB-TRA-01: con el conteo indeterminado NO se cancela:
+    // no se sabe si la cola quedó vacía de verdad.
+    if (resultado.porSubir == 0 &&
+        resultado.conError == 0 &&
+        !resultado.conteoIndeterminado) {
       unawaited(AvisoPendientesSync.cancelar());
     }
     return resultado;
@@ -2498,6 +2533,7 @@ class SyncEngine {
       porSubir: conteo.porSubir,
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
+      conteoIndeterminado: conteo.indeterminado,
     );
   }
 

@@ -99,7 +99,12 @@ void callbackDispatcher() {
       if (!auth.loggedIn) return true;
       final res = await SyncEngine.instance
           .push(esperarIncidencias: true);
-      if (!res.corrio || res.porSubir > 0 || res.conError > 0) {
+      // Yunque B (YB-TRA-01): si el conteo de la cola falló,
+      // la subida NO se da por hecha: WorkManager reintenta.
+      if (!res.corrio ||
+          res.conteoIndeterminado ||
+          res.porSubir > 0 ||
+          res.conError > 0) {
         return false;
       }
       // Delta del panel: el éxito también exige las OTRAS

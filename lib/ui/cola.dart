@@ -1450,9 +1450,30 @@ class _ColaScreenState extends State<ColaScreen> {
                 ],
               ),
             ],
+            // Yunque B (YB-TRA-01): si el conteo de la cola
+            // falló, el resumen lo dice — jamás «al día».
+            if (res.conteoIndeterminado &&
+                (error == null || error.isEmpty)) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      size: 16, color: AppColores.alerta),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      res.textoPendientes,
+                      style: AppTexto.secundario,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (subidos == 0 &&
                 bajados == 0 &&
                 res.pendientesRestantes == 0 &&
+                !res.conteoIndeterminado &&
                 (error == null || error.isEmpty))
               Padding(
                 padding: const EdgeInsets.only(top: AppEspacio.md),
