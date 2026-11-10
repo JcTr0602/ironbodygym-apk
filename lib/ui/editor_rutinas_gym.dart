@@ -84,6 +84,46 @@ class SerieGymAdmin {
       };
 }
 
+/// Yunque R5-M6-1: tope de series por ejercicio en el
+/// editor de rutinas (el chip «Serie» añadía sin límite).
+const int kMaxSeriesPorEjercicioRutina = 20;
+
+/// Yunque R5-M6-1: validación de las series de la rutina
+/// ANTES de publicar (PURO). Devuelve el primer problema,
+/// nombrando el ejercicio por su título (o su id), o null
+/// si todo es publicable: repsMin ≥ 1, repsMax ≥ repsMin,
+/// peso ≥ 0 o vacío, y como mucho
+/// [kMaxSeriesPorEjercicioRutina] series por ejercicio.
+/// Hasta aquí, lo imposible viajaba sin validación local
+/// (reps 0 por campo vaciado, máx < mín, peso negativo).
+String? errorValidacionSeriesRutina(List<EjercicioGymAdmin> ejercicios,
+    {required String Function(String fichaId) tituloDe}) {
+  for (final ej in ejercicios) {
+    final titulo = tituloDe(ej.fichaId);
+    if (ej.series.length > kMaxSeriesPorEjercicioRutina) {
+      return '«$titulo» tiene ${ej.series.length} series: '
+          'el máximo es $kMaxSeriesPorEjercicioRutina por ejercicio.';
+    }
+    for (var i = 0; i < ej.series.length; i++) {
+      final s = ej.series[i];
+      if (s.repsMin < 1) {
+        return '«$titulo», serie ${i + 1}: escribe las repeticiones '
+            'mínimas (al menos 1).';
+      }
+      if (s.repsMax != null && s.repsMax! < s.repsMin) {
+        return '«$titulo», serie ${i + 1}: las repeticiones máximas '
+            '(${s.repsMax}) no pueden ser menos que las mínimas '
+            '(${s.repsMin}).';
+      }
+      if (s.pesoKg != null && s.pesoKg! < 0) {
+        return '«$titulo», serie ${i + 1}: el peso no puede ser '
+            'negativo.';
+      }
+    }
+  }
+  return null;
+}
+
 /// Un ejercicio de la rutina con sus series prescritas.
 class EjercicioGymAdmin {
   final String fichaId;
@@ -750,6 +790,13 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
         _ejercicios.add(EjercicioGymAdmin.desdeFicha(id));
       }
     }
+    // Yunque R5-M6-8: deduplicar al cargar (primera
+    // aparición): si el servidor devolviera una ficha
+    // repetida, el ReorderableListView montaba dos tarjetas
+    // con la misma ValueKey y el editor moría con error de
+    // claves duplicadas justo para corregirla.
+    final vistos = <String>{};
+    _ejercicios.retainWhere((e) => vistos.add(e.fichaId));
     _cargarCatalogoFormulario();
   }
 
@@ -876,6 +923,10 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
   }
 
   Future<void> _guardar() async {
+    // Yunque R5-M6-5: guarda de rol DENTRO de la acción,
+    // como en la Guía — el widget es público y montable
+    // directo; la guarda de la lista no basta.
+    if (!AuthService().isOwner) return;
     // Anti-doble-toque síncrono (ítem 5).
     if (_guardando) return;
     final nombre = _nombreCtrl.text.trim();
@@ -888,6 +939,34 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
       mostrarSnack(context, 'Elige al menos una ficha de GymPedia',
           significado: SignificadoChip.alerta);
       return;
+    }
+    // Yunque R5-M6-1: las series se validan en local ANTES
+    // de publicar (sin esto, lo imposible viajaba tal cual:
+    // reps 0, máx < mín, peso negativo, series sin tope).
+    if (_enviaContenido) {
+      final errorSeries = errorValidacionSeriesRutina(_ejercicios,
+          tituloDe: _tituloDe);
+      if (errorSeries != null) {
+        mostrarSnack(context, errorSeries,
+            significado: SignificadoChip.alerta);
+        return;
+      }
+    }
+    // Yunque R5-M6-7: una ficha retirada de la Guía no se
+    // re-publica en silencio al re-editar la rutina: se
+    // AVISA nombrándolas (no se bloquea: puede ser la
+    // intención de Jc retirar la rutina entera después).
+    if (!_cargandoCatalogo && !_errorCatalogo) {
+      final ausentes = [
+        for (final id in _seleccion)
+          if (_fichaDe(id) == null) id,
+      ];
+      if (ausentes.isNotEmpty) {
+        mostrarSnack(context,
+            'Ojo: estas fichas ya no están en la Guía y se '
+            'publicarán igual: ${ausentes.join(', ')}',
+            significado: SignificadoChip.alerta);
+      }
     }
     setState(() => _guardando = true);
     try {
@@ -935,6 +1014,9 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
   }
 
   Future<void> _retirar() async {
+    // Yunque R5-M6-5: guarda de rol en la acción, como
+    // _guardar.
+    if (!AuthService().isOwner) return;
     final rutina = widget.rutina;
     if (rutina == null || _guardando) return;
     // Escalera de confirmaciones (ítem 2): retirar es
