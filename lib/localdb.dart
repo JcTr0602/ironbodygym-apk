@@ -7783,6 +7783,25 @@ class LocalDb {
     return (r.first['c'] as int?) ?? 0;
   }
 
+  /// Auditoría Definitiva (B-27): fotos 'subiendo' cuyo lease
+  /// ya venció — el worker murió o perdió el lease y la fila
+  /// está reclamable otra vez. La foto de atascos de Reparar
+  /// las suma a las pendientes: no aparecían en NINGÚN
+  /// contador (ni pendiente ni error) y el atasco era
+  /// invisible. El epoch va como parámetro ENTERO (con texto,
+  /// SQLite compararía por tipo y el corte pasaría siempre).
+  Future<int> contarFotosSubiendoLeaseVencido() async {
+    final d = await db;
+    final ahoraEpoch =
+        DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final r = await d.rawQuery(
+        "SELECT COUNT(*) c FROM fotos_cola "
+        "WHERE estado = 'subiendo' AND (lease_hasta IS NULL OR "
+        "COALESCE(CAST(strftime('%s', lease_hasta) AS INTEGER), 0) <= ?)",
+        [ahoraEpoch]);
+    return (r.first['c'] as int?) ?? 0;
+  }
+
   /// Fotos de incidencias aún sin subir (pending/retry).
   Future<int> contarFotosIncidenciasPendientes() async {
     final d = await db;

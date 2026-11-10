@@ -127,11 +127,17 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
       ClaseHallazgo.dueno,
     ));
   }
+  // Auditoría Definitiva (B-27): los hallazgos de ops «auto»
+  // avisan de que el conteo es del TELÉFONO, no de la sesión:
+  // en un teléfono compartido hay ops ajenas que Reparar no
+  // puede subir con la sesión activa.
   if (f.opsError > 0) {
     h.add(HallazgoReparacion(
       '${f.opsError} ${_n(f.opsError, 'operación falló', 'operaciones fallaron')} al enviarse',
       'Fallaron por conexión o por un error pasajero: al '
-          'reparar se reintentan.',
+          'reparar se reintentan.'
+      ' Pueden incluir operaciones de otra cuenta de '
+          'este teléfono: solo se suben las de la sesión activa.',
       ClaseHallazgo.auto,
     ));
   }
@@ -139,7 +145,9 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
     h.add(HallazgoReparacion(
       '${f.opsEnviadas} ${_n(f.opsEnviadas, 'operación espera', 'operaciones esperan')} confirmación',
       'Ya se enviaron y el servidor aún no las confirma: al '
-          'reparar se confirman.',
+          'reparar se confirman.'
+      ' Pueden incluir operaciones de otra cuenta de '
+          'este teléfono: solo se suben las de la sesión activa.',
       ClaseHallazgo.auto,
     ));
   }
@@ -147,7 +155,9 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
     h.add(HallazgoReparacion(
       '${f.opsPendientes} ${_n(f.opsPendientes, 'operación por subir', 'operaciones por subir')}',
       'Están guardadas en este teléfono esperando envío: al '
-          'reparar se suben.',
+          'reparar se suben.'
+      ' Pueden incluir operaciones de otra cuenta de '
+          'este teléfono: solo se suben las de la sesión activa.',
       ClaseHallazgo.auto,
     ));
   }
@@ -289,12 +299,21 @@ Future<FotoAtascos> capturarAtascos() async {
     opsError: await ops('error'),
     opsRechazadas: await ops('rechazada'),
     opsRevision: await ops('necesita_revision'),
-    fotosPendientes: await contar('fotos_cola', "estado = 'pendiente'"),
+    // Auditoría Definitiva (B-27): la foto suma a las fotos
+    // pendientes las 'subiendo' con el lease vencido
+    // (reclamables: no salían en ningún contador), y los
+    // comprobantes se cuentan con la semántica «sin subir»
+    // (pendiente + error, la del aviso previo a la purga):
+    // con contarComprobantesPendientes un comprobante en
+    // 'error' desaparecía de la foto y del hallazgo.
+    fotosPendientes: await contar('fotos_cola', "estado = 'pendiente'") +
+        await contarSeguro('fotos_subiendo_vencidas',
+            db.contarFotosSubiendoLeaseVencido),
     fotosError: await contar('fotos_cola', "estado = 'error'"),
     fotosIncidenciasPendientes: await contarSeguro(
         'fotos_incidencias', db.contarFotosIncidenciasPendientes),
     comprobantesPendientes: await contarSeguro(
-        'comprobantes', db.contarComprobantesPendientes),
+        'comprobantes', db.contarComprobantesSinSubir),
     tablasPorRedescargar: banderas,
     manifiestoSinVerificar: sinVerificar,
     espejoVacioSospechoso: espejoVacio,

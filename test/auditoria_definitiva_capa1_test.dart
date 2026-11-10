@@ -13,6 +13,7 @@ import 'package:ironbody_gym/comprobantes.dart';
 import 'package:ironbody_gym/diagnostico_espejo.dart';
 import 'package:ironbody_gym/fotos_cola.dart';
 import 'package:ironbody_gym/modelos/incidencia.dart';
+import 'package:ironbody_gym/reparar_sync.dart';
 import 'package:ironbody_gym/ui/incidencias/editar_incidencia.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
@@ -866,6 +867,86 @@ void main() {
       expect(enTurno, {111, 222},
           reason: 'local (111) + espejo viva (222); la cerrada '
               '(333) y la de ayer (444) quedan fuera');
+    });
+  });
+
+  group('B-27 · la foto de atascos no esconde atascos', () {
+    test('cuenta comprobantes sin subir (también error) y '
+        'fotos subiendo con lease vencido', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      final ahora = isoHabana(ahoraHabana());
+      for (final (uuid, estado) in [
+        ('comp-p', 'pendiente'),
+        ('comp-e', 'error'),
+        ('comp-s', 'subido'),
+      ]) {
+        await d.insert('comprobantes_pago', {
+          'comprobante_uuid': uuid,
+          'ruta_local': '/tmp/$uuid.jpg',
+          'estado': estado,
+          'creado_en': ahora,
+        });
+      }
+      final vencido = isoHabana(
+          ahoraHabana().subtract(const Duration(minutes: 30)));
+      final vigente = isoHabana(
+          ahoraHabana().add(const Duration(minutes: 30)));
+      for (final (uuid, estado, lease) in [
+        ('f-pend', 'pendiente', null),
+        ('f-sub-vencida', 'subiendo', vencido),
+        ('f-sub-vigente', 'subiendo', vigente),
+        ('f-error', 'error', null),
+      ]) {
+        await d.insert('fotos_cola', {
+          'op_uuid': uuid,
+          'tipo': 'display',
+          'cliente_id': 5,
+          'ruta_local': '/tmp/$uuid.jpg',
+          'estado': estado,
+          'intentos': 1,
+          'lease_hasta': lease,
+          'creado_en': ahora,
+          'actualizado_en': ahora,
+        });
+      }
+
+      final foto = await capturarAtascos();
+      expect(foto.comprobantesPendientes, 2,
+          reason: 'el comprobante en error desapareció de la '
+              'foto (se contaba solo pendiente)');
+      expect(foto.fotosPendientes, 2,
+          reason: 'pendiente + subiendo con lease vencido; la '
+              'de lease vigente está en manos de su worker');
+      expect(foto.fotosError, 1);
+    });
+
+    test('el hallazgo de ops avisa de las ops ajenas del '
+        'teléfono compartido', () {
+      const foto = FotoAtascos(
+        opsPendientes: 3,
+        opsEnviadas: 0,
+        opsError: 1,
+        opsRechazadas: 0,
+        opsRevision: 0,
+        fotosPendientes: 0,
+        fotosError: 0,
+        fotosIncidenciasPendientes: 0,
+        comprobantesPendientes: 0,
+        tablasPorRedescargar: 0,
+        manifiestoSinVerificar: [],
+        espejoVacioSospechoso: false,
+        clientesPrevios: 0,
+        lecturasFallidas: 0,
+      );
+      final hallazgos = clasificarHallazgos(foto);
+      final deOps = hallazgos
+          .where((x) => x.detalle.contains('otra cuenta'))
+          .toList();
+      expect(deOps, hasLength(2),
+          reason: 'los hallazgos «auto» de ops (pendientes y '
+              'error) no avisan de las ops de otra cuenta');
     });
   });
 }
