@@ -258,6 +258,7 @@ class _NominaScreenState extends State<NominaScreen> {
     // del login): el aviso de fallo al compartir no depende
     // del contexto de la pantalla tras los awaits.
     final messengerFoto = ScaffoldMessenger.of(context);
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
