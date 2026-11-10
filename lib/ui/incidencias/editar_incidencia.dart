@@ -13,6 +13,30 @@ import '../../auth.dart';
 
 /// Crear / editar incidencia.
 /// v1.3.0
+/// Auditoría Definitiva (B-22): la asignación que se guarda
+/// al editar una incidencia (PURA, testeable).
+///
+/// Solo el dueño puede asignar a entrenadores (Jc 2026-10-16).
+/// El no-dueño puede asignar a un cliente con su selección,
+/// pero una asignación a ENTRENADOR vigente (puesta por el
+/// dueño) se preserva SIEMPRE: antes, si el no-dueño elegía
+/// «cliente», su selección sustituía la del dueño —
+/// contradiciendo el texto de la propia pantalla («solo el
+/// dueño puede cambiarlo») y el comentario de preservación.
+String? asignadoAAlGuardar({
+  required bool esDueno,
+  required String? responsableElegido,
+  required String? tipoResponsable,
+  required String? asignadoExistente,
+}) {
+  if (esDueno) return responsableElegido;
+  if (asignadoExistente != null &&
+      asignadoExistente.startsWith('entrenador:')) {
+    return asignadoExistente;
+  }
+  return tipoResponsable == 'cliente' ? responsableElegido : null;
+}
+
 class EditarIncidenciaScreen extends StatefulWidget {
   final Incidencia? existente;
   const EditarIncidenciaScreen(
@@ -609,20 +633,16 @@ class _EditarIncidenciaScreenState
         'fecha_limite': _fechaLimite
             ?.toIso8601String(),
         // v1.3.3: responsable (entrenador:<username>:<Nombre> |
-        // cliente:<id>:<Nombre> | null).
-        // Solo el dueño puede asignar a entrenadores (Jc 2026-10-16).
-        // Si no es dueño: puede asignar a cliente (su propia selección),
-        // pero una asignación a entrenador existente (puesta por Jc) se
-        // preserva intacta; nunca puede crear ni cambiar una a entrenador.
-        'asignado_a': _esDueno
-            ? _responsable
-            : (_tipoResponsable == 'cliente'
-                ? _responsable
-                : (widget.existente?.asignadoA
-                                ?.startsWith('entrenador:') ==
-                            true
-                        ? widget.existente!.asignadoA
-                        : null)),
+        // cliente:<id>:<Nombre> | null). La regla vive en
+        // asignadoAAlGuardar (B-22): el no-dueño NUNCA sustituye
+        // una asignación a entrenador vigente, ni eligiendo
+        // «cliente» — antes esa elección la pisaba.
+        'asignado_a': asignadoAAlGuardar(
+          esDueno: _esDueno,
+          responsableElegido: _responsable,
+          tipoResponsable: _tipoResponsable,
+          asignadoExistente: widget.existente?.asignadoA,
+        ),
         'estado':
             widget.existente?.estado ??
                 'pendiente',

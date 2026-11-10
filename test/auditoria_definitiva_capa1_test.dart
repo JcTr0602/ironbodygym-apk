@@ -12,6 +12,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/comprobantes.dart';
 import 'package:ironbody_gym/diagnostico_espejo.dart';
 import 'package:ironbody_gym/fotos_cola.dart';
+import 'package:ironbody_gym/modelos/incidencia.dart';
+import 'package:ironbody_gym/ui/incidencias/editar_incidencia.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
 import 'package:ironbody_gym/tiempo.dart';
@@ -636,6 +638,121 @@ void main() {
       // C-6: sin sesión persistente, el servicio se detiene.
       expect(fgs, contains('SyncMotivoNoCorrio.sinSesion'));
       expect(fgs, contains('_ticksSinSesion'));
+    });
+  });
+
+  group('B-22 · el no-dueño no sustituye la asignación a '
+      'entrenador', () {
+    test('asignadoAAlGuardar preserva la de entrenador aunque '
+        'el no-dueño elija cliente', () {
+      const delDueno = 'entrenador:duany:Duany';
+      // El caso del defecto: existente a entrenador + elección
+      // «cliente» de un no-dueño → se preserva la del dueño.
+      expect(
+          asignadoAAlGuardar(
+            esDueno: false,
+            responsableElegido: 'cliente:9:Nueve',
+            tipoResponsable: 'cliente',
+            asignadoExistente: delDueno,
+          ),
+          delDueno);
+      // Sin asignación a entrenador vigente, su elección a
+      // cliente sí vale.
+      expect(
+          asignadoAAlGuardar(
+            esDueno: false,
+            responsableElegido: 'cliente:9:Nueve',
+            tipoResponsable: 'cliente',
+            asignadoExistente: null,
+          ),
+          'cliente:9:Nueve');
+      expect(
+          asignadoAAlGuardar(
+            esDueno: false,
+            responsableElegido: 'cliente:9:Nueve',
+            tipoResponsable: 'cliente',
+            asignadoExistente: 'cliente:3:Tres',
+          ),
+          'cliente:9:Nueve');
+      // No-dueño sin elegir cliente: nada (como antes).
+      expect(
+          asignadoAAlGuardar(
+            esDueno: false,
+            responsableElegido: null,
+            tipoResponsable: null,
+            asignadoExistente: null,
+          ),
+          isNull);
+      // El dueño manda siempre con su selección.
+      expect(
+          asignadoAAlGuardar(
+            esDueno: true,
+            responsableElegido: 'cliente:9:Nueve',
+            tipoResponsable: 'cliente',
+            asignadoExistente: delDueno,
+          ),
+          'cliente:9:Nueve');
+    });
+  });
+
+  group('B-16 · política única de transiciones por rol', () {
+    Incidencia inc(String estado) => Incidencia(
+          id: 'i1',
+          descripcion: 'x',
+          estado: estado,
+          prioridad: 'media',
+          creadaPor: 'autor',
+          creadaEn: DateTime(2026, 1, 1),
+          version: 1,
+          syncEstado: 'synced',
+        );
+
+    test('resolver y reabrir son solo del dueño; el resto del '
+        'flujo no cambia', () {
+      final pendiente = inc('pendiente');
+      expect(
+          pendiente.puedeTransicionarAConRol('resuelta',
+              esDueno: false),
+          isFalse,
+          reason: 'el detalle ofrecía Resolver a cualquier rol');
+      expect(
+          pendiente.puedeTransicionarAConRol('resuelta',
+              esDueno: true),
+          isTrue);
+      expect(
+          pendiente.puedeTransicionarAConRol('en_proceso',
+              esDueno: false),
+          isTrue);
+      expect(
+          pendiente.puedeTransicionarAConRol('bloqueada',
+              esDueno: false),
+          isTrue);
+      final resuelta = inc('resuelta');
+      expect(
+          resuelta.puedeTransicionarAConRol('en_proceso',
+              esDueno: false),
+          isFalse,
+          reason: 'la reapertura es solo del dueño');
+      expect(
+          resuelta.puedeTransicionarAConRol('en_proceso',
+              esDueno: true),
+          isTrue);
+      // La máquina de estados sigue mandando debajo del rol.
+      expect(
+          pendiente.puedeTransicionarAConRol('pendiente',
+              esDueno: true),
+          isFalse);
+    });
+
+    test('detalle y lote consumen la política (estructural)',
+        () {
+      final detalle = File('lib/ui/incidencias/detalle_incidencia.dart')
+          .readAsStringSync();
+      expect(detalle, contains('puedeTransicionarAConRol'));
+      final lista = File('lib/ui/incidencias/lista_incidencias.dart')
+          .readAsStringSync();
+      expect(lista, contains("destino == 'resuelta' && !AuthService().isOwner"),
+          reason: 'la acción en lote quedó sin la guarda de rol');
     });
   });
 }

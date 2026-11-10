@@ -179,29 +179,33 @@ class _DetalleIncidenciaScreenState
               onSelected: _cambiarEstado,
               itemBuilder: (ctx) {
                 final items = <PopupMenuItem<String>>[];
-                if (inc.puedeTransicionarA(
-                    'pendiente')) {
+                if (inc.puedeTransicionarAConRol(
+                    'pendiente',
+                    esDueno: AuthService().isOwner)) {
                   items.add(const PopupMenuItem(
                     value: 'pendiente',
                     child: Text('Pendiente'),
                   ));
                 }
-                if (inc.puedeTransicionarA(
-                    'en_proceso')) {
+                if (inc.puedeTransicionarAConRol(
+                    'en_proceso',
+                    esDueno: AuthService().isOwner)) {
                   items.add(const PopupMenuItem(
                     value: 'en_proceso',
                     child: Text('En proceso'),
                   ));
                 }
-                if (inc.puedeTransicionarA(
-                    'bloqueada')) {
+                if (inc.puedeTransicionarAConRol(
+                    'bloqueada',
+                    esDueno: AuthService().isOwner)) {
                   items.add(const PopupMenuItem(
                     value: 'bloqueada',
                     child: Text('Bloqueada'),
                   ));
                 }
-                if (inc.puedeTransicionarA(
-                    'resuelta')) {
+                if (inc.puedeTransicionarAConRol(
+                    'resuelta',
+                    esDueno: AuthService().isOwner)) {
                   items.add(const PopupMenuItem(
                     value: 'resuelta',
                     child: Text('Resolver'),

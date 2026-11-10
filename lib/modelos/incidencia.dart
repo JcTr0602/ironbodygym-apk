@@ -206,6 +206,24 @@ class Incidencia {
 
   bool get estaResuelta => estado == 'resuelta';
 
+  /// Auditoría Definitiva (B-16): política ÚNICA de
+  /// transiciones por rol, consumida por el detalle y por el
+  /// lote. La máquina de estados es [puedeTransicionarA]; el
+  /// rol añade DOS reglas, que son las que el lote ya aplicaba
+  /// (Argón #13) y el detalle no:
+  /// - Resolver (pasar a 'resuelta') es SOLO del dueño.
+  /// - Reabrir (salir de 'resuelta') es SOLO del dueño.
+  /// Sin esta política, el mismo entrenador que en el lote no
+  /// veía «Resolver» lo tenía en el menú del detalle.
+  bool puedeTransicionarAConRol(String nuevo,
+      {required bool esDueno}) {
+    if (!puedeTransicionarA(nuevo)) return false;
+    if (!esDueno && (nuevo == 'resuelta' || estado == 'resuelta')) {
+      return false;
+    }
+    return true;
+  }
+
   /// ¿Puede transicionar a este estado?
   /// Flujo Gemini: resolución directa, reapertura, bloqueo bidireccional.
   bool puedeTransicionarA(String nuevo) {

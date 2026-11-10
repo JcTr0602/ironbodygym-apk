@@ -585,6 +585,16 @@ class _ListaIncidenciasScreenState
   Future<void> _accionLote(String destino) async {
     final ids = _seleccionadas.toList();
     if (ids.isEmpty) return;
+    // Auditoría Definitiva (B-16): la misma política por rol
+    // del detalle (puedeTransicionarAConRol) guarda también la
+    // ACCIÓN, no solo el botón: resolver en lote es solo del
+    // dueño (Argón #13). Si el botón no se pintó pero la acción
+    // se invocara por otra vía, aquí se detiene.
+    if (destino == 'resuelta' && !AuthService().isOwner) {
+      mostrarSnack(context, 'Solo el dueño puede resolver',
+          significado: SignificadoChip.error);
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
