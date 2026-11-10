@@ -337,7 +337,9 @@ class _ServiciosEstadisticasScreenState
     final ventasComerciales = ventasP
         .where((v) =>
             '${v['tipo']}'.startsWith('dosis') &&
-            (v['casa'] as num?)?.toInt() != 1)
+            // Yunque R4-M4-8: Casa TOLERANTE (esCasaTolerante),
+            // no solo el cast numérico.
+            !esCasaTolerante(v['casa']))
         .toList();
     final dias = _periodo == 'mes'
         ? ahoraHabana().day
@@ -430,11 +432,15 @@ class _ServiciosEstadisticasScreenState
         semPomos += cant;
         semIng += precio * cant;
       } else if (tipo.startsWith('dosis') &&
-          (v['casa'] as num?)?.toInt() != 1) {
+          // Yunque R4-M4-8: Casa tolerante; R4-M4-4: la
+          // comisión del resumen semanal también manda por
+          // el snapshot comision_monto.
+          !esCasaTolerante(v['casa'])) {
         semDosis += cant;
         semIng += precio * cant;
-        semCom +=
-            ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+        semCom += (v['comision_monto'] as num?)?.toDouble() ??
+            ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
+                cant;
       }
     }
     final semanaTexto = textoResumenSemanal(

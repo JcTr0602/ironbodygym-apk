@@ -64,11 +64,27 @@ class _ComparativaMensualState
 
   Future<double> _sumarPagos(
       String desde, String hasta) async {
+    // Yunque R4-M4-1: las mismas exclusiones que la vía
+    // canónica (pagosDelPeriodo): la Cuenta a la Casa nunca
+    // es ingreso y un pago cuya anulación sigue en cola ya
+    // no es dinero — sin ellas, esta comparativa enseñaba
+    // una cifra de «Mensualidades» que ninguna otra
+    // superficie de la app muestra.
+    final casas = await LocalDb.instance.idsCuentasCasa();
+    final anuladosCola =
+        await LocalDb.instance.pagosAnuladosEnCola();
     double total = 0;
     for (final p in await LocalDb.instance
         .mirrorPorFecha('pagos', 'fecha', desde, hasta)) {
       // P2#4: las cortesías no son ingreso.
       if ((p['metodo'] as String?) == 'cortesia') continue;
+      if (p['casa'] == 1 || p['casa'] == true) continue;
+      final cid = p['cliente_id'];
+      final cidInt = cid is num
+          ? cid.toInt()
+          : (cid is String ? int.tryParse(cid) : null);
+      if (cidInt != null && casas.contains(cidInt)) continue;
+      if (esPagoAnulado(p, anuladosCola)) continue;
       total +=
           (p['monto'] as num?)?.toDouble() ?? 0;
     }
@@ -84,9 +100,10 @@ class _ComparativaMensualState
     // separadas: no se inventa un total general.
     double total = 0;
     for (final v in await ventasSuplementosCup()) {
-      final f = '${v['fecha'] ?? ''}';
-      if (f.length < 10) continue;
-      final dia = f.substring(0, 10);
+      // Yunque R4-M4-3: día de negocio Habana, no el
+      // substring crudo del timestamp.
+      final dia = fechaNegocioHabana(v['fecha']);
+      if (dia.isEmpty) continue;
       if (dia.compareTo(desde) < 0 || dia.compareTo(hasta) > 0) {
         continue;
       }
@@ -115,13 +132,16 @@ class _ComparativaMensualState
     for (final c in await LocalDb.instance
         .allMirror('clientes')) {
       if (esClienteEliminado(c)) continue; // v1.8.0: no es persona
-      final f = '${c['created_at'] ?? c['fecha_ingreso'] ?? ''}';
-      if (f.length >= 10) {
-        final dia = f.substring(0, 10);
-        if (dia.compareTo(desde) >= 0 &&
-            dia.compareTo(hasta) <= 0) {
-          count++;
-        }
+      // Yunque R4-M4-3: created_at puede venir con hora y
+      // zona: el día que cuenta es el de negocio Habana
+      // (con el substring crudo, un alta de madrugada caía
+      // en el mes equivocado de «Nuevos ingresos»).
+      final dia =
+          fechaNegocioHabana(c['created_at'] ?? c['fecha_ingreso']);
+      if (dia.isNotEmpty &&
+          dia.compareTo(desde) >= 0 &&
+          dia.compareTo(hasta) <= 0) {
+        count++;
       }
     }
     return count;

@@ -3,6 +3,7 @@
 // SegmentedButton: Hoy | Mes Actual | Mes Anterior
 import 'package:flutter/material.dart';
 import '../auth.dart';
+import '../estadisticas_servicios.dart' show esCasaTolerante;
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
@@ -157,18 +158,24 @@ class _PagosPorMetodoState
         }
         // Suplementos en CUP, por su método real (#6).
         for (final v in await ventasSuplementosCup()) {
-          final f = '${v['fecha'] ?? ''}';
-          if (f.length >= 10) {
-            final dia = f.substring(0, 10);
-            if (dia.compareTo(desde) >= 0 &&
-                dia.compareTo(hasta) <= 0) {
-              if ('${v['metodo'] ?? 'efectivo'}' == 'transferencia') {
-                transferencia += totalVentaCup(v);
-                nTransferencia++;
-              } else {
-                efectivo += totalVentaCup(v);
-                nEfectivo++;
-              }
+          // Yunque R4-M4-6: día de negocio Habana (no el
+          // substring crudo del timestamp) y método por
+          // contains('transfer'), como la vía hoy/mes —
+          // la igualdad exacta mandaba una variante
+          // («Transferencia») a efectivo SOLO en el mes
+          // anterior, el término de la comparación.
+          final dia = fechaNegocioHabana(v['fecha']);
+          if (dia.isNotEmpty &&
+              dia.compareTo(desde) >= 0 &&
+              dia.compareTo(hasta) <= 0) {
+            if ('${v['metodo'] ?? 'efectivo'}'
+                .toLowerCase()
+                .contains('transfer')) {
+              transferencia += totalVentaCup(v);
+              nTransferencia++;
+            } else {
+              efectivo += totalVentaCup(v);
+              nEfectivo++;
             }
           }
         }
@@ -185,24 +192,28 @@ class _PagosPorMetodoState
           if ((v['reverso_de'] as num?) != null) continue;
           final id = (v['id'] as num?)?.toInt();
           if (id != null && reversadas.contains(id)) continue;
-          if ((v['casa'] as num?)?.toInt() == 1) continue;
-          final f = '${v['fecha'] ?? ''}';
-          if (f.length >= 10) {
-            final dia = f.substring(0, 10);
-            if (dia.compareTo(desde) >= 0 &&
-                dia.compareTo(hasta) <= 0) {
-              // Terra 1.18: separar por método; una dosis o agua
-              // pagada por transferencia no es efectivo.
-              final monto =
-                  ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
-                      ((v['cantidad'] as num?)?.toInt() ?? 0);
-              if ('${v['metodo']}' == 'transferencia') {
-                transferencia += monto;
-                nTransferencia++;
-              } else {
-                efectivo += monto;
-                nEfectivo++;
-              }
+          // Yunque R4-M4-6: Casa TOLERANTE (1/true/'1'), no
+          // solo el cast numérico.
+          if (esCasaTolerante(v['casa'])) continue;
+          // Yunque R4-M4-6: día de negocio Habana y método
+          // por contains('transfer'), como la vía hoy/mes.
+          final dia = fechaNegocioHabana(v['fecha']);
+          if (dia.isNotEmpty &&
+              dia.compareTo(desde) >= 0 &&
+              dia.compareTo(hasta) <= 0) {
+            // Terra 1.18: separar por método; una dosis o agua
+            // pagada por transferencia no es efectivo.
+            final monto =
+                ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+                    ((v['cantidad'] as num?)?.toInt() ?? 0);
+            if ('${v['metodo'] ?? ''}'
+                .toLowerCase()
+                .contains('transfer')) {
+              transferencia += monto;
+              nTransferencia++;
+            } else {
+              efectivo += monto;
+              nEfectivo++;
             }
           }
         }

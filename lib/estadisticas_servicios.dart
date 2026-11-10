@@ -406,8 +406,15 @@ String textoResumenSemanal({
     if (!esCasa) {
       costoAguaVendida +=
           ((v['costo_agua_snapshot'] as num?)?.toDouble() ?? 0) * cant;
-      comision +=
-          ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
+      // Yunque R4-M4-4: el snapshot comision_monto MANDA,
+      // como en los cortes de este mismo archivo
+      // (agruparPorVendedor/agruparPorPomo) y en la nómina:
+      // con solo unitaria×cantidad, el «comisión» y el
+      // «neto_dueno» del bloque 1B divergían de ambas
+      // cuando el snapshot difería del producto.
+      comision += (v['comision_monto'] as num?)?.toDouble() ??
+          ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
+              cant;
     }
   }
   var mermasCosto = 0.0;
@@ -681,7 +688,9 @@ List<
   for (final v in ventas) {
     if (esCasaTolerante(v['casa'])) continue;
     final tipo = '${v['tipo'] ?? ''}';
-    final cant = (v['cantidad'] as num?)?.toInt() ?? 1;
+    // Yunque R4-M4-5: ?? 0, la convención del archivo
+    // (una fila sin cantidad no es una venta fantasma).
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final esDosis = tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua';
     if (!esDosis && tipo != 'agua_suelta') continue;
     final tid = _tidToleranteEst(v['vendedor_id']) ??
@@ -732,7 +741,9 @@ List<
   for (final v in ventas) {
     if (esCasaTolerante(v['casa'])) continue;
     final tipo = '${v['tipo'] ?? ''}';
-    final cant = (v['cantidad'] as num?)?.toInt() ?? 1;
+    // Yunque R4-M4-5: ?? 0, la convención del archivo
+    // (una fila sin cantidad no es una venta fantasma).
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final esDosis = tipo == 'dosis_sin_agua' || tipo == 'dosis_con_agua';
     if (!esDosis && tipo != 'agua_suelta') continue;
     final pomo = _tidToleranteEst(v['pomo_id']);

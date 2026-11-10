@@ -7111,7 +7111,15 @@ Future<List<Map<String, dynamic>>> _servicioVentasNetas() async {
     if ((v['reverso_de'] as num?) != null) return false;
     final id = (v['id'] as num?)?.toInt();
     if (id != null && reversadas.contains(id)) return false;
-    if ((v['casa'] as num?)?.toInt() == 1) return false;
+    // Yunque R4-M4-6: detección Casa TOLERANTE (1/true/'1',
+    // la de esCasaTolerante en estadisticas_servicios.dart,
+    // que no se importa aquí por el sentido de la
+    // dependencia): con el cast numérico, una fila Casa en
+    // forma bool/'1' sumaba como ingreso neto de servicios.
+    final casaV = v['casa'];
+    if (casaV == 1 || casaV == true || casaV == '1') {
+      return false;
+    }
     return true;
   }).toList();
 }
