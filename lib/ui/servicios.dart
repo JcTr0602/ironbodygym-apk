@@ -796,7 +796,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           (p['cliente_id'] as num?)?.toInt() == cidServ &&
           (p['casa'] == true) == casaServ,
       descripcion: 'una venta de '
-          '${tipo == 'dosis_sin_agua' ? 'dosis sin agua' : tipo == 'dosis_con_agua' ? 'dosis con agua' : tipo == 'agua_suelta' ? 'pomo de agua' : 'servicio'}'
+          '${tipo == 'dosis_sin_agua' ? 'dosis' : tipo == 'dosis_con_agua' ? 'dosis con agua' : tipo == 'agua_suelta' ? 'agua' : 'servicio'}'
           ' x$cantidad',
     );
     if (!sigueServ) return;
