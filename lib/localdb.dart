@@ -7214,7 +7214,8 @@ class LocalDb {
   // sensibles: privadas (mirror y local), borradores y plantillas.
 
   /// Borra incidencias privadas y datos sensibles locales. Retorna conteo.
-  Future<int> purgarDatosSensibles() async {
+  Future<int> purgarDatosSensibles(
+      {bool conservarComprobantesPendientes = false}) async {
     final d = await db;
     var n = 0;
     // Argón 1.21 AR-C04: recoger ANTES de borrar las filas los
@@ -7319,7 +7320,12 @@ class LocalDb {
       // visor lo muestra como no disponible). La privacidad
       // manda: subir antes de cerrar sesión evita el caso.
       'suplemento_ajustes',
-      'comprobantes_pago',
+      // 1.31 (IMP-11, yunque de app): con la purga
+      // AUTOMÁTICA (sesión vencida) los comprobantes no
+      // se borran en este bucle: abajo se purgan solo
+      // los 'subido'. La manual los sigue borrando
+      // todos aquí, con su aviso previo.
+      if (!conservarComprobantesPendientes) 'comprobantes_pago',
     ]) {
       try {
         n += await d.delete(t);
@@ -7399,16 +7405,45 @@ class LocalDb {
         } catch (_) {}
       }
     }
-    // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
-    // son fotos de transferencias: tampoco pueden quedar en un
-    // teléfono compartido tras cerrar sesión.
-    try {
-      final docs = await getApplicationDocumentsDirectory();
-      final dirComp = Directory(p.join(docs.path, 'comprobantes'));
-      if (await dirComp.exists()) {
-        await dirComp.delete(recursive: true);
-      }
-    } catch (_) {}
+    // 1.31 (IMP-11): en la purga AUTOMÁTICA, los
+    // comprobantes que aún deben subir ('pendiente' /
+    // 'error') SOBREVIVEN con su archivo: su op de pago
+    // sigue en ops_queue y subirá luego — destruirlos
+    // dejaba el pago en el servidor sin su imagen, sin
+    // que nadie hubiera aceptado ese coste (la decisión
+    // con aviso es solo del cierre MANUAL). Se purgan
+    // únicamente los 'subido' (su imagen ya está en el
+    // servidor) y sus archivos; el resto de la carpeta
+    // no se toca.
+    if (conservarComprobantesPendientes) {
+      try {
+        final subidos = await d.query('comprobantes_pago',
+            columns: ['ruta_local'], where: "estado = 'subido'");
+        for (final f in subidos) {
+          final ruta = (f['ruta_local'] as String?) ?? '';
+          if (ruta.isEmpty) continue;
+          try {
+            await File(ruta).delete();
+          } catch (_) {}
+        }
+        n += await d.delete('comprobantes_pago',
+            where: "estado = 'subido'");
+        await d.insert(
+            'meta', {'k': 'wm_comprobantes_pago', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      } catch (_) {}
+    } else {
+      // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
+      // son fotos de transferencias: tampoco pueden quedar en un
+      // teléfono compartido tras cerrar sesión.
+      try {
+        final docs = await getApplicationDocumentsDirectory();
+        final dirComp = Directory(p.join(docs.path, 'comprobantes'));
+        if (await dirComp.exists()) {
+          await dirComp.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
     return n;
@@ -7588,9 +7623,12 @@ class LocalDb {
 
   /// Purga completa al cerrar sesión o cambiar de usuario.
   /// Llamar ANTES de AuthService.signOut() en cada punto de salida.
-  static Future<void> purgaAlCerrarSesion() async {
+  static Future<void> purgaAlCerrarSesion(
+      {bool conservarComprobantesPendientes = false}) async {
     try {
-      await LocalDb.instance.purgarDatosSensibles();
+      await LocalDb.instance.purgarDatosSensibles(
+          conservarComprobantesPendientes:
+              conservarComprobantesPendientes);
     } catch (_) {}
     // 1.29 (Oleada 8, FB-23): la caché de «Actividad en la
     // app de clientes» es del dueño y no debe quedar legible
