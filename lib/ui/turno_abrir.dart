@@ -46,7 +46,7 @@ Future<List<String>> nombresOtrosEntrenadores() async {
   } catch (e) {
     // Yunque de App 1.31 (C1-7): la suplencia se pierde en
     // silencio si la lectura falla; al menos bitácora.
-    AppLog.warn('turno_abrir', 'otros_entrenadores_fallo', d: '$e');
+    AppLog.aviso('turno_abrir', 'otros_entrenadores_fallo', d: '$e');
   }
   return nombres;
 }

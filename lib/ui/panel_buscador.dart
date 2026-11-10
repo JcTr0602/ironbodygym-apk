@@ -571,7 +571,7 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
       // Sin espejo legible, el buscador de funciones sigue —
       // Y ESPECIFICADO: pero desde el Yunque de App 1.31
       // (C1-6) el fallo queda en bitácora, no en silencio.
-      AppLog.warn('panel_buscador', 'clientes_fallo', d: '$e');
+      AppLog.aviso('panel_buscador', 'clientes_fallo', d: '$e');
     }
   }
 
