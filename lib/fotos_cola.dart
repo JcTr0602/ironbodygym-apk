@@ -1673,7 +1673,8 @@ class FotosColaService {
   }
 
   /// Fix Luna 7: elimina archivos huérfanos (en disco pero no en la cola,
-  /// o de filas en 'error'/'completada' hace más de 7 días).
+  /// o de filas 'completada' hace más de 7 días). Las filas en
+  /// 'error' no se tocan (B-13: su archivo es la única copia).
   Future<int> limpiarHuerfanos() async {
     int borrados = 0;
     try {
@@ -1686,13 +1687,22 @@ class FotosColaService {
       final rows = await db.query('fotos_cola', columns: ['ruta_local']);
       final referenciadas = rows.map((r) => r['ruta_local'] as String).toSet();
 
-      // Filas viejas completadas/error: borrar archivos y filas.
+      // Filas viejas COMPLETADAS: borrar archivos y filas (los
+      // bytes ya viven en Storage).
+      // Auditoría Definitiva (B-13): las filas en 'error' YA NO
+      // se purgan aquí: su archivo local es la ÚNICA copia de
+      // una foto que nunca subió, y borrarlo a los 7 días
+      // destruía en silencio la evidencia y la posibilidad de
+      // reactivarla desde la Cola (reintentarFotoCola /
+      // reintentarTodasFotosCola). Una fila 'error' solo sale
+      // por reactivación (sube) o por descarte manual en la
+      // Cola, que es decisión visible del usuario.
       final limite =
           isoHabana(ahoraHabana().subtract(const Duration(days: 7)));
       final viejas = await db.query(
         'fotos_cola',
         columns: ['id', 'ruta_local', 'suplemento_id'],
-        where: "estado IN ('completada', 'error') AND actualizado_en < ?",
+        where: "estado = 'completada' AND actualizado_en < ?",
         whereArgs: [limite],
       );
       for (final v in viejas) {

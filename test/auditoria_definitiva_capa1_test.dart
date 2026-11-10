@@ -10,8 +10,10 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/comprobantes.dart';
+import 'package:ironbody_gym/fotos_cola.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
+import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/foto_elegir.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -370,6 +372,86 @@ void main() {
           reason: 'la ruta temporal del selector volvió a '
               'guardarse como local_path');
       expect(detalle.contains("'local_path': fotoPath"), isFalse);
+    });
+  });
+
+  group('B-13 · la foto en error conserva su única copia', () {
+    late Directory docs;
+
+    setUpAll(() async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      docs = await Directory.systemTemp.createTemp('b13_docs');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              (call) async => docs.path);
+    });
+
+    test('limpiarHuerfanos purga la completada vieja y NO toca '
+        'la fila en error ni su archivo', () async {
+      await _abrirDbVacia();
+      final db = await LocalDb.instance.db;
+      final fotosDir = Directory('${docs.path}/fotos');
+      await fotosDir.create(recursive: true);
+      final hace8 = isoHabana(
+          ahoraHabana().subtract(const Duration(days: 8)));
+      final ahora = isoHabana(ahoraHabana());
+      Future<void> sembrar(String uuid, String estado) async {
+        final f = File('${fotosDir.path}/$uuid.jpg');
+        await f.writeAsBytes([1, 2, 3]);
+        await db.insert('fotos_cola', {
+          'op_uuid': uuid,
+          'tipo': 'display',
+          'cliente_id': 5,
+          'ruta_local': f.path,
+          'estado': estado,
+          'intentos': estado == 'error' ? 5 : 1,
+          'creado_en': hace8,
+          'actualizado_en': hace8,
+        });
+      }
+
+      await sembrar('b13-error', 'error');
+      await sembrar('b13-ok', 'completada');
+      // Recién creada en error: tampoco se toca, obviamente.
+      final fNueva = File('${fotosDir.path}/b13-nueva.jpg');
+      await fNueva.writeAsBytes([4]);
+      await db.insert('fotos_cola', {
+        'op_uuid': 'b13-nueva',
+        'tipo': 'display',
+        'cliente_id': 5,
+        'ruta_local': fNueva.path,
+        'estado': 'error',
+        'intentos': 5,
+        'creado_en': ahora,
+        'actualizado_en': ahora,
+      });
+
+      await FotosColaService.instance.limpiarHuerfanos();
+
+      final quedan = await db.query('fotos_cola',
+          columns: ['op_uuid'], orderBy: 'op_uuid ASC');
+      expect(quedan.map((r) => r['op_uuid']).toList(),
+          ['b13-error', 'b13-nueva'],
+          reason: 'la completada vieja sale; las de error quedan '
+              'con su fila');
+      expect(
+          await File('${fotosDir.path}/b13-error.jpg').exists(),
+          isTrue,
+          reason: 'el archivo de la foto en error es su única '
+              'copia: no puede borrarse en silencio');
+      expect(await File('${fotosDir.path}/b13-ok.jpg').exists(),
+          isFalse,
+          reason: 'la completada sí se purga (está en Storage)');
+    });
+
+    test('la reactivación desde la Cola cubre el estado error '
+        '(estructural, base 1.30)', () {
+      final cola = File('lib/ui/cola.dart').readAsStringSync();
+      expect(cola, contains('reintentarTodasFotosCola'));
+      expect(cola, contains("estado IN ('pendiente', 'error')"),
+          reason: 'el reintento masivo dejó de cubrir las fotos '
+              'en error');
     });
   });
 }
