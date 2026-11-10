@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../reparar_sync.dart';
 import 'app_bar.dart';
 import 'cola.dart';
@@ -66,6 +67,17 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Yunque R4-M3-3: la reparación (comprobación completa
+    // del manifiesto + sync forzada) es herramienta del
+    // dueño, como la Salud — antes cualquier staff la
+    // disparaba desde el banner de error, sin puerta.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+          appBar: appBarIron(context, 'Reparar sincronización'),
+          body: const Center(
+              child: Text(
+                  'La reparación del sync es solo el dueño.')));
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Reparar sincronización'),
       body: _cargando
@@ -129,7 +141,21 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
         style: AppTexto.secundario,
       ),
       const SizedBox(height: AppEspacio.md),
-      if (hallazgos.isEmpty)
+      if (!foto.fotoCompleta)
+        // Yunque R4-M3-1: con lecturas fallidas la foto es
+        // parcial — jamás el verde de «todo en orden» sobre
+        // ceros que pueden ser errores de lectura.
+        AvisoEstado(
+          tipo: TipoAviso.error,
+          texto: 'La revisión no se pudo completar: '
+              '${foto.lecturasFallidas} '
+              '${foto.lecturasFallidas == 1 ? 'lectura falló' : 'lecturas fallaron'} '
+              'al revisar este teléfono. Lo que se ve abajo '
+              'puede estar incompleto; vuelve a revisar y, '
+              'si sigue fallando, exporta la bitácora desde '
+              'la Salud de la sincronización.',
+        ),
+      if (hallazgos.isEmpty && foto.fotoCompleta)
         // 1.29 (Oleada 6, D-16): el «todo está bien» de
         // reparar sync también habla el lenguaje de
         // estados de la casa (AvisoEstado), como la Salud.
@@ -242,26 +268,49 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
                 style: AppTexto.cuerpo,
               ),
             const SizedBox(height: AppEspacio.xs),
+            // Yunque R4-M3-1: el «se despejaron N» solo es
+            // verdad con AMBAS fotos completas; con fallos
+            // de lectura la diferencia puede ser un cero
+            // fabricado por el error, no una cura.
             Text(
-              arregladoAuto > 0
-                  ? 'Se despejaron $arregladoAuto '
-                      '${arregladoAuto == 1 ? 'cosa atascada' : 'cosas atascadas'}.'
-                  : 'No quedó nada pendiente de despejar por la '
-                      'reparación.',
+              !(r.antes.fotoCompleta && r.despues.fotoCompleta)
+                  ? 'La revisión de antes o de después no se '
+                      'pudo leer completa: no se puede asegurar '
+                      'cuánto se despejó. Vuelve a revisar.'
+                  : arregladoAuto > 0
+                      ? 'Se despejaron $arregladoAuto '
+                          '${arregladoAuto == 1 ? 'cosa atascada' : 'cosas atascadas'}.'
+                      : 'No quedó nada pendiente de despejar por la '
+                          'reparación.',
               style: AppTexto.cuerpo,
             ),
           ],
         ),
       ),
       const SizedBox(height: AppEspacio.md),
-      if (quedanAuto.isEmpty && quedanDueno.isEmpty)
+      if (!r.despues.fotoCompleta)
+        // Yunque R4-M3-1: sin foto completa no hay «todo
+        // quedó en orden» que valga.
+        const AvisoEstado(
+          tipo: TipoAviso.error,
+          texto: 'La revisión final no se pudo completar: '
+              'puede quedar algo atascado sin verse. Vuelve '
+              'a revisar.',
+        ),
+      if (quedanAuto.isEmpty &&
+          quedanDueno.isEmpty &&
+          r.despues.fotoCompleta)
         // D-16: «todo quedó en orden» como AvisoEstado.
         const AvisoEstado(
           tipo: TipoAviso.exito,
           texto: 'Todo quedó en orden.',
         ),
-      if (quedanAuto.isNotEmpty || quedanDueno.isNotEmpty)
-        // D-16: «quedan cambios» como AvisoEstado.
+      if ((quedanAuto.isNotEmpty || quedanDueno.isNotEmpty) &&
+          r.despues.fotoCompleta)
+        // D-16: «quedan cambios» como AvisoEstado. (Con la
+        // foto parcial manda el aviso de error de arriba:
+        // un «no queda nada listado» no debe leerse como
+        // «queda esto y solo esto».)
         const AvisoEstado(
           tipo: TipoAviso.aviso,
           texto: 'Todavía quedan cosas por revisar: están '

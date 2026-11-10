@@ -20,6 +20,7 @@
 library;
 
 import 'app_log.dart';
+import 'auth.dart';
 import 'diagnostico_espejo.dart';
 import 'localdb.dart';
 import 'sync.dart';
@@ -47,6 +48,14 @@ class FotoAtascos {
   final bool espejoVacioSospechoso;
   final int clientesPrevios;
 
+  /// Yunque R4-M3-1: lecturas de la foto que FALLARON (su
+  /// valor quedó en 0 por el catch, no porque no haya nada).
+  /// Con > 0 la foto es PARCIAL: ninguna superficie puede
+  /// declarar «todo en orden» con ella, porque un atasco
+  /// real puede estar escondido tras una lectura rota
+  /// (error ≠ vacío, también en el diagnóstico).
+  final int lecturasFallidas;
+
   const FotoAtascos({
     this.opsPendientes = 0,
     this.opsEnviadas = 0,
@@ -61,7 +70,11 @@ class FotoAtascos {
     this.manifiestoSinVerificar = const [],
     this.espejoVacioSospechoso = false,
     this.clientesPrevios = 0,
+    this.lecturasFallidas = 0,
   });
+
+  /// La foto se leyó entera: solo entonces un cero es cero.
+  bool get fotoCompleta => lecturasFallidas == 0;
 
   /// Total de cosas que el botón Reparar puede mover.
   int get reparablesAuto =>
@@ -199,13 +212,27 @@ List<HallazgoReparacion> clasificarHallazgos(FotoAtascos f) {
 }
 
 /// Captura la foto de atascos actual desde la BD local.
-/// Nunca lanza: lo que no se pueda leer cuenta como 0.
+/// Nunca lanza: lo que no se pueda leer cuenta como 0 PERO
+/// queda contado en [FotoAtascos.lecturasFallidas] y en
+/// bitácora (Yunque R4-M3-1): antes cada catch convertía un
+/// error de lectura en un cero mudo y, con la foto en ceros,
+/// la pantalla declaraba «Todo está en orden» sobre una BD
+/// ilegible — error disfrazado de vacío en la herramienta
+/// que existe para diagnosticar.
 Future<FotoAtascos> capturarAtascos() async {
   final db = LocalDb.instance;
+  var fallidas = 0;
+  void fallo(String que, Object e) {
+    fallidas++;
+    AppLog.error('sync', 'reparar_foto_lectura_fallo',
+        d: '$que: $e');
+  }
+
   Future<int> ops(String estado) async {
     try {
       return (await db.opsByEstado(estado)).length;
-    } catch (_) {
+    } catch (e) {
+      fallo('ops_$estado', e);
       return 0;
     }
   }
@@ -213,7 +240,18 @@ Future<FotoAtascos> capturarAtascos() async {
   Future<int> contar(String tabla, String where) async {
     try {
       return await db.contar(tabla, where: where);
-    } catch (_) {
+    } catch (e) {
+      fallo('contar_$tabla', e);
+      return 0;
+    }
+  }
+
+  Future<int> contarSeguro(
+      String que, Future<int> Function() leer) async {
+    try {
+      return await leer();
+    } catch (e) {
+      fallo(que, e);
       return 0;
     }
   }
@@ -229,7 +267,9 @@ Future<FotoAtascos> capturarAtascos() async {
     if (sv != null && sv.isNotEmpty) {
       sinVerificar = sv.split(',').where((s) => s.isNotEmpty).toList();
     }
-  } catch (_) {}
+  } catch (e) {
+    fallo('banderas_manifiesto', e);
+  }
 
   var espejoVacio = false;
   var previos = 0;
@@ -239,7 +279,9 @@ Future<FotoAtascos> capturarAtascos() async {
       espejoVacio = true;
       previos = d.clientesPrevios;
     }
-  } catch (_) {}
+  } catch (e) {
+    fallo('espejo_vacio', e);
+  }
 
   return FotoAtascos(
     opsPendientes: await ops('pendiente'),
@@ -249,14 +291,15 @@ Future<FotoAtascos> capturarAtascos() async {
     opsRevision: await ops('necesita_revision'),
     fotosPendientes: await contar('fotos_cola', "estado = 'pendiente'"),
     fotosError: await contar('fotos_cola', "estado = 'error'"),
-    fotosIncidenciasPendientes:
-        await db.contarFotosIncidenciasPendientes().catchError((_) => 0),
-    comprobantesPendientes:
-        await db.contarComprobantesPendientes().catchError((_) => 0),
+    fotosIncidenciasPendientes: await contarSeguro(
+        'fotos_incidencias', db.contarFotosIncidenciasPendientes),
+    comprobantesPendientes: await contarSeguro(
+        'comprobantes', db.contarComprobantesPendientes),
     tablasPorRedescargar: banderas,
     manifiestoSinVerificar: sinVerificar,
     espejoVacioSospechoso: espejoVacio,
     clientesPrevios: previos,
+    lecturasFallidas: fallidas,
   );
 }
 
@@ -285,11 +328,23 @@ Future<
     AppLog.error('sync', 'reparar_sync_fallo', d: '$e');
   }
   final despues = await capturarAtascos();
+  // Yunque R4-M3-6: la bitácora dice también QUIÉN disparó
+  // la reparación (en un teléfono multiusuario la acción
+  // debe ser atribuible) y si alguna foto salió parcial.
+  var actor = 'sin_sesion';
+  try {
+    final a = AuthService();
+    actor = '${a.userId ?? 'sin_uid'}'
+        '/${a.isOwner ? 'dueno' : 'staff'}';
+  } catch (_) {}
   AppLog.info('sync', 'reparar_sync',
-      d: 'divergentes=$divergentes '
+      d: 'actor=$actor '
+          'divergentes=$divergentes '
           'auto_antes=${antes.reparablesAuto} '
           'auto_despues=${despues.reparablesAuto} '
-          'dueno=${despues.deDueno}');
+          'dueno=${despues.deDueno} '
+          'foto_fallos_antes=${antes.lecturasFallidas} '
+          'foto_fallos_despues=${despues.lecturasFallidas}');
   return (
     antes: antes,
     despues: despues,

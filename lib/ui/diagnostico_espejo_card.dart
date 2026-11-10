@@ -125,6 +125,13 @@ class _TarjetaDiagnosticoEspejoState
   }
 
   Future<void> _marcarCorrecto() async {
+    // Yunque R4-M3-5: apagar la alarma de espejo vacío es
+    // decisión del dueño y queda en bitácora con actor —
+    // antes cualquier usuario del teléfono compartido la
+    // silenciaba para siempre sin dejar constancia, y el
+    // próximo vacío real ya no tendría tarjeta.
+    final auth = AuthService();
+    if (!auth.isOwner) return;
     final ok = await DialogoApp.confirmar(
       context,
       titulo: '¿De verdad no hay clientes?',
@@ -135,6 +142,9 @@ class _TarjetaDiagnosticoEspejoState
     );
     if (ok != true) return;
     await LocalDb.instance.setMeta('clientes_previos_buenos', '0');
+    AppLog.info('sync', 'espejo_vacio_marcado_correcto',
+        d: 'actor=${auth.userId ?? 'sin_uid'} '
+            'previos=${_diag?.clientesPrevios ?? 0}');
     if (!mounted) return;
     setState(() => _diag = null);
   }
@@ -276,23 +286,27 @@ class _TarjetaDiagnosticoEspejoState
             ),
             // Acción discreta y APARTE: declarar el vacío
             // legítimo no compite con las acciones de
-            // rescate.
-            const SizedBox(height: AppEspacio.xs),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: _marcarCorrecto,
-                style: TextButton.styleFrom(
-                  foregroundColor:
-                      AppColores.textoSecundario(context),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppEspacio.sm),
-                  minimumSize: const Size(0, 36),
+            // rescate. Yunque R4-M3-5: solo el dueño la ve
+            // (como Exportar bitácora): es su decisión y
+            // queda en bitácora.
+            if (esDueno) ...[
+              const SizedBox(height: AppEspacio.xs),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: _marcarCorrecto,
+                  style: TextButton.styleFrom(
+                    foregroundColor:
+                        AppColores.textoSecundario(context),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppEspacio.sm),
+                    minimumSize: const Size(0, 36),
+                  ),
+                  child: const Text(
+                      'Es correcto, se borraron a propósito'),
                 ),
-                child: const Text(
-                    'Es correcto, se borraron a propósito'),
               ),
-            ),
+            ],
           ],
         ),
       ),
