@@ -233,7 +233,7 @@ void main() {
         server.port, Uri.parse(AppConfig.supabaseUrl).host);
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
-      anonKey: 'dummy',
+      publishableKey: 'dummy',
     );
   });
 
