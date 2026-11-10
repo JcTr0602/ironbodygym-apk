@@ -17,6 +17,7 @@ import 'diseno.dart';
 import 'iconos_propios.dart';
 import 'servicios_precios.dart';
 import 'skeleton.dart';
+import '../app_log.dart';
 
 /// v1.8.0: Administración de Servicios por dosis (SOLO DUEÑO):
 /// precios y comisión, stock común de agua (CPP), pomos y botes.
@@ -109,6 +110,23 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _personas[id] ?? 'Persona #$id';
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final precios = await preciosServicios();
     final agua = await stockAguaLocal();
     final movsAgua =
