@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../app_log.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import 'admin_secciones.dart';
+import 'componentes.dart';
 import 'dialogo_gasto.dart';
 import 'permisos_ui.dart';
 
@@ -26,6 +28,9 @@ class GastosScreen extends StatefulWidget {
 class _GastosScreenState extends State<GastosScreen> {
   List<Map<String, dynamic>> _gastos = const [];
   bool _cargado = false;
+  // Yunque de App 1.31 (C1-1): el fallo de lectura se PINTA
+  // como error, no como «sin gastos» con totales en cero.
+  String? _errorCarga;
 
   // H-01 (Argón 1.27): candado anti doble-toque
   // (patrón _operacionEnCurso de admin.dart):
@@ -58,12 +63,20 @@ class _GastosScreenState extends State<GastosScreen> {
       if (!mounted) return;
       setState(() {
         _gastos = gastos;
+        _errorCarga = null;
         _cargado = true;
       });
-    } catch (_) {
+    } catch (e) {
+      // Yunque de App 1.31 (C1-1): bitácora + error visible.
+      // Antes el catch dejaba la lista vacía y la pantalla
+      // decía «Sin gastos registrados» con totales en cero:
+      // un fallo de lectura del espejo se leía como un día
+      // sin gastos.
+      AppLog.error('gastos', 'carga_fallo', d: '$e');
       if (!mounted) return;
       setState(() {
         _gastos = const [];
+        _errorCarga = '$e';
         _cargado = true;
       });
     }
@@ -100,6 +113,15 @@ class _GastosScreenState extends State<GastosScreen> {
     if (!_cargado) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_errorCarga != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Gastos')),
+        body: EstadoError(
+          detalle: _errorCarga,
+          onReintentar: _recargar,
+        ),
       );
     }
     return SeccionGastosScreen(

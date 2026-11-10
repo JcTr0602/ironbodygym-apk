@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../negocio.dart';
 import 'app_bar.dart';
@@ -29,6 +30,9 @@ class LiquidacionesHistorialScreen extends StatefulWidget {
 class _LiquidacionesHistorialScreenState
     extends State<LiquidacionesHistorialScreen> {
   bool _cargando = true;
+  // Yunque de App 1.31 (C1-3): el fallo de carga se PINTA
+  // como error, no como «sin liquidaciones».
+  String? _falloCarga;
   List<Map<String, dynamic>> _todas = [];
   final _busquedaCtrl = TextEditingController();
   String _mes = ''; // '' = todos los meses
@@ -52,11 +56,19 @@ class _LiquidacionesHistorialScreenState
       if (mounted) {
         setState(() {
           _todas = filas;
+          _falloCarga = null;
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // Yunque de App 1.31 (C1-3): bitácora + error visible.
+      AppLog.error('liquidaciones', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -236,7 +248,12 @@ class _LiquidacionesHistorialScreenState
             child: _cargando
                 ? const EstadoCargando(
                     texto: 'Cargando liquidaciones…')
-                : RefreshIndicator(
+                : _falloCarga != null
+                    ? EstadoError(
+                        detalle: _falloCarga,
+                        onReintentar: _cargar,
+                      )
+                    : RefreshIndicator(
                     onRefresh: _cargar,
                     child: visibles.isEmpty
                         ? ListView(

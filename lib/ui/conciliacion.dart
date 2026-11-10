@@ -137,6 +137,9 @@ class ConciliacionScreen extends StatefulWidget {
 
 class _ConciliacionScreenState extends State<ConciliacionScreen> {
   bool _cargando = true;
+  // Yunque de App 1.31 (C1-2): el fallo de carga se PINTA
+  // como error, no como «no hay transferencias esperando».
+  String? _falloCarga;
   List<Map<String, dynamic>> _porComprobar = [];
   List<Map<String, dynamic>> _resueltas = [];
   Map<int, String> _nombres = {};
@@ -252,11 +255,22 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                   r['_conciliacion'] == 'rechazada')
               .take(20)
               .toList();
+          _falloCarga = null;
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // Yunque de App 1.31 (C1-2): bitácora + error visible.
+      // Antes el fallo se leía como «todas comprobadas» y el
+      // dueño podía cerrar el día creyendo que no quedaba
+      // nada por comprobar.
+      AppLog.error('conciliacion', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -398,7 +412,12 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando transferencias…')
-          : Column(
+          : _falloCarga != null
+              ? EstadoError(
+                  detalle: _falloCarga,
+                  onReintentar: _cargar,
+                )
+              : Column(
               children: [
                 Expanded(
                   child: RefreshIndicator(

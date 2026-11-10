@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../auditoria_persona.dart';
+import '../app_log.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart' show fmtMonto;
@@ -44,6 +45,9 @@ class AuditoriaPersonaScreen extends StatefulWidget {
 
 class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   bool _cargando = true;
+  // Yunque de App 1.31 (C1-4): el fallo de carga se PINTA
+  // como error, no como persona sin movimientos.
+  String? _falloCarga;
   List<PersonaApk> _personas = [];
   PersonaApk? _persona;
   String _modo = 'mes'; // dia | semana | mes | rango
@@ -114,7 +118,14 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           ));
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // Yunque de App 1.31 (C1-4): el fallo de leer la lista
+      // de usuarios queda en bitácora; sin ella, la lista
+      // vacía se atribuía a la sesión («No se pudo
+      // identificar tu usuario…») y no a la lectura.
+      AppLog.error('auditoria_persona', 'cargar_personas_fallo',
+          d: '$e');
+    }
     if (!mounted) return;
     setState(() {
       _personas = personas;
@@ -296,6 +307,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
             dinero: dinero,
             accionesSensibles: sensibles.length,
           );
+          _falloCarga = null;
           _avisoCobertura = avisoCoberturaAperturas(
               desdeIso: desdeIso, minFechaEspejo: minFecha);
           // 1.25 T115: series diarias y período LEGIBLE.
@@ -313,8 +325,19 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // Yunque de App 1.31 (C1-4): bitácora + error visible.
+      // Antes el fallo dejaba «Sin datos.»/«Sin turnos en el
+      // período.»: en la pantalla que audita el dinero de una
+      // persona, un fallo de lectura parecía una persona sin
+      // movimientos.
+      AppLog.error('auditoria_persona', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -357,7 +380,12 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           ? const Padding(
               padding: EdgeInsets.all(AppEspacio.md),
               child: SkeletonLista(items: 3))
-          : _persona == null
+          : _falloCarga != null
+              ? EstadoError(
+                  detalle: _falloCarga,
+                  onReintentar: _recargarTodo,
+                )
+              : _persona == null
               ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(AppEspacio.xl),
