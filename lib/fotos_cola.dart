@@ -1250,6 +1250,19 @@ class FotosColaService {
           AppLog.aviso('fotos', 'reintento', d: 'id=$id error=${res.error}');
           return null;
       }
+    } on _PausaQosCola {
+      // Auditoría Definitiva (B-10): la pausa QoS NO es un
+      // error y NO se captura aquí: se relanza intacta al
+      // despachador, cuyo `on _PausaQosCola { break; }` era
+      // código muerto porque este catch genérico la consumía
+      // antes — marcaba el display como LENTO (degradando la
+      // QoS y reteniendo la variante 'original'), dejaba un
+      // AppLog de error falso y el despachador seguía
+      // reclamando la fila siguiente para pausarla también.
+      // La fila ya quedó 'pendiente' sin backoff en
+      // pausarFilaPorQos; el finally cancela el timer del
+      // lease igual que en cualquier salida.
+      rethrow;
     } catch (e) {
       // v1.3.4 Ítem 5: una excepción a mitad de subida invalida la
       // medición de velocidad (el último display no subió rápido).
