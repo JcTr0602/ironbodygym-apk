@@ -2015,6 +2015,8 @@ class SyncEngine {
     }
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
     _lanzarFotosIncidencias();
+    // A-6: autocura del espejo corrupto al cerrar el ciclo.
+    await _marcarRedescargaPorCorruptas();
     // Pendientes al cierre, contados de la cola real: el resumen
     // de la UI se construye con esto y jamás dirá «al día» si
     // queda algo por sincronizar.
@@ -2033,6 +2035,41 @@ class SyncEngine {
       conteoIndeterminado: conteo.indeterminado,
     );
   }
+
+  /// Auditoría Definitiva (A-6): traduce la señal de
+  /// corrupción del espejo en la orden de re-descarga que el
+  /// pull ya consume. `allMirror` mantiene la meta
+  /// `mirror_corruptas_<tabla>` con el conteo de filas cuyo
+  /// JSON no decodifica; hasta hoy esa señal solo pintaba el
+  /// semáforo de Salud: el manifiesto compara solo `sync_seq`,
+  /// así que una fila dañada con el seq correcto no divergía
+  /// jamás y la corrupción era eterna. Aquí, al cerrar el
+  /// ciclo, cada tabla señalada de la lista canónica recibe
+  /// `forzar_redescarga_<tabla>` y el próximo pull la re-baja
+  /// entera: la fila vuelve con datos frescos (autocura).
+  /// Nunca lanza: es un cierre, no un paso del ciclo.
+  Future<void> _marcarRedescargaPorCorruptas() async {
+    try {
+      final senales =
+          await _db.metasValoresConPrefijo('mirror_corruptas_');
+      for (final e in senales.entries) {
+        final n = int.tryParse(e.value) ?? 0;
+        if (n <= 0) continue;
+        final tabla =
+            e.key.replaceFirst('mirror_corruptas_', '');
+        if (!tablasEspejo.contains(tabla)) continue;
+        await _db.setMeta('forzar_redescarga_$tabla', '1');
+        AppLog.aviso('sync', 'espejo_corrupto_redescarga',
+            d: 'tabla=$tabla filas=$n');
+      }
+    } catch (_) {}
+  }
+
+  /// Costura de test (A-6): el consumidor de autocura sin
+  /// tener que correr un ciclo entero.
+  @visibleForTesting
+  Future<void> marcarRedescargaPorCorruptasParaTest() =>
+      _marcarRedescargaPorCorruptas();
 
   /// Conteo de pendientes al cierre de una corrida.
   /// Yunque B (YB-TRA-01): TRIESTADO. Antes, ante cualquier

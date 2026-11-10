@@ -68,7 +68,21 @@ bool esEspejoVacioSospechoso({
 String causaProbableEspejoVacio({
   required bool haySyncOk,
   required int opsPendientes,
+  int filasCorruptas = 0,
 }) {
+  // Auditoría Definitiva (A-6): la corrupción va PRIMERO —
+  // es la explicación exacta cuando el espejo «vacío» tiene
+  // filas cuyo JSON no decodifica. Sin esta rama, el W1
+  // culpaba a la bajada («la bajada llegó sin ningún
+  // cliente») de un daño que vive en el teléfono.
+  if (filasCorruptas > 0) {
+    return 'Hay $filasCorruptas ficha(s) guardada(s) en este '
+        'teléfono con los datos dañados: la app no puede '
+        'leerlas. No es un fallo de la bajada. La próxima '
+        'sincronización las vuelve a bajar solas; si el '
+        'problema sigue, exporta la bitácora y envíasela al '
+        'dueño.';
+  }
   if (!haySyncOk) {
     return 'Este teléfono no registra ninguna sincronización '
         'buena: puede que los datos aún no hayan bajado del '
@@ -93,7 +107,8 @@ Future<DiagnosticoEspejo?> evaluarEspejoVacio() async {
   // las filas dañado, las pantallas leen 0 clientes (allMirror
   // las omite) pero el W1 veía la tabla «llena» y NO
   // disparaba — ciego justo en la variante corrupción.
-  final conteo = (await db.conteoMirrorLegible('clientes')).legibles;
+  final conteoMirror = await db.conteoMirrorLegible('clientes');
+  final conteo = conteoMirror.legibles;
   final previosTxt = await db.getMeta('clientes_previos_buenos');
   final previos = int.tryParse(previosTxt ?? '') ?? 0;
   if (!esEspejoVacioSospechoso(
@@ -111,6 +126,9 @@ Future<DiagnosticoEspejo?> evaluarEspejoVacio() async {
     causaProbable: causaProbableEspejoVacio(
       haySyncOk: pullOk != null,
       opsPendientes: pendientes,
+      // A-6: el conteo ya distingue corruptas; la rama de
+      // corrupción del diagnóstico las nombra.
+      filasCorruptas: conteoMirror.corruptas,
     ),
   );
 }

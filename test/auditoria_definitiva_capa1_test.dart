@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/comprobantes.dart';
+import 'package:ironbody_gym/diagnostico_espejo.dart';
 import 'package:ironbody_gym/fotos_cola.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
@@ -452,6 +453,63 @@ void main() {
       expect(cola, contains("estado IN ('pendiente', 'error')"),
           reason: 'el reintento masivo dejó de cubrir las fotos '
               'en error');
+    });
+  });
+
+  group('A-6 · autocura del espejo corrupto', () {
+    test('la causa probable nombra la corrupción primero', () {
+      final conCorrupcion = causaProbableEspejoVacio(
+          haySyncOk: true, opsPendientes: 0, filasCorruptas: 3);
+      expect(conCorrupcion, contains('dañados'));
+      expect(conCorrupcion, contains('3'));
+      // Sin corrupción, las ramas de siempre quedan intactas.
+      final sinSync = causaProbableEspejoVacio(
+          haySyncOk: false, opsPendientes: 0);
+      expect(sinSync, contains('no registra ninguna'));
+    });
+
+    test('el consumidor traduce mirror_corruptas_* en '
+        'forzar_redescarga_* solo en tablas del pull', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      await db.setMeta('mirror_corruptas_clientes', '2');
+      await db.setMeta('mirror_corruptas_pagos', '0');
+      await db.setMeta('mirror_corruptas_tabla_inventada', '5');
+      await SyncEngine.instance
+          .marcarRedescargaPorCorruptasParaTest();
+      expect(await db.getMeta('forzar_redescarga_clientes'), '1',
+          reason: 'la tabla corrupta no quedó marcada para '
+              're-bajarse: la corrupción seguiría eterna');
+      expect(await db.getMeta('forzar_redescarga_pagos'), isNull,
+          reason: 'una señal en 0 no debe forzar nada');
+      expect(
+          await db.getMeta('forzar_redescarga_tabla_inventada'),
+          isNull,
+          reason: 'una clave ajena no crea banderas huérfanas');
+    });
+
+    test('evaluarEspejoVacio diagnostica corrupción cuando el '
+        'espejo «vacío» son filas dañadas', () async {
+      await _abrirDbVacia();
+      final d = await LocalDb.instance.db;
+      // La columna data exige JSON válido (CHECK de esquema):
+      // la forma «corrupta» alcanzable es un JSON que no es el
+      // mapa esperado — para todo lector del espejo esa fila
+      // no existe (es el criterio de conteoMirrorLegible).
+      await d.insert('clientes', {
+        'id': 77,
+        'data': '[1,2,3]',
+        'sync_seq': 9,
+      });
+      await LocalDb.instance
+          .setMeta('clientes_previos_buenos', '4');
+      await LocalDb.instance.setMeta(
+          'last_pull_ok', isoHabana(ahoraHabana()));
+      final diag = await evaluarEspejoVacio();
+      expect(diag, isNotNull);
+      expect(diag!.causaProbable, contains('dañados'),
+          reason: 'el W1 volvió a culpar a la bajada de una '
+              'corrupción local');
     });
   });
 }
