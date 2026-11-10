@@ -27,6 +27,7 @@ import 'diseno.dart';
 import 'comparativa_entrenadores.dart';
 import 'ficha.dart';
 import 'widgets.dart';
+import '../app_log.dart';
 
 class DetalleEntrenadorScreen extends StatefulWidget {
   final String nombre;
@@ -85,6 +86,23 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   int? _miTid;
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     setState(() => _cargando = true);
     _miTid = widget.telegramId ??
         await telegramIdDeEntrenador(widget.nombre);
