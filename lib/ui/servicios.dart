@@ -227,6 +227,25 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   int? _autonomiaSelDias;
   String? _nivelSel;
 
+  // 1.31 (Mejoras · hub): la pantalla es un hub de zonas —
+  // Vender · Día · Inventario · Análisis (+ Precios como
+  // pantalla desde Inventario). La zona y la vista de Día
+  // viven aquí; cada zona monta lo que ya existía.
+  int _zona = 0; // 0 Vender · 1 Día · 2 Inventario · 3 Análisis
+  int _diaVista = 0; // 0 Hoy · 1 Historial
+
+  /// Zonas visibles según el rol: Inventario y Estadísticas
+  /// solo dueño; Análisis entra también si el entrenador
+  /// tiene el permiso de Ranking (la zona le enseña solo
+  /// esa tarjeta).
+  List<({int id, String nombre})> get _zonasVisibles => [
+        (id: 0, nombre: 'Vender'),
+        (id: 1, nombre: 'Día'),
+        if (_esDueno) (id: 2, nombre: 'Inventario'),
+        if (_esDueno || PermisosEntrenador().canVerRankingServicios)
+          (id: 3, nombre: 'Análisis'),
+      ];
+
   @override
   void initState() {
     super.initState();
@@ -1577,15 +1596,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 1.31 (Mejoras · hub): la pantalla es el hub «Servicios»
+    // con barra de zonas fija — Vender · Día · Inventario ·
+    // Análisis según el rol — y cada zona monta las piezas
+    // que ya existían, sin perder ninguna capacidad de las
+    // 27 tareas. El botón «Administrar» y los enlaces al pie
+    // del cuadre desaparecen: Inventario y Análisis SON
+    // zonas, y Precios cuelga de Inventario.
+    final zonas = _zonasVisibles;
+    final zonaEfectiva =
+        zonas.any((z) => z.id == _zona) ? _zona : 0;
     return Scaffold(
-      // Rediseño 1.18 (Jc 2026-10-29): en la cabecera queda solo
-      // refrescar. Administración baja a un botón con texto
-      // debajo de MI POMO; Estadísticas y Ranking bajan como
-      // enlaces con texto dentro del Cuadre. Los iconos sin
-      // texto eran poco intuitivos.
       appBar: appBarIron(
         context,
-        'Servicios ⚡',
+        'Servicios',
         acciones: [
           IconButton(
             tooltip: 'Actualizar',
@@ -1612,84 +1636,232 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       'Revisa la conexión o vuelve a intentarlo.',
                   onReintentar: _cargar,
                 )
-              : RefreshIndicator(
-              onRefresh: _actualizar,
-              child: ListView(
-                padding: const EdgeInsets.all(AppEspacio.lg),
-                children: [
-                  _tarjetaPomo(),
-                  // Rediseño 1.18 (Jc 2026-10-29): acceso a la
-                  // administración en un toque, con texto, a lo
-                  // ancho debajo de MI POMO. Solo dueño.
-                  if (_esDueno) ...[
-                    const SizedBox(height: AppEspacio.md),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                        context,
-                        RutaIron(
-                            builder: (_) =>
-                                const ServiciosAdminScreen()),
-                      ).then((_) => _cargar()),
-                      icon: const Icon(Icons.settings_rounded, size: 20),
-                      label: const Text('Administrar',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                  const SizedBox(height: AppEspacio.md),
-                  _botonesVenta(),
-                  const SizedBox(height: AppEspacio.md),
-                  _tarjetaCuadre(),
-                  const SizedBox(height: AppEspacio.lg),
-                  // Historial completo (pedido Jc 2026-10-28):
-                  // todas las operaciones de raciones, combos y
-                  // agua, más salidas sin venta, con filtros.
-                  Row(
-                    children: [
-                      Text('Ventas de hoy',
-                          style:
-                              AppTexto.titulo),
-                      const Spacer(),
-                      TextButton.icon(
-                        icon: const Icon(Icons.history_rounded, size: 18),
-                        label: const Text('Historial'),
-                        onPressed: () => Navigator.push(
-                          context,
-                          RutaIron(
-                            builder: (_) => ServiciosHistorialScreen(
-                              esDueno: _esDueno,
-                              miTid: _miTid,
-                              misPomosIds: {
-                                for (final l in _misPomos)
-                                  if ((l['id'] as num?) != null)
-                                    (l['id'] as num).toInt(),
-                              },
-                              personas: _personas,
-                            ),
-                          ),
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          AppEspacio.lg,
+                          AppEspacio.md,
+                          AppEspacio.lg,
+                          AppEspacio.sm),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<int>(
+                          showSelectedIcon: false,
+                          segments: [
+                            for (final z in zonas)
+                              ButtonSegment(
+                                  value: z.id, label: Text(z.nombre)),
+                          ],
+                          selected: {zonaEfectiva},
+                          onSelectionChanged: (sel) =>
+                              setState(() => _zona = sel.first),
                         ),
                       ),
+                    ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: _actualizar,
+                        child: switch (zonaEfectiva) {
+                          1 => _zonaDia(),
+                          2 => const ServiciosAdminScreen(
+                              embebida: true),
+                          3 => _zonaAnalisis(),
+                          _ => _zonaVender(),
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+
+  /// Zona Vender: MI POMO, los botones de venta y la franja
+  /// del día (el cuadre completo y la lista viven en Día).
+  Widget _zonaVender() {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: [
+        _tarjetaPomo(),
+        const SizedBox(height: AppEspacio.md),
+        _botonesVenta(),
+        const SizedBox(height: AppEspacio.md),
+        _franjaDelDia(),
+      ],
+    );
+  }
+
+  /// Franja compacta del día en Vender: dosis vendidas,
+  /// efectivo neto y ventas por sincronizar — SIN saldos de
+  /// pomos (pomo ciego también aquí). Tocarla lleva a Día.
+  Widget _franjaDelDia() {
+    var dosis = 0;
+    var efectivo = 0.0;
+    var porSincronizar = 0;
+    for (final v in _ventasHoy) {
+      final esReverso = (v['reverso_de'] as num?) != null;
+      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+      final monto = ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+          cant;
+      if (!esReverso && '${v['tipo']}' != 'agua_suelta') {
+        dosis += cant;
+      }
+      if ('${v['metodo']}' == 'efectivo') {
+        efectivo += esReverso ? -monto : monto;
+      }
+      if (v['en_cola'] == true) porSincronizar++;
+    }
+    final texto = _ventasHoy.isEmpty
+        ? 'Hoy: sin ventas todavía'
+        : 'Hoy: $dosis dosis · ${fmtMonto(efectivo)} CUP en efectivo'
+            '${porSincronizar > 0 ? ' · $porSincronizar por sincronizar' : ''}';
+    return Tarjeta(
+      onTap: () => setState(() {
+        _zona = 1;
+        _diaVista = 0;
+      }),
+      child: Row(
+        children: [
+          Icon(Icons.today_rounded,
+              color: AppColores.textoSecundario(context)),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(child: Text(texto, style: AppTexto.cuerpo)),
+          Icon(Icons.chevron_right_rounded,
+              color: AppColores.textoSecundario(context)),
+        ],
+      ),
+    );
+  }
+
+  /// Zona Día: segmentos Hoy | Historial. Hoy = el cuadre
+  /// (sin los enlaces, que viven en Análisis) + Ventas de
+  /// hoy; Historial = el cuerpo del historial embebido.
+  Widget _zonaDia() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg, 0,
+              AppEspacio.lg, AppEspacio.sm),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: 0, label: Text('Hoy')),
+                ButtonSegment(value: 1, label: Text('Historial')),
+              ],
+              selected: {_diaVista},
+              onSelectionChanged: (sel) =>
+                  setState(() => _diaVista = sel.first),
+            ),
+          ),
+        ),
+        Expanded(
+          child: _diaVista == 0
+              ? ListView(
+                  padding: const EdgeInsets.all(AppEspacio.lg),
+                  children: [
+                    _tarjetaCuadre(conEnlaces: false),
+                    const SizedBox(height: AppEspacio.lg),
+                    Text('Ventas de hoy', style: AppTexto.titulo),
+                    const SizedBox(height: AppEspacio.sm),
+                    if (_ventasHoy.isEmpty)
+                      const EstadoVacio(
+                        sinMarco: true,
+                        ilustracion: 'assets/vacio_caja.jpg',
+                        icono: Icons.receipt_long_rounded,
+                        titulo: 'Sin ventas registradas hoy.',
+                        subtitulo: 'Las ventas de hoy aparecen aquí.',
+                      )
+                    else
+                      for (final v in _ventasHoy) _filaVenta(v),
+                  ],
+                )
+              : ServiciosHistorialCuerpo(
+                  esDueno: _esDueno,
+                  miTid: _miTid,
+                  misPomosIds: {
+                    for (final l in _misPomos)
+                      if ((l['id'] as num?) != null)
+                        (l['id'] as num).toInt(),
+                  },
+                  personas: _personas,
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// Zona Análisis: las tarjetas de entrada a Estadísticas
+  /// (solo dueño) y Ranking (dueño o permiso), que empujan
+  /// las pantallas de siempre, intactas.
+  Widget _zonaAnalisis() {
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: [
+        if (_esDueno)
+          Tarjeta(
+            onTap: () => Navigator.push(
+              context,
+              RutaIron(
+                  builder: (_) => const ServiciosEstadisticasScreen()),
+            ).then((_) => _cargar()),
+            child: Row(
+              children: [
+                const IconoModuloBadge(
+                  icono: Icons.bar_chart_rounded,
+                  tinte: Colors.blue,
+                  iconoOscuro: AppColores.azulAguaOscuro,
+                  iconoClaro: AppColores.azulAguaClaro,
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Estadísticas', style: AppTexto.titulo),
+                      Text('Ventas, ticket y margen por período',
+                          style: AppTexto.secundario),
                     ],
                   ),
-                  const SizedBox(height: AppEspacio.sm),
-                  if (_ventasHoy.isEmpty)
-                    // 1.30 (Oleada D6, UI130-22): fuera el
-                    // doble fondo (contenedor tintado con el
-                    // vacío dentro): el vacío va sin marco y
-                    // con la caja registradora de la lámina.
-                    const EstadoVacio(
-                      sinMarco: true,
-                      ilustracion: 'assets/vacio_caja.jpg',
-                      icono: Icons.receipt_long_rounded,
-                      titulo: 'Sin ventas registradas hoy.',
-                      subtitulo:
-                          'Las ventas de hoy aparecen aquí.',
-                    )
-                  else
-                    for (final v in _ventasHoy) _filaVenta(v),
-                ],
-              ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    color: AppColores.textoSecundario(context)),
+              ],
             ),
+          ),
+        if (_esDueno) const SizedBox(height: AppEspacio.md),
+        if (_esDueno || PermisosEntrenador().canVerRankingServicios)
+          Tarjeta(
+            onTap: () => Navigator.push(
+              context,
+              RutaIron(builder: (_) => const RankingServiciosScreen()),
+            ),
+            child: Row(
+              children: [
+                const IconoModuloBadge(
+                  icono: Icons.emoji_events_rounded,
+                  tinte: Colors.amber,
+                  iconoOscuro: Colors.amber,
+                  iconoClaro: Colors.amberAccent,
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Ranking', style: AppTexto.titulo),
+                      Text('Quién vende más en el período',
+                          style: AppTexto.secundario),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    color: AppColores.textoSecundario(context)),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
@@ -1932,6 +2104,41 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 ],
               );
             }),
+          // 1.31 (Mejoras · hub, Fase C*): pedir relleno NO
+          // espera a que el pomo esté por agotarse — la acción
+          // (o el estado «ya pediste») vive SIEMPRE en la
+          // tarjeta cuando la banda de «pocas dosis» no está
+          // en pantalla (con la banda, manda la banda). Ciega,
+          // como todo lo del entrenador aquí: sin saldos.
+          if (pomo != null &&
+              !_esDueno &&
+              !avisoLotePorAgotarse(
+                  (pomo['saldo_local'] as num?)?.toInt() ?? 999))
+            Padding(
+              padding: const EdgeInsets.only(top: AppEspacio.sm),
+              child: _rellenoPedidoSel
+                  ? Row(
+                      children: [
+                        Icon(Icons.check_circle_rounded,
+                            size: 18, color: AppColores.exito),
+                        const SizedBox(width: AppEspacio.xs),
+                        Expanded(
+                          child: Text(
+                              'Ya pediste relleno · esperando al dueño',
+                              style: AppTexto.cuerpo),
+                        ),
+                      ],
+                    )
+                  : Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonal(
+                        onPressed: _pidiendoRelleno
+                            ? null
+                            : () => _pedirRelleno(pomo),
+                        child: const Text('Pedir relleno'),
+                      ),
+                    ),
+            ),
           // v1.12.0 (C6): aviso de pomo por agotarse (< 5, umbral
           // fijo de Jc). NO revela el saldo exacto al entrenador
           // (pomo ciego, ítem 6): solo que quedan pocas dosis.
@@ -2239,7 +2446,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
-  Widget _tarjetaCuadre() {
+  /// [conEnlaces] false en la zona Día del hub (la 1.31): los
+  /// enlaces a Estadísticas/Ranking viven en Análisis, no al
+  /// pie del cuadre.
+  Widget _tarjetaCuadre({bool conEnlaces = true}) {
     // 9/25: el dueño alterna entre su cuadre personal y el del gym.
     final esGym = _vistaCuadre == 'gym' && _cuadreGym.isNotEmpty;
     final c = esGym ? _cuadreGym : _cuadre;
@@ -2365,8 +2575,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           // Ranking bajan del AppBar a enlaces con texto aquí.
           // Ranking: dueño siempre; entrenador solo con su
           // permiso (fail-closed, igual que antes).
-          if (_esDueno ||
-              PermisosEntrenador().canVerRankingServicios) ...[
+          if (conEnlaces &&
+              (_esDueno ||
+                  PermisosEntrenador().canVerRankingServicios)) ...[
             const Divider(height: 24),
             Row(
               children: [
