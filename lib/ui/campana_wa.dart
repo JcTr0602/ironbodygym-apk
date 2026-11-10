@@ -190,10 +190,18 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
 
   List<Map<String, dynamic>> _audienciaDesdeCache() {
     final todos = AccesoAppCache.instance.todos ?? [];
+    // Yunque R5-M1-1: el filtro es el ESTADO canónico
+    // (revocado > bloqueado > inactivo > activo), no el flag
+    // `activo` crudo: un acceso revocado o bloqueado con
+    // `activo` aún en true recibía la campaña de activación,
+    // invitando a entrar a quien el dueño acababa de sancionar.
     final sel = switch (_audiencia) {
-      'sin_activar' => todos.where(
-          (a) => a.activo && a.ultimoAccesoEn == null && _telValido(a.telefono)),
-      'activos' => todos.where((a) => a.activo && _telValido(a.telefono)),
+      'sin_activar' => todos.where((a) =>
+          a.estado == 'activo' &&
+          a.ultimoAccesoEn == null &&
+          _telValido(a.telefono)),
+      'activos' => todos
+          .where((a) => a.estado == 'activo' && _telValido(a.telefono)),
       _ => const <AccesoCliente>[],
     };
     return [
@@ -264,9 +272,12 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _construirAudiencia() async {
-    final lista = _audiencia == 'sin_acceso'
+    final cruda = _audiencia == 'sin_acceso'
         ? await _audienciaSinAcceso()
         : _audienciaDesdeCache();
+    // Yunque R5-M1-3: sin duplicados por cliente ni por
+    // teléfono compartido dentro de la misma tanda.
+    final lista = _dedupAudiencia(cruda);
     // Lote 3: excluir a quienes ya recibieron mensaje hoy, ANTES del
     // tope, para que una segunda tanda avance más allá de los 40.
     final enviados = await _enviadosHoy();
@@ -289,6 +300,27 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
       if (p['nombre'] == _plantillaSel) return '${p['texto'] ?? ''}';
     }
     return _textoLibre;
+  }
+
+  /// Yunque R5-M1-3: deduplica la audiencia por cliente
+  /// (id > 0) y, entre ids no registrables (<= 0, la vía RPC
+  /// sin id parseable), por teléfono normalizado: dos filas
+  /// con el mismo número (teléfono familiar compartido) no
+  /// reciben dos mensajes en la misma tanda. PURO.
+  static List<Map<String, dynamic>> _dedupAudiencia(
+      List<Map<String, dynamic>> lista) {
+    final vistos = <String>{};
+    return [
+      for (final a in lista)
+        if (vistos.add(_claveDedup(a))) a,
+    ];
+  }
+
+  static String _claveDedup(Map<String, dynamic> a) {
+    final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
+    if (cid > 0) return 'id:$cid';
+    final tel = normalizarTelefonoWaMe('${a['telefono'] ?? ''}');
+    return 'tel:$tel';
   }
 
   Future<void> _iniciarTanda() async {
@@ -329,8 +361,16 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     }
     if (!mounted) return;
     if (lista.isEmpty) {
-      setState(() => _errorAudiencia =
-          'No hay destinatarios con teléfono válido en este grupo.');
+      // Yunque R5-M1-2: una audiencia de caché VACÍA porque
+      // la lista de accesos nunca se verificó (sin foto en
+      // memoria ni persistida) no es «sin destinatarios»: es
+      // «no se pudo saber». Error ≠ vacío.
+      final sinVerificar = _audiencia != 'sin_acceso' &&
+          !AccesoAppCache.instance.cargado;
+      setState(() => _errorAudiencia = sinVerificar
+          ? 'No se pudo cargar la lista de accesos (sin conexión). '
+              'Reinténtalo cuando haya red.'
+          : 'No hay destinatarios con teléfono válido en este grupo.');
       return;
     }
     _items = lista;
@@ -552,6 +592,17 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Yunque R5-M1-4: defensa propia (patrón de la pestaña
+    // de accesos): la pantalla no depende solo de la puerta
+    // de quien la monta — sin dueño no se muestra nada.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Campaña WhatsApp'),
+        body: const Center(
+          child: Text('Las campañas son solo del dueño.'),
+        ),
+      );
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Campaña WhatsApp'),
       body: _cargando

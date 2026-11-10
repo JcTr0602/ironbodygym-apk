@@ -51,11 +51,18 @@ class ConteoBuzon {
   /// 1.30 (D2, UI130-33): transferencias por comprobar.
   final int conciliaciones;
 
+  /// Yunque R5-M1-6: el primer pase terminó con al menos
+  /// una fuente leída de verdad. Sin esto, un arranque en
+  /// frío con las cuatro lecturas fallidas pintaba lo mismo
+  /// que «verificado, nada pendiente» (conteo inicial 0).
+  final bool verificado;
+
   const ConteoBuzon({
     this.reservas = 0,
     this.adelantos = 0,
     this.rellenos = 0,
     this.conciliaciones = 0,
+    this.verificado = false,
   });
 
   int get total =>

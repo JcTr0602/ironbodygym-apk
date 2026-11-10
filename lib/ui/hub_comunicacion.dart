@@ -13,6 +13,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import 'app_bar.dart';
 import 'avisos_entrenador.dart';
 import 'bandeja_whatsapp.dart';
@@ -112,6 +113,16 @@ class HubComunicacionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Yunque R5-M1-4: defensa propia — el hub no depende
+    // solo de la puerta de Administración que hoy lo monta.
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Comunicación'),
+        body: const Center(
+          child: Text('La comunicación es solo del dueño.'),
+        ),
+      );
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Comunicación'),
       body: ListView(

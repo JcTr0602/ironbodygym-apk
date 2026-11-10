@@ -1074,21 +1074,30 @@ class _HomeScreenState extends State<HomeScreen>
     var adelantos = _buzon.adelantos;
     var rellenos = _buzon.rellenos;
     var conciliaciones = _buzon.conciliaciones;
+    // Yunque R5-M1-6: «verificado» exige que al menos una
+    // fuente de ESTE pase haya leído de verdad (o que un
+    // pase anterior ya lo hubiera hecho): un arranque en
+    // frío con las cuatro lecturas fallidas no puede
+    // presentarse como «nada pendiente».
+    var verificado = _buzon.verificado;
     try {
       final filas = await LocalDb.instance.allMirror('reservas');
       reservas =
           filas.where((r) => r['estado'] == 'solicitada').length;
+      verificado = true;
     } catch (_) {}
     try {
       final todas =
           await SolicitudesAdelantoService.instance.todasParaDueno();
       adelantos =
           todas.where((s) => s.estado == 'pendiente').length;
+      verificado = true;
     } catch (_) {}
     try {
       rellenos = (await SolicitudesRellenoService.instance
               .pendientesParaDueno())
           .length;
+      verificado = true;
     } catch (_) {}
     // 1.30 (Oleada D2, UI130-33): la cuarta fuente — las
     // transferencias por comprobar, con el MISMO conteo
@@ -1103,6 +1112,7 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       conciliaciones =
           await ConciliacionService.instance.conteoPorComprobar();
+      verificado = true;
     } catch (_) {}
     if (!mounted || gen != _buzonGen) return;
     setState(() {
@@ -1110,7 +1120,8 @@ class _HomeScreenState extends State<HomeScreen>
           reservas: reservas,
           adelantos: adelantos,
           rellenos: rellenos,
-          conciliaciones: conciliaciones);
+          conciliaciones: conciliaciones,
+          verificado: verificado);
     });
   }
 
