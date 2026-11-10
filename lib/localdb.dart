@@ -6849,25 +6849,6 @@ class LocalDb {
     return true;
   }
 
-  bool _transicionValida(String anterior, String nuevo) {
-    switch (anterior) {
-      case 'pendiente':
-        return nuevo == 'en_proceso' ||
-            nuevo == 'bloqueada' ||
-            nuevo == 'resuelta';
-      case 'en_proceso':
-        return nuevo == 'bloqueada' ||
-            nuevo == 'resuelta' ||
-            nuevo == 'pendiente';
-      case 'bloqueada':
-        return nuevo == 'en_proceso' || nuevo == 'pendiente';
-      case 'resuelta':
-        return nuevo == 'en_proceso';
-      default:
-        return false;
-    }
-  }
-
   Future<int> cambiarEstadoIncidenciasLote({
     required List<String> ids,
     required String nuevoEstado,
