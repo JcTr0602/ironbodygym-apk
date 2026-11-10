@@ -83,7 +83,21 @@ void mostrarModalPin(
           },
         ),
         FilledButton(
-          onPressed: () => Navigator.of(ctx).pop(),
+          onPressed: () async {
+            // Yunque R5-M2-6: el PIN copiado no queda en el
+            // portapapeles del sistema tras cerrar el modal
+            // (pegable en cualquier app). Solo se limpia si
+            // aún contiene ESTE PIN: si el usuario copió otra
+            // cosa después, eso no se toca.
+            try {
+              final datos = await Clipboard.getData('text/plain');
+              if (datos?.text == pin) {
+                await Clipboard.setData(
+                    const ClipboardData(text: ''));
+              }
+            } catch (_) {}
+            if (ctx.mounted) Navigator.of(ctx).pop();
+          },
           child: const Text('Ya lo envié (Cerrar)'),
         ),
       ],
