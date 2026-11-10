@@ -246,7 +246,9 @@ class _NominaScreenState extends State<NominaScreen> {
       ));
     }
     if (filas.isEmpty) {
-      mostrarSnack(context, 'Aún no hay nómina que fotografiar.');
+      if (mounted) {
+        mostrarSnack(context, 'Aún no hay nómina que fotografiar.');
+      }
       return;
     }
     final ahora = ahoraHabana();
@@ -257,8 +259,8 @@ class _NominaScreenState extends State<NominaScreen> {
     // El messenger se captura ANTES del diálogo (el patrón
     // del login): el aviso de fallo al compartir no depende
     // del contexto de la pantalla tras los awaits.
-    final messengerFoto = ScaffoldMessenger.of(context);
     if (!mounted) return;
+    final messengerFoto = ScaffoldMessenger.of(context);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
