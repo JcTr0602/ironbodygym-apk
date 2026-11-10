@@ -17,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../config.dart';
 import '../guia_validacion.dart';
@@ -340,11 +341,18 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       _aviso('Primero escribe el título para generar el identificador.');
       return;
     }
-    await _db.guiaGuardarBorrador(_borradorActual());
-    // 1.22 GY-04: edición nueva guardada: fuera la marca de
-    // «en cola de publicación».
-    await _db.setMeta('guia_en_cola_${_slug.text.trim()}', '');
-    _aviso('Borrador guardado en este teléfono.');
+    // Yunque R5-M6-6: un fallo local de guardado avisaba
+    // con el silencio (sin try): ahora con motivo.
+    try {
+      await _db.guiaGuardarBorrador(_borradorActual());
+      // 1.22 GY-04: edición nueva guardada: fuera la marca de
+      // «en cola de publicación».
+      await _db.setMeta('guia_en_cola_${_slug.text.trim()}', '');
+      _aviso('Borrador guardado en este teléfono.');
+    } catch (e) {
+      AppLog.error('ui', 'guia_borrador_fallo', d: '$e');
+      _aviso('No se pudo guardar el borrador: $e');
+    }
   }
 
   Future<bool> _chequearObsoleto() async {
@@ -529,6 +537,14 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       await _db.setMeta('guia_en_cola_$slug', '1');
       _aviso('Publicado. Se enviará al servidor al sincronizar.');
       if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      // Yunque R5-M6-6: publicar encola y escribe en cadena;
+      // un fallo local a mitad (BD bloqueada) era silencio
+      // total, con el riesgo de re-publicar a ciegas y
+      // encolar una segunda op condenada a obsoleta. El
+      // fallo va a bitácora y el aviso nombra la causa.
+      AppLog.error('ui', 'guia_publicar_fallo', d: '$e');
+      _aviso('No se pudo publicar: $e');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -745,6 +761,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       await _db.guiaEliminarPublicada(_slug.text.trim());
       _aviso('Retirada. Se enviará al servidor al sincronizar.');
       if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      // Yunque R5-M6-6: mismo silencio que en publicar.
+      AppLog.error('ui', 'guia_retirar_fallo', d: '$e');
+      _aviso('No se pudo retirar: $e');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }

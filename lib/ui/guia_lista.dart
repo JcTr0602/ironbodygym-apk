@@ -445,6 +445,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
     final fallos = <String>[];
     try {
       for (final b in List.of(_borradores)) {
+        try {
         // 1.22 GY-04: en cola de publicación no se re-encola.
         if (_enCola.contains('${b['slug']}')) {
           fallos.add(
@@ -525,6 +526,15 @@ class _GuiaScreenState extends State<GuiaScreen> {
         // 1.22 GY-04: marca de «en cola de publicación».
         await _db.setMeta('guia_en_cola_$slug', '1');
         ok++;
+        } catch (e) {
+          // Yunque R5-M6-6: un fallo local a mitad del lote
+          // (BD bloqueada tras encolar algunas fichas)
+          // abortaba SIN el diálogo resumen: nadie sabía
+          // qué quedó encolado. Ahora la ficha entra en
+          // fallos con el motivo y el lote sigue.
+          AppLog.error('ui', 'guia_lote_fallo', d: '$e');
+          fallos.add('${b['slug']}: error al publicar ($e).');
+        }
       }
     } finally {
       if (mounted) setState(() => _publicandoLote = false);
