@@ -240,6 +240,13 @@ class FotosColaService {
     // llevar cliente_id NULL en la cola y el pareo por entidad no
     // las alcanza, pero su op_uuid sí consta en el espejo.
     String? opUuidAnterior;
+    // Auditoría Definitiva (B-21): los archivos de las
+    // variantes invalidadas se recogen durante la transacción
+    // y se borran DESPUÉS del commit. Antes se borraban
+    // dentro: un fallo posterior revertía filas y claves TUS
+    // pero no el sistema de archivos, y el rollback restauraba
+    // filas apuntando a archivos ya borrados.
+    final archivosPorBorrarTrasCommit = <String>[];
     if (clienteId != null || suplementoId != null) {
       try {
         final tabla = clienteId != null ? 'clientes' : 'suplementos';
@@ -285,10 +292,12 @@ class FotosColaService {
           whereArgs: [opUuid, clienteId, suplementoId, opUuidAnterior ?? ''],
         );
         for (final v in viejas) {
-          try {
-            final f = File(v['ruta_local'] as String);
-            if (await f.exists()) await f.delete();
-          } catch (_) {}
+          // B-21: el archivo NO se borra aquí dentro — se
+          // anota y se borra tras el commit (ver la lista
+          // declarada antes de la transacción). Filas y claves
+          // TUS sí van por el txn: son revertibles.
+          archivosPorBorrarTrasCommit
+              .add(v['ruta_local'] as String);
           for (final clave in [
             'tus_loc_${v['op_uuid']}_${v['tipo']}',
             'tus_offset_${v['op_uuid']}_${v['tipo']}',
@@ -332,6 +341,16 @@ class FotosColaService {
         n++;
       }
     });
+    // B-21: commit hecho — ahora sí se borran los archivos de
+    // las variantes invalidadas. Si la transacción lanzó, esta
+    // línea no se alcanza y los archivos (y las filas que el
+    // rollback restauró) quedan consistentes.
+    for (final ruta in archivosPorBorrarTrasCommit) {
+      try {
+        final f = File(ruta);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
     // v1.2.9+40 (Gemini): verificación post-insert concluyente.
     final count = Sqflite.firstIntValue(await db.rawQuery(
         'SELECT COUNT(*) FROM fotos_cola WHERE op_uuid = ?', [opUuid]));
