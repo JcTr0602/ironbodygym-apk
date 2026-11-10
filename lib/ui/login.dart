@@ -12,6 +12,31 @@ import '../sync.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
+/// Yunque R5-M5-2: clasifica el fallo de entrada para no
+/// mezclar credenciales con red (el mensaje único anterior
+/// hacía creer que la contraseña estaba mal cuando era la
+/// cobertura, y al revés). PURO, por el texto del error:
+/// la autenticación de Supabase llega como AuthException
+/// («Invalid login credentials») y la red como excepción
+/// de socket/timeout/AuthRetryableFetchException.
+String mensajeErrorLogin(Object e) {
+  final s = e.toString();
+  if (s.contains('Invalid login credentials') ||
+      s.contains('invalid_credentials')) {
+    return 'Usuario o contraseña incorrectos.';
+  }
+  final esRed = s.contains('SocketException') ||
+      s.contains('TimeoutException') ||
+      s.contains('timed out') ||
+      s.contains('RetryableFetch') ||
+      s.contains('Failed host lookup') ||
+      s.contains('NetworkException');
+  if (esRed) {
+    return 'Sin conexión con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+  }
+  return 'No se pudo entrar. Revisa usuario, contraseña y conexión.';
+}
+
 class LoginScreen extends StatefulWidget {
   final String? aviso;
   const LoginScreen({super.key, this.aviso});
@@ -151,7 +176,11 @@ class _LoginScreenState extends State<LoginScreen>
     } catch (e) {
       setState(() {
         _cargando = false;
-        _error = 'No se pudo entrar. Revisa usuario, contraseña y conexión.';
+        // Yunque R5-M5-2: credenciales ≠ red. Sin esto, un
+        // entrenador sin cobertura creía que su contraseña
+        // estaba mal (y pedía reseteos innecesarios), y una
+        // contraseña mala se atribuía a «la conexión».
+        _error = mensajeErrorLogin(e);
       });
     }
   }
