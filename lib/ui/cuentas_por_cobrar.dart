@@ -29,6 +29,21 @@ import '../app_log.dart';
 /// etiquetaba todo como USD (un fiado de 3000 CUP se mostraba como
 /// 3000.00 USD). La moneda ausente es CUP, igual que en
 /// HistorialVentasScreen._totales(). PURO.
+/// Yunque R5-M4-1: predicado de fiado pendiente con la forma
+/// TOLERANTE canónica de negocio.dart (un flag vale si es 1 o
+/// true). La copia local de la pantalla usaba el cast numérico
+/// estricto: una venta cuyo `es_fiado` llegara como bool true
+/// quedaba FUERA de «Por cobrar» mientras negocio la contaba
+/// como fiado — la deuda desaparecía de la superficie de cobro.
+bool esFiadoPendienteVenta(Map<String, dynamic> v) {
+  final esFiado = v['es_fiado'] == 1 || v['es_fiado'] == true;
+  if (!esFiado) return false;
+  // Ya saldado (el servidor lo marca; tolerante si aún no llega).
+  final saldado =
+      v['fiado_saldado'] == 1 || v['fiado_saldado'] == true;
+  return !saldado;
+}
+
 ({double cup, double usd}) totalesFiados(
     List<Map<String, dynamic>> fiados) {
   var cup = 0.0;
@@ -145,13 +160,8 @@ class _CuentasPorCobrarScreenState
     _cargar();
   }
 
-  bool _esFiadoPendiente(Map<String, dynamic> v) {
-    final esFiado = (v['es_fiado'] as num?)?.toInt() == 1;
-    if (!esFiado) return false;
-    // Ya saldado (el servidor lo marca; tolerante si aún no llega).
-    final saldado = (v['fiado_saldado'] as num?)?.toInt() == 1;
-    return !saldado;
-  }
+  bool _esFiadoPendiente(Map<String, dynamic> v) =>
+      esFiadoPendienteVenta(v);
 
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
