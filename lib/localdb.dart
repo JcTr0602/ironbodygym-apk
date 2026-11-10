@@ -7332,7 +7332,17 @@ class LocalDb {
       final p = await SharedPreferences.getInstance();
       for (final k in p
           .getKeys()
-          .where((k) => k.startsWith('borrador_') || k.startsWith('plantilla_'))
+          .where((k) =>
+              k.startsWith('borrador_') ||
+              k.startsWith('plantilla_') ||
+              // Yunque R5-M5-1: residuos con datos del dueño
+              // o de clientes que la purga no cubría — la
+              // tanda de campaña (nombres y teléfonos), las
+              // cifras del panel y sus distintivos.
+              k == 'campana_wa_v1' ||
+              k.startsWith('campana_wa_enviados_') ||
+              k.startsWith('panel_cifras_v1_') ||
+              k.startsWith('panel_badges_v1_'))
           .toList()) {
         await p.remove(k);
       }
