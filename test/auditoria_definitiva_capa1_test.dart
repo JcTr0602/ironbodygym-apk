@@ -208,6 +208,18 @@ void main() {
     });
   });
 
+  group('A-5 · migración v71 (columna generacion)', () {
+    test('comprobantes_pago nace con generacion en limpio',
+        () async {
+      await _abrirDbVacia();
+      final d = await LocalDb.instance.db;
+      final cols = await d.rawQuery(
+          "SELECT name FROM pragma_table_info('comprobantes_pago')");
+      expect(cols.map((c) => c['name']), contains('generacion'));
+      expect(LocalDb.versionActual, 71);
+    });
+  });
+
   group('B-18 · encolar asegura el nuevo antes de borrar el viejo',
       () {
     test('re-encolar con el origen ausente NO destruye el '

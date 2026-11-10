@@ -148,6 +148,22 @@ class ComprobantesService {
     await staging.rename(rutaLocal);
 
     final db = await LocalDb.instance.db;
+    // Auditoría Definitiva (A-5): cada encolado SUBE la
+    // generación de la fila. El worker sella su resultado con
+    // CAS sobre la generación que leyó al reclamar: si esta
+    // fila (bytes nuevos) reemplaza a la que está en vuelo, el
+    // sello del worker viejo toca 0 filas y se descarta.
+    final previas = await db.query(
+      'comprobantes_pago',
+      columns: ['generacion'],
+      where: 'comprobante_uuid = ?',
+      whereArgs: [comprobanteUuid],
+      limit: 1,
+    );
+    final generacion = (previas.isEmpty
+            ? 0
+            : (previas.first['generacion'] as int? ?? 0)) +
+        1;
     await db.insert(
       'comprobantes_pago',
       {
@@ -156,6 +172,7 @@ class ComprobantesService {
         'storage_path': rutaStorageComprobante(comprobanteUuid, ext),
         'estado': 'pendiente',
         'creado_en': isoHabana(ahoraHabana()),
+        'generacion': generacion,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -416,7 +433,15 @@ class ComprobantesService {
         // en el bucket pese al cobro deshecho.
         final vigente = await db.query(
           'comprobantes_pago',
-          columns: ['comprobante_uuid', 'ruta_local', 'storage_path'],
+          // A-5: 'generacion' entra en la lectura de vigencia —
+          // sin ella la comparación de abajo leía null (=0) y
+          // saltaba TODA fila con generación ≥ 1.
+          columns: [
+            'comprobante_uuid',
+            'ruta_local',
+            'storage_path',
+            'generacion'
+          ],
           where: 'comprobante_uuid = ?',
           whereArgs: [f['comprobante_uuid']],
           limit: 1,
@@ -427,20 +452,27 @@ class ComprobantesService {
         // otro destino), la copia en memoria ya no es la vigente:
         // subirla marcaría como subido un archivo que nunca
         // subió. Se salta; el próximo ciclo procesa la fila nueva.
+        // Auditoría Definitiva (A-5): la comparación incluye la
+        // GENERACIÓN — ruta y destino son deterministas por uuid
+        // y un re-encolado con la misma extensión los conserva
+        // idénticos; la generación es lo único que distingue la
+        // fila nueva de la vieja.
+        final generacion = f['generacion'] as int? ?? 0;
         if (vigente.first['ruta_local'] != f['ruta_local'] ||
-            vigente.first['storage_path'] != f['storage_path']) {
+            vigente.first['storage_path'] != f['storage_path'] ||
+            (vigente.first['generacion'] as int? ?? 0) != generacion) {
           continue;
         }
         final uuid = f['comprobante_uuid'] as String;
         final ruta = f['ruta_local'] as String?;
         final storagePath = f['storage_path'] as String?;
         if (ruta == null || storagePath == null) {
-          await _marcar(db, uuid, 'error');
+          await _marcar(db, uuid, 'error', generacion);
           continue;
         }
         final file = File(ruta);
         if (!await file.exists()) {
-          await _marcar(db, uuid, 'error');
+          await _marcar(db, uuid, 'error', generacion);
           AppLog.error('comprobantes', 'archivo_ausente',
               d: 'uuid=$uuid');
           continue;
@@ -457,12 +489,26 @@ class ComprobantesService {
             debePausarPorCobro: () async =>
                 await LocalDb.instance.countPendingOpsNoFoto() > 0,
           );
+          // Auditoría Definitiva (C-3): si el lease caducó
+          // DURANTE esta subida y otro worker ya tomó el
+          // relevo, el resultado NO se sella (el dueño nuevo
+          // reprocesa la fila) y el ciclo se detiene.
+          if (!await _leaseSigueMio(db, leaseValor)) {
+            AppLog.aviso('comprobantes', 'lease_perdido_en_vuelo',
+                d: 'uuid=$uuid');
+            break;
+          }
           switch (res.estado) {
             case EstadoSubida.subida:
-              await _marcar(db, uuid, 'subido');
-              subidos++;
+              // El contador solo suma sellos que ATERRIZARON:
+              // con el CAS descartado (fila cambiada en vuelo)
+              // la subida vieja no cuenta como subida de la
+              // fila vigente.
+              if (await _marcar(db, uuid, 'subido', generacion)) {
+                subidos++;
+              }
             case EstadoSubida.permanente:
-              await _marcar(db, uuid, 'error');
+              await _marcar(db, uuid, 'error', generacion);
               AppLog.error('comprobantes', 'error_permanente',
                   d: 'uuid=$uuid error=${res.error}');
             case EstadoSubida.pausadaPorQos:
@@ -488,7 +534,11 @@ class ComprobantesService {
         } catch (e) {
           AppLog.error('comprobantes', 'excepcion_subida',
               d: 'uuid=$uuid error=$e');
-          await _contarIntento(db, f);
+          // C-3: sin lease vigente, ni siquiera el intento se
+          // contabiliza sobre la fila (es del dueño nuevo).
+          if (await _leaseSigueMio(db, leaseValor)) {
+            await _contarIntento(db, f);
+          }
         }
       }
     } finally {
@@ -509,22 +559,48 @@ class ComprobantesService {
     return subidos;
   }
 
+  /// C-3 (Auditoría Definitiva): ¿el lease del worker sigue
+  /// siendo de ESTE ciclo? La subida de una fila puede durar
+  /// minutos (TUS por chunks o PUT con reintentos); si el lease
+  /// caducó en vuelo y otro worker tomó el relevo, sellar el
+  /// resultado pisaría su trabajo.
+  Future<bool> _leaseSigueMio(Database db, String leaseValor) async {
+    try {
+      final r = await db.query(
+        'meta',
+        columns: ['v'],
+        where: 'k = ?',
+        whereArgs: ['comprobantes_worker_lease'],
+        limit: 1,
+      );
+      return r.isNotEmpty && r.first['v'] == leaseValor;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// SA-05: suma un intento fallido; al llegar a 10 la fila pasa
   /// a 'error' (deja de reintentarse sola en cada ciclo).
+  /// Auditoría Definitiva (A-5): la escritura va con CAS por
+  /// generación — si la fila se re-encoló durante el vuelo, el
+  /// conteo toca 0 filas y la fila NUEVA no hereda los intentos
+  /// del intento anterior.
   Future<void> _contarIntento(
       Database db, Map<String, Object?> f) async {
     final uuid = f['comprobante_uuid'] as String;
+    final generacion = f['generacion'] as int? ?? 0;
     final intentos = (f['intentos'] as int? ?? 0) + 1;
     if (intentos >= 10) {
       // Panel de cierre 1.21: estado e intentos se guardan
       // JUNTOS (antes la fila quedaba en 'error' con intentos=9
       // y el contador no reflejaba el motivo del estado).
-      await db.update(
+      final n = await db.update(
         'comprobantes_pago',
         {'estado': 'error', 'intentos': intentos},
-        where: 'comprobante_uuid = ?',
-        whereArgs: [uuid],
+        where: 'comprobante_uuid = ? AND generacion = ?',
+        whereArgs: [uuid, generacion],
       );
+      if (n == 0) return; // la fila cambió en vuelo (A-5)
       AppLog.error('comprobantes', 'tope_intentos',
           d: 'uuid=$uuid intentos=$intentos: pasa a error');
     } else {
@@ -539,18 +615,32 @@ class ComprobantesService {
               (DateTime.now().millisecondsSinceEpoch ~/ 1000) +
                   backoffComprobanteSegundos(intentos),
         },
-        where: 'comprobante_uuid = ?',
-        whereArgs: [uuid],
+        where: 'comprobante_uuid = ? AND generacion = ?',
+        whereArgs: [uuid, generacion],
       );
     }
   }
 
-  Future<void> _marcar(Database db, String uuid, String estado) async {
-    await db.update(
+  /// Auditoría Definitiva (A-5): el sello va con CAS por
+  /// generación. Si la fila se re-encoló (generación nueva) o
+  /// se descartó (fila borrada) durante la subida, la
+  /// actualización toca 0 filas y el resultado del vuelo se
+  /// descarta en silencio: la fila nueva la procesa el próximo
+  /// ciclo con SUS bytes, no con los viejos. Devuelve si el
+  /// sello aterrizó.
+  Future<bool> _marcar(
+      Database db, String uuid, String estado, int generacion) async {
+    final n = await db.update(
       'comprobantes_pago',
       {'estado': estado},
-      where: 'comprobante_uuid = ?',
-      whereArgs: [uuid],
+      where: 'comprobante_uuid = ? AND generacion = ?',
+      whereArgs: [uuid, generacion],
     );
+    if (n == 0) {
+      AppLog.aviso('comprobantes', 'sello_descartado_cas',
+          d: 'uuid=$uuid estado=$estado: la fila cambió en vuelo');
+      return false;
+    }
+    return true;
   }
 }

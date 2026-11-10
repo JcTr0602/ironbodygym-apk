@@ -117,7 +117,7 @@ class LocalDb {
   /// (el mismo hueco que v62 cazó en `acceso_blequeos`): la flota
   /// en v68 no lo creaba nunca. El paso oldV<69 llama al MISMO
   /// método que onCreate (idempotente).
-  static const int versionActual = 70;
+  static const int versionActual = 71;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1616,6 +1616,16 @@ class LocalDb {
           // (idempotente: paridad garantizada, siembra su
           // watermark y no toca lo ya creado).
           await _crearTablaCongelaciones(db);
+        }
+        if (oldV < 71) {
+          // Auditoría Definitiva (A-5): sello de generación de
+          // la fila de comprobante. Cada encolar lo incrementa;
+          // el worker marca/contabiliza con CAS sobre él, para
+          // que una fila re-encolada (o descartada) durante su
+          // subida en vuelo no herede el resultado de los bytes
+          // viejos.
+          await _addColumnIfMissing(db, 'comprobantes_pago',
+              'generacion', 'INTEGER NOT NULL DEFAULT 0');
         }
       },
     );
@@ -3435,7 +3445,10 @@ class LocalDb {
         'intentos INTEGER NOT NULL DEFAULT 0, '
         // 1.24.2 (auditoría sync M5-A3): backoff por fila
         // (epoch en segundos; 0 = lista ya).
-        'proximo_intento_en INTEGER NOT NULL DEFAULT 0)');
+        'proximo_intento_en INTEGER NOT NULL DEFAULT 0, '
+        // Auditoría Definitiva (A-5): generación de la fila
+        // (CAS del worker; ver migración v71).
+        'generacion INTEGER NOT NULL DEFAULT 0)');
   }
 
   /// 1.23 (W7): tabla LOCAL (no espejo ni sync): visitas de
