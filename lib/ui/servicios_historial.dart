@@ -7,6 +7,7 @@ import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
 import 'servicios_detalle.dart';
+import '../app_log.dart';
 
 /// Historial completo de Servicios (pedido de Jc 2026-10-28):
 /// todas las operaciones de venta de raciones, combos y agua, más
@@ -134,6 +135,23 @@ class _ServiciosHistorialCuerpoState
   /// 10/25: carga propia. El predicado de rol es el mismo que
   /// «Ventas de hoy» en Servicios (vendedor o pomo propio).
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final ventas = await LocalDb.instance.allMirror('servicio_ventas');
     final pomosCrudos =
         await LocalDb.instance.allMirror('servicio_pomos');
