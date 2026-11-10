@@ -1657,6 +1657,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
             child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                // (Yunque R2-X1) si la carga del perfil
+                // falló a mitad, se DICE aquí también (no
+                // solo en el aviso al abrir): los valores
+                // que se ven pueden ser los de por defecto,
+                // no los del usuario.
+                if (_cargaPerfilFallo)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: AppEspacio.md),
+                    child: Text(
+                      '⚠ No se pudo leer tu perfil completo: '
+                      'algunos valores se muestran por defecto. '
+                      'Sal y vuelve a entrar para reintentar.',
+                      style: TextStyle(
+                          color: AppColores.error,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 if (_busquedaAjustes.isNotEmpty &&
                     !titulosPorSeccionAjustes.keys
                         // Autoauditoría 1.25: Diagnóstico es
