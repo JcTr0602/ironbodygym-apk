@@ -28,8 +28,11 @@ void main() {
     final r = rangoVisibleSerie(80, 80);
     expect(r.minE, 79);
     expect(r.maxE, 81);
+    // Yunque R5-M9-1: la serie NO plana lleva margen del
+    // 10 % del rango en cada extremo (antes el rango era
+    // exacto y una variación mínima llenaba todo el alto).
     final r2 = rangoVisibleSerie(70, 90);
-    expect((r2.minE, r2.maxE), (70.0, 90.0));
+    expect((r2.minE, r2.maxE), (68.0, 92.0));
   });
   test('el punto cercano al toque es el de menor distancia', () {
     expect(indicePuntoCercano([0.0, 0.5, 1.0], 130, 300), 1);

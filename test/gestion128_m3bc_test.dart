@@ -919,8 +919,10 @@ void main() {
       expect(find.text('Duany'), findsOneWidget);
       expect(find.text('Gabriel'), findsOneWidget);
       expect(find.text('TOTAL A PAGAR'), findsOneWidget);
+      // Yunque R5-M8-2: el total «A PAGAR» excluye al ya
+      // liquidado (Duany, 4250): solo Gabriel (4300).
       expect(
-          find.text('${fmtMonto(8550)} CUP'), findsOneWidget);
+          find.text('${fmtMonto(4300)} CUP'), findsOneWidget);
       expect(find.text('✓ Liquidada'), findsOneWidget);
       expect(find.text('Sin liquidar'), findsOneWidget);
     });

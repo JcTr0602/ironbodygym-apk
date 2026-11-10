@@ -847,18 +847,26 @@ void main() {
 
     testWidgets('doble toque en Revocar: un solo diálogo y el '
         'botón queda deshabilitado en vuelo', (tester) async {
+      // Yunque R5-M2-2: «Revocar» solo se pinta al DUEÑO: el
+      // test monta la sección SIN sesión (isOwner=false) y
+      // el botón ya no existe para él. La mecánica de la
+      // bandera de vuelo se sigue probando con «Regenerar
+      // PIN», que sí se pinta (su método no lleva la
+      // guarda: crear/regenerar es del permiso de generar).
+      // El contrato de la guarda vive en yunque_r5_test.
       await sembrarAccesoActivo(tester);
       await tester.pumpWidget(seccion());
       await tester.pump();
       expect(find.text('Regenerar PIN'), findsOneWidget);
-      expect(find.text('Revocar'), findsOneWidget);
-      final botonRevocar =
-          find.widgetWithText(OutlinedButton, 'Revocar');
+      // R5-M2-2: sin sesión de dueño, «Revocar» ni se pinta.
+      expect(find.text('Revocar'), findsNothing);
+      final botonRegenerar =
+          find.widgetWithText(OutlinedButton, 'Regenerar PIN');
       // Doble toque EN EL MISMO FRAME (gestos crudos, sin
       // bomba intermedia): las dos pulsaciones llegan al
       // botón antes de que el diálogo se pinte — la segunda
       // solo la puede parar la bandera de vuelo.
-      final centro = tester.getCenter(botonRevocar);
+      final centro = tester.getCenter(botonRegenerar);
       final g1 = await tester.startGesture(centro);
       await g1.up();
       final g2 = await tester.startGesture(centro);
@@ -866,15 +874,17 @@ void main() {
       await tester.pump();
       expect(find.byType(AlertDialog), findsOneWidget,
           reason: 'la bandera se levanta antes del diálogo');
-      expect(find.text('Revocar acceso'), findsOneWidget);
+      expect(find.text('Regenerar PIN'), findsWidgets);
       // En vuelo, el botón de la sección está deshabilitado.
-      expect(tester.widget<OutlinedButton>(botonRevocar).onPressed,
+      expect(
+          tester.widget<OutlinedButton>(botonRegenerar).onPressed,
           isNull);
       // Cancelar baja la bandera: el botón revive.
       await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
       await tester.pump();
       expect(find.byType(AlertDialog), findsNothing);
-      expect(tester.widget<OutlinedButton>(botonRevocar).onPressed,
+      expect(
+          tester.widget<OutlinedButton>(botonRegenerar).onPressed,
           isNotNull);
     });
 
