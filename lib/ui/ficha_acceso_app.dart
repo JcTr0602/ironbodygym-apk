@@ -299,12 +299,16 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
             icono: Icons.block_rounded,
           ),
           const SizedBox(height: AppEspacio.sm),
-          FilledButton.icon(
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Reactivar / Generar PIN'),
-            onPressed:
-                _generandoPin ? null : _confirmarYGenerar,
-          ),
+          // R5-M2-2: reactivar un revocado/inactivo es solo
+          // del dueño: el botón ni se pinta para el resto
+          // (la guarda del método manda igualmente).
+          if (AuthService().isOwner)
+            FilledButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Reactivar / Generar PIN'),
+              onPressed:
+                  _generandoPin ? null : _confirmarYGenerar,
+            ),
         ],
       );
     } else if (acceso.estaBloqueado) {
@@ -322,12 +326,16 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
               'Intentos fallidos: ${acceso.intentosFallidos}',
               style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.sm),
-          FilledButton.icon(
-            icon: const Icon(Icons.lock_open_rounded, size: 18),
-            label: const Text('Desbloquear (Nuevo PIN)'),
-            onPressed:
-                _generandoPin ? null : _confirmarYGenerar,
-          ),
+          // R5-M2-2: desbloquear un acceso bloqueado TAMPOCO
+          // es «generar un PIN» para un entrenador: solo el
+          // dueño (misma guarda que _confirmarYGenerar).
+          if (AuthService().isOwner)
+            FilledButton.icon(
+              icon: const Icon(Icons.lock_open_rounded, size: 18),
+              label: const Text('Desbloquear (Nuevo PIN)'),
+              onPressed:
+                  _generandoPin ? null : _confirmarYGenerar,
+            ),
         ],
       );
     } else {
@@ -359,18 +367,21 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                       : () => _confirmarRegenerar(acceso),
                 ),
               ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.block_rounded,
-                      size: 18, color: AppColores.error),
-                  label: const Text('Revocar',
-                      style: TextStyle(color: AppColores.error)),
-                  onPressed: (_generandoPin || _revocando)
-                      ? null
-                      : () => _confirmarRevocar(acceso),
+              // R5-M2-2: «Revocar» solo se pinta al dueño.
+              if (AuthService().isOwner) ...[
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.block_rounded,
+                        size: 18, color: AppColores.error),
+                    label: const Text('Revocar',
+                        style: TextStyle(color: AppColores.error)),
+                    onPressed: (_generandoPin || _revocando)
+                        ? null
+                        : () => _confirmarRevocar(acceso),
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ],
@@ -489,6 +500,12 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   /// (revocado/inactivo/bloqueado) también confirma: la RPC
   /// es la misma que regenera y sus efectos también.
   Future<void> _confirmarYGenerar() async {
+    // Yunque R5-M2-2: REACTIVAR un acceso que el dueño
+    // revocó no es «generar un PIN»: crear un acceso nuevo
+    // para quien nunca lo tuvo sigue abierto al permiso de
+    // generar (_generarPinSinAcceso), pero deshacer una
+    // revocación es solo del dueño.
+    if (!AuthService().isOwner) return;
     // 1.31 (Yunque A, Argón 1.30): la bandera se levanta ANTES
     // del diálogo, igual que en _confirmarRegenerar (patrón
     // D-B1-09): un doble toque rápido no abre dos
@@ -565,6 +582,11 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   }
 
   Future<void> _confirmarRevocar(AccesoCliente acceso) async {
+    // Yunque R5-M2-2: revocar es SOLO del dueño (el permiso
+    // de generar PIN no alcanza): guarda en el método, como
+    // el patrón de acciones_acceso.dart — no basta con que
+    // el botón no se pinte.
+    if (!AuthService().isOwner) return;
     // 1.29 (D-B1-09): bandera de vuelo propia cubriendo
     // diálogo + RPC — antes no había ninguna y el doble toque
     // apilaba diálogos y repetía la revocación.
