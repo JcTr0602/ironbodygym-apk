@@ -14,6 +14,7 @@ import 'detalle_incidencia.dart';
 import 'tipos_incidencia.dart';
 import 'editar_incidencia.dart';
 import '../../auth.dart';
+import '../../app_log.dart';
 
 /// Lista de incidencias con filtros, buscador y SLA visual.
 /// v1.3.0
@@ -49,6 +50,23 @@ class _ListaIncidenciasScreenState
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una consulta local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final db = LocalDb.instance;
     final d = await db.db;
 
