@@ -14,6 +14,7 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
+import '../app_log.dart';
 
 class DetallePendienteScreen extends StatefulWidget {
   final int trainerId;
@@ -47,6 +48,23 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     // 1.22 T-10: un entrenador solo puede ver SU detalle; el
     // dueño ve el de cualquiera.
     final auth = AuthService();
