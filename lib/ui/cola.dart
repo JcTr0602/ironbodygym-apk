@@ -1582,8 +1582,30 @@ class _ColaScreenState extends State<ColaScreen> {
             }
             return;
           }
+        } else {
+          // Yunque de cambios 1.31 (M3): la op no está en la
+          // cola (ya salió o se descartó): no hay nada que
+          // cancelar. Arropar «no encontrada» con la guarda
+          // de autoría sería fail-closed sobre el caso MÁS
+          // común tras navegar un rato — cancelOp devuelve
+          // false y el texto lo declara, igual que antes.
+          // Distinto de una op sin firma: esas SÍ son mías
+          // por definición de esOpMia (Ronda 17: «sin firma =
+          // nació en este teléfono») y SÍ se pueden cancelar.
+          return;
         }
-      } catch (_) {}
+      } catch (e) {
+        // Yunque de cambios 1.31 (M3): el catch ERA mudo y
+        // fail-open en apariencia; el hueco real es que el
+        // fallo de la guarda no quedaba en ningún registro.
+        // Se registra sin cambiar el comportamiento: si la
+        // lectura falló por un parpadeo transitorio, el DELETE
+        // con guarda de estado sigue siendo la barrera que
+        // decide; cerrar el paso por defecto dejaría al
+        // entrenador sin poder descartar NI sus ops sin firma
+        // cuando la BD parpadea.
+        AppLog.error('sync', 'cancelar_autoria_fallo', d: '$e');
+      }
     }
     // Ronda 17 M6-H2: la consulta anterior es un hueco async;
     // sin mounted, el diálogo usaría un context muerto.
@@ -1599,10 +1621,15 @@ class _ColaScreenState extends State<ColaScreen> {
     );
     if (ok != true) return;
     final borrada = await LocalDb.instance.cancelOp(uuid);
+    // Yunque de cambios 1.31 (M3): el descarte deja rastro en
+    // la bitácora (antes el DELETE era silencioso: ni tipo ni
+    // uuid quedaban en ningún registro).
+    AppLog.info('sync', 'op_cancelada_local',
+        d: 'uuid=$uuid tipo=$tipo borrada=$borrada');
     if (!mounted) return;
     mostrarSnack(context, borrada
             ? 'Operación cancelada'
-            : 'Ya no se puede cancelar (fue aplicada)');
+            : 'Ya no se puede cancelar (ya salió del teléfono)');
     _cargar();
   }
 
