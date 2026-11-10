@@ -563,4 +563,32 @@ void main() {
       expect(await db.getMeta('wm_servicio_lotes'), '0');
     });
   });
+
+  group('B-25 · el cursor de borrados no hereda el global', () {
+    test('sin meta wm_borrados, el cursor es 0 aunque el '
+        'global sea alto; con meta, manda la meta', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      await db.setWatermark(9999);
+      expect(await db.getWatermarkTabla('borrados'), 0,
+          reason: 'el cursor de tombstones heredó el global: '
+              'los borrados viejos no se re-aplicarían nunca');
+      await db.setWatermarkTabla('borrados', 123);
+      expect(await db.getWatermarkTabla('borrados'), 123);
+      // Las demás tablas con herencia siguen heredando.
+      expect(await db.getWatermarkTabla('clientes'), 9999);
+    });
+
+    test('la migración v27 escribe 0 en vez de borrar '
+        '(estructural)', () {
+      final localdb = File('lib/localdb.dart').readAsStringSync();
+      final i = localdb.indexOf('if (oldV < 27)');
+      expect(i, isNonNegative);
+      final bloque = localdb.substring(i, i + 700);
+      expect(bloque, contains("'wm_borrados', 'v': '0'"),
+          reason: 'la migración volvió a borrar la meta: el '
+              'cursor caería al global heredado');
+      expect(bloque.contains("delete('meta'"), isFalse);
+    });
+  });
 }

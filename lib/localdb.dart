@@ -1048,11 +1048,20 @@ class LocalDb {
         // (deleteMirror es idempotente) y aplica los que se perdieron.
         if (oldV < 27) {
           try {
-            await db.delete('meta',
-                where: 'k = ?', whereArgs: ['wm_borrados']);
+            // Auditoría Definitiva (B-25): se escribe '0', NO se
+            // borra la fila. Al borrarla, getWatermarkTabla no
+            // tenía caso de no-herencia para 'borrados' y caía al
+            // watermark GLOBAL heredado: en un teléfono viejo con
+            // el global alto, los tombstones de seq menor no se
+            // re-aplicaban jamás — justo el «dinero fantasma» que
+            // esta migración quería curar. Es el patrón SB-01 de
+            // la purga de sesión.
+            await db.insert(
+                'meta', {'k': 'wm_borrados', 'v': '0'},
+                conflictAlgorithm: ConflictAlgorithm.replace);
           } catch (_) {
             // La tabla meta puede no existir en BDs revertidas a v24
-            // en tests; el DELETE es best-effort.
+            // en tests; el reseteo es best-effort.
           }
         }
         // v28 (v1.3.6, ítems 1B+1C): espejos de arqueo de caja e
@@ -8774,6 +8783,13 @@ class LocalDb {
     // v1.12.0 (G2): las tumbas de GymPedia tampoco heredan el global
     // (nacen con la tabla; heredar saltaría tumbas viejas).
     if (tabla == 'gympedia_borrados') return 0;
+    // Auditoría Definitiva (B-25): los tombstones generales
+    // tampoco heredan el global. Su cursor es propio y la
+    // migración v27 lo resetea para re-aplicarlos desde cero;
+    // sin este caso, una meta ausente (BD anterior a v27 que
+    // nunca la tuvo, o fila perdida) heredaba el global alto y
+    // los borrados de seq menor no se aplicaban nunca.
+    if (tabla == 'borrados') return 0;
     // Biblioteca 1.15 (H2): las tablas de la Guía tampoco heredan el
     // global (nacen con el global ya avanzado; heredar saltaría toda
     // la descarga inicial del catálogo).
