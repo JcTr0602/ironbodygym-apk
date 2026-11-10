@@ -15,6 +15,7 @@ import 'componentes.dart';
 import 'skeleton.dart';
 import 'diseno.dart';
 import 'gympedia_editor.dart';
+import '../app_log.dart';
 
 /// GY3 (estéticas 1.19): texto del sello de respaldo de un
 /// artículo GymPedia (puro; mismo vocabulario que el editor).
@@ -185,6 +186,25 @@ class _GympediaScreenState extends State<GympediaScreen> {
   Set<String> _enCola = {};
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02);
+    // cubre además el retorno de no-dueño, que salía SIN
+    // bajarla (la hermana guia_lista sí lo hacía).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     // Ronda 17 M3-H1 (defensa en profundidad): sin dueño no
     // se cargan publicados ni borradores aunque se invoque directo.
     if (!AuthService().isOwner) return;
