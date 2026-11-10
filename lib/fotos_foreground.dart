@@ -102,7 +102,22 @@ Future<void> iniciarSubidaFotosForeground() async {
     final conteo =
         await LocalDb.instance.conteoPendientesSync(uid);
     final ops = conteo.porSubir + conteo.conError;
-    if (fotosReclamables == 0 && ops == 0) return;
+    // Auditoría Definitiva (B-12): el servicio drena la
+    // tubería COMPLETA (cabecera de este archivo) pero
+    // arrancaba contando solo fotos y ops: con solo
+    // comprobantes o fotos de incidencias por subir, nunca
+    // arrancaba. Esas dos cuentas también son motivo de
+    // arranque (y de parada/progreso en el tick).
+    final comprobantesSinSubir =
+        await LocalDb.instance.contarComprobantesSinSubir();
+    final fotosIncSinSubir = await LocalDb.instance
+        .contarFotosIncidenciasPendientes();
+    if (fotosReclamables == 0 &&
+        ops == 0 &&
+        comprobantesSinSubir == 0 &&
+        fotosIncSinSubir == 0) {
+      return;
+    }
     await FlutterForegroundTask.startService(
       notificationTitle: 'Sincronizando Iron Body',
       notificationText: 'Subiendo cambios pendientes…',
@@ -230,6 +245,11 @@ class _SyncTaskHandler extends TaskHandler {
   int _ticksSinProgreso = 0;
   static const _maxTicksSinProgreso = 3;
 
+  /// C-6: ticks seguidos en que push() no corrió por falta de
+  /// sesión. Al llegar al mismo límite del cortacircuitos, el
+  /// servicio se detiene: sin sesión no hay cura esperando.
+  int _ticksSinSesion = 0;
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -259,8 +279,19 @@ class _SyncTaskHandler extends TaskHandler {
         await FlutterForegroundTask.stopService();
         return;
       }
-      final reclamablesAntes = await FotosColaService.instance
-          .contarPendientesReclamables();
+      // Auditoría Definitiva (B-11): el progreso de fotos se
+      // mide por el delta de COMPLETADAS, no de reclamables —
+      // una foto que entra en backoff deja de ser reclamable
+      // sin haber subido y «progresaba» en falso, reiniciando
+      // el cortacircuitos con la red caída. (B-12): los
+      // comprobantes y las fotos de incidencias cuentan para
+      // progreso y para la parada, como en el arranque.
+      final completadasAntes =
+          await FotosColaService.instance.contarCompletadas();
+      final comprobantesAntes =
+          await LocalDb.instance.contarComprobantesSinSubir();
+      final fotosIncAntes = await LocalDb.instance
+          .contarFotosIncidenciasPendientes();
       SyncResultado? res;
       Object? fallo;
       try {
@@ -276,13 +307,52 @@ class _SyncTaskHandler extends TaskHandler {
       // NO es un fallo de red: este tick no cuenta para el
       // cortacircuitos, no detiene el servicio y no deja
       // aviso. Se espera al siguiente tick.
-      if (res != null && !res.corrio) return;
+      if (res != null && !res.corrio) {
+        // Auditoría Definitiva (C-6): la excepción es la falta
+        // de sesión PERSISTENTE — ese estado no se cura
+        // esperando (nadie va a entrar desde el isolate de
+        // fondo) y el servicio seguiría despertando cada 5 s
+        // para siempre. Tras los mismos ticks del
+        // cortacircuitos seguidos sin sesión, se detiene; el
+        // próximo arranque en primer plano lo relanza si hay
+        // sesión y trabajo.
+        if (res.motivoNoCorrio == SyncMotivoNoCorrio.sinSesion) {
+          _ticksSinSesion++;
+          if (_ticksSinSesion >= _maxTicksSinProgreso) {
+            await FlutterForegroundTask.stopService();
+          }
+        } else {
+          _ticksSinSesion = 0;
+        }
+        return;
+      }
+      _ticksSinSesion = 0;
       final reclamablesDespues = await FotosColaService.instance
           .contarPendientesReclamables();
-      final fotosSubidas = reclamablesAntes - reclamablesDespues;
-      final progreso =
-          (res?.subidos ?? 0) + (fotosSubidas > 0 ? fotosSubidas : 0);
+      final completadasDespues =
+          await FotosColaService.instance.contarCompletadas();
+      final comprobantesDespues =
+          await LocalDb.instance.contarComprobantesSinSubir();
+      final fotosIncDespues = await LocalDb.instance
+          .contarFotosIncidenciasPendientes();
+      // Deltas con suelo en 0: la limpieza de huérfanos puede
+      // BORRAR filas completadas entre las dos lecturas, y ese
+      // descenso no es progreso negativo ni positivo.
+      int delta(int antes, int despues, {bool invertido = false}) {
+        final d = invertido ? antes - despues : despues - antes;
+        return d > 0 ? d : 0;
+      }
+
+      final fotosSubidas =
+          delta(completadasAntes, completadasDespues);
+      final progreso = (res?.subidos ?? 0) +
+          fotosSubidas +
+          delta(comprobantesAntes, comprobantesDespues,
+              invertido: true) +
+          delta(fotosIncAntes, fotosIncDespues, invertido: true);
       final quedanReclamables = reclamablesDespues > 0 ||
+          comprobantesDespues > 0 ||
+          fotosIncDespues > 0 ||
           (res != null && (res.porSubir > 0 || res.conError > 0));
       final decision = decisionTickFgs(
         progreso: progreso,

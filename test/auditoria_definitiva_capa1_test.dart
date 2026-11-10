@@ -591,4 +591,51 @@ void main() {
       expect(bloque.contains("delete('meta'"), isFalse);
     });
   });
+
+  group('B-11/B-12/C-6 · el FGS cuenta la tubería completa', () {
+    test('contarCompletadas solo cuenta las que llegaron',
+        () async {
+      await _abrirDbVacia();
+      final d = await LocalDb.instance.db;
+      final ahora = isoHabana(ahoraHabana());
+      for (final (uuid, estado) in [
+        ('fgs-c1', 'completada'),
+        ('fgs-c2', 'completada'),
+        ('fgs-p1', 'pendiente'),
+        ('fgs-b1', 'pendiente'), // en backoff: NO es progreso
+        ('fgs-e1', 'error'),
+      ]) {
+        await d.insert('fotos_cola', {
+          'op_uuid': uuid,
+          'tipo': 'display',
+          'cliente_id': 5,
+          'ruta_local': '/tmp/$uuid.jpg',
+          'estado': estado,
+          'intentos': 0,
+          'creado_en': ahora,
+          'actualizado_en': ahora,
+        });
+      }
+      expect(await FotosColaService.instance.contarCompletadas(),
+          2);
+    });
+
+    test('arranque, progreso, parada y sin-sesión miran las '
+        'cuentas nuevas (estructural)', () {
+      final fgs =
+          File('lib/fotos_foreground.dart').readAsStringSync();
+      // B-12: comprobantes y fotos de incidencias en el FGS.
+      expect(fgs, contains('contarComprobantesSinSubir'));
+      expect(fgs, contains('contarFotosIncidenciasPendientes'));
+      // B-11: progreso por delta de completadas.
+      expect(fgs, contains('contarCompletadas'));
+      expect(fgs.contains('reclamablesAntes - reclamablesDespues'),
+          isFalse,
+          reason: 'el progreso volvió a medirse por reclamables: '
+              'el backoff «progresa» en falso');
+      // C-6: sin sesión persistente, el servicio se detiene.
+      expect(fgs, contains('SyncMotivoNoCorrio.sinSesion'));
+      expect(fgs, contains('_ticksSinSesion'));
+    });
+  });
 }

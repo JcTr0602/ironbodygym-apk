@@ -1672,6 +1672,20 @@ class FotosColaService {
     return (r.first['n'] as int? ?? 0);
   }
 
+  /// Auditoría Definitiva (B-11): filas que YA llegaron al
+  /// servidor (estado 'completada'). El FGS mide su progreso
+  /// por el DELTA de esta cuenta, no por el de reclamables:
+  /// una foto que entra en backoff deja de ser reclamable sin
+  /// haber subido, y con el delta de reclamables ese «avance»
+  /// falso reiniciaba el cortacircuitos con la red caída.
+  Future<int> contarCompletadas() async {
+    final db = await LocalDb.instance.db;
+    final r = await db.rawQuery(
+        "SELECT COUNT(*) as n FROM fotos_cola "
+        "WHERE estado = 'completada'");
+    return (r.first['n'] as int? ?? 0);
+  }
+
   /// Fix Luna 7: elimina archivos huérfanos (en disco pero no en la cola,
   /// o de filas 'completada' hace más de 7 días). Las filas en
   /// 'error' no se tocan (B-13: su archivo es la única copia).
