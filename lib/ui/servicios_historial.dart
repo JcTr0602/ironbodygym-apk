@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../localdb.dart';
-import '../negocio.dart' show fmtMonto, fmtFecha;
+import '../negocio.dart' show fmtMonto, fechaLargaCorta;
 import '../servicios.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
+import 'servicios_detalle.dart';
 
 /// Historial completo de Servicios (pedido de Jc 2026-10-28):
 /// todas las operaciones de venta de raciones, combos y agua, más
 /// las salidas sin venta, en orden de nuevas a viejas, con filtros
-/// por tipo y (solo dueño) por vendedor. Solo lectura: no vende,
-/// no revierte, no cambia nada.
+/// por tipo y (solo dueño) por vendedor. No vende, pero desde
+/// la 1.31 (Mejoras) SÍ abre el detalle único de la venta y
+/// revierte también aquí (G-1: antes revertir era privilegio
+/// del día en curso).
 ///
 /// Roles: el dueño ve todas las operaciones; el entrenador solo
 /// las suyas (el mismo predicado que «Ventas de hoy»: vendedor o
@@ -24,7 +27,7 @@ import 'componentes.dart';
 /// y salidas del espejo) en vez de recibir las listas ya cargadas
 /// desde Servicios: así la pantalla principal ya no escanea los
 /// espejos completos en cada carga.
-class ServiciosHistorialScreen extends StatefulWidget {
+class ServiciosHistorialScreen extends StatelessWidget {
   final bool esDueno;
   final int? miTid;
   final Set<int> misPomosIds;
@@ -44,12 +47,46 @@ class ServiciosHistorialScreen extends StatefulWidget {
   });
 
   @override
-  State<ServiciosHistorialScreen> createState() =>
-      _ServiciosHistorialScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: appBarIron(context, 'Historial de Servicios'),
+      body: ServiciosHistorialCuerpo(
+        esDueno: esDueno,
+        miTid: miTid,
+        misPomosIds: misPomosIds,
+        personas: personas,
+        resaltarId: resaltarId,
+      ),
+    );
+  }
 }
 
-class _ServiciosHistorialScreenState
-    extends State<ServiciosHistorialScreen> {
+/// 1.31 (Mejoras · Día): el cuerpo del historial es un widget
+/// propio: la pantalla lo monta con su Scaffold y el hub
+/// «Servicios» lo embebe en la zona Día, sin duplicar lógica.
+class ServiciosHistorialCuerpo extends StatefulWidget {
+  final bool esDueno;
+  final int? miTid;
+  final Set<int> misPomosIds;
+  final Map<int, String> personas;
+  final int? resaltarId;
+
+  const ServiciosHistorialCuerpo({
+    super.key,
+    required this.esDueno,
+    this.miTid,
+    this.misPomosIds = const {},
+    required this.personas,
+    this.resaltarId,
+  });
+
+  @override
+  State<ServiciosHistorialCuerpo> createState() =>
+      _ServiciosHistorialCuerpoState();
+}
+
+class _ServiciosHistorialCuerpoState
+    extends State<ServiciosHistorialCuerpo> {
   // Filtros: tipo 'todas' | 'racion' | 'combo' | 'agua' | 'salida';
   // vendedor null = todos (solo dueño; el entrenador solo ve lo suyo).
   String _filtroTipo = 'todas';
@@ -72,6 +109,17 @@ class _ServiciosHistorialScreenState
   List<Map<String, dynamic>> _entradas = [];
   bool _cargando = true;
 
+  /// 1.31 (Mejoras): pomos con el producto resuelto, para el
+  /// detalle único y para nombrar el pomo en las salidas.
+  List<Map<String, dynamic>> _pomosResueltos = [];
+
+  void _aviso(String m, {bool error = false}) {
+    if (!mounted) return;
+    mostrarSnack(context, m,
+        significado:
+            error ? SignificadoChip.error : SignificadoChip.neutral);
+  }
+
   /// Respaldo de nombre por tid (menor Argón adenda): nombre que
   /// traía la venta (registrado_por_nombre) cuando el tid no está
   /// en widget.personas (p. ej. ventas viejas o del dueño).
@@ -87,6 +135,27 @@ class _ServiciosHistorialScreenState
   /// «Ventas de hoy» en Servicios (vendedor o pomo propio).
   Future<void> _cargar() async {
     final ventas = await LocalDb.instance.allMirror('servicio_ventas');
+    final pomosCrudos =
+        await LocalDb.instance.allMirror('servicio_pomos');
+    final sups = await LocalDb.instance.allMirror('suplementos');
+    final supPorId = <int, Map<String, dynamic>>{
+      for (final x in sups)
+        if ((x['id'] as num?)?.toInt() != null)
+          (x['id'] as num).toInt(): x,
+    };
+    final pomosResueltos = <Map<String, dynamic>>[
+      for (final p in pomosCrudos)
+        {
+          ...p,
+          'producto_nombre':
+              '${supPorId[(p['producto_id'] as num?)?.toInt()]?['nombre'] ?? 'Suplemento'}',
+          'responsable_nombre': p['responsable_id'] == null
+              ? 'Mío (dueño)'
+              : (widget.personas[
+                      int.tryParse('${p['responsable_id']}')] ??
+                  'Entrenador'),
+        },
+    ];
     final salidas = widget.esDueno
         ? await LocalDb.instance.allMirror('servicio_salidas')
         : <Map<String, dynamic>>[];
@@ -125,6 +194,7 @@ class _ServiciosHistorialScreenState
     setState(() {
       _entradas = entradas;
       _respaldoPorTid = respaldo;
+      _pomosResueltos = pomosResueltos;
       _cargando = false;
     });
     if (widget.resaltarId != null) {
@@ -210,20 +280,69 @@ class _ServiciosHistorialScreenState
   }
 
   /// V23: aplana las entradas visibles intercalando el día
-  /// ('aaaa-mm-dd') como encabezado de grupo.
+  /// como encabezado de grupo. 1.31 (Mejoras): el encabezado
+  /// ya no es la fecha cruda sola: lleva los TOTALES del día
+  /// visible (operaciones e importe neto, con
+  /// totalesDiaHistorialServicios).
   List<Object> _itemsPorDia(List<Map<String, dynamic>> visibles) {
     final items = <Object>[];
     String? diaActual;
+    var delDia = <Map<String, dynamic>>[];
+    void cerrarDia() {
+      if (diaActual == null) return;
+      final t = totalesDiaHistorialServicios(delDia);
+      items.add({
+        'encabezado': true,
+        'dia': diaActual,
+        'ops': t.operaciones,
+        'importe': t.importe,
+      });
+      items.addAll(delDia);
+      delDia = <Map<String, dynamic>>[];
+    }
+
     for (final e in visibles) {
       final f = '${e['fecha']}';
       final dia = f.length >= 10 ? f.substring(0, 10) : f;
       if (dia != diaActual) {
+        cerrarDia();
         diaActual = dia;
-        items.add(dia);
       }
-      items.add(e);
+      delDia.add(e);
     }
+    cerrarDia();
     return items;
+  }
+
+  /// Abre el detalle ÚNICO de la venta (el mismo de «Ventas
+  /// de hoy») y, desde él, la reversión — también para días
+  /// pasados (G-1). Tras revertir, el historial se recarga.
+  Future<void> _abrirDetalle(Map<String, dynamic> e) async {
+    final cruda = e['cruda'];
+    if (cruda is! Map<String, dynamic>) return;
+    await mostrarDetalleVentaServicio(
+      context,
+      venta: cruda,
+      pomos: _pomosResueltos,
+      yaReversada: e['yaReversada'] == true,
+      onRevertir: (venta) async {
+        final ok = await revertirVentaServicioUI(context, venta,
+            esDueno: widget.esDueno, aviso: _aviso);
+        if (ok && mounted) await _cargar();
+      },
+    );
+  }
+
+  /// Nombre del pomo de una salida («del pomo de quién salió»).
+  String _nombrePomoSalida(Map<String, dynamic> e) {
+    final pid = (e['pomoId'] as num?)?.toInt();
+    if (pid == null) return 'sin pomo';
+    for (final p in _pomosResueltos) {
+      if ((p['id'] as num?)?.toInt() == pid) {
+        return '${p['producto_nombre']} · ${p['responsable_nombre']}';
+      }
+    }
+    return 'Pomo #$pid';
   }
 
   Widget _filaEntrada(Map<String, dynamic> e) {
@@ -231,21 +350,38 @@ class _ServiciosHistorialScreenState
     final esReverso = e['esReverso'] == true;
     final yaReversada = e['yaReversada'] == true;
     final esCasa = e['casa'] == true;
-    final fecha = '${e['fecha']}';
-    final fecha10 = fecha.length >= 10 ? fecha.substring(0, 10) : fecha;
-    final hora = '${e['hora']}';
+    final hora = '${e['hora'] ?? ''}';
     if (!esVenta) {
-      return Card(
-        margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-        child: ListTile(
-          leading: Icon(Icons.outbox_rounded,
-              color: AppColores.textoSecundario(context)),
-          title: const Text('Salida sin venta', style: AppTexto.cuerpo),
-          subtitle: Text(
-            '${e['tipo'] == 'agua' ? 'Agua' : 'Dosis'} ×${e['cantidad']}'
-            ' · ${e['motivo']}'
-            ' · $fecha10',
-            style: AppTexto.secundario,
+      // Salida sin venta: qué salió, de qué pomo y por qué —
+      // antes la fila no decía ni el pomo ni llevaba la hora.
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+        child: Tarjeta(
+          child: Row(
+            children: [
+              Icon(Icons.outbox_rounded,
+                  color: AppColores.textoSecundario(context)),
+              const SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Salida sin venta',
+                        style: AppTexto.cuerpo),
+                    Text(
+                      '${e['tipo'] == 'agua' ? 'Agua' : 'Dosis'} '
+                      '×${e['cantidad']} · ${_nombrePomoSalida(e)}',
+                      style: AppTexto.secundario,
+                    ),
+                    Text(
+                      '${e['motivo']}'
+                      '${hora.isNotEmpty ? ' · $hora' : ''}',
+                      style: AppTexto.metadato,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -262,47 +398,102 @@ class _ServiciosHistorialScreenState
                 : e['tipo'] == 'dosis_con_agua'
                     ? Icons.local_drink_rounded
                     : Icons.water_drop_rounded;
-    final colorIcono = esReverso
-        ? AppColores.error
-        : esCasa
-            ? AppColores.alerta
-            : e['tipo'] == 'agua_suelta'
-                ? AppColores.info
-                : AppColores.naranja;
-    final titulo = '$tipoTxt'
-        '${esReverso ? ' · Reverso' : yaReversada ? ' · Reversada' : ''}'
-        '${esCasa ? ' · Casa' : ''}';
+    final significadoTipo = esReverso
+        ? SignificadoChip.error
+        : e['tipo'] == 'dosis_sin_agua'
+            ? SignificadoChip.exito
+            : SignificadoChip.info;
     final vendedor = widget.esDueno
-        ? ' · Vend: ${_nombreVendedor(_vendedorDe(e), '${e['registradoPor'] ?? ''}')}'
+        ? ' · ${_nombreVendedor(_vendedorDe(e), '${e['registradoPor'] ?? ''}')}'
         : '';
+    final metodo = '${e['metodo'] ?? ''}';
     final idVenta = (e['id'] as num?)?.toInt() ?? 0;
     final llave = _llaves.putIfAbsent(idVenta, () => GlobalKey());
-    return Card(
+    // 1.31 (Mejoras · Historial elevado): la fila es una
+    // Tarjeta del sistema (antes Card+ListTile crudos): el
+    // CLIENTE es el título (G-2), el tipo va en chip con su
+    // icono y color, y tocarla abre el detalle único — con
+    // reversión también desde aquí (G-1).
+    return Padding(
       key: llave,
-      color: _resaltado == idVenta
-          ? AppColores.naranja.withValues(alpha: 0.15)
-          : null,
-      margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: ListTile(
-        leading: Icon(icono, color: colorIcono),
-        title: Text(titulo, style: AppTexto.cuerpo),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${e['cliente']}', style: AppTexto.secundario),
-            Text(
-              '$fecha10${hora.isNotEmpty ? ' $hora' : ''}'
-              '$vendedor'
-              '${esCasa ? '' : (e['metodo'] as String).isNotEmpty ? ' · ${e['metodo']}' : ''}',
-              style: AppTexto.metadato,
-            ),
-          ],
+      padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+      child: Tarjeta(
+        color: _resaltado == idVenta
+            ? AppColores.naranja.withValues(alpha: 0.15)
+            : null,
+        onTap: () => _abrirDetalle(e),
+        child: Opacity(
+          opacity: (esReverso || yaReversada) ? 0.55 : 1,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(icono,
+                    color: esReverso
+                        ? AppColores.error
+                        : esCasa
+                            ? AppColores.alerta
+                            : null),
+              ),
+              const SizedBox(width: AppEspacio.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${e['cliente']}',
+                        style: AppTexto.subtitulo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: AppEspacio.xs),
+                    Wrap(
+                      spacing: AppEspacio.sm,
+                      runSpacing: AppEspacio.xs,
+                      children: [
+                        ChipEstado.semantico(
+                          texto: tipoTxt,
+                          significado: significadoTipo,
+                          icono: icono,
+                        ),
+                        if (esReverso)
+                          const ChipEstado.semantico(
+                            texto: 'Reverso',
+                            significado: SignificadoChip.error,
+                            icono: Icons.undo_rounded,
+                          ),
+                        if (yaReversada && !esReverso)
+                          const ChipEstado.semantico(
+                            texto: 'Revertida',
+                            significado: SignificadoChip.error,
+                            icono: Icons.undo_rounded,
+                          ),
+                        if (esCasa)
+                          const ChipEstado.semantico(
+                            texto: 'Casa',
+                            significado: SignificadoChip.alerta,
+                            icono: Icons.star_rounded,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppEspacio.xs),
+                    Text(
+                      '${hora.isNotEmpty ? hora : '—'}'
+                      '${metodo.isNotEmpty ? ' · $metodo' : ''}'
+                      '$vendedor',
+                      style: AppTexto.metadato,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              Text('${fmtMonto((e['monto'] as num).toDouble())} CUP',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      color: esReverso ? AppColores.error : null)),
+            ],
+          ),
         ),
-        trailing: Text('${fmtMonto((e['monto'] as num).toDouble())} CUP',
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontFeatures: const [FontFeature.tabularFigures()],
-                color: esReverso ? AppColores.error : null)),
       ),
     );
   }
@@ -310,17 +501,12 @@ class _ServiciosHistorialScreenState
   @override
   Widget build(BuildContext context) {
     if (_cargando) {
-      return Scaffold(
-        appBar: appBarIron(context, 'Historial de Servicios'),
-        body: const EstadoCargando(texto: 'Cargando historial…'),
-      );
+      return const EstadoCargando(texto: 'Cargando historial…');
     }
     final visibles = _visibles;
     final itemsHist = _itemsPorDia(visibles);
     final vendedores = _vendedores;
-    return Scaffold(
-      appBar: appBarIron(context, 'Historial de Servicios'),
-      body: Column(
+    return Column(
         children: [
           // 11/25: buscador por cliente, vendedor o tipo.
           Padding(
@@ -436,13 +622,31 @@ class _ServiciosHistorialScreenState
                         );
                       }
                       final it = itemsHist[index];
-                      if (it is String) {
+                      if (it is Map<String, dynamic> &&
+                          it['encabezado'] == true) {
+                        // 1.31 (Mejoras): día en palabras +
+                        // totales del día visible.
                         return Padding(
                           padding: EdgeInsets.only(
-                              top: index == 0 ? 0 : AppEspacio.sm,
+                              top: index == 0 ? 0 : AppEspacio.md,
                               bottom: AppEspacio.sm),
-                          child: Text(fmtFecha(it),
-                              style: AppTexto.subtitulo),
+                          child: Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                    fechaLargaCorta('${it['dia']}'),
+                                    style: AppTexto.subtitulo),
+                              ),
+                              Text(
+                                '${it['ops']} operaciones · '
+                                '${fmtMonto((it['importe'] as num).toDouble())} CUP',
+                                style: AppTexto.metadato,
+                              ),
+                            ],
+                          ),
                         );
                       }
                       return _filaEntrada(it as Map<String, dynamic>);
@@ -451,7 +655,6 @@ class _ServiciosHistorialScreenState
             ),
           ),
         ],
-      ),
-    );
+      );
   }
 }
