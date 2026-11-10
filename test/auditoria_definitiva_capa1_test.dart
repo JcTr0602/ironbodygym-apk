@@ -755,4 +755,42 @@ void main() {
           reason: 'la acción en lote quedó sin la guarda de rol');
     });
   });
+
+  group('B-15 · el fallo de carga se VE en las 3 superficies '
+      'de incidencias (estructural)', () {
+    void esperaErrorVisible(String ruta, String nombre) {
+      final s = File(ruta).readAsStringSync();
+      expect(s, contains('_errorCarga'),
+          reason: '$nombre no tiene estado de error de carga');
+      expect(s, contains('EstadoError('),
+          reason: '$nombre no pinta el error con el widget de '
+              'la casa');
+      expect(s, contains('onReintentar: _cargar'),
+          reason: '$nombre no ofrece Reintentar');
+      expect(s, contains('mensajeErrorAmable'),
+          reason: '$nombre no traduce el error a lenguaje llano');
+    }
+
+    test('incidencias_sync (la prioritaria: mentía en '
+        'silencio)', () {
+      esperaErrorVisible(
+          'lib/ui/incidencias_sync.dart', 'incidencias_sync');
+      final s =
+          File('lib/ui/incidencias_sync.dart').readAsStringSync();
+      expect(s, contains("AppLog.error('incidencias_sync', 'carga_fallo'"),
+          reason: 'su _cargar sigue sin bitácora (no recibió '
+              'la familia R2-X1)');
+    });
+
+    test('lista de incidencias', () {
+      esperaErrorVisible('lib/ui/incidencias/lista_incidencias.dart',
+          'lista');
+    });
+
+    test('detalle de incidencia (no más «No encontrada» falso)',
+        () {
+      esperaErrorVisible(
+          'lib/ui/incidencias/detalle_incidencia.dart', 'detalle');
+    });
+  });
 }

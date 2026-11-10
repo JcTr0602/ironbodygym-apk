@@ -32,6 +32,11 @@ class IncidenciasSyncScreen extends StatefulWidget {
 class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   bool _cargando = true;
   bool _procesando = false;
+  // Auditoría Definitiva (B-15): error de carga VISIBLE. Esta
+  // pantalla no recibió la familia R2-X1: su catch solo bajaba
+  // _cargando y el build decía «Sin incidencias pendientes.»
+  // — un fallo de lectura se pintaba como vacío, en silencio.
+  String? _errorCarga;
   List<Map<String, dynamic>> _pendientes = [];
   List<Map<String, dynamic>> _resueltas = [];
   bool _verResueltas = false;
@@ -68,10 +73,19 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           _resueltas = r;
           _nombresClientes = nombres;
           _cargando = false;
+          _errorCarga = null;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // B-15 (familia R2-X1): bitácora + error visible con
+      // Reintentar; nunca más «vacío» por un fallo de lectura.
+      AppLog.error('incidencias_sync', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _errorCarga = mensajeErrorAmable(e);
+        });
+      }
     }
   }
 
@@ -249,7 +263,14 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
           Expanded(
             child: _cargando || _procesando
                 ? const EstadoCargando(texto: 'Cargando incidencias…')
-                : lista.isEmpty
+                : _errorCarga != null
+                    ? EstadoError(
+                        titulo:
+                            'No se pudieron cargar las incidencias',
+                        detalle: _errorCarga,
+                        onReintentar: _cargar,
+                      )
+                    : lista.isEmpty
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(AppEspacio.xxl),

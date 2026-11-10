@@ -41,6 +41,11 @@ class _DetalleIncidenciaScreenState
   List<IncidenciaFoto> _fotos = [];
   List<IncidenciaHistorial> _historial = [];
   bool _cargando = true;
+  // Auditoría Definitiva (B-15): error de carga VISIBLE — un
+  // fallo de lectura dejaba _inc en null y el build decía
+  // «No encontrada», que es falso: la incidencia existe, lo
+  // que falló fue leerla.
+  String? _errorCarga;
   final _ctrlComentario = TextEditingController();
 
   @override
@@ -61,10 +66,18 @@ class _DetalleIncidenciaScreenState
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted && _errorCarga != null) {
+        setState(() => _errorCarga = null);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // B-15: y se VE como error con Reintentar, no como
+      // «No encontrada».
+      if (mounted) {
+        setState(() => _errorCarga = mensajeErrorAmable(e));
+      }
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -219,7 +232,13 @@ class _DetalleIncidenciaScreenState
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
-          : inc == null
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar la incidencia',
+                  detalle: _errorCarga,
+                  onReintentar: _cargar,
+                )
+              : inc == null
               ? const Center(
                   child:
                       Text('No encontrada'))

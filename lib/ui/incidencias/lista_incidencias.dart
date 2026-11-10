@@ -15,6 +15,7 @@ import 'tipos_incidencia.dart';
 import 'editar_incidencia.dart';
 import '../../auth.dart';
 import '../../app_log.dart';
+import '../../errores_sync.dart';
 
 /// Lista de incidencias con filtros, buscador y SLA visual.
 /// v1.3.0
@@ -31,6 +32,10 @@ class _ListaIncidenciasScreenState
   List<Incidencia> _todas = [];
   List<TipoIncidencia> _tipos = [];
   bool _cargando = true;
+  // Auditoría Definitiva (B-15): error de carga VISIBLE — la
+  // lista tenía el envoltorio R2-X1 (bitácora) pero un fallo
+  // de lectura se pintaba como «Sin incidencias».
+  String? _errorCarga;
 
   // Filtros
   String _busqueda = '';
@@ -55,10 +60,18 @@ class _ListaIncidenciasScreenState
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted && _errorCarga != null) {
+        setState(() => _errorCarga = null);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // B-15: y además se VE, con Reintentar — no como lista
+      // vacía.
+      if (mounted) {
+        setState(() => _errorCarga = mensajeErrorAmable(e));
+      }
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -293,7 +306,14 @@ class _ListaIncidenciasScreenState
                     padding: EdgeInsets.all(AppEspacio.md),
                     child: SkeletonLista(items: 4),
                   )
-                : filtradas.isEmpty
+                : _errorCarga != null
+                    ? EstadoError(
+                        titulo:
+                            'No se pudieron cargar las incidencias',
+                        detalle: _errorCarga,
+                        onReintentar: _cargar,
+                      )
+                    : filtradas.isEmpty
                     ? EstadoVacio(
                         icono: Icons.report_off_rounded,
                         titulo: 'Sin incidencias',
