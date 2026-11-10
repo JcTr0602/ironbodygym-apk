@@ -56,6 +56,12 @@ class _DialogoResolverDiferenciaState
   var _resolucion = 'vuelto';
   final _notaCtrl = TextEditingController();
   var _errorNota = false;
+  // Yunque R4-M7-2: guarda de vuelo y error visible al
+  // resolver (el servicio lanza si ya hay una resolución
+  // en curso; sin esto, un doble toque era una excepción
+  // asíncrona sin mensaje).
+  var _resolviendo = false;
+  String? _errorResolver;
 
   @override
   void dispose() {
@@ -136,6 +142,14 @@ class _DialogoResolverDiferenciaState
                         color: AppColores.errorTexto(context)),
                   ),
                 ],
+                if (_errorResolver != null) ...[
+                  const SizedBox(height: AppEspacio.sm),
+                  Text(
+                    _errorResolver!,
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(context)),
+                  ),
+                ],
               ],
             ),
           ),
@@ -145,19 +159,43 @@ class _DialogoResolverDiferenciaState
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
-              onPressed: () async {
-                if (notaObligatoria &&
-                    _notaCtrl.text.trim().isEmpty) {
-                  setState(() => _errorNota = true);
-                  return;
-                }
-                await DiferenciasCajaService.instance.resolver(
-                  expedienteId: '${expediente['id']}',
-                  resolucion: _resolucion,
-                  nota: _notaCtrl.text,
-                );
-                if (context.mounted) Navigator.pop(context, true);
-              },
+              onPressed: _resolviendo
+                  ? null
+                  : () async {
+                      if (notaObligatoria &&
+                          _notaCtrl.text.trim().isEmpty) {
+                        setState(() => _errorNota = true);
+                        return;
+                      }
+                      // Yunque R4-M7-2: guarda de vuelo y
+                      // error VISIBLE del servicio (su
+                      // StateError «ya tiene una resolución
+                      // en curso» llegaba como excepción
+                      // asíncrona sin cazar).
+                      setState(() {
+                        _resolviendo = true;
+                        _errorResolver = null;
+                      });
+                      try {
+                        await DiferenciasCajaService.instance
+                            .resolver(
+                          expedienteId: '${expediente['id']}',
+                          resolucion: _resolucion,
+                          nota: _notaCtrl.text,
+                        );
+                        if (context.mounted) {
+                          Navigator.pop(context, true);
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          setState(() {
+                            _resolviendo = false;
+                            _errorResolver = '$e'
+                                .replaceFirst('Bad state: ', '');
+                          });
+                        }
+                      }
+                    },
               child: const Text('Resolver'),
             ),
           ],

@@ -366,6 +366,10 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
   // T5 (1.20): expedientes por liquidación (chip o botón
   // «Abrir expediente» en el historial).
   Map<String, Map<String, dynamic>> _expedientes = {};
+  // Yunque R4-M7-1: liquidaciones con la apertura de
+  // expediente en vuelo (doble toque no abre dos veces;
+  // el servicio además lo impide en la cola).
+  final Set<String> _abriendoExpediente = {};
   // (M2-BC B2/C4) UUID de la liquidación de la moneda
   // elegida que sigue EN COLA en este teléfono: mientras
   // exista, la tarjeta lleva el sello «Liquidado» y el
@@ -1025,20 +1029,58 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                           size: 18),
                                       label: const Text(
                                           'Abrir expediente'),
-                                      onPressed: () async {
-                                        await DiferenciasCajaService
-                                            .instance
-                                            .abrir(
-                                                liquidacionId:
-                                                    '${h['id']}');
-                                        if (!context.mounted) return;
-                                        mostrarSnack(context,
-                                            'Expediente abierto '
-                                            '(se sincronizará)',
-                                            significado:
-                                                SignificadoChip.exito);
-                                        _cargar();
-                                      },
+                                      // Yunque R4-M7-1: guarda
+                                      // de vuelo + error
+                                      // visible (la guarda del
+                                      // servicio lanza si ya
+                                      // hay expediente o
+                                      // apertura en curso).
+                                      onPressed: _abriendoExpediente
+                                              .contains(
+                                                  '${h['id']}')
+                                          ? null
+                                          : () async {
+                                              final liqId =
+                                                  '${h['id']}';
+                                              setState(() =>
+                                                  _abriendoExpediente
+                                                      .add(liqId));
+                                              try {
+                                                await DiferenciasCajaService
+                                                    .instance
+                                                    .abrir(
+                                                        liquidacionId:
+                                                            liqId);
+                                                if (!context
+                                                    .mounted) {
+                                                  return;
+                                                }
+                                                mostrarSnack(context,
+                                                    'Expediente abierto '
+                                                    '(se sincronizará)',
+                                                    significado:
+                                                        SignificadoChip
+                                                            .exito);
+                                                _cargar();
+                                              } catch (e) {
+                                                if (!context
+                                                    .mounted) {
+                                                  return;
+                                                }
+                                                mostrarSnack(context,
+                                                    '$e',
+                                                    significado:
+                                                        SignificadoChip
+                                                            .error);
+                                              } finally {
+                                                if (mounted) {
+                                                  setState(() =>
+                                                      _abriendoExpediente
+                                                          .remove(
+                                                              liqId));
+                                                }
+                                              }
+                                            },
                                     ),
                                   ),
                               ],

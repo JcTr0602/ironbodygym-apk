@@ -152,14 +152,42 @@ class DiferenciasCajaService {
 
   /// Mapa liquidacion_id -> expediente, para pintar el
   /// historial de liquidaciones sin una consulta por fila.
+  /// Yunque R4-M7-1: con el MISMO overlay de [todas] para
+  /// las aperturas encoladas — sin él, el historial leía
+  /// solo el espejo y, tras abrir un expediente y recargar,
+  /// el botón «Abrir expediente» reaparecía en la misma
+  /// sesión para la misma liquidación.
   Future<Map<String, Map<String, dynamic>>> porLiquidacion()
       async {
     final rows = await _db.allMirror('diferencias_caja');
-    return {
+    final mapa = <String, Map<String, dynamic>>{
       for (final r in rows)
         if ('${r['liquidacion_id'] ?? ''}'.isNotEmpty)
           '${r['liquidacion_id']}': r,
     };
+    try {
+      for (final op in await _db.pendingOpsLectura()) {
+        if ('${op['tipo']}' != 'diferencia_abrir') continue;
+        try {
+          final p = jsonDecode(op['payload'] as String)
+              as Map<String, dynamic>;
+          final liqId = '${p['liquidacion_id'] ?? ''}';
+          if (liqId.isNotEmpty && !mapa.containsKey(liqId)) {
+            mapa[liqId] = <String, dynamic>{
+              'id': 'pendiente-${op['op_uuid']}',
+              'liquidacion_id': liqId,
+              'estado': 'abierta',
+              'fecha': '${op['creada_ts'] ?? ''}',
+              'explicacion': p['explicacion'],
+              'pendiente_sync': 1,
+            };
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+    } catch (_) {}
+    return mapa;
   }
 
   /// Expedientes de un entrenador (su vista de resumen:
@@ -194,6 +222,32 @@ class DiferenciasCajaService {
     required String liquidacionId,
     String? explicacion,
   }) async {
+    // Yunque R4-M7-1: anti-duplicado, simétrico al de
+    // resolver() — una segunda apertura para la misma
+    // liquidación no se encola (el espejo ya la tiene, o
+    // ya hay una apertura esperando sincronizar). Sin la
+    // guarda, el botón del historial reaparecía tras
+    // recargar (el mapa no llevaba overlay) y un segundo
+    // toque mandaba un segundo diferencia_abrir al
+    // servidor.
+    if (await deLiquidacion(liquidacionId) != null) {
+      throw StateError(
+          'Esta liquidación ya tiene su expediente.');
+    }
+    for (final op in await _db.pendingOpsLectura()) {
+      if ('${op['tipo']}' != 'diferencia_abrir') continue;
+      try {
+        final p = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+        if ('${p['liquidacion_id'] ?? ''}' == liquidacionId) {
+          throw StateError(
+              'Esta liquidación ya tiene un expediente en '
+              'curso (esperando sincronizar).');
+        }
+      } catch (e) {
+        if (e is StateError) rethrow;
+      }
+    }
     await _queueYEmpujar('diferencia_abrir', {
       'liquidacion_id': liquidacionId,
       if (explicacion != null && explicacion.trim().isNotEmpty)
