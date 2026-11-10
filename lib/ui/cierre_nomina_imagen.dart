@@ -36,6 +36,11 @@ class FilaCierreNomina {
   final bool liquidada;
 }
 
+/// Yunque R5-M8-2: el total «A PAGAR» de la imagen excluye
+/// a los ya liquidados (su neto ya se pagó). PURO.
+double totalAPagarCierre(List<FilaCierreNomina> filas) =>
+    filas.fold<double>(0, (s, f) => s + (f.liquidada ? 0 : f.neto));
+
 class ImagenCierreNomina extends StatelessWidget {
   const ImagenCierreNomina({
     super.key,
@@ -57,7 +62,10 @@ class ImagenCierreNomina extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = filas.fold<double>(0, (s, f) => s + f.neto);
+    // Yunque R5-M8-2: «TOTAL A PAGAR» suma solo a quien NO
+    // está liquidado (ya cobró: no es «a pagar»), el mismo
+    // criterio que netoTotalDueno de la foto de nómina.
+    final total = totalAPagarCierre(filas);
     return Container(
       width: 340,
       decoration: BoxDecoration(

@@ -181,29 +181,68 @@ class _NominaScreenState extends State<NominaScreen> {
   Future<void> _mostrarFotoCierre() async {
     final base = _clientesPagados * _tarifa;
     final filas = <FilaCierreNomina>[];
+    // Yunque R5-M8-1/M8-6: el mes de la foto es el mes
+    // CARGADO en pantalla (el pref de _cargarDatos), no el
+    // reloj de este instante: cruzar la medianoche del
+    // cambio de mes con la pantalla abierta ya no rotula
+    // los datos del mes viejo con el nombre del nuevo.
+    final prefFoto = hoyHabanaIso().substring(0, 7);
     for (final ent in ['duany', 'gabriel']) {
       final persona = _personasAdelantos[ent];
       if (persona == null) continue;
-      final bono = _bonoPara(ent);
-      final comision = _comisionDosis[ent]?.total ?? 0;
+      var bono = _bonoPara(ent);
+      var comision = _comisionDosis[ent]?.total ?? 0;
       final libro = _libroMes[ent];
-      final adelantos = libro?.adelantos ?? 0;
-      final deuda = libro?.deudaEntrante ?? 0;
-      filas.add(FilaCierreNomina(
-        nombre: persona.nombre,
+      var adelantos = libro?.adelantos ?? 0;
+      var deuda = libro?.deudaEntrante ?? 0;
+      final liquidada = _nominaLiquidadaMes[ent] ?? false;
+      var baseFila = base;
+      var neto = NominaCalc.totalVivo(
         base: base,
         bono: bono,
         comision: comision,
         adelantos: adelantos,
+        deudaEntrante: deuda,
+      );
+      if (liquidada) {
+        // Yunque R5-M8-1 (ALTA): un mes ya liquidado manda
+        // por su FOTO de liquidación (regla N-5), no por el
+        // cálculo vivo: si la tarifa cambió tras liquidar,
+        // la imagen ya no dice «✓ Liquidada» con un neto
+        // distinto del que se pagó. Sin snapshot legible se
+        // conserva el cálculo vivo (no se inventa la foto).
+        final snap = await AdelantosService.instance.snapshotNomina(
+          prefFoto,
+          entrenadorId: persona.id,
+          telegramId: persona.telegramId,
+        );
+        if (snap != null) {
+          double n(String k) => (snap[k] as num?)?.toDouble() ?? 0;
+          baseFila = n('base');
+          bono = n('bonos');
+          comision = n('comisiones');
+          adelantos = n('adelantos');
+          deuda = n('deuda_entrante');
+          neto = snap['neto'] != null
+              ? n('neto')
+              : NominaCalc.totalVivo(
+                  base: baseFila,
+                  bono: bono,
+                  comision: comision,
+                  adelantos: adelantos,
+                  deudaEntrante: deuda,
+                );
+        }
+      }
+      filas.add(FilaCierreNomina(
+        nombre: persona.nombre,
+        base: baseFila,
+        bono: bono,
+        comision: comision,
+        adelantos: adelantos,
         deuda: deuda,
-        neto: NominaCalc.totalVivo(
-          base: base,
-          bono: bono,
-          comision: comision,
-          adelantos: adelantos,
-          deudaEntrante: deuda,
-        ),
-        liquidada: _nominaLiquidadaMes[ent] ?? false,
+        neto: neto,
+        liquidada: liquidada,
       ));
     }
     if (filas.isEmpty) {
@@ -211,8 +250,14 @@ class _NominaScreenState extends State<NominaScreen> {
       return;
     }
     final ahora = ahoraHabana();
-    final mesEtiqueta = '${_nombreMes(ahora.month)} de ${ahora.year}';
+    final mesEtiqueta = '${_nombreMes(int.parse(prefFoto.substring(5, 7)))}'
+        ' de ${prefFoto.substring(0, 4)}';
     final boundaryKey = GlobalKey();
+    var compartiendoFoto = false;
+    // El messenger se captura ANTES del diálogo (el patrón
+    // del login): el aviso de fallo al compartir no depende
+    // del contexto de la pantalla tras los awaits.
+    final messengerFoto = ScaffoldMessenger.of(context);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -234,34 +279,51 @@ class _NominaScreenState extends State<NominaScreen> {
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Cerrar'),
           ),
-          FilledButton.icon(
-            icon: const Icon(Icons.share_rounded, size: 18),
-            label: const Text('Compartir imagen'),
-            onPressed: () async {
-              try {
-                final boundary = boundaryKey.currentContext!
-                    .findRenderObject() as RenderRepaintBoundary;
-                final imagen =
-                    await boundary.toImage(pixelRatio: 3.0);
-                final datos = await imagen.toByteData(
-                    format: ui.ImageByteFormat.png);
-                if (datos == null) return;
-                final dir = await getTemporaryDirectory();
-                final f = await File(
-                        '${dir.path}/cierre_nomina_'
-                        '${hoyHabanaIso().substring(0, 7)}.png')
-                    .writeAsBytes(datos.buffer.asUint8List());
-                await Share.shareXFiles([XFile(f.path)],
-                    text: 'Cierre de nómina · $mesEtiqueta · '
-                        'Iron Body Gym');
-              } catch (_) {
-                if (mounted) {
-                  mostrarSnack(context,
-                      'No se pudo compartir la imagen',
-                      significado: SignificadoChip.error);
-                }
-              }
-            },
+          // Yunque R5-M8-4: guarda anti-doble-toque (el
+          // patrón de confirmacion_cobro): dos toques no
+          // escriben dos veces sobre el mismo archivo ni
+          // abren dos hojas de compartir.
+          StatefulBuilder(
+            builder: (ctx, setLocal) => FilledButton.icon(
+              icon: const Icon(Icons.share_rounded, size: 18),
+              label: const Text('Compartir imagen'),
+              onPressed: compartiendoFoto
+                  ? null
+                  : () async {
+                      setLocal(() => compartiendoFoto = true);
+                      try {
+                        final boundary = boundaryKey.currentContext!
+                            .findRenderObject() as RenderRepaintBoundary;
+                        final imagen =
+                            await boundary.toImage(pixelRatio: 3.0);
+                        final datos = await imagen.toByteData(
+                            format: ui.ImageByteFormat.png);
+                        // R5-M8-5: PNG nulo = error visible,
+                        // no retorno mudo.
+                        if (datos == null) throw 'sin imagen';
+                        final dir = await getTemporaryDirectory();
+                        final f = await File(
+                                '${dir.path}/cierre_nomina_'
+                                '$prefFoto.png')
+                            .writeAsBytes(datos.buffer.asUint8List());
+                        await Share.shareXFiles([XFile(f.path)],
+                            text: 'Cierre de nómina · $mesEtiqueta · '
+                                'Iron Body Gym\n'
+                                // R5-M8-3: es un mensaje que
+                                // compone el sistema: lleva la
+                                // línea oficial de cierre.
+                                '$lineaMensajeAutomatico');
+                      } catch (_) {
+                        mostrarSnackEnMessenger(messengerFoto,
+                            'No se pudo compartir la imagen',
+                            significado: SignificadoChip.error);
+                      } finally {
+                        if (ctx.mounted) {
+                          setLocal(() => compartiendoFoto = false);
+                        }
+                      }
+                    },
+            ),
           ),
         ],
       ),
