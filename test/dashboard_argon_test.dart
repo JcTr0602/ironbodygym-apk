@@ -114,6 +114,33 @@ void main() {
           r.porVencer.map((c) => c['nombre']).toList(),
           ['Manana', 'Limite']);
     });
+
+    test(
+        'Yunque de cambios 1.31 (M1): el pausado en curso fuera de '
+        'ambos grupos; sin conjunto, la partición no cambia', () {
+      final filas = [
+        {'id': 1, 'nombre': 'PausaHoy', 'pagado_hasta': '2026-10-30'},
+        {'id': 2, 'nombre': 'PausaManana', 'pagado_hasta': '2026-10-31'},
+        {'id': 3, 'nombre': 'Normal', 'pagado_hasta': '2026-10-30'},
+      ];
+      final conPausa = partirVencimientos(
+        filas: filas,
+        hoy: '2026-10-30',
+        limIso: '2026-11-02',
+        congelados: {1, 2},
+      );
+      expect(
+          conPausa.vencenHoy.map((c) => c['nombre']).toList(), ['Normal']);
+      expect(conPausa.porVencer, isEmpty);
+      // Sin conjunto (default): nadie se excluye por pausa.
+      final sinPausa = partirVencimientos(
+        filas: filas,
+        hoy: '2026-10-30',
+        limIso: '2026-11-02',
+      );
+      expect(sinPausa.vencenHoy.length, 2);
+      expect(sinPausa.porVencer.length, 1);
+    });
   });
 
   group('esAlertaStockBajo (Q6)', () {

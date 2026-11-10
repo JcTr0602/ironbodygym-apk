@@ -6303,6 +6303,11 @@ Future<
 /// por vencer (mañana..+`dias`, SIN hoy) y vencen hoy, en UNA sola
 /// lectura de activos y con las mismas reglas de `porVencer` y
 /// `vencenHoy` (Casa fuera de ambos; orden por pagado_hasta).
+/// Yunque de cambios 1.31 (M1): la exclusión de la pausa
+/// aprobada EN CURSO (YB-FLU-01) entra también aquí — los
+/// conteos «por vencer» y «vencen hoy» del Dashboard salen de
+/// esta partición y un pausado NO vence hoy ni está por vencer
+/// para el panel del dueño, igual que en los predicados.
 Future<
     ({
       List<Map<String, dynamic>> porVencer,
@@ -6311,13 +6316,18 @@ Future<
   final hoy = _hoyIso();
   // 1.24 B2: límite por aritmética de fecha pura (sumarDiasIso).
   final limIso = sumarDiasIso(hoy, dias);
+  final congelados = await _congeladosEnCurso();
   return partirVencimientos(
-      filas: await _activos(), hoy: hoy, limIso: limIso);
+      filas: await _activos(),
+      hoy: hoy,
+      limIso: limIso,
+      congelados: congelados);
 }
 
 /// Dashboard 1.19, PURO: la partición de `vencimientosResumen`.
-/// Casa fuera de ambos grupos; sin `pagado_hasta` fuera; hoy
-/// exacto → vencenHoy; (hoy, limIso] → porVencer.
+/// Casa fuera de ambos grupos; en pausa aprobada en curso
+/// ([congelados]) fuera de ambos grupos; sin `pagado_hasta`
+/// fuera; hoy exacto → vencenHoy; (hoy, limIso] → porVencer.
 ({
   List<Map<String, dynamic>> porVencer,
   List<Map<String, dynamic>> vencenHoy,
@@ -6325,11 +6335,15 @@ Future<
   required List<Map<String, dynamic>> filas,
   required String hoy,
   required String limIso,
+  Set<int> congelados = const {},
 }) {
   final porVencer = <Map<String, dynamic>>[];
   final vencenHoy = <Map<String, dynamic>>[];
   for (final c in filas) {
     if (esCuentaCasa(c)) continue;
+    // Yunque de cambios 1.31 (M1): el pausado no vence hoy
+    // ni está por vencer en el Dashboard (YB-FLU-01).
+    if (_enPausa(c, congelados)) continue;
     final ph = c['pagado_hasta'] as String?;
     if (ph == null) continue;
     if (ph == hoy) {
