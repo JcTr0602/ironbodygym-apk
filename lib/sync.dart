@@ -7474,6 +7474,14 @@ class SyncEngine {
         return null;
       }
       return loc.startsWith('http') ? loc : '$_base$loc';
+    } on SessionExpired {
+      // Auditoría Definitiva (B-3): la sesión vencida NO es
+      // «TUS no disponible»: tragarla aquí hacía que
+      // _subirFotoTusCola devolviera null y subirFotoCola
+      // cayera al PUT simple con la MISMA sesión vencida, en
+      // vez de tomar su rama SessionExpired (cierre ordenado
+      // de la sesión). Se relanza intacta.
+      rethrow;
     } catch (e) {
       // v1.2.9+46: loguear la excepción real.
       AppLog.aviso('fotos', 'tus_excepcion', d: 'path=$objectPath error=$e');
@@ -7489,6 +7497,12 @@ class SyncEngine {
       if (r.statusCode == 404 || r.statusCode == 410) return -1;
       if (r.statusCode != 200) return -2;
       return int.tryParse(r.headers['upload-offset'] ?? '') ?? -2;
+    } on SessionExpired {
+      // Auditoría Definitiva (B-3): ídem que en _tusCrear — el
+      // -2 («no se pudo averiguar») es para fallos de red, no
+      // para una sesión vencida, que debe subir hasta la rama
+      // SessionExpired de subirFotoCola.
+      rethrow;
     } catch (_) {
       return -2;
     }

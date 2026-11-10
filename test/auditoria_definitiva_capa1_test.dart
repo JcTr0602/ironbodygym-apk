@@ -208,6 +208,29 @@ void main() {
     });
   });
 
+  group('B-3 · SessionExpired no se traga en TUS (estructural)',
+      () {
+    final sync = File('lib/sync.dart').readAsStringSync();
+
+    test('_tusCrear y _tusOffset relanzan SessionExpired', () {
+      final i = sync.indexOf('Future<String?> _tusCrear');
+      expect(i, isNonNegative);
+      final crear = sync.substring(i, i + 2600);
+      expect(crear, contains('on SessionExpired'),
+          reason: '_tusCrear volvió a tragar la sesión vencida '
+              'como «TUS no disponible»');
+      final j = sync.indexOf('Future<int> _tusOffset');
+      expect(j, isNonNegative);
+      final offset = sync.substring(j, j + 900);
+      expect(offset, contains('on SessionExpired'),
+          reason: '_tusOffset volvió a disfrazar la sesión '
+              'vencida de «no se pudo averiguar» (-2)');
+      // La rama receptora existe: subirFotoCola la convierte en
+      // reintentable, sin fallback a PUT con la sesión muerta.
+      expect(sync, contains("error: 'sesión expirada'"));
+    });
+  });
+
   group('A-5 · migración v71 (columna generacion)', () {
     test('comprobantes_pago nace con generacion en limpio',
         () async {
