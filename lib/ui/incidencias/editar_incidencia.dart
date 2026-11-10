@@ -215,6 +215,24 @@ class _EditarIncidenciaScreenState
   }
 
   Future<void> _cargarTipos() async {
+    // Yunque de App 1.31 (familia B-15): si la lectura falla,
+    // el desplegable «Tipo» no puede quedar vacío y mudo —
+    // bitácora + snack.
+    try {
+      await _cargarTiposDatos();
+    } catch (e) {
+      AppLog.error('incidencias', 'cargar_tipos_fallo',
+          d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudieron cargar los tipos de incidencia: '
+            '${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  Future<void> _cargarTiposDatos() async {
     final d = await LocalDb.instance.db;
     final rows = await d.query('incidencias_tipos',
         where: 'activo = 1', orderBy: 'orden');
@@ -617,7 +635,6 @@ class _EditarIncidenciaScreenState
         .validate()) return;
     setState(() => _guardando = true);
     try {
-      final d = await LocalDb.instance.db;
       // P2#17: timestamps persistidos en hora Habana, no del
       // dispositivo (el picker de fecha límite es solo UI y se deja).
       final ahora = isoHabana(ahoraHabana());

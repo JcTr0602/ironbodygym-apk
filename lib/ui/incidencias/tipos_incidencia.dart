@@ -1,14 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../../auth.dart';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
 import '../../tiempo.dart';
 import '../app_bar.dart';
+import '../componentes.dart';
 import '../diseno.dart';
 import '../../app_log.dart';
+import '../../errores_sync.dart';
 
 /// CRUD de tipos de incidencia (solo dueño).
 /// v1.3.0 — con ajustes Gemini:
@@ -28,6 +29,9 @@ class _TiposIncidenciaScreenState
     extends State<TiposIncidenciaScreen> {
   List<TipoIncidencia> _tipos = [];
   bool _cargando = true;
+  // Yunque de App 1.31 (familia B-15): el fallo de carga se
+  // PINTA como error, no como lista vacía.
+  String? _errorCarga;
 
   @override
   void initState() {
@@ -41,10 +45,17 @@ class _TiposIncidenciaScreenState
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted && _errorCarga != null) {
+        setState(() => _errorCarga = null);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
-      // (la clase nació de fallos mudos).
+      // (la clase nació de fallos mudos) Y se pinta
+      // (Yunque de App 1.31: familia B-15).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() => _errorCarga = '$e');
+      }
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -81,7 +92,12 @@ class _TiposIncidenciaScreenState
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
-          : ReorderableListView.builder(
+          : _errorCarga != null
+              ? EstadoError(
+                  detalle: _errorCarga,
+                  onReintentar: _cargar,
+                )
+              : ReorderableListView.builder(
               // Ajuste Gemini: drag handles explícitos,
               // no toda la fila arrastrable (conflicto con Switch)
               buildDefaultDragHandles: false,
@@ -235,6 +251,25 @@ class _TiposIncidenciaScreenState
       TipoIncidencia t, bool activo) async {
     // P2#9: escritura solo-dueño.
     if (!AuthService().isOwner) return;
+    // Yunque de App 1.31 (familia B-15, rama escritura): la
+    // mutación no puede fallar en silencio.
+    try {
+      await _cambiarActivoDatos(t, activo);
+    } catch (e) {
+      AppLog.error('tipos_incidencia', 'cambiar_activo_fallo',
+          d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo guardar el cambio: '
+            '${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+      _cargar();
+    }
+  }
+
+  Future<void> _cambiarActivoDatos(
+      TipoIncidencia t, bool activo) async {
     // Fix #9 (Sol): mutación + encolado atómicos.
     await LocalDb.instance.mutarYEncolar(
       tabla: 'incidencias_tipos',
@@ -272,6 +307,33 @@ class _TiposIncidenciaScreenState
         existente?.orden ?? _tipos.length;
     // v1.3.2 (Argón #14): conservar activo/inactivo al editar.
     final activo = (existente?.activo ?? true) ? 1 : 0;
+    // Yunque de App 1.31 (familia B-15, rama escritura): la
+    // mutación no puede fallar en silencio.
+    try {
+      await _guardarTipoDatos(
+          id: id, res: res, activo: activo, orden: orden,
+          esInsert: existente == null);
+    } catch (e) {
+      AppLog.error('tipos_incidencia', 'guardar_tipo_fallo',
+          d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo guardar el tipo: '
+            '${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
+    _cargar();
+  }
+
+  Future<void> _guardarTipoDatos({
+    required String id,
+    required Map<String, dynamic> res,
+    required int activo,
+    required int orden,
+    required bool esInsert,
+  }) async {
     // Fix #9 (Sol): insert + encolado atómicos.
     await LocalDb.instance.mutarYEncolar(
       tabla: 'incidencias_tipos',
@@ -297,9 +359,8 @@ class _TiposIncidenciaScreenState
         'orden': orden,
         'plantilla_descripcion': res['plantilla_descripcion'],
       },
-      esInsert: existente == null,
+      esInsert: esInsert,
     );
-    _cargar();
   }
 }
 

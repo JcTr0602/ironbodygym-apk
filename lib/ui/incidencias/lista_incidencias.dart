@@ -641,21 +641,36 @@ class _ListaIncidenciasScreenState
       if (nota == null || !mounted) return;
     }
 
-    final cambiadas = await LocalDb.instance
-        .cambiarEstadoIncidenciasLote(
-      ids: ids,
-      nuevoEstado: destino,
-      notaResolucion: nota,
-      autor: autorIncidenciaActual(
-        displayName: AuthService().displayName,
+    // Yunque de App 1.31 (familia B-15, rama escritura): si
+    // el lote falla, se DICE (bitácora + snack) y la
+    // selección queda puesta para reintentar.
+    final int cambiadas;
+    try {
+      cambiadas = await LocalDb.instance
+          .cambiarEstadoIncidenciasLote(
+        ids: ids,
+        nuevoEstado: destino,
+        notaResolucion: nota,
+        autor: autorIncidenciaActual(
+          displayName: AuthService().displayName,
+          telegramId: AuthService().telegramId,
+        ),
+        userId: AuthService().userId,
         telegramId: AuthService().telegramId,
-      ),
-      userId: AuthService().userId,
-      telegramId: AuthService().telegramId,
-      // Yunque de App 1.31: rol del actor para la compuerta
-      // de rol del lote (resolver/reabrir solo dueño).
-      esDueno: AuthService().isOwner,
-    );
+        // Yunque de App 1.31: rol del actor para la compuerta
+        // de rol del lote (resolver/reabrir solo dueño).
+        esDueno: AuthService().isOwner,
+      );
+    } catch (e) {
+      AppLog.error('incidencias', 'lote_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo aplicar el cambio en lote: '
+            '${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     // v1.3.2: un solo disparo de sync al terminar el lote.
     unawaited(SyncEngine.instance.push());
     if (!mounted) return;

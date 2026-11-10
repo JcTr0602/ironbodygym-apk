@@ -649,6 +649,23 @@ class _DetalleIncidenciaScreenState
   Future<void> _enviarComentario() async {
     final texto = _ctrlComentario.text.trim();
     if (texto.isEmpty) return;
+    // Yunque de App 1.31 (familia B-15, rama escritura): un
+    // fallo de la mutación se DICE (bitácora + snack); el
+    // texto se conserva en el campo para reintentar.
+    try {
+      await _enviarComentarioDatos(texto);
+    } catch (e) {
+      AppLog.error('incidencias', 'comentario_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(
+            context, 'No se pudo enviar el comentario: '
+            '${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  Future<void> _enviarComentarioDatos(String texto) async {
     final comId = const Uuid().v4();
     final ahora =
         isoHabana(ahoraHabana());
@@ -681,8 +698,26 @@ class _DetalleIncidenciaScreenState
     _cargar();
   }
 
-  Future<void> _cambiarEstado(
-      String nuevo) async {
+  Future<void> _cambiarEstado(String nuevo) async {
+    // Yunque de App 1.31 (familia B-15, rama escritura): la
+    // mutación no puede fallar en silencio — bitácora + snack.
+    // (El diálogo de resolver y su foto gestionada llevan su
+    // propio aviso dentro de _cambiarEstadoDatos.)
+    try {
+      await _cambiarEstadoDatos(nuevo);
+    } catch (e) {
+      AppLog.error('incidencias', 'cambiar_estado_fallo',
+          d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo cambiar el estado: '
+            '${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  Future<void> _cambiarEstadoDatos(String nuevo) async {
     final d = await LocalDb.instance.db;
     final ahora =
         isoHabana(ahoraHabana());
