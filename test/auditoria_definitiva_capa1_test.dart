@@ -127,6 +127,40 @@ void main() {
           _opPago(clienteId: 504, optimista: null, anterior: '2026-11-10'));
       expect(await _pagadoHastaEspejo(504), '2026-12-10');
     });
+
+    // 1.31 (H-04 residuo A-3, yunque de app): el caso
+    // MISMO VALOR — dos pagos en vuelo que pintan el
+    // MISMO pagado_hasta resultante (p. ej. dos
+    // mensualidades seguidas que caen en la misma fecha
+    // tope). La guarda por VALOR no puede distinguirlos:
+    // el segundo se confirma, el primero se rechaza, y
+    // la reversión del primero pisa el vencimiento del
+    // segundo. Este test FIJA el comportamiento actual
+    // (revierte) como evidencia del residuo: la guarda
+    // por IDENTIDAD de op exige modelo nuevo y va
+    // especificada al Yunque de Sincronización.
+    test('MISMO VALOR: dos pagos con el mismo vencimiento '
+        '— la guarda por valor no distingue (residuo fijado)',
+        () async {
+      await _abrirDbVacia();
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          505,
+          {'id': 505, 'nombre': 'E', 'pagado_hasta': '2026-12-10'},
+          1);
+      // La op rechazada es la PRIMERA; la segunda (con
+      // el mismo valor resultante) ya se confirmó y el
+      // espejo es correcto… pero la reversión lo pisa.
+      await SyncEngine.instance.revertirVencimientoOptimistaParaTest(
+          _opPago(
+              clienteId: 505,
+              optimista: '2026-12-10',
+              anterior: '2026-11-10'));
+      expect(await _pagadoHastaEspejo(505), '2026-11-10',
+          reason: 'comportamiento ACTUAL fijado: con el '
+              'mismo valor, la reversión pisa el pago '
+              'confirmado (residuo H-04 → Yunque de Sync)');
+    });
   });
 
   group('A-2 · el sello de éxito exige push limpio (estructural)',
