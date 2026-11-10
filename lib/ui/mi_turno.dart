@@ -416,7 +416,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       base = switch ('${u['tipo'] ?? ''}') {
         'dosis_con_agua' => cant > 1 ? '$cant dosis con agua' : 'Dosis con agua',
         'agua_suelta' => cant > 1 ? '$cant pomos de agua' : 'Agua',
-        _ => cant > 1 ? '$cant dosis sin agua' : 'Dosis sin agua',
+        _ => cant > 1 ? '$cant dosis' : 'Dosis',
       };
     }
     if (u['casa'] == true) return '$base · Casa';
@@ -1187,7 +1187,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                               FilledButton.icon(
                                 icon: const Icon(Icons.local_drink_rounded,
                                     size: 18),
-                                label: const Text('Dosis sin agua'),
+                                label: const Text('Dosis'),
                                 onPressed: () => Navigator.of(context).push(
                                   RutaIron(
                                     builder: (_) => const ServiciosScreen(

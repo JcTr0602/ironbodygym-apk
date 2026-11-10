@@ -1829,7 +1829,7 @@ Future<({Map<String, dynamic> payload, String? retener})>
   if (!casa && precio <= 0) {
     throw Exception(
         'El precio de este servicio aún no está fijado '
-        '(Administración → Servicios)');
+        '(Servicios → Precios y comisión)');
   }
   // A5: comisión 0 en agua suelta y cuando el VENDEDOR es el dueño.
   // Ítem 8: la UI del dueño puede fijar otra comisión para esta

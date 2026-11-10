@@ -1170,7 +1170,7 @@ class _FichaScreenState extends State<FichaScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.bolt_rounded),
-              title: const Text('Dosis sin agua'),
+              title: const Text('Dosis'),
               onTap: () => Navigator.pop(ctx, 'dosis_sin_agua'),
             ),
             ListTile(

@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
+import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -385,7 +386,7 @@ class _DialogoEditarAvisoState extends State<_DialogoEditarAviso> {
                     onPressed: () async {
                       final f = await showDatePicker(
                         context: context,
-                        initialDate: DateTime.now(),
+                        initialDate: ahoraHabana(),
                         firstDate: DateTime(2026),
                         lastDate: DateTime(2030),
                       );
@@ -405,7 +406,7 @@ class _DialogoEditarAvisoState extends State<_DialogoEditarAviso> {
                     onPressed: () async {
                       final f = await showDatePicker(
                         context: context,
-                        initialDate: DateTime.now(),
+                        initialDate: ahoraHabana(),
                         firstDate: DateTime(2026),
                         lastDate: DateTime(2030),
                       );

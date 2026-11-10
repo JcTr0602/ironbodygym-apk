@@ -807,7 +807,7 @@ class _ServiciosEstadisticasScreenState
                 ),
                 const SizedBox(height: 8),
                 Text(
-                    'Precio sin agua: ${fmtMonto(precioSin)} CUP '
+                    'Precio dosis: ${fmtMonto(precioSin)} CUP '
                     '(margen ${fmtMonto(sim.margenSinAgua)} CUP/dosis)'),
                 Slider(
                   value: precioSin,
@@ -1305,7 +1305,7 @@ class _ServiciosEstadisticasScreenState
                   : 'Inversión en agua (acumulada)',
               cup('inversion_agua')),
           const Divider(height: 20),
-          _fila('Ingresos dosis sin agua', cup('ing_sin')),
+          _fila('Ingresos por dosis', cup('ing_sin')),
           _fila('Ingresos dosis con agua', cup('ing_con')),
           _fila('Ingresos pomos sueltos', cup('ing_agua')),
           _fila('Ingresos totales', cup('ingresos'), negrita: true),

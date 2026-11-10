@@ -125,9 +125,9 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                             final f = _filas[i];
                             final detalle = <String>[
                               if ((f['raciones'] as int) > 0)
-                                'Raciones: ${f['raciones']}',
+                                'Dosis: ${f['raciones']}',
                               if ((f['combos'] as int) > 0)
-                                'Combos: ${f['combos']}',
+                                'Dosis con agua: ${f['combos']}',
                               if ((f['aguas'] as int) > 0)
                                 'Agua: ${f['aguas']}',
                             ].join(' · ');

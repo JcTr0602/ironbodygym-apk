@@ -92,17 +92,17 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
       ('Pagos diarios', suma((e) => e['tipo'] == 'diario')),
       ('Suplementos', suma((e) => e['tipo'] == 'suplemento')),
       (
-        'Raciones (dosis)',
+        'Dosis',
         suma((e) =>
             e['tipo'] == 'servicio' && e['servicio_tipo'] == 'dosis_sin_agua')
       ),
       (
-        'Combos',
+        'Dosis con agua',
         suma((e) =>
             e['tipo'] == 'servicio' && e['servicio_tipo'] == 'dosis_con_agua')
       ),
       (
-        'Pomos de agua',
+        'Agua',
         suma((e) =>
             e['tipo'] == 'servicio' && e['servicio_tipo'] == 'agua_suelta')
       ),
