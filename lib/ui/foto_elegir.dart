@@ -247,3 +247,38 @@ Future<void> _borrar(File f) async {
     await f.delete();
   } catch (_) {}
 }
+
+/// Auditoría Definitiva (B-14): copia una foto recién elegida a
+/// un directorio GESTIONADO de documentos y devuelve su ruta.
+///
+/// El selector devuelve rutas de la caché temporal, que
+/// Android purga cuando quiere: guardar esa ruta tal cual en
+/// una fila pendiente (incidencias_fotos.local_path) dejaba la
+/// fila apuntando a un archivo inexistente y la subida la
+/// marcaba 'error' en silencio — la foto de evidencia o de
+/// resolución se perdía sin que nadie lo viera. Es el mismo
+/// patrón que comprobantes aplica al adjuntar (copiar primero,
+/// guardar la copia). Lanza StateError si el origen ya no
+/// existe o está vacío: el llamador avisa y NO crea la fila.
+Future<String> copiarFotoGestionada({
+  required String subdirectorio,
+  required String nombreBase,
+  required String rutaOrigen,
+}) async {
+  final origen = File(rutaOrigen);
+  if (!await origen.exists() || await origen.length() == 0) {
+    throw StateError('la foto elegida ya no está disponible');
+  }
+  final docs = await getApplicationDocumentsDirectory();
+  final dir = Directory('${docs.path}/$subdirectorio');
+  if (!await dir.exists()) await dir.create(recursive: true);
+  var ext = rutaOrigen.contains('.')
+      ? rutaOrigen.substring(rutaOrigen.lastIndexOf('.'))
+      : '.jpg';
+  if (ext.length > 6 || ext.contains('/') || ext.contains('\\')) {
+    ext = '.jpg';
+  }
+  final destino = File('${dir.path}/$nombreBase$ext');
+  await origen.copy(destino.path);
+  return destino.path;
+}

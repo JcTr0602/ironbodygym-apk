@@ -7,10 +7,12 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/comprobantes.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
+import 'package:ironbody_gym/ui/foto_elegir.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -307,6 +309,67 @@ void main() {
       expect(
           await File(fila!['ruta_local'] as String).readAsBytes(),
           [7, 7, 7]);
+    });
+  });
+
+  group('B-14 · foto de incidencia a documentos gestionados', () {
+    late Directory docs;
+
+    setUpAll(() async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      docs = await Directory.systemTemp.createTemp('b14_docs');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              (call) async => docs.path);
+    });
+
+    test('copia con su extensión y devuelve la ruta gestionada',
+        () async {
+      final tmp = await Directory.systemTemp.createTemp('b14_tmp');
+      addTearDown(() async {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      final origen = File('${tmp.path}/cache_picker.jpg');
+      await origen.writeAsBytes([5, 6, 7, 8]);
+      final ruta = await copiarFotoGestionada(
+        subdirectorio: 'incidencias_fotos',
+        nombreBase: 'foto-1',
+        rutaOrigen: origen.path,
+      );
+      expect(ruta, '${docs.path}/incidencias_fotos/foto-1.jpg');
+      expect(await File(ruta).readAsBytes(), [5, 6, 7, 8]);
+      // La copia sobrevive a la purga de la caché temporal.
+      await origen.delete();
+      expect(await File(ruta).exists(), isTrue);
+    });
+
+    test('origen desaparecido o vacío: lanza y no crea copia',
+        () async {
+      await expectLater(
+          copiarFotoGestionada(
+            subdirectorio: 'incidencias_fotos',
+            nombreBase: 'foto-x',
+            rutaOrigen: '${docs.path}/no-existe.jpg',
+          ),
+          throwsA(isA<StateError>()));
+      expect(
+          await File('${docs.path}/incidencias_fotos/foto-x.jpg')
+              .exists(),
+          isFalse);
+    });
+
+    test('los dos sitios de detalle guardan la copia gestionada '
+        '(estructural)', () {
+      final detalle = File('lib/ui/incidencias/detalle_incidencia.dart')
+          .readAsStringSync();
+      expect(detalle, contains('copiarFotoGestionada'));
+      expect(detalle.contains("'local_path': xfile.path"), isFalse,
+          reason: 'la ruta temporal del selector volvió a '
+              'guardarse como local_path');
+      expect(detalle.contains("'local_path': fotoPath"), isFalse);
     });
   });
 }

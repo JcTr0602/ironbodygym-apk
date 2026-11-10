@@ -473,13 +473,23 @@ class _DetalleIncidenciaScreenState
       final id = const Uuid().v4();
       final ahora =
           isoHabana(ahoraHabana());
+      // Auditoría Definitiva (B-14): la ruta del selector es
+      // caché temporal que Android purga; se copia a documentos
+      // gestionados ANTES de crear la fila. Si la copia falla,
+      // el catch de esta función avisa y NO queda una fila
+      // 'pending' apuntando a un archivo que ya no existe.
+      final rutaGestionada = await copiarFotoGestionada(
+        subdirectorio: 'incidencias_fotos',
+        nombreBase: id,
+        rutaOrigen: xfile.path,
+      );
       // v1.3.2 (Argón #8): la incidencia puede venir de otro móvil
       // (solo en mirror); copiarla a local antes del hijo (FK).
       await db.asegurarIncidenciaLocal(_inc!.id);
       await d.insert('incidencias_fotos', {
         'id': id,
         'incidencia_id': _inc!.id,
-        'local_path': xfile.path,
+        'local_path': rutaGestionada,
         'tipo': 'evidencia',
         'sync_estado': 'pending',
         'creado_en': ahora,
@@ -646,6 +656,36 @@ class _DetalleIncidenciaScreenState
       final fotoPath =
           res['foto'] as String?;
 
+      // Auditoría Definitiva (B-14): la foto de resolución
+      // viene de la caché temporal del selector; se copia a
+      // documentos gestionados ANTES de la transacción (la IO
+      // no va dentro). Si la copia falla se avisa y la
+      // incidencia NO cambia de estado: mejor repetir la
+      // resolución que perder su foto en silencio.
+      String? fotoIdResolucion;
+      String? fotoRutaGestionada;
+      if (fotoPath != null) {
+        fotoIdResolucion = const Uuid().v4();
+        try {
+          fotoRutaGestionada = await copiarFotoGestionada(
+            subdirectorio: 'incidencias_fotos',
+            nombreBase: fotoIdResolucion,
+            rutaOrigen: fotoPath,
+          );
+        } catch (e) {
+          AppLog.error('detalle_incidencia',
+              'resolver_foto_copia_fallo',
+              d: '$e');
+          if (mounted) {
+            mostrarSnack(context,
+                'No se pudo guardar la foto de resolución. '
+                'Inténtalo de nuevo.',
+                significado: SignificadoChip.error);
+          }
+          return;
+        }
+      }
+
       await d.transaction((txn) async {
         // v1.3.2 (Argón post-fix): generar el op_uuid antes para
         // guardarlo también en la fila local.
@@ -669,13 +709,14 @@ class _DetalleIncidenciaScreenState
           whereArgs: [_inc!.id],
         );
 
-        // 2. Si tomó foto, registrarla
-        if (fotoPath != null) {
+        // 2. Si tomó foto, registrarla (con la copia
+        // gestionada de B-14, no la ruta temporal).
+        if (fotoRutaGestionada != null) {
           await txn.insert(
               'incidencias_fotos', {
-            'id': const Uuid().v4(),
+            'id': fotoIdResolucion,
             'incidencia_id': _inc!.id,
-            'local_path': fotoPath,
+            'local_path': fotoRutaGestionada,
             'tipo': 'resolucion',
             'sync_estado': 'pending',
             'creado_en': ahora,
