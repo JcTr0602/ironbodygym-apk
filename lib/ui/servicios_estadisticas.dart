@@ -17,6 +17,7 @@ import 'diseno.dart';
 import 'reporte_margenes.dart';
 import 'servicios_admin.dart';
 import 'widgets.dart';
+import '../app_log.dart';
 
 /// v1.8.0: Estadísticas de servicios (SOLO DUEÑO), diseño 🟢 Argón
 /// (DISENO_DOSIS_ESTADISTICAS): dos tarjetas separadas —
@@ -124,6 +125,23 @@ class _ServiciosEstadisticasScreenState
   List<Map<String, dynamic>>? _ePomos;
 
   Future<void> _cargar({bool releer = true}) async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos(releer: releer);
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos({bool releer = true}) async {
     if (releer || _eVentas == null) {
       _eVentas = await LocalDb.instance.allMirror('servicio_ventas');
       _eSalidas =
