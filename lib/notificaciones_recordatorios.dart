@@ -104,6 +104,28 @@ DateTime instanteAvisoDebido({
   return ahoraUtc.add(const Duration(minutes: 5));
 }
 
+/// Yunque R4-M1-1 (PURO): ¿hay que REPONER la alarma de un
+/// aviso ya marcado como programado? Las alarmas de
+/// AlarmManager no sobreviven a un reinicio del teléfono,
+/// pero la marca `notif_prog_*` sí: sin reposición, el
+/// aviso de hoy moría en silencio tras un reinicio antes
+/// de su hora. Devuelve el epoch (ms) al que reprogramar
+/// — EL MISMO instante guardado, para que reponer sea
+/// idempotente (mismo PendingIntent: con la alarma viva
+/// es un no-op; con la muerta, la resucita sin deslizar
+/// la hora) — o null si no hay que reprogramar: marca
+/// ilegible, o instante ya pasado (no se puede distinguir
+/// «ya sonó» de «se perdió por el reinicio» — el receptor
+/// nativo no escribe el log de disparos — y reprogramar
+/// en pasado podría repetir un aviso ya dado).
+int? epochReprogramacionTrasReinicio(
+    String? marcaCruda, int ahoraEpochMs) {
+  if (marcaCruda == null) return null;
+  final epoch = int.tryParse(marcaCruda.trim());
+  if (epoch == null) return null;
+  return epoch > ahoraEpochMs ? epoch : null;
+}
+
 /// Clave de meta que marca un aviso ya programado (PURO).
 String claveAvisoRecordatorio({
   required String recordatorioId,
@@ -246,7 +268,26 @@ class AvisosRecordatorios {
             fecha: d.fechaHabana);
         vigentes.add(clave);
         final ya = await LocalDb.instance.getMeta(clave);
-        if (ya != null && ya.isNotEmpty) continue;
+        if (ya != null && ya.isNotEmpty) {
+          // Yunque R4-M1-1 (mitad segura): reponer la
+          // alarma muerta por un reinicio, en el instante
+          // guardado (la decisión pura lo acota: solo
+          // futuro, sin deslizar ni repetir).
+          final reponer = epochReprogramacionTrasReinicio(
+              ya, ahoraUtcReal().millisecondsSinceEpoch);
+          if (reponer != null) {
+            final tYa = textoAvisoRecordatorio(d);
+            try {
+              await _canal.invokeMethod('programar', {
+                'id': clave,
+                'titulo': tYa.titulo,
+                'texto': tYa.texto,
+                'epochMillis': reponer,
+              });
+            } catch (_) {}
+          }
+          continue;
+        }
         final t = textoAvisoRecordatorio(d);
         // 1.22 R-1: el instante de comparación es el UTC
         // REAL. ahoraHabana().toUtc() reinterpretaba el

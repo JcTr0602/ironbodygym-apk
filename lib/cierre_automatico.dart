@@ -84,6 +84,13 @@ Future<bool> verificarCierresAutomaticos() async {
     final cacheRaw =
         prefs.getString('cache_horarios_gym');
     if (cacheRaw == null || cacheRaw.isEmpty) {
+      // Yunque R4-M1-8: la salida sin caché deja rastro —
+      // en un teléfono que nunca abrió la pantalla de
+      // horario (la única que escribe esta caché) los
+      // turnos quedan abiertos sin auto-cierre y sin
+      // ninguna señal de por qué.
+      AppLog.info('cierre_automatico', 'sin_cache_horarios',
+          d: 'sin cache_horarios_gym: el barrido no corre');
       return false; // Sin horarios, no se puede verificar
     }
 

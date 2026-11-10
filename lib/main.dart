@@ -192,6 +192,29 @@ Future<void> programarOneOffSyncSiPendientes() async {
   }
 }
 
+/// Yunque R4-M1-5: paso de la cadena previa a runApp con
+/// red de seguridad. Los pasos DEGRADABLES (bitácora,
+/// centinela, tema) no pueden dejar la app en el logo para
+/// siempre si un canal de plataforma (prefs/documentos) se
+/// cuelga o lanza: con timeout de 10 s se sigue sin ellos y
+/// el fallo queda registrado. Supabase.initialize NO pasa
+/// por aquí a propósito: sin él no hay arranque posible
+/// (sesión, sync y RPC cuelgan de su cliente) y un timeout
+/// que lo cortara a mitad dejaría el cliente en un estado
+/// peor que la espera.
+Future<void> _pasoArranqueDegradable(
+    String nombre, Future<void> Function() paso) async {
+  try {
+    await paso().timeout(const Duration(seconds: 10));
+  } catch (e) {
+    debugPrint('[arranque] $nombre falló o tardó demasiado: $e');
+    try {
+      AppLog.error('app', 'arranque_paso_fallo',
+          d: '$nombre: $e');
+    } catch (_) {}
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // v1.3.0 (AppLog v2.0, Gemini #3): interceptores globales.
@@ -208,16 +231,17 @@ Future<void> main() async {
   // v1.3.1 (AppLog v3.0, Argón Fix A): init DESPUÉS de los handlers
   // de main.dart, para que el encadenamiento de _instalarManejadores()
   // los envuelva en lugar de ser sobrescrito por ellos.
-  await AppLog.init();
+  await _pasoArranqueDegradable('app_log', AppLog.init);
   // v1.3.0 (Gemini #4): verificar cierre anormal previo.
-  await CentinelaApp.verificarArranque();
+  await _pasoArranqueDegradable(
+      'centinela', CentinelaApp.verificarArranque);
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     publishableKey: AppConfig.anonKey,
   );
   // v1.2.9+46 (AppLog): arranque con versión para forense.
   AppLog.info('app', 'inicio', d: 'IronBody Gym ${AppConfig.appVersion}');
-  await ThemeController.load();
+  await _pasoArranqueDegradable('tema', ThemeController.load);
   // Subida en segundo plano (punto 21): aunque cierren la app.
   // 1.31 (campo 2026-11-09): el registro de WorkManager SALE
   // de la cadena previa a runApp — con el canal colgado, los
