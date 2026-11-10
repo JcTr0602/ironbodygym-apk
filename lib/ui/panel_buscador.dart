@@ -13,6 +13,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
@@ -566,8 +567,11 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
       final filas = await LocalDb.instance.allMirror('clientes');
       if (!mounted) return;
       setState(() => _clientes = filas);
-    } catch (_) {
-      // Sin espejo legible, el buscador de funciones sigue.
+    } catch (e) {
+      // Sin espejo legible, el buscador de funciones sigue —
+      // Y ESPECIFICADO: pero desde el Yunque de App 1.31
+      // (C1-6) el fallo queda en bitácora, no en silencio.
+      AppLog.warn('panel_buscador', 'clientes_fallo', d: '$e');
     }
   }
 

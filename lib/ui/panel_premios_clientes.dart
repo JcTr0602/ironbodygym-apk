@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../premios_panel.dart';
@@ -174,7 +175,11 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         _todos = todos;
         _cargandoClientes = false;
       });
-    } catch (_) {
+    } catch (e) {
+      // Yunque de App 1.31 (C1-5): el fallo queda en bitácora
+      // en vez de leerse como «no hay clientes con premios».
+      AppLog.error('premios_clientes', 'cargar_clientes_fallo',
+          d: '$e');
       if (mounted) setState(() => _cargandoClientes = false);
     }
   }

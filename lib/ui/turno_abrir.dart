@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../turno_service.dart';
@@ -42,7 +43,11 @@ Future<List<String>> nombresOtrosEntrenadores() async {
         }
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    // Yunque de App 1.31 (C1-7): la suplencia se pierde en
+    // silencio si la lectura falla; al menos bitácora.
+    AppLog.warn('turno_abrir', 'otros_entrenadores_fallo', d: '$e');
+  }
   return nombres;
 }
 
