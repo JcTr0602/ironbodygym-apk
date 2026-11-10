@@ -33,31 +33,23 @@ import 'recordatorios.dart';
 import 'tiempo.dart';
 
 /// Texto de la notificación para un debido (PURO).
+///
+/// Yunque R5-M2-3: la notificación NATIVA se muestra fuera
+/// de la app (pantalla de bloqueo del teléfono), fuera del
+/// alcance del PIN y de la capa de candado: el NOMBRE del
+/// cliente NO viaja en el texto — el detalle con nombre
+/// vive dentro de la app. El título (`d.titulo`) es el
+/// genérico de la casa («Cumpleaños hoy», «Vencimiento
+/// próximo»…), sin datos del cliente.
 ({String titulo, String texto}) textoAvisoRecordatorio(
     RecordatorioDebido d) {
-  final nombre = (d.clienteNombre ?? '').trim();
   switch (d.tipo) {
     case 'cumpleanos':
-      return (
-        titulo: d.titulo,
-        texto: nombre.isEmpty
-            ? 'Un cliente cumple años hoy'
-            : '$nombre cumple años hoy',
-      );
+      return (titulo: d.titulo, texto: 'Un cliente cumple años hoy');
     case 'vencimiento':
-      return (
-        titulo: d.titulo,
-        texto: nombre.isEmpty
-            ? 'Una mensualidad vence pronto'
-            : 'La mensualidad de $nombre vence pronto',
-      );
+      return (titulo: d.titulo, texto: 'Una mensualidad vence pronto');
     default:
-      return (
-        titulo: d.titulo,
-        texto: nombre.isEmpty
-            ? 'Recordatorio para hoy'
-            : 'Cliente: $nombre',
-      );
+      return (titulo: d.titulo, texto: 'Recordatorio para hoy');
   }
 }
 

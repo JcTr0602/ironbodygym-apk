@@ -27,17 +27,24 @@ void main() {
         fechaHabana: '2026-11-02',
       );
 
-  test('texto: cumpleaños y vencimiento con nombre', () {
+  test('texto: NUNCA lleva el nombre del cliente (R5-M2-3)', () {
+    // La notificación nativa se ve en la pantalla de
+    // bloqueo del teléfono, fuera del PIN: sin nombres.
     expect(
         textoAvisoRecordatorio(debido(cliente: 'Ana')),
-        (titulo: 'Cumpleaños', texto: 'Ana cumple años hoy'));
+        (titulo: 'Cumpleaños', texto: 'Un cliente cumple años hoy'));
     expect(
         textoAvisoRecordatorio(
             debido(tipo: 'vencimiento', cliente: 'Luis')),
         (
           titulo: 'Cumpleaños',
-          texto: 'La mensualidad de Luis vence pronto',
+          texto: 'Una mensualidad vence pronto',
         ));
+    expect(
+        textoAvisoRecordatorio(
+                debido(tipo: 'personalizado', cliente: 'Ana'))
+            .texto,
+        'Recordatorio para hoy');
   });
 
   test('texto: sin cliente, mensaje genérico', () {
