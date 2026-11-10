@@ -137,31 +137,13 @@ class ComprobantesService {
     // fila se reemplaza por conflictAlgorithm.replace) dejaba el
     // archivo de la extensión anterior huérfano en disco y las
     // claves TUS apuntando a la subida vieja (la reanudación
-    // chocaba con 409). Se borran ambos archivos posibles y las
-    // claves TUS — AHORA que el reemplazo ya está asegurado
-    // (B-18) — y el staging pasa a su ruta final.
-    final dbPrevia = await LocalDb.instance.db;
-    for (final extPrevia in const ['webp', 'jpg']) {
-      try {
-        final viejo = File('${dir.path}/$comprobanteUuid.$extPrevia');
-        if (await viejo.exists()) await viejo.delete();
-      } catch (_) {}
-    }
-    for (final clave in [
-      'tus_loc_${comprobanteUuid}_comp',
-      'tus_offset_${comprobanteUuid}_comp',
-    ]) {
-      await dbPrevia.delete('meta', where: 'k = ?', whereArgs: [clave]);
-    }
-    // El staging que no ganó (un parcial de compresión) no
-    // queda huérfano (FIN-01 de Argón, 1.20).
-    for (final s in [stagingWebp, stagingJpg]) {
-      if (s.path != staging.path) {
-        try {
-          if (await s.exists()) await s.delete();
-        } catch (_) {}
-      }
-    }
+    // chocaba con 409).
+    // 1.31 (H-05 residuo B-18, yunque de app): el borrado de lo
+    // viejo va DESPUÉS del rename y del insert confirmados —
+    // el orden intermedio borraba archivos y claves TUS antes
+    // del rename/insert: si alguno fallaba, la fila vieja
+    // apuntaba a un archivo borrado. Se captura primero qué
+    // hay que retirar (rutas ajenas a la nueva y las claves).
     final rutaLocal = '${dir.path}/$comprobanteUuid.$ext';
     await staging.rename(rutaLocal);
 
@@ -201,6 +183,36 @@ class ComprobantesService {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     });
+    // 1.31 (H-05): SOLO con el reemplazo ya confirmado se
+    // retira lo viejo: el archivo de la OTRA extensión (la
+    // ruta nueva jamás se toca: si la extensión coincide,
+    // el rename ya la sustituyó) y las claves TUS de la
+    // subida anterior. Un fallo aquí deja basura, nunca
+    // una fila apuntando a un archivo ausente.
+    for (final extPrevia in const ['webp', 'jpg']) {
+      if (extPrevia == ext) continue;
+      try {
+        final viejo = File('${dir.path}/$comprobanteUuid.$extPrevia');
+        if (await viejo.exists()) await viejo.delete();
+      } catch (_) {}
+    }
+    for (final clave in [
+      'tus_loc_${comprobanteUuid}_comp',
+      'tus_offset_${comprobanteUuid}_comp',
+    ]) {
+      try {
+        await db.delete('meta', where: 'k = ?', whereArgs: [clave]);
+      } catch (_) {}
+    }
+    // El staging que no ganó (un parcial de compresión) no
+    // queda huérfano (FIN-01 de Argón, 1.20).
+    for (final s in [stagingWebp, stagingJpg]) {
+      if (s.path != staging.path) {
+        try {
+          if (await s.exists()) await s.delete();
+        } catch (_) {}
+      }
+    }
     AppLog.info('comprobantes', 'encolado',
         d: 'uuid=$comprobanteUuid ext=$ext');
   }
