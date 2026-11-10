@@ -32,6 +32,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'skeleton.dart';
+import '../app_log.dart';
 
 /// Un cliente elegible del selector: id + nombre del espejo
 /// local (puro, testeable).
@@ -145,6 +146,23 @@ class _SeccionActividadAppClientesState
   }
 
   Future<void> _cargarClientes() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si la lectura del espejo lanza
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarClientesDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargandoLista) {
+        setState(() => _cargandoLista = false);
+      }
+    }
+  }
+
+  Future<void> _cargarClientesDatos() async {
     final espejo = await LocalDb.instance.allMirror('clientes');
     if (!mounted) return;
     setState(() {
