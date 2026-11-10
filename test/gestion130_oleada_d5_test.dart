@@ -34,7 +34,6 @@ import 'package:ironbody_gym/ui/detalle_suplemento.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
 import 'package:ironbody_gym/ui/incidencias/lista_incidencias.dart';
 import 'package:ironbody_gym/ui/incidencias/widgets/tarjeta_incidencia.dart';
-import 'package:ironbody_gym/ui/servicios_admin.dart';
 import 'package:ironbody_gym/ui/servicios_precios.dart';
 import 'package:ironbody_gym/ui/skeleton.dart';
 import 'package:ironbody_gym/ui/suplementos.dart';
