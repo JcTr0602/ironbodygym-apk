@@ -7154,6 +7154,34 @@ class LocalDb {
             whereArgs: ['wm_${t}_sin_permiso', 'wm_${t}_ausente']);
       } catch (_) {}
     }
+    // Auditoría Definitiva (B-24): las tablas SOLO-DUEÑO de
+    // tablasProhibidasEntrenador que la lista anterior no
+    // cubre (congelaciones con su motivo, lotes y compras de
+    // Servicios, turnos, tarifas especiales, entregas de
+    // efectivo, recordatorios, borradores de GymPedia, vistos)
+    // sobrevivían íntegras al cierre de sesión: la red H-08
+    // solo corre una vez y el resync por huella solo dispara
+    // con huella DISTINTA — mismo rol, otra persona (un
+    // entrenador sale y entra otro) dejaba vivas las filas
+    // confirmadas del anterior. Aquí se borran las filas
+    // CONFIRMADAS (sync_seq > 0) de TODAS las prohibidas — se
+    // conservan las locales sin confirmar, que son trabajo de
+    // este teléfono aún no subido — y su wm_<t> vuelve a '0'
+    // con las marcas de permiso limpiadas (patrón SB-01/AT-05
+    // de arriba), para que el siguiente rol las re-baje solo
+    // si le tocan. La lista sale del propio conjunto, sin una
+    // tercera copia a mano que vuelva a quedarse corta.
+    for (final t in tablasProhibidasEntrenador) {
+      try {
+        n += await d.delete(t,
+            where: 'sync_seq > 0');
+        await d.insert('meta', {'k': 'wm_$t', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        await d.delete('meta',
+            where: 'k IN (?, ?)',
+            whereArgs: ['wm_${t}_sin_permiso', 'wm_${t}_ausente']);
+      } catch (_) {}
+    }
     // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
     // son fotos de transferencias: tampoco pueden quedar en un
     // teléfono compartido tras cerrar sesión.

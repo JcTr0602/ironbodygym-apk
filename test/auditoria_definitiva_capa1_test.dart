@@ -512,4 +512,55 @@ void main() {
               'corrupción local');
     });
   });
+
+  group('B-24 · la purga de sesión alcanza a las solo-dueño', () {
+    late Directory docs;
+
+    setUpAll(() async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      docs = await Directory.systemTemp.createTemp('b24_docs');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/path_provider'),
+              (call) async => docs.path);
+    });
+
+    test('borra las filas confirmadas de las prohibidas, '
+        'conserva las locales y resetea su watermark', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      // Congelaciones: una confirmada del dueño anterior
+      // (con motivo sensible) y una local sin confirmar.
+      await d.insert('cliente_congelaciones', {
+        'id': 'cong-confirmada',
+        'data': '{"motivo":"dato de salud"}',
+        'sync_seq': 42,
+      });
+      await d.insert('cliente_congelaciones', {
+        'id': 'cong-local',
+        'data': '{"motivo":"aun no sube"}',
+        'sync_seq': 0,
+      });
+      await d.insert('servicio_lotes', {
+        'id': 7,
+        'data': '{"dosis":30}',
+        'sync_seq': 9,
+      });
+      await db.setMeta('wm_cliente_congelaciones', '42');
+      await db.setMeta('wm_servicio_lotes', '9');
+
+      await db.purgarDatosSensibles();
+
+      final congs = await d.query('cliente_congelaciones',
+          columns: ['id']);
+      expect(congs.map((r) => r['id']).toList(), ['cong-local'],
+          reason: 'la congelación confirmada (con el motivo) '
+              'sobrevivió al cierre de sesión');
+      expect(await d.query('servicio_lotes'), isEmpty,
+          reason: 'los lotes confirmados sobrevivieron');
+      expect(await db.getMeta('wm_cliente_congelaciones'), '0');
+      expect(await db.getMeta('wm_servicio_lotes'), '0');
+    });
+  });
 }
