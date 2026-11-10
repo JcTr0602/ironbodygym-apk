@@ -1691,7 +1691,8 @@ class SyncEngine {
   /// los llamadores siguen sin esperar nada.
   Future<void> _sesionVencidaEncadenada() async {
     try {
-      await LocalDb.purgaAlCerrarSesion();
+      await LocalDb.purgaAlCerrarSesion(
+          conservarComprobantesPendientes: true);
     } catch (_) {
       // La purga es best-effort: su fallo no puede dejar la
       // sesión vencida colgada sin cerrar.
@@ -3914,10 +3915,25 @@ class SyncEngine {
       // entre el markOp y la limpieza dejaba el duplicado
       // permanente, porque la purga solo borra sync_seq > 0.
       String? incidenciaId;
-      if ('${op['tipo']}' == 'incidencia') {
+      // 1.31 (IMP-5 residuos, yunque de app): la
+      // extracción no es solo del tipo legado
+      // 'incidencia': los tipos vivos de incidencia
+      // (crear/editar/cambiar_estado) también llevan el
+      // id en el payload ('id' o 'incidencia_id'), y sin
+      // extraerlo la fila local no se marcaba
+      // sincronizada en esta ruta (la cubría solo el
+      // barrido estacionario de comentarios).
+      const tiposIncidencia = {
+        'incidencia',
+        'crear_incidencia',
+        'editar_incidencia',
+        'cambiar_estado_incidencia',
+      };
+      if (tiposIncidencia.contains('${op['tipo']}')) {
         try {
           final pl = jsonDecode(op['payload'] as String);
-          incidenciaId = pl['id'] as String?;
+          incidenciaId =
+              (pl['id'] ?? pl['incidencia_id']) as String?;
         } catch (_) {}
       }
       final tablaOptimista =
@@ -6201,6 +6217,19 @@ class SyncEngine {
             'categoria_suplemento': 'categorias_suplemento',
             // v1.2.5-rev6: cierres (id TEXT)
             'turnos_cierre': 'turnos_cierre',
+            // 1.31 (C-NEW-3, yunque de app): sync.py SÍ
+            // emite tombstones note_delete de estas seis
+            // entidades y el mapa no las conocía: caían en
+            // borrados_entidad_desconocida y la fila
+            // fantasma vivía en el espejo hasta el
+            // manifiesto. Sus ids son enteros, como el
+            // resto de la rama.
+            'pagos_diarios': 'pagos_diarios',
+            'reservas': 'reservas',
+            'servicio_ventas': 'servicio_ventas',
+            'servicio_lotes': 'servicio_lotes',
+            'servicio_botes': 'servicio_botes',
+            'servicio_pomos': 'servicio_pomos',
           };
           final tabla = mapaEntidades[entidad];
           if (tabla == null) {
