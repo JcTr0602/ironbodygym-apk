@@ -3930,6 +3930,35 @@ class SyncEngine {
       // y el catch tragaría la reversión en silencio.
       final cid = int.tryParse('${p['cliente_id']}');
       if (cid == null) return;
+      // Auditoría Definitiva (A-3): guarda de PROCEDENCIA. La
+      // reversión incondicional pisaba un pago POSTERIOR ya
+      // confirmado del mismo cliente: dos pagos en vuelo, el
+      // segundo se confirma y el primero se rechaza después ⇒
+      // el espejo volvía al vencimiento anterior al primer
+      // pago, borrando el efecto del pago válido. Solo se
+      // revierte si el `pagado_hasta` actual del espejo SIGUE
+      // siendo el valor optimista que ESTA op pintó (el
+      // 'pagado_hasta' de su propio payload, el mismo que el
+      // preview aplicó al espejo al encolar). Si otra op (o un
+      // pull con la verdad del servidor) ya lo movió, el
+      // vencimiento actual manda y no se toca.
+      final optimistaRaw = '${p['pagado_hasta'] ?? ''}';
+      if (optimistaRaw.isEmpty) {
+        // La op no pintó vencimiento optimista (el preview
+        // solo actualiza el espejo cuando el payload trae el
+        // nuevo vencimiento): no hay nada suyo que revertir.
+        return;
+      }
+      final optimista = optimistaRaw.length >= 10
+          ? optimistaRaw.substring(0, 10)
+          : optimistaRaw;
+      final filas = await _db.mirrorPorIds('clientes', [cid]);
+      if (filas.isEmpty) return;
+      final actualRaw = '${filas.first['pagado_hasta'] ?? ''}';
+      final actual = actualRaw.length >= 10
+          ? actualRaw.substring(0, 10)
+          : actualRaw;
+      if (actual != optimista) return;
       final anterior = p['pagado_hasta_anterior'];
       if (anterior == null || '$anterior'.isEmpty) {
         await _db.updateMirrorBasico(cid, {'pagado_hasta': null});
@@ -3940,6 +3969,14 @@ class SyncEngine {
       }
     } catch (_) {}
   }
+
+  /// Costura de test (Auditoría Definitiva A-3): expone la
+  /// reversión del vencimiento optimista para verificar la
+  /// guarda de procedencia contra la BD real.
+  @visibleForTesting
+  Future<void> revertirVencimientoOptimistaParaTest(
+          Map<String, dynamic> op) =>
+      _revertirVencimientoOptimista(op);
 
   /// 1.30 (Oleada 4, §5.3 punto 4): marca la restauración de los
   /// espejos purgados por un eliminar_suplemento que el servidor
