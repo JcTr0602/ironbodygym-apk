@@ -5273,6 +5273,27 @@ class LocalDb {
       if (n == 0) {
         await txn.insert('clientes', {'id': clienteId, ...valores});
       }
+      // Auditoría Definitiva (C-11): el índice FTS de clientes
+      // se refresca en la MISMA transacción (delete+insert,
+      // el patrón de upsertMirror). Sin esto, tras un refresco
+      // puntual el buscador seguía encontrando al cliente por
+      // su nombre/teléfono VIEJOS hasta el próximo pull. El
+      // índice es derivado: un fallo suyo nunca invalida la
+      // escritura del cliente.
+      if (data != null) {
+        try {
+          if (await _ftsDisponible(txn)) {
+            final nn = _normTexto('${data['nombre'] ?? ''}');
+            await txn.delete('clientes_fts',
+                where: 'id=?', whereArgs: [clienteId]);
+            await txn.insert('clientes_fts', {
+              'nombre_norm': nn,
+              'telefonos': _telefonosNorm(data),
+              'id': clienteId,
+            });
+          }
+        } catch (_) {}
+      }
       return true;
     });
   }

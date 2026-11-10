@@ -949,4 +949,40 @@ void main() {
               'error) no avisan de las ops de otra cuenta');
     });
   });
+
+  group('C-11 · refrescarMirrorCliente refresca el FTS', () {
+    test('tras el refresco puntual, el índice trae el nombre '
+        'y el teléfono NUEVOS', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      await db.upsertMirror('clientes', 31,
+          {'nombre': 'Nombre Viejo', 'telefono': '11112222'}, 5);
+      var fts = await d.query('clientes_fts',
+          columns: ['nombre_norm', 'telefonos'],
+          where: 'id = ?',
+          whereArgs: [31]);
+      expect(fts, hasLength(1));
+      expect(fts.first['nombre_norm'], contains('viejo'));
+
+      final ok = await db.refrescarMirrorCliente(
+          31,
+          jsonEncode(
+              {'nombre': 'Nombre Nuevo', 'telefono': '33334444'}),
+          6);
+      expect(ok, isTrue);
+      fts = await d.query('clientes_fts',
+          columns: ['nombre_norm', 'telefonos'],
+          where: 'id = ?',
+          whereArgs: [31]);
+      expect(fts, hasLength(1),
+          reason: 'el refresco dejó dos filas o ninguna en el '
+              'índice');
+      expect(fts.first['nombre_norm'], contains('nuevo'));
+      expect(fts.first['nombre_norm'], isNot(contains('viejo')),
+          reason: 'el buscador seguiría encontrándolo por el '
+              'nombre viejo hasta el próximo pull');
+      expect('${fts.first['telefonos']}', contains('33334444'));
+    });
+  });
 }
