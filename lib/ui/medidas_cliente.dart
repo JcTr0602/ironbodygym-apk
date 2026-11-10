@@ -415,6 +415,9 @@ class _DialogoRegistrarMedidaState
   final _ctrls = <String, TextEditingController>{
     for (final k in kMetricasMedicion.keys) k: TextEditingController(),
   };
+  // Yunque R4-M6-3: error de rango DENTRO del diálogo (ver
+  // _registrar).
+  String? _errorRango;
 
   @override
   void dispose() {
@@ -440,6 +443,23 @@ class _DialogoRegistrarMedidaState
         descartadas.add(nombreMetrica(e.key));
       }
     }
+    // Yunque R4-M6-3: el rango se valida AQUÍ, con el
+    // diálogo abierto y lo tecleado intacto. Antes el
+    // diálogo se cerraba primero y validarMedicion
+    // rechazaba DESPUÉS: un peso de 500 kg perdía las 7
+    // medidas escritas. Los rangos salen de la misma
+    // lista cerrada que valida el registro.
+    for (final e in medidas.entries) {
+      final spec = kMetricasMedicion[e.key];
+      if (spec != null &&
+          (e.value < spec.min || e.value > spec.max)) {
+        setState(() => _errorRango =
+            '${nombreMetrica(e.key)} está fuera de rango '
+            '(${spec.min}–${spec.max} ${spec.unidad}). '
+            'Corrige el valor; lo demás queda como está.');
+        return;
+      }
+    }
     Navigator.pop(
         context, _ResultadoMedidaDialogo(medidas, descartadas));
   }
@@ -463,10 +483,23 @@ class _DialogoRegistrarMedidaState
               controller: _ctrls[e.key],
               keyboardType: const TextInputType.numberWithOptions(
                   decimal: true),
+              onChanged: (_) {
+                if (_errorRango != null) {
+                  setState(() => _errorRango = null);
+                }
+              },
               decoration: InputDecoration(
                   labelText:
                       '${e.key.replaceAll('_', ' ')} (${e.value.unidad})'),
             ),
+          if (_errorRango != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorRango!,
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.errorTexto(context)),
+            ),
+          ],
         ],
       ),
       acciones: [

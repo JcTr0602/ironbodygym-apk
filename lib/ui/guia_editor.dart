@@ -687,6 +687,13 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         _tieneImagen = true;
         _imagenCambiada = true;
       });
+    } catch (e) {
+      // Yunque R4-M6-2: el post-pick (comprimir/guardar)
+      // cerraba con try/finally sin catch: un throw era
+      // silencio total y el editor creía que «no pasó
+      // nada». Error ≠ silencio también aquí.
+      _aviso('No se pudo procesar la imagen ($e). '
+          'Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }

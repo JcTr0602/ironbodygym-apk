@@ -231,7 +231,12 @@ class _SeccionFotosProgresoNubeState
     final j = jsonDecode(r.body);
     if (j is! Map || j['ok'] != true) throw Exception('respuesta');
     final fotos = j['fotos'];
-    if (fotos is! List) return const [];
+    // Yunque R4-M6-5: un 200 con el campo fotos corrupto o
+    // renombrado en el servidor es un fallo de CONTRATO,
+    // no «este cliente no tiene fotos»: se lanza y la
+    // sección pinta error con Reintentar, como el resto
+    // de fallos de esta misma función.
+    if (fotos is! List) throw Exception('respuesta');
     return [
       for (final f in fotos)
         if (f is Map) Map<String, dynamic>.from(f),

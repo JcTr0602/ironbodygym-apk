@@ -72,11 +72,16 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
                 (v['fiado_cliente_id'] as num?)?.toInt()) ==
             widget.clienteId)
         .toList();
-    final servicios = (await LocalDb.instance
-            .allMirror('servicio_ventas'))
-        .where((s) =>
-            (s['cliente_id'] as num?)?.toInt() == widget.clienteId)
-        .toList();
+    // Yunque R4-M10-3: servicios por la vía FILTRADA por
+    // cliente_id (columna indexada v61), no el espejo
+    // completo decodificado para un solo cliente — el
+    // predicado es el mismo (cliente_id de la fila).
+    // Las ventas de suplementos NO se mueven: su
+    // predicado incluye fiado_cliente_id como clave
+    // alternativa del deudor y ventasSuplementosPorFiltro
+    // no lo reproduce (quedan especificadas en la ronda).
+    final servicios = await LocalDb.instance
+        .servicioVentasPorFiltro(clienteId: widget.clienteId);
     final fiado = await LocalDb.instance
         .fiadoPendienteDeCliente(widget.clienteId);
     // Yunque R3-M6-2: PRIMER PINTADO con lo local ya
