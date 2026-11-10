@@ -22,6 +22,12 @@
 ///   bandera calculada `alerta_referencia_rechazada` (la
 ///   referencia ya apareció en un reporte rechazado: se AVISA en
 ///   la fila, no se bloquea — ajuste 1 de Argón).
+/// - Multimes (0.6, pieza 4 de Gestión): cada fila trae además
+///   `meses` (la foto del paquete que la cotización vendió:
+///   1/2/3/6/12) y `dias` (= meses × 30, derivado en el servidor
+///   por la misma fórmula). La bandeja rotula el paquete en la
+///   fila y en la confirmación: con paquetes, el monto solo ya
+///   no dice qué se está aprobando.
 library;
 
 import 'dart:convert';
@@ -92,6 +98,24 @@ bool puedeDecidirReportesPlus({required bool esDueno}) => esDueno;
 bool montoConfirmacionPlusValido(num? v) =>
     v != null && v.isFinite && v > 0;
 
+/// Multimes (pieza 4 de Gestión, D3): ¿el monto que el dueño
+/// está confirmando DESCUADRA del precio del paquete cotizado?
+/// El monto del reporte ES el precio congelado de la cotización
+/// (nace de ella en `plus_reportar`): si el dueño lo edita en el
+/// diálogo y deja de coincidir, los días del paquete se otorgan
+/// IGUAL (manda el paquete, no el monto) y el monto editado solo
+/// ajusta el ingreso — el diálogo lo avisa antes de confirmar.
+/// Función pura: inválido o ausente no es descuadre (eso lo
+/// juzga [montoConfirmacionPlusValido]); la tolerancia de 0.01
+/// absorbe el ruido de teclear decimales equivalentes.
+bool montoPlusDescuadrado({
+  required num montoReportado,
+  required num? montoEditado,
+}) =>
+    montoEditado != null &&
+    montoEditado.isFinite &&
+    (montoEditado - montoReportado).abs() > 0.01;
+
 /// Yunque B (YB-FLU-03): ¿la cotización de un reporte está
 /// SEGURAMENTE vencida? El reporte solo pudo nacer con su
 /// cotización viva (el servidor lo exige en `plus_reportar`)
@@ -127,6 +151,14 @@ class ReportePlus {
   final String referencia;
   final String banco;
   final String movilOrigen;
+
+  /// Multimes (0.6): paquete de la cotización que originó el
+  /// reporte — la foto que `plus_reportar` copió de la
+  /// cotización (1/2/3/6/12). Las filas anteriores al multimes
+  /// y cualquier respuesta sin el campo caen a 1 (el mes suelto
+  /// de siempre): la bandeja nunca inventa un paquete.
+  final int meses;
+
   final DateTime? creadoEn;
 
   /// Fecha de resolución (confirmación/rechazo) si la RPC la trae.
@@ -155,6 +187,7 @@ class ReportePlus {
     required this.banco,
     required this.movilOrigen,
     required this.creadoEn,
+    this.meses = 1,
     this.resueltoEn,
     this.alertaReferenciaRechazada = false,
     this.estadoAtencion,
@@ -163,6 +196,17 @@ class ReportePlus {
   /// El `reporte_id` del contrato es entero (el id viaja como
   /// texto en la UI; al encolar se convierte).
   int get reporteIdInt => int.tryParse(id) ?? 0;
+
+  /// Días que el paquete otorga: la fórmula ÚNICA del diseño
+  /// (meses × 30), la misma que el servidor aplica en
+  /// `plus_confirmar` y rotula como `dias` en el listado.
+  int get dias => meses * 30;
+
+  /// Rótulo del paquete para la bandeja y los diálogos:
+  /// «12 meses · 360 días» / «1 mes · 30 días» (la fila lo
+  /// compone como «Paquete: …» junto al monto).
+  String get rotuloPaquete =>
+      meses == 1 ? '1 mes · 30 días' : '$meses meses · $dias días';
 
   static ReportePlus? fromJson(Map<String, dynamic> j) {
     final id = '${j['id'] ?? j['reporte_id'] ?? ''}';
@@ -174,6 +218,13 @@ class ReportePlus {
     // 0 CUP con el dato correcto en el servidor (campo 2026-10-23).
     final montoRaw = j['monto_cup'] ?? j['monto'] ?? j['precio_cup'];
     final alerta = j['alerta_referencia_rechazada'];
+    // Multimes: `meses` viaja como entero (puede venir como
+    // texto en respuestas viejas); ausente o ilegible = 1, el
+    // mes suelto — nunca 0 ni un paquete inventado.
+    final mesesRaw = j['meses'];
+    final mesesParse = mesesRaw is num
+        ? mesesRaw.toInt()
+        : int.tryParse('${mesesRaw ?? ''}') ?? 1;
     return ReportePlus(
       id: id,
       invitadoId: invitadoId,
@@ -185,6 +236,7 @@ class ReportePlus {
       referencia: '${j['referencia'] ?? ''}',
       banco: '${j['banco'] ?? ''}',
       movilOrigen: '${j['movil_origen'] ?? ''}',
+      meses: mesesParse >= 1 ? mesesParse : 1,
       creadoEn: instanteServidorHabana(j['creado_en']),
       resueltoEn: instanteServidorHabana(j['resuelto_en']),
       alertaReferenciaRechazada:

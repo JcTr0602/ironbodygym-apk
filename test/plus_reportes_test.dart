@@ -304,4 +304,84 @@ void main() {
     expect(
         montoConfirmacionPlusValido(double.negativeInfinity), isFalse);
   });
+
+  test('multimes: el paquete viaja en la fila (meses/dias/rótulo)',
+      () {
+    // La fila del contrato multimes: plus_reportes_listar
+    // rotula meses y dias por fila (foto del paquete que la
+    // cotización vendió, copiada al reporte en plus_reportar).
+    var lista = parsearReportesPlus([
+      {
+        'id': 31,
+        'invitado_id': 'i31',
+        'nombre': 'Laura',
+        'monto_cup': 9600,
+        'referencia': 'REF31',
+        'meses': 12,
+        'dias': 360,
+      }
+    ]);
+    expect(lista.single.meses, 12);
+    expect(lista.single.dias, 360,
+        reason: 'los días se derivan de la fórmula única meses × 30');
+    expect(lista.single.rotuloPaquete, '12 meses · 360 días');
+    // `meses` como texto (respuestas viejas toleradas).
+    lista = parsearReportesPlus([
+      {'id': 32, 'invitado_id': 'i32', 'meses': '6'}
+    ]);
+    expect(lista.single.meses, 6);
+    expect(lista.single.dias, 180);
+    expect(lista.single.rotuloPaquete, '6 meses · 180 días');
+    // Sin el campo (reporte anterior al multimes): el mes
+    // suelto de siempre, nunca un paquete inventado.
+    lista = parsearReportesPlus([
+      {'id': 33, 'invitado_id': 'i33', 'monto_cup': 1000}
+    ]);
+    expect(lista.single.meses, 1);
+    expect(lista.single.dias, 30);
+    expect(lista.single.rotuloPaquete, '1 mes · 30 días');
+    // Valores ilegibles o imposibles caen al mes suelto.
+    for (final crudo in [0, -3, 'x', null]) {
+      lista = parsearReportesPlus([
+        {'id': 34, 'invitado_id': 'i34', 'meses': crudo}
+      ]);
+      expect(lista.single.meses, 1, reason: 'meses=$crudo');
+    }
+    // El constructor sin meses también es el mes suelto.
+    expect(_reporte('5').meses, 1);
+    expect(_reporte('5').rotuloPaquete, '1 mes · 30 días');
+  });
+
+  test('multimes: montoPlusDescuadrado (D3)', () {
+    // Sin editar o editando lo mismo: no hay descuadre.
+    expect(
+        montoPlusDescuadrado(montoReportado: 9600, montoEditado: null),
+        isFalse);
+    expect(
+        montoPlusDescuadrado(montoReportado: 9600, montoEditado: 9600),
+        isFalse);
+    // Ruido de decimales equivalentes dentro de la tolerancia.
+    expect(
+        montoPlusDescuadrado(
+            montoReportado: 1000, montoEditado: 1000.005),
+        isFalse);
+    // Editar a otro monto: descuadre (los días no cambian; el
+    // aviso del diálogo sale de esta función).
+    expect(
+        montoPlusDescuadrado(montoReportado: 9600, montoEditado: 9000),
+        isTrue);
+    expect(
+        montoPlusDescuadrado(montoReportado: 1000, montoEditado: 1001),
+        isTrue);
+    // Inválidos no son descuadre: los juzga la validación del
+    // monto al confirmar.
+    expect(
+        montoPlusDescuadrado(
+            montoReportado: 9600, montoEditado: double.nan),
+        isFalse);
+    expect(
+        montoPlusDescuadrado(
+            montoReportado: 9600, montoEditado: double.infinity),
+        isFalse);
+  });
 }
