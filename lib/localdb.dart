@@ -19,6 +19,7 @@ import 'package:uuid/uuid.dart';
 
 import 'errores_sync.dart';
 import 'tiempo.dart';
+import 'turnos_resolucion.dart';
 
 import 'auth.dart';
 import 'fotos.dart';
@@ -7664,11 +7665,35 @@ class LocalDb {
         distinct: true,
         where: 'fecha_turno=? AND estado IN (?,?)',
         whereArgs: [fechaTurno, 'abierto_local', 'abierto_sincronizado']);
-    return {
+    final out = {
       for (final r in rows)
         if (normalizarTelegramId(r['telegram_id']) != null)
           normalizarTelegramId(r['telegram_id'])!,
     };
+    // Auditoría Definitiva (B-23): unión con el ESPEJO
+    // turnos_apertura del día. La tabla local `turnos` solo
+    // conoce las aperturas hechas en ESTE teléfono: en el
+    // teléfono del dueño, un entrenador que abrió en su propio
+    // teléfono no salía «en turno» en el W5, que promete cruzar
+    // espejos. Se suman las aperturas del espejo de hoy SIN
+    // cierre que les corresponda en el espejo turnos_cierre
+    // (la correspondencia de turnos_resolucion, la misma del
+    // hub y de la auditoría por persona). Si la lectura del
+    // espejo falla, manda el conjunto local de siempre.
+    try {
+      final aperturas = await mirrorPorFecha(
+          'turnos_apertura', 'fecha_turno', fechaTurno, fechaTurno);
+      if (aperturas.isNotEmpty) {
+        final cierres = await mirrorPorFecha(
+            'turnos_cierre', 'fecha', fechaTurno, fechaTurno);
+        for (final a
+            in aperturasSinCierre(aperturas: aperturas, cierres: cierres)) {
+          final tid = normalizarTelegramId(a['telegram_id']);
+          if (tid != null) out.add(tid);
+        }
+      }
+    } catch (_) {}
+    return out;
   }
 
   // ── 1.23: barrera de mantenimiento (importación de respaldo)

@@ -793,4 +793,79 @@ void main() {
           'lib/ui/incidencias/detalle_incidencia.dart', 'detalle');
     });
   });
+
+  group('B-23 · «en turno» del W5 cruza el espejo', () {
+    test('telegramIdsConTurnoAbierto une la tabla local con '
+        'las aperturas del espejo sin cierre', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      final h = ahoraHabana();
+      String dos(int n) => n.toString().padLeft(2, '0');
+      final hoy = '${h.year}-${dos(h.month)}-${dos(h.day)}';
+      // Apertura del espejo SIN cierre (otro teléfono): en turno.
+      await d.insert('turnos_apertura', {
+        'id': 'ap-espejo-viva',
+        'data': jsonEncode({
+          'turno_id': 't-viva',
+          'fecha_turno': hoy,
+          'turno': 'manana',
+          'telegram_id': 222,
+          'entrenador_nombre': 'Gabriel',
+        }),
+        'sync_seq': 10,
+      });
+      // Apertura del espejo YA cerrada en el espejo: no cuenta.
+      await d.insert('turnos_apertura', {
+        'id': 'ap-espejo-cerrada',
+        'data': jsonEncode({
+          'turno_id': 't-cerrada',
+          'fecha_turno': hoy,
+          'turno': 'tarde',
+          'telegram_id': 333,
+          'entrenador_nombre': 'Duany',
+        }),
+        'sync_seq': 11,
+      });
+      await d.insert('turnos_cierre', {
+        'id': 'ci-espejo',
+        'data': jsonEncode({
+          'turno_id': 't-cerrada',
+          'fecha': hoy,
+          'turno': 'tarde',
+          'telegram_id': 333,
+        }),
+        'sync_seq': 12,
+      });
+      // Apertura de AYER en el espejo: no es de hoy.
+      final ayerDate = h.subtract(const Duration(days: 1));
+      final ayer =
+          '${ayerDate.year}-${dos(ayerDate.month)}-${dos(ayerDate.day)}';
+      await d.insert('turnos_apertura', {
+        'id': 'ap-ayer',
+        'data': jsonEncode({
+          'turno_id': 't-ayer',
+          'fecha_turno': ayer,
+          'turno': 'manana',
+          'telegram_id': 444,
+          'entrenador_nombre': 'Otro',
+        }),
+        'sync_seq': 9,
+      });
+      // Y la local de este teléfono sigue contando.
+      await d.insert('turnos', {
+        'turno_id': 'turno-local',
+        'fecha_turno': hoy,
+        'turno': 'manana',
+        'hora_apertura': '${hoy}T07:00:00-05:00',
+        'estado': 'abierto_local',
+        'telegram_id': 111,
+      });
+
+      final enTurno = await db.telegramIdsConTurnoAbierto(hoy);
+      expect(enTurno, {111, 222},
+          reason: 'local (111) + espejo viva (222); la cerrada '
+              '(333) y la de ayer (444) quedan fuera');
+    });
+  });
 }
