@@ -71,8 +71,8 @@ void main() {
       'recordatorio_config trae pausada_hasta TEXT', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 70);
-    expect(await db.getVersion(), 70);
+    expect(LocalDb.versionActual, 71);
+    expect(await db.getVersion(), 71);
     final info = await _infoRecordatorioConfig(db);
     expect(info['pausada_hasta'], startsWith('TEXT'),
         reason: 'sin la columna, la pausa con fecha de un '
@@ -93,7 +93,7 @@ void main() {
     await LocalDb.resetParaTest(borrarArchivo: false);
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 70);
+    expect(await db.getVersion(), 71);
     final filas = await db.query('recordatorio_config',
         columns: ['id', 'pausada_hasta', 'activa'],
         orderBy: 'id');

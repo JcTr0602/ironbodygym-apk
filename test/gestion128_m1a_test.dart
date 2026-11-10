@@ -564,10 +564,12 @@ void main() {
       // (reset del watermark de recordatorios); 1.29
       // (Oleada 6, D-A3): a 68 (sello de autor en
       // fotos_cola); 1.30 (cierre §17): a 69 (paso de
-      // migración del espejo avisos_vistos). La columna de
+      // migración del espejo avisos_vistos); 1.31 (Yunque
+      // de Cambios): a 70; 1.31 (Auditoría Definitiva A-5):
+      // a 71 (generación CAS de comprobantes). La columna de
       // v65 sigue naciendo en el esquema limpio, que es lo
       // que aquí se fija.
-      expect(LocalDb.versionActual, 70);
+      expect(LocalDb.versionActual, 71);
     });
   });
 

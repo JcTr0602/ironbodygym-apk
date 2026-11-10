@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/comprobantes.dart';
+import 'package:ironbody_gym/errores_sync.dart';
 import 'package:ironbody_gym/diagnostico_espejo.dart';
 import 'package:ironbody_gym/fotos_cola.dart';
 import 'package:ironbody_gym/modelos/incidencia.dart';
@@ -1028,6 +1029,180 @@ void main() {
       final quedan = await d.query('reservas',
           columns: ['id'], orderBy: 'id ASC');
       expect(quedan.map((r) => r['id']).toList(), [3, 4, 5]);
+    });
+  });
+
+  group('Cola de bajas · C-1/C-2/C-9/C-10/B-26/B-8', () {
+    test('C-1 · un error técnico en minúsculas no pasa por '
+        'motivo de negocio', () {
+      final tecnico = explicacionOp(
+          estado: 'rechazada',
+          error: 'http 409: duplicate key value violates');
+      expect(tecnico.motivo, isNot(contains('duplicate key')));
+      final tecnico2 = explicacionOp(
+          estado: 'rechazada', error: 'clientexception: boom');
+      expect(tecnico2.motivo, isNot(contains('clientexception')));
+      // Control positivo: un motivo de negocio en español SÍ
+      // se muestra tal cual.
+      final negocio = explicacionOp(
+          estado: 'rechazada',
+          error: 'El cliente ya tiene una reserva ese día');
+      expect(negocio.motivo,
+          'El cliente ya tiene una reserva ese día');
+    });
+
+    test('C-2 · el núcleo En de auditoría compone en la '
+        'transacción del llamador (rollback total)', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      // Composición feliz: evento + lectura de hashes dentro
+      // de UNA transacción.
+      late String idOk;
+      await d.transaction((txn) async {
+        idOk = await db.auditoriaInsertEn(txn,
+            actorId: 'u1',
+            actorNombre: 'Dueño',
+            accion: 'prueba_c2',
+            objetoTipo: 'cliente',
+            objetoId: '1',
+            dispositivoId: 'dev');
+        final propia = await db.auditoriaPorId(idOk, txn: txn);
+        expect(propia, isNotNull);
+        expect(propia!['hash_propio'], isNotNull);
+      });
+      expect(await db.auditoriaPorId(idOk), isNotNull);
+      // Si la transacción del llamador muere tras el insert,
+      // el evento NO queda (antes: evento local sin su op).
+      await expectLater(
+        d.transaction((txn) async {
+          await db.auditoriaInsertEn(txn,
+              actorId: 'u1',
+              actorNombre: 'Dueño',
+              accion: 'prueba_c2_falla',
+              objetoTipo: 'cliente',
+              objetoId: '2',
+              dispositivoId: 'dev');
+          throw StateError('muerte simulada a mitad');
+        }),
+        throwsStateError,
+      );
+      final filas = await d.query('auditoria_local',
+          where: 'accion=?', whereArgs: ['prueba_c2_falla']);
+      expect(filas, isEmpty,
+          reason: 'el evento quedó sin su op: la transacción '
+              'no fue atómica');
+      // Y el cableado del motor usa la composición.
+      final syncSrc = File('lib/sync.dart').readAsStringSync();
+      final cuerpo = syncSrc.substring(
+          syncSrc.indexOf('Future<String> registrarAuditoria'));
+      expect(
+          cuerpo.substring(0, cuerpo.indexOf('\n  }\n') + 4),
+          contains('auditoriaInsertEn'));
+    });
+
+    test('C-9 · las cáscaras eliminado no cuentan como '
+        'legibles y el conteo se memoiza', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      await db.upsertMirror('clientes', 1,
+          {'nombre': 'Ana', 'estado': 'activo'}, 5);
+      await db.upsertMirror('clientes', 2,
+          {'nombre': 'Cliente eliminado', 'estado': 'eliminado'},
+          6);
+      final d = await db.db;
+      await d.insert('clientes',
+          {'id': 3, 'data': '[1,2,3]', 'sync_seq': 7});
+      final c = await db.conteoMirrorLegible('clientes');
+      expect(c.total, 3);
+      expect(c.legibles, 1,
+          reason: 'la cáscara contó como persona legible');
+      expect(c.carcaras, 1);
+      expect(c.corruptas, 1);
+      // Memo: segunda llamada, mismo resultado.
+      final c2 = await db.conteoMirrorLegible('clientes');
+      expect(c2.legibles, 1);
+      // La huella cambia (fila nueva con seq mayor): recount.
+      await db.upsertMirror(
+          'clientes', 4, {'nombre': 'Beto', 'estado': 'activo'}, 8);
+      final c3 = await db.conteoMirrorLegible('clientes');
+      expect(c3.legibles, 2);
+    });
+
+    test('C-10 · seqFilaMirror distingue error de ausencia',
+        () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      await db.upsertMirror('clientes', 9, {'nombre': 'Ana'}, 42);
+      final presente = await db.seqFilaMirror('clientes', '9');
+      expect(presente.ok, isTrue);
+      expect(presente.seq, 42);
+      final ausente = await db.seqFilaMirror('clientes', '999');
+      expect(ausente.ok, isTrue);
+      expect(ausente.seq, isNull);
+      final error = await db.seqFilaMirror('tabla_inexistente', '1');
+      expect(error.ok, isFalse,
+          reason: 'un error de lectura se disfrazó de ausencia');
+      expect(error.seq, isNull);
+    });
+
+    test('B-26 · mirrorPorFecha usa el día Habana también en '
+        'la rama SQL', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      // 2026-11-09T01:30Z = 2026-11-08 21:30 en La Habana:
+      // el día de negocio es el 8, no el 9 del prefijo UTC.
+      await d.insert('reservas', {
+        'id': 1,
+        'data': jsonEncode(
+            {'creada_ts': '2026-11-09T01:30:00.000Z', 'estado': 'pagada'}),
+        'sync_seq': 5,
+      });
+      final del8 = await db.mirrorPorFecha(
+          'reservas', 'creada_ts', '2026-11-08', '2026-11-08');
+      expect(del8.map((m) => m['id']), contains(1),
+          reason: 'la rama SQL lo buscó por el prefijo UTC y '
+              'lo perdió');
+      final del9 = await db.mirrorPorFecha(
+          'reservas', 'creada_ts', '2026-11-09', '2026-11-09');
+      expect(del9.map((m) => m['id']), isNot(contains(1)));
+    });
+
+    test('B-8 · la persistencia declarada manda sobre la '
+        'estima por tipo de error', () {
+      // Red: el clasificador estima «guardado»…
+      final red = traducirErrorSync(
+          Exception('SocketException: Connection failed'));
+      expect(red.datosGuardadosLocalmente, isTrue);
+      // …pero si el llamador declara que NO hubo escritura
+      // local previa, su palabra manda.
+      final redSinPersistir = traducirErrorSync(
+          Exception('SocketException: Connection failed'),
+          persistenciaConfirmada: false);
+      expect(redSinPersistir.datosGuardadosLocalmente, isFalse);
+      expect(redSinPersistir.codigo, red.codigo,
+          reason: 'solo cambia la persistencia, no la clase');
+      // Y al revés: un error que el clasificador marca «no
+      // guardado» con persistencia confirmada → guardado.
+      final conPersistencia = traducirErrorSync(
+          Exception('DatabaseException: disk full'),
+          persistenciaConfirmada: true);
+      expect(conPersistencia.datosGuardadosLocalmente, isTrue);
+    });
+
+    test('B-6 · el resultado declara el corte por lock', () {
+      const r = SyncResultado(corrio: true, cortadoPorLock: true);
+      expect(r.cortadoPorLock, isTrue);
+      const normal = SyncResultado(corrio: true);
+      expect(normal.cortadoPorLock, isFalse);
+      const nc = SyncResultado.noCorrio(SyncMotivoNoCorrio.enCurso);
+      expect(nc.cortadoPorLock, isFalse);
+      final syncSrc = File('lib/sync.dart').readAsStringSync();
+      expect('cortadoPorLock = true'.allMatches(syncSrc).length,
+          greaterThanOrEqualTo(3),
+          reason: 'run/push/pull deben marcar el corte');
+      expect(syncSrc, contains('cortado: cortadoScope'));
     });
   });
 }
