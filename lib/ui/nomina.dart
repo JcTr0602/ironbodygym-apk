@@ -90,6 +90,24 @@ class _NominaScreenState extends State<NominaScreen> {
 
   Future<void> _cargar() async {
     final gen = ++_genCarga;
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02);
+    // solo baja la generación vigente (M2-A A4 intacta).
+    try {
+      await _cargarDatos(gen);
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && gen == _genCarga && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos(int gen) async {
     setState(() => _cargando = true);
     final ahora = ahoraHabana();
     final pref = hoyHabanaIso().substring(0, 7); // YYYY-MM
