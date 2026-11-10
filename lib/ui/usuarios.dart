@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../fotos.dart';
 import '../localdb.dart';
@@ -96,15 +97,39 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    // Refrescar desde el servidor y leer caché local.
-    // F3-22: el fallo del pull ya no se traga en silencio: se
-    // anota para avisar de que la lista es la guardada.
+    // Yunque de App 1.31 (C4-1 + C2-2): PINTAR LO LOCAL
+    // PRIMERO. Antes el pull corría antes de pintar la meta
+    // local y la pantalla esperaba la bajada entera (con una
+    // fila sucia del espejo además moría en spinner: las
+    // lecturas locales iban sin red — C2-2). Ahora: la lista
+    // guardada se pinta al momento y el pull refresca tras
+    // ella, conservando la marca de frescura F3-22.
     var pullFallo = false;
+    try {
+      await _leerLocal();
+    } catch (e) {
+      AppLog.error('usuarios', 'lectura_local_fallo', d: '$e');
+      _pintar(const [], pullFallo: _pullFallo || pullFallo);
+      return;
+    }
     try {
       await SyncEngine.instance.pull();
     } catch (_) {
       pullFallo = true;
     }
+    try {
+      await _leerLocal(pullFallo: pullFallo);
+    } catch (e) {
+      // El pull puede haber actualizado la meta; si releer
+      // falla, se CONSERVA lo ya pintado y queda bitácora.
+      AppLog.error('usuarios', 'relectura_fallo', d: '$e');
+      _pintar(_usuarios, pullFallo: pullFallo);
+    }
+  }
+
+  /// Lee la lista guardada en la meta y la pinta (con la
+  /// marca de frescura del pull que corresponda).
+  Future<void> _leerLocal({bool? pullFallo}) async {
     final tsPull = await LocalDb.instance.getMeta('ultimo_pull_ts');
     final ultimoPull = tsPull == null ? null : DateTime.tryParse(tsPull);
     final raw = await LocalDb.instance.getMeta('usuarios_apk');
@@ -117,14 +142,18 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       } catch (_) {}
     }
     lista.sort((a, b) => '${a['username']}'.compareTo('${b['username']}'));
-    if (mounted) {
-      setState(() {
-        _usuarios = lista;
-        _cargando = false;
-        _pullFallo = pullFallo;
-        _ultimoPull = ultimoPull;
-      });
-    }
+    _pintar(lista, pullFallo: pullFallo ?? _pullFallo, ultimoPull: ultimoPull);
+  }
+
+  void _pintar(List<Map<String, dynamic>> lista,
+      {required bool pullFallo, DateTime? ultimoPull}) {
+    if (!mounted) return;
+    setState(() {
+      _usuarios = lista;
+      _cargando = false;
+      _pullFallo = pullFallo;
+      if (ultimoPull != null) _ultimoPull = ultimoPull;
+    });
   }
 
   /// F3-22: la lista que se pinta, tras el filtro del buscador.

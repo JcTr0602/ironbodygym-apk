@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../guia_validacion.dart';
 import '../localdb.dart';
@@ -27,6 +28,10 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   List<Map<String, dynamic>> _equipos = [];
   Map<String, int> _conteo = {};
   bool _cargando = true;
+  // Yunque de App 1.31 (C2-1): el fallo de carga se PINTA
+  // como error; antes no había catch y la pantalla moría
+  // en «Cargando equipos…» para siempre.
+  String? _falloCarga;
   bool _ocupado = false;
 
   @override
@@ -36,19 +41,33 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   }
 
   Future<void> _cargar() async {
-    final eq = await _db.guiaEquipos();
-    final pub = await _db.guiaPublicadas();
-    final conteo = <String, int>{};
-    for (final p in pub) {
-      final id = '${p['equipoId'] ?? ''}';
-      conteo[id] = (conteo[id] ?? 0) + 1;
-    }
-    if (!mounted) return;
+    // Yunque de App 1.31 (C2-1): red completa — try/catch
+    // (AppLog) con finally que baja la bandera SIEMPRE y
+    // señala el error a la vista. Una fila sucia del espejo
+    // ya no deja spinner eterno.
     setState(() {
-      _equipos = eq;
-      _conteo = conteo;
-      _cargando = false;
+      _cargando = true;
+      _falloCarga = null;
     });
+    try {
+      final eq = await _db.guiaEquipos();
+      final pub = await _db.guiaPublicadas();
+      final conteo = <String, int>{};
+      for (final p in pub) {
+        final id = '${p['equipoId'] ?? ''}';
+        conteo[id] = (conteo[id] ?? 0) + 1;
+      }
+      if (!mounted) return;
+      setState(() {
+        _equipos = eq;
+        _conteo = conteo;
+      });
+    } catch (e) {
+      AppLog.error('guia_equipos', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _falloCarga = '$e');
+    } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
   }
 
   void _aviso(String m) {
@@ -275,7 +294,12 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando equipos…')
-          : ListView(
+          : _falloCarga != null
+              ? EstadoError(
+                  detalle: _falloCarga,
+                  onReintentar: _cargar,
+                )
+              : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [
                 Text(

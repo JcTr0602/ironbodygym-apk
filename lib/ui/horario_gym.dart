@@ -250,8 +250,21 @@ class _HorarioGymState extends State<HorarioGym> {
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     // 1. Intentar caché local primero
-    final prefs =
-        await SharedPreferences.getInstance();
+    // Yunque de App 1.31 (C2-3): getInstance iba FUERA de
+    // toda red: su fallo dejaba la pantalla en «Cargando…»
+    // para siempre sin diagnóstico. Dentro del try, el
+    // fallo cae al aviso de error de la rama de red.
+    late final SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _cargando = false);
+        mostrarSnack(context, 'Error: $e',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     final cacheRaw = prefs.getString(_kCacheKey);
     if (cacheRaw != null && cacheRaw.isNotEmpty) {
       try {
