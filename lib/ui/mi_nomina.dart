@@ -171,6 +171,23 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     setState(() => _cargando = true);
     final pref = NominaCalc.prefMesActual();
     // #6 (Argón nómina): refrescar el pre-cálculo antes de
