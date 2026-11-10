@@ -5461,25 +5461,82 @@ class LocalDb {
   /// dañado, las pantallas leen 0 filas pero el diagnóstico
   /// W1 veía la tabla «llena» y no disparaba. Este conteo es
   /// el que alimenta el testigo y la evaluación del W1.
-  Future<({int total, int legibles, int corruptas})> conteoMirrorLegible(
-      String tabla) async {
+  /// Auditoría Definitiva (C-9): memo del conteo legible por
+  /// tabla, validado contra una huella barata (número de filas
+  /// + max sync_seq). El conteo decodifica el padrón ENTERO fila
+  /// a fila; sin memo, cada evaluación del diagnóstico lo
+  /// repetía. La huella se consulta por SQL agregado (no
+  /// decodifica nada): si no cambió, el conteo tampoco.
+  static final Map<
+      String,
+      ({
+        int huellaN,
+        int huellaMaxSeq,
+        ({int total, int legibles, int corruptas, int carcaras}) conteo
+      })> _memoConteoLegible = {};
+
+  Future<({int total, int legibles, int corruptas, int carcaras})>
+      conteoMirrorLegible(String tabla) async {
     final d = await db;
+    // Huella barata para el memo (C-9). Si la tabla no tiene
+    // sync_seq o el agregado falla, se cuenta sin memo.
+    int? huellaN;
+    int? huellaMaxSeq;
+    // La clave incluye la ruta de la BD: el memo jamás sirve
+    // el conteo de OTRA base (p. ej. entre contextos).
+    final claveMemo = '${d.path}|$tabla';
+    try {
+      final h = await d.rawQuery(
+          'SELECT COUNT(*) AS n, MAX(sync_seq) AS m FROM $tabla');
+      huellaN = (h.first['n'] as num).toInt();
+      huellaMaxSeq = (h.first['m'] as num?)?.toInt() ?? 0;
+      final memo = _memoConteoLegible[claveMemo];
+      if (memo != null &&
+          memo.huellaN == huellaN &&
+          memo.huellaMaxSeq == huellaMaxSeq) {
+        return memo.conteo;
+      }
+    } catch (_) {
+      huellaN = null;
+      huellaMaxSeq = null;
+    }
     final rows = await d.query(tabla, columns: ['data']);
     var legibles = 0;
     var corruptas = 0;
+    var carcaras = 0;
     for (final r in rows) {
       // Mismo criterio que los lectores: legible = decodifica
       // como MAPA. Un JSON válido que no es objeto (p. ej. una
       // lista) revienta igual a todo lector del espejo; si
       // contara como legible, el W1 no vería el espejo vacío
       // que la UI sí está viendo.
-      if (_decodificarDataGuardada(r['data']) != null) {
-        legibles++;
-      } else {
+      final decodificada = _decodificarDataGuardada(r['data']);
+      if (decodificada == null) {
         corruptas++;
+      } else if (esEliminadoDe(decodificada)) {
+        // C-9: la cáscara de una baja (estado='eliminado') es
+        // legible pero NO es una persona con datos: contarla
+        // como legible dejaba al W1 sin disparar con el padrón
+        // efectivamente vacío. Se cuenta APARTE.
+        carcaras++;
+      } else {
+        legibles++;
       }
     }
-    return (total: rows.length, legibles: legibles, corruptas: corruptas);
+    final conteo = (
+      total: rows.length,
+      legibles: legibles,
+      corruptas: corruptas,
+      carcaras: carcaras
+    );
+    if (huellaN != null && huellaMaxSeq != null) {
+      _memoConteoLegible[claveMemo] = (
+        huellaN: huellaN,
+        huellaMaxSeq: huellaMaxSeq,
+        conteo: conteo
+      );
+    }
+    return conteo;
   }
 
   /// 1.28 (M1-A3/R3M1-F4): decodifica el JSON de una fila espejo
@@ -6513,18 +6570,35 @@ class LocalDb {
       return res;
     }
     try {
+      // Auditoría Definitiva (B-26): criterio de fecha ÚNICO
+      // en ambas ramas. Antes la rama SQL filtraba por el
+      // prefijo crudo del texto guardado (substr 1,10) y el
+      // fallback sin JSON1 por el día de negocio Habana
+      // (fechaNegocioHabana): la MISMA fila caía en días
+      // distintos según el teléfono tuviera o no JSON1. Ahora
+      // el SQL solo PRE-filtra con una ventana ensanchada
+      // (±1 día, para no perder filas cuyo instante cae en
+      // otro día al convertir a Habana) y el filtro fino es
+      // el de Dart, idéntico al del fallback.
+      final desdeAmplio = _desplazarDiaTxt(desde, -1);
+      final hastaAmplio = _desplazarDiaTxt(hasta, 1);
       final rows = await d.rawQuery(
         "SELECT id, data FROM $tabla WHERE substr(json_extract(data, '\$.$campoFecha'), 1, 10) >= ? "
         "AND substr(json_extract(data, '\$.$campoFecha'), 1, 10) <= ?",
-        [desde, hasta],
+        [desdeAmplio, hastaAmplio],
       );
-      return [
-        for (final r in rows)
-          {
-            ...jsonDecode(r['data'] as String) as Map<String, dynamic>,
-            'id': r['id'],
-          }
-      ];
+      final res = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        final m = _decodificarDataGuardada(r['data']);
+        if (m == null) continue;
+        final dia = fechaNegocioHabana(m[campoFecha]);
+        if (dia.isNotEmpty &&
+            dia.compareTo(desde) >= 0 &&
+            dia.compareTo(hasta) <= 0) {
+          res.add({...m, 'id': r['id']});
+        }
+      }
+      return res;
     } catch (_) {
       final todos = await allMirror(tabla);
       return todos.where((m) {
@@ -6534,6 +6608,18 @@ class LocalDb {
             dia.compareTo(hasta) <= 0;
       }).toList();
     }
+  }
+
+  /// Desplaza un día 'YYYY-MM-DD' en [dias] (para la ventana
+  /// ensanchada de [mirrorPorFecha]). Si el texto no parsea,
+  /// lo devuelve tal cual (la ventana queda sin ensanchar).
+  static String _desplazarDiaTxt(String diaTxt, int dias) {
+    final f = DateTime.tryParse(diaTxt);
+    if (f == null) return diaTxt;
+    final d = f.add(Duration(days: dias));
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
   }
 
   /// 10/25 (rendimiento Servicios): filas espejo con un campo JSON
@@ -6991,35 +7077,65 @@ class LocalDb {
     // fuera, dos inserciones concurrentes leían el mismo previo
     // y la cadena de hashes se bifurcaba (dos eventos con el
     // mismo hash_previo, cadena rota sin error visible).
+    late String id;
+    await d.transaction((txn) async {
+      id = await auditoriaInsertEn(txn,
+          actorId: actorId,
+          actorNombre: actorNombre,
+          accion: accion,
+          objetoTipo: objetoTipo,
+          objetoId: objetoId,
+          detalle: detalle,
+          dispositivoId: dispositivoId);
+    });
+    return id;
+  }
+
+  /// Auditoría Definitiva (C-2): núcleo con ejecutor EXPLÍCITO
+  /// de [auditoriaInsert] (patrón queueOp/queueOpEn): NO abre
+  /// transacción propia, para que el llamador pueda componer
+  /// el evento local + su op de sync en UNA sola transacción
+  /// (ver SyncEngine.registrarAuditoria). Dentro de la
+  /// transacción del llamador, la lectura del hash previo + el
+  /// insert conservan la propiedad anti-bifurcación de la
+  /// cadena (la transacción serializa).
+  Future<String> auditoriaInsertEn(
+    DatabaseExecutor ex, {
+    required String actorId,
+    required String actorNombre,
+    required String accion,
+    required String objetoTipo,
+    required String objetoId,
+    Map<String, dynamic>? detalle,
+    required String dispositivoId,
+  }) async {
     final id = 'aud_${const Uuid().v4()}';
     final creadaEn = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
-    await d.transaction((txn) async {
-      final prev = await txn.rawQuery(
-          'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
-      final hashPrevio =
-          prev.isEmpty ? null : prev.first['hash_propio'] as String?;
-      final hashPropio = _hashAuditoria(
-        previo: hashPrevio,
-        actorId: actorId,
-        accion: accion,
-        objetoTipo: objetoTipo,
-        objetoId: objetoId,
-        creadaEn: creadaEn,
-      );
-      await txn.insert('auditoria_local', {
-        'id': id,
-        'actor_id': actorId,
-        'actor_nombre': actorNombre,
-        'accion': accion,
-        'objeto_tipo': objetoTipo,
-        'objeto_id': objetoId,
-        'detalle': detalle != null ? jsonEncode(detalle) : null,
-        'dispositivo_id': dispositivoId,
-        'hash_previo': hashPrevio,
-        'hash_propio': hashPropio,
-        'creada_en': creadaEn,
-        'sincronizada': 0,
-      });
+    final prev = await ex.rawQuery(
+        'SELECT hash_propio FROM auditoria_local ORDER BY creada_en DESC, rowid DESC LIMIT 1');
+    final hashPrevio =
+        prev.isEmpty ? null : prev.first['hash_propio'] as String?;
+    final hashPropio = _hashAuditoria(
+      previo: hashPrevio,
+      actorId: actorId,
+      accion: accion,
+      objetoTipo: objetoTipo,
+      objetoId: objetoId,
+      creadaEn: creadaEn,
+    );
+    await ex.insert('auditoria_local', {
+      'id': id,
+      'actor_id': actorId,
+      'actor_nombre': actorNombre,
+      'accion': accion,
+      'objeto_tipo': objetoTipo,
+      'objeto_id': objetoId,
+      'detalle': detalle != null ? jsonEncode(detalle) : null,
+      'dispositivo_id': dispositivoId,
+      'hash_previo': hashPrevio,
+      'hash_propio': hashPropio,
+      'creada_en': creadaEn,
+      'sincronizada': 0,
     });
     return id;
   }
@@ -7039,9 +7155,14 @@ class LocalDb {
   /// por aquí los hashes de la fila que ACABA de insertar:
   /// antes tomaba «la pendiente más vieja» y la op viajaba
   /// con el hash_previo/hash_propio de OTRA auditoría.
-  Future<Map<String, dynamic>?> auditoriaPorId(String id) async {
-    final d = await db;
-    final rows = await d.query('auditoria_local',
+  Future<Map<String, dynamic>?> auditoriaPorId(String id,
+      {DatabaseExecutor? txn}) async {
+    // Auditoría Definitiva (C-2): ejecutor inyectable para leer
+    // la fila recién insertada DENTRO de la transacción que la
+    // creó (sin él, la lectura iría por otra conexión lógica y
+    // no vería el insert aún no confirmado).
+    final DatabaseExecutor ex = txn ?? await db;
+    final rows = await ex.query('auditoria_local',
         where: 'id=?', whereArgs: [id], limit: 1);
     return rows.isEmpty ? null : rows.first;
   }
@@ -7282,20 +7403,32 @@ class LocalDb {
 
   /// v1.2.5 (D19): sync_seq local de una fila del espejo (null si no existe).
   /// Para comparar contra el manifiesto del servidor.
-  Future<int?> seqFilaMirror(String tabla, String rid) async {
+  /// Auditoría Definitiva (C-10): TRIESTADO — antes la
+  /// lectura devolvía `int?` y el catch tragaba el error a
+  /// null, indistinguible de «la fila no existe»: en caminos
+  /// de diagnóstico un error de lectura se disfrazaba de
+  /// ausencia y podía disparar una re-descarga innecesaria.
+  /// Ahora: `ok:false` = la lectura FALLÓ (el llamador no
+  /// debe concluir ausencia); `ok:true, seq:null` = la fila
+  /// no existe; `ok:true, seq:n` = su sync_seq local.
+  Future<({bool ok, int? seq})> seqFilaMirror(
+      String tabla, String rid) async {
     final d = await db;
     try {
       final id = int.tryParse(rid) ?? rid;
       final rows = await d.query(tabla,
           columns: ['sync_seq'], where: 'id=?', whereArgs: [id], limit: 1);
-      if (rows.isEmpty) return null;
+      if (rows.isEmpty) return (ok: true, seq: null);
       // 1.28 (M1-A9): cast tolerante (un sync_seq que llegue
       // como double/String no debe tumbar la lectura).
-      return (rows.first['sync_seq'] as num?)?.toInt() ??
-          int.tryParse('${rows.first['sync_seq']}') ??
-          0;
+      return (
+        ok: true,
+        seq: (rows.first['sync_seq'] as num?)?.toInt() ??
+            int.tryParse('${rows.first['sync_seq']}') ??
+            0
+      );
     } catch (_) {
-      return null;
+      return (ok: false, seq: null);
     }
   }
 

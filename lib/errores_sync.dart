@@ -62,8 +62,15 @@ class ErrorSync {
   /// Acción del botón primario.
   final AccionBoton accionBoton;
 
-  /// TRUE solo si SQLite confirmó la escritura local antes del error.
-  /// Regla de la verdad: nunca afirmar "datos a salvo" si es false.
+  /// ¿Los datos del usuario quedaron guardados en el teléfono
+  /// pese al error? Regla de la verdad: nunca afirmar «datos a
+  /// salvo» sin base. Auditoría Definitiva (B-8): el
+  /// clasificador por sí solo NO puede saberlo — lo estima por
+  /// el TIPO de error (red/timeout/5xx ⇒ probablemente sí,
+  /// porque el llamador típico ya encoló la op; SQLite/disco/
+  /// validación ⇒ no). El llamador que SÍ lo sabe lo declara
+  /// con el parámetro `persistenciaConfirmada` de
+  /// [traducirErrorSync] y su palabra manda sobre la estima.
   final bool datosGuardadosLocalmente;
 
   /// Detalle técnico original, solo para logs/depuración. Nunca mostrar al usuario.
@@ -82,7 +89,35 @@ class ErrorSync {
 
 /// Traduce cualquier error a un ErrorSync con mensaje en lenguaje simple.
 /// GARANTIZA que ningún término técnico llegue al usuario.
-ErrorSync traducirErrorSync(Object error, {int? httpStatus, StackTrace? stack}) {
+///
+/// Auditoría Definitiva (B-8): [persistenciaConfirmada] es la
+/// persistencia REAL declarada por el llamador: si se pasa,
+/// manda sobre la estima por tipo de error del clasificador
+/// para `datosGuardadosLocalmente`. Los llamadores del motor
+/// de sync describen fallos de ops YA encoladas (persistencia
+/// cierta por construcción) y pasan `true`; un flujo sin
+/// escritura local previa debe pasar `false` o no prometer.
+ErrorSync traducirErrorSync(Object error,
+    {int? httpStatus, StackTrace? stack, bool? persistenciaConfirmada}) {
+  final base =
+      _clasificarErrorSync(error, httpStatus: httpStatus, stack: stack);
+  if (persistenciaConfirmada == null ||
+      persistenciaConfirmada == base.datosGuardadosLocalmente) {
+    return base;
+  }
+  return ErrorSync(
+    codigo: base.codigo,
+    tipo: base.tipo,
+    mensaje: base.mensaje,
+    accionTexto: base.accionTexto,
+    accionBoton: base.accionBoton,
+    datosGuardadosLocalmente: persistenciaConfirmada,
+    detalleTecnicoOculto: base.detalleTecnicoOculto,
+  );
+}
+
+ErrorSync _clasificarErrorSync(Object error,
+    {int? httpStatus, StackTrace? stack}) {
   final raw = error.toString().toLowerCase();
 
   // 1. Permisos del sistema operativo
@@ -469,11 +504,15 @@ String resumenErrorDiagnostico(String crudo) {
       }
       // Motivo de negocio del servidor (español, sin marcas
       // técnicas): es el dato útil, se muestra tal cual.
-      final pareceTecnico = err.contains('Exception') ||
-          err.contains('HTTP') ||
-          err.contains('Socket') ||
-          err.contains('timeout') ||
-          err.contains('Timeout');
+      // Auditoría Definitiva (C-1): la comparación se hace
+      // sobre el texto en MINÚSCULAS — antes era sensible a
+      // mayúsculas y variantes como «http 409: duplicate key…»
+      // o «clientexception:…» pasaban por «motivo de negocio».
+      final errMin = err.toLowerCase();
+      final pareceTecnico = errMin.contains('exception') ||
+          errMin.contains('http') ||
+          errMin.contains('socket') ||
+          errMin.contains('timeout');
       if (primeraLinea.isNotEmpty &&
           !pareceTecnico &&
           primeraLinea.length <= 200) {

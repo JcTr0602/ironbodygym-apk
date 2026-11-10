@@ -513,6 +513,16 @@ class SyncResultado {
   /// el aviso de pendientes, jamás dar la subida por hecha.
   final bool conteoIndeterminado;
 
+  /// Auditoría Definitiva (B-6): el ciclo EMPEZÓ pero perdió
+  /// el lock interno a mitad (otro ciclo tomó el relevo) y se
+  /// detuvo en silencio a propósito (1.28 M1-A1: no limpiar
+  /// errores ni sonar éxito). Sin esta marca, el resultado
+  /// salía como un ciclo corrido completo y el llamador no
+  /// podía distinguir «terminó» de «fue cortado». La marca NO
+  /// cambia la semántica deliberada: el ciclo cortado sigue
+  /// sin sellar ni emitir éxito.
+  final bool cortadoPorLock;
+
   const SyncResultado({
     required this.corrio,
     this.motivoNoCorrio,
@@ -526,6 +536,7 @@ class SyncResultado {
     this.conError = 0,
     this.deOtroUsuario = 0,
     this.conteoIndeterminado = false,
+    this.cortadoPorLock = false,
   });
 
   /// La corrida no llegó a ejecutarse: NUNCA es un éxito.
@@ -541,7 +552,8 @@ class SyncResultado {
         porSubir = 0,
         conError = 0,
         deOtroUsuario = 0,
-        conteoIndeterminado = false;
+        conteoIndeterminado = false,
+        cortadoPorLock = false;
 
   /// «Al día» SOLO si el ciclo corrió, no falló, la cola quedó
   /// vacía Y el conteo de la cola se pudo hacer (YB-TRA-01).
@@ -1614,7 +1626,13 @@ class SyncEngine {
   /// El mismo fallo siempre muestra el mismo mensaje y acción.
   /// v1.2.9+43: retorna ErrorSync (no String) para blindaje anti-fugas.
   Future<ErrorSync> _describeErrorVisible(Object e, {int? httpStatus}) async {
-    final ec = traducirErrorSync(e, httpStatus: httpStatus);
+    // Auditoría Definitiva (B-8): esta descripción solo se
+    // usa para fallos de trabajo YA guardado localmente (ops
+    // encoladas y espejo): la persistencia es cierta por
+    // construcción y se declara, no se estima por el tipo de
+    // error.
+    final ec = traducirErrorSync(e,
+        httpStatus: httpStatus, persistenciaConfirmada: true);
     // Sin conexión pero hay internet: el servidor no responde.
     if (ec.codigo == 'sin_conexion' && await _hayInternet()) {
       return ErrorSync(
@@ -1788,6 +1806,8 @@ class SyncEngine {
     var subidos = 0;
     var bajados = 0;
     String? errorCorrida;
+    // Auditoría Definitiva (B-6): marca de corte por lock.
+    var cortadoPorLock = false;
     final noCorrio = await _conLock(() async {
       try {
         // v1.4.0: al forzar, reactivar ops atascadas en 'enviada' antes del push.
@@ -1922,8 +1942,12 @@ class SyncEngine {
           errorCorrida = msgPushSucio;
         } else if (errPush != null) {
           await _db.setMeta('last_sync_error', errPush);
+          // B-8: el fallo es de la SUBIDA de ops ya encoladas:
+          // los datos están guardados en el teléfono por
+          // construcción — se declara la persistencia real.
           _emit(SyncPhase.error,
-              error: traducirErrorSync(errPush));
+              error: traducirErrorSync(errPush,
+                  persistenciaConfirmada: true));
           errorCorrida = errPush;
           return;
         } else if (errPull != null) {
@@ -1992,6 +2016,7 @@ class SyncEngine {
         // del usuario ni se sella nada: el dueño nuevo del
         // lock está sincronizando y lo que falte lo retoma el
         // próximo ciclo.
+        cortadoPorLock = true;
         AppLog.aviso('sync', 'ciclo_detenido_sin_lock');
         _emit(SyncPhase.idle);
         errorCorrida = 'La sincronización se interrumpió '
@@ -2033,6 +2058,7 @@ class SyncEngine {
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
       conteoIndeterminado: conteo.indeterminado,
+      cortadoPorLock: cortadoPorLock,
     );
   }
 
@@ -2137,14 +2163,23 @@ class SyncEngine {
         bool corrio,
         bool error,
         int bajados,
-        SyncMotivoNoCorrio? motivo
+        SyncMotivoNoCorrio? motivo,
+        bool cortado
       })> sincronizarScopeDetallado(String scope) async {
     // H-08: el alcance también se intersecta con el rol.
     final tablas = SyncScope.resolver(scope, esAdmin: _esAdminSeguro);
     if (tablas.isEmpty) {
-      return (corrio: false, error: false, bajados: 0, motivo: null);
+      return (
+        corrio: false,
+        error: false,
+        bajados: 0,
+        motivo: null,
+        cortado: false
+      );
     }
     var errorEnCiclo = false;
+    // Auditoría Definitiva (B-6): marca de corte por lock.
+    var cortadoScope = false;
     var bajadosScope = 0;
     final noCorrioScope = await _conLock(() async {
       try {
@@ -2244,6 +2279,9 @@ class SyncEngine {
         // visible (el catch genérico pintaría «Instance of
         // '_CicloSinLock'»): el ciclo se corta, no se sella
         // nada y el proceso relevo sigue con el suyo.
+        // B-6: el cierre silencioso se mantiene (deliberado),
+        // pero el resultado lo DECLARA en su marca `cortado`.
+        cortadoScope = true;
         _emit(SyncPhase.idle);
       } catch (e) {
         errorEnCiclo = true;
@@ -2260,6 +2298,7 @@ class SyncEngine {
       error: errorEnCiclo,
       bajados: bajadosScope,
       motivo: noCorrioScope,
+      cortado: cortadoScope,
     );
   }
 
@@ -2396,6 +2435,8 @@ class SyncEngine {
     }
     var subidos = 0;
     var bajados = 0;
+    // Auditoría Definitiva (B-6): marca de corte por lock.
+    var cortadoPorLock = false;
     final noCorrio = await _conLock(() async {
       // 1.28 (M1-A1): si el ciclo pierde el lock a mitad, se
       // detiene en silencio (sin limpiar errores ni gancho de
@@ -2403,6 +2444,7 @@ class SyncEngine {
       try {
         subidos = await _doPush(desdeForeground: desdeForeground);
       } on _CicloSinLock {
+        cortadoPorLock = true;
         return;
       }
       // v1.0.14: limpiar error viejo si el push tuvo éxito.
@@ -2444,6 +2486,7 @@ class SyncEngine {
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
       conteoIndeterminado: conteo.indeterminado,
+      cortadoPorLock: cortadoPorLock,
     );
     // Sello de Argón (fusión 1+4): un push que deja la cola
     // propia en cero CANCELA el aviso de pendientes que el
@@ -2645,6 +2688,8 @@ class SyncEngine {
   /// como antes.
   Future<SyncResultado> pull() async {
     var bajados = 0;
+    // Auditoría Definitiva (B-6): marca de corte por lock.
+    var cortadoPorLock = false;
     final noCorrio = await _conLock(() async {
       // v1.0.12: cierre remoto de sesión (el dueño lo forzó)
       await _verificarCierreForzado();
@@ -2653,6 +2698,7 @@ class SyncEngine {
       try {
         bajados = await _doPull();
       } on _CicloSinLock {
+        cortadoPorLock = true;
         return;
       }
       // 1.15 (caso c): verificación silenciosa si hay ops
@@ -2681,6 +2727,7 @@ class SyncEngine {
       conError: conteo.conError,
       deOtroUsuario: conteo.deOtroUsuario,
       conteoIndeterminado: conteo.indeterminado,
+      cortadoPorLock: cortadoPorLock,
     );
   }
 
@@ -7066,15 +7113,14 @@ class SyncEngine {
     final actorNombre = _auth.displayName;
     // v1.2.5: dispositivo_id estable por instalación (perfil.dart).
     final dispositivoId = await _db.getMeta('device_id') ?? 'desconocido';
-    final id = await _db.auditoriaInsert(
-      actorId: actorId,
-      actorNombre: actorNombre,
-      accion: accion.trim(),
-      objetoTipo: objetoTipo,
-      objetoId: objetoId,
-      detalle: detalle,
-      dispositivoId: dispositivoId,
-    );
+    // Auditoría Definitiva (C-2): los tres pasos (insert del
+    // evento, lectura de sus hashes, encolado de la op) van en
+    // UNA transacción: antes eran tres awaits separados y una
+    // muerte del proceso en medio dejaba el evento local SIN su
+    // op — la auditoría nunca salía del teléfono y nadie lo
+    // notaba (no hay barrido regenerador). El núcleo En de
+    // auditoriaInsert conserva dentro de esta transacción la
+    // propiedad anti-bifurcación de la cadena de hashes.
     // El hash previo/propio viajan para verificación cruzada en servidor.
     // 1.28 (M1-A6/R2M1-F3): se leen de LA FILA RECIÉN INSERTADA,
     // por su id. Antes se tomaba auditoriaPendientes(limit: 1)
@@ -7083,20 +7129,35 @@ class SyncEngine {
     // el id/acción nuevos pero los hashes de OTRA auditoría, y
     // la cadena no validaba en el servidor (falsa señal de
     // manipulación sobre un registro íntegro).
-    final propia = await _db.auditoriaPorId(id);
-    await _db.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'auditoria',
-      payload: {
-        'id': id,
-        'accion': accion.trim(),
-        'objeto_tipo': objetoTipo,
-        'objeto_id': objetoId,
-        'detalle': detalle,
-        'hash_previo': propia?['hash_previo'],
-        'hash_propio': propia?['hash_propio'],
-      },
-    );
+    final d = await _db.db;
+    late String id;
+    await d.transaction((txn) async {
+      id = await _db.auditoriaInsertEn(
+        txn,
+        actorId: actorId,
+        actorNombre: actorNombre,
+        accion: accion.trim(),
+        objetoTipo: objetoTipo,
+        objetoId: objetoId,
+        detalle: detalle,
+        dispositivoId: dispositivoId,
+      );
+      final propia = await _db.auditoriaPorId(id, txn: txn);
+      await _db.queueOp(
+        txn: txn,
+        opUuid: const Uuid().v4(),
+        tipo: 'auditoria',
+        payload: {
+          'id': id,
+          'accion': accion.trim(),
+          'objeto_tipo': objetoTipo,
+          'objeto_id': objetoId,
+          'detalle': detalle,
+          'hash_previo': propia?['hash_previo'],
+          'hash_propio': propia?['hash_propio'],
+        },
+      );
+    });
     return id;
   }
 
