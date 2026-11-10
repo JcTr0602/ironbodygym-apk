@@ -12,8 +12,10 @@ library;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/salud_sync.dart';
+import 'package:ironbody_gym/sync.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -24,10 +26,18 @@ Future<Database> _abrirDbVacia() async {
   databaseFactory = databaseFactoryFfi;
   SharedPreferences.setMockInitialValues({});
   final dir = await getDatabasesPath();
-  final dbPath = p.join(dir, 'ironbody.db');
-  try {
-    await File(dbPath).delete();
-  } catch (_) {}
+  // Con IRONBODY_TEST_DB=1 (el corredor de la casa) el archivo
+  // es ironbody_<pid>.db: borrar SIEMPRE el que LocalDb abre de
+  // verdad, no el histórico 'ironbody.db' (con el borrador
+  // equivocado la BD del proceso arrastraba las metas de un
+  // test anterior y los atascos salían en otro orden).
+  for (final sufijo in ['', '-wal', '-shm']) {
+    for (final nombre in ['ironbody.db', 'ironbody_$pid.db']) {
+      try {
+        await File(p.join(dir, nombre) + sufijo).delete();
+      } catch (_) {}
+    }
+  }
   await LocalDb.resetParaTest();
   return await LocalDb.instance.db;
 }
@@ -87,5 +97,39 @@ void main() {
     // sigue en ámbar como hasta hoy.
     expect(pintar(sinVerificar: true), SemaforoTabla.ambar);
     expect(pintar(), SemaforoTabla.verde);
+  });
+
+  // NOTA de harness (Yunque de cambios 1.31, M2): el camino
+  // conductual atascoSinVerificar() no se ejercita aquí porque
+  // en este archivo la sesión de Supabase es la del dummy sin
+  // admin y el escaneo del rol entrenador excluye
+  // cliente_congelaciones a propósito (tablasProhibidasEntrenador);
+  // con sesión de dueño en la app real el escaneo es
+  // tablasEspejo completo. El guardián determinista de la
+  // corrección es la pertenencia al conjunto, abajo.
+  test(
+      'Yunque de cambios 1.31 (M2): las 5 tablas que el lector '
+      'viejo no veía están en el escaneo nuevo', () {
+    SharedPreferences.setMockInitialValues({});
+    const fueraDelWatermark = [
+      'cliente_mediciones',
+      'gympedia_solicitudes',
+      'permisos_bandeja',
+      'espejo_gympedia_borradores',
+      'cliente_congelaciones',
+    ];
+    for (final t in fueraDelWatermark) {
+      expect(LocalDb.tablasConWatermark.contains(t), isFalse,
+          reason: '$t no debía estar en tablasConWatermark');
+      expect(
+          SyncEngine.tablasEspejoActivasParaRol(true).contains(t),
+          isTrue,
+          reason: '$t sí debe estar en el escaneo de atascos');
+      expect(SyncEngine.tablasEspejo.contains(t), isTrue);
+    }
+    // Y el escaneo del dueño cubre TODO el pull: nada fuera.
+    expect(
+        SyncEngine.tablasEspejoActivasParaRol(true),
+        SyncEngine.tablasEspejo);
   });
 }

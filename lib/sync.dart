@@ -1382,7 +1382,14 @@ class SyncEngine {
   Future<({String? tabla, String? nombre, int? seq, int filas})>
       atascoSinVerificar() async {
     try {
-      final tablas = LocalDb.tablasConWatermarkParaRol(_esAdminSeguro);
+      // Yunque de cambios 1.31 (M2): el rastro se persiste para
+      // TODA tabla del pull (tablasEspejo activas del rol);
+      // escanear solo las de watermark dejaba fuera 5 espejos
+      // (cliente_mediciones, gympedia_solicitudes,
+      // permisos_bandeja, espejo_gympedia_borradores,
+      // cliente_congelaciones): su atasco existía en la meta
+      // pero ninguna superficie lo nombraba.
+      final tablas = tablasEspejoActivasParaRol(_esAdminSeguro);
       for (final t in tablas) {
         final v = await _db.getMeta('wm_sinverificar_$t');
         if (v == null || v.isEmpty) continue;
@@ -2010,7 +2017,7 @@ class SyncEngine {
         indeterminado: false,
       );
     } catch (e) {
-      AppLog.error('sync', 'conteo_pendientes_fallo: $e');
+      AppLog.error('sync', 'conteo_pendientes_fallo', d: '$e');
       return (
         total: 0,
         esperandoConfirmacion: 0,
