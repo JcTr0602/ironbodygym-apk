@@ -199,7 +199,10 @@ List<({DateTime fecha, double valor})> serieMedicion(
     final medidas = m['medidas'];
     if (medidas is! Map) continue;
     final v = (medidas[metrica] as num?)?.toDouble();
-    if (v == null) continue;
+    // Yunque R5-M9-3: el mismo filtro de validez que
+    // validarMedicion: un 0/NaN legado no es una medición
+    // y no se pinta como caída a cero de la serie.
+    if (v == null || v <= 0 || !v.isFinite) continue;
     final f = DateTime.tryParse('${m['fecha_medicion'] ?? ''}');
     if (f == null) continue;
     puntos.add((fecha: f, valor: v));

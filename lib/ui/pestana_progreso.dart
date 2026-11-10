@@ -298,8 +298,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           ),
           const SizedBox(height: 16),
 
-          // Gráfico de peso (2+) o tarjeta resumen (1 medición)
-          if (_mediciones.length >= 2) ...[
+          // Gráfico de peso (2+) o tarjeta resumen (1 medición).
+          // Yunque R5-M9-4: la puerta cuenta PUNTOS DE PESO
+          // VÁLIDOS, no mediciones: con 2 mediciones pero un
+          // solo peso válido, antes no salía ni gráfica ni
+          // tarjeta — un vacío mudo.
+          if (puntosPesoValidos(_mediciones).length >= 2) ...[
             GraficoPesoEntrenador(mediciones: _mediciones),
             const SizedBox(height: 16),
             // 1.25 T109: el gráfico deja de ser solo del
@@ -318,7 +322,8 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                     titulo: titulo, unidad: 'cm', puntos: serie),
                 const SizedBox(height: 16),
               ],
-          ] else if (_mediciones.length == 1) ...[
+          ] else if (puntosPesoValidos(_mediciones).length == 1 ||
+              _mediciones.length == 1) ...[
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -332,9 +337,22 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      _mediciones.first.pesoKg == null
-                          ? 'Último: sin peso registrado'
-                          : 'Último: ${_mediciones.first.pesoKg!.toStringAsFixed(1)} kg',
+                      // R5-M9-4: «último» = el último peso
+                      // VÁLIDO (la lista llega recientes
+                      // primero), no el de la primera
+                      // medición de la lista.
+                      () {
+                        final validos = [
+                          for (final m in _mediciones)
+                            if (m.pesoKg != null &&
+                                m.pesoKg! > 0 &&
+                                m.createdAt.year >= 2000)
+                              m.pesoKg!,
+                        ];
+                        return validos.isEmpty
+                            ? 'Último: sin peso registrado'
+                            : 'Último: ${validos.first.toStringAsFixed(1)} kg';
+                      }(),
                       style:
                           AppTexto.displayPequeno,
                     ),

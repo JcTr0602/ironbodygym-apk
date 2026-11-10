@@ -34,9 +34,15 @@ class PuntoSerie {
 List<double> fraccionesEjeTiempo(List<DateTime> fechas) {
   if (fechas.isEmpty) return const [];
   if (fechas.length == 1) return const [0.5];
+  // Yunque R5-M9-5: el día del eje es el día HABANA, el
+  // mismo que rotulan las etiquetas (fmtFechaHabana): con
+  // los campos crudos, una medición de madrugada UTC se
+  // agrupaba por un día distinto del que decía su rótulo.
   final dias = [
     for (final f in fechas)
-      DateTime.utc(f.year, f.month, f.day).millisecondsSinceEpoch ~/ 86400000,
+      DateTime.utc(aHabana(f).year, aHabana(f).month, aHabana(f).day)
+              .millisecondsSinceEpoch ~/
+          86400000,
   ];
   final span = dias.last - dias.first;
   if (span <= 0) {
@@ -47,10 +53,14 @@ List<double> fraccionesEjeTiempo(List<DateTime> fechas) {
 
 /// El rango visible de la serie: si es plana (máx ==
 /// mín), se expande ±1 para dibujarla en el CENTRO en
-/// vez de pegada al suelo.
+/// vez de pegada al suelo. Si no es plana, Yunque
+/// R5-M9-1: margen del 10 % del rango en cada extremo —
+/// sin él, una variación mínima (99,9 → 100,1 kg) llenaba
+/// todo el alto y se leía como un cambio enorme.
 ({double minE, double maxE}) rangoVisibleSerie(double min, double max) {
   if (max == min) return (minE: min - 1, maxE: max + 1);
-  return (minE: min, maxE: max);
+  final margen = (max - min) * 0.1;
+  return (minE: min - margen, maxE: max + margen);
 }
 
 /// El índice del punto cuya X (fracción × ancho) queda
