@@ -142,6 +142,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
   String _swipeIzq = 'ninguna';
   String? _espacioTexto;
   bool _buscandoUpdate = false;
+  // (Yunque R2-X1) la carga del perfil terminó (bien o
+  // mal): sin esta marca, un fallo a mitad dejaba los
+  // valores por defecto EN SILENCIO, indistinguibles de
+  // los reales; con ella la pantalla avisa del fallo.
+  bool _cargaPerfilFallo = false;
 
   @override
   void initState() {
@@ -197,6 +202,24 @@ class _AjustesScreenState extends State<AjustesScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) si una lectura del perfil lanza a
+    // mitad, NO se finge que los valores por defecto son
+    // los del usuario: se marca el fallo y se avisa.
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora.
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() => _cargaPerfilFallo = true);
+        _msg('No se pudo leer tu perfil completo; algunos '
+            'valores se ven por defecto. Vuelve a entrar '
+            'para reintentar.');
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final av = await _perfil.avatarFile();
     final tiene = await av.exists();
     if (!mounted) return;
