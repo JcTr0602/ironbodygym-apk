@@ -570,15 +570,30 @@ double ultimaEntradaAguaCosto(List<Map<String, dynamic>> movs) {
   return (mejor?['costo_unitario'] as num?)?.toDouble() ?? 0;
 }
 
-/// CSV para J2/J3 (exportar a CSV/Excel): escapado mínimo con
-/// comillas cuando hace falta. PURO.
+/// CSV para J2/J3 (exportar a CSV/Excel). PURO.
+/// Yunque R5-M3-3: mismo criterio que csvDeExportacion —
+/// neutraliza las celdas que empiezan por `=`/`+`/`-`/`@`
+/// (inyección de fórmulas en Excel) y entrecomilla también
+/// con `\r`; antes esta copia solo escapaba `,`/`"`/`\n` y
+/// un nombre de bote/suplemento tecleado podía abrirse como
+/// fórmula viva.
 String csvEstadisticas(
     List<String> cabecera, List<List<String>> filas) {
   String esc(String s) {
-    if (s.contains(',') || s.contains('"') || s.contains('\n')) {
-      return '"${s.replaceAll('"', '""')}"';
+    var v = s;
+    if (v.startsWith('=') ||
+        v.startsWith('+') ||
+        v.startsWith('-') ||
+        v.startsWith('@')) {
+      v = "'$v";
     }
-    return s;
+    if (v.contains(',') ||
+        v.contains('"') ||
+        v.contains('\n') ||
+        v.contains('\r')) {
+      return '"${v.replaceAll('"', '""')}"';
+    }
+    return v;
   }
 
   final sb = StringBuffer();

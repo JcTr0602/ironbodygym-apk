@@ -13,10 +13,12 @@ import '../adelantos.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
+import '../negocio.dart' show esPagoAnulado;
 import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
 import '../perfil.dart';
 import '../tiempo.dart';
+import 'cuentas_por_cobrar.dart' show esFiadoPendienteVenta;
 
 /// CSV de exportación (cabecera + filas). 1.29 (Oleada 6,
 /// D-B3-08): las celdas que empiezan por `=`, `+`, `-` o
@@ -63,6 +65,26 @@ bool esVentaAnulada(Map<String, dynamic> v) {
       '${v['estado'] ?? ''}' == 'anulada';
 }
 
+/// Yunque R5-M3-1: ¿el pago viaja en la hoja de pagos del
+/// mes? Aplica los filtros canónicos de `pagosDelPeriodo`
+/// (negocio.dart): la Cuenta a la Casa nunca suma en
+/// ingresos, las cortesías/promos no son pagos, y un pago
+/// cuya anulación sigue en cola ya no es dinero. Sin esto,
+/// la hoja incluía montos que ninguna pantalla de la app
+/// muestra y quien sumaba el CSV obtenía un mes inflado.
+/// PURO.
+bool pagoExportable(Map<String, dynamic> p, Set<int> casas,
+    Set<int> anuladosEnCola) {
+  final metodo = '${p['metodo'] ?? ''}'.toLowerCase();
+  if (metodo == 'cortesia' || metodo == 'promo') return false;
+  if (p['casa'] == 1 || p['casa'] == true) return false;
+  final cid = (p['cliente_id'] as num?)?.toInt() ??
+      int.tryParse('${p['cliente_id'] ?? ''}');
+  if (cid != null && casas.contains(cid)) return false;
+  if (esPagoAnulado(p, anuladosEnCola)) return false;
+  return true;
+}
+
 /// Filas de la hoja de ventas del mes (PURO): solo el mes [pref],
 /// sin anuladas y sin compradores protegidos (misma privacidad que
 /// la hoja de pagos). Columnas: fecha, producto, cantidad, monto,
@@ -77,6 +99,10 @@ List<List<String>> filasVentasMes(
   for (final v in ventas) {
     if (!'${v['fecha'] ?? ''}'.startsWith(pref)) continue;
     if (esVentaAnulada(v)) continue;
+    // Yunque R5-M3-2: el fiado sin saldar no es una venta
+    // cobrada (la vía canónica ventasSuplementosCup lo
+    // excluye): no viaja en la hoja del mes.
+    if (esFiadoPendienteVenta(v)) continue;
     final cid = (v['cliente_id'] as num?)?.toInt() ??
         (v['fiado_cliente_id'] as num?)?.toInt();
     if (cid != null && protegidos.contains(cid)) continue;
@@ -187,11 +213,16 @@ Future<bool> exportarExcel() async {
     };
     final pagosMes =
         pagos.where((p) => '${p['fecha'] ?? ''}'.startsWith(pref)).toList();
+    // Yunque R5-M3-1: los mismos filtros canónicos que
+    // pagosDelPeriodo (Casa, anulados en cola, cortesías).
+    final casas = await LocalDb.instance.idsCuentasCasa();
+    final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
     final csvPagos = csvDeExportacion(
       ['fecha', 'cliente', 'monto', 'metodo'],
       [
         for (final p in pagosMes)
-          if (!protegidos.contains((p['cliente_id'] as num?)?.toInt()))
+          if (!protegidos.contains((p['cliente_id'] as num?)?.toInt()) &&
+              pagoExportable(p, casas, anuladosCola))
           [
             '${p['fecha'] ?? ''}',
             nombreCliente[p['cliente_id'] as int?] ?? '',
@@ -382,9 +413,12 @@ Future<bool> exportarExcel() async {
       XFile(f4.path),
       if (f5 != null) XFile(f5.path),
     ];
+    // Yunque R5-M3-5: el texto anuncia solo las hojas que
+    // de verdad van en el paquete; si la nómina falló, no
+    // se promete en el mensaje ni se pretende que va.
     await Share.shareXFiles(archivos,
-        text: 'Iron Body Gym — clientes, pagos, ventas, suplementos'
-            ' y nómina del mes');
+        text: 'Iron Body Gym — clientes, pagos, ventas y suplementos'
+            '${f5 != null ? ' y nómina del mes' : ' del mes (la nómina no se pudo generar)'}');
     return true;
   } catch (_) {
     return false;

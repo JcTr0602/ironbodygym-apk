@@ -1941,15 +1941,13 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   // -- exportar ----------------------------------------------------------
-  String _csv(List<String> cab, List<List<String>> filas) {
-    String esc(String s) => '"${s.replaceAll('"', '""')}"';
-    final sb = StringBuffer();
-    sb.writeln(cab.map(esc).join(','));
-    for (final f in filas) {
-      sb.writeln(f.map(esc).join(','));
-    }
-    return sb.toString();
-  }
+  // Yunque R5-M3-3: el escape es el CANÓNICO de
+  // csvDeExportacion (exportar_excel.dart), con la
+  // neutralización anti-fórmulas de D-B3-08 — esta copia
+  // solo entrecomillaba y un nombre que empezara por «=»
+  // se abría en Excel como fórmula viva.
+  String _csv(List<String> cab, List<List<String>> filas) =>
+      csvDeExportacion(cab, filas);
 
   Future<void> _exportar() async {
     // Cliente protegido (2026-10-26, Protegido 2 H8): exportar es
@@ -1961,6 +1959,20 @@ class _AdminScreenState extends State<AdminScreen> {
       }
       return;
     }
+    // Yunque R5-M3-4: el fallo se AVISA (antes la promesa
+    // quedaba sin gestionar y el dueño no sabía si exportó).
+    try {
+      await _exportarReal();
+    } catch (e) {
+      AppLog.error('ui', 'exportar_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo exportar: $e',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  Future<void> _exportarReal() async {
     final clientes = await LocalDb.instance.allMirror('clientes');
     final protegidos = <int>{};
     for (final c in clientes) {
@@ -1992,11 +2004,16 @@ class _AdminScreenState extends State<AdminScreen> {
         '${n.month.toString().padLeft(2, '0')}';
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
     final pagosMes = await LocalDb.instance.pagosDelMes(pref);
+    // Yunque R5-M3-1: los filtros canónicos, como la hoja
+    // principal (Casa, anulados en cola, cortesías fuera).
+    final casasExp = await LocalDb.instance.idsCuentasCasa();
+    final anuladosExp = await LocalDb.instance.pagosAnuladosEnCola();
     final csvPagos = _csv(
       ['id', 'cliente_id', 'fecha', 'monto', 'metodo', 'periodo'],
       [
         for (final p in pagosMes)
-          if (!protegidos.contains((p['cliente_id'] as num?)?.toInt()))
+          if (!protegidos.contains((p['cliente_id'] as num?)?.toInt()) &&
+              pagoExportable(p, casasExp, anuladosExp))
           [
             '${p['id'] ?? ''}',
             '${p['cliente_id'] ?? ''}',
