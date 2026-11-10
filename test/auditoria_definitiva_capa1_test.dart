@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/comprobantes.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
 import 'package:path/path.dart' as p;
@@ -165,6 +166,45 @@ void main() {
       expect(k, isNonNegative,
           reason: 'push() volvió a limpiar last_sync_error '
               'incondicionalmente');
+    });
+  });
+
+  group('A-4 · la bandera de comprobantes no queda pegada', () {
+    test('tras la pausa QoS, el siguiente ciclo SÍ procesa',
+        () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      // Comprobante pendiente con el archivo ausente: si un
+      // ciclo llega a procesarlo, termina en 'error'
+      // (archivo_ausente) sin tocar la red.
+      await d.insert('comprobantes_pago', {
+        'comprobante_uuid': 'comp-a4',
+        'ruta_local': '/no/existe/comp-a4.jpg',
+        'storage_path': 'comprobantes/comp-a4.jpg',
+        'estado': 'pendiente',
+        'creado_en': '2026-11-10T00:00:00-05:00',
+        'intentos': 0,
+        'proximo_intento_en': 0,
+      });
+      // Una op de cobro pendiente cierra la puerta QoS.
+      await db.queueOp(
+          opUuid: 'op-a4',
+          tipo: 'pago_mensual',
+          payload: {'cliente_id': 1});
+      expect(await ComprobantesService.instance.procesar(), 0);
+      var fila = await ComprobantesService.instance.filaDe('comp-a4');
+      expect(fila?['estado'], 'pendiente',
+          reason: 'la puerta QoS no debió tocar la fila');
+      // La op se aplica y la puerta se abre. Con la bandera
+      // pegada (el defecto), este procesar() devolvería 0 al
+      // instante sin mirar la fila.
+      await db.markOp('op-a4', 'aplicada');
+      await ComprobantesService.instance.procesar();
+      fila = await ComprobantesService.instance.filaDe('comp-a4');
+      expect(fila?['estado'], 'error',
+          reason: 'el ciclo tras la pausa QoS no corrió: '
+              '_procesando quedó pegada');
     });
   });
 }

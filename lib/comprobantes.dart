@@ -293,14 +293,18 @@ class ComprobantesService {
     _procesando = true;
     try {
       return await _procesarInterno();
-    } catch (_) {
-      // Panel final 1.21 (Terra por Zen): la apertura de la BD y
-      // el cálculo del lease van ANTES del try interno; si lanzan,
-      // el flag quedaba pegado en true y el worker no volvía a
-      // correr en este isolate. Se libera y se propaga el error,
-      // igual que se propagaba antes.
+    } finally {
+      // Auditoría Definitiva (A-4): la bandera se libera en TODA
+      // salida, sin excepción. Antes solo la soltaban el catch
+      // de aquí (si _procesarInterno LANZABA) y el finally
+      // INTERNO de _procesarInterno — pero la puerta QoS de la
+      // Regla de Hierro que el Yunque R3-M3-4 puso a la ENTRADA
+      // de _procesarInterno hace `return 0` NORMAL antes de ese
+      // try: la bandera quedaba pegada toda la vida del isolate
+      // y ningún comprobante volvía a subir en la sesión, en
+      // silencio. El finally interno ya no la toca (queda solo
+      // para el lease, que sí es suyo).
       _procesando = false;
-      rethrow;
     }
   }
 
@@ -461,7 +465,11 @@ class ComprobantesService {
       }
     } finally {
       // Liberar el lease solo si sigue siendo nuestro (si otro
-      // worker ya tomó el relevo, su valor no se toca).
+      // worker ya tomó el relevo, su valor no se toca). La
+      // bandera _procesando la libera el finally de procesar()
+      // (A-4): este finally corre ANTES si el try llegó a
+      // abrirse, y los return previos a él (puerta QoS, lease
+      // ajeno) ya no dejan nada pegado.
       try {
         await db.rawUpdate(
           "UPDATE meta SET v = '' WHERE k = 'comprobantes_worker_lease' "
@@ -469,7 +477,6 @@ class ComprobantesService {
           [leaseValor],
         );
       } catch (_) {}
-      _procesando = false;
     }
     return subidos;
   }
