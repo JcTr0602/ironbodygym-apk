@@ -23,6 +23,7 @@ import 'guia_editor.dart';
 import 'guia_equipos.dart';
 import 'componentes.dart';
 import 'skeleton.dart';
+import '../app_log.dart';
 
 /// 1.22 GY-05 (PURO): esenciales que quedarían tras publicar
 /// [candidatosDoc], fusionando POR SLUG sobre [publicadas]:
@@ -109,6 +110,23 @@ class _GuiaScreenState extends State<GuiaScreen> {
   Set<String> _enCola = {};
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     // 1.22 GY-02: sin dueño no se carga nada (defensa en
     // profundidad; build ya lo bloquea visualmente).
     if (!AuthService().isOwner) {
