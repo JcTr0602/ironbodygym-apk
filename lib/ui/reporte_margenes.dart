@@ -4,6 +4,7 @@ import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import '../app_log.dart';
 
 /// Margen en USD de un suplemento del espejo (Argón #9 BLOQUEANTE).
 /// El espejo `suplementos` es JSON (data), sin columnas: el precio vivo
@@ -66,6 +67,23 @@ class _ReporteMargenesScreenState
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     // Argón #9 (BLOQUEANTE): la tabla espejo suplementos es JSON
     // (id, data, sync_seq, ultimo_precio, moneda): NO existen las
     // columnas nombre/costo/precio/stock/activo y el rawQuery viejo
