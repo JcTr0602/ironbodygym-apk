@@ -22,6 +22,7 @@ import 'iconos_propios.dart';
 import 'aviso_duplicado.dart';
 import 'diseno.dart';
 import 'hoja_accion.dart';
+import 'servicios_detalle.dart';
 import 'skeleton.dart';
 import 'ranking_servicios.dart';
 import 'servicios_admin.dart';
@@ -149,124 +150,6 @@ class _HojaSalidaSinVentaState extends State<_HojaSalidaSinVenta> {
               texto: 'Registrar',
               icono: Icons.check_rounded,
               onPressed: _registrar,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// (1.30 D3, UI130-15) Hoja de «Revertir venta»: HojaAccion
-/// con estado propio, dueña de su controlador (dispose al
-/// cerrar). Devuelve (motivo, polvoPerdido) ya validado;
-/// null si se cancela. Los guardarraíles (pomo desactivado
-/// / lote cerrado) se comprueban ANTES, en _revertirInterno.
-/// Nace como hoja: era el otro diálogo excluido de la
-/// oleada 7.
-class _HojaRevertirVenta extends StatefulWidget {
-  final Map<String, dynamic> venta;
-  final bool esDueno;
-  const _HojaRevertirVenta(
-      {required this.venta, required this.esDueno});
-
-  @override
-  State<_HojaRevertirVenta> createState() =>
-      _HojaRevertirVentaState();
-}
-
-class _HojaRevertirVentaState extends State<_HojaRevertirVenta> {
-  final _motivoCtrl = TextEditingController();
-  var _polvoPerdido = false;
-  // 1.26 (BAJA): error de validación DENTRO de la hoja
-  // (antes «Revertir» cerraba y el motivo vacío se
-  // avisaba después, perdiendo lo tecleado).
-  String? _errorMotivo;
-
-  @override
-  void dispose() {
-    _motivoCtrl.dispose();
-    super.dispose();
-  }
-
-  void _revertir() {
-    // 1.26 (BAJA): validar sin cerrar la hoja.
-    if (_motivoCtrl.text.trim().isEmpty) {
-      setState(() =>
-          _errorMotivo = 'Escribe el motivo de la reversión');
-      return;
-    }
-    Navigator.pop(context, (
-      motivo: _motivoCtrl.text.trim(),
-      polvoPerdido: _polvoPerdido,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final v = widget.venta;
-    // Argón #9 (BAJO): la comisión de la hoja es la real
-    // de la fila (la configurable; puede ser 0 para el
-    // dueño, el agua suelta o la Casa), no un texto fijo.
-    final com = (v['comision_monto'] as num?)?.toDouble() ??
-        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) *
-            ((v['cantidad'] as num?)?.toInt() ?? 0);
-    return HojaAccion(
-      titulo: 'Revertir venta',
-      icono: Icons.undo_rounded,
-      cuerpo: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-              'Se registrará un reverso auditable de esta venta '
-              '(${fmtMonto(((v['precio_unitario'] as num?)?.toDouble() ?? 0) * ((v['cantidad'] as num?)?.toDouble() ?? 0))} CUP). '
-              'La dosis vuelve al pomo, el pomo al agua común'
-              '${com > 0 ? ' y se restan los ${fmtMonto(com)} CUP de comisión' : ''}.'),
-          const SizedBox(height: AppEspacio.md),
-          CampoTexto(
-            controller: _motivoCtrl,
-            etiqueta: 'Motivo (obligatorio)',
-            errorText: _errorMotivo,
-            onChanged: (_) {
-              if (_errorMotivo != null) {
-                setState(() => _errorMotivo = null);
-              }
-            },
-          ),
-          // 1.15 V5: «polvo perdido» solo lo marca el dueño
-          // (patrón AuthService().isOwner vía _esDueno). La
-          // regla del servidor no cambia: sin salida por merma
-          // autorizada, la dosis no vuelve al saldo con una
-          // reversión ordinaria. Ventas viejas sin pomo no lo
-          // ofrecen: su merma no se puede atribuir a un pomo.
-          if (mostrarCheckboxPolvoPerdido(widget.esDueno) &&
-              (v['pomo_id'] as num?) != null)
-            CheckboxListTile(
-              value: _polvoPerdido,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('El polvo se perdió físicamente'),
-              subtitle: const Text(
-                  'La reversión anula cobro y comisión y la '
-                  'pérdida queda como salida no vendida.'),
-              onChanged: (x) =>
-                  setState(() => _polvoPerdido = x ?? false),
-            ),
-        ],
-      ),
-      pie: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-          ),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: BotonPrimario(
-              texto: 'Revertir',
-              icono: Icons.undo_rounded,
-              onPressed: _revertir,
             ),
           ),
         ],
@@ -1679,62 +1562,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
   }
 
+  /// 1.31 (Mejoras · Día): la reversión vive UNA vez en
+  /// servicios_detalle.dart y la comparten «Ventas de hoy» y
+  /// el Historial (guardarraíles + hoja + op + avisos).
   Future<void> _revertirInterno(Map<String, dynamic> v) async {
-    final pomoId = (v['pomo_id'] as num?)?.toInt();
-    // Guardarraíl: si el pomo ya fue desactivado por el dueño, la
-    // reversión está BLOQUEADA con motivo visible (la dosis no
-    // puede volver a un pomo desactivado). Ventas viejas de la
-    // época de lotes (pomo_id NULL) conservan su guardarraíl viejo.
-    if (pomoId != null) {
-      final pomos = await LocalDb.instance.allMirror('servicio_pomos');
-      final pomo = pomos.where(
-          (l) => (l['id'] as num?)?.toInt() == pomoId).toList();
-      if (pomo.isNotEmpty &&
-          (pomo.first['activo'] as num?)?.toInt() != 1) {
-        _aviso('El pomo de esta venta ya fue desactivado por el dueño',
-            error: true);
-        return;
-      }
-    } else {
-      final loteId = (v['lote_id'] as num?)?.toInt();
-      if (loteId != null) {
-        final lotes = await LocalDb.instance.allMirror('servicio_lotes');
-        final lote = lotes.where(
-            (l) => (l['id'] as num?)?.toInt() == loteId).toList();
-        if (lote.isNotEmpty &&
-            '${lote.first['estado'] ?? ''}' != 'activo') {
-          _aviso('El lote de esta venta ya fue cerrado por el dueño',
-              error: true);
-          return;
-        }
-      }
-    }
-    if (!mounted) return;
-    // 1.30 (D3, UI130-15): «Revertir venta» nace como
-    // HojaAccion (era el otro diálogo de la clase B excluida
-    // de la oleada 7). La hoja es dueña de su controlador y
-    // devuelve el motivo ya validado; el reverso y sus
-    // reglas no cambian.
-    final res = await showModalBottomSheet<
-        ({String motivo, bool polvoPerdido})>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => _HojaRevertirVenta(venta: v, esDueno: _esDueno),
-    );
-    if (res == null) return;
-    try {
-      await revertirVentaServicio(
-        ventaId: (v['id'] as num).toInt(),
-        motivo: res.motivo,
-        polvoPerdido: res.polvoPerdido,
-        pomoId: pomoId,
-        cantidad: (v['cantidad'] as num?)?.toInt(),
-      );
-      _aviso('Reverso registrado');
-      await _cargar();
-    } catch (e) {
-      _aviso(_limpio(e), error: true);
-    }
+    final ok = await revertirVentaServicioUI(context, v,
+        esDueno: _esDueno, aviso: _aviso);
+    if (ok && mounted) await _cargar();
   }
 
   // ---------------------------------------------------------------
@@ -2706,111 +2540,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   /// 10/25: la venta original de un reverso, por PK.
-  Future<Map<String, dynamic>?> _ventaOriginal(
-      Map<String, dynamic> v) async {
-    final origId = (v['reverso_de'] as num?)?.toInt();
-    if (origId == null) return null;
-    final filas =
-        await LocalDb.instance.mirrorPorIds('servicio_ventas', [origId]);
-    return filas.isEmpty ? null : filas.first;
-  }
-
-  /// Ficha de la venta (8/25): hora, pomo, motivo y venta original
-  /// si es reverso. Solo lectura, salvo Revertir (misma condición
-  /// que el botón de la fila).
+  /// 1.31 (Mejoras · Día): detalle único compartido con el
+  /// Historial (servicios_detalle.dart): monto arriba, cliente
+  /// protagonista y Revertir al pie.
   Future<void> _detalleVenta(Map<String, dynamic> v) async {
-    final esReverso = (v['reverso_de'] as num?) != null;
-    final yaReversada =
-        _reversadas.contains((v['id'] as num?)?.toInt());
-    final esCasa = (v['casa'] as num?)?.toInt() == 1;
-    final precio =
-        (v['precio_unitario'] as num?)?.toDouble() ?? 0;
-    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-    final monto = precio * cant;
-    final tipoTxt = etiquetaTipoServicio('${v['tipo']}');
-    final com = (v['comision_monto'] as num?)?.toDouble() ??
-        ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
-    // 10/25: la venta original se trae por PK, sin el espejo.
-    final original = await _ventaOriginal(v);
-    final fecha = '${v['fecha'] ?? ''}';
-    final fecha10 = fecha.length >= 10 ? fecha.substring(0, 10) : fecha;
-    final motivo = '${v['motivo'] ?? ''}'.trim();
-    if (!mounted) return;
-
-    Widget fila(String e, String valor) => Padding(
-          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                  width: 92,
-                  child: Text(e, style: AppTexto.secundario)),
-              Expanded(child: Text(valor, style: AppTexto.cuerpo)),
-            ],
-          ),
-        );
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: esReverso ? 'Reverso · $tipoTxt' : tipoTxt,
-        iconoTitulo: esReverso ? Icons.undo_rounded : Icons.bolt_rounded,
-        contenido: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              fila('Cliente', nombreClienteVentaServicio(v)),
-              fila('Fecha', fecha10.isEmpty ? '—' : fecha10),
-              fila('Hora', horaVentaServicio(v)),
-              fila('Pomo', nombrePomoVenta(v, _misPomos)),
-              fila('Cantidad', '$cant'),
-              fila('Precio', '${fmtMonto(precio)} CUP'),
-              fila('Total', '${fmtMonto(monto)} CUP'),
-              fila('Método', '${v['metodo'] ?? '—'}'),
-              // 1.28 (M3-C5): la ficha de una venta en cola lo
-              // dice: aún vive solo en este teléfono.
-              if (v['en_cola'] == true)
-                fila('Estado', 'Por sincronizar'),
-              fila('Registrado por',
-                  '${v['registrado_por_nombre'] ?? '—'}'),
-              if (esCasa) fila('Cuenta', 'Casa'),
-              if (com > 0)
-                fila('Comisión', '${fmtMonto(com)} CUP'),
-              if (motivo.isNotEmpty) fila('Motivo', motivo),
-              if (original != null) ...[
-                const EncabezadoSeccion(titulo: 'Venta original'),
-                fila('Tipo',
-                    etiquetaTipoServicio('${original['tipo']}')),
-                fila('Cliente', nombreClienteVentaServicio(original)),
-                fila('Monto',
-                    '${fmtMonto(((original['precio_unitario'] as num?)?.toDouble() ?? 0) * ((original['cantidad'] as num?)?.toDouble() ?? 0))} CUP'),
-                fila('Fecha', (() {
-                  final f = '${original['fecha'] ?? ''}';
-                  return f.length >= 10 ? f.substring(0, 10) : f;
-                })()),
-              ],
-            ],
-          ),
-        ),
-        acciones: [
-          // 1.28 (M3-C5): una venta aún en cola no se revierte
-          // (no tiene id de espejo): se deshace al vender.
-          if (!esReverso && !yaReversada && v['en_cola'] != true)
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await _revertir(v);
-              },
-              child: const Text('Revertir',
-                  style: TextStyle(color: AppColores.error)),
-            ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
+    await mostrarDetalleVentaServicio(
+      context,
+      venta: v,
+      pomos: _misPomos,
+      yaReversada: _reversadas.contains((v['id'] as num?)?.toInt()),
+      onRevertir: (venta) => _revertir(venta),
     );
   }
 }
