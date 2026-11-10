@@ -79,6 +79,28 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
         .toList();
     final fiado = await LocalDb.instance
         .fiadoPendienteDeCliente(widget.clienteId);
+    // Yunque R3-M6-2: PRIMER PINTADO con lo local ya
+    // computado y el Plus «sin verificar». Antes el primer
+    // setState esperaba la RPC del Plus: sin red, la
+    // pantalla giraba hasta 12 s con el estado de cuenta
+    // entero listo en el teléfono (la clase de la ficha
+    // del 2026-11-02). Ahora se pinta ya y la RPC de abajo
+    // enriquece en segundo plano recomponiendo el texto.
+    if (!mounted) return;
+    setState(() {
+      _cliente = cliente;
+      _texto = textoEstadoCuenta(
+        cliente: cliente,
+        pagos: pagos,
+        ventas: ventas,
+        servicios: servicios,
+        fiadoPendiente: fiado,
+        plusResidualTexto:
+            AuthService().isOwner ? 'sin verificar' : null,
+        hoyIso: hoyHabanaIso(),
+      );
+      _cargando = false;
+    });
     // Residuo Plus: solo el dueño obtiene dato real de la
     // RPC (fail-closed, igual que en la ficha).
     String? plusTxt;

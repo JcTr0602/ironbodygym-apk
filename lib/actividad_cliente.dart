@@ -221,12 +221,21 @@ class ActividadClienteService {
         .rpc('admin_actividad_cliente', params: params)
         .timeout(const Duration(seconds: 12));
     final filas = <ActividadCliente>[];
-    if (res is List) {
-      for (final f in res) {
-        if (f is Map) {
-          filas.add(ActividadCliente.desdeRpc(
-              Map<String, dynamic>.from(f)));
-        }
+    // Yunque R3-M6-7: una respuesta que NO es una lista es un
+    // fallo de contrato, no «sin actividad»: devolver [] aquí
+    // lo cacheaba el llamador como actividad vacía real con
+    // _sinConexion=false (error disfrazado de vacío). Se
+    // lanza, como hacen marcas_cliente y panel_premios con la
+    // respuesta malformada, y el catch del llamador lo pinta
+    // como lo que es: no se pudo consultar.
+    if (res is! List) {
+      throw StateError(
+          'admin_actividad_cliente: respuesta no es una lista');
+    }
+    for (final f in res) {
+      if (f is Map) {
+        filas.add(ActividadCliente.desdeRpc(
+            Map<String, dynamic>.from(f)));
       }
     }
     return filas;

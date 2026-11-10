@@ -135,6 +135,10 @@ class AccesosClientesTab extends StatefulWidget {
 
 class _AccesosClientesTabState extends State<AccesosClientesTab> {
   bool _cargando = true;
+  // Yunque R3-M6-3: generación de carga — una recarga
+  // posterior descarta el pintado en dos fases de la
+  // anterior (mismo patrón que el resto de la app).
+  int _genCarga = 0;
 
   @override
   void dispose() {
@@ -187,11 +191,23 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   Future<void> _cargar() async {
     // Lote 1 Argón: sin dueño no se dispara el RPC.
     if (!AuthService().isOwner) return;
+    final gen = ++_genCarga;
     setState(() {
       _cargando = true;
       _error = null;
     });
-    final ok = await AccesoAppCache.instance.cargar();
+    // Yunque R3-M6-3: si la caché ya tiene foto (memoria o
+    // persistida de la sesión), se pinta YA con ella y la
+    // carga de red enriquece detrás: antes el primer pintado
+    // esperaba en serie la caché (hasta 10 s) y la RPC de
+    // sin-acceso (12 s), con la lista ya en el teléfono.
+    final cache = AccesoAppCache.instance;
+    await cache.restaurarPersistidoSiFalta();
+    if (!mounted || gen != _genCarga) return;
+    if (cache.cargado) {
+      setState(() => _cargando = false);
+    }
+    final ok = await cache.cargar();
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s). La
       // caché de accesos ya trae el suyo (10 s), pero esta RPC
@@ -1163,6 +1179,11 @@ class AuditoriaAccesosScreen extends StatefulWidget {
 class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
   bool _cargando = true;
   List<dynamic> _items = [];
+  // Yunque R3-M6-4: el fallo de la última carga se pinta
+  // como error, nunca como «sin acciones»: pasado el snack
+  // transitorio, sin esta bandera la lista vacía por fallo
+  // era indistinguible del vacío real.
+  bool _falloCarga = false;
 
   static const _nombres = {
     'resetear_pin': 'PIN reseteado',
@@ -1201,12 +1222,16 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
       if (mounted) {
         setState(() {
           _items = (res as List?) ?? [];
+          _falloCarga = false;
           _cargando = false;
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _cargando = false);
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
         mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
       }
     }
@@ -1240,7 +1265,14 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
           // pantalla (antes decía «Cargando control de acceso…»,
           // copiado de la pantalla madre).
           ? const EstadoCargando(texto: 'Cargando auditoría de accesos…')
-          : _items.isEmpty
+          : _falloCarga && _items.isEmpty
+              // Yunque R3-M6-4: error ≠ vacío.
+              ? EstadoError(
+                  titulo: 'No se pudo cargar la auditoría',
+                  detalle: 'Revisa la conexión e inténtalo de nuevo.',
+                  onReintentar: _cargar,
+                )
+              : _items.isEmpty
               ? const Center(
                   child: Text('Sin acciones registradas todavía.',
                       style: AppTexto.secundario),

@@ -1618,7 +1618,11 @@ class InvitadosService {
         purgados: (n as num?)?.toInt() ?? 0,
       );
     }
-    return (ok: true, purgados: 0);
+    // Yunque R3-M6-7c: respuesta malformada de una op
+    // DESTRUCTIVA no es «no quedaba nada»: es fallo. Antes el
+    // llamador mostraba «Limpieza completada» con 0 purgados
+    // ante una respuesta que no se pudo interpretar.
+    return (ok: false, purgados: 0);
   }
 
   /// Prepara la conversión en Supabase y registra el estado local

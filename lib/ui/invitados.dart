@@ -613,6 +613,16 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     try {
       final res = await _svc.purgarVencidos();
       if (!mounted) return;
+      // Yunque R3-M6-7c: ok:false (p. ej. respuesta malformada
+      // del servidor) no es «limpieza completada con 0»: es
+      // fallo y se dice como tal, sin diálogo de éxito.
+      if (!res.ok) {
+        mostrarSnack(context,
+            'No se pudo confirmar la limpieza. Revisa la '
+            'conexión e inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+        return;
+      }
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(

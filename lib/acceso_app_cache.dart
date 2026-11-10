@@ -368,6 +368,18 @@ class AccesoAppCache {
     } catch (_) {}
   }
 
+  /// Yunque R3-M6-3: restaura la foto PERSISTIDA sin red,
+  /// para que una pantalla pueda pintar al instante y luego
+  /// enriquezca con [cargar]. Si ya hay foto en memoria, es
+  /// no-op. La guarda de generación de _cargarInterno no
+  /// aplica aquí a propósito: esto SOLO lee el persistido
+  /// (nunca escribe sobre datos más nuevos que la foto) y
+  /// respeta un borrado en curso, como _restaurarPersistido.
+  Future<void> restaurarPersistidoSiFalta() async {
+    if (_porCliente != null) return;
+    await _restaurarPersistido();
+  }
+
   /// Obtiene el acceso de un cliente. null = sin acceso o no cargado.
   AccesoCliente? obtener(int clienteId) => _porCliente?[clienteId];
 

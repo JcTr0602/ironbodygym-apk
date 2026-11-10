@@ -32,6 +32,13 @@ class _EditorPlanNutricionalState
   final _ctrl = TextEditingController();
   bool _cargando = true;
   bool _guardando = false;
+  // Yunque R3-M6-5: la carga del plan falló (o devolvió una
+  // forma inesperada): el editor queda NO editable y sin
+  // guardar hasta que una recarga traiga el plan real. Sin
+  // esta marca, un fallo dejaba el editor vacío, editable y
+  // guardable, y teclear encima sobrescribía a ciegas el
+  // plan que el servidor sí tenía.
+  bool _falloCarga = false;
   String? _actualizadoPor;
   DateTime? _actualizadoEn;
 
@@ -48,13 +55,17 @@ class _EditorPlanNutricionalState
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _falloCarga = false;
+    });
     try {
       // Autoauditoría 1.22 #2: la LECTURA con timeout (12 s):
       // sin tope, una conexión colgada dejaba el editor en
-      // «cargando» eterno. La ESCRITURA (_guardar) no lleva
-      // timeout a propósito, como en Invitados: un corte del
-      // lado cliente no debe fingir que el servidor no guardó.
+      // «cargando» eterno. (El comentario histórico decía que
+      // la ESCRITURA no llevaba timeout «a propósito»; desde
+      // la 1.24 Bloque 4 _guardar SÍ lo lleva — 12 s — y el
+      // texto quedó corregido en el Yunque R3-M6-5.)
       final res = await Supabase.instance.client
           .rpc(
             'obtener_plan_cliente',
@@ -68,7 +79,13 @@ class _EditorPlanNutricionalState
           data = data.first;
         }
         if (data is! Map) {
-          setState(() => _cargando = false);
+          // Yunque R3-M6-5: forma inesperada = no se sabe si
+          // hay plan: se trata como fallo de carga, no como
+          // plan vacío editable.
+          setState(() {
+            _falloCarga = true;
+            _cargando = false;
+          });
           return;
         }
         final m = Map<String, dynamic>.from(data);
@@ -99,7 +116,10 @@ class _EditorPlanNutricionalState
       // va a la bitácora, no a la cara del usuario.
       AppLog.error('plan_nutricional', 'cargar_fallo', d: '$e');
       if (mounted) {
-        setState(() => _cargando = false);
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
         mostrarSnack(context,
             'No se pudo cargar el plan. Revisa la conexión '
             'e inténtalo de nuevo.',
@@ -208,7 +228,7 @@ class _EditorPlanNutricionalState
         context,
         'Plan: ${widget.nombreCliente}',
         acciones: [
-          if (puedeEditar && !_cargando)
+          if (puedeEditar && !_cargando && !_falloCarga)
             IconButton(
               icon: const Icon(Icons.save_rounded),
               onPressed:
@@ -220,7 +240,17 @@ class _EditorPlanNutricionalState
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator())
-          : Column(
+          : _falloCarga
+              // Yunque R3-M6-5: sin el plan real no hay
+              // editor: error con reintento, nunca un campo
+              // vacío guardable encima del plan del servidor.
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el plan',
+                  detalle: 'El plan guardado no se descargó; '
+                      'editar ahora lo sobrescribiría a ciegas.',
+                  onReintentar: _cargar,
+                )
+              : Column(
               children: [
                 if (_actualizadoPor != null)
                   Padding(

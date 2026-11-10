@@ -415,10 +415,16 @@ class TurnoService {
         .rpc('mis_cierres_turno')
         .timeout(const Duration(seconds: 12));
     final filas = <Map<String, dynamic>>[];
-    if (res is List) {
-      for (final f in res) {
-        if (f is Map) filas.add(Map<String, dynamic>.from(f));
-      }
+    // Yunque R3-M6-7: una respuesta que NO es una lista es un
+    // fallo de contrato, no «sin cierres»: devolver [] aquí
+    // hacía que la reconciliación devolviera ok:true con 0
+    // recibidos (éxito disfrazado). Se lanza y la
+    // reconciliación lo reporta como fallo de lectura.
+    if (res is! List) {
+      throw StateError('mis_cierres_turno: respuesta no es una lista');
+    }
+    for (final f in res) {
+      if (f is Map) filas.add(Map<String, dynamic>.from(f));
     }
     return filas;
   }
