@@ -144,6 +144,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
         nombre: r.nombre,
         monto: r.monto,
         referencia: r.referencia,
+        meses: r.meses,
         // Yunque B (YB-FLU-03): con la cotización vencida el
         // diálogo exige aceptarlo expresamente (checkbox)
         // antes de habilitar «Confirmar».
@@ -167,6 +168,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
         nombre: r.nombre,
         monto: r.monto,
         referencia: r.referencia,
+        meses: r.meses,
       ),
     );
     if (motivo != null && mounted) {
@@ -283,6 +285,11 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
                 : r.telefono),
             _fila(Icons.receipt_long_rounded,
                 'Referencia: ${r.referencia}'),
+            // Multimes (pieza 4 de Gestión): el paquete va EN
+            // LA FILA, junto al monto — con paquetes de varios
+            // meses, el monto solo ya no dice qué se aprueba.
+            _fila(Icons.inventory_2_rounded,
+                'Paquete: ${r.rotuloPaquete}'),
             if (r.banco.isNotEmpty)
               _fila(Icons.account_balance_rounded, r.banco),
             if (r.movilOrigen.isNotEmpty)
@@ -406,12 +413,19 @@ class _DialogoConfirmarPlus extends StatefulWidget {
     required this.nombre,
     required this.monto,
     required this.referencia,
+    this.meses = 1,
     this.cotizacionVencida = false,
   });
 
   final String nombre;
   final double monto;
   final String referencia;
+
+  /// Multimes (pieza 4 de Gestión): paquete del reporte. El
+  /// diálogo nombra SUS días (meses × 30), no un «30 días»
+  /// fijo, y el aviso de descuadre lo compara contra el
+  /// precio de ESTE paquete (el monto reportado).
+  final int meses;
 
   /// Yunque B (YB-FLU-03): la cotización del reporte venció
   /// seguro (>24 h): el diálogo lo dice y exige marcar la
@@ -454,6 +468,24 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
     Navigator.pop(context, v);
   }
 
+  int get _dias => widget.meses * 30;
+
+  String get _rotuloPaquete => widget.meses == 1
+      ? '1 mes · 30 días'
+      : '${widget.meses} meses · $_dias días';
+
+  /// Multimes (D3): el monto tecleado ya no coincide con el
+  /// precio del paquete cotizado (el monto del reporte). El
+  /// diálogo lo avisa EN VIVO, mientras se edita: los días
+  /// del paquete se otorgan igual y el monto solo ajusta el
+  /// ingreso. Texto ilegible o inválido no es descuadre (lo
+  /// marca el error del campo al confirmar).
+  bool get _descuadra {
+    final v = double.tryParse(_ctrl.text.trim().replaceAll(',', '.'));
+    return montoPlusDescuadrado(
+        montoReportado: widget.monto, montoEditado: v);
+  }
+
   @override
   Widget build(BuildContext context) {
     return DialogoApp(
@@ -465,9 +497,11 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
         children: [
           Text('${widget.nombre} reportó ${fmtMonto(widget.monto)} CUP '
               'por transferencia (referencia ${widget.referencia}).'
-              '\n\nAl confirmar, el invitado recibe 30 días de '
-              'App Plus desde que el servidor procese la '
-              'confirmación.'),
+              '\n\nPaquete: $_rotuloPaquete.'
+              '\n\nAl confirmar, el invitado recibe $_dias días '
+              'de App Plus, sumados al final de su Plus actual '
+              'si aún lo tiene vigente, desde que el servidor '
+              'procese la confirmación.'),
           // Yunque B (YB-FLU-03): reconfirmación expresa con
           // la cotización vencida — sin marcarla, «Confirmar»
           // queda deshabilitado.
@@ -496,6 +530,9 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
             controller: _ctrl,
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
+            // Multimes: repintar al teclear para que el aviso
+            // de descuadre aparezca en vivo.
+            onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               labelText: 'Monto confirmado (CUP)',
               border: const OutlineInputBorder(),
@@ -504,6 +541,23 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
                   : null,
             ),
           ),
+          // Multimes (D3): aviso de descuadre — editar el
+          // monto NO cambia los días del paquete; solo el
+          // ingreso. Para el pago que no corresponde, la vía
+          // es Rechazar con motivo.
+          if (_descuadra) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Ojo: el monto no coincide con el paquete de '
+              '${widget.meses == 1 ? '1 mes' : '${widget.meses} meses'} '
+              '(${fmtMonto(widget.monto)} CUP): el invitado '
+              'recibirá igualmente los $_dias días del paquete '
+              'y el ingreso quedará por el monto que confirmes.',
+              style: TextStyle(
+                  color: AppColores.alerta,
+                  fontWeight: FontWeight.w600),
+            ),
+          ],
         ],
       ),
       acciones: [
@@ -534,11 +588,17 @@ class _DialogoRechazarPlus extends StatefulWidget {
     required this.nombre,
     required this.monto,
     required this.referencia,
+    this.meses = 1,
   });
 
   final String nombre;
   final double monto;
   final String referencia;
+
+  /// Multimes (pieza 4 de Gestión): paquete del reporte; el
+  /// resumen del rechazo también lo nombra (quien decide un
+  /// rechazo también debe saber qué paquete está tumbando).
+  final int meses;
 
   @override
   State<_DialogoRechazarPlus> createState() =>
@@ -573,7 +633,8 @@ class _DialogoRechazarPlusState extends State<_DialogoRechazarPlus> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('${widget.nombre} · ${fmtMonto(widget.monto)} CUP · '
-              'ref. ${widget.referencia}'),
+              'ref. ${widget.referencia} · '
+              'Paquete: ${widget.meses == 1 ? '1 mes · 30 días' : '${widget.meses} meses · ${widget.meses * 30} días'}'),
           const SizedBox(height: 12),
           TextField(
             controller: _ctrl,
