@@ -10,6 +10,14 @@ class TipoOperacionInfo {
 
 const Map<String, TipoOperacionInfo> kTiposOperacion = {
   'inscribir': TipoOperacionInfo('Inscripción', Icons.person_add_rounded),
+  // 1.31 (H-07/C-NEW-5, yunque de app): los dos tipos de
+  // vales de premio SÍ están en el CHECK del servidor
+  // pero faltaban aquí: la cola los enseñaba con el
+  // identificador crudo.
+  'anular_vale_premio':
+      TipoOperacionInfo('Anulación de vale de premio', Icons.cancel_rounded),
+  'regalar_dias_premio': TipoOperacionInfo(
+      'Regalo de días (premio)', Icons.card_giftcard_rounded),
   'crear_cliente':
       TipoOperacionInfo('Nuevo cliente', Icons.person_add_rounded),
   'editar_cliente':
