@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 import 'dart:async';
 import '../../localdb.dart';
 import '../../modelos/incidencia.dart';
@@ -653,6 +652,9 @@ class _ListaIncidenciasScreenState
       ),
       userId: AuthService().userId,
       telegramId: AuthService().telegramId,
+      // Yunque de App 1.31: rol del actor para la compuerta
+      // de rol del lote (resolver/reabrir solo dueño).
+      esDueno: AuthService().isOwner,
     );
     // v1.3.2: un solo disparo de sync al terminar el lote.
     unawaited(SyncEngine.instance.push());

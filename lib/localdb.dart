@@ -6808,6 +6808,47 @@ class LocalDb {
   /// Retorna la cantidad de incidencias efectivamente cambiadas.
   /// v1.3.2 (Argón #13): valida transición de estado (espejo de
   /// Incidencia.puedeTransicionarA, sin instanciar el modelo).
+  /// Yunque de App 1.31: espejo SIN instanciar de
+  /// Incidencia.puedeTransicionarAConRol — `_transicionValida`
+  /// validaba SOLO la máquina de estados, sin rol, y el lote
+  /// dejaba a un no-dueño REABRIR (resuelta → en_proceso) lo que
+  /// B-16 le quitó en el detalle. Esta compuerta añade las dos
+  /// reglas de rol de la política única: resolver y reabrir son
+  /// SOLO del dueño.
+  static bool transicionValidaConRol(
+      String anterior, String nuevo, bool esDueno) {
+    switch (anterior) {
+      case 'pendiente':
+        if (!(nuevo == 'en_proceso' ||
+            nuevo == 'bloqueada' ||
+            nuevo == 'resuelta')) {
+          return false;
+        }
+        break;
+      case 'en_proceso':
+        if (!(nuevo == 'bloqueada' ||
+            nuevo == 'resuelta' ||
+            nuevo == 'pendiente')) {
+          return false;
+        }
+        break;
+      case 'bloqueada':
+        if (!(nuevo == 'en_proceso' || nuevo == 'pendiente')) {
+          return false;
+        }
+        break;
+      case 'resuelta':
+        if (nuevo != 'en_proceso') return false;
+        break;
+      default:
+        return false;
+    }
+    if (!esDueno && (nuevo == 'resuelta' || anterior == 'resuelta')) {
+      return false;
+    }
+    return true;
+  }
+
   bool _transicionValida(String anterior, String nuevo) {
     switch (anterior) {
       case 'pendiente':
@@ -6838,6 +6879,10 @@ class LocalDb {
     // la op); puede ser null sin sesión.
     String? userId,
     int? telegramId,
+    // Yunque de App 1.31: rol del actor para la compuerta de
+    // `transicionValidaConRol` (resolver/reabrir solo dueño).
+    // Default false (sin rol declarado, manda la restricción).
+    bool esDueno = false,
   }) async {
     if (ids.isEmpty) return 0;
     final d = await db;
@@ -6895,7 +6940,11 @@ class LocalDb {
         // Filtro no-op: ya está en el estado destino.
         if (anterior == nuevoEstado) continue;
         // v1.3.2 (Argón #13): validar transición permitida.
-        if (!_transicionValida(anterior, nuevoEstado)) continue;
+        // Yunque de App 1.31: con la política de rol completa
+        // (B-16): un no-dueño no resuelve ni REABRE en lote.
+        if (!transicionValidaConRol(anterior, nuevoEstado, esDueno)) {
+          continue;
+        }
         // v1.3.2 (Argón #13): Mantenimiento exige foto para resolver.
         if (nuevoEstado == 'resuelta' &&
             '${rows.first['tipo_id']}' ==
@@ -6954,6 +7003,11 @@ class LocalDb {
               'resuelta_en': ahora,
             },
             'version': version + 1,
+            // Yunque de App 1.31 (C-5 completo): la misma
+            // precondición OCC que el detalle y el editor ya
+            // llevaban; sin ella el lote pisaba cambios de
+            // otro teléfono sin detección.
+            'version_base': version,
           }),
           'estado': 'pendiente',
           'creada_ts': ahora,
