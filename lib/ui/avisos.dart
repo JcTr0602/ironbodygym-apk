@@ -9,6 +9,7 @@ import 'app_bar.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 import 'componentes.dart';
+import '../app_log.dart';
 
 class AvisosScreen extends StatefulWidget {
   const AvisosScreen({super.key});
@@ -29,6 +30,23 @@ class _AvisosScreenState extends State<AvisosScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final v = await LocalDb.instance.getMeta('aviso_vencimientos');
     final c = await LocalDb.instance.getMeta('aviso_cumpleanos');
     final s = await LocalDb.instance.getMeta('aviso_sync');
