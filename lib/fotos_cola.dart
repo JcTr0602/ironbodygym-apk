@@ -685,38 +685,82 @@ class FotosColaService {
         );
 
         if (opPadre.isEmpty) {
-          // La operación padre no existe: foto huérfana. Decisión
-          // de Jc (G5): DESCARTAR, no conservar: la fila se borra y
-          // queda en AppLog (el op padre nunca existió o ya se
-          // podó; la foto no puede vincularse jamás).
-          await _descartarHuerfana(
-              db, f['id'] as int, 'op padre no existe en ops_queue');
-          continue;
+          // Auditoría Definitiva (B-17): «no está en ops_queue»
+          // ya no basta para descartar. purgarOpsAplicadas poda
+          // las ops aplicadas de >60 días: una foto cuyo padre
+          // se aplicó y se podó caía aquí igual que una cuyo
+          // padre jamás existió, y se descartaba pudiendo
+          // vincularse. Antes de descartar se distingue con la
+          // misma resolución triestado de _subirUna
+          // (clienteDeOp/suplementoDeOp: caché local del
+          // resultado y, si no, el registro del servidor):
+          // - Con evidencia (algún id resuelto): el padre SÍ
+          //   existió — se sigue al reclamo y _subirUna resuelve
+          //   los ids y vincula.
+          // - Sin evidencia pero SIN certeza (ambas lecturas
+          //   fallaron) o con la fila joven (<24 h): se difiere
+          //   2 h sin descartar — la ausencia puede ser una
+          //   carrera con la poda o con el propio push.
+          // - Sin evidencia, con certeza (el servidor respondió
+          //   y no la conoce) y fila vieja: nunca existió —
+          //   descarte G5, como antes.
+          final rc =
+              await SyncEngine.instance.clienteDeOp(fotoOpUuid);
+          final rs =
+              await SyncEngine.instance.suplementoDeOp(fotoOpUuid);
+          final hayEvidencia = rc.id != null || rs.id != null;
+          if (!hayEvidencia) {
+            final creada =
+                DateTime.tryParse('${f['creado_en'] ?? ''}');
+            final joven = creada != null &&
+                ahoraHabana().difference(creada) <
+                    const Duration(hours: 24);
+            final hayCerteza = rc.ok || rs.ok;
+            if (hayCerteza && !joven) {
+              await _descartarHuerfana(db, f['id'] as int,
+                  'op padre no existe en ops_queue ni en el servidor');
+            } else {
+              await db.update(
+                'fotos_cola',
+                {
+                  'proximo_intento_en': isoHabana(
+                      ahoraHabana().add(const Duration(hours: 2))),
+                  'actualizado_en': isoHabana(ahoraHabana()),
+                },
+                where: 'id = ?',
+                whereArgs: [f['id']],
+              );
+              AppLog.aviso('fotos', 'huerfana_en_gracia',
+                  d: 'op=$fotoOpUuid certeza=$hayCerteza joven=$joven');
+            }
+            continue;
+          }
+          // Con evidencia: seguir al reclamo y a _subirUna.
+        } else {
+          final estadoPadre = opPadre.first['estado'] as String?;
+          if (estadoPadre == 'rechazada') {
+            // La entidad fue rechazada por el servidor: nunca existirá.
+            await _descartarHuerfana(db, f['id'] as int,
+                'op padre rechazada por el servidor');
+            continue;
+          }
+          if (estadoPadre != 'aplicada') {
+            debugPrint(
+                '[Fotos] Lock: el op $fotoOpUuid está en $estadoPadre, la foto espera.');
+            await db.update(
+              'fotos_cola',
+              {
+                'proximo_intento_en': isoHabana(
+                    ahoraHabana().add(const Duration(minutes: 2))),
+                'actualizado_en': isoHabana(ahoraHabana()),
+              },
+              where: 'id = ?',
+              whereArgs: [f['id']],
+            );
+            continue;
+          }
+          // 'aplicada': la entidad ya existe en el servidor; seguir.
         }
-
-        final estadoPadre = opPadre.first['estado'] as String?;
-        if (estadoPadre == 'rechazada') {
-          // La entidad fue rechazada por el servidor: nunca existirá.
-          await _descartarHuerfana(db, f['id'] as int,
-              'op padre rechazada por el servidor');
-          continue;
-        }
-        if (estadoPadre != 'aplicada') {
-          debugPrint(
-              '[Fotos] Lock: el op $fotoOpUuid está en $estadoPadre, la foto espera.');
-          await db.update(
-            'fotos_cola',
-            {
-              'proximo_intento_en':
-                  isoHabana(ahoraHabana().add(const Duration(minutes: 2))),
-              'actualizado_en': isoHabana(ahoraHabana()),
-            },
-            where: 'id = ?',
-            whereArgs: [f['id']],
-          );
-          continue;
-        }
-        // 'aplicada': la entidad ya existe en el servidor; seguir.
       } // fin if (fotoOpUuid != null)
       final id = f['id'] as int;
 
@@ -1291,6 +1335,25 @@ class FotosColaService {
   /// limpiarHuerfanos por antigüedad).
   Future<void> _descartarHuerfana(
       DatabaseExecutor db, int id, String motivo) async {
+    // Auditoría Definitiva (B-17): el descarte también limpia
+    // las claves TUS de la foto (tus_loc_/tus_offset_ por
+    // op_uuid+tipo): quedaban huérfanas en meta para siempre.
+    try {
+      final filas = await db.query('fotos_cola',
+          columns: ['op_uuid', 'tipo'],
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1);
+      if (filas.isNotEmpty) {
+        final op = '${filas.first['op_uuid'] ?? ''}';
+        final tipo = '${filas.first['tipo'] ?? ''}';
+        if (op.isNotEmpty && tipo.isNotEmpty) {
+          await LocalDb.instance.setMeta('tus_loc_${op}_$tipo', '');
+          await LocalDb.instance
+              .setMeta('tus_offset_${op}_$tipo', '');
+        }
+      }
+    } catch (_) {}
     await db.delete('fotos_cola', where: 'id = ?', whereArgs: [id]);
     AppLog.info('fotos', 'huerfana_descartada',
         d: 'id=$id motivo=$motivo');
