@@ -164,6 +164,14 @@ void main() {
       'lib/ui/gympedia.dart': '_cargando',
       // Menores
       'lib/ui/avisos.dart': '_cargando',
+      // Extensión del barrido global de la ronda (fuera
+      // del catálogo de exploración, mismo defecto):
+      'lib/ui/congelados.dart': '_cargando',
+      'lib/ui/pagaron_mes.dart': '_cargando',
+      'lib/ui/pendiente.dart': '_cargando',
+      'lib/ui/plantillas_mensaje.dart': '_cargando',
+      'lib/ui/incidencias/detalle_incidencia.dart': '_cargando',
+      'lib/ui/incidencias/tipos_incidencia.dart': '_cargando',
     };
 
     test('cada pantalla del catálogo envuelve su carga en '
@@ -203,6 +211,29 @@ void main() {
       final src = _src('lib/ui/ajustes.dart');
       expect(src.contains('_cargaPerfilFallo = true'), isTrue);
       expect(src.contains('await _cargarDatos();'), isTrue);
+    });
+
+    test('toda red de la familia deja el fallo en bitácora '
+        '(AppLog «carga_fallo»: la clase nació de fallos '
+        'mudos y el finally a secas lo volvía inatribuible)', () {
+      for (final ruta in [
+        ...catalogo.keys,
+        'lib/ui/panel_bloque2.dart',
+        'lib/ui/pago.dart',
+        'lib/ui/ajustes.dart',
+        'lib/ui/ficha_acceso_app.dart',
+      ]) {
+        final src = _src(ruta);
+        expect(src.contains("AppLog.error('ui', 'carga_fallo'"), isTrue,
+            reason: '$ruta: la red no registra el fallo');
+      }
+    });
+
+    test('ficha_acceso_app: el «verificando» baja también '
+        'si la caché de acceso lanza', () {
+      final src = _src('lib/ui/ficha_acceso_app.dart');
+      expect(src.contains('(Yunque R2-X1)'), isTrue);
+      expect(src.contains('_verificando = false;'), isTrue);
     });
   });
 }
