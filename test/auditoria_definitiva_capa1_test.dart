@@ -1191,6 +1191,41 @@ void main() {
       expect(conPersistencia.datosGuardadosLocalmente, isTrue);
     });
 
+    test('C-4/C-5/C-7/C-12 · incidencias: catch en guardar, '
+        'version_base, selector seguro y build sin IO', () {
+      final editar =
+          File('lib/ui/incidencias/editar_incidencia.dart')
+              .readAsStringSync();
+      final detalle =
+          File('lib/ui/incidencias/detalle_incidencia.dart')
+              .readAsStringSync();
+      final tipos = File('lib/ui/incidencias/tipos_incidencia.dart')
+          .readAsStringSync();
+      final comprobantes =
+          File('lib/comprobantes.dart').readAsStringSync();
+      // C-4: _guardar atrapa y avisa (antes solo finally).
+      final guardar = editar.substring(
+          editar.indexOf('Future<void> _guardar()'));
+      expect(guardar, contains('guardar_fallo'));
+      expect(guardar, contains('mensajeErrorAmable'));
+      // C-7: el selector no se construye si el valor no tiene
+      // segmento visible para el rol.
+      expect(editar,
+          contains("_esDueno || _tipoResponsable != 'entrenador'"));
+      // C-5: AMBAS ops de cambio de estado llevan OCC.
+      expect("'version_base': _inc!.version"
+          .allMatches(detalle)
+          .length, 2);
+      // C-12: el build del detalle no hace IO síncrona ni crea
+      // futures; _reordenar no muta la lista dentro de la
+      // transacción; el barrido de huérfanos tiene tope 24 h.
+      expect(detalle, isNot(contains('file.existsSync()')));
+      expect(detalle, contains('_futurasRemotas[f.storagePath]'));
+      expect(tipos, isNot(contains('_tipos.removeAt(oldIndex)')));
+      expect(tipos, contains('List<TipoIncidencia>.of(_tipos)'));
+      expect(comprobantes, contains('_ultimoBarridoHuerfanos'));
+    });
+
     test('B-6 · el resultado declara el corte por lock', () {
       const r = SyncResultado(corrio: true, cortadoPorLock: true);
       expect(r.cortadoPorLock, isTrue);

@@ -1604,9 +1604,15 @@ class FotosColaService {
         // Verificar precedencia: no sobrescribir foto más nueva.
         final fotoUuidVigente = data['foto_uuid'] as String?;
         if (fotoUuidVigente != null && fotoUuidVigente != opUuid) {
-          debugPrint(
-              '[Fotos] Suplemento $suplementoId ya tiene foto más nueva.');
-          return;
+          // B-20: mismo criterio temporal que en clientes.
+          if (await _esFotoRealmenteMasNueva(
+              txn, fotoUuidVigente, opUuid)) {
+            debugPrint(
+                '[Fotos] Suplemento $suplementoId ya tiene foto más nueva.');
+            return;
+          }
+          debugPrint('[Fotos] Suplemento $suplementoId: el '
+              'espejo traía una foto más vieja; vincula la actual.');
         }
 
         data['foto_storage'] = storagePath;
@@ -1635,6 +1641,36 @@ class FotosColaService {
   }
 
   /// Vincula foto a cliente: mirror local + op para Supabase.
+  /// Auditoría Definitiva (B-20): ¿la foto [otroOpUuid] que
+  /// el espejo exhibe es REALMENTE más nueva que la que se
+  /// está vinculando ([opUuidActual])? Las guardas de
+  /// vinculación trataban cualquier foto_uuid distinto como
+  /// «más nueva» sin orden temporal: si un pull revertía el
+  /// espejo entre el reclamo y la vinculación, la foto
+  /// vigente ganaba el pulso a la nueva y esta completaba SIN
+  /// vincular. Se compara el creado_en (ISO Habana,
+  /// comparable lexicográficamente) de la fila más antigua de
+  /// cada op en la cola. Sin evidencia temporal de alguna de
+  /// las dos, manda el criterio histórico (distinta ⇒ más
+  /// nueva): fail-safe hacia NO pisar.
+  Future<bool> _esFotoRealmenteMasNueva(
+      dynamic db, String otroOpUuid, String opUuidActual) async {
+    Future<String?> creadoDe(String op) async {
+      final r = await db.rawQuery(
+          'SELECT MIN(creado_en) AS c FROM fotos_cola '
+          'WHERE op_uuid = ?',
+          [op]);
+      if (r.isEmpty) return null;
+      final v = r.first['c'];
+      return v?.toString();
+    }
+
+    final otro = await creadoDe(otroOpUuid);
+    final actual = await creadoDe(opUuidActual);
+    if (otro == null || actual == null) return true;
+    return otro.compareTo(actual) >= 0;
+  }
+
   Future<void> _vincularFotoCliente(dynamic db, int clienteId,
       String opUuid, String storagePath, String opUuidDeterminista) async {
     final rows = await db.query(
@@ -1665,8 +1701,15 @@ class FotosColaService {
     // Verificar precedencia: no sobrescribir si ya hay una foto más nueva.
     final fotoUuidVigente = data['foto_uuid'] as String?;
     if (fotoUuidVigente != null && fotoUuidVigente != opUuid) {
-      debugPrint('[Fotos] Foto más nueva existe, no sobrescribo mirror.');
-      return;
+      // B-20: «distinta» no basta — si la del espejo es MÁS
+      // VIEJA que esta (espejo revertido por un pull), la que
+      // manda es la que se está vinculando y se sigue.
+      if (await _esFotoRealmenteMasNueva(db, fotoUuidVigente, opUuid)) {
+        debugPrint('[Fotos] Foto más nueva existe, no sobrescribo mirror.');
+        return;
+      }
+      debugPrint('[Fotos] El espejo traía una foto más vieja '
+          '(posible reversión por pull): vincula la actual.');
     }
 
     data['foto_storage'] = storagePath;

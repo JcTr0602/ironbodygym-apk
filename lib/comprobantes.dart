@@ -47,6 +47,10 @@ class ComprobantesService {
 
   bool _procesando = false;
 
+  /// Auditoría Definitiva (C-12): marca del último barrido de
+  /// archivos huérfanos de [purgarSubidosViejos] (tope 1/24 h).
+  static DateTime? _ultimoBarridoHuerfanos;
+
   /// Guarda la foto elegida (comprimida a máx. 1600 px, WebP
   /// q80; si la compresión falla, copia el original como .jpg)
   /// y deja la fila 'pendiente' de subida. [baseDir] solo lo
@@ -305,6 +309,19 @@ class ComprobantesService {
     // lleva más de 2 h en disco se borra. Las filas en 'error' NO
     // se podan aquí: son visibles y reactivables a propósito
     // (A-03); su archivo sigue referenciado y no se toca.
+    // Auditoría Definitiva (C-12): el barrido lista el
+    // directorio ENTERO con lastModified por archivo y corría
+    // en CADA ciclo de procesar(); ahora corre como mucho una
+    // vez cada 24 h (la poda de filas de arriba, que es SQL
+    // acotada, sigue en cada llamada).
+    final ahoraBarrido = ahoraHabana();
+    final ultimo = _ultimoBarridoHuerfanos;
+    if (ultimo != null &&
+        ahoraBarrido.difference(ultimo) <
+            const Duration(hours: 24)) {
+      return viejos.length;
+    }
+    _ultimoBarridoHuerfanos = ahoraBarrido;
     try {
       final base = await getApplicationDocumentsDirectory();
       final dir = Directory('${base.path}/comprobantes');

@@ -337,6 +337,17 @@ Future<
   final antes = await capturarAtascos();
   var divergentes = -1;
   try {
+    // Auditoría Definitiva (B-28, residuo documentado): aquí
+    // el manifiesto completo se comprueba SIN la compuerta de
+    // cola limpia que sí tiene la pasada diaria
+    // (manifiestoDiarioSiToca salta si hay ops pendientes).
+    // Es DELIBERADO: Reparar es una acción manual de
+    // diagnóstico y su foto debe medirse contra el servidor
+    // tal cual; además la divergencia se mide por sync_seq
+    // (no por contenido), así que las escrituras optimistas
+    // pendientes no crean divergencias falsas ni pisado. El
+    // coste es una pasada completa con la cola sucia: se
+    // acepta por ser manual y a demanda.
     divergentes = await SyncEngine.instance.comprobarManifiestoAhora();
   } catch (e) {
     AppLog.error('sync', 'reparar_manifiesto_fallo', d: '$e');

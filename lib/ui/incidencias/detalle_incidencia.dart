@@ -39,6 +39,14 @@ class _DetalleIncidenciaScreenState
   String? _creadaPorEspejo;
   List<IncidenciaComentario> _comentarios = [];
   List<IncidenciaFoto> _fotos = [];
+  // Auditoría Definitiva (C-12): existencia en disco de cada
+  // foto y futures de descarga remota MEMOIZADOS, resueltos
+  // en _cargarDatos — el build no hace IO síncrona
+  // (existsSync por foto y rebuild) ni crea un future nuevo
+  // en cada repintado (el FutureBuilder reiniciaba la
+  // descarga).
+  Map<String, bool> _fotosLocales = {};
+  final Map<String, Future<File?>> _futurasRemotas = {};
   List<IncidenciaHistorial> _historial = [];
   bool _cargando = true;
   // Auditoría Definitiva (B-15): error de carga VISIBLE — un
@@ -139,6 +147,20 @@ class _DetalleIncidenciaScreenState
         whereArgs: [widget.incidenciaId],
         orderBy: 'cambiado_en DESC');
 
+    // C-12: existencia local y descargas remotas se resuelven
+    // AQUÍ (fuera del build), una sola vez por carga.
+    final fotosLista =
+        fr.map((m) => IncidenciaFoto.fromMap(m)).toList();
+    final locales = <String, bool>{};
+    for (final f in fotosLista) {
+      locales[f.id] = await File(f.localPath).exists();
+      final sp = f.storagePath;
+      if (locales[f.id] == false && sp != null && sp.isNotEmpty) {
+        _futurasRemotas.putIfAbsent(
+            sp, () => FotoCache.instance.obtener(sp));
+      }
+    }
+
     if (mounted) {
       setState(() {
         _inc = inc;
@@ -148,9 +170,8 @@ class _DetalleIncidenciaScreenState
             .map((m) =>
                 IncidenciaComentario.fromMap(m))
             .toList();
-        _fotos = fr
-            .map((m) => IncidenciaFoto.fromMap(m))
-            .toList();
+        _fotos = fotosLista;
+        _fotosLocales = locales;
         _historial = hr
             .map((m) =>
                 IncidenciaHistorial.fromMap(m))
@@ -420,7 +441,8 @@ class _DetalleIncidenciaScreenState
               final file = File(f.localPath);
               // v1.3.2 (Argón #21): si el archivo local no existe pero hay
               // storage_path (foto de otro móvil), descargarla vía FotoCache.
-              final Widget imagen = file.existsSync()
+              // C-12: existencia y future vienen de _cargarDatos.
+              final Widget imagen = (_fotosLocales[f.id] ?? false)
                   ? Image.file(
                       file,
                       width: 100,
@@ -429,8 +451,7 @@ class _DetalleIncidenciaScreenState
                     )
                   : (f.storagePath != null && f.storagePath!.isNotEmpty)
                       ? FutureBuilder<File?>(
-                          future: FotoCache.instance
-                              .obtener(f.storagePath),
+                          future: _futurasRemotas[f.storagePath],
                           builder: (ctx, snap) {
                             if (snap.hasData && snap.data != null) {
                               return Image.file(
@@ -770,6 +791,11 @@ class _DetalleIncidenciaScreenState
             'resuelta_por': _autorActual(),
             'resuelta_en': ahora,
             'version': _inc!.version + 1,
+            // Auditoría Definitiva (C-5): precondición OCC,
+            // como el editor — sin version_base el servidor
+            // no puede detectar que la fila cambió en otro
+            // teléfono entre la lectura y esta op.
+            'version_base': _inc!.version,
           }),
           'estado': 'pendiente',
           'creada_ts': ahora,
@@ -820,6 +846,8 @@ class _DetalleIncidenciaScreenState
           'estado_anterior': anterior,
           'estado_nuevo': nuevo,
           'version': _inc!.version + 1,
+          // Auditoría Definitiva (C-5): version_base OCC.
+          'version_base': _inc!.version,
         }),
         'estado': 'pendiente',
         'creada_ts': ahora,

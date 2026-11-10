@@ -170,48 +170,65 @@ class _TiposIncidenciaScreenState
     if (oldIndex < newIndex) {
       newIndex -= 1;
     }
+    // Auditoría Definitiva (C-12): el orden nuevo se calcula
+    // en una COPIA y _tipos solo se toca tras el commit. Antes
+    // la lista de pantalla se mutaba DENTRO del callback de la
+    // transacción: si esta fallaba a mitad, la pantalla y la
+    // BD quedaban con órdenes distintos y el error subía sin
+    // aviso ni recarga.
+    final copia = List<TipoIncidencia>.of(_tipos);
+    final item = copia.removeAt(oldIndex);
+    copia.insert(newIndex, item);
     final d = await LocalDb.instance.db;
     // Fix #9 (Sol): reorden + encolado en una transacción.
-    await d.transaction((txn) async {
-      final item =
-          _tipos.removeAt(oldIndex);
-      _tipos.insert(newIndex, item);
-      // v1.3.2 (Argón post-fix): un solo op_uuid para las filas y la op.
-      final opUuidReorden = const Uuid().v4();
-      // Actualizar 'orden' de todos en una transacción
-      for (var i = 0;
-          i < _tipos.length;
-          i++) {
-        await txn.update(
-          'incidencias_tipos',
-          {
-            'orden': i,
-            'sync_estado': 'pending',
-            'op_uuid': opUuidReorden,
-          },
-          where: 'id = ?',
-          whereArgs: [_tipos[i].id],
+    try {
+      await d.transaction((txn) async {
+        // v1.3.2 (Argón post-fix): un solo op_uuid para las filas y la op.
+        final opUuidReorden = const Uuid().v4();
+        // Actualizar 'orden' de todos en una transacción
+        for (var i = 0; i < copia.length; i++) {
+          await txn.update(
+            'incidencias_tipos',
+            {
+              'orden': i,
+              'sync_estado': 'pending',
+              'op_uuid': opUuidReorden,
+            },
+            where: 'id = ?',
+            whereArgs: [copia[i].id],
+          );
+        }
+        // Op consolidada dentro de la transacción
+        await txn.insert('ops_queue', {
+          'op_uuid': opUuidReorden,
+          'tipo': 'reordenar_tipos_incidencia',
+          'payload': jsonEncode({
+            'orden': [
+              for (var i = 0; i < copia.length; i++)
+                {'id': copia[i].id, 'orden': i}
+            ],
+          }),
+          'estado': 'pendiente',
+          'creada_ts': isoHabana(ahoraHabana()),
+          'user_id': AuthService().userId,
+          'telegram_id': AuthService().telegramId,
+        });
+      });
+    } catch (e, st) {
+      AppLog.error('tipos_incidencia', 'reordenar_fallo',
+          d: '$e', stack: st);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No se pudo guardar el nuevo orden.')),
         );
       }
-      // Op consolidada dentro de la transacción
-      await txn.insert('ops_queue', {
-        'op_uuid': opUuidReorden,
-        'tipo': 'reordenar_tipos_incidencia',
-        'payload': jsonEncode({
-          'orden': [
-            for (var i = 0;
-                i < _tipos.length;
-                i++)
-              {'id': _tipos[i].id, 'orden': i}
-          ],
-        }),
-        'estado': 'pendiente',
-        'creada_ts': isoHabana(ahoraHabana()),
-        'user_id': AuthService().userId,
-        'telegram_id': AuthService().telegramId,
-      });
-    });
-    setState(() {});
+      _cargar();
+      return;
+    }
+    if (mounted) {
+      setState(() => _tipos = copia);
+    }
   }
 
   Future<void> _cambiarActivo(

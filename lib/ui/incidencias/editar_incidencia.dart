@@ -8,8 +8,11 @@ import '../../negocio.dart';
 import '../../modelos/incidencia.dart';
 import '../../tiempo.dart';
 import '../app_bar.dart';
+import '../componentes.dart';
 import '../diseno.dart';
+import '../../app_log.dart';
 import '../../auth.dart';
+import '../../errores_sync.dart';
 
 /// Crear / editar incidencia.
 /// v1.3.0
@@ -359,6 +362,15 @@ class _EditarIncidenciaScreenState
                     fontWeight:
                         FontWeight.w600)),
             const SizedBox(height: 4),
+            // Auditoría Definitiva (C-7): si el valor restaurado
+            // no tiene segmento visible (no-dueño con asignación
+            // a entrenador puesta por el dueño: el segmento
+            // 'entrenador' solo existe para el dueño), NO se
+            // construye el selector — un SegmentedButton cuya
+            // selección no está entre sus segmentos revienta en
+            // debug y renderiza sin selección en release. En ese
+            // caso manda el bloque de solo lectura de abajo.
+            if (_esDueno || _tipoResponsable != 'entrenador')
             SegmentedButton<String>(
               segments: [
                 const ButtonSegment(
@@ -690,6 +702,18 @@ class _EditarIncidenciaScreenState
         );
       }
       if (mounted) Navigator.pop(context, true);
+    } catch (e, st) {
+      // Auditoría Definitiva (C-4): el _guardar solo tenía
+      // try/finally — un fallo de mutarYEncolar propagaba sin
+      // aviso y el usuario no sabía si su incidencia se había
+      // guardado (patrón R2-X1: bitácora + aviso visible, y la
+      // pantalla NO se cierra: puede reintentar).
+      AppLog.error('incidencias', 'guardar_fallo', d: '$e', stack: st);
+      if (mounted) {
+        mostrarSnack(
+            context, 'Error: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
     } finally {
       if (mounted) {
         setState(() => _guardando = false);
