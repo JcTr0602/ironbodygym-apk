@@ -118,4 +118,53 @@ void main() {
       expect(await _pagadoHastaEspejo(504), '2026-12-10');
     });
   });
+
+  group('A-2 · el sello de éxito exige push limpio (estructural)',
+      () {
+    final sync = File('lib/sync.dart').readAsStringSync();
+
+    test('los bumps del push ensucian el veredicto de la corrida',
+        () {
+      final i = sync.indexOf('Future<void> _bumpConReversion');
+      expect(i, isNonNegative);
+      final cuerpo = sync.substring(i, i + 400);
+      expect(cuerpo, contains('_fallosUltimoPush++'),
+          reason: 'un bump ya no cuenta como fallo del push: '
+              'el ciclo volvería a sellar en verde con la '
+              'subida rota');
+      expect(sync, contains('pushOk = _ultimoPushLimpio;'),
+          reason: 'run() volvió a dar el push por bueno solo '
+              'porque _doPush no lanzó');
+    });
+
+    test('la rama de ciclo completo exige pushOk para sellar', () {
+      expect(sync, contains('if (completo && pushOk)'),
+          reason: 'la rama completo volvió a sellar sin mirar '
+              'la subida');
+      final j = sync.indexOf('} else if (completo) {');
+      expect(j, isNonNegative,
+          reason: 'falta la rama «bajada completa, subida '
+              'sucia» que conserva el error');
+      final rama = sync.substring(j, j + 700);
+      expect(rama, contains("setMeta('last_sync_error', msgPushSucio)"));
+      expect(rama, isNot(contains('_marcarOk()')),
+          reason: 'la rama de subida sucia no puede sellar');
+    });
+
+    test('el gancho de éxito y la limpieza de error van '
+        'condicionados', () {
+      expect(
+          sync,
+          contains('if (errorCorrida == null) _avisarSyncExitoso();'),
+          reason: 'run() volvió a avisar éxito con la corrida '
+              'en error');
+      expect(sync, contains('if (_ultimoPushLimpio) _avisarSyncExitoso();'),
+          reason: 'push() volvió a avisar éxito sin push limpio');
+      final k = sync.indexOf("if (_ultimoPushLimpio) {\n"
+          "        await _db.setMeta('last_sync_error', '');");
+      expect(k, isNonNegative,
+          reason: 'push() volvió a limpiar last_sync_error '
+              'incondicionalmente');
+    });
+  });
 }

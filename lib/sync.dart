@@ -1188,6 +1188,23 @@ class SyncEngine {
   bool _incidenciasOkUltimaPasada = true;
   String? _errorIncidenciasUltimaPasada;
 
+  /// Auditoría Definitiva (A-2): ops que el ÚLTIMO `_doPush`
+  /// intentó subir y no logró (golpeadas con bump en
+  /// `_uploadOps`/`_uploadUnaPorUna`; el contador se suma en
+  /// `_bumpConReversion`, el único embudo de esos fallos, y se
+  /// reinicia al entrar en `_doPush`). El defecto: `_uploadOps`
+  /// traga los fallos del POST con bumps y `_doPush` retorna
+  /// NORMAL, así que `run()` creía «pushOk» y, si el pull
+  /// completaba, sellaba «sincronizado» y borraba
+  /// `last_sync_error` con cobros sin subir. Un push limpio es
+  /// un push con CERO ops golpeadas en ESTA corrida (las que
+  /// esperan su backoff o su ventana de Deshacer no fueron
+  /// intentadas y no ensucian el veredicto).
+  int _fallosUltimoPush = 0;
+
+  /// ¿El último `_doPush` terminó sin una sola op golpeada?
+  bool get _ultimoPushLimpio => _fallosUltimoPush == 0;
+
   /// v1.2.9+43: cliente HTTP singleton para reutilizar conexiones TCP/TLS
   /// (Keep-Alive). Evita el handshake de 800ms-2s por cada petición.
   static final _httpClient = http.Client();
@@ -1798,7 +1815,12 @@ class SyncEngine {
                   fase: SyncFase.subiendo,
                   mensaje: 'Subiendo operaciones...'));
           subidos = await _doPush(forzar: forzar, onProgreso: onProgreso);
-          pushOk = true;
+          // Auditoría Definitiva (A-2): «no lanzó» ya no basta
+          // para dar el push por bueno: _uploadOps traga los
+          // fallos del POST con bumps y _doPush retorna normal
+          // con las ops golpeadas. El push solo es OK si no
+          // dejó ni una op golpeada en esta corrida.
+          pushOk = _ultimoPushLimpio;
         } catch (e) {
           errPush = (await _describeErrorVisible(e)).mensaje;
           AppLog.error('sync', 'push_fallo', d: '$e');
@@ -1868,7 +1890,12 @@ class SyncEngine {
         await _db.setMeta('last_pull_error', errPull ?? '');
         // v1.3.1 (E3): solo registrar error real, nunca un estado
         // informativo que la UI interpreta como fallo.
-        if (completo) {
+        // Auditoría Definitiva (A-2): el sello «sincronizado» y
+        // la limpieza del error exigen TAMBIÉN un push limpio —
+        // antes esta rama mandaba sola y sellaba en verde un
+        // ciclo cuya subida había fallado con bumps (el error
+        // quedaba borrado y el aviso de éxito sonaba igual).
+        if (completo && pushOk) {
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
           // v1.3.4 (Ítem 6 Capa 1, Argón): reconciliación silenciosa
@@ -1881,6 +1908,18 @@ class SyncEngine {
           // caras). Dentro del ciclo, el espejo está quieto y el
           // latido mantiene el lock vivo; es 1 vez al día.
           await manifiestoDiarioSiToca();
+        } else if (completo) {
+          // Auditoría Definitiva (A-2): la bajada SÍ alcanzó el
+          // watermark, pero la subida dejó ops golpeadas (o
+          // lanzó): el ciclo NO se sella ni limpia el error —
+          // queda el motivo de la subida para la UI y el sello
+          // last_sync_ok no avanza con trabajo sin enviar.
+          final msgPushSucio = errPush ??
+              'La descarga terminó, pero la subida dejó '
+                  'operaciones sin enviar; se reintentarán en '
+                  'el próximo ciclo.';
+          await _db.setMeta('last_sync_error', msgPushSucio);
+          errorCorrida = msgPushSucio;
         } else if (errPush != null) {
           await _db.setMeta('last_sync_error', errPush);
           _emit(SyncPhase.error,
@@ -1942,7 +1981,12 @@ class SyncEngine {
         await _pullSiProtegidoPendiente();
         // v1.5.0 (Bloque G): ciclo completo sin error de push →
         // avisar al gancho (confirmación de conversiones).
-        _avisarSyncExitoso();
+        // Auditoría Definitiva (A-2): el gancho de éxito solo
+        // suena si la corrida cerró SIN error registrado —
+        // antes se disparaba en todas las ramas que no salían
+        // por el return temprano, también con la subida sucia
+        // o la bajada incompleta.
+        if (errorCorrida == null) _avisarSyncExitoso();
       } on _CicloSinLock {
         // 1.28 (M1-A1): ciclo zombi detenido — no es un error
         // del usuario ni se sella nada: el dueño nuevo del
@@ -2324,8 +2368,14 @@ class SyncEngine {
       } on _CicloSinLock {
         return;
       }
-      // v1.0.14: limpiar error viejo si el push tuvo éxito
-      await _db.setMeta('last_sync_error', '');
+      // v1.0.14: limpiar error viejo si el push tuvo éxito.
+      // Auditoría Definitiva (A-2): el éxito se juzga por el
+      // resultado REAL de la subida (cero ops golpeadas), no
+      // por «_doPush retornó»: con ops vivas golpeadas el
+      // error NO se limpia y el gancho de éxito no suena.
+      if (_ultimoPushLimpio) {
+        await _db.setMeta('last_sync_error', '');
+      }
       // v1.0.17: pull silencioso tras el push para actualizar el watermark.
       // Sin esto, el server_seq avanza por las ops propias y el banner
       // muestra "Hay cambios nuevos" aunque no haya nada que bajar.
@@ -2340,7 +2390,7 @@ class SyncEngine {
         await _subirFotosIncidenciasConGuarda();
       }
       // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
-      _avisarSyncExitoso();
+      if (_ultimoPushLimpio) _avisarSyncExitoso();
     });
     if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
@@ -2384,6 +2434,10 @@ class SyncEngine {
       void Function(SyncProgress)? onProgreso}) async {
     // v1.2.9+46 (AppLog): inicio de push.
     AppLog.info('sync', 'push_ini');
+    // Auditoría Definitiva (A-2): el veredicto de limpieza de
+    // ESTE push nace en cero; los bumps de la corrida lo
+    // ensucian vía _bumpConReversion.
+    _fallosUltimoPush = 0;
     try {
       _emit(SyncPhase.uploading);
       // 1.28 (M1-A5/R2M1-F2): el reset masivo de 'uploading'
@@ -3480,6 +3534,10 @@ class SyncEngine {
   /// hace el camino de estados del servidor.
   Future<void> _bumpConReversion(Map<String, dynamic> op, Object error,
       {int? httpStatus}) async {
+    // Auditoría Definitiva (A-2): esta op fue intentada y no
+    // subió — el push en curso ya no es limpio (ver
+    // [_fallosUltimoPush]).
+    _fallosUltimoPush++;
     final uuid = '${op['op_uuid']}';
     await _db.bumpOp(uuid, error, httpStatus: httpStatus);
     try {
