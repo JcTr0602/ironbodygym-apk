@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../bloque3.dart';
@@ -10,14 +9,13 @@ import '../entrenador_identidad.dart';
 import '../fotos.dart';
 import '../etiqueta_producto.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtMonto;
+import '../negocio.dart' show fmtMonto, fmtFecha;
 import '../servicios.dart';
-import '../sync.dart';
-import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'iconos_propios.dart';
+import 'servicios_precios.dart';
 import 'skeleton.dart';
 
 /// v1.8.0: Administración de Servicios por dosis (SOLO DUEÑO):
@@ -27,7 +25,11 @@ import 'skeleton.dart';
 /// su op; el servidor re-impone los permisos (estas ops son
 /// solo-admin en el candado).
 class ServiciosAdminScreen extends StatefulWidget {
-  const ServiciosAdminScreen({super.key});
+  /// 1.31 (Mejoras · Inventario): embebida = sin Scaffold ni
+  /// AppBar propios (la monta el hub «Servicios» en su zona
+  /// Inventario); suelta, es la pantalla «Inventario».
+  final bool embebida;
+  const ServiciosAdminScreen({super.key, this.embebida = false});
 
   @override
   State<ServiciosAdminScreen> createState() =>
@@ -46,6 +48,10 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   ({double sinAgua, double conAgua, double agua, double comision})?
       _precios;
   ({int saldo, double cpp}) _agua = (saldo: 0, cpp: 0);
+
+  /// 1.31 (Mejoras · Inventario): últimos movimientos del
+  /// agua común, para la mini-lista del bloque Agua.
+  List<Map<String, dynamic>> _movsAgua = [];
   List<Map<String, dynamic>> _botes = [];
   List<Map<String, dynamic>> _pomos = [];
   // 1.29 (Oleada 4, FB-09): peticiones de relleno pendientes
@@ -62,46 +68,12 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   List<Map<String, dynamic>> _suplementos = [];
   Map<int, String> _categorias = {};
   Map<int, String> _personas = {}; // telegram_id → nombre
-  // Ítem 7: un controlador por clave precio_<producto>_<método> y el
-  // estado de cada interruptor activo_<producto>_<método>.
-  static const _stemsPrecio = ['racion', 'combo', 'agua'];
-  final _precioCtrl = <String, TextEditingController>{
-    for (final s in _stemsPrecio)
-      for (final m in const ['efectivo', 'transferencia'])
-        '${s}_$m': TextEditingController(),
-  };
-  final _activoMet = <String, bool>{
-    for (final s in _stemsPrecio)
-      for (final m in const ['efectivo', 'transferencia'])
-        '${s}_$m': true,
-  };
-  final _comisionCtrl = TextEditingController();
-  // 1.30 D5 (UI130-17): foto base de cada grupo de precios al
-  // cargar (para el estado «Cambios sin guardar» en vivo) y la
-  // hora del último guardado por grupo («Guardado · hh:mm»).
-  // El guardado es POR GRUPO: cada tarjeta de producto guarda
-  // solo sus claves, con la semántica del guardado único de
-  // antes (diff contra lo vigente resuelto; la legacy sigue
-  // al efectivo).
-  final _basePrecio = <String, double>{};
-  final _baseActivo = <String, bool>{};
-  double? _baseComision;
-  final _guardadoEn = <String, String>{};
-
   @override
   void initState() {
     super.initState();
     _cargar();
   }
 
-  @override
-  void dispose() {
-    for (final c in _precioCtrl.values) {
-      c.dispose();
-    }
-    _comisionCtrl.dispose();
-    super.dispose();
-  }
 
   Map<String, dynamic>? _supPorIdLocal(int? id) {
     for (final s in _suplementos) {
@@ -138,8 +110,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
 
   Future<void> _cargar() async {
     final precios = await preciosServicios();
-    final ajustes = await LocalDb.instance.getAjustes();
     final agua = await stockAguaLocal();
+    final movsAgua =
+        await LocalDb.instance.allMirror('servicio_agua_movimientos');
     final botes = await LocalDb.instance.allMirror('servicio_botes');
     // 1.15: pomos activos con su saldo local (el espejo ya trae
     // asignadas/repartidas; el saldo deriva espejo + pendientes).
@@ -194,36 +167,12 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _indiceEntrenador = indices;
       _precios = precios;
       _agua = agua;
+      _movsAgua = movsAgua;
       _botes = botes;
       _pomos = pomos;
       _suplementos = suplementos;
       _categorias = mapaCategoriasSuplemento(categorias);
       _personas = personas;
-      // Ítem 7: los campos nacen con los valores RESUELTOS vigentes
-      // (lo que publica el servidor), no con claves sueltas.
-      for (final s in _stemsPrecio) {
-        final tipo = s == 'racion'
-            ? 'dosis_sin_agua'
-            : s == 'combo'
-                ? 'dosis_con_agua'
-                : 'agua_suelta';
-        for (final m in const ['efectivo', 'transferencia']) {
-          _precioCtrl['${s}_$m']!.text =
-              precioServicioMetodo(ajustes, tipo, m).toStringAsFixed(0);
-          _activoMet['${s}_$m'] = metodoServicioActivo(ajustes, tipo, m);
-        }
-      }
-      _comisionCtrl.text = precios.comision.toStringAsFixed(0);
-      // 1.30 D5 (UI130-17): la foto base del estado por grupo
-      // es lo recién cargado (lo vigente resuelto).
-      for (final s in _stemsPrecio) {
-        final tipo = _tipoDeStem(s);
-        for (final m in const ['efectivo', 'transferencia']) {
-          _basePrecio['${s}_$m'] = precioServicioMetodo(ajustes, tipo, m);
-          _baseActivo['${s}_$m'] = metodoServicioActivo(ajustes, tipo, m);
-        }
-      }
-      _baseComision = precios.comision;
       _cargando = false;
     });
   }
@@ -241,167 +190,6 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   // ---------------------------------------------------------------
   // Precios
   // ---------------------------------------------------------------
-
-  String _tipoDeStem(String stem) => stem == 'racion'
-      ? 'dosis_sin_agua'
-      : stem == 'combo'
-          ? 'dosis_con_agua'
-          : 'agua_suelta';
-
-  String _horaHabana() {
-    final h = ahoraHabana();
-    return '${h.hour.toString().padLeft(2, '0')}:'
-        '${h.minute.toString().padLeft(2, '0')}';
-  }
-
-  /// ¿El grupo [stem] difiere de su foto base (lo cargado)?
-  /// Un texto no numérico cuenta como cambio (al guardar,
-  /// caerá en la validación de siempre).
-  bool _grupoSucio(String stem) {
-    for (final m in const ['efectivo', 'transferencia']) {
-      final v = double.tryParse(
-          _precioCtrl['${stem}_$m']!.text.trim().replaceAll(',', '.'));
-      if (v == null || !v.isFinite || v != _basePrecio['${stem}_$m']) {
-        return true;
-      }
-      if (_activoMet['${stem}_$m'] != _baseActivo['${stem}_$m']) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool get _comisionSucia {
-    final v = double.tryParse(
-        _comisionCtrl.text.trim().replaceAll(',', '.'));
-    return v == null || !v.isFinite || v != _baseComision;
-  }
-
-  /// 1.30 D5 (UI130-17): guardado POR GRUPO de un producto.
-  /// La semántica es EXACTAMENTE la del guardado único
-  /// anterior, acotada a las claves del grupo: diff contra lo
-  /// vigente resuelto, la misma validación (dosis > 0; el
-  /// agua admite 0) y la clave legacy que sigue al efectivo.
-  Future<void> _guardarGrupoPrecios(String stem) async {
-    // Ronda 3-9 #10: la pantalla ya bloquea a no-dueños en build;
-    // esto frena un cambio de sesión a mitad.
-    if (!AuthService().isOwner) return;
-    final ajustes = await LocalDb.instance.getAjustes();
-    final cambios = <String, num>{};
-    final tipo = _tipoDeStem(stem);
-    for (final m in const ['efectivo', 'transferencia']) {
-      // Autoauditoría 1.22 #2 (clase N-2): lo no finito cae al
-      // -1 «inválido» de siempre (NaN no era <= 0 y se guardaba
-      // como precio de dosis en los ajustes).
-      final valorCrudo = double.tryParse(
-          _precioCtrl['${stem}_$m']!.text.trim().replaceAll(',', '.'));
-      final valor =
-          (valorCrudo != null && valorCrudo.isFinite) ? valorCrudo : -1;
-      // Las dosis deben costar más de 0; el agua admite 0 (sin
-      // fijar) y la comisión también.
-      if (stem == 'agua' ? valor < 0 : valor <= 0) {
-        _aviso('Revisa los valores: las dosis deben costar más de 0',
-            error: true);
-        return;
-      }
-      if (valor != precioServicioMetodo(ajustes, tipo, m)) {
-        cambios['servicio_precio_${stem}_$m'] = valor;
-      }
-      final activo = _activoMet['${stem}_$m']! ? 1 : 0;
-      if (activo != (metodoServicioActivo(ajustes, tipo, m) ? 1 : 0)) {
-        cambios['servicio_activo_${stem}_$m'] = activo;
-      }
-    }
-    // Compatibilidad: el precio único legacy del producto sigue
-    // al de EFECTIVO, para las versiones viejas aún instaladas.
-    const legacyDe = {
-      'racion': 'servicio_precio_sin_agua',
-      'combo': 'servicio_precio_con_agua',
-      'agua': 'servicio_precio_agua',
-    };
-    final ef = cambios['servicio_precio_${stem}_efectivo'];
-    if (ef != null &&
-        ef.toDouble() != (ajustes[legacyDe[stem]] as num?)?.toDouble()) {
-      cambios[legacyDe[stem]!] = ef;
-    }
-    if (cambios.isEmpty) {
-      _aviso('Sin cambios');
-      return;
-    }
-    await _aplicarCambiosAjustes(cambios);
-    if (!mounted) return;
-    setState(() => _guardadoEn[stem] = _horaHabana());
-    _aviso('Precios guardados (se sincronizarán)');
-    await _cargar();
-  }
-
-  /// 1.30 D5 (UI130-17): la comisión es su propio grupo, con
-  /// su guardado — misma validación y misma clave de siempre.
-  Future<void> _guardarComision() async {
-    // Ronda 3-9 #10: solo el dueño (ver _guardarGrupoPrecios).
-    if (!AuthService().isOwner) return;
-    final comisionCruda = double.tryParse(
-        _comisionCtrl.text.trim().replaceAll(',', '.'));
-    final comision =
-        (comisionCruda != null && comisionCruda.isFinite) ? comisionCruda : -1;
-    if (comision < 0) {
-      _aviso('Revisa la comisión', error: true);
-      return;
-    }
-    final cambios = <String, num>{};
-    final pr = _precios;
-    if (pr != null && comision != pr.comision) {
-      cambios['servicio_comision_dosis'] = comision;
-    }
-    if (cambios.isEmpty) {
-      _aviso('Sin cambios');
-      return;
-    }
-    await _aplicarCambiosAjustes(cambios);
-    if (!mounted) return;
-    setState(() => _guardadoEn['comision'] = _horaHabana());
-    _aviso('Precios guardados (se sincronizarán)');
-    await _cargar();
-  }
-
-  /// El final común de todo guardado de ajustes de esta
-  /// pantalla (era el final del guardado único): una op
-  /// 'ajuste' por clave, la actualización optimista del
-  /// espejo local (claves sueltas Y la estructura resuelta
-  /// que leen los formularios) y el push.
-  Future<void> _aplicarCambiosAjustes(Map<String, num> cambios) async {
-    for (final e in cambios.entries) {
-      await LocalDb.instance.queueOp(
-        opUuid: const Uuid().v4(),
-        tipo: 'ajuste',
-        payload: {'clave': e.key, 'valor': e.value},
-      );
-    }
-    // Actualización optimista del espejo local de ajustes (patrón
-    // de AdminScreen): claves sueltas Y la estructura resuelta que
-    // leen los formularios, para que el cambio se vea sin esperar
-    // al próximo pull.
-    final aj = await LocalDb.instance.getAjustes();
-    for (final e in cambios.entries) {
-      aj[e.key] = e.value;
-    }
-    final pub = aj['servicio_precios_metodo'];
-    if (pub is Map) {
-      for (final e in cambios.entries) {
-        final partes = e.key.split('_');
-        if (partes.length == 4 && partes[0] == 'servicio') {
-          final prod = pub[partes[2]];
-          if (prod is Map) {
-            prod[partes[1] == 'precio'
-                ? partes[3]
-                : 'activo_${partes[3]}'] = e.value;
-          }
-        }
-      }
-    }
-    await LocalDb.instance.setAjustes(aj);
-    SyncEngine.instance.push();
-  }
 
   // ---------------------------------------------------------------
   // Agua
@@ -629,17 +417,43 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 1.31 (Mejoras · Inventario): esta pantalla ES la zona
+    // Inventario del hub. Suelta conserva su Scaffold con el
+    // título «Inventario» (antes «Servicios · Admin»); embebida
+    // devuelve solo el cuerpo. Los precios ya no viven aquí:
+    // son su propia pantalla («Precios y comisión»).
     if (!AuthService().isOwner) {
+      const cuerpo = Center(
+          child: Text('Solo el dueño administra los servicios.'));
+      if (widget.embebida) return cuerpo;
       return Scaffold(
-        appBar: appBarIron(context, 'Servicios · Admin'),
-        body: const Center(
-            child: Text('Solo el dueño administra los servicios.')),
+        appBar: appBarIron(context, 'Inventario'),
+        body: cuerpo,
       );
     }
+    final cuerpo = _cargando
+        // 1.30 (Oleada D6, UI130-22): la carga de una
+        // pantalla de ajustes enseña SU esqueleto
+        // (grupos con filas), no el rótulo genérico.
+        ? const SkeletonAjustes(grupos: 4)
+        : ListView(
+            padding: const EdgeInsets.all(AppEspacio.lg),
+            children: [
+              _tarjetaIrPrecios(),
+              const SizedBox(height: AppEspacio.md),
+              _seccionSolicitudesRelleno(),
+              _seccionAgua(),
+              const SizedBox(height: AppEspacio.md),
+              _seccionPomos(),
+              const SizedBox(height: AppEspacio.md),
+              _seccionBotes(),
+            ],
+          );
+    if (widget.embebida) return cuerpo;
     return Scaffold(
       appBar: appBarIron(
         context,
-        'Servicios · Admin',
+        'Inventario',
         acciones: [
           IconButton(
             tooltip: 'Actualizar',
@@ -648,218 +462,165 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
           ),
         ],
       ),
-      body: _cargando
-          // 1.30 (Oleada D6, UI130-22): la carga de una
-          // pantalla de ajustes enseña SU esqueleto
-          // (grupos con filas), no el rótulo genérico.
-          ? const SkeletonAjustes(grupos: 4)
-          : ListView(
-              padding: const EdgeInsets.all(AppEspacio.lg),
-              children: [
-                _seccionPrecios(),
-                const SizedBox(height: AppEspacio.md),
-                _seccionAgua(),
-                const SizedBox(height: AppEspacio.md),
-                _seccionSolicitudesRelleno(),
-                _seccionPomos(),
-                const SizedBox(height: AppEspacio.md),
-                _seccionBotes(),
-              ],
-            ),
+      body: cuerpo,
     );
   }
 
-  /// El estado de un grupo de precios: «Cambios sin guardar»
-  /// en alerta mientras difiere de su foto base, o la hora de
-  /// su último guardado en esta visita a la pantalla.
-  Widget _estadoGrupo(String clave, bool sucio) {
-    if (sucio) {
-      return Text('Cambios sin guardar',
-          style: AppTexto.metadato.copyWith(
-              color: AppColores.alerta, fontWeight: FontWeight.w600));
-    }
-    final hora = _guardadoEn[clave];
-    if (hora == null) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.check_rounded, size: 14, color: AppColores.exito),
-        const SizedBox(width: 4),
-        Text('Guardado · $hora',
-            style: AppTexto.metadato
-                .copyWith(color: AppColores.textoSecundario(context))),
-      ],
-    );
-  }
-
-  Widget _tarjetaGrupoPrecio(String titulo, String stem) {
+  /// 1.31 (Mejoras): tarjeta-puerta a «Precios y comisión»
+  /// con los valores vigentes de un vistazo (sin abrirla se
+  /// sabe cuánto cuesta todo hoy).
+  Widget _tarjetaIrPrecios() {
+    final p = _precios;
     return Tarjeta(
-      padding: const EdgeInsets.all(AppEspacio.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(titulo, style: AppTexto.subtitulo),
-          const SizedBox(height: AppEspacio.sm),
-          // Ítem 7: precio por (producto, método), con los
-          // campos de moneda del kit (D3).
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: CampoMoneda(
-                  etiqueta: 'Efectivo',
-                  controller: _precioCtrl['${stem}_efectivo']!,
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: CampoMoneda(
-                  etiqueta: 'Transferencia',
-                  controller: _precioCtrl['${stem}_transferencia']!,
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-            ],
-          ),
-          // 1.30 D5 (UI130-17): los interruptores van a lo
-          // ancho, uno por línea (antes dos apretados en una
-          // fila, con la etiqueta cortada). Cada uno lleva su
-          // Material transparente: dentro de una Tarjeta sin
-          // onTap (que no crea Material), la tinta del
-          // ListTile caería en un ancestro lejano y Flutter
-          // avisa de que el fondo/la tinta serían invisibles.
-          Material(
-            type: MaterialType.transparency,
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Cobrar en efectivo'),
-              value: _activoMet['${stem}_efectivo']!,
-              onChanged: (v) =>
-                  setState(() => _activoMet['${stem}_efectivo'] = v),
-            ),
-          ),
-          Material(
-            type: MaterialType.transparency,
-            child: SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Cobrar por transferencia'),
-              value: _activoMet['${stem}_transferencia']!,
-              onChanged: (v) => setState(
-                  () => _activoMet['${stem}_transferencia'] = v),
-            ),
-          ),
-          Row(
-            children: [
-              Expanded(child: _estadoGrupo(stem, _grupoSucio(stem))),
-              FilledButton(
-                onPressed: () => _guardarGrupoPrecios(stem),
-                child: const Text('Guardar'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 1.30 D5 (UI130-17): la antigua megatarjeta de «Precios y
-  // comisión» se reparte en una tarjeta por grupo, cada una
-  // con su guardado y su estado. La carga es la misma
-  // (_cargar) y el guardado conserva la semántica del único
-  // (ver _guardarGrupoPrecios y _guardarComision).
-  Widget _seccionPrecios() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Precios y comisión', style: AppTexto.titulo),
-        const SizedBox(height: AppEspacio.sm),
-        _tarjetaGrupoPrecio('Dosis', 'racion'),
-        const SizedBox(height: AppEspacio.sm),
-        _tarjetaGrupoPrecio('Dosis con agua', 'combo'),
-        const SizedBox(height: AppEspacio.sm),
-        _tarjetaGrupoPrecio('Agua', 'agua'),
-        const SizedBox(height: AppEspacio.sm),
-        Tarjeta(
-          padding: const EdgeInsets.all(AppEspacio.md),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Comisión', style: AppTexto.subtitulo),
-              const SizedBox(height: AppEspacio.sm),
-              CampoMoneda(
-                etiqueta: 'Comisión por dosis',
-                controller: _comisionCtrl,
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: AppEspacio.sm),
-              Row(
-                children: [
-                  Expanded(
-                      child: _estadoGrupo('comision', _comisionSucia)),
-                  FilledButton(
-                    onPressed: _guardarComision,
-                    child: const Text('Guardar'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppEspacio.sm),
-        Text(
-          'Agua en 0 = precio sin fijar (no se puede vender suelta). '
-          'Comisión en 0 = sin comisión. La comisión se paga con la '
-          'nómina del mes. Apagar ambos métodos de un producto lo '
-          'deja invendible (la Cuenta a la Casa no se afecta).',
-          style: AppTexto.metadato.copyWith(color: Colors.grey),
-        ),
-      ],
-    );
-  }
-
-  Widget _seccionAgua() {
-    return Tarjeta(
-      padding: const EdgeInsets.all(AppEspacio.md),
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+              builder: (_) => const ServiciosPreciosScreen()),
+        );
+        if (mounted) await _cargar();
+      },
       child: Row(
         children: [
           const IconoModuloBadge(
-            icono: Icons.water_drop_rounded,
-            tinte: Colors.blue,
-            iconoOscuro: AppColores.azulAguaOscuro,
-            iconoClaro: AppColores.azulAguaClaro,
+            icono: Icons.payments_rounded,
+            tinte: Colors.green,
+            iconoOscuro: Colors.green,
+            iconoClaro: Colors.lightGreen,
           ),
           const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Agua común',
-                    style: AppTexto.titulo),
+                Text('Precios y comisión', style: AppTexto.titulo),
                 Text(
-                  'Stock: ${_agua.saldo} pomos · Costo promedio: '
-                  '${fmtMonto(_agua.cpp)} CUP/pomo',
-                  style: AppTexto.cuerpo,
+                  p == null
+                      ? '—'
+                      : 'Dosis ${fmtMonto(p.sinAgua)} · '
+                          'Dosis con agua ${fmtMonto(p.conAgua)} · '
+                          'Agua ${fmtMonto(p.agua)} · '
+                          'Comisión ${fmtMonto(p.comision)}',
+                  style: AppTexto.secundario,
                 ),
               ],
             ),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FilledButton(
-                onPressed: _reponerAgua,
-                child: const Text('Reponer'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: _salidaAgua,
-                child: const Text('Salida sin venta'),
-              ),
-            ],
-          ),
+          Icon(Icons.chevron_right_rounded,
+              color: AppColores.textoSecundario(context)),
         ],
       ),
+    );
+  }
+
+  /// 1.31 (Mejoras · Inventario): el agua es un BLOQUE
+  /// propio con la anatomía de un pomo (antes una tarjeta
+  /// compacta perdida entre secciones): saldo en métrica,
+  /// costo promedio, precio de venta vigente, sus dos
+  /// acciones y los últimos movimientos.
+  Widget _seccionAgua() {
+    final recientes = [..._movsAgua]
+      ..sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
+    final ultimos = recientes.take(5).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const IconoModuloBadge(
+              icono: Icons.water_drop_rounded,
+              tinte: Colors.blue,
+              iconoOscuro: AppColores.azulAguaOscuro,
+              iconoClaro: AppColores.azulAguaClaro,
+            ),
+            const SizedBox(width: AppEspacio.sm),
+            Text('Agua', style: AppTexto.titulo),
+          ],
+        ),
+        const SizedBox(height: AppEspacio.sm),
+        Tarjeta(
+          padding: const EdgeInsets.all(AppEspacio.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('${_agua.saldo}', style: AppTexto.metrica),
+                  const SizedBox(width: AppEspacio.xs),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text('pomos en stock',
+                        style: AppTexto.secundario),
+                  ),
+                ],
+              ),
+              Text(
+                'Costo promedio: ${fmtMonto(_agua.cpp)} CUP/pomo'
+                '${_precios != null ? ' · Precio de venta: ${fmtMonto(_precios!.agua)} CUP' : ''}',
+                style: AppTexto.cuerpo,
+              ),
+              const SizedBox(height: AppEspacio.sm),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _reponerAgua,
+                      child: const Text('Reponer'),
+                    ),
+                  ),
+                  const SizedBox(width: AppEspacio.sm),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _salidaAgua,
+                      child: const Text('Salida sin venta'),
+                    ),
+                  ),
+                ],
+              ),
+              if (ultimos.isNotEmpty) ...[
+                const Divider(height: 24),
+                Text('Últimos movimientos', style: AppTexto.metadato),
+                const SizedBox(height: AppEspacio.xs),
+                for (final m in ultimos)
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: AppEspacio.xs),
+                    child: Row(
+                      children: [
+                        Icon(
+                          '${m['tipo']}' == 'entrada'
+                              ? Icons.arrow_downward_rounded
+                              : Icons.arrow_upward_rounded,
+                          size: 14,
+                          color: AppColores.textoSecundario(context),
+                        ),
+                        const SizedBox(width: AppEspacio.xs),
+                        Expanded(
+                          child: Text(
+                            '${m['tipo']}' == 'entrada'
+                                ? 'Reposición · ${m['cantidad']} pomos'
+                                : 'Salida · ${m['cantidad']} pomos',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                        Text(
+                          () {
+                            final f = '${m['fecha'] ?? ''}';
+                            return f.length >= 10
+                                ? fmtFecha(f.substring(0, 10))
+                                : f;
+                          }(),
+                          style: AppTexto.metadato,
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -990,7 +751,38 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       for (final s in _solicitudesRelleno)
         if (!_rellenoAtendidasLocal.contains(s.id)) s,
     ];
-    if (visibles.isEmpty) return const SizedBox.shrink();
+    if (visibles.isEmpty) {
+      // 1.31 (Mejoras · Inventario): la bandeja es FIJA — sin
+      // peticiones también se ve (antes la sección entera
+      // desaparecía y «¿dónde caen los pedidos?» no tenía
+      // respuesta en la pantalla).
+      return Column(
+        children: [
+          Tarjeta(
+            padding: const EdgeInsets.all(AppEspacio.md),
+            child: Row(
+              children: [
+                IconoPomo(
+                    tamano: 24, color: AppColores.texto(context)),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Solicitudes de relleno',
+                          style: AppTexto.titulo),
+                      Text('Sin solicitudes de relleno',
+                          style: AppTexto.secundario),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppEspacio.md),
+        ],
+      );
+    }
     return Column(
       children: [
         Tarjeta(
@@ -1071,7 +863,18 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             Text('Pomos', style: AppTexto.titulo),
           ],
         ),
-        const SizedBox(height: AppEspacio.sm),
+        // 1.31 (Mejoras · Inventario): el encabezado resume
+        // cuántos pomos hay y cuántos andan bajos (≤4, el
+        // rojo del semáforo), sin abrir fila por fila.
+        if (pomos.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child: Text(
+              '${pomos.length} pomos · '
+              '${pomos.where((l) => ((l['saldo_local'] as num?)?.toInt() ?? 99) <= 4).length} con pocas dosis',
+              style: AppTexto.secundario,
+            ),
+          ),
         if (pomos.isEmpty)
           Text('Sin pomos todavía: abre un bote para tener principal.',
               style: AppTexto.cuerpo

@@ -35,6 +35,7 @@ import 'package:ironbody_gym/ui/diseno.dart';
 import 'package:ironbody_gym/ui/incidencias/lista_incidencias.dart';
 import 'package:ironbody_gym/ui/incidencias/widgets/tarjeta_incidencia.dart';
 import 'package:ironbody_gym/ui/servicios_admin.dart';
+import 'package:ironbody_gym/ui/servicios_precios.dart';
 import 'package:ironbody_gym/ui/skeleton.dart';
 import 'package:ironbody_gym/ui/suplementos.dart';
 import 'package:path/path.dart' as p;
@@ -173,8 +174,11 @@ void main() {
         await _fijarSesion(
             email: 'jctr0602@ironbody.gym', telegramId: 735772141);
       });
+      // 1.31 (Mejoras): el guardado por grupo vive ahora en
+      // su pantalla propia, «Precios y comisión»; el contrato
+      // es el mismo y se prueba donde vive.
       await tester.pumpWidget(
-          const MaterialApp(home: ServiciosAdminScreen()));
+          const MaterialApp(home: ServiciosPreciosScreen()));
       expect(
           await _esperarTexto(tester, 'Dosis'), isTrue);
       await _ciclos(tester);
