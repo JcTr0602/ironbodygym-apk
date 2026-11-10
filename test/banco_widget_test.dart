@@ -212,7 +212,7 @@ void main() {
       await tester
           .pumpWidget(const MaterialApp(home: ServiciosScreen()));
       await tester.pump();
-      expect(find.text('Servicios ⚡'), findsOneWidget);
+      expect(find.text('Servicios'), findsOneWidget);
       // 1.28 (M3-C6): la carga de Servicios ya no es un rótulo
       // con spinner: es el esqueleto espejo de la pantalla.
       expect(find.byType(SkeletonServicios), findsOneWidget);

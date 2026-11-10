@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/ui/servicios.dart';
@@ -100,6 +101,17 @@ void main() {
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
+    // La familia de flakes de app_links: sin mock, la
+    // excepción del canal de eventos cae sobre el test que
+    // esté corriendo cuando aflora. Se mockean AMBOS canales.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('com.llfbandit.app_links/messages'),
+            (call) async => null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('com.llfbandit.app_links/events'),
+            (call) async => null);
     await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
   });
 

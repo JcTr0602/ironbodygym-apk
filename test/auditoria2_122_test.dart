@@ -272,8 +272,12 @@ void main() {
     test('inscripción, servicios y tarifas especiales', () {
       expect(_fuente('lib/ui/inscribir.dart'), contains('v.isFinite'));
       final sa = _fuente('lib/ui/servicios_admin.dart');
-      expect(sa, contains('valorCrudo'));
-      expect(sa, contains('comisionCruda'));
+      // 1.31 (Mejoras): el guardado de precios/comisión se
+      // mudó a su pantalla propia; la guarda N-2 lo sigue
+      // donde vive. El costo (botes/agua) sigue en Inventario.
+      final sp = _fuente('lib/ui/servicios_precios.dart');
+      expect(sp, contains('valorCrudo'));
+      expect(sp, contains('comisionCruda'));
       expect(sa, contains('costoCrudo'));
       final te = _fuente('lib/ui/tarifas_especiales.dart');
       final iPm = te.indexOf('double? _parseMonto');
