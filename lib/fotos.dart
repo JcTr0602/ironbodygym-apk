@@ -21,6 +21,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_log.dart';
 import 'auth.dart';
@@ -88,11 +89,14 @@ class ColaPrecargaFotos {
     this.timeoutDescarga = const Duration(seconds: 10),
     this.backoffFallo = const Duration(minutes: 3),
     DateTime Function()? ahora,
+    bool Function(String ruta)? esFalloSinCastigo,
   })  : _descargador = descargador,
-        _ahora = ahora ?? DateTime.now;
+        _ahora = ahora ?? DateTime.now,
+        _esFalloSinCastigo = esFalloSinCastigo;
 
   final Future<File?> Function(String ruta, Duration timeout)
       _descargador;
+  final bool Function(String ruta)? _esFalloSinCastigo;
   final int concurrencia;
   final Duration timeoutDescarga;
   final Duration backoffFallo;
@@ -155,7 +159,7 @@ class ColaPrecargaFotos {
     if (f != null) {
       _falloEn.remove(ruta);
       if (!_avisos.isClosed) _avisos.add(ruta);
-    } else {
+    } else if (!(_esFalloSinCastigo?.call(ruta) ?? false)) {
       _falloEn[ruta] = _ahora();
     }
     return f;
@@ -178,6 +182,13 @@ class FotoCache {
   /// la ficha y la cola nunca descargan lo mismo a la vez).
   final _enVuelo = <String, Future<File?>>{};
 
+  /// 1.31 (IMP-18, yunque de app): rutas cuyo último fallo
+  /// de red fue un 401 (JWT vencido). Un 401 NO es un
+  /// fallo de la foto: la sesión puede refrescarse
+  /// enseguida, así que esas rutas NO entran en la caché
+  /// negativa (_falloEn) del llamador.
+  final _fallo401 = <String>{};
+
   /// 1.31: la cola de precarga de las listas (ver su doc). Su
   /// descargador mira primero la caché (la ruta pudo aterrizar
   /// por otra vía entre el encolado y el turno) y luego baja
@@ -188,6 +199,9 @@ class FotoCache {
       if (c != null) return c;
       return _descargaCompartida(ruta, timeout: t);
     },
+    // IMP-18: un fallo por 401 (JWT vencido) no entra en
+    // la caché negativa de la cola.
+    esFalloSinCastigo: (String ruta) => _fallo401.contains(ruta),
   );
 
   /// Rutas cuya foto acaba de aterrizar (las filas repintan
@@ -290,7 +304,8 @@ class FotoCache {
         timeout: const Duration(seconds: 30));
     if (f != null) {
       _colaPrecarga.olvidarFallo(storagePath);
-    } else {
+    } else if (!_fallo401.contains(storagePath)) {
+      // IMP-18: un 401 no castiga la ruta.
       _colaPrecarga.registrarFallo(storagePath);
     }
     return f;
@@ -314,16 +329,35 @@ class FotoCache {
   /// de eso se encargan [obtener] y la cola). Null si falla.
   Future<File?> _descargarRed(String storagePath,
       {required Duration timeout}) async {
+    _fallo401.remove(storagePath);
     try {
-      final token = _auth.session?.accessToken ?? '';
-      final r = await http.get(
-        Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
-            '${AppConfig.bucketFotos}/$storagePath'),
-        headers: {
-          'apikey': AppConfig.anonKey,
-          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-        },
-      ).timeout(timeout);
+      Future<http.Response> pedir(String token) => http.get(
+            Uri.parse('${AppConfig.supabaseUrl}/storage/v1/object/'
+                '${AppConfig.bucketFotos}/$storagePath'),
+            headers: {
+              'apikey': AppConfig.anonKey,
+              if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+            },
+          ).timeout(timeout);
+      var r = await pedir(_auth.session?.accessToken ?? '');
+      // 1.31 (IMP-18): ante un 401 (JWT vencido), refrescar
+      // la sesión y reintentar UNA vez — el patrón _reqAuth
+      // de sync. Si el refresh falla (sin red), se conserva
+      // la respuesta original: un fallo de red no es un
+      // vencimiento.
+      if (r.statusCode == 401) {
+        try {
+          final res =
+              await Supabase.instance.client.auth.refreshSession();
+          final nuevo = res.session?.accessToken ?? '';
+          if (nuevo.isNotEmpty) {
+            r = await pedir(nuevo);
+          }
+        } catch (_) {}
+      }
+      if (r.statusCode == 401) {
+        _fallo401.add(storagePath);
+      }
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
         // AA2: a la bitácora, no print (queda en diagnóstico).
         AppLog.error('fotos', 'cache_http',
