@@ -153,8 +153,15 @@ class _PinLockScreenState extends State<PinLockScreen> {
     if (ok != true || !mounted) return;
     // v1.2.5: purga de datos sensibles antes de cerrar sesión.
     await LocalDb.purgaAlCerrarSesion();
-    await AuthService().signOut();
+    // Yunque R5-M2-1 (ALTA): el hash del PIN vive bajo la
+    // clave DEL USUARIO (seg_pin_hash_<usuario>) y
+    // setPinHash la deriva de la sesión VIVA: hay que
+    // borrarlo ANTES de signOut — después, el username es
+    // '' y se borraba una clave sin sufijo que no existe,
+    // dejando el PIN «olvidado» intacto y al usuario
+    // atrapado con él al volver a entrar.
     await PerfilService.instance.setPinHash(null);
+    await AuthService().signOut();
     if (!mounted) return;
     // v1.4.4: basta replegar hasta la raíz: al desaparecer la
     // sesión, RaizSesion muestra Login. (Antes se empujaba una
