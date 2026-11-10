@@ -30,6 +30,7 @@ import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
+import '../app_log.dart';
 
 /// Un cobro del día: viene del espejo (ya sincronizado) o de una op
 /// local aún en cola. Se ordenan por hora descendente.
@@ -129,10 +130,28 @@ class _PagoScreenState extends State<PagoScreen> {
   void initState() {
     super.initState();
     _buscar();
-    _cargarDatos();
+    _cargarDatosSeguro();
   }
 
   String _hoyStr() => hoyHabanaIso();
+
+  /// (Yunque R2-X1) red de seguridad de la carga de cobros:
+  /// la bandera baja SIEMPRE, también si una lectura local
+  /// lanza a mitad (spinner eterno: la clase de la ficha
+  /// 2026-11-02). Sin esta red, un fallo dejaba el pie de
+  /// caja oculto tras `_cargandoCobros` para siempre.
+  Future<void> _cargarDatosSeguro() async {
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora.
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargandoCobros) {
+        setState(() => _cargandoCobros = false);
+      }
+    }
+  }
 
   /// Cobros del día: espejo + ops locales pago_mensual aún no aplicadas.
   /// Incluye las pendientes aunque no haya internet (caja offline).
@@ -405,7 +424,7 @@ class _PagoScreenState extends State<PagoScreen> {
             significado: SignificadoChip.neutral);
     }
     SyncEngine.instance.push();
-    _cargarDatos();
+    _cargarDatosSeguro();
     _buscar();
   }
 
@@ -516,7 +535,7 @@ class _PagoScreenState extends State<PagoScreen> {
     } else {
       return;
     }
-    _cargarDatos();
+    _cargarDatosSeguro();
     _buscar();
   }
 
