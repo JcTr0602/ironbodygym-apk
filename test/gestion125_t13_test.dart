@@ -93,6 +93,33 @@ void main() {
     expect(find.textContaining('AL DÍA'), findsNothing);
   });
 
+  testWidgets(
+      'Yunque de cambios 1.31 (M1): cabecera con la fusión de '
+      'pausa y días vencidos dice CONGELADO, no VENCIDO',
+      (tester) async {
+    // El caso M1.5: la ficha pasa `congelado: pausado` (pausa
+    // nueva en curso) con los días ya negativos — la insignia
+    // debe salir de la rama de pausa, no de la de días.
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: CabeceraFicha(
+          nombre: 'Cliente Pausado',
+          foto: null,
+          colorMarco: Colors.blue,
+          esCasa: false,
+          dias: -12,
+          congelado: true,
+          heroTag: null,
+          onFotoTap: null,
+          onCambiarFoto: _nada,
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(find.text('CONGELADO'), findsOneWidget);
+    expect(find.textContaining('VENCIDO'), findsNothing);
+  });
+
   testWidgets('T13: barra pausada explica la pausa',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

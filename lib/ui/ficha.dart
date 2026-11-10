@@ -2657,7 +2657,12 @@ class _FichaScreenState extends State<FichaScreen> {
                         child: _barraCompactaFicha(
                           nombre: nombre,
                           esCasa: esCasa,
-                          congelado: congelado,
+                          // Yunque de cambios 1.31 (M1): la
+                          // barra recibe la fusión `pausado`
+                          // (su parámetro se llama congelado):
+                          // con la pausa nueva decía «Vencido
+                          // hace N días» con el anillo en azul.
+                          congelado: pausado,
                           dias: dias,
                           colorMarco: colorMarco,
                         ),
@@ -2736,7 +2741,7 @@ class _FichaScreenState extends State<FichaScreen> {
     final textoEstadoBarra = esCasa
         ? 'Cuenta a la Casa'
         : congelado
-            ? 'Congelado'
+            ? 'En pausa ❄ · el vencimiento no corre'
             : dias == null
                 ? 'Sin pagos'
                 : dias < 0
@@ -2845,7 +2850,14 @@ class _FichaScreenState extends State<FichaScreen> {
                         colorMarco: colorMarco,
                         esCasa: esCasa,
                         dias: dias,
-                        congelado: congelado,
+                        // Yunque de cambios 1.31 (M1): la
+                        // cabecera recibe la fusión `pausado`
+                        // (congelado viejo O pausa nueva en
+                        // curso), no solo el congelado viejo:
+                        // con la pausa nueva, la insignia caía
+                        // a «VENCIDO N DÍAS» sobre el anillo
+                        // azul de pausa de la misma ficha.
+                        congelado: pausado,
                         heroTag: widget.origenHero == null
                             ? null
                             : tagHeroCliente(
@@ -2873,7 +2885,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                 pagadoHastaRaw:
                                     '${_c?['pagado_hasta'] ?? ''}',
                               )?.frac,
-                        periodoPausado: congelado,
+                        periodoPausado: pausado,
                         ),
                       ),
                       const SizedBox(
@@ -3210,8 +3222,8 @@ class _FichaScreenState extends State<FichaScreen> {
                                         as String?)),
                             FilaInfoFicha(icono: Icons.event_rounded, etiqueta: 'Estado', valor: esCasa
                                     ? 'Cuenta a la Casa'
-                                    : congelado
-                                        ? 'Congelado ❄ · el vencimiento no corre'
+                                    : pausado
+                                        ? 'En pausa ❄ · el vencimiento no corre'
                                         : textoEstado(c['pagado_hasta']
                                             as String?)),
                             // 1.25 T117 (F1-44): el porqué de

@@ -42,6 +42,7 @@ import 'package:ironbody_gym/mediciones_cliente.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/buscar.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/cuentas_cobrar.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
 import 'package:ironbody_gym/ui/ficha.dart';
@@ -271,6 +272,36 @@ void main() {
           reason: 'vencido + sin fecha; el protegido NO alimenta');
       expect(conteos['sinfoto'], 3,
           reason: 'vencido, sin fecha y la Casa; el protegido no');
+    });
+
+    test(
+        'Yunque de cambios 1.31 (M1): el pausado en curso no '
+        'cuenta como vencido; sin conjunto, no cambia', () async {
+      await _fijarSesion('duany@ironbody.local', 969869611);
+      final base = <Map<String, dynamic>>[
+        {'id': 3, 'nombre': 'Pausado', 'pagado_hasta': isoEn(-5)},
+        {'id': 4, 'nombre': 'Sin Fecha Pausado', 'pagado_hasta': null},
+        {'id': 7, 'nombre': 'Vencido Real', 'pagado_hasta': isoEn(-2)},
+      ];
+      final conPausa = conteosDeBuscar(base, congelados: {3, 4});
+      expect(conPausa['todos'], 3);
+      expect(conPausa['vencidos'], 1,
+          reason: 'solo el vencido real; los dos pausados fuera');
+      expect(conPausa['sinfoto'], 3,
+          reason: 'el pausado sigue contando en sin foto');
+      final sinPausa = conteosDeBuscar(base);
+      expect(sinPausa['vencidos'], 3);
+    });
+
+    test(
+        'Yunque de cambios 1.31 (M1): chipEstadoFila en pausa '
+        'dice EN PAUSA y no vencido', () {
+      final chip = chipEstadoFila(
+          dias: -5, pagadoHasta: isoEn(-5), enPausa: true);
+      expect(chip.texto, contains('EN PAUSA'));
+      expect(chip.estado, EstadoMembresia.congelado);
+      final sin = chipEstadoFila(dias: -5, pagadoHasta: isoEn(-5));
+      expect(sin.texto, contains('Venció'));
     });
   });
 

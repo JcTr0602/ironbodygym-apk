@@ -93,6 +93,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
   bool _mostrarAvanzada = false;
   bool _modoSeleccion = false;
   final Set<int> _seleccionados = {};
+  // Yunque de cambios 1.31 (M1): pausados en curso de la
+  // última búsqueda (para el chip/anillo de la fila).
+  Set<int> _pausados = {};
   // 1.25 T116 (F1-55): ids con aviso de WhatsApp YA
   // registrado hoy (el registro del día de la bandeja):
   // la fila lo enseña y el flujo en lote los salta.
@@ -210,6 +213,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // ANTES de todo filtro. Los filtros reasignan `r` a
     // listas nuevas, así que la referencia queda intacta.
     final baseConteos = r;
+    // Yunque de cambios 1.31 (M1): el conjunto de pausados en
+    // curso (espejo solo-dueño; en el teléfono del entrenador
+    // sale vacío y nada cambia) para que el filtro «vencidos»
+    // y los conteos del directorio no clasifiquen como vencido
+    // a quien está en pausa aprobada — la misma exclusión de
+    // los predicados centrales de negocio.dart.
+    final pausados = await CongelacionesService.instance
+        .idsCongeladosEnCurso(ahoraHabana());
+    if (gen != _gen) return;
     // Filtros de estado de mensualidad.
     // v1.3.1: sin fecha = vencido (no "al día").
     if (_filtro != 'todos' && _filtro != 'sinfoto') {
@@ -220,12 +232,18 @@ class _BuscarScreenState extends State<BuscarScreen> {
         // FIN-28 de Argón (1.20): la Casa pasa el filtro «al
         // día» y ningún otro de estado.
         if (esCuentaCasa(c)) return _filtro == 'aldia';
+        // Yunque de cambios 1.31 (M1): el cliente en pausa
+        // aprobada en curso no es «vencido» en el directorio
+        // (misma regla que los predicados de Listas): queda
+        // fuera de ese filtro; en «todos» y en los demás
+        // filtros sigue saliendo por su fecha, como antes.
         final dias = diasRestantes(c['pagado_hasta'] as String?);
         switch (_filtro) {
           case 'aldia':
             return dias != null && dias > 7;
           case 'vencidos':
-            return dias == null || dias < 0;
+            return (dias == null || dias < 0) &&
+                !pausados.contains((c['id'] as num?)?.toInt());
           case 'porvencer':
             return dias != null && dias >= 0 && dias <= 7;
           default:
@@ -322,8 +340,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
     // hay alguno activo; sin filtros, la lista final (con
     // el rescate ya aplicado) ES la base y se cuenta ella,
     // conservando la corrección de la 1.28.
-    final conteos =
-        conteosDeBuscar(sinFiltros ? r : baseConteos);
+    final conteos = conteosDeBuscar(
+        sinFiltros ? r : baseConteos,
+        congelados: pausados);
     // 1.25 T116 (F1-55): ids ya avisados hoy según el
     // registro del día (SQLite de la bandeja).
     final tocados =
@@ -339,6 +358,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
         _busco = true;
         _conteos = conteos;
         _avisadosHoyIds = idsHoy;
+        _pausados = pausados;
       });
     }
   }
@@ -859,6 +879,8 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                   ),
                                   child: FilaCliente(
                                     cliente: c,
+                                    enPausa: cidFila != null &&
+                                        _pausados.contains(cidFila),
                                     origenHero: 'buscar',
                                     compacta: _compacta,
                                     // 1.25 T116 (F1-55): rastro
@@ -1633,9 +1655,15 @@ class FilaCliente extends StatelessWidget {
   final String? importeTexto;
   final String? importeEtiqueta;
 
+  /// Yunque de cambios 1.31 (M1): en pausa aprobada en curso
+  /// (solo lo pasa el directorio de Buscar, que tiene el
+  /// conjunto): la fila dice pausa, no vencido.
+  final bool enPausa;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
+      this.enPausa = false,
       this.onTap,
       this.onLongPress,
       this.trailing,
@@ -1654,6 +1682,7 @@ class FilaCliente extends StatelessWidget {
   Widget build(BuildContext context) => _FilaCliente(
       key: ValueKey(cliente['id']),
       cliente: cliente,
+      enPausa: enPausa,
       onTap: onTap,
       onLongPress: onLongPress,
       trailing: trailing,
@@ -1670,6 +1699,10 @@ class FilaCliente extends StatelessWidget {
 }
 
 class _FilaCliente extends StatefulWidget {
+  /// Yunque de cambios 1.31 (M1): el cliente está en pausa
+  /// aprobada en curso (conjunto del directorio): su chip y
+  /// su anillo dicen pausa, no vencido.
+  final bool enPausa;
   final Map<String, dynamic> cliente;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -1688,6 +1721,7 @@ class _FilaCliente extends StatefulWidget {
   const _FilaCliente(
       {super.key,
       required this.cliente,
+      this.enPausa = false,
       this.onTap,
       this.onLongPress,
       this.trailing,
@@ -1822,11 +1856,13 @@ class _FilaClienteState extends State<_FilaCliente> {
     final esCasaAnillo = esCuentaCasa(c);
     final colorSemaforo = esCasaAnillo
         ? AppColores.casaIcono
-        : (d == null || d < 0)
-            ? AppColores.error
-            : d <= 7
-                ? AppColores.alerta
-                : AppColores.exito;
+        : widget.enPausa
+            ? AppColores.info
+            : (d == null || d < 0)
+                ? AppColores.error
+                : d <= 7
+                    ? AppColores.alerta
+                    : AppColores.exito;
     final fotoSemaforo = AvatarCliente(
       nombre: nombre,
       foto: _foto,
@@ -1878,7 +1914,8 @@ class _FilaClienteState extends State<_FilaCliente> {
     // convertir null en 999999 días pintaba «AL DÍA» a
     // quien nunca pagó; T04 lo curó en el modelo y aquí
     // llega a la fila).
-    final chipFila = chipEstadoFila(dias: d, pagadoHasta: ph);
+    final chipFila =
+        chipEstadoFila(dias: d, pagadoHasta: ph, enPausa: widget.enPausa);
     // 1.25 T47: el texto de días vive dentro del chip
     // (chipEstadoFila); Casa conserva su chip dorado con
     // el texto completo.
@@ -2135,7 +2172,16 @@ double fraccionBarraAtraso(int dias) =>
 ({EstadoMembresia estado, String texto}) chipEstadoFila({
   required int? dias,
   required String? pagadoHasta,
+  bool enPausa = false,
 }) {
+  // Yunque de cambios 1.31 (M1): en pausa aprobada en curso
+  // el chip dice la pausa, no el vencimiento que no corre.
+  if (enPausa) {
+    return (
+      estado: EstadoMembresia.congelado,
+      texto: 'EN PAUSA · no vence mientras dura'
+    );
+  }
   if (dias == null) {
     return (
       estado: EstadoMembresia.sinPagos,
@@ -2197,7 +2243,8 @@ String? accionPrincipalBuscar({
 /// no alimenta ningún contador (su estado no se revela); la
 /// Cuenta a la Casa cuenta como al día y también alimenta
 /// «sin foto»; sin fecha = vencido.
-Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base) {
+Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base,
+    {Set<int> congelados = const {}}) {
   final conteos = <String, int>{
     'todos': base.length,
     'aldia': 0,
@@ -2217,11 +2264,17 @@ Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base) {
         conteos['aldia'] = conteos['aldia']! + 1;
       } else {
         final dias = diasRestantes(c['pagado_hasta'] as String?);
+        // Yunque de cambios 1.31 (M1): en pausa aprobada en
+        // curso no cuenta como vencido (sigue en «todos» y en
+        // «sin foto» si le toca): el directorio no lo clasifica
+        // como moroso, igual que Listas.
+        final enPausa =
+            congelados.contains((c['id'] as num?)?.toInt());
         if (dias != null && dias > 7) {
           conteos['aldia'] = conteos['aldia']! + 1;
         } else if (dias != null && dias >= 0 && dias <= 7) {
           conteos['porvencer'] = conteos['porvencer']! + 1;
-        } else if (dias == null || dias < 0) {
+        } else if ((dias == null || dias < 0) && !enPausa) {
           conteos['vencidos'] = conteos['vencidos']! + 1;
         }
       }

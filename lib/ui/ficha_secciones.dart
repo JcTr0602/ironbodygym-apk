@@ -162,6 +162,13 @@ class CabeceraFicha extends StatelessWidget {
                 const SizedBox(height: AppEspacio.sm),
                 // Argón Clientes #3: con Casa manda el chip
                 // dorado; la insignia de días no se pinta.
+                // Yunque de cambios 1.31 (M1): `congelado` aquí
+                // es la fusión que pasa la ficha (congelado
+                // viejo O pausa nueva en curso): la insignia
+                // sigue diciendo «CONGELADO» (la T13 de la 1.25
+                // lo fija) — lo que se corrige es que la pausa
+                // nueva LLEGUE a esta rama y no caiga a la de
+                // días («VENCIDO N DÍAS»).
                 if (!esCasa && congelado)
                   const BadgeEstado(
                       estado: EstadoMembresia.congelado,

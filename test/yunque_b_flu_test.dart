@@ -141,6 +141,31 @@ void main() {
     expect(resumen.activos, 8);
   });
 
+  test(
+      'Yunque de cambios 1.31 (M1): la pausa TERMINADA vuelve a '
+      'entrar en los predicados', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = await _abrirDbVacia();
+    final hoy = DateTime.parse(hoyHabanaIso());
+    String hace(int d) => _iso(hoy.subtract(Duration(days: d)));
+
+    // 31: vencido hace 5 días con pausa que TERMINÓ ayer
+    // (empezó hace 12, terminó hace 1): la ventana ya cerró,
+    // vuelve a ser atrasado y moroso como cualquier vencido.
+    await _cliente(db, 31, 'Pausa Terminada', hace(5));
+    await _congelacion(db, 'c31', 31, hace(12), hace(1));
+    // 32: control en curso (empezó hace 2, termina en 10):
+    // sigue fuera, como en el test principal.
+    await _cliente(db, 32, 'Pausa En Curso', hace(5));
+    await _congelacion(db, 'c32', 32, hace(2),
+        _iso(hoy.add(const Duration(days: 10))));
+
+    final atr = _ids(await atrasados(masDe30: false));
+    expect(atr, contains(31));
+    expect(atr, isNot(contains(32)));
+    expect(await morosos(), 1);
+  });
+
   // ── Yunque B · Medias (Gestión 1.31): FLU-03 y FLU-04 ──
   group('YB-FLU-03 cotizacionPlusSeguramenteVencida', () {
     final creado = DateTime(2026, 11, 8, 10, 0);
