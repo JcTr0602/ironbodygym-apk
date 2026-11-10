@@ -21,6 +21,7 @@ import 'diseno.dart';
 import 'permisos_ui.dart';
 import 'reporte_mensual_diarios.dart';
 import 'widgets.dart';
+import '../app_log.dart';
 
 /// ¿Puede este usuario editar/anular un registro de pago diario?
 /// PURO. Dueño: todo. Entrenador: solo lo suyo. Sin autor conocido
@@ -104,6 +105,23 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
 
   /// v1.0.15: carga los datos del reporte para la fecha seleccionada.
   Future<void> _cargarReporte() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarReporteDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargandoReporte) {
+        setState(() => _cargandoReporte = false);
+      }
+    }
+  }
+
+  Future<void> _cargarReporteDatos() async {
     setState(() => _cargandoReporte = true);
     final iso =
         '${_fechaReporte.year.toString().padLeft(4, '0')}-'
