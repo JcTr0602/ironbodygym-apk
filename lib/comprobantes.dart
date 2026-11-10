@@ -61,12 +61,67 @@ class ComprobantesService {
     final dir = Directory('${base.path}/comprobantes');
     if (!await dir.exists()) await dir.create(recursive: true);
 
+    // Auditoría Definitiva (B-18): el contenido NUEVO se prepara
+    // primero en un archivo de staging y se VERIFICA (existe y
+    // no está vacío); solo entonces se retira lo anterior. El
+    // orden viejo borraba los archivos y las claves TUS ANTES
+    // de comprimir/copiar: si la copia del origen fallaba tras
+    // el borrado, la fila vieja quedaba apuntando a un archivo
+    // ausente y el próximo ciclo la marcaba 'error'
+    // (archivo_ausente) — el comprobante se perdía sin haber
+    // llegado nunca el reemplazo.
+    var ext = 'webp';
+    final stagingWebp = File('${dir.path}/$comprobanteUuid.webp.tmp');
+    final stagingJpg = File('${dir.path}/$comprobanteUuid.jpg.tmp');
+    File? staging;
+    try {
+      final res = await FlutterImageCompress.compressAndGetFile(
+        rutaOrigen,
+        stagingWebp.path,
+        minWidth: 1600,
+        minHeight: 1600,
+        quality: 80,
+        format: CompressFormat.webp,
+      );
+      if (res != null &&
+          await stagingWebp.exists() &&
+          await stagingWebp.length() > 0) {
+        staging = stagingWebp;
+      }
+    } catch (e) {
+      debugPrint('Comprobantes: compresión falló ($e); se copia '
+          'el original');
+    }
+    if (staging == null) {
+      ext = 'jpg';
+      // Si el origen no se puede copiar, la excepción sube con
+      // la fila y el archivo anteriores INTACTOS.
+      await File(rutaOrigen).copy(stagingJpg.path);
+      if (await stagingJpg.exists() &&
+          await stagingJpg.length() > 0) {
+        staging = stagingJpg;
+      }
+    }
+    if (staging == null) {
+      // Ni la compresión ni la copia produjeron un archivo
+      // válido: se limpia el staging y lo anterior queda como
+      // estaba (la llamada falla, el comprobante viejo no).
+      for (final s in [stagingWebp, stagingJpg]) {
+        try {
+          if (await s.exists()) await s.delete();
+        } catch (_) {}
+      }
+      throw StateError(
+          'No se pudo preparar el comprobante $comprobanteUuid');
+    }
+
     // Caza Fotos L3-MEDIA (Argón): re-encolar el MISMO uuid (la
     // fila se reemplaza por conflictAlgorithm.replace) dejaba el
     // archivo de la extensión anterior huérfano en disco y las
     // claves TUS apuntando a la subida vieja (la reanudación
     // chocaba con 409). Se borran ambos archivos posibles y las
-    // claves TUS antes de escribir el nuevo.
+    // claves TUS — AHORA que el reemplazo ya está asegurado
+    // (B-18) — y el staging pasa a su ruta final.
     final dbPrevia = await LocalDb.instance.db;
     for (final extPrevia in const ['webp', 'jpg']) {
       try {
@@ -80,44 +135,17 @@ class ComprobantesService {
     ]) {
       await dbPrevia.delete('meta', where: 'k = ?', whereArgs: [clave]);
     }
-
-    var ext = 'webp';
-    final destino = File('${dir.path}/$comprobanteUuid.webp');
-    try {
-      final tmp = '${destino.path}.tmp';
-      final res = await FlutterImageCompress.compressAndGetFile(
-        rutaOrigen,
-        tmp,
-        minWidth: 1600,
-        minHeight: 1600,
-        quality: 80,
-        format: CompressFormat.webp,
-      );
-      if (res != null) {
-        await File(tmp).rename(destino.path);
-      } else {
-        ext = 'jpg';
+    // El staging que no ganó (un parcial de compresión) no
+    // queda huérfano (FIN-01 de Argón, 1.20).
+    for (final s in [stagingWebp, stagingJpg]) {
+      if (s.path != staging.path) {
         try {
-          final parcial = File(tmp);
-          if (await parcial.exists()) await parcial.delete();
+          if (await s.exists()) await s.delete();
         } catch (_) {}
       }
-    } catch (e) {
-      debugPrint('Comprobantes: compresión falló ($e); se copia '
-          'el original');
-      ext = 'jpg';
-      // FIN-01 de Argón (1.20): si la compresión dejó un .tmp
-      // parcial en disco, no debe quedar huérfano.
-      try {
-        final parcial = File('${destino.path}.tmp');
-        if (await parcial.exists()) await parcial.delete();
-      } catch (_) {}
     }
-    var rutaLocal = destino.path;
-    if (ext == 'jpg') {
-      rutaLocal = '${dir.path}/$comprobanteUuid.jpg';
-      await File(rutaOrigen).copy(rutaLocal);
-    }
+    final rutaLocal = '${dir.path}/$comprobanteUuid.$ext';
+    await staging.rename(rutaLocal);
 
     final db = await LocalDb.instance.db;
     await db.insert(

@@ -207,4 +207,71 @@ void main() {
               '_procesando quedó pegada');
     });
   });
+
+  group('B-18 · encolar asegura el nuevo antes de borrar el viejo',
+      () {
+    test('re-encolar con el origen ausente NO destruye el '
+        'comprobante anterior', () async {
+      await _abrirDbVacia();
+      final tmp = await Directory.systemTemp.createTemp('comp_b18');
+      addTearDown(() async {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      final origen = File('${tmp.path}/captura.jpg');
+      await origen.writeAsBytes([1, 2, 3, 4, 5]);
+      await ComprobantesService.instance.encolar(
+          comprobanteUuid: 'comp-b18',
+          rutaOrigen: origen.path,
+          baseDir: tmp);
+      var fila =
+          await ComprobantesService.instance.filaDe('comp-b18');
+      expect(fila?['estado'], 'pendiente');
+      final rutaVieja = fila!['ruta_local'] as String;
+      expect(await File(rutaVieja).exists(), isTrue);
+
+      // Re-encolado cuyo origen ya no existe: la llamada falla
+      // y el comprobante anterior queda intacto (con el orden
+      // viejo, su archivo ya estaba borrado y la fila apuntaba
+      // al vacío).
+      await expectLater(
+          ComprobantesService.instance.encolar(
+              comprobanteUuid: 'comp-b18',
+              rutaOrigen: '${tmp.path}/ya-no-esta.jpg',
+              baseDir: tmp),
+          throwsA(anything));
+      fila = await ComprobantesService.instance.filaDe('comp-b18');
+      expect(fila?['ruta_local'], rutaVieja);
+      expect(fila?['estado'], 'pendiente');
+      expect(await File(rutaVieja).readAsBytes(), [1, 2, 3, 4, 5]);
+    });
+
+    test('re-encolar válido sustituye el archivo', () async {
+      await _abrirDbVacia();
+      final tmp = await Directory.systemTemp.createTemp('comp_b18b');
+      addTearDown(() async {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      final o1 = File('${tmp.path}/uno.jpg');
+      await o1.writeAsBytes([9, 9]);
+      await ComprobantesService.instance.encolar(
+          comprobanteUuid: 'comp-b18b',
+          rutaOrigen: o1.path,
+          baseDir: tmp);
+      final o2 = File('${tmp.path}/dos.jpg');
+      await o2.writeAsBytes([7, 7, 7]);
+      await ComprobantesService.instance.encolar(
+          comprobanteUuid: 'comp-b18b',
+          rutaOrigen: o2.path,
+          baseDir: tmp);
+      final fila =
+          await ComprobantesService.instance.filaDe('comp-b18b');
+      expect(
+          await File(fila!['ruta_local'] as String).readAsBytes(),
+          [7, 7, 7]);
+    });
+  });
 }
