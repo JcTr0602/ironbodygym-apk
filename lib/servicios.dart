@@ -201,6 +201,18 @@ bool mostrarCheckboxPolvoPerdido(bool esDueno) => esDueno;
 /// si hay id sin nombre (mismo criterio que el ranking) →
 /// 'Sin identificar' (venta de mostrador, legítima: identificar
 /// al comprador es opcional en el flujo de venta).
+/// 1.31 (Mejoras · nombres únicos): el trío de productos se
+/// llama IGUAL en toda la app, como se dice en el mostrador:
+/// «Dosis», «Dosis con agua», «Agua». Antes cada pantalla
+/// traducía a su manera (Ración/Combo/Pomo de agua/Solo agua/
+/// Dosis sin agua…) y el mismo producto tenía cuatro nombres.
+String etiquetaTipoServicio(String tipo) => switch (tipo) {
+      'dosis_sin_agua' => 'Dosis',
+      'dosis_con_agua' => 'Dosis con agua',
+      'agua_suelta' => 'Agua',
+      _ => tipo,
+    };
+
 String nombreClienteVentaServicio(Map<String, dynamic> v) {
   final propio = '${v['cliente_nombre'] ?? ''}'.trim();
   if (propio.isNotEmpty) return propio;
@@ -234,6 +246,12 @@ List<Map<String, dynamic>> entradasHistorialServicios({
       'casa': esCasaTolerante(v['casa']),
       'esReverso': (v['reverso_de'] as num?) != null,
       'yaReversada': reversadas.contains(id),
+      // 1.31 (Mejoras): el pomo viaja en la entrada: la fila
+      // de salida lo nombra y el detalle único lo resuelve.
+      'pomoId': (v['pomo_id'] as num?)?.toInt(),
+      // La fila cruda del espejo, para el detalle único del
+      // historial (misma forma que usa «Ventas de hoy»).
+      'cruda': v,
     });
   }
   for (final s in salidas) {
@@ -249,6 +267,7 @@ List<Map<String, dynamic>> entradasHistorialServicios({
       'casa': false,
       'esReverso': false,
       'yaReversada': false,
+      'pomoId': (s['pomo_id'] as num?)?.toInt(),
     });
   }
   String f10(Map<String, dynamic> e) {
@@ -266,18 +285,40 @@ List<Map<String, dynamic>> entradasHistorialServicios({
   return entradas;
 }
 
+/// 1.31 (Mejoras · Historial elevado): totales de UN día del
+/// historial (PURO). Operaciones = todas las entradas del día
+/// (ventas, reversos y salidas sin venta). Importe = ventas
+/// menos reversos: la venta ya reversada sigue sumando (su
+/// reverso es la entrada que resta) y las salidas no mueven
+/// dinero. Es el número que el encabezado de día enseña.
+({int operaciones, double importe}) totalesDiaHistorialServicios(
+    List<Map<String, dynamic>> entradasDelDia) {
+  var importe = 0.0;
+  for (final e in entradasDelDia) {
+    if (e['kind'] != 'venta') continue;
+    final m = (e['monto'] as num?)?.toDouble() ?? 0;
+    importe += e['esReverso'] == true ? -m : m;
+  }
+  return (operaciones: entradasDelDia.length, importe: importe);
+}
+
 /// Buscador del historial de servicios (11/25, PURO): el texto
 /// coincide con el cliente, el vendedor, el tipo (en palabras:
-/// ración/combo/agua, y también el código crudo: dosis/agua) o,
+/// dosis/dosis con agua/agua — con los alias ración/combo —
+/// y también el código crudo) o,
 /// en salidas, el motivo. Sin mayúsculas.
 bool coincideBusquedaHistorialServicio(
     Map<String, dynamic> e, String texto, String nombreVendedor) {
   final q = texto.trim().toLowerCase();
   if (q.isEmpty) return true;
+  // 1.31 (Mejoras · nombres únicos): se busca por el nombre
+  // nuevo («dosis», «dosis con agua», «agua») y TAMBIÉN por
+  // los de antes («ración», «combo», «agua suelta»): la
+  // memoria del personal no se reentrena por decreto.
   final tipoTxt = switch ('${e['tipo']}') {
-    'dosis_sin_agua' => 'ración',
-    'dosis_con_agua' => 'combo',
-    'agua_suelta' => 'agua suelta',
+    'dosis_sin_agua' => 'dosis ración',
+    'dosis_con_agua' => 'dosis con agua combo',
+    'agua_suelta' => 'agua agua suelta',
     _ => '${e['tipo']}',
   };
   final campos = e['kind'] == 'venta'

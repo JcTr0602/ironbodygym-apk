@@ -837,7 +837,7 @@ void main() {
       await _pumpReal(tester, vueltas: 6);
       // Las 5 filas del día, visibles sin expandir nada más.
       expect(find.textContaining('Pago diario'), findsNWidgets(4));
-      expect(find.textContaining('Combo (dosis con agua)'),
+      expect(find.textContaining('Dosis con agua'),
           findsOneWidget);
       // El total del día (4×200 + 900) se comprueba.
       expect(find.textContaining('1700 CUP'), findsWidgets);

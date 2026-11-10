@@ -176,7 +176,7 @@ void main() {
       await tester.pumpWidget(
           const MaterialApp(home: ServiciosAdminScreen()));
       expect(
-          await _esperarTexto(tester, 'Ración (dosis sin agua)'), isTrue);
+          await _esperarTexto(tester, 'Dosis'), isTrue);
       await _ciclos(tester);
     }
 

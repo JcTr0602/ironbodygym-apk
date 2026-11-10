@@ -774,11 +774,11 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       children: [
         Text('Precios y comisión', style: AppTexto.titulo),
         const SizedBox(height: AppEspacio.sm),
-        _tarjetaGrupoPrecio('Ración (dosis sin agua)', 'racion'),
+        _tarjetaGrupoPrecio('Dosis', 'racion'),
         const SizedBox(height: AppEspacio.sm),
-        _tarjetaGrupoPrecio('Combo (dosis con agua)', 'combo'),
+        _tarjetaGrupoPrecio('Dosis con agua', 'combo'),
         const SizedBox(height: AppEspacio.sm),
-        _tarjetaGrupoPrecio('Pomo de agua suelto', 'agua'),
+        _tarjetaGrupoPrecio('Agua', 'agua'),
         const SizedBox(height: AppEspacio.sm),
         Tarjeta(
           padding: const EdgeInsets.all(AppEspacio.md),

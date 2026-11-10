@@ -136,9 +136,9 @@ bool esCobroServidor(String accion) {
 String lineaDetalleActividad(String det, String titulo) {
   var s = det;
   // Tipos crudos de servicio → etiquetas de la app.
-  s = s.replaceAll('dosis_sin_agua', 'Dosis sin agua');
-  s = s.replaceAll('dosis_con_agua', 'Dosis + agua');
-  s = s.replaceAll('agua_suelta', 'Agua suelta');
+  s = s.replaceAll('dosis_sin_agua', 'Dosis');
+  s = s.replaceAll('dosis_con_agua', 'Dosis con agua');
+  s = s.replaceAll('agua_suelta', 'Agua');
   // "(vía APK)" puede venir solo o dentro de un paréntesis con más
   // texto ("(mensual, vía APK)"): quitarlo en ambas formas antes de
   // limpiar los paréntesis que deja vacíos o a medias.

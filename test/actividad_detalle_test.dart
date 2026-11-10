@@ -30,7 +30,7 @@ void main() {
           'dosis_con_agua x1 = 900 CUP (venta #123, vía APK)',
           'Venta servicio',
         ),
-        'Dosis + agua x1',
+        'Dosis con agua x1',
       );
     });
     test('promo se conserva', () {

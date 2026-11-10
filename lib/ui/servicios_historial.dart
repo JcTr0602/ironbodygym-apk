@@ -250,12 +250,9 @@ class _ServiciosHistorialScreenState
         ),
       );
     }
-    final tipoTxt = switch ('${e['tipo']}') {
-      'dosis_sin_agua' => 'Ración',
-      'dosis_con_agua' => 'Combo',
-      'agua_suelta' => 'Agua suelta ×${e['cantidad']}',
-      _ => '${e['tipo']}',
-    };
+    final tipoTxt = '${e['tipo']}' == 'agua_suelta'
+        ? 'Agua ×${e['cantidad']}'
+        : etiquetaTipoServicio('${e['tipo']}');
     final icono = esReverso
         ? Icons.undo_rounded
         : esCasa
@@ -360,8 +357,8 @@ class _ServiciosHistorialScreenState
               child: Row(
                 children: [
                   _chip('todas', 'Todas'),
-                  _chip('racion', 'Raciones'),
-                  _chip('combo', 'Combos'),
+                  _chip('racion', 'Dosis'),
+                  _chip('combo', 'Dosis con agua'),
                   _chip('agua', 'Agua'),
                   if (widget.esDueno) _chip('salida', 'Salidas'),
                 ],

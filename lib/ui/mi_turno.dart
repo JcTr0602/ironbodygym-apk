@@ -415,7 +415,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       final cant = (u['cantidad'] as num?)?.toInt() ?? 1;
       base = switch ('${u['tipo'] ?? ''}') {
         'dosis_con_agua' => cant > 1 ? '$cant dosis con agua' : 'Dosis con agua',
-        'agua_suelta' => cant > 1 ? '$cant pomos de agua' : 'Pomo de agua',
+        'agua_suelta' => cant > 1 ? '$cant pomos de agua' : 'Agua',
         _ => cant > 1 ? '$cant dosis sin agua' : 'Dosis sin agua',
       };
     }

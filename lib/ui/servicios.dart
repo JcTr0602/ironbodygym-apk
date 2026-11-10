@@ -2373,12 +2373,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   color: Theme.of(context).colorScheme.onPrimary,
                 )),
             const SizedBox(width: AppEspacio.sm),
-            boton('dosis_con_agua', 'Dosis + agua',
+            boton('dosis_con_agua', 'Dosis con agua',
                 precioDe('dosis_con_agua'), Icons.water_drop_rounded,
                 AppColores.naranja,
                 grande: true, degradado: AppColores.gradienteDosisAgua),
             const SizedBox(width: AppEspacio.sm),
-            boton('agua_suelta', 'Solo agua',
+            boton('agua_suelta', 'Agua',
                 precioDe('agua_suelta'), Icons.local_drink_rounded,
                 AppColores.azulAgua,
                 grande: true),
@@ -2597,12 +2597,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final atenuada = esReverso || yaReversada;
     final monto = ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
         ((v['cantidad'] as num?)?.toDouble() ?? 0);
-    final tipoTxt = switch ('${v['tipo']}') {
-      'dosis_sin_agua' => 'Dosis sin agua',
-      'dosis_con_agua' => 'Dosis con agua',
-      'agua_suelta' => 'Pomo de agua ×${v['cantidad']}',
-      _ => '${v['tipo']}',
-    };
+    // 1.31 (Mejoras · nombres únicos): «Dosis», «Dosis con
+    // agua», «Agua ×N» — etiquetaTipoServicio manda.
+    final tipoTxt = '${v['tipo']}' == 'agua_suelta'
+        ? 'Agua ×${v['cantidad']}'
+        : etiquetaTipoServicio('${v['tipo']}');
     // Ítem 8 (trazabilidad para el entrenador): si la venta salió
     // de MI lote pero el vendedor fue otro (el dueño), se dice con
     // su insignia; si el dueño la registró a MI nombre, también.
@@ -2728,12 +2727,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         (v['precio_unitario'] as num?)?.toDouble() ?? 0;
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
     final monto = precio * cant;
-    final tipoTxt = switch ('${v['tipo']}') {
-      'dosis_sin_agua' => 'Dosis sin agua',
-      'dosis_con_agua' => 'Dosis con agua',
-      'agua_suelta' => 'Agua suelta',
-      _ => '${v['tipo']}',
-    };
+    final tipoTxt = etiquetaTipoServicio('${v['tipo']}');
     final com = (v['comision_monto'] as num?)?.toDouble() ??
         ((v['comision_unitaria'] as num?)?.toDouble() ?? 0) * cant;
     // 10/25: la venta original se trae por PK, sin el espejo.
@@ -2786,12 +2780,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               if (motivo.isNotEmpty) fila('Motivo', motivo),
               if (original != null) ...[
                 const EncabezadoSeccion(titulo: 'Venta original'),
-                fila('Tipo', switch ('${original['tipo']}') {
-                  'dosis_sin_agua' => 'Dosis sin agua',
-                  'dosis_con_agua' => 'Dosis con agua',
-                  'agua_suelta' => 'Agua suelta',
-                  _ => '${original['tipo']}',
-                }),
+                fila('Tipo',
+                    etiquetaTipoServicio('${original['tipo']}')),
                 fila('Cliente', nombreClienteVentaServicio(original)),
                 fila('Monto',
                     '${fmtMonto(((original['precio_unitario'] as num?)?.toDouble() ?? 0) * ((original['cantidad'] as num?)?.toDouble() ?? 0))} CUP'),
@@ -3150,11 +3140,9 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
     final precioUnit =
         precioServicioMetodo(_ajustes, tipo, metodo);
     return DialogoApp(
-      titulo: tipo == 'dosis_sin_agua'
-          ? 'Dosis sin agua'
-          : tipo == 'dosis_con_agua'
-              ? 'Dosis con agua'
-              : 'Pomo de agua',
+      // 1.31 (Mejoras · nombres únicos): el título del
+      // diálogo es el nombre único del producto.
+      titulo: etiquetaTipoServicio(tipo),
       iconoTitulo: Icons.bolt_rounded,
       contenido: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3257,7 +3245,7 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
             if (metodosActivos.isEmpty)
               Text(
                 '⚠️ Este producto no tiene métodos de cobro '
-                'habilitados (Administración → Servicios).',
+                'habilitados (Servicios → Precios y comisión).',
                 style: AppTexto.secundario.copyWith(
                     color: AppColores.error),
               )

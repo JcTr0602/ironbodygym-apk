@@ -1180,7 +1180,7 @@ class _FichaScreenState extends State<FichaScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.water_drop_rounded),
-              title: const Text('Pomo de agua'),
+              title: const Text('Agua'),
               onTap: () => Navigator.pop(ctx, 'agua_suelta'),
             ),
             if (puedeBotes)
@@ -3957,9 +3957,9 @@ class _FichaScreenState extends State<FichaScreen> {
         'tipo': 'venta',
         'fecha': '${s['fecha'] ?? ''}',
         'titulo': switch ('${s['tipo']}') {
-          'dosis_sin_agua' => 'Dosis sin agua',
+          'dosis_sin_agua' => 'Dosis',
           'dosis_con_agua' => 'Dosis con agua',
-          'agua_suelta' => 'Pomo de agua',
+          'agua_suelta' => 'Agua',
           _ => 'Servicio',
         },
         // 1.25 T117 (F1-44): sin separadores colgando —

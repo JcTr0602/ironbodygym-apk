@@ -297,11 +297,12 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       case 'dosis_con_agua':
         return 'Dosis con agua (x$cant)';
       case 'dosis_sin_agua':
-        return 'Dosis sin agua (x$cant)';
+        return 'Dosis (x$cant)';
       case 'agua_suelta':
-        return 'Agua suelta (x$cant)';
+        return 'Agua (x$cant)';
       case 'combo':
-        return 'Combo (x$cant)';
+        // Subtipo legacy: era la dosis con agua.
+        return 'Dosis con agua (x$cant)';
       default:
         return 'Servicio (x$cant)';
     }

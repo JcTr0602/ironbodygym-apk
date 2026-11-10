@@ -970,9 +970,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
                   icono: Icons.bolt_rounded,
                   colorIcono: AppColores.naranja,
                   concepto: switch ('${s['tipo']}') {
-                    'dosis_con_agua' => 'Combo',
-                    'agua_suelta' => 'Pomo de agua',
-                    _ => 'Ración',
+                    'dosis_con_agua' => 'Dosis con agua',
+                    'agua_suelta' => 'Agua',
+                    _ => 'Dosis',
                   },
                   detalle: '${fmtFecha(s['fecha'] as String?)}'
                       '${'${s['cliente_nombre'] ?? ''}'.isNotEmpty ? ' · ${s['cliente_nombre']}' : ''}',

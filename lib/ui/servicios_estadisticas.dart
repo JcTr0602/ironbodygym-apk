@@ -802,7 +802,7 @@ class _ServiciosEstadisticasScreenState
                   'Costo del bote: ${fmtMonto(costo)} CUP · '
                   'Rendimiento: $rend dosis · '
                   'Costo por dosis: ${fmtMonto(sim.costoPorDosis)} CUP · '
-                  'Pomo de agua: ${fmtMonto(costoAgua)} CUP',
+                  'Agua: ${fmtMonto(costoAgua)} CUP',
                   style: AppTexto.cuerpo,
                 ),
                 const SizedBox(height: 8),

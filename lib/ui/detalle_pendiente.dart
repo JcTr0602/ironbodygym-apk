@@ -256,9 +256,9 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                                   title: Text(switch (
                                       '${it['servicio_tipo']}') {
                                     'dosis_con_agua' =>
-                                      'Combo (dosis con agua)',
-                                    'agua_suelta' => 'Pomo de agua',
-                                    _ => 'Ración (dosis)',
+                                      'Dosis con agua',
+                                    'agua_suelta' => 'Agua',
+                                    _ => 'Dosis',
                                   }),
                                   subtitle: Text(
                                       '${fmtFecha(it['fecha'])}'

@@ -5839,10 +5839,12 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
       'moneda': 'CUP',
       'creada_en': s['fecha'],
       'tipo': 'servicio',
+      // 1.31 (Mejoras · nombres únicos): «Dosis», «Dosis con
+      // agua», «Agua» también en el pendiente a entregar.
       'descripcion': switch ('${s['tipo']}') {
-        'dosis_con_agua' => 'Combo (dosis con agua)',
-        'agua_suelta' => 'Pomo de agua',
-        _ => 'Ración (dosis)',
+        'dosis_con_agua' => 'Dosis con agua',
+        'agua_suelta' => 'Agua',
+        _ => 'Dosis',
       },
       'entrenador_nombre': nombreResp,
       'trainer_telegram_id': tid,
