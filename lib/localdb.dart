@@ -10378,6 +10378,24 @@ class LocalDb {
           '${corte.day.toString().padLeft(2, '0')}';
       final terminales =
           estadosTerminalesReserva.map((e) => "'$e'").join(',');
+      // Auditoría Definitiva (C-8): poda en DOS pasos. El
+      // DELETE único con json_extract sobre toda la tabla
+      // fallaba entero con UNA fila de data no-JSON
+      // (json_extract lanza sobre JSON mal formado) → −1 para
+      // siempre y la poda diaria sin marcar el día jamás.
+      // Paso 1: las filas ILEGIBLES (sync_seq > 0 y data no
+      // válida como JSON) se borran aparte y se cuentan:
+      // ningún lector local puede leerlas y el espejo las
+      // re-baja si siguen existiendo en el servidor.
+      // json_valid no lanza sobre texto mal formado (devuelve
+      // 0), así que este paso no puede reventar por la misma
+      // causa.
+      final ilegibles = await d.rawDelete(
+        'DELETE FROM reservas '
+        'WHERE sync_seq > 0 AND NOT json_valid(data)',
+      );
+      // Paso 2: el DELETE de siempre, ya inmune: las filas que
+      // quedan son JSON válido y json_extract no lanza.
       final n = await d.rawDelete(
         'DELETE FROM reservas '
         'WHERE sync_seq > 0 '
@@ -10385,8 +10403,10 @@ class LocalDb {
         "AND substr(json_extract(data, '\$.creada_ts'), 1, 10) < ?",
         [corteTxt],
       );
-      debugPrint('[poda_reservas] locales borradas=$n corte=$corteTxt');
-      return n;
+      final total = ilegibles + n;
+      debugPrint('[poda_reservas] locales borradas=$total '
+          '(ilegibles=$ilegibles) corte=$corteTxt');
+      return total;
     } catch (e) {
       debugPrint('[poda_reservas] fallo (no fatal): $e');
       return -1;

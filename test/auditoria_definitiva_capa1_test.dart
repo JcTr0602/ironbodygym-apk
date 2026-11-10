@@ -985,4 +985,49 @@ void main() {
       expect('${fts.first['telefonos']}', contains('33334444'));
     });
   });
+
+  group('C-8 · la poda de reservas no la condena una fila '
+      'ilegible', () {
+    test('purgarReservasLocalesViejas borra la ilegible aparte '
+        'y poda las legibles', () async {
+      await _abrirDbVacia();
+      final db = LocalDb.instance;
+      final d = await db.db;
+      final vieja = isoHabana(
+          ahoraHabana().subtract(const Duration(days: 100)));
+      final hoyTxt = isoHabana(ahoraHabana());
+      Future<void> sembrar(int id, String data, int seq) =>
+          d.insert('reservas',
+              {'id': id, 'data': data, 'sync_seq': seq});
+      // Legible, terminal y vieja: se poda (paso 2).
+      await sembrar(
+          1,
+          jsonEncode({'estado': 'pagada', 'creada_ts': vieja}),
+          5);
+      // Ilegible del servidor: se borra aparte (paso 1) y NO
+      // bloquea al resto — antes el DELETE entero moría con
+      // ella y la poda devolvía −1 para siempre.
+      await sembrar(2, 'esto no es json', 5);
+      // Legible no terminal: se queda.
+      await sembrar(
+          3,
+          jsonEncode({'estado': 'confirmada', 'creada_ts': vieja}),
+          5);
+      // Legible terminal pero reciente: se queda.
+      await sembrar(
+          4,
+          jsonEncode({'estado': 'pagada', 'creada_ts': hoyTxt}),
+          5);
+      // Ilegible LOCAL (sync_seq 0): no es del espejo, se queda.
+      await sembrar(5, 'tampoco es json', 0);
+
+      final n = await db.purgarReservasLocalesViejas();
+      expect(n, 2,
+          reason: 'la poda no devolvió el total (ilegible + '
+              'legible vieja) o volvió a condenarse a −1');
+      final quedan = await d.query('reservas',
+          columns: ['id'], orderBy: 'id ASC');
+      expect(quedan.map((r) => r['id']).toList(), [3, 4, 5]);
+    });
+  });
 }
