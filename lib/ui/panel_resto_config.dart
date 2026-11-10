@@ -35,6 +35,7 @@ import 'diseno.dart';
 import 'dialogo_pago.dart' show metodosAceptadosEfectivos;
 import 'panel_resto_caja.dart';
 import 'tarifas_especiales.dart';
+import '../app_log.dart';
 
 void _ir(BuildContext context, Widget pantalla) {
   Navigator.push(context, RutaIron(builder: (_) => pantalla));
@@ -118,6 +119,25 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02;
+    // aquí además _hayCambios exige !_cargando, así que
+    // una carga muerta se leía como «sin cambios»).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final aj = await LocalDb.instance.getAjustes();
     // Los métodos salen por la MISMA función que los lee
     // en el diálogo de cobro (efectivo/transferencia).
