@@ -21,6 +21,7 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'suplementos.dart';
+import '../app_log.dart';
 
 /// B2: las 14 claves de permiso, explicadas en sencillo.
 const kPermisosExplicados = {
@@ -111,6 +112,23 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     // 1.23 AT-02 (auditoría total de Argón): la Casa la otorga
     // y la quita SOLO el dueño, pero esta lista no tenía
     // guarda: un entrenador que alcanzara la ruta veía la
@@ -212,6 +230,23 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final todos = await LocalDb.instance.allMirror('suplementos');
     final mal = todos.where((s) {
       // P2#7: fuera eliminados e inactivos (activo != 1).
@@ -308,6 +343,23 @@ class _VencimientosProximosScreenState
   }
 
   Future<void> _cargar() async {
+    // (Yunque R2-X1) red de seguridad: la bandera baja
+    // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
+    // (spinner eterno: la clase de la ficha 2026-11-02).
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora
+      // (la clase nació de fallos mudos).
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final hoy = hoyHabanaIso();
     // 1.24 B2: límite por aritmética de fecha pura (sumarDiasIso).
     final limite = sumarDiasIso(hoy, 7);
