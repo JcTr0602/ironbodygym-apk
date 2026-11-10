@@ -186,7 +186,21 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   }
 
   Future<void> _cargarCache() async {
-    final ok = await AccesoAppCache.instance.cargar();
+    // (Yunque R2-X1) red de seguridad: «Verificando
+    // acceso…» baja SIEMPRE. AccesoAppCache.cargar ya
+    // devuelve false sin lanzar en sus caminos conocidos;
+    // si algo lanzara, el «verificando» quedaba eterno
+    // (la clase de la ficha 2026-11-02) — y un fallo de
+    // lectura NO es «sin acceso»: se lee como no
+    // verificado, con su reintento visible.
+    bool ok;
+    try {
+      ok = await AccesoAppCache.instance.cargar();
+    } catch (e) {
+      // El error NO se traga: queda en bitácora.
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+      ok = false;
+    }
     if (!mounted) return;
     setState(() {
       _verificando = false;
