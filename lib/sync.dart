@@ -654,6 +654,14 @@ enum EstadoSubida { subida, reintentable, permanente, permitirFallback, pausadaP
 /// el próximo ciclo reanuda en el último chunk confirmado.
 class _PausaQos implements Exception {}
 
+/// Yunque R3-M3-2/3: la guarda QoS mandó parar en el PUT
+/// monolítico (_subirFotoSimple), que devuelve bool y no
+/// puede expresar la pausa. Los llamadores la capturan
+/// ANTES de contar el intento: una pausa no es un fallo de
+/// red y no quema intentos (la clase hermana _PausaQosCola
+/// de fotos_cola hace el mismo papel en su cola).
+class _PausaQosSimple implements Exception {}
+
 /// v1.2.9: resultado estructurado (corrección Gemini #3).
 class ResultadoSubidaFoto {
   final EstadoSubida estado;
@@ -3392,7 +3400,15 @@ class SyncEngine {
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
           // error de cliente: reintenta op por op para aislar la
           // culpable en vez de atascar el lote entero
-          await _uploadUnaPorUna(lote);
+          // Yunque R3-M1-4: si el fallback aceptó ALGUNA op, el
+          // envío sí funcionó: se contabiliza como aceptado
+          // (antes el lote caía a 10 igualmente y, con un
+          // servidor que rechaza lotes pero acepta
+          // individuales, el push vivía en el mínimo + N POSTs).
+          if (await _uploadUnaPorUna(lote) > 0) {
+            algunEnvioAceptado = true;
+            loteOk = true;
+          }
         } else {
           // 1.15 (S1.7): 5xx es AMBIGUO (el servidor pudo haber
           // aceptado antes de fallar): el barrido NO se omite.
@@ -3498,7 +3514,13 @@ class SyncEngine {
     } catch (_) {}
   }
 
-  Future<void> _uploadUnaPorUna(List<Map<String, dynamic>> lote) async {
+  /// Yunque R3-M1-4: devuelve cuántas ops dejó en 'enviada'
+  /// (aceptadas por el servidor): el llamador alimenta con
+  /// eso la contabilidad del lote adaptativo. Antes el
+  /// éxito del fallback no se contabilizaba y el tamaño de
+  /// lote caía a 10 aunque todas las individuales salieran.
+  Future<int> _uploadUnaPorUna(List<Map<String, dynamic>> lote) async {
+    var aceptadas = 0;
     final tag = await deviceTag();
     for (final op in lote) {
       final uuid = op['op_uuid'] as String;
@@ -3531,6 +3553,7 @@ class SyncEngine {
             r.statusCode == 204 ||
             r.statusCode == 409) {
           await _db.markOp(uuid, 'enviada');
+          aceptadas++;
         } else if (r.statusCode == 429 ||
             r.statusCode == 408 ||
             r.statusCode >= 500) {
@@ -3594,6 +3617,7 @@ class SyncEngine {
         await _bumpConReversion(op, e);
       }
     }
+    return aceptadas;
   }
 
   /// v1.3.4 Ítem 1 (Argón): captura en lote del estado + resultado del
@@ -7016,10 +7040,18 @@ class SyncEngine {
     // Ante reintentable tampoco: el reintento lo gestiona la cola
     // (TUS reanuda en el offset guardado), no un PUT monolítico.
     if (res.estado != EstadoSubida.permitirFallback) return null;
-    final ok = await _subirFotoSimple(path, comprimida,
-        debePausarPorCobro: () async =>
-            await _db.countPendingOpsNoFoto() > 0);
-    return ok ? path : null;
+    try {
+      final ok = await _subirFotoSimple(path, comprimida,
+          debePausarPorCobro: () async =>
+              await _db.countPendingOpsNoFoto() > 0);
+      return ok ? path : null;
+    } on _PausaQosSimple {
+      // Yunque R3-M3-3: pausa en el PUT de respaldo: null
+      // como ante un fallo, pero sin haber intentado el PUT
+      // (la guarda cortó antes); el llamador reintentará en
+      // el próximo ciclo con la foto intacta.
+      return null;
+    }
   }
 
   /// v1.2.9: subida para la cola persistente (fotos_cola).
@@ -7063,8 +7095,21 @@ class SyncEngine {
       // tus == false: fallo reintentable (el offset quedó guardado).
       // tus == null: TUS no disponible → fallback permitido.
       if (tus == null) {
-        final ok = await _subirFotoSimple(objectPath, bytes,
-            debePausarPorCobro: debePausarPorCobro);
+        bool ok;
+        try {
+          ok = await _subirFotoSimple(objectPath, bytes,
+              debePausarPorCobro: debePausarPorCobro);
+        } on _PausaQosSimple {
+          // Yunque R3-M3-3: pausa en el PUT de respaldo =
+          // pausadaPorQos (el llamador no cuenta intento),
+          // no permitirFallback: antes la pausa reclasificada
+          // quemaba un intento por ciclo en fotos_cola y en
+          // comprobantes, y a los 5/10 topes la fila caía a
+          // 'error' sin un solo fallo de red.
+          return const ResultadoSubidaFoto(
+            estado: EstadoSubida.pausadaPorQos,
+          );
+        }
         if (ok) {
           // Luna #3: tras fallback PUT exitoso, invalidar estado TUS
           // para que un reintento no reanude el upload viejo.
@@ -7078,7 +7123,9 @@ class SyncEngine {
         }
         return const ResultadoSubidaFoto(
           estado: EstadoSubida.permitirFallback,
-          error: 'TUS no disponible y PUT falló o pausó por cobro',
+          // Yunque R3-M3-3: la pausa ya no llega aquí (sale
+          // como pausadaPorQos más arriba): esto es solo fallo.
+          error: 'TUS no disponible y PUT falló',
         );
       }
       return const ResultadoSubidaFoto(
@@ -7356,8 +7403,13 @@ class SyncEngine {
   /// 1.28 (M4-A16/R1M4-M7): la guarda QoS se consulta antes
   /// de CADA intento — este PUT monolítico (hasta 120 s × 3)
   /// era la única vía de subida que no cedía ante un cobro
-  /// pendiente. Si la guarda manda parar, devuelve false
-  /// sin reintentar: el llamador lo trata como reintentable.
+  /// pendiente. Yunque R3-M3-2/3: si la guarda manda parar,
+  /// LANZA _PausaQosSimple en vez de devolver false: con el
+  /// bool, la pausa era indistinguible del fallo y cada
+  /// pausa quemaba un intento en los llamadores (a los 5,
+  /// la foto de incidencia caía a 'error' sin un solo fallo
+  /// de red; en el fallback de subirFotoCola reclasificaba
+  /// la pausa como permitirFallback reintentable).
   Future<bool> _subirFotoSimple(String path, Uint8List bytes,
       {Future<bool> Function()? debePausarPorCobro}) async {
     // v1.2.4 (Hark): antes no se enviaba el cuerpo y quedaban fotos de 0 bytes.
@@ -7366,7 +7418,7 @@ class SyncEngine {
     final mime = path.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
     for (var intento = 0; intento < 3; intento++) {
       if (debePausarPorCobro != null && await debePausarPorCobro()) {
-        return false;
+        throw _PausaQosSimple();
       }
       try {
         final r = await _postAuth(
@@ -8158,10 +8210,31 @@ class SyncEngine {
         // re-consulta antes de CADA intento dentro de
         // _subirFotoSimple, y si manda parar la foto queda
         // en 'retry' sin quemar el intento de red.
-        final ok = await _subirFotoSimple(
-            storagePath, bytes,
-            debePausarPorCobro: () async =>
-                await _db.countPendingOpsNoFoto() > 0);
+        var ok = false;
+        var pausadaQos = false;
+        try {
+          ok = await _subirFotoSimple(
+              storagePath, bytes,
+              debePausarPorCobro: () async =>
+                  await _db.countPendingOpsNoFoto() > 0);
+        } on _PausaQosSimple {
+          // Yunque R3-M3-2: la pausa NO es un fallo: la foto
+          // vuelve a 'retry' SIN quemar otro intento (el del
+          // claim ya contó como el intento de este ciclo) y
+          // el lote cede la red, como hace la guarda previa
+          // por archivo al inicio del bucle.
+          pausadaQos = true;
+        }
+        if (pausadaQos) {
+          await d.update(
+              'incidencias_fotos',
+              {'sync_estado': 'retry', 'reclamada_en': null},
+              where: 'id = ?',
+              whereArgs: [fid]);
+          AppLog.aviso('sync', 'foto_inc_pausa_qos',
+              d: 'pausa a mitad de subida; sin quemar intento');
+          break;
+        }
         if (ok) {
           // Fix #13: encolar metadatos ANTES de marcar synced,
           // todo en una transacción.

@@ -315,6 +315,19 @@ class ComprobantesService {
     // meta como el de fotos_cola ('comprobantes_worker_lease'),
     // reclamado atómicamente y liberado solo por su dueño.
     final db = await LocalDb.instance.db;
+    // Yunque R3-M3-4: puerta de la Regla de Hierro a la
+    // ENTRADA. Antes la guarda solo vivía dentro de la subida
+    // por chunk: con ops de cobro pendientes, los disparos
+    // directos (Cola, Ajustes) igualmente reclamaban el lease
+    // y generaban la red previa de TUS (creación y consulta
+    // de offset) antes del primer chequeo. «Las fotos nunca
+    // compiten con los cobros» se honra desde la puerta,
+    // como en fotos_cola.
+    if (await LocalDb.instance.countPendingOpsNoFoto() > 0) {
+      AppLog.aviso('comprobantes', 'pausa_qos_puerta',
+          d: 'hay operaciones de cobro pendientes; ciclo omitido');
+      return 0;
+    }
     final workerId = const Uuid().v4();
     var leaseValor =
         '$workerId|${isoHabana(ahoraHabana().add(const Duration(minutes: 10)))}';
