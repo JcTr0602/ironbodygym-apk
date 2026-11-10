@@ -1850,7 +1850,7 @@ class FotosColaService {
           isoHabana(ahoraHabana().subtract(const Duration(days: 7)));
       final viejas = await db.query(
         'fotos_cola',
-        columns: ['id', 'ruta_local', 'suplemento_id'],
+        columns: ['id', 'ruta_local', 'suplemento_id', 'cliente_id'],
         where: "estado = 'completada' AND actualizado_en < ?",
         whereArgs: [limite],
       );
@@ -1881,6 +1881,34 @@ class FotosColaService {
                 await db.update('suplementos',
                     {'data': jsonEncode(sdata)},
                     where: 'id = ?', whereArgs: [supId]);
+              }
+            }
+          } catch (_) {}
+        }
+        // 1.31 (residuo B-13, yunque de app): la misma
+        // suelta para el espejo de CLIENTES — su
+        // foto_local también puede apuntar al archivo
+        // que se acaba de borrar (la UI mitiga con
+        // existsSync, pero la referencia muerta no debe
+        // quedar en el espejo).
+        final cliId = v['cliente_id'] as int?;
+        if (cliId != null) {
+          try {
+            final crows = await db.query('clientes',
+                columns: ['data'],
+                where: 'id = ?',
+                whereArgs: [cliId],
+                limit: 1);
+            if (crows.isNotEmpty) {
+              final cdata = Map<String, dynamic>.from(
+                  crows.first['data'] is String
+                      ? jsonDecode(crows.first['data'] as String)
+                      : crows.first['data'] as Map);
+              if (cdata['foto_local'] == v['ruta_local']) {
+                cdata.remove('foto_local');
+                await db.update('clientes',
+                    {'data': jsonEncode(cdata)},
+                    where: 'id = ?', whereArgs: [cliId]);
               }
             }
           } catch (_) {}
