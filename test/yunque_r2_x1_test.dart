@@ -211,6 +211,9 @@ void main() {
       final src = _src('lib/ui/ajustes.dart');
       expect(src.contains('_cargaPerfilFallo = true'), isTrue);
       expect(src.contains('await _cargarDatos();'), isTrue);
+      // La marca se LEE en el build (banda visible), no es
+      // un campo escrito y olvidado.
+      expect(src.contains('if (_cargaPerfilFallo)'), isTrue);
     });
 
     test('toda red de la familia deja el fallo en bitácora '
