@@ -27,9 +27,13 @@ const clavesMontoConfig = <(String, String)>[
   ('mensualidad_menores', 'Mensualidad menores'),
   // v1.2.1: tasa USD del día para mostrar precios en suplementos.
   ('tasa_usd', 'Tasa USD (CUP por 1 USD)'),
-  // v1.7.0 (G2): precio del App Plus (30 días). Default 1000;
-  // al guardar se republica a info_publica (lo hace el llamador).
-  ('precio_app_plus', 'Precio App Plus (30 días)'),
+  // v1.7.0 (G2): precio BASE del App Plus, POR MES. Default
+  // 1000; al guardar se republica a info_publica (lo hace el
+  // llamador). Multimes (0.6): los paquetes de 1/2/3/6/12
+  // meses se DERIVAN de esta base en el servidor
+  // (plus_precio_paquete); la etiqueta lo dice para que nadie
+  // la lea como el precio de un paquete concreto.
+  ('precio_app_plus', 'Precio App Plus (por mes)'),
 ];
 
 /// Etiqueta visible de una clave de monto (la clave misma si
