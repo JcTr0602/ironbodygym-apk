@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../invitados.dart';
 import '../localdb.dart';
@@ -34,6 +35,9 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   final _db = LocalDb.instance;
   bool _cargando = true;
   bool _guardando = false;
+  // Yunque R5-M2-5: un fallo de la lectura del espejo no
+  // puede pintarse como «Ningún candado activo».
+  bool _falloCarga = false;
 
   /// 1.28 (M5-A7/R2M5-H07): candados en curso de retirada,
   /// por id: un doble toque sobre la misma fila no abre
@@ -115,13 +119,22 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
         _activos = activos;
         _entrenadores = entrenadores;
         _cargando = false;
+        _falloCarga = false;
       });
       // Fase 2 (sin bloquear la pintura): nombres de invitados
       // para que un candado por invitado se lea con su nombre y
       // no con el id crudo en la lista de activos.
       unawaited(_cargarNombresInvitados());
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // Yunque R5-M2-5: el fallo queda en bitácora y se
+      // pinta como error, no como «sin candados».
+      AppLog.error('ui', 'carga_fallo', d: 'panel_candado: $e');
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
+      }
     }
   }
 
@@ -403,7 +416,14 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
       appBar: appBarIron(context, 'Candado de acceso'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando candados…')
-          : ListView(
+          : _falloCarga
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los candados',
+                  detalle:
+                      'La lectura local falló; puede haber candados activos que no se ven.',
+                  onReintentar: _cargar,
+                )
+              : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 Text(
