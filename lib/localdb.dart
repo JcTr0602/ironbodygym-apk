@@ -7378,15 +7378,45 @@ class LocalDb {
     // si le tocan. La lista sale del propio conjunto, sin una
     // tercera copia a mano que vuelva a quedarse corta.
     for (final t in tablasProhibidasEntrenador) {
+      // Yunque de App 1.31 (YC-9): borrado y reseteo en try
+      // SEPARADOS. Antes iban juntos: si el delete lanzaba
+      // (p. ej. una tabla futura del conjunto sin columna
+      // sync_seq), el catch tragaba TAMBIÉN el reseteo del
+      // watermark y la limpieza de marcas — la tabla quedaba
+      // sin purgar y sin avisar, el modo de fallo que B-24
+      // vino a cerrar.
       try {
-        n += await d.delete(t,
-            where: 'sync_seq > 0');
+        n += await d.delete(t, where: 'sync_seq > 0');
+      } catch (e) {
+        // Bitácora directa en app_log (localdb no importa
+        // app_log.dart: ciclo app_log → localdb).
+        try {
+          await d.insert('app_log', {
+            'ts': isoHabana(ahoraHabana()),
+            'modulo': 'sesion',
+            'evento': 'purga_borrado_fallo',
+            'detalle': 'tabla=$t $e',
+            'nivel': 'error',
+          });
+        } catch (_) {}
+      }
+      try {
         await d.insert('meta', {'k': 'wm_$t', 'v': '0'},
             conflictAlgorithm: ConflictAlgorithm.replace);
         await d.delete('meta',
             where: 'k IN (?, ?)',
             whereArgs: ['wm_${t}_sin_permiso', 'wm_${t}_ausente']);
-      } catch (_) {}
+      } catch (e) {
+        try {
+          await d.insert('app_log', {
+            'ts': isoHabana(ahoraHabana()),
+            'modulo': 'sesion',
+            'evento': 'purga_reseteo_fallo',
+            'detalle': 'tabla=$t $e',
+            'nivel': 'error',
+          });
+        } catch (_) {}
+      }
     }
     // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
     // son fotos de transferencias: tampoco pueden quedar en un

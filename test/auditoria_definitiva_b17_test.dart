@@ -38,6 +38,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 String _cuerpoSyncOps = '[]';
 int _offsetServidor = 0;
 
+/// Yunque de App 1.31 (YC-3): si es true, el GET de sync_ops
+/// cuyo filtro NO pide cliente_id (el de suplementoDeOp) se
+/// responde 500 — una de las dos lecturas de la puerta falla
+/// de forma transitoria mientras la otra responde bien.
+bool _fallarGetSinClienteId = false;
+
 Future<HttpServer> _servidor() async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   server.listen((req) async {
@@ -48,6 +54,12 @@ Future<HttpServer> _servidor() async {
         res.statusCode = 200;
       } else if (req.method == 'GET' &&
           path == '/rest/v1/sync_ops') {
+        if (_fallarGetSinClienteId &&
+            !req.uri.query.contains('cliente_id')) {
+          res.statusCode = 500;
+          res.write('fallo simulado');
+          return;
+        }
         res.statusCode = 200;
         res.headers.contentType = ContentType.json;
         res.write(_cuerpoSyncOps);
@@ -240,6 +252,7 @@ void main() {
     await db.delete('ops_queue');
     _cuerpoSyncOps = '[]';
     _offsetServidor = 0;
+    _fallarGetSinClienteId = false;
   });
 
   Future<File> sembrarFoto(String opUuid,
@@ -303,6 +316,45 @@ void main() {
     expect(filas.first['proximo_intento_en'], isNotNull,
         reason: 'la gracia difiere con proximo_intento_en, no '
             'en caliente');
+  });
+
+  test('D) YC-3: certeza asimétrica (una lectura ok sin id, '
+      'la otra falla) + fila vieja: NO se descarta', () async {
+    final db = await LocalDb.instance.db;
+    _fallarGetSinClienteId = true;
+    await sembrarFoto('op-asimetrica',
+        creada: ahoraHabana().subtract(const Duration(days: 3)));
+
+    await FotosColaService.instance.procesarCola();
+
+    final filas = await db.query('fotos_cola');
+    expect(filas, hasLength(1),
+        reason: 'con una sola lectura buena no hay certeza: '
+            'su «sin id» puede ser solo «la op es del otro '
+            'tipo» mientras la lectura del tipo correcto falló');
+    expect(filas.first['estado'], 'pendiente');
+    expect(filas.first['proximo_intento_en'], isNotNull,
+        reason: 'sin certeza la fila se difiere (gracia), no '
+            'se descarta');
+  });
+
+  test('E) YC-8: sin evidencia de edad (creado_en ilegible) y '
+      'con certeza: se difiere, no se descarta', () async {
+    final db = await LocalDb.instance.db;
+    final archivo = await sembrarFoto('op-sin-fecha',
+        creada: ahoraHabana().subtract(const Duration(days: 3)));
+    // La columna es NOT NULL: la ausencia realista de
+    // evidencia es un texto ilegible (fila heredada/corrupta).
+    await db.update('fotos_cola', {'creado_en': 'no-es-fecha'},
+        where: 'ruta_local = ?', whereArgs: [archivo.path]);
+
+    await FotosColaService.instance.procesarCola();
+
+    final filas = await db.query('fotos_cola');
+    expect(filas, hasLength(1),
+        reason: 'ante la ausencia de evidencia de edad se '
+            'falla al lado seguro (diferir), como B-20');
+    expect(filas.first['estado'], 'pendiente');
   });
 
   test('C) el servidor conoce la op (aplicada y podada): hay '

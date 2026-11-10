@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/comprobantes.dart';
 import 'package:ironbody_gym/config.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/tiempo.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -222,8 +223,10 @@ void main() {
     await LocalDb.resetParaTest();
     final db = await LocalDb.instance.db;
     await db.delete('meta');
+    await db.delete('comprobantes_pago');
     _offsetServidor = 0;
     _enPlenoVuelo = null;
+    ComprobantesService.ganchoTrasSnapshotPurga = null;
   });
 
   test('A-5: el re-encolado en pleno vuelo NO se sella subido '
@@ -275,5 +278,147 @@ void main() {
     fila = await ComprobantesService.instance.filaDe('comp-a5');
     expect(fila?['estado'], 'subido');
     expect(fila?['generacion'], 2);
+  });
+
+  test('YC-5: dos encolar concurrentes del mismo uuid dejan '
+      'generaciones 1 y 2 (no la misma dos veces)', () async {
+    final tmp = await Directory.systemTemp.createTemp('comp_yc5');
+    addTearDown(() async {
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {}
+    });
+    final o1 = File('${tmp.path}/o1.jpg');
+    await o1.writeAsBytes(List<int>.filled(1500, 0x43));
+    final o2 = File('${tmp.path}/o2.jpg');
+    await o2.writeAsBytes(List<int>.filled(1500, 0x44));
+
+    await Future.wait([
+      ComprobantesService.instance.encolar(
+          comprobanteUuid: 'comp-yc5',
+          rutaOrigen: o1.path,
+          baseDir: tmp),
+      ComprobantesService.instance.encolar(
+          comprobanteUuid: 'comp-yc5',
+          rutaOrigen: o2.path,
+          baseDir: tmp),
+    ]);
+
+    final fila =
+        await ComprobantesService.instance.filaDe('comp-yc5');
+    expect(fila?['generacion'], 2,
+        reason: 'fuera de transacción, ambos encolar leían la '
+            'misma generación previa y computaban la misma '
+            'nueva: el CAS dejaba de distinguir las filas');
+    expect(fila?['estado'], 'pendiente');
+    expect(await File(fila!['ruta_local'] as String).exists(),
+        isTrue);
+  });
+
+  test('YC-4: la purga no se lleva la fila ni el archivo de '
+      'un re-encolado intercalado', () async {
+    final tmp = await Directory.systemTemp.createTemp('comp_yc4');
+    addTearDown(() async {
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {}
+    });
+    final db = await LocalDb.instance.db;
+    final viejo = File('${tmp.path}/comprobantes/comp-yc4.jpg');
+    await viejo.parent.create(recursive: true);
+    await viejo.writeAsBytes(List<int>.filled(800, 0x45));
+    final fechaVieja =
+        isoHabana(ahoraHabana().subtract(const Duration(days: 40)));
+    await db.insert('comprobantes_pago', {
+      'comprobante_uuid': 'comp-yc4',
+      'ruta_local': viejo.path,
+      'storage_path': 'comprobantes/comp-yc4.jpg',
+      'estado': 'subido',
+      'creado_en': fechaVieja,
+      'intentos': 0,
+      'proximo_intento_en': 0,
+      'generacion': 1,
+    });
+
+    // Entre el snapshot de la purga y el borrado, el
+    // comprobante se re-encola: fila gen 2 con bytes NUEVOS
+    // en la misma ruta determinista.
+    final bytesNuevos = List<int>.filled(900, 0x46);
+    ComprobantesService.ganchoTrasSnapshotPurga = () async {
+      await viejo.writeAsBytes(bytesNuevos);
+      await db.update(
+        'comprobantes_pago',
+        {
+          'estado': 'pendiente',
+          'generacion': 2,
+          'creado_en': isoHabana(ahoraHabana()),
+        },
+        where: 'comprobante_uuid = ?',
+        whereArgs: ['comp-yc4'],
+      );
+    };
+    await ComprobantesService.instance.purgarSubidosViejos();
+    ComprobantesService.ganchoTrasSnapshotPurga = null;
+
+    final fila =
+        await ComprobantesService.instance.filaDe('comp-yc4');
+    expect(fila, isNotNull,
+        reason: 'la purga borró la fila del re-encolado');
+    expect(fila?['generacion'], 2);
+    expect(fila?['estado'], 'pendiente');
+    expect(await viejo.readAsBytes(), bytesNuevos,
+        reason: 'la purga borró el archivo con los bytes '
+            'nuevos del re-encolado');
+  });
+
+  test('YC-4: el CAS por generación de las escrituras de '
+      'comprobantes distingue la fila re-encolada', () async {
+    // Las ventanas reales (purga y reactivación) intercalan
+    // el re-encolado ENTRE la lectura del snapshot y la
+    // escritura — inalcanzables sin costura desde fuera (la
+    // purga sí la tiene y se ejercita arriba con el gancho).
+    // Aquí se prueba DURA la primitiva que ambas escrituras
+    // usan: update/delete con `AND generacion = ?` no toca la
+    // fila cuya generación avanzó, y sí la que sigue en la
+    // generación del snapshot.
+    final db = await LocalDb.instance.db;
+    await db.insert('comprobantes_pago', {
+      'comprobante_uuid': 'comp-cas',
+      'ruta_local': '/tmp/comp-cas.jpg',
+      'storage_path': 'comprobantes/comp-cas.jpg',
+      'estado': 'error',
+      'creado_en': isoHabana(ahoraHabana()),
+      'intentos': 5,
+      'proximo_intento_en': 999,
+      'generacion': 2,
+    });
+    // Con la generación del snapshot VIEJO (1): 0 filas.
+    expect(
+        await db.update(
+          'comprobantes_pago',
+          {'estado': 'pendiente', 'intentos': 0},
+          where: 'comprobante_uuid = ? AND generacion = ?',
+          whereArgs: ['comp-cas', 1],
+        ),
+        0);
+    expect(
+        await db.delete('comprobantes_pago',
+            where: 'comprobante_uuid = ? AND generacion = ?',
+            whereArgs: ['comp-cas', 1]),
+        0);
+    // Con la generación vigente (2): la escritura aterriza.
+    expect(
+        await db.update(
+          'comprobantes_pago',
+          {'estado': 'pendiente', 'intentos': 0},
+          where: 'comprobante_uuid = ? AND generacion = ?',
+          whereArgs: ['comp-cas', 2],
+        ),
+        1);
+    expect(
+        await db.delete('comprobantes_pago',
+            where: 'comprobante_uuid = ? AND generacion = ?',
+            whereArgs: ['comp-cas', 2]),
+        1);
   });
 }

@@ -47,6 +47,13 @@ class ComprobantesService {
 
   bool _procesando = false;
 
+  /// Yunque de App 1.31 (gancho de test de YC-4): se invoca
+  /// dentro de [purgarSubidosViejos] tras leer el snapshot de
+  /// filas viejas y antes de borrar la primera — permite
+  /// sembrar el re-encolado intercalado que la purga no debe
+  /// llevarse. En producción queda en null.
+  static Future<void> Function()? ganchoTrasSnapshotPurga;
+
   /// Auditoría Definitiva (C-12): marca del último barrido de
   /// archivos huérfanos de [purgarSubidosViejos] (tope 1/24 h).
   static DateTime? _ultimoBarridoHuerfanos;
@@ -75,8 +82,15 @@ class ComprobantesService {
     // (archivo_ausente) — el comprobante se perdía sin haber
     // llegado nunca el reemplazo.
     var ext = 'webp';
-    final stagingWebp = File('${dir.path}/$comprobanteUuid.webp.tmp');
-    final stagingJpg = File('${dir.path}/$comprobanteUuid.jpg.tmp');
+    // Yunque de App 1.31 (YC-5): staging ÚNICO por llamada
+    // (sufijo aleatorio): dos encolar concurrentes del mismo
+    // uuid compartían el staging fijo — una podía renombrar
+    // el de la otra o quedarse sin él.
+    final sufijoStaging = const Uuid().v4().substring(0, 8);
+    final stagingWebp =
+        File('${dir.path}/$comprobanteUuid.webp.$sufijoStaging.tmp');
+    final stagingJpg =
+        File('${dir.path}/$comprobanteUuid.jpg.$sufijoStaging.tmp');
     File? staging;
     try {
       final res = await FlutterImageCompress.compressAndGetFile(
@@ -157,29 +171,36 @@ class ComprobantesService {
     // CAS sobre la generación que leyó al reclamar: si esta
     // fila (bytes nuevos) reemplaza a la que está en vuelo, el
     // sello del worker viejo toca 0 filas y se descarta.
-    final previas = await db.query(
-      'comprobantes_pago',
-      columns: ['generacion'],
-      where: 'comprobante_uuid = ?',
-      whereArgs: [comprobanteUuid],
-      limit: 1,
-    );
-    final generacion = (previas.isEmpty
-            ? 0
-            : (previas.first['generacion'] as int? ?? 0)) +
-        1;
-    await db.insert(
-      'comprobantes_pago',
-      {
-        'comprobante_uuid': comprobanteUuid,
-        'ruta_local': rutaLocal,
-        'storage_path': rutaStorageComprobante(comprobanteUuid, ext),
-        'estado': 'pendiente',
-        'creado_en': isoHabana(ahoraHabana()),
-        'generacion': generacion,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    // Yunque de App 1.31 (YC-5): lectura de la generación e
+    // inserción en UNA transacción — dos encolar concurrentes
+    // calculaban la MISMA generación nueva fuera de
+    // transacción, y el CAS dejaba de distinguir la fila nueva
+    // de la vieja justo en el camino que lo alimenta.
+    await db.transaction((txn) async {
+      final previas = await txn.query(
+        'comprobantes_pago',
+        columns: ['generacion'],
+        where: 'comprobante_uuid = ?',
+        whereArgs: [comprobanteUuid],
+        limit: 1,
+      );
+      final generacion = (previas.isEmpty
+              ? 0
+              : (previas.first['generacion'] as int? ?? 0)) +
+          1;
+      await txn.insert(
+        'comprobantes_pago',
+        {
+          'comprobante_uuid': comprobanteUuid,
+          'ruta_local': rutaLocal,
+          'storage_path': rutaStorageComprobante(comprobanteUuid, ext),
+          'estado': 'pendiente',
+          'creado_en': isoHabana(ahoraHabana()),
+          'generacion': generacion,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
     AppLog.info('comprobantes', 'encolado',
         d: 'uuid=$comprobanteUuid ext=$ext');
   }
@@ -260,14 +281,19 @@ class ComprobantesService {
       // SA-05: la reactivación deliberada también resetea el
       // contador (si no, el próximo fallo lo devuelve a 'error'
       // al instante por el tope ya alcanzado).
-      await db.update(
+      // Yunque de App 1.31 (YC-4): CAS por generación — si
+      // la fila se re-encoló mientras tanto (bytes nuevos,
+      // generación+1), esta reactivación del snapshot viejo
+      // no la toca.
+      final tocadas = await db.update(
         'comprobantes_pago',
         // 1.24.2: la reactivación también limpia el backoff
         // (si no, la fila reactivada seguiría dormida).
         {'estado': 'pendiente', 'intentos': 0, 'proximo_intento_en': 0},
-        where: 'comprobante_uuid = ?',
-        whereArgs: [f['comprobante_uuid']],
+        where: 'comprobante_uuid = ? AND generacion = ?',
+        whereArgs: [f['comprobante_uuid'], f['generacion']],
       );
+      if (tocadas == 0) continue;
       n++;
     }
     if (n > 0) {
@@ -286,22 +312,31 @@ class ComprobantesService {
     final corte = isoHabana(ahoraHabana().subtract(Duration(days: dias)));
     final viejos = await db.query(
       'comprobantes_pago',
-      columns: ['comprobante_uuid', 'ruta_local'],
+      columns: ['comprobante_uuid', 'ruta_local', 'generacion'],
       where: "estado = 'subido' AND creado_en < ?",
       whereArgs: [corte],
     );
+    final ganchoPurga = ganchoTrasSnapshotPurga;
+    if (ganchoPurga != null) await ganchoPurga();
     for (final f in viejos) {
+      // Yunque de App 1.31 (YC-4): el borrado va con CAS por
+      // generación y SOLO si la fila sigue siendo la del
+      // snapshot se borra su archivo: si el comprobante se
+      // re-encoló entre la query y aquí (fila nueva, bytes
+      // nuevos en la misma ruta determinista), la purga no
+      // puede llevarse ni la fila nueva ni su archivo.
+      final borradas = await db.delete(
+        'comprobantes_pago',
+        where: 'comprobante_uuid = ? AND generacion = ?',
+        whereArgs: [f['comprobante_uuid'], f['generacion']],
+      );
+      if (borradas == 0) continue;
       final ruta = f['ruta_local'] as String?;
       if (ruta != null) {
         try {
           await File(ruta).delete();
         } catch (_) {}
       }
-      await db.delete(
-        'comprobantes_pago',
-        where: 'comprobante_uuid = ?',
-        whereArgs: [f['comprobante_uuid']],
-      );
     }
     // Caza Fotos L1-MEDIA (Argón): barrido de archivos huérfanos
     // del directorio (descartes a mitad de escritura, cambios de

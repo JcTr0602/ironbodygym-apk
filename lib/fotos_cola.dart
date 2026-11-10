@@ -731,10 +731,20 @@ class FotosColaService {
           if (!hayEvidencia) {
             final creada =
                 DateTime.tryParse('${f['creado_en'] ?? ''}');
-            final joven = creada != null &&
+            // Yunque de App 1.31 (YC-3 + YC-8): la certeza de
+            // que el padre no existe exige que AMBAS lecturas
+            // hayan respondido bien — con una sola, su
+            // «sin id» puede significar solo «la op es del
+            // otro tipo» mientras la lectura del tipo correcto
+            // falló de forma transitoria, y la foto se
+            // descartaba pudiendo vincularse. Y sin evidencia
+            // de edad (creado_en ausente o ilegible) la fila se
+            // trata como JOVEN (se difiere): ante la ausencia
+            // se falla al lado seguro, como B-20.
+            final joven = creada == null ||
                 ahoraHabana().difference(creada) <
                     const Duration(hours: 24);
-            final hayCerteza = rc.ok || rs.ok;
+            final hayCerteza = rc.ok && rs.ok;
             if (hayCerteza && !joven) {
               await _descartarHuerfana(db, f['id'] as int,
                   'op padre no existe en ops_queue ni en el servidor');
