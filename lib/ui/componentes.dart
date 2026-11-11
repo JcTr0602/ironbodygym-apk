@@ -915,14 +915,34 @@ class EstadoVacio extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.32 (Oleada 2, Fase 0 — residuo 9b del veredicto
+    // g132dis_): el vacío es ELÁSTICO. Con poca altura
+    // disponible (< 200 px) compacta márgenes y figura —
+    // jamás la tipografía — y con marco se envuelve en un
+    // scroll seguro: lo que no cabe SCROLLEA en vez de
+    // recortarse (el recorte medido: 101 px a 480×640 en
+    // los vacíos envueltos del Pilar Clientes, agravado
+    // por la cabecera marco de dos filas permanentes).
+    return LayoutBuilder(
+      builder: (context, limites) {
+        final compacto =
+            limites.maxHeight.isFinite && limites.maxHeight < 200;
+        return _contenido(context, compacto: compacto, limites: limites);
+      },
+    );
+  }
+
+  Widget _contenido(BuildContext context,
+      {required bool compacto, required BoxConstraints limites}) {
     final secundario = AppColores.textoSecundario(context);
     // La figura: la ilustración asignada si la hay; si
     // no, el icono — con su medallón en el vacío de
     // pantalla y suelto en el sin marco (la sección que
-    // lo aloja ya trae su propio fondo).
+    // lo aloja ya trae su propio fondo). En compacto la
+    // figura se reduce; la tipografía, nunca.
     final Widget figura;
     if (ilustracion != null) {
-      final lado = sinMarco ? 96.0 : 128.0;
+      final lado = sinMarco ? 96.0 : (compacto ? 72.0 : 128.0);
       figura = ClipRRect(
         borderRadius: BorderRadius.circular(AppRadio.lg),
         child: Image.asset(ilustracion!,
@@ -930,25 +950,31 @@ class EstadoVacio extends StatelessWidget {
       );
     } else if (sinMarco) {
       figura = Icon(icono,
-          size: 30, color: AppColores.textoSecundario(context));
+          size: compacto ? 24 : 30,
+          color: AppColores.textoSecundario(context));
     } else {
+      final diametro = compacto ? 48.0 : 72.0;
       figura = Container(
-        width: 72,
-        height: 72,
+        width: diametro,
+        height: diametro,
         decoration: BoxDecoration(
           color:
               AppColores.textoSecundario(context).withValues(alpha: 0.12),
           shape: BoxShape.circle,
         ),
         child: Icon(icono,
-            size: 36, color: AppColores.textoSecundario(context)),
+            size: compacto ? 24 : 36,
+            color: AppColores.textoSecundario(context)),
       );
     }
     final columna = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         figura,
-        SizedBox(height: sinMarco ? AppEspacio.md : AppEspacio.lg),
+        SizedBox(
+            height: sinMarco
+                ? AppEspacio.md
+                : (compacto ? AppEspacio.sm : AppEspacio.lg)),
         Text(titulo,
             style: AppTexto.subtitulo,
             textAlign: TextAlign.center),
@@ -961,25 +987,40 @@ class EstadoVacio extends StatelessWidget {
         ],
         if (textoAccion != null &&
             onAccion != null) ...[
-          const SizedBox(height: AppEspacio.lg),
+          SizedBox(height: compacto ? AppEspacio.md : AppEspacio.lg),
           BotonSecundario(
               texto: textoAccion!, onPressed: onAccion),
         ],
       ],
     );
     // Sin marco: ni el Center de pantalla completa ni su
-    // acolchado xxl — solo el aire de la sección.
+    // acolchado xxl — solo el aire de la sección (en
+    // compacto, reducido). La sección anfitriona ya trae
+    // su propio scroll si lo necesita.
     if (sinMarco) {
       return Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.lg, vertical: AppEspacio.md),
+        padding: EdgeInsets.symmetric(
+            horizontal: AppEspacio.lg,
+            vertical: compacto ? AppEspacio.sm : AppEspacio.md),
         child: columna,
       );
     }
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppEspacio.xxl),
-        child: columna,
+    final acolchado = Padding(
+      padding:
+          EdgeInsets.all(compacto ? AppEspacio.md : AppEspacio.xxl),
+      child: columna,
+    );
+    // Alto sin cota (dentro de una lista): el Center de
+    // siempre — la lista anfitriona ya scrollea.
+    if (!limites.maxHeight.isFinite) {
+      return Center(child: acolchado);
+    }
+    // Alto finito: centrado si sobra, scroll si falta —
+    // nunca recorte ni overflow.
+    return SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: limites.maxHeight),
+        child: Center(child: acolchado),
       ),
     );
   }

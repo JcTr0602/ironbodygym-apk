@@ -100,25 +100,16 @@ void main() {
       expect(tester.takeException(), isNull,
           reason: '$tab revienta al 200 %');
     }
-    // Clientes MONTA al 200 %, con un residuo conocido y
-    // acotado: la cabecera FIJA de BuscarScreen (pantalla
-    // legada que esta oleada envuelve, no reconstruye) no
-    // es resiliente al 200 % bajo la fuente del tester
-    // (desborde vertical de su Column, medido: 213 px con
-    // glifos Ahem; con Roboto real la estimación cabe). Su
-    // arreglo estructural — cabecera dentro del scroll —
-    // es material de la Oleada 2 (nivelación de pantallas
-    // envueltas). Aquí se fija el residuo: si la excepción
-    // no es ESE desborde, el test cae.
+    // Clientes MONTA al 200 % SIN excepción: la cabecera
+    // de BuscarScreen vive dentro del scroll desde la
+    // Oleada 2 (Fase 0, residuo 9a resuelto) — ya no hay
+    // residuo fijado que valga: cualquier excepción aquí
+    // es una regresión.
     await tester.tap(find.byKey(const ValueKey('pilar-tab-clientes')));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(PilarClientes), findsOneWidget);
-    final exc = tester.takeException();
-    if (exc != null) {
-      expect('$exc', contains('overflowed'),
-          reason: 'residuo de BuscarScreen al 200 %; '
-              'otra excepción no vale: $exc');
-    }
+    expect(tester.takeException(), isNull,
+        reason: 'el Pilar Clientes revienta al 200 %');
     await _avanzarTiempo(tester);
   });
 }

@@ -579,14 +579,30 @@ class _BuscarScreenState extends State<BuscarScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // 1.24.2 (cabecera compacta): banner en su variante
-          // estrecha y buscador con las acciones en la misma fila
-          // (embudo = búsqueda avanzada, orden, densidad y
-          // selección múltiple). La lista gana ~90 px de alto.
-          const SyncBanner(compact: true),
-          Padding(
+      // 1.32 (Oleada 2, Fase 0 — residuo 9a del veredicto
+      // g132dis_): la cabecera de BuscarScreen vive DENTRO
+      // del scroll (antes fija sobre la lista: desbordaba
+      // al 200 % y comía alto permanente). Un solo
+      // CustomScrollView: la cabecera como slivers y la
+      // lista como SliverList — la cabecera nunca se
+      // remonta al cruzar de vacío a resultados (el campo
+      // conserva foco y texto) y el RefreshIndicator, que
+      // antes solo envolvía la lista, ahora cubre la vista
+      // entera, también en vacío.
+      body: RefreshIndicator(
+        onRefresh: _actualizar,
+        child: CustomScrollView(
+          controller: _scroll,
+          slivers: [
+            // 1.24.2 (cabecera compacta): banner en su variante
+            // estrecha y buscador con las acciones en la misma fila
+            // (embudo = búsqueda avanzada, orden, densidad y
+            // selección múltiple). La lista gana ~90 px de alto.
+            const SliverToBoxAdapter(
+              child: SyncBanner(compact: true),
+            ),
+            SliverToBoxAdapter(
+              child:           Padding(
             padding: const EdgeInsets.fromLTRB(AppEspacio.md,
                 AppEspacio.sm, AppEspacio.sm, AppEspacio.xs),
             child: Row(
@@ -668,7 +684,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
               ],
             ),
           ),
-          // 1.30 (Oleada D6, UI130-20): fuera el héroe
+            ),
+            SliverToBoxAdapter(
+              child:           // 1.30 (Oleada D6, UI130-20): fuera el héroe
           // carbón de la 1.25 T51 — en su lugar, la franja
           // de resumen de UNA línea (total + frescura) y
           // los chips de filtro en su propia fila, sin
@@ -678,7 +696,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
             principal: '${_conteos['todos'] ?? 0} clientes',
             secundario: _frescura,
           ),
-          SingleChildScrollView(
+            ),
+            SliverToBoxAdapter(
+              child:           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                 AppEspacio.xs, AppEspacio.lg, AppEspacio.sm),
@@ -704,11 +724,13 @@ class _BuscarScreenState extends State<BuscarScreen> {
               ],
             ),
           ),
-          // Bloque 1: cartel de lista vieja a las 24 h sin bajar
-          // cambios (12 h alertaría cada mañana; 24 h no).
-          if (_ultimoPull != null &&
-              ahoraHabana().difference(_ultimoPull!).inHours >= 24)
-            Padding(
+            ),
+            // Bloque 1: cartel de lista vieja a las 24 h sin bajar
+            // cambios (12 h alertaría cada mañana; 24 h no).
+            if (_ultimoPull != null &&
+                ahoraHabana().difference(_ultimoPull!).inHours >= 24)
+              SliverToBoxAdapter(
+                child:             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -737,12 +759,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 ),
               ),
             ),
-          // v1.0.15: búsqueda avanzada (notas + rango de edad).
-          // 1.24.2: vive tras el botón de embudo de la cabecera
-          // (antes un ExpansionTile siempre visible que comía
-          // alto de lista aunque no se usara).
-          if (_mostrarAvanzada) ...[
-            SwitchListTile(
+              ),
+            // v1.0.15: búsqueda avanzada (notas + rango de edad).
+            // 1.24.2: vive tras el botón de embudo de la cabecera
+            // (antes un ExpansionTile siempre visible que comía
+            // alto de lista aunque no se usara).
+            if (_mostrarAvanzada)
+              SliverToBoxAdapter(
+                child:             SwitchListTile(
               dense: true,
               visualDensity: VisualDensity.compact,
               title: const Text('Buscar también en notas',
@@ -753,7 +777,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 _buscar();
               },
             ),
-            Padding(
+              ),
+            if (_mostrarAvanzada)
+              SliverToBoxAdapter(
+                child:             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -775,10 +802,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 ],
               ),
             ),
-          ],
-          // 1.24.2: barra de selección múltiple para avisar.
-          if (_modoSeleccion)
-            Container(
+              ),
+            // 1.24.2: barra de selección múltiple para avisar.
+            if (_modoSeleccion)
+              SliverToBoxAdapter(
+                child:             Container(
               color: AppColores.naranja.withValues(alpha: 0.12),
               padding: const EdgeInsets.symmetric(
                   horizontal: AppEspacio.md, vertical: AppEspacio.xs),
@@ -805,21 +833,28 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 ],
               ),
             ),
-          // 1.23 (W1): si el espejo de clientes está vacío
-          // habiendo tenido clientes, la tarjeta de diagnóstico
-          // va sobre la lista (se auto-oculta si está sano).
-          const TarjetaDiagnosticoEspejo(),
-          Expanded(
-            child: _res.isEmpty
-                // 1.25 T116 (F1-52): el vacío dice SU causa
-                // (espejo vacío, filtro o búsqueda) y da la
-                // salida de cada una.
-                ? _vacioBuscar()
-                : Column(
-                    children: [
-                      // B1 (estéticas 1.19): aviso único del gesto.
-                      if (_mostrarAvisoSwipe)
-                        Padding(
+              ),
+            // 1.23 (W1): si el espejo de clientes está vacío
+            // habiendo tenido clientes, la tarjeta de diagnóstico
+            // va sobre la lista (se auto-oculta si está sano).
+            const SliverToBoxAdapter(
+              child: TarjetaDiagnosticoEspejo(),
+            ),
+            // 1.25 T116 (F1-52): el vacío dice SU causa
+            // (espejo vacío, filtro o búsqueda) y da la
+            // salida de cada una.
+            if (_res.isEmpty)
+              // El vacío fluye como un sliver más (sin
+              // SliverFillRemaining: ese sliver pide las
+              // dimensiones intrínsecas del hijo y el
+              // EstadoVacio elástico, LayoutBuilder, no
+              // puede responderlas — reventaba en layout).
+              SliverToBoxAdapter(child: _vacioBuscar())
+            else ...[
+              // B1 (estéticas 1.19): aviso único del gesto.
+              if (_mostrarAvisoSwipe)
+                SliverToBoxAdapter(
+                  child:                         Padding(
                           padding: const EdgeInsets.fromLTRB(
                               12, 0, 12, 4),
                           child: Tarjeta(
@@ -854,193 +889,187 @@ class _BuscarScreenState extends State<BuscarScreen> {
                             ),
                           ),
                         ),
-                      Expanded(
-                        child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: RefreshIndicator(
-                          onRefresh: _actualizar,
-                          child: FadeEntrada(
-                            child: ListView.builder(
-                              controller: _scroll,
-                              itemCount: _res.length,
-                              itemBuilder: (ctx, i) {
-                                final c = _res[i];
-                                final cidFila =
-                                    (c['id'] as num?)?.toInt();
-                                final protegidoFila =
-                                    esVistaProtegida(c);
-                                final diasFila = diasRestantes(
-                                    c['pagado_hasta'] as String?);
-                                // 1.29 (FB-01): teléfono EFECTIVO
-                                // (movil primero) — el de `telefono`
-                                // a pelo dejaba sin WhatsApp al
-                                // migrado y «con teléfono» al carnet.
-                                final telWaFila =
-                                    telefonoEfectivoWa(c).isNotEmpty;
-                                // Bloque 1 (A1): cada fila es una
-                                // tarjeta; el tap abre la ficha.
-                                // v1.3.1: ValueKey por id.
-                                final fila = Card(
-                                  margin: const EdgeInsets.symmetric(
-                                      horizontal: AppEspacio.md, vertical: AppEspacio.xs),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(
-                                            AppRadio.md),
-                                    side: BorderSide(
-                                        color: AppColores.borde(
-                                            context)),
-                                  ),
-                                  child: FilaCliente(
-                                    cliente: c,
-                                    enPausa: cidFila != null &&
-                                        _pausados.contains(cidFila),
-                                    origenHero: 'buscar',
-                                    compacta: _compacta,
-                                    // 1.25 T116 (F1-55): rastro
-                                    // visible de quién ya fue
-                                    // avisado hoy.
-                                    avisoChip: !protegidoFila &&
-                                            cidFila != null &&
-                                            _avisadosHoyIds
-                                                .contains(cidFila)
-                                        ? 'Avisado hoy'
-                                        : null,
-                                    // 1.25 T11: homónimos en los
-                                    // resultados o búsqueda por
-                                    // teléfono → la fila enseña su
-                                    // contacto. Nunca en protegidos.
-                                    desambiguar: !protegidoFila &&
-                                        (_q.text
-                                                    .replaceAll(
-                                                        RegExp(
-                                                            r'[^0-9]'),
-                                                        '')
-                                                    .length >=
-                                                4 ||
-                                            (conteoNombres['${c['nombre'] ?? ''}'
-                                                    .trim()
-                                                    .toLowerCase()] ??
-                                                0) >
-                                                1),
-                                    leading: (_modoSeleccion &&
-                                            !protegidoFila &&
-                                            cidFila != null)
-                                        ? Checkbox(
-                                            value: _seleccionados
-                                                .contains(cidFila),
-                                            onChanged: (_) =>
-                                                _alternarSeleccion(c),
-                                          )
-                                        : null,
-                                    // 1.24.2: botón WhatsApp directo
-                                    // en vencidos y por vencer (con
-                                    // teléfono válido y sin ser Casa:
-                                    // la Casa no vence).
-                                    // 1.25 T52: próxima acción
-                                    // según el estado (la fila
-                                    // protegida o en selección
-                                    // no la lleva).
-                                    accionPrincipal: _accionFilaBuscar(
-                                        c,
-                                        dias: diasFila,
-                                        protegido: protegidoFila),
-                                    accionWhatsapp: (!_modoSeleccion &&
-                                            !protegidoFila &&
-                                            !esCuentaCasa(c) &&
-                                            telWaFila &&
-                                            (diasFila == null ||
-                                                diasFila <= 7))
-                                        ? () => _abrirWhatsapp(c)
-                                        : null,
-                                    onLongPress: (_modoSeleccion ||
-                                            protegidoFila)
-                                        ? null
-                                        : () => _menuRapido(c),
-                                    onTap: _modoSeleccion
-                                        ? () => _alternarSeleccion(c)
-                                        : () {
-                                            if (cidFila == null) {
-                                              return;
-                                            }
-                                            Navigator.of(context)
-                                                .push(RutaIron(
-                                                    builder: (_) =>
-                                                        FichaScreen(
-                                                            clienteId:
-                                                                cidFila,
-                                                            origenHero:
-                                                                'buscar')))
-                                                .then((_) {
-                                              if (mounted) _buscar();
-                                            });
-                                          },
-                                  ),
-                                );
-                                // Ronda 17 M7-H1: cliente protegido
-                                // nunca se envuelve en Dismissible:
-                                // el gesto abriría cobro o edición
-                                // saltándose el bloqueo visual.
-                                // 1.24.2: en modo selección tampoco
-                                // (el toque selecciona, no desliza).
-                                if (protegidoFila || _modoSeleccion) {
-                                  return fila;
-                                }
-                                // Bloque 1: deslizables configurables
-                                // desde Ajustes (lista cerrada). Sin
-                                // acción configurada no hay Dismissible.
-                                final tieneDer =
-                                    _swipeDer != 'ninguna';
-                                final tieneIzq =
-                                    _swipeIzq != 'ninguna';
-                                if (!tieneDer && !tieneIzq) {
-                                  return fila;
-                                }
-                                final dir = tieneDer && tieneIzq
-                                    ? DismissDirection.horizontal
-                                    : tieneDer
-                                        ? DismissDirection
-                                            .startToEnd
-                                        : DismissDirection
-                                            .endToStart;
-                                return Dismissible(
-                                  key: ValueKey(
-                                      'buscar_${c['id']}'),
-                                  direction: dir,
-                                  background: _fondoSwipe(
-                                      _swipeDer, true),
-                                  secondaryBackground: _fondoSwipe(
-                                      _swipeIzq, false),
-                                  // La fila nunca se borra: la acción
-                                  // se ejecuta y la fila se queda.
-                                  confirmDismiss: (d) async {
-                                    final accion = d ==
-                                            DismissDirection
-                                                .startToEnd
-                                        ? _swipeDer
-                                        : _swipeIzq;
-                                    await _ejecutarSwipe(accion, c);
-                                    return false;
-                                  },
-                                  child: fila,
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                ),
+              SliverList.builder(
+                itemCount: _res.length,
+                itemBuilder: (context, i) =>
+                    FadeEntrada(child: _filaResultado(context, i)),
               ),
             ],
-          ),
+          ],
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
+
+  /// Fila de resultado: la tarjeta del cliente con su
+  /// deslizamiento configurado (la unidad del SliverList).
+  /// 1.32 (Oleada 2, Fase 0): sale del build al pasar la
+  /// lista a slivers; el fundido de bloque que envolvía la
+  /// lista entera ahora envuelve cada fila al montar (ver
+  /// el itemBuilder del SliverList).
+  Widget _filaResultado(BuildContext context, int i) {
+    final c = _res[i];
+    final cidFila =
+        (c['id'] as num?)?.toInt();
+    final protegidoFila =
+        esVistaProtegida(c);
+    final diasFila = diasRestantes(
+        c['pagado_hasta'] as String?);
+    // 1.29 (FB-01): teléfono EFECTIVO
+    // (movil primero) — el de `telefono`
+    // a pelo dejaba sin WhatsApp al
+    // migrado y «con teléfono» al carnet.
+    final telWaFila =
+        telefonoEfectivoWa(c).isNotEmpty;
+    // Bloque 1 (A1): cada fila es una
+    // tarjeta; el tap abre la ficha.
+    // v1.3.1: ValueKey por id.
+    final fila = Card(
+      margin: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: AppEspacio.xs),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(
+                AppRadio.md),
+        side: BorderSide(
+            color: AppColores.borde(
+                context)),
+      ),
+      child: FilaCliente(
+        cliente: c,
+        enPausa: cidFila != null &&
+            _pausados.contains(cidFila),
+        origenHero: 'buscar',
+        compacta: _compacta,
+        // 1.25 T116 (F1-55): rastro
+        // visible de quién ya fue
+        // avisado hoy.
+        avisoChip: !protegidoFila &&
+                cidFila != null &&
+                _avisadosHoyIds
+                    .contains(cidFila)
+            ? 'Avisado hoy'
+            : null,
+        // 1.25 T11: homónimos en los
+        // resultados o búsqueda por
+        // teléfono → la fila enseña su
+        // contacto. Nunca en protegidos.
+        desambiguar: !protegidoFila &&
+            (_q.text
+                        .replaceAll(
+                            RegExp(
+                                r'[^0-9]'),
+                            '')
+                        .length >=
+                    4 ||
+                (conteoNombres['${c['nombre'] ?? ''}'
+                        .trim()
+                        .toLowerCase()] ??
+                    0) >
+                    1),
+        leading: (_modoSeleccion &&
+                !protegidoFila &&
+                cidFila != null)
+            ? Checkbox(
+                value: _seleccionados
+                    .contains(cidFila),
+                onChanged: (_) =>
+                    _alternarSeleccion(c),
+              )
+            : null,
+        // 1.24.2: botón WhatsApp directo
+        // en vencidos y por vencer (con
+        // teléfono válido y sin ser Casa:
+        // la Casa no vence).
+        // 1.25 T52: próxima acción
+        // según el estado (la fila
+        // protegida o en selección
+        // no la lleva).
+        accionPrincipal: _accionFilaBuscar(
+            c,
+            dias: diasFila,
+            protegido: protegidoFila),
+        accionWhatsapp: (!_modoSeleccion &&
+                !protegidoFila &&
+                !esCuentaCasa(c) &&
+                telWaFila &&
+                (diasFila == null ||
+                    diasFila <= 7))
+            ? () => _abrirWhatsapp(c)
+            : null,
+        onLongPress: (_modoSeleccion ||
+                protegidoFila)
+            ? null
+            : () => _menuRapido(c),
+        onTap: _modoSeleccion
+            ? () => _alternarSeleccion(c)
+            : () {
+                if (cidFila == null) {
+                  return;
+                }
+                Navigator.of(context)
+                    .push(RutaIron(
+                        builder: (_) =>
+                            FichaScreen(
+                                clienteId:
+                                    cidFila,
+                                origenHero:
+                                    'buscar')))
+                    .then((_) {
+                  if (mounted) _buscar();
+                });
+              },
+      ),
+    );
+    // Ronda 17 M7-H1: cliente protegido
+    // nunca se envuelve en Dismissible:
+    // el gesto abriría cobro o edición
+    // saltándose el bloqueo visual.
+    // 1.24.2: en modo selección tampoco
+    // (el toque selecciona, no desliza).
+    if (protegidoFila || _modoSeleccion) {
+      return fila;
+    }
+    // Bloque 1: deslizables configurables
+    // desde Ajustes (lista cerrada). Sin
+    // acción configurada no hay Dismissible.
+    final tieneDer =
+        _swipeDer != 'ninguna';
+    final tieneIzq =
+        _swipeIzq != 'ninguna';
+    if (!tieneDer && !tieneIzq) {
+      return fila;
+    }
+    final dir = tieneDer && tieneIzq
+        ? DismissDirection.horizontal
+        : tieneDer
+            ? DismissDirection
+                .startToEnd
+            : DismissDirection
+                .endToStart;
+    return Dismissible(
+      key: ValueKey(
+          'buscar_${c['id']}'),
+      direction: dir,
+      background: _fondoSwipe(
+          _swipeDer, true),
+      secondaryBackground: _fondoSwipe(
+          _swipeIzq, false),
+      // La fila nunca se borra: la acción
+      // se ejecuta y la fila se queda.
+      confirmDismiss: (d) async {
+        final accion = d ==
+                DismissDirection
+                    .startToEnd
+            ? _swipeDer
+            : _swipeIzq;
+        await _ejecutarSwipe(accion, c);
+        return false;
+      },
+      child: fila,
+    );
   }
 
   String _etiquetaSwipeAccion(String v) => switch (v) {
