@@ -72,6 +72,13 @@ class EstadoTablaSalud {
   /// WhatsApp nacía ciego. '' = sin error registrado.
   final String errorBajada;
 
+  /// 1.32 (O2F2S, M4): la tabla quedó atascada en la bajada
+  /// con filas sin verificar (la meta wm_sinverificar_ está
+  /// activa). La vigilancia M4 lo consume como campo (la
+  /// regla A7 exige aviso inmediato) en vez de parsear la
+  /// nota; hasta hoy solo vivía dentro de cargarSaludSync.
+  final bool atascadaSinVerificar;
+
   const EstadoTablaSalud({
     required this.tablaLocal,
     required this.nombre,
@@ -81,6 +88,7 @@ class EstadoTablaSalud {
     required this.estado,
     required this.nota,
     this.errorBajada = '',
+    this.atascadaSinVerificar = false,
   });
 }
 
@@ -283,6 +291,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       watermark: wm,
       estado: s,
       errorBajada: errorBajada,
+      atascadaSinVerificar: atascada,
       nota: _notaTabla(
         s: s,
         hayError: hayError,
