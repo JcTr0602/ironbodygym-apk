@@ -4,12 +4,13 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
-import '../bandeja.dart';
 import '../bloque3.dart';
 import '../cliente_protegido.dart';
 import '../invitados.dart' as invitados_svc;
@@ -37,7 +38,6 @@ import 'servicios_admin.dart';
 import 'solicitudes_adelanto.dart';
 import 'incidencias/lista_incidencias.dart';
 import 'ajustes.dart';
-import 'bandeja.dart';
 import 'actividad.dart';
 import 'ayuda.dart';
 import 'buscar.dart';
@@ -53,11 +53,18 @@ import 'gastos.dart';
 import 'diseno.dart';
 import 'inscribir.dart';
 import 'mi_nomina.dart';
-import 'servicios.dart';
-import 'invitados.dart';
-import 'listas.dart';
 import 'mi_dia.dart';
 import 'mi_turno.dart';
+import '../fotos_cola.dart';
+import 'auditoria.dart';
+import 'foto_elegir.dart';
+import 'lupa_universal.dart';
+import 'marco.dart';
+import 'pilar_clientes.dart';
+import 'pilar_negocio.dart';
+import 'pilar_tienda.dart';
+import 'por_decidir.dart';
+import 'salud_sync_screen.dart';
 import 'hub_turnos.dart';
 import 'turno_abrir.dart';
 import 'nomina.dart';
@@ -65,11 +72,8 @@ import 'pago.dart';
 import 'pago_diario.dart';
 import 'pagaron_mes.dart';
 import 'suplementos.dart';
-import 'papelera.dart';
 import 'pendiente.dart';
 import 'pin_lock.dart';
-import 'transferencia.dart';
-import 'widgets.dart';
 import '../app_log.dart';
 import '../turno_service.dart';
 import '../errores_sync.dart';
@@ -224,7 +228,6 @@ class _HomeScreenState extends State<HomeScreen>
   double _pendienteUsd = 0;
   double _cobradoHoyEf = 0;
   double _cobradoHoyTr = 0;
-  int _noLeidas = 0;
   double _cobradoHoy = 0;
   int _cumpleHoy = 0; // v1.3.3: chip de cumpleaños
   int _incidenciasAbiertas = 0; // v1.3.3: chip de incidencias
@@ -232,8 +235,6 @@ class _HomeScreenState extends State<HomeScreen>
   // de WhatsApp (solo dueño).
   // v1.19 (bandeja): visible si el dueño o con permiso otorgado;
   // el badge cuenta las solicitudes pendientes del espejo.
-  bool _bandejaVisible = false;
-  int _bandejaPendientes = 0;
   // v1.8.0: señal de atención del dueño (solicitudes de invitados
   // + reportes Plus). Solo dueño; la rellena el segundo pase de
   // _cargar (_cargarAtencionDueno). Sin conexión queda en 0 = sin
@@ -262,7 +263,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// (herramientas). Vive en el State (H-03): ningún setState
   /// de fondo devuelve al usuario al nivel 1 ni le pierde el
   /// sitio.
-  int _nivelActivo = 0;
+  /// 1.32: el pilar activo de la cáscara de 4 pilares y
+  /// los ya visitados (IndexedStack perezoso: un pilar
+  /// nace al primer toque y nunca se destruye, para no
+  /// perder su estado ni su scroll — PageStorageKey).
+  int _pilarActivo = 0;
+  final Set<int> _pilaresVisitados = {0};
 
   /// 1.26.1 (scroll, veredicto de Argón): el controlador de
   /// scroll vive en el State — nunca se recrea en build — y
@@ -274,23 +280,24 @@ class _HomeScreenState extends State<HomeScreen>
   /// secciones con RepaintBoundary, espejo del arreglo de
   /// Inicio en Clientes 0.16.
   final ScrollController _scrollCtrl = ScrollController();
-  final Map<int, double> _offsetPorNivel = {0: 0, 1: 0};
 
   /// Cambia de nivel guardando el offset del saliente y
   /// restaurando el del entrante tras el frame (condición 1
   /// de Argón: la posición nunca se reinicia por un rebuild).
-  void _irANivel(int nivel) {
-    if (nivel == _nivelActivo) return;
-    if (_scrollCtrl.hasClients) {
-      _offsetPorNivel[_nivelActivo] = _scrollCtrl.offset;
-    }
-    setState(() => _nivelActivo = nivel);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollCtrl.hasClients) return;
-      final destino = _offsetPorNivel[nivel] ?? 0;
-      final max = _scrollCtrl.position.maxScrollExtent;
-      _scrollCtrl.jumpTo(destino.clamp(0.0, max).toDouble());
+  void _seleccionarPilar(int i) {
+    if (i == _pilarActivo) return;
+    setState(() {
+      _pilarActivo = i;
+      _pilaresVisitados.add(i);
     });
+    if (MarcoNav.pilar.value != i) MarcoNav.pilar.value = i;
+  }
+
+  /// Saltos externos al marco (lupa, Por Decidir, Pulso):
+  /// el ValueNotifier manda y la cáscara obedece.
+  void _oigoMarco() {
+    if (!mounted) return;
+    _seleccionarPilar(MarcoNav.pilar.value);
   }
 
   /// Evita apilar el diálogo de suspendido (Argón).
@@ -524,6 +531,13 @@ class _HomeScreenState extends State<HomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _mostrarAvisosDueno();
     });
+    // 1.32: la cáscara escucha los saltos del marco (lupa,
+    // Por Decidir, Pulso) y engancha tras el primer frame
+    // la foto recuperada del selector (Compuerta 5).
+    MarcoNav.pilar.addListener(_oigoMarco);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_ofrecerFotoRecuperada());
+    });
     // v1.3.9 Sprint 4 (#9): verificar cierres automáticos
     _verificarCierresAuto();
     // Auto-actualiza contadores cuando termina una sincronización.
@@ -580,6 +594,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    MarcoNav.pilar.removeListener(_oigoMarco);
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _scrollCtrl.dispose();
@@ -854,7 +869,6 @@ class _HomeScreenState extends State<HomeScreen>
       final p = res[3] as double;
       final porSubir = res[4] as int;
       final det = res[5] as dynamic;
-      final noLeidas = res[6] as int;
       final nombreVisible = res[7] as String?;
       final cobrado = res[8] as Map<String, double>;
       final quiereAviso = res[9] as bool;
@@ -938,7 +952,6 @@ class _HomeScreenState extends State<HomeScreen>
             _cobradoHoyEf = cobrado['efectivo'] ?? 0;
             _cobradoHoyTr = cobrado['transferencia'] ?? 0;
           }
-          _noLeidas = noLeidas;
           _cobradoHoy = cobradoHoy;
           _cumpleHoy = cumple.length;
           _incidenciasAbiertas = incidAbiertas;
@@ -981,7 +994,6 @@ class _HomeScreenState extends State<HomeScreen>
       if (_auth.isOwner) unawaited(_cargarBuzonDueno());
       // v1.19 (bandeja): visibilidad y badge en segundo pase (la
       // lectura del espejo no bloquea el pintado del home).
-      unawaited(_cargarBandeja());
     } catch (e) {
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.
       // M4 (Argón): loguear y retornar en vez de rethrow.
@@ -1002,31 +1014,6 @@ class _HomeScreenState extends State<HomeScreen>
     _lastFetch = ahoraUtcReal();
   }
 
-  /// v1.19 (bandeja): segundo pase de _cargar. Visible para el
-  /// dueño siempre y para el entrenador con permiso otorgado; el
-  /// badge cuenta las solicitudes pendientes del espejo local.
-  /// Fail-silent: sin espejo (v2.2 sin ejecutar) la tarjeta no se
-  /// muestra y Home sigue offline-first.
-  Future<void> _cargarBandeja() async {
-    try {
-      final visible = await tieneAccesoBandeja();
-      var pendientes = 0;
-      if (visible) {
-        final todas = await solicitudesBandeja();
-        pendientes =
-            solicitudesPorEstado(todas, kBandejaPendiente).length;
-      }
-      if (!mounted) return;
-      setState(() {
-        _bandejaVisible = visible;
-        _bandejaPendientes = pendientes;
-      });
-    } catch (_) {
-      // Panel Terra (media): un fallo de lectura NO pone el badge
-      // en 0 (eso ocultaría pendientes reales). Se conserva el
-      // valor anterior y el próximo _cargar reintenta.
-    }
-  }
 
   /// v1.8.0: segundo pase de _cargar (SOLO dueño): trae los conteos
   /// de personas esperando — la MISMA fuente que el bloque
@@ -1277,109 +1264,200 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final esDueno = _auth.isOwner;
-    // 1.26.1 (scroll): las secciones de la Home como ítems
-    // de un ListView.builder — solo se construye lo visible
-    // y un rebuild por sync ya no reinicia la posición ni
-    // mata el impulso del gesto (condiciones 1 y 2 de
-    // Argón: controlador en el State, claves estables).
-    final items = <Widget>[
-      // v1.3.3: cabecera compacta
-      // 1.29 (D-21): con su micro-animación de entrada
-      // (fundido + desplazamiento corto, una sola vez al
-      // montar; la clave estable conserva el estado del
-      // envoltorio entre reconstrucciones).
-      KeyedSubtree(
-          key: const ValueKey('home-cabecera'),
-          child: _EntradaCabecera(child: _cabecera())),
-      // Rediseño Argón: un solo banner de sync (ver
-      // _bannerSync): si coexisten fallo y aviso, manda
-      // el fallo; al descartarlo reaparece el aviso.
-      KeyedSubtree(
-          key: const ValueKey('home-banner'), child: _bannerSync()),
-      // 1.23 (W1): diagnóstico de espejo vacío — solo
-      // pinta si el espejo de clientes está en cero
-      // habiendo tenido clientes tras una bajada buena.
-      const KeyedSubtree(
-          key: ValueKey('home-diagnostico'),
-          child: TarjetaDiagnosticoEspejo()),
-      // 1.23 (B2): selector de nivel bajo la cabecera y el
-      // banner — Hoy | Módulos, a un toque y sin empujar
-      // ninguna zona interactiva (H-02).
-      KeyedSubtree(
-          key: const ValueKey('home-selector'),
-          child: _selectorNivel()),
-      // v1.3.6: el dock fijo se reemplazó por el botón
-      // flotante de acciones rápidas (speed dial); el
-      // contenido del nivel va por secciones con ValueKey
-      // propia (nunca GlobalKey, H-03).
-      ..._seccionesNivel(esDueno),
-    ];
     return Scaffold(
-      // v1.3.6 (Jc): el dock fijo de abajo se reemplaza por un botón
-      // flotante de acciones rápidas (speed dial): al tocarlo despliega
-      // en horizontal Cobrar / Pago diario / Inscribir.
-      // 1.30 (Oleada D2, UI130-06): el dial queda como
-      // acceso directo SOLO de Servicios (agua, ración,
-      // combo): Cobrar / Pago diario / Inscribir viven en
-      // el mostrador, que es el sistema primario único.
-      floatingActionButton: _FabAccionesRapidas(
-        // Yunque B (YB-SER-01): vender (también el agua) exige
-        // can_vender_suplementos en el servidor; la entrada
-        // comprueba antes de navegar, como «Inscribir», y el
-        // flujo de Servicios re-verifica dentro (H-02).
-        onVenderAgua: () async {
-          if (await permisoOperativoOkConRefresco(
-              context,
-              () => PermisosEntrenador().canVenderSuplementos,
-              'vender servicios')) {
-            _ir(const ServiciosScreen(tipoInicial: 'agua_suelta'));
-          }
-        },
-        onVenderRacion: () async {
-          if (await permisoOperativoOkConRefresco(
-              context,
-              () => PermisosEntrenador().canVenderSuplementos,
-              'vender servicios')) {
-            _ir(const ServiciosScreen(tipoInicial: 'dosis_sin_agua'));
-          }
-        },
-        onVenderCombo: () async {
-          if (await permisoOperativoOkConRefresco(
-              context,
-              () => PermisosEntrenador().canVenderSuplementos,
-              'vender servicios')) {
-            _ir(const ServiciosScreen(tipoInicial: 'dosis_con_agua'));
-          }
-        },
-      ),
       body: SafeArea(
-        // 1.30 (Oleada D2): ámbito de la fundación de
-        // movimiento de D1 — las secciones de Hoy entran
-        // en cascada (ItemCascada) al abrir la app; el
-        // ámbito decide una sola vez y luego todo pinta
-        // directo.
-        child: EntradaCascada(
-          child: RefreshIndicator(
-            onRefresh: () => _cargar(forceRefresh: true),
-            child: ListView.builder(
-              controller: _scrollCtrl,
-              physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: items.length,
-              itemBuilder: (context, i) =>
-                  RepaintBoundary(child: items[i]),
+        child: Column(
+          children: [
+            CabeceraMarco(
+              rol: _rolSimple(),
+              nombre: _nombreVisible ?? _auth.displayName,
+              onSyncTap: () => _ir(const ColaScreen()),
+              onLupa: () => _ir(const LupaUniversalScreen()),
+              onAccionPerfil: _accionPerfilMarco,
             ),
-          ),
+            Expanded(
+              child: IndexedStack(
+                index: _pilarActivo,
+                children: [
+                  for (var i = 0; i < 4; i++)
+                    if (_pilaresVisitados.contains(i))
+                      KeyedSubtree(
+                        key: ValueKey('pilar-$i'),
+                        child: _cuerpoPilar(i, esDueno),
+                      )
+                    else
+                      SizedBox.shrink(key: ValueKey('pilar-vacio-$i')),
+                ],
+              ),
+            ),
+          ],
         ),
+      ),
+      bottomNavigationBar: BarraPilares(
+        activo: _pilarActivo,
+        esDueno: esDueno,
+        urgencias: urgenciasHome(
+          atras: _atras,
+          incidencias: _incidenciasAbiertas,
+          atencion: _atencion.total,
+        ),
+        onTap: _seleccionarPilar,
       ),
     );
   }
 
-  /// 1.23 (B2): selector segmentado Hoy | Módulos. La pestaña
-  /// «Hoy» lleva el contador de urgencias (atrasados +
-  /// incidencias + personas esperando al dueño): estando en
-  /// Módulos, lo urgente nunca queda escondido. El segundo pase
-  /// de _cargar solo muta ese contador — la barra no cambia de
-  /// alto ni empuja nada (H-02).
+  Widget _cuerpoPilar(int i, bool esDueno) {
+    switch (i) {
+      case 1:
+        return PilarClientes(esDueno: esDueno);
+      case 2:
+        return const PilarTienda();
+      case 3:
+        return PilarNegocio(esDueno: esDueno);
+      default:
+        return _cuerpoMostrador(esDueno);
+    }
+  }
+
+  /// El Pilar 1: el scroll de Hoy de siempre (banner de
+  /// sync honesto + diagnóstico del espejo + secciones por
+  /// rol, con su cascada de entrada) y el Dock de acciones
+  /// pegado al pie. El scroll lo recuerda PageStorageKey.
+  Widget _cuerpoMostrador(bool esDueno) {
+    final items = <Widget>[
+      KeyedSubtree(
+          key: const ValueKey('home-banner'), child: _bannerSync()),
+      const TarjetaDiagnosticoEspejo(key: ValueKey('home-diagnostico')),
+      ..._seccionesMostrador(esDueno),
+    ];
+    return Column(
+      children: [
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => _cargar(forceRefresh: true),
+            child: EntradaCascada(
+              child: ListView.builder(
+              key: const PageStorageKey<String>('mostrador-scroll'),
+              controller: _scrollCtrl,
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: items.length,
+              itemBuilder: (context, index) => items[index],
+              ),
+            ),
+          ),
+        ),
+        DockMostrador(
+          esDueno: esDueno,
+          onCobrar: () => _ir(const PagoScreen()),
+          onServicio: () async {
+            if (await permisoOperativoOkConRefresco(
+                context,
+                () => PermisosEntrenador().canVenderSuplementos,
+                'vender servicios')) {
+              MarcoNav.irAPilar(PilarGestion.tienda);
+            }
+          },
+          onPase: () => _ir(const PagoDiarioScreen()),
+          onInscribir: () async {
+            if (await permisoOperativoOkConRefresco(
+                context,
+                () => PermisosEntrenador().canInscribirClientes,
+                'inscribir clientes')) {
+              _ir(const InscribirScreen());
+            }
+          },
+          onSuplemento:
+              esDueno ? () => _ir(const SuplementosScreen()) : null,
+          onGasto: esDueno ? () => _ir(const GastosScreen()) : null,
+        ),
+      ],
+    );
+  }
+
+  /// Menú de perfil de la cabecera del marco: cada acción
+  /// cae en la pantalla de siempre.
+  void _accionPerfilMarco(String accion) {
+    switch (accion) {
+      case 'perfil':
+      case 'respaldo':
+        _ir(const AjustesScreen());
+      case 'auditoria':
+        _ir(const AuditoriaScreen());
+      case 'diagnostico':
+        _ir(const SaludSyncScreen());
+      case 'ayuda':
+        _ir(const AyudaScreen());
+      case 'tema':
+        unawaited(ThemeController.ciclo());
+      case 'salir':
+        unawaited(_salir());
+    }
+  }
+
+  /// Compuerta 5 del veredicto g132: si Android mató la app
+  /// con el selector de fotos abierto, al rehidratar la
+  /// cáscara OFRECE la foto recuperada en su contexto (la
+  /// ficha del cliente o la inscripción en curso). Nunca se
+  /// aplica en silencio; al resolver, el contexto se limpia
+  /// para no ofrecerla en bucle.
+  Future<void> _ofrecerFotoRecuperada() async {
+    try {
+      final rec = await consultarFotoRecuperadaAlRehidratar();
+      if (rec == null || !mounted) return;
+      final ctxFoto = rec.contexto;
+      final acepta = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Foto recuperada'),
+          content: const Text(
+              'El selector de fotos se cerró sin entregar la '
+              'imagen la última vez. ¿Quieres usar la foto que '
+              'elegiste?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Descartar')),
+            BotonPrimario(
+              texto: 'Usar la foto',
+              expandido: false,
+              onPressed: () => Navigator.pop(ctx, true),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (acepta != true) {
+        await limpiarContextoFoto();
+        return;
+      }
+      if (ctxFoto?.flujo == 'ficha_cliente') {
+        final id = int.tryParse(ctxFoto?.entidadId ?? '');
+        await limpiarContextoFoto();
+        if (id == null) return;
+        await FotosColaService.instance.encolarFoto(
+          opUuid: const Uuid().v4(),
+          clienteId: id,
+          rutaOriginal: rec.archivo.path,
+        );
+        LocalDb.limpiarFotoEliminadaSesion(id);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Foto recuperada aplicada (se sincronizará).')));
+        unawaited(SyncEngine.instance.push());
+      } else if (ctxFoto?.flujo == 'inscribir') {
+        await limpiarContextoFoto();
+        if (!mounted) return;
+        _ir(InscribirScreen(fotoInicial: File(rec.archivo.path)));
+      } else {
+        await limpiarContextoFoto();
+      }
+    } catch (_) {
+      // La rehidratación jamás tumba la cáscara.
+    }
+  }
+
+
   Future<void> _cargarEstacion() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1405,181 +1483,45 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (_) {}
   }
 
-  Widget _selectorNivel() {
-    final urgencias = urgenciasHome(
-        atras: _atras,
-        incidencias: _incidenciasAbiertas,
-        atencion: _atencion.total);
-    Widget segmento(int nivel, IconData icono, String texto,
-        {int contador = 0}) {
-      final activo = _nivelActivo == nivel;
-      // 1.29 (Oleada 5, D-14): el segmento activo va
-      // sobre el gradiente naranja — su letra pasa a
-      // grafito (sobreMarca), la regla fundacional de la
-      // oleada 1 («blanco sobre naranja, prohibido»: daba
-      // 2,75; el grafito da 6,32).
-      final colorTexto = activo
-          ? AppColores.sobreMarca
-          : AppColores.textoSecundario(context);
-      return Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadio.circular),
-          onTap: () => _irANivel(nivel),
-          child: Container(
-            // 1.23 B11: alto mínimo cómodo de 48 (antes ~42:
-            // icono 18 + padding vertical md×2).
-            constraints: const BoxConstraints(minHeight: 48),
-            padding:
-                const EdgeInsets.symmetric(vertical: AppEspacio.md),
-            decoration: BoxDecoration(
-              gradient:
-                  activo ? AppColores.gradienteNaranja : null,
-              borderRadius: BorderRadius.circular(AppRadio.circular),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icono, size: 18, color: colorTexto),
-                const SizedBox(width: 6),
-                // 1.25 T116 (F1-12): con letra grande, el
-                // texto cede y no desborda el segmento.
-                Flexible(
-                  child: Text(texto,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTexto.secundario.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: colorTexto)),
-                ),
-                if (contador > 0) ...[
-                  const SizedBox(width: 6),
-                  // 1.30 D1 (UI130-02): el contador de
-                  // urgencia es el componente único sobre
-                  // errorFondo (6,54) — fuera el par
-                  // blanco/error brillante (3,76).
-                  ContadorUrgente(numero: contador),
-                ],
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(AppRadio.circular),
-          border: Border.all(color: Theme.of(context).dividerColor),
-        ),
-        padding: const EdgeInsets.all(AppEspacio.xs),
-        child: Row(
-          children: [
-            segmento(0, Icons.bolt_rounded, 'Hoy',
-                contador: urgencias),
-            segmento(1, Icons.grid_view_rounded, 'Módulos'),
-            // 1.25 Panel 19: personalizar la estación
-            // diaria (solo en el nivel «Hoy»).
-            if (_nivelActivo == 0)
-              IconButton(
-                icon: const Icon(Icons.tune_rounded, size: 20),
-                tooltip: 'Personalizar mi día',
-                onPressed: _personalizarEstacion,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// El contenido del nivel activo, con su ValueKey<int> para
-  /// el AnimatedSwitcher del build (gramática T7 / H-03).
-  /// 1.26.1 (scroll): las secciones del nivel activo como
-  /// ítems del ListView.builder de la Home, cada una con su
-  /// ValueKey estable para que Flutter reutilice los Element
-  /// en los rebuilds por sync (condición 2 de Argón). Antes
-  /// era _contenidoNivel: una Column ansiosa por nivel
-  /// dentro de un SingleChildScrollView.
-  List<Widget> _seccionesNivel(bool esDueno) {
-    if (_nivelActivo == 0) {
-      // Nivel 1 «Hoy»: la vista se parte por rol (1.30
-      // D2, UI130-31) — HomeScreen sigue siendo el
-      // contenedor único de estado y cada vista recibe
-      // SOLO las secciones que pinta, ya construidas.
-      if (esDueno) {
-        return _VistaHoyDueno(
-          bloquesHoy: _bloquesHoy,
-          buscar: _botonBuscarCliente(),
-          mostrador: _mostradorRapido(),
-          tarjetaAdministracion: _tarjetaAdministracionHoy(),
-          finanzas: _tarjetaFinanciera(true),
-          bandeja: _botonBandejaWhatsapp(),
-          buzon: _tarjetaBuzon(),
-          hayBuzon: _buzon.hay,
-          alertas: _tiraAlertas(),
-          onPersonalizar: _personalizarEstacion,
-        ).secciones();
-      }
-      return _VistaHoyEntrenador(
+  /// 1.32: las secciones del Mostrador (antes «Nivel 1
+  /// Hoy»): la vista se parte por rol y cada vista recibe
+  /// SOLO las secciones que pinta, ya construidas. El
+  /// mostrador rápido vive ahora en el Dock al pie (a las
+  /// vistas llega retirado) y la búsqueda en la lupa de la
+  /// cabecera; el botón grande de buscar se conserva como
+  /// primer elemento, como siempre. El dueño estrena la
+  /// bandeja «Por Decidir» sobre el Pulso (Compuerta 1).
+  List<Widget> _seccionesMostrador(bool esDueno) {
+    if (esDueno) {
+      return _VistaHoyDueno(
         bloquesHoy: _bloquesHoy,
         buscar: _botonBuscarCliente(),
-        mostrador: _mostradorRapido(),
-        finanzas: _tarjetaFinanciera(false),
+        mostrador: const SizedBox.shrink(),
+        porDecidir: BandejaPorDecidir(
+          incidencias: _incidenciasAbiertas,
+          rellenos: _buzon.rellenos,
+          adelantos: _buzon.adelantos,
+          onIr: _ir,
+        ),
+        finanzas: _tarjetaFinanciera(true),
+        bandeja: _botonBandejaWhatsapp(),
+        buzon: _tarjetaBuzon(),
+        hayBuzon: _buzon.hay,
         alertas: _tiraAlertas(),
         onPersonalizar: _personalizarEstacion,
       ).secciones();
     }
-    // Nivel 2 «Módulos»: herramientas de gestión y consulta.
-    // Sin tarjetas que abran en crudo Cobrar / Pago diario /
-    // Inscribir (ya viven en el mostrador y en el FAB): el
-    // grupo «Cobrar y clientes» es de gestión y auditoría.
-    return [
-      const EncabezadoSeccion(
-          key: ValueKey('mod-encabezado'),
-          titulo: 'MÓDULOS',
-          variante: VarianteEncabezado.pagina),
-      KeyedSubtree(
-        key: const ValueKey('mod-grid'),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppEspacio.lg),
-          child: _gridModulos(),
-        ),
-      ),
-      // v1.3.3: resto de herramientas (ninguna pantalla se pierde)
-      const EncabezadoSeccion(
-          key: ValueKey('mas-encabezado'),
-          titulo: 'MÁS',
-          variante: VarianteEncabezado.pagina),
-      KeyedSubtree(
-        key: const ValueKey('mas-grid'),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppEspacio.lg),
-          child: _gridMas(),
-        ),
-      ),
-      KeyedSubtree(
-        key: const ValueKey('mod-pie'),
-        child: Column(
-          children: [
-            const SizedBox(height: AppEspacio.lg),
-            Center(
-              child: Text('© Creado por JcTr0602',
-                  style: AppTexto.minuscula.copyWith(
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-      // v1.3.6: aire inferior para que el FAB de acciones rápidas
-      // no tape el pie al llegar al final del scroll.
-      const SizedBox(key: ValueKey('mod-aire'), height: 96),
-    ];
+    return _VistaHoyEntrenador(
+      bloquesHoy: _bloquesHoy,
+      buscar: _botonBuscarCliente(),
+      mostrador: const SizedBox.shrink(),
+      finanzas: _tarjetaFinanciera(false),
+      alertas: _tiraAlertas(),
+      onPersonalizar: _personalizarEstacion,
+    ).secciones();
   }
+
+
 
   /// Texto del rol sin emojis (v1.1: iconos Material).
   String _rolSimple() {
@@ -1588,15 +1530,7 @@ class _HomeScreenState extends State<HomeScreen>
     return 'Entrenador';
   }
 
-  String _fechaHoy() {
-    final h = ahoraHabana(); // v1.3.4 (Argón): cabecera en hora de La Habana
-    const meses = [
-      'ene', 'feb', 'mar', 'abr', 'may', 'jun',
-      'jul', 'ago', 'sep', 'oct', 'nov', 'dic'
-    ];
-    return '${h.day} ${meses[h.month - 1]} ${h.year}';
-  }
-
+  
   /// v1.3.3: cabecera compacta con avatar (Ajustes), iconos de
   /// sincronización (badge), actividad (badge) y ayuda, más
   /// saludo, chip de rol, fecha/turno y SyncPill.
@@ -1669,351 +1603,9 @@ class _HomeScreenState extends State<HomeScreen>
     return const SizedBox.shrink();
   }
 
-  /// Zona 2 — Mostrador rápido (rediseño Argón): 4 acciones a 1
-  /// toque en fila de 52 px. En teléfonos estrechos, si la fila
-  /// aprieta las etiquetas, el plan B es cuadrícula 2x2.
-  /// 1.30 (Oleada D2, UI130-06): el mostrador es EL
-  /// sistema primario de Home — y el único: las cuatro
-  /// acciones dejan el naranja pleno (cuatro botones de
-  /// marca gritando a la vez) por la superficie elevada
-  /// con el icono en naranja y la etiqueta en su color
-  /// normal. El naranja pleno se reserva a UNA acción
-  /// primaria por pantalla.
-  Widget _mostradorRapido() {
-    Widget accion(IconData icono, String texto, VoidCallback ir) {
-      return Expanded(
-        child: Material(
-          color: Theme.of(context).cardColor,
-          elevation: 2,
-          shadowColor: Colors.black.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(AppRadio.md),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppRadio.md),
-            onTap: ir,
-            child: Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppEspacio.xs),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(AppRadio.md),
-                border: Border.all(
-                    color: Theme.of(context).dividerColor),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icono, size: 20, color: AppColores.naranja),
-                  const SizedBox(height: 2),
-                  // 1.25 T116 (F1-13): la etiqueta ya NO se
-                  // encoge por debajo del tamaño del
-                  // usuario (FittedBox anulaba su letra
-                  // grande): crece a 2 líneas centradas y
-                  // solo recorta si ni así cabe.
-                  Flexible(
-                    child: Text(texto,
-                        maxLines: 2,
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTexto.etiqueta),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
 
-    return Row(
-      children: [
-        accion(Icons.payments_rounded, 'Cobrar',
-            () => _ir(const PagoScreen())),
-        const SizedBox(width: AppEspacio.sm),
-        accion(Icons.today_rounded, 'Pago diario',
-            () => _ir(const PagoDiarioScreen())),
-        const SizedBox(width: AppEspacio.sm),
-        accion(Icons.person_add_rounded, 'Inscribir', () async {
-          // 1.24 Bloque 3: permiso operativo al tocar.
-          // 1.25 Bloque 2: con refresco antes de denegar.
-          if (await permisoOperativoOkConRefresco(
-        context, () => PermisosEntrenador().canInscribirClientes, 'inscribir clientes')) {
-            _ir(const InscribirScreen());
-          }
-        }),
-        const SizedBox(width: AppEspacio.sm),
-        accion(Icons.science_rounded, 'Dosis', () async {
-          // Yunque B (YB-SER-01): misma guarda que el dial.
-          if (await permisoOperativoOkConRefresco(
-              context,
-              () => PermisosEntrenador().canVenderSuplementos,
-              'vender servicios')) {
-            _ir(const ServiciosScreen());
-          }
-        }),
-      ],
-    );
-  }
 
-  /// 1.30 (Oleada D2, UI130-05): cabecera en DOS niveles
-  /// honestos. Nivel 1: el logo con su destino VISIBLE
-  /// (la insignia de engranaje dice que abre Ajustes) y
-  /// el wordmark con el saludo con aire — fuera los
-  /// botones de sync/ayuda/tema de la primera fila.
-  /// Debajo, la línea de contexto (fecha + mi turno) y
-  /// la FILA DE ESTADO: la píldora de sync A LO ANCHO
-  /// (nivel 1 de UI130-07: el botón-icono separado
-  /// desaparece), la campana con su contador y el menú
-  /// «más» (⋯) que recoge Ayuda y Tema: no desaparecen,
-  /// dejan de competir con el título en cada arranque.
-  Widget _cabecera() {
-    final nombre = _nombreVisible ?? _auth.displayName;
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: AppColores.gradienteCarbon,
-        borderRadius: BorderRadius.vertical(
-            bottom: Radius.circular(AppRadio.xl)),
-      ),
-      padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
-          AppEspacio.md, AppEspacio.lg, AppEspacio.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              // El logo abre Ajustes y ahora lo DICE: la
-              // insignia de engranaje sobre su esquina.
-              InkWell(
-                borderRadius: BorderRadius.circular(AppRadio.lg),
-                onTap: () => _ir(const AjustesScreen()),
-                child: Tooltip(
-                  message: 'Ajustes',
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          color: AppColores.carbonProfundo,
-                          borderRadius:
-                              BorderRadius.circular(AppRadio.lg),
-                          border: Border.all(
-                              color: AppColores.naranja
-                                  .withValues(alpha: 0.55)),
-                        ),
-                        child: ClipRRect(
-                          borderRadius:
-                              BorderRadius.circular(AppRadio.md),
-                          child: Image.asset('assets/logo.jpg',
-                              fit: BoxFit.cover),
-                        ),
-                      ),
-                      Positioned(
-                        right: -4,
-                        bottom: -4,
-                        child: Container(
-                          width: 20,
-                          height: 20,
-                          decoration: BoxDecoration(
-                            color: AppColores.naranja,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                                color: AppColores.carbonProfundo,
-                                width: 2),
-                          ),
-                          child: const Icon(
-                              Icons.settings_rounded,
-                              size: 11,
-                              color: AppColores.sobreMarca),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // El wordmark de D-21, intacto:
-                    // «IRON BODY» en blanco y «GYM» en
-                    // naranja, con el tracking de siempre.
-                    RichText(
-                      overflow: TextOverflow.ellipsis,
-                      text: TextSpan(
-                        style: AppTexto.tituloPagina.copyWith(
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1),
-                        children: const [
-                          TextSpan(
-                              text: 'IRON BODY',
-                              style:
-                                  TextStyle(color: Colors.white)),
-                          TextSpan(
-                              text: ' GYM',
-                              style: TextStyle(
-                                  color: AppColores.naranja)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text('${saludoHora()}, $nombre',
-                              style: AppTexto.secundario.copyWith(
-                                  color: Colors.white70),
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                        const SizedBox(width: 8),
-                        _chipRol(),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.md),
-          Row(
-            children: [
-              Flexible(
-                child: Text(
-                  _fechaHoy(),
-                  style: AppTexto.metadato
-                      .copyWith(color: Colors.white60),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              _chipTurno(),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          Row(
-            children: [
-              Expanded(
-                child: SyncPill(
-                  anchoCompleto: true,
-                  onTap: () => _ir(const ColaScreen()),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              _campana(),
-              _menuMasCabecera(),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          // B9: acento cerrando la cabecera.
-          // 1.25 T49: el filete es VIVO — su color dice el
-          // estado del día antes de leer un solo número:
-          // verde sin atrasados ni vencimientos de hoy,
-          // ámbar si vencen hoy o hay atrasados leves, rojo
-          // si hay vencidos de +30 días (la prioridad de
-          // urgenciaVencimientos). Se conserva tal cual.
-          Container(
-            height: 3,
-            decoration: BoxDecoration(
-              color: colorAcentoCabecera(
-                vencenHoy: _vencen,
-                atrasLeve: _atras - _atras30,
-                atras30: _atras30,
-              ),
-              borderRadius: BorderRadius.circular(AppRadio.circular),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  /// 1.30 (Oleada D2, UI130-05): el menú «más» (⋯) de la
-  /// cabecera — recoge Ayuda y Tema con el mismo botón
-  /// circular que el resto de la cabecera.
-  Widget _menuMasCabecera() {
-    return PopupMenuButton<String>(
-      tooltip: 'Más opciones',
-      onSelected: (valor) {
-        if (valor == 'ayuda') {
-          _ir(const AyudaScreen());
-        } else if (valor == 'tema') {
-          ThemeController.ciclo();
-        }
-      },
-      itemBuilder: (ctx) => [
-        const PopupMenuItem<String>(
-          value: 'ayuda',
-          child: Row(
-            children: [
-              Icon(Icons.help_outline_rounded, size: 20),
-              SizedBox(width: AppEspacio.sm),
-              Text('Ayuda'),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'tema',
-          child: Row(
-            children: [
-              Icon(
-                  ThemeController.mode.value == ThemeMode.dark
-                      ? Icons.light_mode_rounded
-                      : ThemeController.mode.value ==
-                              ThemeMode.light
-                          ? Icons.dark_mode_rounded
-                          : Icons.brightness_auto_rounded,
-                  size: 20),
-              const SizedBox(width: AppEspacio.sm),
-              const Text('Cambiar tema'),
-            ],
-          ),
-        ),
-      ],
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.08),
-        shape: CircleBorder(
-          side: BorderSide(
-              color: Colors.white.withValues(alpha: 0.16)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: const SizedBox(
-          width: 48,
-          height: 48,
-          child: Icon(Icons.more_vert_rounded,
-              color: Colors.white, size: 22),
-        ),
-      ),
-    );
-  }
-
-  /// Chip de rol (Dueño / Administrador / Entrenador).
-  Widget _chipRol() {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.sm, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppColores.naranja.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(AppRadio.md),
-        border: Border.all(
-            color:
-                AppColores.naranja.withValues(alpha: 0.5)),
-      ),
-      child: Text(
-        _rolSimple(),
-        style: AppTexto.etiqueta.copyWith(
-            // 1.30 D1 (UI130-03): la marca como TEXTO va
-            // por el rol textoNaranja (en oscuro, la
-            // variante clara legible sobre el tinte y la
-            // cabecera carbón); el relleno y el borde
-            // conservan la marca, que como gráfico sí vale.
-            color: AppColores.textoNaranja(context),
-            fontWeight: FontWeight.bold),
-      ),
-    );
-  }
 
   /// 1.25 T116 (F1-11): metadato discreto de frescura —
   /// «Datos del espejo · actualizado a las 07:42» según el
@@ -2035,19 +1627,6 @@ class _HomeScreenState extends State<HomeScreen>
             color: AppColores.textoSecundario(context)));
   }
 
-  /// Campana de notificaciones con contador (item 3 del Home).
-  /// 1.29 (D-21): en el botón circular de la cabecera,
-  /// con su contador como insignia.
-  Widget _campana() {
-    return _BotonCabecera(
-      icono: Icons.notifications_rounded,
-      tooltip: 'Actividad',
-      onPressed: () => _ir(const ActividadScreen()),
-      // 1.30 D1 (UI130-02): la insignia es el número; el
-      // tope («99+») lo pone el ContadorUrgente único.
-      insignia: _noLeidas > 0 ? _noLeidas : null,
-    );
-  }
 
   /// v1.3.3: tarjeta financiera contextual por rol.
   /// Entrenador: "Mi Turno Hoy" con cobrado hoy + pendiente a
@@ -2237,6 +1816,17 @@ class _HomeScreenState extends State<HomeScreen>
                 onPressed: () => _ir(const HubTurnosScreen()),
               ),
             ),
+            // 1.32: la puerta a la Actividad también al pie
+            // de «Mi Turno» (la pantalla se acota sola por
+            // rol y por captura propia).
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                key: const ValueKey('pulso-actividad'),
+                onPressed: () => _ir(const ActividadScreen()),
+                child: const Text('Ver actividad reciente →'),
+              ),
+            ),
           ],
         ),
       );
@@ -2324,6 +1914,44 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          // 1.32 (D-3 absorbido por el veredicto g132): las
+          // cifras de vencimiento del Pulso saltan al Pilar
+          // 2 con su chip puesto — «Vencidos» y «Al día» al
+          // directorio filtrado (la pantalla recalcula
+          // desde el espejo: el destino nunca miente aunque
+          // la cifra envejezca en pantalla).
+          Row(
+            children: [
+              Expanded(
+                  child: _datoFinancieroTappable(
+                      'Vencidos',
+                      '$_atras',
+                      urgenciaVencimientos(
+                              atrasLeve: _atras - _atras30,
+                              atras30: _atras30)
+                          .color,
+                      () => MarcoNav.irAClientes(const DestinoClientes(
+                          segmento: 'directorio', filtro: 'vencidos')))),
+              Expanded(
+                  child: _datoFinancieroTappable(
+                      'Al día',
+                      '$_activosMes',
+                      AppColores.exito,
+                      () => MarcoNav.irAClientes(const DestinoClientes(
+                          segmento: 'directorio', filtro: 'aldia')))),
+            ],
+          ),
+          // Puerta a la Actividad al pie del Pulso
+          // (asignada por Argón en el veredicto g132).
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const ValueKey('pulso-actividad'),
+              onPressed: () => _ir(const ActividadScreen()),
+              child: const Text('Ver actividad reciente →'),
+            ),
           ),
           // v1.3.6 (ítem 4): el banner se puede descartar (X).
           // v1.6.0 (Jc): el descarte es DURABLE por instancia
@@ -3004,7 +2632,8 @@ class _HomeScreenState extends State<HomeScreen>
           // 1.25 T116 (F1-10): mismo color que la pestaña
           // «Hoy» de Listas (ámbar; el rojo es de Atrasados).
           color: AppColores.alerta,
-          ir: () => _ir(const ListasScreen(inicial: 0))));
+          ir: () => MarcoNav.irAClientes(const DestinoClientes(
+              segmento: 'vencimientos', tabListas: 0))));
     }
     if (_atras > 0) {
       // 1.25 T116 (F1-10): destino y color por la MISMA
@@ -3014,7 +2643,8 @@ class _HomeScreenState extends State<HomeScreen>
           atrasLeve: _atras - _atras30, atras30: _atras30);
       filas.add((icono: Icons.schedule_rounded,
           texto: 'Atrasados', conteo: _atras, color: urg.color,
-          ir: () => _ir(ListasScreen(inicial: urg.tabInicial))));
+          ir: () => MarcoNav.irAClientes(DestinoClientes(
+              segmento: 'vencimientos', tabListas: urg.tabInicial))));
     }
     if (_cumpleHoy > 0) {
       filas.add((icono: Icons.cake_rounded,
@@ -3066,158 +2696,9 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// v1.3.3: grid de módulos (2 columnas). Día del gym para ambos
-  /// roles; Administración solo admin, Mi turno solo entrenador.
-  /// H1 (estéticas 1.19): módulos agrupados con encabezado pequeño
-  /// en vez de una lista plana. Cada grupo es su propio grid de
-  /// 2 columnas; un grupo sin hijos no se pinta.
-  /// 1.30 (Oleada D2, UI130-23): la tarjeta de
-  /// Administración en Hoy — el acceso rápido que el
-  /// diseño aprobado pone entre el mostrador y
-  /// Estadísticas Rápidas, con su subtítulo de siempre
-  /// («Precios y tarifas · Plus · Usuarios y permisos»)
-  /// y el contador de atención del Panel. Se construye
-  /// solo para el dueño y NO es un bloque de la
-  /// estación personalizable: no se puede ocultar.
-  Widget _tarjetaAdministracionHoy() {
-    return Tarjeta(
-      onTap: () => _ir(const AdminScreen()),
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.md, vertical: AppEspacio.md),
-      child: Row(
-        children: [
-          IconoModuloBadge.naranja(
-              Icons.admin_panel_settings_rounded,
-              tamanoIcono: 22),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Administración',
-                    style: AppTexto.secundario
-                        .copyWith(fontWeight: FontWeight.w600)),
-                Text(
-                    'Precios y tarifas · Plus · Usuarios y permisos',
-                    style: AppTexto.metadato.copyWith(
-                        color: AppColores.textoSecundario(context))),
-              ],
-            ),
-          ),
-          if (_atencion.total > 0) ...[
-            ContadorUrgente(numero: _atencion.total),
-            const SizedBox(width: 4),
-          ],
-          Icon(Icons.chevron_right_rounded,
-              size: 20,
-              color: AppColores.textoSecundario(context)),
-        ],
-      ),
-    );
-  }
 
-  /// 1.30 (Oleada D2, UI130-23): rejilla que CIERRA —
-  /// filas de [columnas] fichas con la misma altura; la
-  /// última fila, si queda incompleta, ensancha sus
-  /// fichas a lo ancho en vez de dejar la celda vacía
-  /// que dejaba GridView.count (el hueco de «El gym
-  /// hoy», con 3 módulos, y el de MÁS según el rol).
-  Widget _rejillaCerrada(
-      List<Widget> hijos, int columnas, double ratio) {
-    if (hijos.isEmpty) return const SizedBox.shrink();
-    return LayoutBuilder(builder: (ctx, cons) {
-      final anchoFicha =
-          (cons.maxWidth - (columnas - 1) * AppEspacio.sm) /
-              columnas;
-      final altoFicha = anchoFicha / ratio;
-      final filas = <Widget>[];
-      for (var i = 0; i < hijos.length; i += columnas) {
-        final fin =
-            i + columnas < hijos.length ? i + columnas : hijos.length;
-        final fila = hijos.sublist(i, fin);
-        filas.add(Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var j = 0; j < fila.length; j++) ...[
-              if (j > 0) const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                  child:
-                      SizedBox(height: altoFicha, child: fila[j])),
-            ],
-          ],
-        ));
-        if (fin < hijos.length) {
-          filas.add(const SizedBox(height: AppEspacio.sm));
-        }
-      }
-      return Column(mainAxisSize: MainAxisSize.min, children: filas);
-    });
-  }
 
-  Widget _gridModulos() {
-    Widget grupo(String titulo, List<Widget> hijos) {
-      if (hijos.isEmpty) return const SizedBox.shrink();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(titulo,
-              style: AppTexto.secundario.copyWith(
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: AppEspacio.sm),
-          // 1.30 D2 (UI130-23): rejilla cerrada — sin la
-          // celda vacía del conteo impar.
-          _rejillaCerrada(hijos, 2, 2.4),
-          const SizedBox(height: AppEspacio.md),
-        ],
-      );
-    }
-
-    // H2: el badge de Vencimientos ya no es siempre rojo: color
-    // según urgencia y el toque cae en la pestaña del desglose.
-    final urgVenc = urgenciaVencimientos(
-        atrasLeve: _atras - _atras30, atras30: _atras30);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        grupo('Cobrar y clientes', [
-          _modulo(Icons.insights_rounded, 'Día del gym',
-              () => _ir(const MiDiaScreen())),
-          _modulo(Icons.inventory_2_rounded, 'Suplementos',
-              () => _ir(const SuplementosScreen())),
-        ]),
-        grupo('El gym hoy', [
-          _modulo(Icons.event_busy_rounded, 'Vencimientos',
-              () => _ir(ListasScreen(inicial: urgVenc.tabInicial)),
-              badge: _vencen + _atras,
-              badgeColor: urgVenc.color),
-          _modulo(Icons.report_rounded, 'Incidencias',
-              () => _ir(const ListaIncidenciasScreen()),
-              badge: _incidenciasAbiertas),
-          _modulo(Icons.dashboard_rounded, 'Dashboard',
-              () => _ir(const DashboardScreen())),
-        ]),
-        grupo('Mi trabajo', [
-          if (_bandejaVisible)
-            _modulo(Icons.mail_rounded, 'Bandeja',
-                () => _ir(const BandejaScreen()),
-                badge: _bandejaPendientes),
-          if (_auth.isAdmin)
-            _modulo(Icons.admin_panel_settings_rounded,
-                'Administración',
-                () => _ir(const AdminScreen()),
-                // v1.8.0: personas esperando (solo dueño; el conteo
-                // solo se carga para el dueño, para el resto queda 0
-                // y el distintivo no se pinta). El toque ya lleva al
-                // Panel, donde se atienden.
-                badge: _atencion.total)
-          else
-            _modulo(Icons.badge_rounded, 'Mi turno',
-                () => _ir(const MiTurnoScreen())),
-        ]),
-      ],
-    );
-  }
-
+  
   /// v1.3.6 (Jc): botón horizontal de ancho completo para Buscar cliente
   /// en el Mostrador Rápido (rediseño Argón, zona 2). v1.3.6 (Argón,
   /// diseño): badge squircle de acción + chevron_rounded al extremo.
@@ -3290,164 +2771,9 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Módulo del grid (badge squircle + etiqueta). v1.3.6 (Argón, diseño):
-  /// iconos _rounded dentro del badge tinted naranja.
-  /// Módulo del grid. v1.8.0: [badge] opcional — conteo en una
-  /// píldora a la derecha (mismo lenguaje visual que el
-  /// contador de la campana); con 0 no se pinta nada.
-  /// H2 (estéticas 1.19): [badgeColor] tiñe la píldora según
-  /// urgencia (por defecto rojo, como antes).
-  Widget _modulo(IconData icono, String texto, VoidCallback onTap,
-      {int badge = 0, Color? badgeColor}) {
-    return Tarjeta(
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.md,
-          vertical: AppEspacio.sm),
-      child: Row(
-        children: [
-          IconoModuloBadge.naranja(icono),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Text(texto,
-                style: AppTexto.secundario.copyWith(
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis),
-          ),
-          if (badge > 0) ...[
-            const SizedBox(width: AppEspacio.sm),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppEspacio.sm, vertical: 2),
-              decoration: BoxDecoration(
-                color: badgeColor ?? AppColores.error,
-                borderRadius: BorderRadius.circular(AppRadio.md),
-              ),
-              child: Text(badge > 99 ? '99+' : '$badge',
-                  style: AppTexto.etiqueta.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
-  /// H3 (estéticas 1.19): el turno como chip de color en la
-  /// cabecera, en vez de texto gris. Mañana naranja, tarde azul,
-  /// noche ámbar (mismo turnoActual() de siempre, 5-12 / 12-18 /
-  /// resto).
-  ///
-  /// 1.25 T08: si hoy hay turno registrado, el chip manda con
-  /// el estado REAL («Tarde · Abierto ✓ 07:02», con el color
-  /// del estado) y la franja del reloj queda como contexto:
-  /// un solo chip, sin la contradicción de antes («Turno
-  /// mañana» en la cabecera y «Cerrado» en la tarjeta).
-  Widget _chipTurno() {
-    final t = turnoActual();
-    final real = _estadoTurnoReal();
-    final color = real != null
-        ? real.$2
-        : t == 'Mañana'
-            ? AppColores.naranja
-            : t == 'Tarde'
-                ? AppColores.info
-                : AppColores.alerta;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 2),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(AppRadio.md),
-      ),
-      child: Text(
-          real != null ? '$t · ${real.$1}' : 'Turno ${t.toLowerCase()}',
-          style: AppTexto.etiqueta.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.bold)),
-    );
-  }
 
-  /// v1.3.3: resto de herramientas.
-  /// post-1.15 (Jc): «Pagos realizados» sale de MÁS: es la misma
-  /// lista que «Pagaron el mes» en Estadísticas Rápidas, así que
-  /// el botón era redundante. La pantalla sigue en el código por
-  /// si se recupera, pero sin entrada en el grid.
-  Widget _gridMas() {
-    // 1.30 D2 (UI130-23): rejilla cerrada de 3 columnas
-    // (el conteo varía por rol: sin huecos en ninguno).
-    return _rejillaCerrada([
 
-        _herramienta(Icons.account_balance_rounded,
-            'Transferencia',
-            () => _ir(const TransferenciaScreen())),
-        // v1.5.0 (Bloque G): bandeja de invitados de la app de clientes.
-        _herramienta(Icons.person_add_rounded, 'Invitados',
-            () => _ir(const InvitadosScreen())),
-        _herramienta(Icons.cake_rounded, 'Cumpleaños',
-            () => _ir(const CumpleanosScreen())),
-        // 1.27: permiso can_registrar_gastos conectado de
-        // verdad — el dueño entra directo; el entrenador
-        // pasa el permiso operativo al tocar (visible con
-        // aviso, patrón 1.24/1.25) y el servidor verifica
-        // la op 'gasto' contra el mismo permiso.
-        _herramienta(Icons.receipt_long_rounded, 'Gastos',
-            () async {
-          if (_auth.isOwner) {
-            _ir(const GastosScreen());
-            return;
-          }
-          if (await permisoOperativoOkConRefresco(
-              context,
-              () => PermisosEntrenador().canRegistrarGastos,
-              'registrar gastos')) {
-            _ir(const GastosScreen());
-          }
-        }),
-        if (_auth.isAdmin)
-          _herramienta(Icons.badge_rounded, 'Mis cobros',
-              () => _ir(const MiTurnoScreen())),
-        _herramienta(Icons.delete_outline_rounded, 'Papelera',
-            () => _ir(const PapeleraScreen())),
-        _herramienta(Icons.logout_rounded, 'Salir', _salir,
-            color: AppColores.error),
-    ], 3, 1.4);
-  }
-
-  /// Herramienta pequeña (badge + etiqueta). v1.3.6 (Argón, diseño): mismo
-  /// badge squircle que los módulos para no dejar dos estilos conviviendo
-  /// en el mismo scroll.
-  Widget _herramienta(IconData icono, String texto,
-      VoidCallback onTap,
-      {Color? color}) {
-    final esAlerta = color != null;
-    return Tarjeta(
-      padding: const EdgeInsets.symmetric(
-          vertical: AppEspacio.md,
-          horizontal: AppEspacio.xs),
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          esAlerta
-              ? IconoModuloBadge(
-                  icono: icono,
-                  tinte: color,
-                  iconoOscuro: AppColores.errorIconoOscuro,
-                  iconoClaro: color,
-                  tamanoIcono: 20)
-              : IconoModuloBadge.naranja(icono, tamanoIcono: 20),
-          const SizedBox(height: 8),
-          Text(texto,
-              style: AppTexto.minuscula.copyWith(
-                  color: esAlerta
-                      ? color
-                      : AppColores.textoSecundario(context)),
-              textAlign: TextAlign.center),
-        ],
-      ),
-    );
-  }
 }
 
 /// 1.30 (Oleada D2, UI130-31 + UI130-23): la vista de
@@ -3463,7 +2789,7 @@ class _VistaHoyDueno extends StatelessWidget {
   final Set<String> bloquesHoy;
   final Widget buscar;
   final Widget mostrador;
-  final Widget tarjetaAdministracion;
+  final Widget porDecidir;
   final Widget finanzas;
   final Widget bandeja;
   final Widget buzon;
@@ -3475,7 +2801,7 @@ class _VistaHoyDueno extends StatelessWidget {
     required this.bloquesHoy,
     required this.buscar,
     required this.mostrador,
-    required this.tarjetaAdministracion,
+    required this.porDecidir,
     required this.finanzas,
     required this.bandeja,
     required this.buzon,
@@ -3507,17 +2833,20 @@ class _VistaHoyDueno extends StatelessWidget {
           ),
         ),
       ),
-      // 1.30 D2 (UI130-23): Administración, entre el
-      // mostrador y Estadísticas Rápidas. Solo dueño
-      // (esta vista solo se construye para él).
+      // 1.32: la bandeja «Por Decidir» manda sobre el
+      // Pulso: primero lo que espera una decisión del
+      // dueño (Compuerta 1 del veredicto g132). La vieja
+      // tarjeta de Administración se funde aquí (sus
+      // contadores de atención) y en el Pilar 4 (sus
+      // destinos).
       KeyedSubtree(
-        key: const ValueKey('hoy-admin'),
+        key: const ValueKey('hoy-pordecidir'),
         child: ItemCascada(
           indice: 1,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: tarjetaAdministracion,
+            child: porDecidir,
           ),
         ),
       ),
@@ -3709,317 +3038,7 @@ class _VistaHoyEntrenador extends StatelessWidget {
       Column(children: secciones());
 }
 
-/// v1.3.6 (Jc): botón flotante de acciones rápidas (speed dial) que
-/// reemplaza al dock inferior fijo de la v1.3.5. Cerrado muestra un solo
-/// FAB naranja (rayo); v1.3.7 (Jc): al tocarlo despliega en VERTICAL las
-/// 3 acciones más usadas (Cobrar, Pago diario, Inscribir) con aparición
-/// escalonada suave. Elegir una acción (o el botón Atrás) lo cierra.
-/// 1.30 (Oleada D2, UI130-06): el dial, especializado.
-/// Nació como atajo general (membresías + servicios) y
-/// duplicaba el mostrador: desde esta oleada es SOLO el
-/// acceso directo de Servicios — agua, ración y combo —
-/// con su icono propio de dosis en el FAB (el rayo era
-/// el icono «de dosis» y confundía). Cobrar, Pago
-/// diario e Inscribir viven únicamente en el mostrador.
-class _FabAccionesRapidas extends StatefulWidget {
-  // Ítem 5 (post-1.8.0, pedido de Jc): Servicios protagonistas —
-  // venta directa de agua, ración y combo.
-  final VoidCallback onVenderAgua;
-  final VoidCallback onVenderRacion;
-  final VoidCallback onVenderCombo;
 
-  const _FabAccionesRapidas({
-    required this.onVenderAgua,
-    required this.onVenderRacion,
-    required this.onVenderCombo,
-  });
-
-  @override
-  State<_FabAccionesRapidas> createState() => _FabAccionesRapidasState();
-}
-
-class _FabAccionesRapidasState extends State<_FabAccionesRapidas>
-    with SingleTickerProviderStateMixin {
-  bool _abierto = false;
-  late final AnimationController _ctrl;
-  // D-14 (1.21): las CurvedAnimation de cada píldora se crean
-  // UNA vez (antes nacía una nueva en cada build y nunca se
-  // liberaba: fuga lenta de listeners sobre _ctrl).
-  late final List<CurvedAnimation> _animsPildora;
-  // 1.23 T8: gemelas de ESCALA con rebote suave (easeOutBack
-  // contenido) para el despliegue; el fade y el deslizamiento
-  // siguen con easeOutCubic en _animsPildora (easeOutBack
-  // supera 1.0 y rompería el FadeTransition).
-  late final List<CurvedAnimation> _animsPildoraEscala;
-
-  @override
-  void initState() {
-    super.initState();
-    // v1.3.7 (Jc): transición más suave y escalonada (300ms).
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    const total = 3;
-    _animsPildora = [
-      for (var index = 0; index < total; index++)
-        CurvedAnimation(
-          parent: _ctrl,
-          curve: Interval((0.3 / (total - 1)) * (total - 1 - index),
-              (0.3 / (total - 1)) * (total - 1 - index) + 0.7,
-              curve: Curves.easeOutCubic),
-        ),
-    ];
-    _animsPildoraEscala = [
-      for (var index = 0; index < total; index++)
-        CurvedAnimation(
-          parent: _ctrl,
-          curve: Interval((0.3 / (total - 1)) * (total - 1 - index),
-              (0.3 / (total - 1)) * (total - 1 - index) + 0.7,
-              curve: Curves.easeOutBack),
-        ),
-    ];
-  }
-
-  @override
-  void dispose() {
-    for (final a in _animsPildora) {
-      a.dispose();
-    }
-    for (final a in _animsPildoraEscala) {
-      a.dispose();
-    }
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _toggle() {
-    setState(() => _abierto = !_abierto);
-    if (_abierto) {
-      _ctrl.forward();
-    } else {
-      _ctrl.reverse();
-    }
-  }
-
-  void _irCerrando(VoidCallback accion) {
-    // v1.3.9 (Bug 1, Argón): cierre EXPLÍCITO (no toggle) antes de navegar.
-    // Garantiza que al regresar a Home el estado visual coincida con el lógico.
-    if (_abierto) {
-      setState(() => _abierto = false);
-      _ctrl.reverse();
-    }
-    accion();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_abierto,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _abierto) _toggle();
-      },
-      // v1.3.9 (Argón): Stack con clipBehavior none para permitir que el
-      // scrim se extienda más allá de los límites del FAB.
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.bottomRight,
-        children: [
-          // v1.3.9 (Argón): Scrim semitransparente que cubre la pantalla
-          // cuando el dial está abierto. Al tocarlo, cierra el dial.
-          // Positioned con offsets negativos grandes para cubrir toda la pantalla.
-          Positioned(
-            top: -2000,
-            left: -2000,
-            right: -30,
-            bottom: -30,
-            child: IgnorePointer(
-              ignoring: !_abierto,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                // Rediseño Argón: el fondo cierra con _toggle
-                // (antes solo ponía _abierto = false y la animación
-                // quedaba a medias, sin _ctrl.reverse()).
-                onTap: _toggle,
-                child: AnimatedOpacity(
-                  duration: AppMovimiento.media,
-                  opacity: _abierto ? 1.0 : 0.0,
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.55),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // v1.3.7 (Jc): acciones en VERTICAL sobre el FAB, con
-          // aparición escalonada (fade + deslizamiento suave).
-          // v1.3.9 (Bug 1, Argón): IgnorePointer envuelve SOLO la columna
-          // de píldoras (no el FAB principal). Con el menú cerrado las
-          // píldoras invisibles ya no capturan toques. NO usar Visibility:
-          // cortaría la animación de cierre.
-          IgnorePointer(
-            ignoring: !_abierto,
-            child: ClipRect(
-              child: Container(
-                margin: const EdgeInsets.only(bottom: AppEspacio.md),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    // 1.30 (Oleada D2, UI130-06): solo las
-                    // tres ventas de Servicios, en el orden
-                    // de siempre (agua junto al FAB).
-                    _accionAnimada(0, Icons.water_drop_rounded,
-                        'Vender agua',
-                        () => _irCerrando(widget.onVenderAgua)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(1, Icons.science_rounded,
-                        'Vender ración',
-                        () => _irCerrando(widget.onVenderRacion)),
-                    const SizedBox(height: 8),
-                    _accionAnimada(2, Icons.local_drink_rounded,
-                        'Vender combo',
-                        () => _irCerrando(widget.onVenderCombo)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // v1.3.6 (Argón, diseño): FAB con gradiente lineal reservado
-          // para el speed dial + sombra naranja. 1.29 O9: el gradiente
-          // vive tokenizado con nombre propio (AppColores.gradienteDial).
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: AppColores.gradienteDial,
-              boxShadow: [
-                BoxShadow(
-                  color:
-                      AppColores.naranja.withValues(alpha: 0.35),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: FloatingActionButton(
-              tooltip: _abierto ? 'Cerrar' : 'Acciones rápidas',
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              highlightElevation: 0,
-              onPressed: _toggle,
-              child: AnimatedRotation(
-                turns: _abierto ? 0.125 : 0.0,
-                duration: const Duration(milliseconds: 220),
-                child: Icon(
-                  // 1.30 D2 (UI130-06): el FAB lleva el
-                  // icono propio de DOSIS (el frasco): el
-                  // rayo era el icono de las dosis y el
-                  // dial ya es solo de Servicios.
-                  _abierto
-                      ? Icons.close_rounded
-                      : Icons.science_rounded,
-                  // 1.30 D1 (UI130-01): el glifo del dial va
-                  // en sobreMarca (7,35/4,88 sobre el
-                  // gradiente), no en blanco (2,36/3,56).
-                  color: AppColores.sobreMarca,
-                  size: 26,
-                ),
-              ),
-            ),
-          ),
-        ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Píldora de acción. v1.3.6 (Argón, diseño): superficie de tarjeta con
-  /// borde sutil + mini-círculo interno (28×28, naranja 15%) para el icono
-  /// _rounded a 17 px. Sin destacado: el protagonismo es del FAB.
-  /// v1.3.7 (Jc): cada acción aparece con fade + deslizamiento,
-  /// escalonada según su índice (la de arriba sale última).
-  Widget _accionAnimada(
-      int index, IconData icono, String texto, VoidCallback onTap) {
-    // Orden visual (1.30 D2, UI130-06): «Vender agua»
-    // (0) arriba … «Vender combo» (2) junto al FAB. La
-    // animación entra de abajo hacia arriba; con 3
-    // píldoras el escalonado se reparte en el tramo
-    // total (0.3) para que ningún Interval pase de 1.0.
-    final itemAnim = _animsPildora[index];
-    return FadeTransition(
-      opacity: itemAnim,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, 0.35),
-          end: Offset.zero,
-        ).animate(itemAnim),
-        // 1.23 T8: rebote suave al desplegar — la escala nace
-        // en 0.82 y easeOutBack la deja ~2% por encima de 1.0
-        // un instante antes de asentarse (anclada a la
-        // derecha, donde vive el FAB).
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.82, end: 1.0)
-              .animate(_animsPildoraEscala[index]),
-          alignment: Alignment.centerRight,
-          // Ancho fijo para que las 3 píldoras queden alineadas.
-          child: SizedBox(
-            width: 190,
-            child: _pildora(icono, texto, onTap),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _pildora(IconData icono, String texto, VoidCallback onTap) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadio.md),
-      onTap: onTap,
-      child: Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(AppRadio.md),
-          border: Border.all(
-              color: AppColores.naranja.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColores.naranja.withValues(alpha: 0.15),
-              ),
-              child: Icon(icono,
-                  color: AppColores.textoSecundario(context), size: 17),
-            ),
-            const SizedBox(width: 8),
-            // FittedBox en vez de ellipsis para que "Pago diario" no se
-            // trunque en móviles estrechos o con texto ampliado.
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(texto,
-                    style: AppTexto.secundario.copyWith(
-                        color: AppColores.naranja,
-                        fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// 1.25 T43: pintor del anillo de salud del mes (arco de
 /// fondo completo + arco de progreso desde arriba).
@@ -4161,115 +3180,5 @@ class _DialogoEstacionDiariaState
   }
 }
 
-/// 1.29 (Oleada 5, D-21): micro-animación de entrada de
-/// la cabecera — fundido y desplazamiento corto UNA
-/// sola vez al montar la principal. Con «reducir
-/// movimiento» activo, la cabecera nace puesta, sin
-/// animar.
-class _EntradaCabecera extends StatefulWidget {
-  final Widget child;
 
-  const _EntradaCabecera({required this.child});
 
-  @override
-  State<_EntradaCabecera> createState() => _EntradaCabeceraState();
-}
-
-class _EntradaCabeceraState extends State<_EntradaCabecera>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 350));
-    _ctrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (MediaQuery.of(context).disableAnimations) return widget.child;
-    final curva =
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    return FadeTransition(
-      opacity: curva,
-      child: SlideTransition(
-        position: Tween<Offset>(
-                begin: const Offset(0, -0.06), end: Offset.zero)
-            .animate(curva),
-        child: widget.child,
-      ),
-    );
-  }
-}
-
-/// 1.29 (Oleada 5, D-21): botón circular de la cabecera
-/// — contenedor translúcido sobre el gradiente carbón,
-/// borde hairline, zona tocable de 48×48 e icono blanco.
-/// Admite una insignia con contador (la campana). El
-/// punto de estado del sync vivía aquí hasta UI130-05:
-/// ahora lo lleva la píldora, única señal de sync de la
-/// cabecera, y los parámetros punto/giro se retiran.
-class _BotonCabecera extends StatelessWidget {
-  final IconData icono;
-  final String tooltip;
-  final VoidCallback onPressed;
-
-  /// Contador de la insignia (1.30 D1, UI130-02: lo pinta
-  /// el ContadorUrgente único; antes era un texto suelto
-  /// sobre el rojo brillante). Null o 0 = sin insignia.
-  final int? insignia;
-
-  const _BotonCabecera({
-    required this.icono,
-    required this.tooltip,
-    required this.onPressed,
-    this.insignia,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final iconoW = Icon(icono, color: Colors.white, size: 22);
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.08),
-        shape: CircleBorder(
-          side: BorderSide(
-              color: Colors.white.withValues(alpha: 0.16)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          customBorder: const CircleBorder(),
-          child: SizedBox(
-            width: 48,
-            height: 48,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Center(child: iconoW),
-                if (insignia != null && insignia! > 0)
-                  Positioned(
-                    right: 2,
-                    top: 2,
-                    // Vive sobre la cabecera carbón: con el
-                    // borde de separación del componente.
-                    child: ContadorUrgente(
-                        numero: insignia!, conBorde: true),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

@@ -1,0 +1,482 @@
+/// 1.32 «Mostrador Táctico» — la bandeja «Por Decidir» del
+/// Pilar 1 (solo dueño), bajo la COMPUERTA 1 del veredicto
+/// g132, que aquí se cumple al pie de la letra:
+///
+/// - Pinta en el frame 1 con fuentes LOCALES (incidencias,
+///   rellenos y adelantos llegan del estado de Home, que ya
+///   los contó en local; congelaciones del espejo local con
+///   su triestado; arqueos del libro local) MÁS la última
+///   FOTO PERSISTIDA de los contadores remotos.
+/// - Las remotas (Vales, Plus, Comunidad, Solicitudes de
+///   invitados) se refrescan DETRÁS, cada una con su timeout
+///   de 12 s y guarda de generación; al verificar, la foto
+///   persistida se renueva.
+/// - Error ≠ vacío, jamás: si una fuente remota devuelve
+///   null (sin conexión o respuesta degradada), su fila dice
+///   «sin verificar» (o enseña su foto con la hora) y la
+///   bandeja muestra la línea «bandejas remotas sin
+///   verificar (sin conexión)». La frase «0 pendientes /
+///   Todo al día» SOLO sale si TODAS las fuentes — locales
+///   y remotas — verificaron y suman 0.
+library;
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../congelaciones_gestion.dart';
+import '../invitados.dart' as invitados_svc;
+import '../negocio.dart';
+import '../plus_reportes.dart';
+import '../tiempo.dart';
+import 'componentes.dart';
+import 'congelaciones.dart';
+import 'diseno.dart';
+import 'hoja_liquidar.dart';
+import 'hoja_liquidar_arqueo.dart';
+import 'incidencias/lista_incidencias.dart';
+import 'marco.dart';
+import 'panel_comunidad.dart';
+import 'panel_premios.dart';
+import 'panel_premios_hub.dart';
+import 'reportes_plus.dart';
+import 'solicitudes_adelanto.dart' as ui_adelantos;
+
+/// Conteos remotos de la bandeja: null en un campo = esa
+/// fuente NO se pudo verificar (sin conexión o degradada).
+class ConteosRemotosPorDecidir {
+  final int? vales;
+  final int? plus;
+  final int? comunidad;
+  final int? solicitudes;
+
+  const ConteosRemotosPorDecidir(
+      {this.vales, this.plus, this.comunidad, this.solicitudes});
+
+  bool get todasVerificadas =>
+      vales != null && plus != null && comunidad != null && solicitudes != null;
+
+  int get sumaVerificada =>
+      (vales ?? 0) + (plus ?? 0) + (comunidad ?? 0) + (solicitudes ?? 0);
+
+  Map<String, dynamic> aJson() => {
+        if (vales != null) 'v': vales,
+        if (plus != null) 'p': plus,
+        if (comunidad != null) 'c': comunidad,
+        if (solicitudes != null) 's': solicitudes,
+      };
+
+  static ConteosRemotosPorDecidir desdeJson(Map<String, dynamic> j) {
+    int? n(String k) => (j[k] as num?)?.toInt();
+    return ConteosRemotosPorDecidir(
+      vales: n('v'),
+      plus: n('p'),
+      comunidad: n('c'),
+      solicitudes: n('s'),
+    );
+  }
+}
+
+/// La foto persistida de las remotas (SharedPreferences):
+/// lo último verificado, con su hora habanera.
+class FotoRemotaPorDecidir {
+  final ConteosRemotosPorDecidir conteos;
+  final DateTime hora;
+
+  const FotoRemotaPorDecidir(this.conteos, this.hora);
+}
+
+const _kFotoPorDecidir = 'pordecidir_foto_remota_v1';
+
+Future<FotoRemotaPorDecidir?> leerFotoPorDecidir() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kFotoPorDecidir);
+    if (raw == null || raw.isEmpty) return null;
+    final j = jsonDecode(raw) as Map<String, dynamic>;
+    final hora = DateTime.tryParse('${j['ts'] ?? ''}');
+    if (hora == null) return null;
+    return FotoRemotaPorDecidir(
+      ConteosRemotosPorDecidir.desdeJson(j),
+      hora,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<void> guardarFotoPorDecidir(ConteosRemotosPorDecidir c) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _kFotoPorDecidir,
+      jsonEncode({...c.aJson(), 'ts': isoHabana(ahoraHabana())}),
+    );
+  } catch (_) {}
+}
+
+/// Titular de la bandeja (PURO, testeable): la regla de oro
+/// de la Compuerta 1 vive aquí — «Todo al día» exige que
+/// TODO haya verificado y sume 0.
+({String titular, bool todoAlDia}) titularPorDecidir({
+  required int locales,
+  required ConteosRemotosPorDecidir remotasEfectivas,
+  required bool remotasVerificadasAhora,
+}) {
+  final total = locales + remotasEfectivas.sumaVerificada;
+  if (remotasVerificadasAhora && total == 0) {
+    return (titular: 'Todo al día · 0 decisiones pendientes', todoAlDia: true);
+  }
+  if (total == 0) {
+    // Hay locales en 0 pero alguna remota no verificó: el
+    // titular NO puede afirmar el cero.
+    return (titular: 'Por decidir', todoAlDia: false);
+  }
+  return (
+    titular: total == 1 ? '1 decisión pendiente' : '$total decisiones pendientes',
+    todoAlDia: false,
+  );
+}
+
+/// Las remotas reales: cada una con su timeout de 12 s;
+/// cualquier fallo o degradación devuelve null en SU campo
+/// (las demás no se contaminan).
+Future<ConteosRemotosPorDecidir> cargarRemotasPorDecidir() async {
+  Future<int?> conTope(Future<int?> Function() f) async {
+    try {
+      return await f().timeout(const Duration(seconds: 12),
+          onTimeout: () => null);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final r = await Future.wait<int?>([
+    conTope(() => contarValesPorAprobar()),
+    conTope(() async =>
+        (await PlusReportesService().pendientes()).length),
+    conTope(() => contarReportesComunidadNuevos()),
+    conTope(() async =>
+        (await invitados_svc.InvitadosService().solicitudesPendientes())
+            .length),
+  ]);
+  return ConteosRemotosPorDecidir(
+      vales: r[0], plus: r[1], comunidad: r[2], solicitudes: r[3]);
+}
+
+class BandejaPorDecidir extends StatefulWidget {
+  /// Conteos locales que Home ya calculó (incidencias del
+  /// espejo local, buzón de rellenos y adelantos).
+  final int incidencias;
+  final int rellenos;
+  final int adelantos;
+
+  /// Navegación a pantallas sueltas (el _ir de Home).
+  final void Function(Widget pantalla) onIr;
+
+  /// Cargadores inyectables (tests); null = los reales.
+  final Future<ConteosRemotosPorDecidir> Function()? cargarRemotas;
+  final Future<({bool ok, int pendientes})> Function()?
+      cargarCongelaciones;
+  final Future<List<Map<String, dynamic>>> Function()? cargarArqueos;
+
+  const BandejaPorDecidir({
+    super.key,
+    required this.incidencias,
+    required this.rellenos,
+    required this.adelantos,
+    required this.onIr,
+    this.cargarRemotas,
+    this.cargarCongelaciones,
+    this.cargarArqueos,
+  });
+
+  @override
+  State<BandejaPorDecidir> createState() => _BandejaPorDecidirState();
+}
+
+class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
+  FotoRemotaPorDecidir? _foto;
+  ConteosRemotosPorDecidir? _remotasAhora;
+  int _gen = 0;
+  int? _congelaciones;
+  bool _congelacionesOk = true;
+  List<Map<String, dynamic>> _arqueos = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarFotoYRefrescar();
+    _cargarLocalesExtra();
+  }
+
+  Future<void> _cargarFotoYRefrescar() async {
+    final foto = await leerFotoPorDecidir();
+    if (!mounted) return;
+    setState(() => _foto = foto);
+    await _refrescarRemotas();
+  }
+
+  Future<void> _refrescarRemotas() async {
+    final gen = ++_gen;
+    final r = await (widget.cargarRemotas ?? cargarRemotasPorDecidir)();
+    if (!mounted || gen != _gen) return;
+    setState(() => _remotasAhora = r);
+    // La foto se renueva SOLO con lo verificado ahora; un
+    // campo null conserva el de la foto anterior al guardar.
+    final previa = _foto?.conteos;
+    final fusion = ConteosRemotosPorDecidir(
+      vales: r.vales ?? previa?.vales,
+      plus: r.plus ?? previa?.plus,
+      comunidad: r.comunidad ?? previa?.comunidad,
+      solicitudes: r.solicitudes ?? previa?.solicitudes,
+    );
+    await guardarFotoPorDecidir(fusion);
+    if (!mounted || gen != _gen) return;
+    setState(() => _foto =
+        FotoRemotaPorDecidir(fusion, ahoraHabana()));
+  }
+
+  Future<void> _cargarLocalesExtra() async {
+    try {
+      final r = await (widget.cargarCongelaciones ??
+          () async {
+            final e = await CongelacionesService.instance.leerEspejo();
+            return (
+              ok: e.ok,
+              pendientes: e.datos.where((c) => c.esPendiente).length,
+            );
+          })();
+      if (mounted) {
+        setState(() {
+          _congelacionesOk = r.ok;
+          _congelaciones = r.pendientes;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _congelacionesOk = false);
+    }
+    try {
+      final a = await (widget.cargarArqueos ?? entrenadoresConPendiente)();
+      if (mounted) setState(() => _arqueos = a);
+    } catch (_) {}
+  }
+
+  /// El valor EFECTIVO de una remota: el de ahora si
+  /// verificó; si no, el de la foto (marcado); si no hay
+  /// ninguno, null = «sin verificar».
+  ({int? valor, bool deFoto}) _efectivo(
+      int? ahora, int? foto) {
+    if (ahora != null) return (valor: ahora, deFoto: false);
+    if (foto != null) return (valor: foto, deFoto: true);
+    return (valor: null, deFoto: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ahora = _remotasAhora;
+    final foto = _foto?.conteos;
+    final vVales = _efectivo(ahora?.vales, foto?.vales);
+    final vPlus = _efectivo(ahora?.plus, foto?.plus);
+    final vCom = _efectivo(ahora?.comunidad, foto?.comunidad);
+    final vSol = _efectivo(ahora?.solicitudes, foto?.solicitudes);
+    final efectivas = ConteosRemotosPorDecidir(
+      vales: vVales.valor,
+      plus: vPlus.valor,
+      comunidad: vCom.valor,
+      solicitudes: vSol.valor,
+    );
+    final locales = widget.incidencias +
+        widget.rellenos +
+        widget.adelantos +
+        (_congelacionesOk ? (_congelaciones ?? 0) : 0);
+    final verificadasAhora = ahora?.todasVerificadas ?? false;
+    final algunaSinVerificar = !verificadasAhora;
+    final t = titularPorDecidir(
+      locales: locales,
+      remotasEfectivas: efectivas,
+      remotasVerificadasAhora: verificadasAhora,
+    );
+
+    Widget fila({
+      required IconData icono,
+      required String titulo,
+      required int? valor,
+      bool deFoto = false,
+      bool localOk = true,
+      required VoidCallback onTap,
+    }) {
+      if (localOk && (valor == null || valor == 0)) {
+        return const SizedBox.shrink();
+      }
+      return ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icono, color: AppColores.cobaltoDe(context)),
+        title: Text(titulo, style: AppTexto.cuerpo),
+        trailing: valor == null
+            ? Text('sin verificar',
+                style: AppTexto.metadato
+                    .copyWith(color: AppColores.alerta))
+            : Text(
+                deFoto ? '$valor · foto' : '$valor',
+                style: AppTexto.conTabulares(
+                    AppTexto.subtitulo.copyWith(
+                        fontWeight: FontWeight.w700)),
+              ),
+        onTap: onTap,
+      );
+    }
+
+    return Tarjeta(
+      key: const ValueKey('por-decidir'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                t.todoAlDia
+                    ? Icons.check_circle_rounded
+                    : Icons.inbox_rounded,
+                color: t.todoAlDia
+                    ? AppColores.verdeDe(context)
+                    : AppColores.cobaltoDe(context),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              const Expanded(
+                child: Text('Por Decidir', style: AppTexto.titulo),
+              ),
+            ],
+          ),
+          Text(t.titular, style: AppTexto.secundario),
+          const SizedBox(height: AppEspacio.xs),
+          // --- Locales (frame 1, sin red) ---
+          fila(
+            icono: Icons.sync_problem_rounded,
+            titulo: 'Incidencias de sincronización',
+            valor: widget.incidencias,
+            onTap: () => widget.onIr(const ListaIncidenciasScreen()),
+          ),
+          fila(
+            icono: Icons.ac_unit_rounded,
+            titulo: 'Congelaciones por decidir',
+            valor: _congelacionesOk ? _congelaciones : null,
+            localOk: _congelacionesOk,
+            onTap: () => widget.onIr(const CongelacionesScreen()),
+          ),
+          if (!_congelacionesOk)
+            const Text(
+              'Congelaciones: no se pudo leer el espejo local.',
+              style: AppTexto.metadato,
+            ),
+          fila(
+            icono: Icons.science_rounded,
+            titulo: 'Pomos por rellenar',
+            valor: widget.rellenos,
+            onTap: () => MarcoNav.irAPilar(PilarGestion.tienda),
+          ),
+          fila(
+            icono: Icons.request_quote_rounded,
+            titulo: 'Adelantos por responder',
+            valor: widget.adelantos,
+            onTap: () =>
+                widget.onIr(const ui_adelantos.SolicitudesAdelantoScreen()),
+          ),
+          // --- Remotas (foto + refresco detrás) ---
+          fila(
+            icono: Icons.emoji_events_rounded,
+            titulo: 'Vales de premio por aprobar',
+            valor: vVales.valor,
+            deFoto: vVales.deFoto,
+            localOk: false,
+            onTap: () => widget.onIr(const PremiosHubScreen()),
+          ),
+          fila(
+            icono: Icons.workspace_premium_rounded,
+            titulo: 'Reportes App Plus por confirmar',
+            valor: vPlus.valor,
+            deFoto: vPlus.deFoto,
+            localOk: false,
+            onTap: () => widget.onIr(const ReportesPlusScreen()),
+          ),
+          fila(
+            icono: Icons.groups_rounded,
+            titulo: 'Reportes de Comunidad',
+            valor: vCom.valor,
+            deFoto: vCom.deFoto,
+            localOk: false,
+            onTap: () => widget.onIr(const ComunidadPanelScreen()),
+          ),
+          fila(
+            icono: Icons.person_add_rounded,
+            titulo: 'Solicitudes de inscripción',
+            valor: vSol.valor,
+            deFoto: vSol.deFoto,
+            localOk: false,
+            onTap: () => MarcoNav.irAClientes(
+                const DestinoClientes(segmento: 'invitados')),
+          ),
+          // --- Arqueos (Momento 3A): liquidar sin salir ---
+          for (final e in _arqueos.take(2))
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.account_balance_wallet_rounded,
+                  color: AppColores.ambarDe(context)),
+              title: Text(
+                  'Efectivo de ${e['nombre'] ?? ''} por recoger',
+                  style: AppTexto.cuerpo),
+              subtitle: Text(
+                [
+                  if (((e['cup'] as num?)?.toDouble() ?? 0) > 0)
+                    '${fmtMonto((e['cup'] as num).toDouble())} CUP',
+                  if (((e['usd'] as num?)?.toDouble() ?? 0) > 0)
+                    '${fmtMonto((e['usd'] as num).toDouble())} USD',
+                ].join(' · '),
+                style: AppTexto.conTabulares(AppTexto.secundario),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: () => _liquidarRapido(e),
+                child: const Text('Liquidar Arqueo'),
+              ),
+            ),
+          if (algunaSinVerificar)
+            Padding(
+              padding: const EdgeInsets.only(top: AppEspacio.xs),
+              child: Text(
+                _foto == null
+                    ? 'bandejas remotas sin verificar (sin conexión)'
+                    : 'Sin conexión: se enseña la última foto de '
+                        'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
+                        '${_foto!.hora.minute.toString().padLeft(2, '0')}.',
+                style: AppTexto.metadato
+                    .copyWith(color: AppColores.alerta),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _liquidarRapido(Map<String, dynamic> e) async {
+    final tid = (e['telegram_id'] as num?)?.toInt();
+    if (tid == null) return;
+    final nombre = '${e['nombre'] ?? ''}';
+    final messenger = ScaffoldMessenger.of(context);
+    final r = await mostrarHojaLiquidarArqueo(context,
+        telegramId: tid, nombre: nombre);
+    if (r == null) return;
+    mostrarAvisoLiquidacionConDeshacer(
+      messenger,
+      mensaje: 'Liquidación registrada para $nombre.',
+      liqId: r.liqId,
+      alDeshacer: () async {
+        await _cargarLocalesExtra();
+      },
+    );
+    await _cargarLocalesExtra();
+  }
+}
