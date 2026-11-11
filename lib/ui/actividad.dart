@@ -373,6 +373,51 @@ String horasSubtituloActividad(Map<String, dynamic> a, DateTime ahora) {
   return 'Hecho $hechoTxt · Subido $subidoTxt';
 }
 
+/// 1.32 (Oleada 2 Fase 2): agrupación por día de Actividad
+/// como función PURA (antes era método del State cortando el
+/// ts crudo). La clave de cada ítem es su día de NEGOCIO
+/// habanero ([fechaNegocioHabana] sobre el ts): el ts sin
+/// zona ya es pared habanera y manda su fecha escrita — el
+/// mismo resultado que el substring de siempre —, pero un
+/// instante CON zona (la cola local guarda isoHabana con
+/// offset) se convierte a La Habana antes de cortar el día:
+/// un ts UTC de madrugada ya no cae en el día siguiente.
+/// «Ayer» sale de [sumarDiasCalendario] (aritmética de
+/// calendario, no 24 h crudas contra el cambio de hora).
+/// El orden dentro del grupo NO se toca: llega por ts
+/// descendente, que es el orden real de aplicación, y las
+/// dos horas de la fila (horasSubtituloActividad) tampoco.
+/// [ahora] se inyecta para el test.
+List<MapEntry<String, List<Map<String, dynamic>>>>
+    agruparActividadPorDia(
+        List<Map<String, dynamic>> items, DateTime ahora) {
+  String isoDia(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+  final grupos = <String, List<Map<String, dynamic>>>{};
+  final orden = <String>[];
+  final hoyStr = isoDia(ahora);
+  final ayerStr = isoDia(sumarDiasCalendario(ahora, -1));
+  for (final a in items) {
+    var dia = fechaNegocioHabana(a['ts']);
+    if (dia.isEmpty) {
+      final ts = '${a['ts'] ?? ''}';
+      dia = ts.length >= 10 ? ts.substring(0, 10) : '?';
+    }
+    final titulo = dia == hoyStr
+        ? 'Hoy'
+        : dia == ayerStr
+            ? 'Ayer'
+            : fmtFecha(dia);
+    if (!grupos.containsKey(titulo)) {
+      grupos[titulo] = [];
+      orden.add(titulo);
+    }
+    grupos[titulo]!.add(a);
+  }
+  return orden.map((t) => MapEntry(t, grupos[t]!)).toList();
+}
+
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
@@ -1693,36 +1738,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
   }
 
   /// Agrupa por día: devuelve lista de (tituloDia, items).
+  /// La lógica vive en [agruparActividadPorDia] (pura,
+  /// testeable); aquí solo se inyecta el ahora habanero.
   List<MapEntry<String, List<Map<String, dynamic>>>> _agruparPorDia(
-      List<Map<String, dynamic>> items) {
-    final grupos = <String, List<Map<String, dynamic>>>{};
-    final orden = <String>[];
-    // P2#11 (Argón): «Hoy»/«Ayer» del encabezado en hora Habana.
-    final hoy = ahoraHabana();
-    final hoyStr =
-        '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
-    final ayer = hoy.subtract(const Duration(days: 1));
-    final ayerStr =
-        '${ayer.year}-${ayer.month.toString().padLeft(2, '0')}-${ayer.day.toString().padLeft(2, '0')}';
-    for (final a in items) {
-      final ts = '${a['ts'] ?? ''}';
-      final dia = ts.length >= 10 ? ts.substring(0, 10) : '?';
-      String titulo;
-      if (dia == hoyStr) {
-        titulo = 'Hoy';
-      } else if (dia == ayerStr) {
-        titulo = 'Ayer';
-      } else {
-        titulo = fmtFecha(dia);
-      }
-      if (!grupos.containsKey(titulo)) {
-        grupos[titulo] = [];
-        orden.add(titulo);
-      }
-      grupos[titulo]!.add(a);
-    }
-    return orden.map((t) => MapEntry(t, grupos[t]!)).toList();
-  }
+          List<Map<String, dynamic>> items) =>
+      agruparActividadPorDia(items, ahoraHabana());
 
   /// v1.3.5 (Fase 1, A1+B1+A4): UNA sola fila horizontal con los chips
   /// rápidos de fecha + botón "Filtros · N" + chips resumen de los
@@ -2042,6 +2062,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                                 pinned: true,
                                 delegate: _EncabezadoFechaSticky(
                                   titulo: grupo.key,
+                                  total: grupo.value.length,
                                 ),
                               ),
                               SliverList(
@@ -2564,7 +2585,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
 class _EncabezadoFechaSticky extends SliverPersistentHeaderDelegate {
   final String titulo;
 
-  const _EncabezadoFechaSticky({required this.titulo});
+  /// 1.32 (O2F2): total del grupo, a la derecha de la
+  /// cabecera con la plantilla del Día de Servicios («N
+  /// movimientos»). Vale para los dos agrupamientos de la
+  /// pantalla (por día y por entrenador).
+  final int total;
+
+  const _EncabezadoFechaSticky({required this.titulo, this.total = 0});
 
   @override
   double get minExtent => 40;
@@ -2579,17 +2606,32 @@ class _EncabezadoFechaSticky extends SliverPersistentHeaderDelegate {
       color: Theme.of(context).scaffoldBackgroundColor,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       alignment: Alignment.centerLeft,
-      child: Text(
-        titulo,
-        style: AppTexto.subtitulo
-            .copyWith(color: AppColores.textoSecundario(context)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Expanded(
+            child: Text(
+              titulo,
+              style: AppTexto.subtitulo
+                  .copyWith(color: AppColores.textoSecundario(context)),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (total > 0)
+            Text(
+              total == 1 ? '1 movimiento' : '$total movimientos',
+              style: AppTexto.metadato,
+            ),
+        ],
       ),
     );
   }
 
   @override
   bool shouldRebuild(covariant _EncabezadoFechaSticky oldDelegate) =>
-      oldDelegate.titulo != titulo;
+      oldDelegate.titulo != titulo || oldDelegate.total != total;
 }
 
 /// Cuenta las actividades no leídas (para el badge).
