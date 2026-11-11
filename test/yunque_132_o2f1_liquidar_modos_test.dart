@@ -82,7 +82,7 @@ void main() {
     // del dueño siempre existe; la guarda real de la op está
     // cubierta por sus tests unitarios con sesión de dueño).
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   Future<void> abrirHoja(
