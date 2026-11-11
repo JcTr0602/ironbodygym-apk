@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
+import '../tiempo.dart' show fechaNegocioHabana;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -129,6 +130,56 @@ import '../app_log.dart';
             ((v['cantidad'] as num?)?.toDouble() ?? 0));
   }
   return (cup: cup, usd: usd);
+}
+
+/// 1.32 (Oleada 2 Fase 2 · G-33): la lista adopta la plantilla
+/// del Día de Servicios — las filas se aplanan intercalando la
+/// cabecera de su día con los TOTALES del día (cierres y
+/// cobrado CUP/USD). La clave de día es la fecha de NEGOCIO
+/// habanera ([fechaNegocioHabana]): la fecha plana manda tal
+/// cual y un instante con zona se convierte a La Habana antes
+/// de cortar el día (Compuerta 6: nada de substring crudo
+/// sobre un instante UTC ni de DateTime.now() en la lógica).
+/// El orden de entrada se conserva (el espejo ya viene de
+/// nuevo a viejo). PURO, testeable.
+List<Object> itemsHistorialCajaPorDia(
+    List<Map<String, dynamic>> cierres) {
+  final items = <Object>[];
+  String? diaActual;
+  var delDia = <Map<String, dynamic>>[];
+  void cerrarDia() {
+    if (diaActual == null) return;
+    var cup = 0.0;
+    var usd = 0.0;
+    for (final c in delDia) {
+      cup += (c['cobrado'] as num?)?.toDouble() ?? 0;
+      usd += (c['cobrado_usd'] as num?)?.toDouble() ?? 0;
+    }
+    items.add({
+      'encabezado': true,
+      'dia': diaActual,
+      'cierres': delDia.length,
+      'cobrado': cup,
+      'cobrado_usd': usd,
+    });
+    items.addAll(delDia);
+    delDia = <Map<String, dynamic>>[];
+  }
+
+  for (final c in cierres) {
+    var dia = fechaNegocioHabana(c['fecha']);
+    if (dia.isEmpty) {
+      final cruda = '${c['fecha'] ?? ''}';
+      dia = cruda.length >= 10 ? cruda.substring(0, 10) : cruda;
+    }
+    if (dia != diaActual) {
+      cerrarDia();
+      diaActual = dia;
+    }
+    delDia.add(c);
+  }
+  cerrarDia();
+  return items;
 }
 
 class HistorialCajaScreen extends StatefulWidget {
@@ -263,6 +314,11 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
           body: const Center(
               child: Text('Solo el dueño ve esta pantalla.')));
     }
+    // G-33: la lista se aplana por día (cabecera con los
+    // totales del día + sus cierres), como el Día de Servicios.
+    final items = _cargando || _cierres.isEmpty
+        ? const <Object>[]
+        : itemsHistorialCajaPorDia(_cierres);
     return Scaffold(
       appBar: appBarIron(context, 'Historial de caja'),
       body: _cargando
@@ -280,63 +336,102 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _cargar,
-                  child: ListView.separated(
+                  child: ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
-                    itemCount: _cierres.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 8),
+                    itemCount: items.length,
                     itemBuilder: (ctx, i) {
-                      final c = _cierres[i];
-                      return Tarjeta(
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    fmtFecha(
-                                        c['fecha'] as String?),
-                                    style: AppTexto.titulo,
-                                  ),
-                                ),
-                                Chip(
-                                  label: Text(
-                                      _nombreTurno(c['turno'] as String?),
-                                      style: AppTexto.minuscula),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Entrenador: ${c['entrenador_nombre'] ?? c['telegram_id'] ?? '—'}',
-                              style: AppTexto.secundario,
-                            ),
-                            Text(
-                              'Cobrado: ${fmtMonto((c['cobrado'] as num?)?.toDouble() ?? 0)} CUP',
-                              style: AppTexto.cuerpo.copyWith(
-                                  fontWeight:
-                                      FontWeight.w600),
-                            ),
-                            if (((c['cobrado_usd'] as num?)?.toDouble() ??
-                                    0) >
-                                0)
-                              Text(
-                                'Cobrado: ${fmtMonto((c['cobrado_usd'] as num?)?.toDouble() ?? 0)} USD',
-                                style: AppTexto.cuerpo.copyWith(
-                                    fontWeight:
-                                        FontWeight.w600),
+                      final it = items[i];
+                      if (it is Map<String, dynamic> &&
+                          it['encabezado'] == true) {
+                        // Cabecera de día de la plantilla:
+                        // fecha en palabras a la izquierda y
+                        // totales del día a la derecha.
+                        final usdDia =
+                            (it['cobrado_usd'] as num?)?.toDouble() ??
+                                0;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                              top: i == 0 ? 0 : AppEspacio.md,
+                              bottom: AppEspacio.sm),
+                          child: Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                    fechaLargaCorta('${it['dia']}'),
+                                    style: AppTexto.subtitulo),
                               ),
-                            Text(
-                              'Operaciones: ${c['pagos_count'] ?? '—'}',
-                              style: AppTexto.secundario,
-                            ),
-                            Text(
-                              'Cerrado: ${_fmtCerrado(c['cerrado_en'] as String?)}',
-                              style: AppTexto.secundario,
-                            ),
-                          ],
+                              Text(
+                                '${it['cierres']} '
+                                'cierre${it['cierres'] == 1 ? '' : 's'} · '
+                                '${fmtMonto((it['cobrado'] as num).toDouble())} CUP'
+                                '${usdDia > 0 ? ' · ${fmtMonto(usdDia)} USD' : ''}',
+                                style: AppTexto.metadato,
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      final c = it as Map<String, dynamic>;
+                      final usd =
+                          (c['cobrado_usd'] as num?)?.toDouble() ?? 0;
+                      return Padding(
+                        padding: const EdgeInsets.only(
+                            bottom: AppEspacio.sm),
+                        child: Tarjeta(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  // El protagonista de la fila
+                                  // es el entrenador (plantilla);
+                                  // la fecha vive en la
+                                  // cabecera de su día.
+                                  Expanded(
+                                    child: Text(
+                                      '${c['entrenador_nombre'] ?? c['telegram_id'] ?? '—'}',
+                                      style: AppTexto.subtitulo,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  ChipEstado.semantico(
+                                    texto: _nombreTurno(
+                                        c['turno'] as String?),
+                                    significado: SignificadoChip.info,
+                                    icono: Icons.schedule_rounded,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Cobrado: ${fmtMonto((c['cobrado'] as num?)?.toDouble() ?? 0)} CUP',
+                                style: AppTexto.cuerpo.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures()
+                                    ]),
+                              ),
+                              if (usd > 0)
+                                Text(
+                                  'Cobrado: ${fmtMonto(usd)} USD',
+                                  style: AppTexto.cuerpo.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures()
+                                      ]),
+                                ),
+                              Text(
+                                'Operaciones: ${c['pagos_count'] ?? '—'} · '
+                                'Cerrado: ${_fmtCerrado(c['cerrado_en'] as String?)}',
+                                style: AppTexto.secundario,
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
