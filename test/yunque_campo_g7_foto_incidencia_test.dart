@@ -40,7 +40,9 @@ String _jwtFalso() {
 
 String _faseFoto = 'falla'; // 'falla' | 'lenta'
 int _putsFoto = 0;
-int _bytesRecibidos = 0;
+// (Al integrar el guión a la suite se retiró el contador
+// _bytesRecibidos: se acumulaba y nunca se leía — warning
+// unused_element; los tamaños asertados viven en _tamanosPut.)
 final List<int> _tamanosPut = [];
 
 Future<HttpServer> _servidorFake() async {
@@ -70,7 +72,6 @@ Future<HttpServer> _servidorFake() async {
         final cuerpo =
             await req.fold(<int>[], (a, b) => a..addAll(b));
         _putsFoto++;
-        _bytesRecibidos += cuerpo.length;
         _tamanosPut.add(cuerpo.length);
         if (_faseFoto == 'falla') {
           res.statusCode = 500;
@@ -253,7 +254,6 @@ void main() {
   setUp(() async {
     _faseFoto = 'falla';
     _putsFoto = 0;
-    _bytesRecibidos = 0;
     _tamanosPut.clear();
     await LocalDb.resetParaTest();
     final db = await LocalDb.instance.db;
