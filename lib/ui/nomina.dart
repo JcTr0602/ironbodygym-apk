@@ -66,6 +66,11 @@ class _NominaScreenState extends State<NominaScreen> {
   Map<String, MesLibroAdelantos> _libroMes = {};
   Map<String, List<Map<String, dynamic>>> _eventosAdelantos = {};
   Map<String, bool> _nominaLiquidadaMes = {};
+  // 1.32 (H-DIN-1, cerrojo (b)): la foto de liquidación (fila
+  // del espejo u op local) de cada entrenador liquidado, para
+  // que su tarjeta pinte las cifras CONGELADAS con las que se
+  // liquidó y no el cálculo vivo del mes ya cerrado.
+  Map<String, Map<String, dynamic>?> _fotosLiquidadas = {};
   // T22 (1.20): confirmación de recepción por entrenador
   // (espejo u op local), para mostrar el acuse al dueño.
   Map<String, Map<String, dynamic>?> _confirmacionMes = {};
@@ -148,6 +153,22 @@ class _NominaScreenState extends State<NominaScreen> {
       // conteo del pre-cálculo y el estado de la UI; los bonos
       // llegan de leerBonosMesConMigracion (arriba).
       final foto = await fotoNominaMes(pref);
+      // 1.32 (H-DIN-1, cerrojo (b)): la foto de liquidación de
+      // cada entrenador liquidado (espejo u op local), leída
+      // con la carga para que la tarjeta pinte las cifras
+      // congeladas al liquidar.
+      final fotosLiq = <String, Map<String, dynamic>?>{};
+      for (final e in foto.liquidadas.entries) {
+        if (e.value != true) continue;
+        final persona = foto.personas[e.key];
+        if (persona == null) continue;
+        fotosLiq[e.key] =
+            await AdelantosService.instance.snapshotNomina(
+          pref,
+          entrenadorId: persona.id,
+          telegramId: persona.telegramId,
+        );
+      }
       // #7 (Argón nómina): el doble chequeo era redundante.
       // (M2-A A4) y si una carga más nueva ya arrancó, esta
       // foto vieja no pisa su estado.
@@ -158,6 +179,7 @@ class _NominaScreenState extends State<NominaScreen> {
         _libroMes = foto.libroMes;
         _eventosAdelantos = foto.eventosPorEnt;
         _nominaLiquidadaMes = foto.liquidadas;
+        _fotosLiquidadas = fotosLiq;
         _confirmacionMes = foto.confirmaciones;
         _clientesPagados = clientesPagados;
         _bonos = bonos;
@@ -211,27 +233,33 @@ class _NominaScreenState extends State<NominaScreen> {
         // la imagen ya no dice «✓ Liquidada» con un neto
         // distinto del que se pagó. Sin snapshot legible se
         // conserva el cálculo vivo (no se inventa la foto).
+        // 1.32 (H-DIN-1): la extracción pasa por
+        // importesDeFotoLiquidacion — una foto que existe
+        // pero trae los importes en NULL (las filas legadas
+        // del servidor) ya NO se convierte en una foto de
+        // ceros con `?? 0`: sin importes no hay foto y manda
+        // el cálculo vivo, igual que sin snapshot.
         final snap = await AdelantosService.instance.snapshotNomina(
           prefFoto,
           entrenadorId: persona.id,
           telegramId: persona.telegramId,
         );
-        if (snap != null) {
-          double n(String k) => (snap[k] as num?)?.toDouble() ?? 0;
-          baseFila = n('base');
-          bono = n('bonos');
-          comision = n('comisiones');
-          adelantos = n('adelantos');
-          deuda = n('deuda_entrante');
-          neto = snap['neto'] != null
-              ? n('neto')
-              : NominaCalc.totalVivo(
-                  base: baseFila,
-                  bono: bono,
-                  comision: comision,
-                  adelantos: adelantos,
-                  deudaEntrante: deuda,
-                );
+        final imp =
+            AdelantosService.importesDeFotoLiquidacion(snap);
+        if (imp != null) {
+          baseFila = imp.base ?? baseFila;
+          bono = imp.bonos;
+          comision = imp.comisiones;
+          adelantos = imp.adelantos;
+          deuda = imp.deudaEntrante;
+          neto = imp.neto ??
+              NominaCalc.totalVivo(
+                base: baseFila,
+                bono: bono,
+                comision: comision,
+                adelantos: adelantos,
+                deudaEntrante: deuda,
+              );
         }
       }
       filas.add(FilaCierreNomina(
@@ -616,15 +644,45 @@ class _NominaScreenState extends State<NominaScreen> {
     final libro = _libroMes[ent];
     final adelantosMes = libro?.adelantos ?? 0;
     final deudaEntrante = libro?.deudaEntrante ?? 0;
-    // 1.14 (M5.1): la fórmula vive en NominaCalc.totalVivo.
-    final total = NominaCalc.totalVivo(
-      base: base,
-      bono: bono,
-      comision: comision.total,
-      adelantos: adelantosMes,
-      deudaEntrante: deudaEntrante,
-    );
     final liquidada = _nominaLiquidadaMes[ent] ?? false;
+    // 1.32 (H-DIN-1, cerrojo (b) del Corte A): si el mes está
+    // liquidado y su foto trae importes, la tarjeta pinta las
+    // cifras CONGELADAS con las que se pagó (base, bonos,
+    // comisiones, adelantos, deuda y neto de la foto), no el
+    // cálculo vivo: hasta hoy la tarjeta recomponía el neto en
+    // vivo y un pago del mes siguiente o un cambio de tarifa
+    // reescribían el «✓ nómina pagada» con otra cifra. Foto
+    // sin importes (fila legada con NULLs) → cálculo vivo,
+    // como manda N-5 (no se inventa la foto ni se pinta cero).
+    final imp = liquidada
+        ? AdelantosService.importesDeFotoLiquidacion(
+            _fotosLiquidadas[ent])
+        : null;
+    final baseF = imp?.base ?? base;
+    final bonoF = imp?.bonos ?? bono;
+    final comisionF = imp?.comisiones ?? comision.total;
+    final adelantosF = imp?.adelantos ?? adelantosMes;
+    final deudaF = imp?.deudaEntrante ?? deudaEntrante;
+    // 1.14 (M5.1): la fórmula vive en NominaCalc.totalVivo.
+    final total = imp?.neto ??
+        NominaCalc.totalVivo(
+          base: baseF,
+          bono: bonoF,
+          comision: comisionF,
+          adelantos: adelantosF,
+          deudaEntrante: deudaF,
+        );
+    // El detalle de la base: de la foto (conteo derivado de
+    // su base ÷ su tarifa) o el vivo de siempre.
+    final tarifaImp = imp?.tarifa;
+    final baseImp = imp?.base;
+    final String? detalleBase = imp == null
+        ? '$_clientesPagados clientes × '
+            '${fmtMonto(_tarifa)} CUP'
+        : (tarifaImp != null && tarifaImp > 0 && baseImp != null
+            ? '${(baseImp / tarifaImp).round()} clientes × '
+                '${fmtMonto(tarifaImp)} CUP'
+            : null);
     // Ronda 17 M4-H1: el detalle de la base (conteo ×
     // tarifa) es cifra global: solo con permiso de
     // cifras, como la línea del resumen.
@@ -653,37 +711,35 @@ class _NominaScreenState extends State<NominaScreen> {
             const SizedBox(height: AppEspacio.sm),
             FilaLibro(
               concepto: 'Base',
-              detalle: verCifras
-                  ? '$_clientesPagados clientes × '
-                      '${fmtMonto(_tarifa)} CUP'
-                  : null,
-              monto: '${fmtMonto(base)} CUP',
+              detalle: verCifras ? detalleBase : null,
+              monto: '${fmtMonto(baseF)} CUP',
             ),
-            if (bono != 0)
+            if (bonoF != 0)
               FilaLibro(
                 concepto: 'Bonos',
                 monto:
-                    '${bono > 0 ? '+' : ''}${fmtMonto(bono)} CUP',
-                colorMonto: colorCifraNomina(bono),
+                    '${bonoF > 0 ? '+' : ''}${fmtMonto(bonoF)} CUP',
+                colorMonto: colorCifraNomina(bonoF),
               ),
-            if (comision.total != 0)
+            if (comisionF != 0)
               FilaLibro(
                 concepto: 'Comisión dosis',
-                detalle: '${comision.dosis} dosis',
-                monto: '${comision.total > 0 ? '+' : ''}'
-                    '${fmtMonto(comision.total)} CUP',
-                colorMonto: colorCifraNomina(comision.total),
+                detalle:
+                    imp != null ? null : '${comision.dosis} dosis',
+                monto: '${comisionF > 0 ? '+' : ''}'
+                    '${fmtMonto(comisionF)} CUP',
+                colorMonto: colorCifraNomina(comisionF),
               ),
-            if (adelantosMes != 0)
+            if (adelantosF != 0)
               FilaLibro(
                 concepto: 'Adelantos del mes',
-                monto: '−${fmtMonto(adelantosMes)} CUP',
+                monto: '−${fmtMonto(adelantosF)} CUP',
                 colorMonto: AppColores.error,
               ),
-            if (deudaEntrante > 0)
+            if (deudaF > 0)
               FilaLibro(
                 concepto: 'Deuda anterior',
-                monto: '−${fmtMonto(deudaEntrante)} CUP',
+                monto: '−${fmtMonto(deudaF)} CUP',
                 colorMonto: AppColores.error,
               ),
             const Divider(height: 16),
@@ -700,9 +756,9 @@ class _NominaScreenState extends State<NominaScreen> {
             // «por qué» del neto de un vistazo, no solo
             // cuatro numeritos.
             BarraComposicionNomina(
-              bruto: base + bono + comision.total,
+              bruto: baseF + bonoF + comisionF,
               neto: total,
-              descuentos: adelantosMes + deudaEntrante,
+              descuentos: adelantosF + deudaF,
             ),
             if (_personasAdelantos.containsKey(ent))
               _seccionAdelantos(context, ent),

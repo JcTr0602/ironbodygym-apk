@@ -646,6 +646,50 @@ class AdelantosService {
     return null;
   }
 
+  /// 1.32 (H-DIN-1, cerrojo (b) del Corte A): los importes de
+  /// una foto de liquidación, extraídos con UNA sola regla para
+  /// todas las pantallas (tarjeta de Nómina, foto del cierre,
+  /// libro). Una foto SIN importes —las filas legadas del
+  /// servidor traen base/neto/tarifa en NULL— NO es una foto de
+  /// ceros: devuelve null y el llamador conserva su cálculo
+  /// vivo, como manda la regla N-5 («sin snapshot legible no se
+  /// inventa la foto»). Antes, la foto del cierre convertía
+  /// esos NULL en 0 con `?? 0` y un mes liquidado se enseñaba
+  /// con todas las cifras a cero. Con importes, los componentes
+  /// ausentes valen 0 (una liquidación sin bonos trae la clave
+  /// en null porque no hubo bonos, no porque falte el dato) y
+  /// solo `base`/`tarifa`/`neto` pueden quedar null (fotos
+  /// viejas que solo guardaron parte).
+  static ({
+    double? base,
+    double? tarifa,
+    double bonos,
+    double comisiones,
+    double adelantos,
+    double deudaEntrante,
+    double? neto,
+  })? importesDeFotoLiquidacion(Map<String, dynamic>? snap) {
+    if (snap == null) return null;
+    double? n(String k) {
+      final v = snap[k];
+      if (v is num) return v.toDouble();
+      return double.tryParse('${v ?? ''}');
+    }
+
+    final base = n('base');
+    final neto = n('neto');
+    if (base == null && neto == null) return null;
+    return (
+      base: base,
+      tarifa: n('tarifa_por_cliente'),
+      bonos: n('bonos') ?? 0,
+      comisiones: n('comisiones') ?? 0,
+      adelantos: n('adelantos') ?? 0,
+      deudaEntrante: n('deuda_entrante') ?? 0,
+      neto: neto,
+    );
+  }
+
   /// N-5 (1.22): aplica las fotos de liquidación a los mapas
   /// de un libro de adelantos en construcción. Para cada mes
   /// con snapshot de ESTE entrenador, bruto/bonos/comisiones
