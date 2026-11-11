@@ -100,6 +100,24 @@ Future<HttpServer> _servidorFake() async {
         _postsSyncOps++;
         res.statusCode = 201;
         res.write('[]');
+      } else if (req.method == 'GET' &&
+          path.endsWith('/rest/v1/sync_estado')) {
+        // 1.32 (O2F2S, Pieza 4a): en producción sync_estado
+        // SIEMPRE devuelve su fila única (id=1); un [] aquí
+        // modelaba un servidor imposible y, desde que el
+        // sello exige el server_seq LEÍDO en la corrida, el
+        // ciclo ya no podía sellar contra ese fake. La fila
+        // va con server_seq 0 (servidor sin cambios).
+        res.headers.contentType = ContentType.json;
+        res.write(jsonEncode([
+          {
+            'id': 1,
+            'server_seq': 0,
+            'ajustes': <String, dynamic>{},
+            'usuarios': [],
+            'actividad': [],
+          }
+        ]));
       } else if (req.method == 'GET') {
         res.headers.contentType = ContentType.json;
         res.write('[]');
