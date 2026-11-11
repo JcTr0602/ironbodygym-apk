@@ -10411,6 +10411,74 @@ class LocalDb {
     return ids;
   }
 
+  /// Umbral de intentos para considerar ENVENENADA una op en
+  /// 'error' a efectos de la puerta de la Regla de Hierro (YS-2):
+  /// con [kIntentosOpEnvenenada] golpes o más y
+  /// [kEdadOpEnvenenada] de vida, la op ya demostró que su fallo
+  /// no es un bache: su carril la sigue reintentando, pero deja
+  /// de cerrarles la puerta a las colas hermanas.
+  static const int kIntentosOpEnvenenada = 10;
+  static const Duration kEdadOpEnvenenada = Duration(hours: 24);
+
+  /// Yunque de Sincronización (YS-2, pura y probada): ¿una op en
+  /// 'error' está EXENTA de la puerta de la Regla de Hierro?
+  ///
+  /// - Con `proximo_reintento` en el futuro está DORMIDA en su
+  ///   backoff: no compite por red ahora (su propio reloj la
+  ///   despertará y el push la reintentará por su carril).
+  /// - Con [kIntentosOpEnvenenada] intentos o más y
+  ///   [kEdadOpEnvenenada] desde su creación está ENVENENADA
+  ///   (p. ej. un 500 del servidor solo para su payload): oscila
+  ///   en error para siempre y no puede condenar a fotos,
+  ///   comprobantes y fotos de incidencias a esperar eternamente.
+  ///
+  /// Todo lo demás (backoff ya vencido con pocos intentos, sello
+  /// ilegible) cuenta como accionable: la dirección segura es
+  /// cerrar la puerta.
+  static bool opEnErrorExentaDePuerta({
+    required int intentos,
+    required String? creadaTs,
+    required String? proximoReintento,
+    required DateTime ahora,
+  }) {
+    final prox = proximoReintento == null
+        ? null
+        : DateTime.tryParse(proximoReintento);
+    if (prox != null && prox.isAfter(ahora)) return true;
+    if (intentos >= kIntentosOpEnvenenada && creadaTs != null) {
+      final creada = DateTime.tryParse(creadaTs);
+      if (creada != null &&
+          ahora.difference(creada) >= kEdadOpEnvenenada) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// YS-2: las ops en 'error' que la puerta NO cuenta (dormidas
+  /// en backoff o envenenadas), para que las puertas las anoten
+  /// en bitácora (`sync/puerta_ops_exenta`): el atasco queda
+  /// visible en Salud en vez de volverse silencioso. Solo
+  /// lectura; devuelve las filas crudas de la cola.
+  Future<List<Map<String, dynamic>>> opsExentasPuerta() async {
+    final d = await db;
+    final rows = await d.rawQuery(
+        "SELECT op_uuid, tipo, intentos, creada_ts, proximo_reintento "
+        "FROM ops_queue WHERE estado = 'error' "
+        "AND tipo NOT IN ('foto', 'foto_suplemento')");
+    final ahora = ahoraHabana();
+    return [
+      for (final r in rows)
+        if (opEnErrorExentaDePuerta(
+          intentos: (r['intentos'] as num?)?.toInt() ?? 0,
+          creadaTs: r['creada_ts'] as String?,
+          proximoReintento: r['proximo_reintento'] as String?,
+          ahora: ahora,
+        ))
+          r,
+    ];
+  }
+
   /// v1.3.4 Ítem 5 (Argón, Bug A1.2): pendientes excluyendo las ops
   /// 'foto'/'foto_suplemento'. Esas ops las genera el propio
   /// FotosColaService al vincular variantes subidas: son consecuencia
@@ -10418,12 +10486,37 @@ class LocalDb {
   /// que NO deben disparar la Regla de Hierro ni reiniciar el reloj de
   /// holgura de fotos_cola (contarlas auto-saboteaba la regla: la
   /// propia foto bloqueaba la cola de fotos para siempre).
+  ///
+  /// Yunque de Sincronización (YS-2, R3-M3-1): la puerta cuenta
+  /// solo ops ACCIONABLES AHORA — 'pendiente' y 'enviada'
+  /// siempre; 'error' solo si no está exenta
+  /// ([opEnErrorExentaDePuerta]): una op dormida en backoff o
+  /// envenenada ya no cierra la puerta para siempre. La op sigue
+  /// en la cola, visible y reintentando por su carril; la
+  /// exención se anota en bitácora desde las puertas
+  /// (`sync/puerta_ops_exenta`, ver [opsExentasPuerta]).
   Future<int> countPendingOpsNoFoto() async {
     final d = await db;
     final r = await d.rawQuery(
-        "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente', 'enviada', 'error') "
+        "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente', 'enviada') "
         "AND tipo NOT IN ('foto', 'foto_suplemento')");
-    return (r.first['c'] as int?) ?? 0;
+    var n = (r.first['c'] as int?) ?? 0;
+    final errores = await d.rawQuery(
+        "SELECT intentos, creada_ts, proximo_reintento "
+        "FROM ops_queue WHERE estado = 'error' "
+        "AND tipo NOT IN ('foto', 'foto_suplemento')");
+    final ahora = ahoraHabana();
+    for (final f in errores) {
+      if (!opEnErrorExentaDePuerta(
+        intentos: (f['intentos'] as num?)?.toInt() ?? 0,
+        creadaTs: f['creada_ts'] as String?,
+        proximoReintento: f['proximo_reintento'] as String?,
+        ahora: ahora,
+      )) {
+        n++;
+      }
+    }
+    return n;
   }
 
   /// Pendientes agrupados por tipo: {'inscribir': 2, 'pago_mensual': 3...}

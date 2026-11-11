@@ -8467,6 +8467,19 @@ class SyncEngine {
     try {
       await _db.rescatarFotosIncidenciasAtascadas();
     } catch (_) {}
+    // Yunque de Sincronización (YS-2): si hay ops exentas de la
+    // puerta de la Regla de Hierro (en error dormidas en su
+    // backoff o envenenadas), el atasco se anota una vez por
+    // corrida de este worker: visible en Salud, no silencioso.
+    try {
+      final exentas = await _db.opsExentasPuerta();
+      if (exentas.isNotEmpty) {
+        AppLog.info('sync', 'puerta_ops_exenta',
+            d: '${exentas.length} op(s) en error fuera de la '
+                'puerta: ${exentas.map((e) => '${e['tipo']} '
+                    '(${e['intentos']} intentos)').join(', ')}');
+      }
+    } catch (_) {}
     final pendientes = await d.query(
         'incidencias_fotos',
         where: "sync_estado IN ('pending', 'retry')",
