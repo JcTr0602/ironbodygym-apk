@@ -4897,11 +4897,26 @@ class LocalDb {
     return _telefonosLista(data).join(' ');
   }
 
+  /// 1.32 (H-CAMPO-2): tope de la búsqueda por prefijo de
+  /// teléfono. Era 50, compartido con la vía de nombre, y cortaba
+  /// EN SILENCIO: en el padrón real 61 clientes comparten el
+  /// prefijo «5819» y 11 quedaban invisibles sin señal alguna
+  /// (Y-CAMPO G4). La vía de teléfono no es un ranking de
+  /// relevancia —un prefijo pertenece a un cliente o no—: el
+  /// tope solo acota el coste, así que se fija en 200 (>3× el
+  /// peor caso real observado; la lista de ids resultante sigue
+  /// siendo trivial de cargar). La vía de NOMBRE conserva su
+  /// límite de 50: ahí sí manda la relevancia y la pantalla no
+  /// necesita más.
+  static const limiteBusquedaTelefono = 200;
+
   /// v1.2.5-rev5: búsqueda rápida por FTS5 (prefijo por token).
   /// Retorna ids ordenados por relevancia FTS.
   /// v1.2.5-rev6: modo [porTelefono] busca en la columna de teléfonos
   /// (dígitos normalizados), para no escanear el padrón en Dart.
   /// v1.2.5+28: sin FTS5 en el teléfono, fallback a LIKE sobre el espejo.
+  /// 1.32 (H-CAMPO-2): la vía de teléfono corta en
+  /// [limiteBusquedaTelefono], no en el 50 de la vía de nombre.
   Future<List<int>> buscarClientesFtsIds(String nq,
       {bool porTelefono = false}) async {
     final d = await db;
@@ -4914,7 +4929,7 @@ class LocalDb {
         if (dig.length < 3) return [];
         final rows = await d.rawQuery(
             'SELECT id FROM clientes_fts WHERE clientes_fts MATCH ? '
-            'ORDER BY rank LIMIT 50',
+            'ORDER BY rank LIMIT $limiteBusquedaTelefono',
             ['telefonos:"$dig"*']);
         return rows.map((r) => r['id'] as int).toList();
       }
@@ -4956,7 +4971,9 @@ class LocalDb {
             out.add(r['id'] as int);
           }
         } catch (_) {}
-        if (out.length >= 50) break;
+        // 1.32 (H-CAMPO-2): mismo tope que la vía FTS de
+        // teléfono (limiteBusquedaTelefono), no el 50 de nombre.
+        if (out.length >= limiteBusquedaTelefono) break;
       }
       return out;
     }
