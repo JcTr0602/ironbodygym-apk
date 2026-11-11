@@ -15,6 +15,16 @@ class ThemeController {
   static final ValueNotifier<bool> altoContraste =
       ValueNotifier(false);
 
+  // 1.32 «Mostrador Táctico»: Modo Sol (claro de Papel Frío para
+  // el sol directo del mostrador). SOLO manual, de 1 toque en la
+  // cabecera — guarda del contraste de Argón: el encendido
+  // automático por sensor de luz queda APAGADO por defecto y NO
+  // se implementa (Jc trabaja bajo techo la mayor parte del día;
+  // un parpadeo de tema a media venta es inaceptable). No hay
+  // ningún código de sensor en la app.
+  static final ValueNotifier<bool> modoSol = ValueNotifier(false);
+  static const _kModoSol = 'modo_sol_v1';
+
   static ThemeMode _aMode(String tema) {
     switch (tema) {
       case 'claro':
@@ -48,6 +58,16 @@ class ThemeController {
     // v1.2.5 (3.4): alto contraste.
     altoContraste.value =
         await PerfilService.instance.getAltoContraste();
+    // 1.32: Modo Sol persistido (default apagado).
+    modoSol.value = p.getBool(_kModoSol) ?? false;
+  }
+
+  /// 1.32: enciende/apaga el Modo Sol y lo persiste. Al apagarlo
+  /// manda de nuevo el modo elegido (sistema/claro/oscuro).
+  static Future<void> setModoSol(bool v) async {
+    modoSol.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kModoSol, v);
   }
 
   static Future<void> setTema(String tema) async {

@@ -202,6 +202,111 @@ class AppColores {
     end: Alignment.bottomRight,
   );
 
+  // --- 1.32 «Mostrador Táctico» (rediseño de Argón, inventario
+  // §4.1) ---
+  // Paleta táctica EXACTA del plano. Los tokens anteriores NO se
+  // tocan (sus valores están fijados por tests de contraste); estos
+  // son nombres NUEVOS que consumen el marco de 4 Pilares, el Dock
+  // y los temas [AppTema.tacticoOscuro]/[AppTema.sol]. El naranja
+  // de marca (#E8821A) queda RESERVADO al logo y al botón Cobrar;
+  // la acción principal del sistema táctico es el cobalto.
+  /// Fondo del tema táctico oscuro.
+  static const pizarra = Color(0xFF0B0F14);
+
+  /// Fondo del Modo Sol (claro táctico).
+  static const papelFrio = Color(0xFFF4F6F8);
+
+  /// Superficie 1 del tema táctico oscuro.
+  static const grafitoTactico = Color(0xFF151C24);
+
+  /// Superficie 2 del tema táctico oscuro.
+  static const acero = Color(0xFF1E2936);
+
+  /// Superficie 2 del Modo Sol.
+  static const grisTecnico = Color(0xFFE8ECEF);
+
+  /// Acción principal y navegación (tema oscuro).
+  static const cobalto = Color(0xFF2563EB);
+
+  /// Acción principal y navegación (Modo Sol).
+  static const cobaltoOscuro = Color(0xFF1D4ED8);
+
+  /// Éxito / Al día (tema oscuro).
+  static const esmeralda = Color(0xFF10B981);
+
+  /// Éxito / Al día (Modo Sol).
+  static const verdeBosque = Color(0xFF047857);
+
+  /// Urgencia media / Por vencer (tema oscuro).
+  static const ambarTactico = Color(0xFFFACC15);
+
+  /// Urgencia media / Por vencer (Modo Sol).
+  static const ambarTierra = Color(0xFFCA8A04);
+
+  /// Error / Atrasado (tema oscuro).
+  static const coral = Color(0xFFEF4444);
+
+  /// Error / Atrasado (Modo Sol).
+  static const carmesi = Color(0xFFDC2626);
+
+  /// Estado En Pausa (tema oscuro).
+  static const cianHielo = Color(0xFF06B6D4);
+
+  /// Estado En Pausa (Modo Sol).
+  static const cianProfundo = Color(0xFF0E7490);
+
+  /// Transferencia / App Plus (tema oscuro).
+  static const violetaTactico = Color(0xFF8B5CF6);
+
+  /// Transferencia / App Plus (Modo Sol).
+  static const indigoTactico = Color(0xFF6D28D9);
+
+  /// Cuenta a la Casa (tema oscuro; exclusivo, jamás genérico).
+  static const doradoReal = Color(0xFFF59E0B);
+
+  /// Cuenta a la Casa (Modo Sol).
+  static const doradoRealOscuro = Color(0xFFB45309);
+
+  /// Cobalto de acción según el brillo actual.
+  static Color cobaltoDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? cobalto
+          : cobaltoOscuro;
+
+  /// Verde de éxito según el brillo actual.
+  static Color verdeDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? esmeralda
+          : verdeBosque;
+
+  /// Ámbar de urgencia según el brillo actual.
+  static Color ambarDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? ambarTactico
+          : ambarTierra;
+
+  /// Rojo de error según el brillo actual.
+  static Color rojoDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? coral : carmesi;
+
+  /// Cian del estado En Pausa según el brillo actual.
+  static Color cianDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? cianHielo
+          : cianProfundo;
+
+  /// Violeta de transferencia/Plus según el brillo actual.
+  static Color violetaDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? violetaTactico
+          : indigoTactico;
+
+  /// Dorado EXCLUSIVO de la Cuenta a la Casa según el brillo.
+  static Color doradoDe(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? doradoReal
+          : doradoRealOscuro;
+
   // --- P0 (1.20, paquete de diseño Argón) ---
   // Superficies con jerarquía: elevada flota sobre la tarjeta, hundida
   // se hunde hacia el fondo. Valores por modo + helpers por brillo.
@@ -458,6 +563,23 @@ class AppColores {
 class AppTexto {
   AppTexto._();
 
+  /// 1.32 «Mostrador Táctico»: aplica cifras tabulares a
+  /// CUALQUIER estilo. El plano (§4.2) exige
+  /// `FontFeature.tabularFigures()` en todo contador, importe y
+  /// cronómetro del sistema táctico para que las columnas de
+  /// dinero no «bailen» al cambiar un dígito; los estilos con
+  /// nombre (display, metrica…) ya la traen, este helper cubre
+  /// los estilos compuestos al vuelo.
+  static TextStyle conTabulares(TextStyle estilo) {
+    final previas = estilo.fontFeatures ?? const <FontFeature>[];
+    if (previas.contains(const FontFeature.tabularFigures())) {
+      return estilo;
+    }
+    return estilo.copyWith(
+      fontFeatures: [...previas, const FontFeature.tabularFigures()],
+    );
+  }
+
   /// Números grandes: dinero, conteos, vencimientos.
   /// 1.23 (Delta Argón 6ª, pulido): cifras tabulares — los
   /// dígitos ocupan el mismo ancho y las columnas de dinero
@@ -655,6 +777,84 @@ class AppTema {
       _tema(Brightness.light, altoContraste: true);
   static ThemeData oscuroAltoContraste() =>
       _tema(Brightness.dark, altoContraste: true);
+
+  /// 1.32 «Mostrador Táctico» — tema OSCURO del rediseño: fondo
+  /// Pizarra, superficies Grafito/Acero y acción principal en
+  /// Cobalto (el naranja queda reservado a la marca y a Cobrar).
+  /// Se construye SOBRE [_tema] para heredar transiciones,
+  /// interruptores, formularios y demás fundación; solo cambian
+  /// las superficies y el primario. Los temas claro()/oscuro()
+  /// anteriores no se tocan (tests de contraste los fijan).
+  static ThemeData tacticoOscuro() {
+    final base = _tema(Brightness.dark);
+    final esquema = base.colorScheme.copyWith(
+      primary: AppColores.cobalto,
+      onPrimary: Colors.white,
+      surface: AppColores.grafitoTactico,
+      surfaceContainerHighest: AppColores.acero,
+      surfaceContainerHigh: AppColores.acero,
+    );
+    return base.copyWith(
+      colorScheme: esquema,
+      scaffoldBackgroundColor: AppColores.pizarra,
+      appBarTheme: base.appBarTheme.copyWith(
+        backgroundColor: AppColores.grafitoTactico,
+      ),
+      cardTheme: base.cardTheme.copyWith(color: AppColores.grafitoTactico),
+      dialogTheme: base.dialogTheme.copyWith(
+        backgroundColor: AppColores.grafitoTactico,
+      ),
+      bottomSheetTheme: base.bottomSheetTheme.copyWith(
+        backgroundColor: AppColores.grafitoTactico,
+      ),
+      navigationBarTheme: base.navigationBarTheme.copyWith(
+        backgroundColor: AppColores.grafitoTactico,
+        indicatorColor: AppColores.cobalto.withValues(alpha: 0.35),
+      ),
+    );
+  }
+
+  /// 1.32 «Mostrador Táctico» — MODO SOL: el claro táctico de
+  /// Papel Frío para contrarrestar el sol directo del mostrador.
+  /// Se activa SOLO a mano desde la cabecera (guarda del
+  /// contraste de Argón: el automático por sensor queda APAGADO
+  /// por defecto y no se implementa). Bordes definidos de 1,5 dp
+  /// en grafito sobre las tarjetas, como manda el plano §4.1.
+  static ThemeData sol() {
+    final base = _tema(Brightness.light);
+    final esquema = base.colorScheme.copyWith(
+      primary: AppColores.cobaltoOscuro,
+      onPrimary: Colors.white,
+      surface: Colors.white,
+      surfaceContainerHighest: AppColores.grisTecnico,
+      surfaceContainerHigh: AppColores.grisTecnico,
+    );
+    return base.copyWith(
+      colorScheme: esquema,
+      scaffoldBackgroundColor: AppColores.papelFrio,
+      appBarTheme: base.appBarTheme.copyWith(
+        backgroundColor: AppColores.papelFrio,
+        foregroundColor: AppColores.sobreMarca,
+        titleTextStyle: AppTexto.titulo
+            .copyWith(color: AppColores.sobreMarca),
+      ),
+      cardTheme: base.cardTheme.copyWith(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.md),
+          side: const BorderSide(
+              color: AppColores.sobreMarca, width: 1.5),
+        ),
+      ),
+      dialogTheme: base.dialogTheme.copyWith(backgroundColor: Colors.white),
+      bottomSheetTheme:
+          base.bottomSheetTheme.copyWith(backgroundColor: Colors.white),
+      navigationBarTheme: base.navigationBarTheme.copyWith(
+        backgroundColor: AppColores.papelFrio,
+        indicatorColor: AppColores.cobaltoOscuro.withValues(alpha: 0.25),
+      ),
+    );
+  }
 
   static ThemeData _tema(Brightness b, {bool altoContraste = false}) {
     final oscuro = b == Brightness.dark;

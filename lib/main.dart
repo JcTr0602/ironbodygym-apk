@@ -419,6 +419,8 @@ class _IronBodyAppState extends State<IronBodyApp>
       builder: (_, mode, __) => ValueListenableBuilder<double>(
         valueListenable: ThemeController.fontScale,
         builder: (_, escala, __) => ValueListenableBuilder<bool>(
+          valueListenable: ThemeController.modoSol,
+          builder: (_, solActivo, __) => ValueListenableBuilder<bool>(
           valueListenable: ThemeController.altoContraste,
           builder: (_, hc, __) => MaterialApp(
             builder: (ctx, child) {
@@ -497,16 +499,23 @@ class _IronBodyAppState extends State<IronBodyApp>
             // suave en toda la app (ver componentes.dart).
             scrollBehavior: const ComportamientoScrollSuave(),
             title: 'Iron Body Gestión',
-            themeMode: mode,
+            // 1.32 «Mostrador Táctico»: el Modo Sol (manual, de
+            // 1 toque en la cabecera) fuerza el claro táctico;
+            // apagado, manda el modo elegido. El automático por
+            // sensor NO existe (guarda del contraste de Argón).
+            themeMode: solActivo ? ThemeMode.light : mode,
             // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).
-            theme: AppTema.claro(),
-            darkTheme: AppTema.oscuro(),
+            // 1.32: el claro pasa a ser el táctico de Papel Frío
+            // (Modo Sol) y el oscuro el táctico Pizarra/Cobalto.
+            theme: AppTema.sol(),
+            darkTheme: AppTema.tacticoOscuro(),
             // v1.2.5 (3.4): alto contraste (WCAG AA).
             highContrastTheme:
                 hc ? AppTema.claroAltoContraste() : null,
             highContrastDarkTheme:
                 hc ? AppTema.oscuroAltoContraste() : null,
             home: const RaizSesion(),
+          ),
           ),
         ),
       ),
