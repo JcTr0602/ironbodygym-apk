@@ -9,6 +9,7 @@ import '../cobro_parcial.dart';
 import '../negocio.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 
 /// 1.26.1: hoja de «Cobrar parcial» — el dueño escribe
 /// cuánto recogió del entrenador. StatefulWidget
@@ -85,22 +86,39 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
           Text('Pendiente total: ${fmtMonto(widget.total)} CUP',
               style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.md),
-          TextField(
-            controller: _ctrl,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(
-                decimal: true),
-            style: AppTexto.display.copyWith(
-                color: AppColores.textoNaranja(context),
-                fontWeight: FontWeight.bold),
-            decoration: InputDecoration(
-              suffixText: 'CUP',
-              border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(AppRadio.md)),
+          // 1.32 (O2F2, Pieza 4): la hoja del cobro parcial
+          // compone el importe con el PAD empotrado (antes
+          // abría el teclado del sistema sobre la hoja). El
+          // controlador sigue existiendo como fuente del
+          // texto: los atajos (_fijar) y la validación
+          // (_valido) no cambian.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColores.borde(context)),
+              borderRadius: BorderRadius.circular(AppRadio.md),
             ),
-            onChanged: (t) => setState(() =>
-                _monto = double.tryParse(t.replaceAll(',', '.'))),
+            child: Text(
+              _ctrl.text.isEmpty ? '0' : _ctrl.text,
+              style: AppTexto.display.copyWith(
+                  color: AppColores.textoNaranja(context),
+                  fontWeight: FontWeight.bold,
+                  fontFeatures: const [
+                    FontFeature.tabularFigures()
+                  ]),
+              textAlign: TextAlign.end,
+            ),
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          PadNumerico(
+            valor: _ctrl.text,
+            onCambia: (t) {
+              _ctrl.text = t;
+              setState(() =>
+                  _monto = double.tryParse(t.replaceAll(',', '.')));
+            },
           ),
           const SizedBox(height: AppEspacio.sm),
           Wrap(

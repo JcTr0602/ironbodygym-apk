@@ -9,6 +9,7 @@ import 'arqueo.dart';
 import 'cola.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'nomina.dart';
 import 'skeleton.dart';
 import 'pendiente.dart';
@@ -109,14 +110,19 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
   }
 
   Future<void> _cerrarMes() async {
-    final ok = await DialogoApp.confirmar(
+    // 1.32 (O2F2, Pieza 4): el sello del mes se pone
+    // DESLIZANDO, no con un toque (confirmarDeslizando);
+    // la reevaluación de marcarMesCerrado no cambia.
+    final ok = await confirmarDeslizando(
       context,
       titulo: 'Cerrar ${_nombreMes}',
       mensaje: 'Todos los pasos están verificados. Marcar el '
           'mes como cerrado deja constancia de que el cierre '
           'se hizo completo; no bloquea nada: podrás seguir '
           'operando y corrigiendo como siempre.',
-      aceptar: 'Marcar cerrado',
+      textoDeslizar: 'Desliza para marcar cerrado',
+      textoConfirmando: 'Cerrando…',
+      icono: Icons.event_available_rounded,
     );
     if (ok != true) return;
     // Delta del panel: marcarMesCerrado REEVALÚA — si algo

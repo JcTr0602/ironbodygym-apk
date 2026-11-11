@@ -24,6 +24,7 @@ import 'cierre_mes.dart';
 import 'cierre_nomina_imagen.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'hoja_accion.dart';
 import 'mi_nomina.dart';
 import 'skeleton.dart';
@@ -1857,11 +1858,26 @@ class _DialogoRegistrarAdelantoState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _montoCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                  labelText: 'Monto (CUP entero)'),
+            // 1.32 (O2F2, Pieza 4): el adelanto se teclea con
+            // el pad en modo ENTERO («pesos enteros» de
+            // siempre); la validación de Registrar queda
+            // donde estaba.
+            CampoMontoPad(
+              etiqueta: 'Monto (CUP entero)',
+              valor: _montoCtrl.text,
+              sufijo: 'CUP',
+              onTap: () async {
+                final v = await mostrarHojaMontoPad(
+                  context,
+                  titulo: 'Monto del adelanto (CUP)',
+                  valorInicial: _montoCtrl.text,
+                  sufijo: 'CUP',
+                  decimales: false,
+                );
+                if (v == null || !mounted) return;
+                _montoCtrl.text = v;
+                setState(() => _errorMonto = null);
+              },
             ),
             if (_errorMonto != null) ...[
               const SizedBox(height: 8),

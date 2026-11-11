@@ -42,6 +42,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'historial_ventas.dart';
 import 'servicios_historial.dart';
 import '../app_log.dart';
@@ -843,12 +844,25 @@ class _DialogoRegistrarCompraManualState
                     labelText: 'Concepto (ej: Whey 2 lb)',
                     border: OutlineInputBorder())),
             const SizedBox(height: 8),
-            TextField(
-                controller: _montoCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Monto (CUP)',
-                    border: OutlineInputBorder())),
+            // 1.32 (O2F2, Pieza 4): el importe de la compra
+            // manual también se compone con el pad; el
+            // guardado valida el texto como siempre.
+            CampoMontoPad(
+              etiqueta: 'Monto (CUP)',
+              valor: _montoCtrl.text,
+              sufijo: 'CUP',
+              onTap: () async {
+                final v = await mostrarHojaMontoPad(
+                  context,
+                  titulo: 'Monto de la compra (CUP)',
+                  valorInicial: _montoCtrl.text,
+                  sufijo: 'CUP',
+                );
+                if (v == null || !mounted) return;
+                _montoCtrl.text = v;
+                setState(() {});
+              },
+            ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               icon: const Icon(Icons.calendar_month_rounded,

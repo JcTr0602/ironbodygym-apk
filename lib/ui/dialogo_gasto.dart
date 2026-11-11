@@ -8,6 +8,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
 
@@ -121,6 +122,20 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
     super.dispose();
   }
 
+  /// 1.32 (O2F2): el monto se compone en la hoja del pad;
+  /// vuelve al controlador y _guardar valida como siempre.
+  Future<void> _editarMontoConPad() async {
+    final v = await mostrarHojaMontoPad(
+      context,
+      titulo: 'Monto del gasto (CUP)',
+      valorInicial: _montoCtrl.text,
+      sufijo: 'CUP',
+    );
+    if (v == null || !mounted) return;
+    _montoCtrl.text = v;
+    setState(() {});
+  }
+
   Future<void> _guardar() async {
     if (_guardando) return;
     final concepto = _conceptoCtrl.text.trim();
@@ -210,11 +225,16 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
               controller: _conceptoCtrl,
               etiqueta: 'Concepto (ej: pago de la luz)'),
           const SizedBox(height: 8),
-          CampoTexto(
-              controller: _montoCtrl,
-              etiqueta: 'Monto (CUP)',
-              teclado:
-                  const TextInputType.numberWithOptions(decimal: true)),
+          // 1.32 (O2F2, Pieza 4): el monto del gasto se
+          // teclea con el pad del mostrador. La validación
+          // de _guardar (incluida la guarda de ambigüedad
+          // «1.500») queda intacta.
+          CampoMontoPad(
+            etiqueta: 'Monto (CUP)',
+            valor: _montoCtrl.text,
+            sufijo: 'CUP',
+            onTap: _editarMontoConPad,
+          ),
         ],
       ),
       acciones: [

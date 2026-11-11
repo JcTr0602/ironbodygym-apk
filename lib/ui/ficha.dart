@@ -40,6 +40,7 @@ import 'panel_bloque2.dart';
 import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'ficha_acceso_app.dart';
 import 'ficha_congelacion.dart';
 import 'ficha_marcas.dart';
@@ -2407,10 +2408,11 @@ class _FichaScreenState extends State<FichaScreen> {
     if (accion == null || !mounted) return;
 
     if (accion == 'anular') {
-      final motivoTexto = await showDialog<String>(
-        context: context,
-        builder: (ctx) => const _DialogoAnularPagoFicha(),
-      );
+      // 1.32 (O2F2, Pieza 4): la anulación se confirma
+      // DESLIZANDO en su hoja (antes un botón «Sí, anular»
+      // al alcance de un toque accidental).
+      final motivoTexto =
+          await _DialogoAnularPagoFicha.mostrar(context);
       if (motivoTexto == null || !mounted) return;
       final motivo = motivoTexto.trim();
       if (motivo.isEmpty) {
@@ -4625,8 +4627,24 @@ class _DialogoMotivoCuentaCasaState extends State<_DialogoMotivoCuentaCasa> {
 /// 1.30 (Oleada 7, clase B): diálogo «Anular pago» de la
 /// ficha con su controlador en el State. Devuelve el
 /// motivo tecleado o null si se cancela.
+/// 1.32 (O2F2, Pieza 4): la anulación de un pago deja de
+/// confirmarse con un botón y pasa a una HOJA con el
+/// carril de deslizar (la primitiva no puede vivir dentro
+/// de un AlertDialog: su LayoutBuilder no responde las
+/// dimensiones intrínsecas que el diálogo pide). El
+/// deslizador solo se habilita con el motivo escrito; el
+/// llamador conserva su guarda de motivo vacío.
 class _DialogoAnularPagoFicha extends StatefulWidget {
   const _DialogoAnularPagoFicha();
+
+  static Future<String?> mostrar(BuildContext context) {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => const _DialogoAnularPagoFicha(),
+    );
+  }
 
   @override
   State<_DialogoAnularPagoFicha> createState() =>
@@ -4650,32 +4668,53 @@ class _DialogoAnularPagoFichaState extends State<_DialogoAnularPagoFicha> {
 
   @override
   Widget build(BuildContext context) {
-    return DialogoApp(
-      titulo: 'Anular pago',
-      iconoTitulo: Icons.cancel_rounded,
-      contenido: Column(
+    return Padding(
+      padding: EdgeInsets.only(
+        left: AppEspacio.lg,
+        right: AppEspacio.lg,
+        top: AppEspacio.sm,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            AppEspacio.lg,
+      ),
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Row(
+            children: [
+              Icon(Icons.cancel_rounded, color: AppColores.error),
+              SizedBox(width: AppEspacio.sm),
+              Text('Anular pago', style: AppTexto.titulo),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
           const Text('¿Seguro? El pago quedará anulado en el sistema. '
               'Esta acción se sincronizará.'),
           const SizedBox(height: 12),
           TextField(
             controller: _motivoCtrl,
+            onChanged: (_) => setState(() {}),
             decoration: const InputDecoration(
                 labelText: 'Motivo (obligatorio)',
                 border: OutlineInputBorder()),
           ),
+          const SizedBox(height: AppEspacio.lg),
+          DeslizarConfirmar(
+            texto: 'Desliza para anular',
+            textoConfirmando: 'Anulando…',
+            habilitado: _motivoCtrl.text.trim().isNotEmpty,
+            onConfirmar: () =>
+                Navigator.pop(context, _motivoCtrl.text),
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('No')),
+          ),
         ],
       ),
-      acciones: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('No')),
-        ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColores.error),
-            onPressed: () => Navigator.pop(context, _motivoCtrl.text),
-            child: const Text('Sí, anular')),
-      ],
     );
   }
 }
@@ -4729,12 +4768,24 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
       contenido: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
-            controller: _montoCtrl,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-                labelText: 'Monto (CUP)', border: OutlineInputBorder()),
+          // 1.32 (O2F2, Pieza 4): el monto corregido se
+          // teclea con el pad del mostrador; fecha, método
+          // y motivo quedan como estaban.
+          CampoMontoPad(
+            etiqueta: 'Monto (CUP)',
+            valor: _montoCtrl.text,
+            sufijo: 'CUP',
+            onTap: () async {
+              final v = await mostrarHojaMontoPad(
+                context,
+                titulo: 'Monto del pago (CUP)',
+                valorInicial: _montoCtrl.text,
+                sufijo: 'CUP',
+              );
+              if (v == null || !mounted) return;
+              _montoCtrl.text = v;
+              setState(() {});
+            },
           ),
           const SizedBox(height: 8),
           TextField(

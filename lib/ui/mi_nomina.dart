@@ -30,6 +30,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'servicios.dart';
 import 'widgets.dart';
 import '../errores_sync.dart';
@@ -1295,14 +1296,27 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
-            controller: _montoCtrl,
-            onChanged: (_) => _rearmarAviso(),
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Monto (CUP, pesos enteros)',
-              border: OutlineInputBorder(),
-            ),
+          // 1.32 (O2F2, Pieza 4): la petición de adelanto
+          // también se teclea con el pad en modo entero; el
+          // aviso de duplicado se rearma igual que con el
+          // tecleo de antes.
+          CampoMontoPad(
+            etiqueta: 'Monto (CUP, pesos enteros)',
+            valor: _montoCtrl.text,
+            sufijo: 'CUP',
+            onTap: () async {
+              final v = await mostrarHojaMontoPad(
+                context,
+                titulo: 'Monto del adelanto (CUP)',
+                valorInicial: _montoCtrl.text,
+                sufijo: 'CUP',
+                decimales: false,
+              );
+              if (v == null || !mounted) return;
+              _montoCtrl.text = v;
+              setState(() {});
+              _rearmarAviso();
+            },
           ),
           const SizedBox(height: AppEspacio.md),
           TextField(

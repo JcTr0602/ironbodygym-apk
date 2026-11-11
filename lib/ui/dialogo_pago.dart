@@ -23,6 +23,7 @@ import '../tipos_pago.dart';
 import 'componentes.dart';
 import 'foto_elegir.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 
 /// Selección de período hecha en el diálogo.
 class PeriodoSel {
@@ -1153,23 +1154,38 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                 onChanged: (_) => setState(() {}),
               ),
               const SizedBox(height: 8),
-              TextField(
-                controller: montoCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(
-                        decimal: true),
-                // 1.15 (m8): solo dígitos y un separador
-                // decimal válido (punto o coma; el parseo
-                // posterior convierte la coma y lo inválido
-                // cae a monto 0 → inválido, nunca se cobra).
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(
-                      RegExp(r'[0-9.,]')),
-                ],
-                decoration: const InputDecoration(
-                    labelText: 'Monto (CUP)',
-                    border: OutlineInputBorder()),
-                onChanged: (_) => setState(() {}),
+              // 1.32 (O2F2, Pieza 4): el monto del cobro
+              // personalizado se teclea con el pad del
+              // mostrador, con los importes rápidos del
+              // plano. El parseo y la validación de siempre
+              // leen montoCtrl igual que antes (el pad solo
+              // compone dígitos y un punto; lo inválido sigue
+              // cayendo a inválido, nunca se cobra). El campo
+              // Días queda con teclado: es un conteo de días,
+              // no dinero.
+              CampoMontoPad(
+                etiqueta: 'Monto (CUP)',
+                valor: montoCtrl.text,
+                sufijo: 'CUP',
+                onTap: () async {
+                  final v = await mostrarHojaMontoPad(
+                    context,
+                    titulo: 'Monto del cobro (CUP)',
+                    valorInicial: montoCtrl.text,
+                    sufijo: 'CUP',
+                    rapidos: const [
+                      (etiqueta: '200', valor: '200'),
+                      (etiqueta: '600', valor: '600'),
+                      (etiqueta: '1 200', valor: '1200'),
+                      (etiqueta: '1 500', valor: '1500'),
+                      (etiqueta: '2 000', valor: '2000'),
+                      (etiqueta: '2 500', valor: '2500'),
+                    ],
+                  );
+                  if (v == null || !mounted) return;
+                  montoCtrl.text = v;
+                  setState(() {});
+                },
               ),
             ],
             const SizedBox(height: 8),

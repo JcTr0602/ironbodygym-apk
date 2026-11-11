@@ -13,6 +13,7 @@ import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import '../turno_service.dart';
 import 'componentes.dart';
+import 'primitivas.dart';
 import 'permisos_ui.dart';
 
 /// 1.22 T-08: texto del motivo cuando hay turno abierto
@@ -86,7 +87,12 @@ Future<bool> cerrarTurnoConDialogo(BuildContext context) async {
   }
   if (!context.mounted) return false;
   final limpio = prep['limpio'] == true;
-  final ok = await DialogoApp.confirmar(
+  // 1.32 (O2F2, Pieza 4): cerrar la caja del día ya no se
+  // confirma con un toque: el resumen se lee y se DESLIZA
+  // (confirmarDeslizando). La ejecución del cierre
+  // (confirmarCierre con su mirada al resultado) no
+  // cambia ni una línea.
+  final ok = await confirmarDeslizando(
     context,
     titulo: 'Cerrar turno',
     mensaje: 'Cobrado del día: ${prep['pagosCount']} pago(s). '
@@ -95,7 +101,10 @@ Future<bool> cerrarTurnoConDialogo(BuildContext context) async {
         '${(prep['pendientesUsd'] as num) > 0 ? ' + ${fmtMonto((prep['pendientesUsd'] as num).toDouble())} USD' : ''})'
         '${(prep['revisionCount'] as int) > 0 ? ', ${prep['revisionCount']} en revisión' : ''}.'
         '${limpio ? '' : ' Cerrar de todos modos deja los pendientes guardados en este teléfono.'}',
-    aceptar: limpio ? 'Confirmar cierre' : 'Cerrar de todos modos',
+    textoDeslizar: limpio
+        ? 'Desliza para cerrar el turno'
+        : 'Desliza para cerrar de todos modos',
+    textoConfirmando: 'Cerrando…',
     icono: Icons.lock_rounded,
   );
   if (!ok) return false;

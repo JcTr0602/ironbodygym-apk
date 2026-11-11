@@ -23,6 +23,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diferencias_caja.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'hoja_liquidar.dart';
 import 'liquidaciones_historial.dart';
 import 'skeleton.dart';
@@ -580,16 +581,14 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     // 1.29 (Oleada 4, barrido): el diálogo de confirmación
     // vive en un StatefulWidget dueño de su controlador
     // (_DialogoConfirmarLiquidacion); ver su doc.
-    final r = await showDialog<({bool abrirExp, String explicacion})>(
-      context: context,
-      builder: (_) => _DialogoConfirmarLiquidacion(
-        nombre: widget.nombre,
-        esperado: esperado,
-        entregado: entregado,
-        parcial: parcial,
-        moneda: _moneda,
-        totalIds: totalIds,
-      ),
+    final r = await _DialogoConfirmarLiquidacion.mostrar(
+      context,
+      nombre: widget.nombre,
+      esperado: esperado,
+      entregado: entregado,
+      parcial: parcial,
+      moneda: _moneda,
+      totalIds: totalIds,
     );
     if (r == null || !mounted) return;
     final quiereExpediente = r.abrirExp;
@@ -859,20 +858,28 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                       const SizedBox(height: AppEspacio.md),
                       const Text('Nueva liquidación', style: AppTexto.subtitulo),
                       const SizedBox(height: AppEspacio.sm),
-                      TextField(
-                        controller: _entregadoCtrl,
-                        keyboardType:
-                            const TextInputType.numberWithOptions(
-                                decimal: true),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                              RegExp(r'[0-9.,]')),
-                        ],
-                        decoration: InputDecoration(
-                          labelText: 'Monto entregado ($_moneda)',
-                          border: const OutlineInputBorder(),
-                          suffixText: _moneda,
-                        ),
+                      // 1.32 (O2F2, Pieza 4): lo entregado se
+                      // teclea con el pad del mostrador; el
+                      // parseo de _liquidar lee el controlador
+                      // igual que antes. El campo viene
+                      // precargado con lo esperado (la foto de
+                      // la pantalla): el pad lo confirma o lo
+                      // corrige dígito a dígito.
+                      CampoMontoPad(
+                        etiqueta: 'Monto entregado ($_moneda)',
+                        valor: _entregadoCtrl.text,
+                        sufijo: _moneda,
+                        onTap: () async {
+                          final v = await mostrarHojaMontoPad(
+                            context,
+                            titulo: 'Monto entregado ($_moneda)',
+                            valorInicial: _entregadoCtrl.text,
+                            sufijo: _moneda,
+                          );
+                          if (v == null || !mounted) return;
+                          _entregadoCtrl.text = v;
+                          setState(() {});
+                        },
                       ),
                       const SizedBox(height: AppEspacio.sm),
                       TextField(
@@ -1123,6 +1130,36 @@ class _DialogoConfirmarLiquidacion extends StatefulWidget {
   final String moneda;
   final int totalIds;
 
+  /// 1.32 (O2F2, Pieza 4): la confirmación de la
+  /// liquidación se muestra como HOJA (mostrar) y se
+  /// confirma DESLIZANDO — la primitiva no puede vivir
+  /// dentro de un AlertDialog (su LayoutBuilder no
+  /// responde las dimensiones intrínsecas que el diálogo
+  /// pide al medirse). El recibo y sus reglas no cambian.
+  static Future<({bool abrirExp, String explicacion})?> mostrar(
+    BuildContext context, {
+    required String nombre,
+    required double esperado,
+    required double entregado,
+    required bool parcial,
+    required String moneda,
+    required int totalIds,
+  }) {
+    return showModalBottomSheet<({bool abrirExp, String explicacion})>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _DialogoConfirmarLiquidacion(
+        nombre: nombre,
+        esperado: esperado,
+        entregado: entregado,
+        parcial: parcial,
+        moneda: moneda,
+        totalIds: totalIds,
+      ),
+    );
+  }
+
   @override
   State<_DialogoConfirmarLiquidacion> createState() =>
       _DialogoConfirmarLiquidacionState();
@@ -1164,12 +1201,29 @@ class _DialogoConfirmarLiquidacionState
 
   @override
   Widget build(BuildContext context) {
-    return         AlertDialog(
-        title: const Text('Confirmar liquidación'),
-        content: Column(
+    return Padding(
+        padding: EdgeInsets.only(
+          left: AppEspacio.lg,
+          right: AppEspacio.lg,
+          top: AppEspacio.sm,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              AppEspacio.lg,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Row(
+              children: [
+                Icon(Icons.receipt_long_rounded,
+                    color: AppColores.naranja),
+                SizedBox(width: AppEspacio.sm),
+                Text('Confirmar liquidación',
+                    style: AppTexto.titulo),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.md),
             // (M2-BC C4) el diálogo como RECIBO: filas
             // claras widget.esperado / widget.entregado / diferencia o
             // arrastre dentro de una tarjeta con borde, en
@@ -1266,21 +1320,27 @@ class _DialogoConfirmarLiquidacionState
                   maxLines: 2,
                 ),
             ],
+            const SizedBox(height: AppEspacio.lg),
+            DeslizarConfirmar(
+              texto: 'Desliza para liquidar',
+              textoConfirmando: 'Liquidando…',
+              habilitado: true,
+              onConfirmar: () => Navigator.of(context).pop((
+                abrirExp: _abrirExp,
+                explicacion: _expCtrl.text,
+              )),
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancelar'),
+              ),
+            ),
           ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop((
-              abrirExp: _abrirExp,
-              explicacion: _expCtrl.text,
-            )),
-            child: const Text('Liquidar'),
-          ),
-        ],
     );
   }
 }

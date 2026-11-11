@@ -23,6 +23,7 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/gastos.dart';
+import 'package:ironbody_gym/ui/primitivas.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -96,8 +97,21 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Concepto (ej: pago de la luz)'),
         'Pago de la luz');
-    await tester.enterText(
-        find.widgetWithText(TextField, 'Monto (CUP)'), '1500');
+    // 1.32 (O2F2): el monto va por la hoja del pad. OJO:
+    // hay que dejar ASENTAR la hoja (pumpAndSettle) antes
+    // de tocar sus teclas — _esperarTexto no avanza el
+    // reloj de la animación y los toques caerían sobre la
+    // hoja aún entrando (en el teléfono no pasa: el dedo
+    // toca píxeles ya pintados).
+    await tester.tap(find.byType(CampoMontoPad));
+    await _esperarTexto(tester, 'Aceptar');
+    await tester.pumpAndSettle();
+    for (final d in ['1', '5', '0', '0']) {
+      await tester.tap(find.byKey(ValueKey('pad-$d')));
+      await tester.pump();
+    }
+    await tester.tap(find.text('Aceptar'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Guardar'));
     await _esperarTexto(tester, 'Pago de la luz');
 
@@ -128,8 +142,17 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Concepto (ej: pago de la luz)'),
         'Algo');
-    await tester.enterText(
-        find.widgetWithText(TextField, 'Monto (CUP)'), 'abc');
+    // 1.32 (O2F2): con el pad no se puede teclear «abc»;
+    // el inválido de la era del pad es el monto CERO: la
+    // misma guarda de _guardar («Concepto o monto
+    // inválidos») lo rechaza.
+    await tester.tap(find.byType(CampoMontoPad));
+    await _esperarTexto(tester, 'Aceptar');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pad-0')));
+    await tester.pump();
+    await tester.tap(find.text('Aceptar'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Guardar'));
     await _esperarTexto(tester, 'Concepto o monto inválidos');
 

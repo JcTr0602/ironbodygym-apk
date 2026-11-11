@@ -37,6 +37,7 @@ import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'confirmacion_cobro.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'venta_suplemento_inscripcion.dart';
 import 'widgets.dart';
 
@@ -162,6 +163,34 @@ class _VentaSuplementoScreenState
 
   /// v1.2.4: al cambiar de moneda, si el precio no se tocó a mano,
   /// se rellena con el oficial convertido (evita cobrar 50 CUP por 50 USD).
+  /// 1.32 (O2F2): edición de precio y tasa con la hoja del
+  /// pad del mostrador; el texto vuelve al controlador de
+  /// siempre y la pantalla repinta (el _precioDifiere y la
+  /// nota obligatoria se recalculan solos en el build).
+  Future<void> _editarPrecioConPad() async {
+    final v = await mostrarHojaMontoPad(
+      context,
+      titulo: 'Precio por unidad ($_moneda)',
+      valorInicial: _precio.text,
+      sufijo: _moneda,
+    );
+    if (v == null || !mounted) return;
+    _precio.text = v;
+    setState(() {});
+  }
+
+  Future<void> _editarTasaConPad() async {
+    final v = await mostrarHojaMontoPad(
+      context,
+      titulo: 'Tasa (CUP por 1 USD)',
+      valorInicial: _tasa.text,
+      sufijo: 'CUP',
+    );
+    if (v == null || !mounted) return;
+    _tasa.text = v;
+    setState(() {});
+  }
+
   void _cambiarMoneda(String m) {
     final anterior = _oficialEn(_moneda);
     final actual =
@@ -839,12 +868,16 @@ class _VentaSuplementoScreenState
               style: AppTexto.secundario,
             ),
           ),
-          CampoTexto(
-            controller: _precio,
+          // 1.32 (O2F2, Pieza 4 · veredicto de Argón): el
+          // precio de venta de suplemento se teclea con el
+          // PAD del mostrador, nunca con el teclado del
+          // sistema. La validación (_precioDifiere, la nota
+          // obligatoria) no cambia: el pad solo captura.
+          CampoMontoPad(
             etiqueta: 'Precio por unidad',
-            teclado: const TextInputType.numberWithOptions(
-                decimal: true),
-            onChanged: (_) => setState(() {}),
+            valor: _precio.text,
+            sufijo: _moneda,
+            onTap: _editarPrecioConPad,
           ),
           if (_precioDifiere) _alertaPrecio(),
           // v1.3.4 (candado b): motivo del precio distinto. Obligatorio
@@ -868,12 +901,14 @@ class _VentaSuplementoScreenState
           // si la moneda es CUP.
           if (_moneda == 'CUP') ...[
             const SizedBox(height: AppEspacio.sm),
-            CampoTexto(
-              controller: _tasa,
+            // 1.32 (O2F2, Pieza 4): la tasa también va con el
+            // pad — un dígito mal puesto falsea el precio en
+            // USD de toda la venta.
+            CampoMontoPad(
               etiqueta: 'Tasa (CUP por 1 USD) — obligatoria',
-              teclado: const TextInputType.numberWithOptions(
-                  decimal: true),
-              onChanged: (_) => setState(() {}),
+              valor: _tasa.text,
+              sufijo: 'CUP',
+              onTap: _editarTasaConPad,
             ),
           ],
           const EncabezadoSeccion(titulo: 'Comprador'),

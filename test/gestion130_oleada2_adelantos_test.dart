@@ -36,6 +36,7 @@ import 'package:ironbody_gym/bloque3.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
 import 'package:ironbody_gym/ui/mi_nomina.dart';
+import 'package:ironbody_gym/ui/primitivas.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -458,11 +459,29 @@ void main() {
       expect(await _esperarTexto(tester, 'Enviar solicitud'), isTrue,
           reason: 'el diálogo abre');
 
-      final campos = find.descendant(
+      // 1.32 (O2F2): el monto del adelanto va por la hoja
+      // del pad (modo entero); el motivo sigue en su campo
+      // de texto, que es el único TextField del diálogo.
+      await tester.tap(find.descendant(
           of: find.byType(AlertDialog),
-          matching: find.byType(TextField));
-      await tester.enterText(campos.at(0), '500');
-      await tester.enterText(campos.at(1), '  ALMUERZO ');
+          matching: find.byType(CampoMontoPad)));
+      expect(await _esperarTexto(tester, 'Aceptar'), isTrue,
+          reason: 'la hoja del pad abre');
+      // Asentar la hoja antes de teclear (su animación de
+      // entrada corre con el reloj falso del test).
+      await tester.pumpAndSettle();
+      for (final d in ['5', '0', '0']) {
+        await tester.tap(find.byKey(ValueKey('pad-$d')));
+        await tester.pump();
+      }
+      await tester.tap(find.text('Aceptar'));
+      await tester.pumpAndSettle();
+      await _ciclos(tester, 3);
+      await tester.enterText(
+          find.descendant(
+              of: find.byType(AlertDialog),
+              matching: find.byType(TextField)),
+          '  ALMUERZO ');
       await tester.tap(find.text('Enviar solicitud'));
       expect(
           await _esperarTexto(

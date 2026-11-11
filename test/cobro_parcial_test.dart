@@ -294,7 +294,7 @@ void main() {
   });
 
   group('hoja de cobro parcial (widget)', () {
-    testWidgets('teclear valida y «quedan pendientes» '
+    testWidgets('el pad empotrado valida y «quedan pendientes» '
         'cuadra; el atajo Todo confirma el total',
         (tester) async {
       double? resultado;
@@ -322,14 +322,26 @@ void main() {
       expect(find.text('Cobrar parcial — Duany'), findsOneWidget);
       expect(find.text('Pendiente total: 4800 CUP'),
           findsOneWidget);
-      await tester.enterText(find.byType(TextField), '3000');
-      await tester.pump();
+      // 1.32 (O2F2): la hoja compone con el PAD empotrado;
+      // teclear = tocar las teclas del pad.
+      Future<void> tecla(String t) async {
+        await tester.tap(find.byKey(ValueKey('pad-$t')));
+        await tester.pump();
+      }
+
+      await tecla('3');
+      await tecla('0');
+      await tecla('0');
+      await tecla('0');
       expect(find.textContaining('Quedan pendientes 1800 CUP'),
           findsOneWidget);
       // Por encima del total: inválido y no confirma
       // (el botón está deshabilitado: la hoja sigue).
-      await tester.enterText(find.byType(TextField), '9999');
-      await tester.pump();
+      await tecla('C');
+      await tecla('9');
+      await tecla('9');
+      await tecla('9');
+      await tecla('9');
       expect(find.text('Supera el pendiente total.'),
           findsOneWidget);
       await tester.tap(find.text('Confirmar cobro'));

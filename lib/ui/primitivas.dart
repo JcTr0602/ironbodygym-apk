@@ -39,11 +39,21 @@ abstract final class Tacto {
 /// como texto (dígitos y un punto decimal) sin abrir el
 /// teclado del sistema. Reutilizable por los demás cobros
 /// en la Oleada 2.
+///
+/// 1.32 (O2F2): [decimales] = false para importes ENTEROS
+/// (los adelantos son «pesos enteros»): la tecla del punto
+/// se pinta apagada y no compone nada.
 class PadNumerico extends StatelessWidget {
   final String valor;
   final void Function(String nuevo) onCambia;
+  final bool decimales;
 
-  const PadNumerico({super.key, required this.valor, required this.onCambia});
+  const PadNumerico({
+    super.key,
+    required this.valor,
+    required this.onCambia,
+    this.decimales = true,
+  });
 
   void _tecla(String t) {
     Tacto.ligero();
@@ -53,6 +63,7 @@ class PadNumerico extends StatelessWidget {
     } else if (t == 'C') {
       v = '';
     } else if (t == '.') {
+      if (!decimales) return;
       if (!v.contains('.')) v = v.isEmpty ? '0.' : '$v.';
     } else {
       // Tope sano de mostrador: 9 enteros y 2 decimales.
@@ -67,6 +78,8 @@ class PadNumerico extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget tecla(String t, {bool ancha = false}) {
+      // Sin decimales, la tecla '.' queda apagada y muda.
+      final apagada = t == '.' && !decimales;
       return Expanded(
         flex: ancha ? 2 : 1,
         child: Padding(
@@ -77,12 +90,17 @@ class PadNumerico extends StatelessWidget {
             child: InkWell(
               key: ValueKey('pad-$t'),
               borderRadius: BorderRadius.circular(AppRadio.sm),
-              onTap: () => _tecla(t),
+              onTap: apagada ? null : () => _tecla(t),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Center(
                   child: Text(t,
-                      style: AppTexto.conTabulares(AppTexto.subtitulo)),
+                      style: AppTexto.conTabulares(AppTexto.subtitulo)
+                          .copyWith(
+                              color: apagada
+                                  ? AppColores.textoSecundario(context)
+                                      .withValues(alpha: 0.35)
+                                  : null)),
                 ),
               ),
             ),
@@ -111,11 +129,18 @@ class DeslizarConfirmar extends StatefulWidget {
   final bool habilitado;
   final VoidCallback onConfirmar;
 
+  /// 1.32 (O2F2): el rótulo mientras la confirmación viaja
+  /// («Liquidando…» en la hoja de arqueo, la cuna de la
+  /// primitiva; «Anulando…», «Cerrando…» en los demás
+  /// flujos de dinero que la adoptan).
+  final String textoConfirmando;
+
   const DeslizarConfirmar({
     super.key,
     required this.texto,
     required this.habilitado,
     required this.onConfirmar,
+    this.textoConfirmando = 'Liquidando…',
   });
 
   @override
@@ -147,7 +172,7 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
             children: [
               Center(
                 child: Text(
-                  _confirmado ? 'Liquidando…' : widget.texto,
+                  _confirmado ? widget.textoConfirmando : widget.texto,
                   style: AppTexto.etiqueta.copyWith(
                     fontWeight: FontWeight.w700,
                     color: widget.habilitado
@@ -200,5 +225,264 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
       },
     );
   }
+}
+
+/// 1.32 (Oleada 2 Fase 2): HOJA DE IMPORTE con el pad del
+/// mostrador — la puerta ÚNICA para teclear dinero sin el
+/// teclado del sistema en los flujos que viven dentro de
+/// otros diálogos o formularios (precio de suplemento, gasto,
+/// adelanto, cobro personalizado, editar pago, entregado del
+/// arqueo, compra). Muestra el importe en grande, los
+/// atajos opcionales (los importes rápidos del plano:
+/// 200/600/1200/1500/2000/2500 en los cobros) y el
+/// [PadNumerico]; devuelve el texto compuesto o null si se
+/// cancela. La validación del importe sigue siendo la de
+/// cada flujo: la hoja solo captura.
+Future<String?> mostrarHojaMontoPad(
+  BuildContext context, {
+  required String titulo,
+  required String valorInicial,
+  String? sufijo,
+  bool decimales = true,
+  List<({String etiqueta, String valor})>? rapidos,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) => _HojaMontoPad(
+      titulo: titulo,
+      valorInicial: valorInicial,
+      sufijo: sufijo,
+      decimales: decimales,
+      rapidos: rapidos,
+    ),
+  );
+}
+
+class _HojaMontoPad extends StatefulWidget {
+  final String titulo;
+  final String valorInicial;
+  final String? sufijo;
+  final bool decimales;
+  final List<({String etiqueta, String valor})>? rapidos;
+
+  const _HojaMontoPad({
+    required this.titulo,
+    required this.valorInicial,
+    this.sufijo,
+    this.decimales = true,
+    this.rapidos,
+  });
+
+  @override
+  State<_HojaMontoPad> createState() => _HojaMontoPadState();
+}
+
+class _HojaMontoPadState extends State<_HojaMontoPad> {
+  late String _valor = widget.valorInicial;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: AppEspacio.lg,
+        right: AppEspacio.lg,
+        top: AppEspacio.sm,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            AppEspacio.lg,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.titulo, style: AppTexto.subtitulo),
+          const SizedBox(height: AppEspacio.sm),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColores.borde(context)),
+              borderRadius: BorderRadius.circular(AppRadio.md),
+            ),
+            child: Text(
+              _valor.isEmpty ? '0' : _valor,
+              style: AppTexto.display.copyWith(
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: _valor.isEmpty
+                    ? AppColores.textoSecundario(context)
+                    : null,
+              ),
+              textAlign: TextAlign.end,
+            ),
+          ),
+          if (widget.sufijo != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(widget.sufijo!,
+                  style: AppTexto.metadato),
+            ),
+          if (widget.rapidos != null && widget.rapidos!.isNotEmpty) ...[
+            const SizedBox(height: AppEspacio.sm),
+            Wrap(
+              spacing: AppEspacio.sm,
+              children: [
+                for (final r in widget.rapidos!)
+                  ActionChip(
+                    label: Text(r.etiqueta),
+                    onPressed: () =>
+                        setState(() => _valor = r.valor),
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: AppEspacio.sm),
+          PadNumerico(
+            valor: _valor,
+            decimales: widget.decimales,
+            onCambia: (v) => setState(() => _valor = v),
+          ),
+          const SizedBox(height: AppEspacio.md),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context, _valor),
+                  child: const Text('Aceptar'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Campo de importe SIN teclado: se ve como un campo de la
+/// casa (misma decoración que CampoTexto) y al tocarlo abre
+/// [mostrarHojaMontoPad]. El llamador guarda el texto
+/// devuelto en su controlador de siempre y repinta; todas
+/// las validaciones del flujo quedan donde estaban.
+class CampoMontoPad extends StatelessWidget {
+  final String etiqueta;
+  final String valor;
+  final String? sufijo;
+  final IconData? icono;
+  final VoidCallback onTap;
+
+  const CampoMontoPad({
+    super.key,
+    required this.etiqueta,
+    required this.valor,
+    this.sufijo,
+    this.icono,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: InputDecorator(
+        isEmpty: valor.isEmpty,
+        decoration: InputDecoration(
+          labelText: etiqueta,
+          suffixText: sufijo,
+          prefixIcon: icono != null ? Icon(icono) : null,
+          suffixIcon: const Icon(Icons.dialpad_rounded, size: 20),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            borderSide: BorderSide(color: AppColores.borde(context)),
+          ),
+          filled: true,
+          fillColor: AppColores.superficie(context),
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.lg, vertical: AppEspacio.md),
+        ),
+        child: Text(
+          valor.isEmpty ? 'Toca para escribir el importe' : valor,
+          style: AppTexto.cuerpo.copyWith(
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color: valor.isEmpty
+                ? AppColores.textoSecundario(context)
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Confirmación de dinero crítico por DESLIZAMIENTO (la
+/// hermana de DialogoApp.confirmar para los cierres y
+/// anulaciones del plano transversal): el mensaje se lee y
+/// la confirmación exige arrastrar el pulgar — un toque
+/// accidental no cierra una caja ni anula un pago. Devuelve
+/// true SOLO si se deslizó hasta el final.
+///
+/// Es una HOJA modal, no un AlertDialog, a propósito:
+/// DeslizarConfirmar usa LayoutBuilder, que no responde
+/// dimensiones intrínsecas, y el AlertDialog las pide al
+/// medir título/contenido (el diálogo no pinta); en la hoja
+/// el carril ya vive probado desde la Fase 1.
+Future<bool> confirmarDeslizando(
+  BuildContext context, {
+  required String titulo,
+  required String mensaje,
+  required String textoDeslizar,
+  String textoConfirmando = 'Un momento…',
+  IconData icono = Icons.help_outline_rounded,
+}) async {
+  final ok = await showModalBottomSheet<bool>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, AppEspacio.lg),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icono, color: AppColores.textoSecundario(ctx)),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(child: Text(titulo, style: AppTexto.titulo)),
+            ],
+          ),
+          const SizedBox(height: AppEspacio.md),
+          Text(mensaje, style: AppTexto.cuerpo),
+          const SizedBox(height: AppEspacio.lg),
+          DeslizarConfirmar(
+            texto: textoDeslizar,
+            textoConfirmando: textoConfirmando,
+            habilitado: true,
+            onConfirmar: () => Navigator.pop(ctx, true),
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  return ok == true;
 }
 
