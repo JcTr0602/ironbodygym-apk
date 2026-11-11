@@ -5040,12 +5040,25 @@ class LocalDb {
   /// pago debe seguir excluido. La llama [markOp] dentro de la
   /// transacción que marca el rechazo, sobre el mismo executor:
   /// transición y compensación son atómicas.
+  ///
+  /// 1.32 (H-MUERTE-1): [excluirOpUuid] deja fuera del conteo de
+  /// vivas a la op que está muriendo por descarte manual: el
+  /// embudo [resolverEfectosOpMuerta] corre ANTES del DELETE de
+  /// [cancelOp] (misma transacción), así que sin la exclusión la
+  /// op se vería a sí misma como anulación viva y la marca
+  /// quedaría pegada. En el camino de [markOp] no hace falta:
+  /// la transición a 'rechazada' ya ocurrió en la transacción.
   Future<void> _desmarcarPagoAnuladoSiSinViva(
-      DatabaseExecutor ex, int pagoId) async {
+      DatabaseExecutor ex, int pagoId,
+      {String? excluirOpUuid}) async {
     final vivas = await ex.query('ops_queue',
-        columns: ['payload'],
+        columns: ['op_uuid', 'payload'],
         where: "tipo='anular_pago' AND estado != 'rechazada'");
     for (final r in vivas) {
+      if (excluirOpUuid != null &&
+          '${r['op_uuid']}' == excluirOpUuid) {
+        continue;
+      }
       try {
         final p =
             jsonDecode(r['payload'] as String) as Map<String, dynamic>;
@@ -5639,6 +5652,14 @@ class LocalDb {
   /// por el pull y el temporal debe desaparecer para no duplicar.
   Future<void> limpiarOptimista(String tabla, String opUuid) async {
     final d = await db;
+    await _limpiarOptimistaEn(d, tabla, opUuid);
+  }
+
+  /// Núcleo con ejecutor EXPLÍCITO de [limpiarOptimista] (1.32,
+  /// H-MUERTE-1): el embudo [resolverEfectosOpMuerta] limpia la
+  /// fila optimista DENTRO de la transacción del descarte.
+  Future<void> _limpiarOptimistaEn(
+      DatabaseExecutor ex, String tabla, String opUuid) async {
     // Auditoría 1.21 A-09: antes cargaba y decodificaba la tabla
     // ENTERA por cada op aplicada; las filas optimistas son por
     // definición las de id negativo — se filtran en SQL y solo
@@ -5646,7 +5667,7 @@ class LocalDb {
     // 1.23 (Delta Argón 4ª#6): el LIKE en SQL descarta ya en
     // SQLite las optimistas de OTRAS ops (la comprobación exacta
     // en Dart se mantiene como red).
-    final rows = await d.query(tabla,
+    final rows = await ex.query(tabla,
         where: 'id < 0 AND data LIKE ?', whereArgs: ['%$opUuid%']);
     for (final r in rows) {
       try {
@@ -5660,7 +5681,7 @@ class LocalDb {
         final data =
             jsonDecode(r['data'] as String) as Map<String, dynamic>;
         if (data['op_uuid'] == opUuid) {
-          await d.delete(tabla, where: 'id=?', whereArgs: [id]);
+          await ex.delete(tabla, where: 'id=?', whereArgs: [id]);
         }
       } catch (_) {}
     }
@@ -10949,15 +10970,278 @@ class LocalDb {
         [desdeIso, hastaIso]);
   }
 
+  /// 1.24 Bloque 2 (movido a LocalDb en 1.32, H-MUERTE-1):
+  /// restaura el `pagado_hasta` del espejo al valor que traía
+  /// ANTES del cobro optimista, usando el 'pagado_hasta_anterior'
+  /// que el preview guarda en el payload (contrato P1#4, el
+  /// mismo que usa el Deshacer de la pantalla de pagos). Sin ese
+  /// campo en el payload no se inventa nada: la op no nació del
+  /// preview y su espejo no fue tocado por él.
+  ///
+  /// Guardas (A-3 + YS-5): solo se revierte si el `pagado_hasta`
+  /// actual del espejo SIGUE siendo el valor optimista que ESTA
+  /// op pintó (guarda de valor) y el sello de procedencia, si
+  /// existe, nombra a ESTA op (guarda de identidad). Si la
+  /// procedencia es de OTRA op, el vencimiento vigente no es de
+  /// esta: no se revierte y se pide la re-descarga completa de
+  /// clientes por meta (el pull delta no traería la fila: en el
+  /// servidor no cambió — patrón Missail/H12).
+  ///
+  /// Devuelve true SOLO en ese caso de procedencia ajena, para
+  /// que SyncService levante además su pull protegido en
+  /// memoria; el resto de desenlaces devuelve false. Nunca
+  /// lanza: cualquier fallo deja el espejo como está.
+  Future<bool> revertirVencimientoOptimistaDeOp(
+      Map<String, dynamic> op,
+      {DatabaseExecutor? txn}) async {
+    try {
+      final rawPayload = op['payload'];
+      final Map<String, dynamic> p;
+      if (rawPayload is String) {
+        p = jsonDecode(rawPayload) as Map<String, dynamic>;
+      } else if (rawPayload is Map) {
+        p = rawPayload.cast<String, dynamic>();
+      } else {
+        return false;
+      }
+      if (!p.containsKey('pagado_hasta_anterior')) return false;
+      // Tolerante num-o-texto (auditoría de cierre 1.24): un
+      // cast `as num?` lanzaría si el id llegara como String
+      // y el catch tragaría la reversión en silencio.
+      final cid = int.tryParse('${p['cliente_id']}');
+      if (cid == null) return false;
+      final optimistaRaw = '${p['pagado_hasta'] ?? ''}';
+      if (optimistaRaw.isEmpty) {
+        // La op no pintó vencimiento optimista (el preview
+        // solo actualiza el espejo cuando el payload trae el
+        // nuevo vencimiento): no hay nada suyo que revertir.
+        return false;
+      }
+      final optimista = optimistaRaw.length >= 10
+          ? optimistaRaw.substring(0, 10)
+          : optimistaRaw;
+      final filas = await mirrorPorIds('clientes', [cid], txn: txn);
+      if (filas.isEmpty) return false;
+      final procedencia = '${filas.first['ultimo_pago_op_uuid'] ?? ''}';
+      final miUuid = '${op['op_uuid'] ?? ''}';
+      if (procedencia.isNotEmpty &&
+          miUuid.isNotEmpty &&
+          procedencia != miUuid) {
+        final ex = txn ?? await db;
+        await setMetaEn(ex, 'forzar_redescarga_clientes', '1');
+        return true;
+      }
+      final actualRaw = '${filas.first['pagado_hasta'] ?? ''}';
+      final actual = actualRaw.length >= 10
+          ? actualRaw.substring(0, 10)
+          : actualRaw;
+      if (actual != optimista) return false;
+      final ex = txn ?? await db;
+      final rows = await ex.query('clientes',
+          where: 'id=?', whereArgs: [cid], limit: 1);
+      if (rows.isEmpty) return false;
+      // Misma red que updateMirrorPagadoHastaEn: JSON dañado →
+      // se omite (el próximo pull reescribe la fila entera).
+      final data = _decodificarDataGuardada(rows.first['data']);
+      if (data == null) return false;
+      final anterior = p['pagado_hasta_anterior'];
+      if (anterior == null || '$anterior'.isEmpty) {
+        data.remove('pagado_hasta');
+      } else {
+        final f = '$anterior';
+        data['pagado_hasta'] =
+            f.length >= 10 ? f.substring(0, 10) : f;
+      }
+      // Las columnas dedicadas se propagan como en
+      // updateMirrorPagadoHastaEn / updateMirrorBasico.
+      await ex.update(
+          'clientes', {'data': jsonEncode(data), ...columnasClientes(data)},
+          where: 'id=?', whereArgs: [cid]);
+      // H5 (revisión de Argón al Yunque de Sync): la reversión
+      // consumió el vencimiento de ESTA op — el sello que la
+      // nombraba no debe sobrevivir a su propio desenlace. La
+      // limpieza es condicional al uuid exacto (regla §0.2-6).
+      await limpiarProcedenciaPagoEn(ex, cid, miUuid);
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Tipos de op que llevan una fila local en `incidencias_local`
+  /// (espejo del conjunto de sync.dart): su muerte sin aplicar
+  /// debe resolver esa fila o queda en 'pending' eterno y
+  /// congela el cursor del pull de incidencias (YS-3).
+  static const _tiposIncidenciaLocal = {
+    'incidencia',
+    'crear_incidencia',
+    'editar_incidencia',
+    'cambiar_estado_incidencia',
+  };
+
+  /// 1.32 (H-MUERTE-1, Corte A de Argón): embudo ÚNICO de
+  /// resolución de efectos locales de una op que MUERE sin
+  /// aplicarse por descarte manual ([cancelOp]). Hasta hoy el
+  /// descarte desde Salud era un DELETE desnudo: un cobro
+  /// cancelado dejaba al cliente «pagado» para siempre, una
+  /// anulación cancelada dejaba el pago válido fuera de caja y
+  /// nómina para siempre, una liquidación cancelada seguía
+  /// descontando el «pendiente a entregar»... Este embudo aplica
+  /// por tipo LA MISMA resolución que la rama de rechazo del
+  /// servidor en sync.dart (`_aplicarEstadoServidor`), sobre el
+  /// ejecutor que le pase el llamador:
+  /// - `pago_mensual`: reversión determinista del vencimiento
+  ///   optimista con su doble guarda valor+identidad
+  ///   ([revertirVencimientoOptimistaDeOp]).
+  /// - `anular_pago`: desmarca `anulado` del pago SOLO si no
+  ///   queda otra anulación viva para ese pago (la op moribunda
+  ///   se excluye del conteo: el embudo corre antes del DELETE).
+  /// - `liquidar_entrega_efectivo`: borra la fila local de la
+  ///   entrega por su op_uuid (deja de descontar el pendiente).
+  /// - `inscripcion_venta_suplemento` / `crear_categoria`: borra
+  ///   la fila optimista (id < 0) de su espejo.
+  /// - `reponer_lote`: reversión idempotente de las dosis
+  ///   (H-MUERTE-2: si ya se revirtió al morir antes, no repite).
+  /// - `eliminar_suplemento`: marca la restauración de los 5
+  ///   espejos purgados (re-descarga completa focalizada por
+  ///   meta, el remedio persistente de `_marcarRestauracion
+  ///   Suplemento` en sync.dart).
+  /// - Mutaciones sobre cliente existente (conjunto AT-04 sin
+  ///   `pago_mensual`, que ya tiene su reversión determinista):
+  ///   pide la re-descarga completa de clientes por meta para
+  ///   que el espejo converja con el servidor.
+  /// - Ops de incidencia: su fila local sale a
+  ///   `sync_estado='error'` con [motivo], visible y
+  ///   reintentable, nunca en 'pending' eterno.
+  ///
+  /// Cada efecto va con su propia red (como en las superficies
+  /// de sync): el fallo de uno no bloquea a los demás ni al
+  /// descarte. Para una op que ya transitó a 'rechazada' el
+  /// embudo es inocuo: sus efectos ya se resolvieron al
+  /// transitar y cada paso es idempotente o con guarda.
+  Future<void> resolverEfectosOpMuerta(Map<String, dynamic> op,
+      String motivo,
+      {DatabaseExecutor? txn}) async {
+    final ex = txn ?? await db;
+    final uuid = '${op['op_uuid'] ?? ''}';
+    final tipo = '${op['tipo'] ?? ''}';
+    Map<String, dynamic>? payload;
+    try {
+      final raw = op['payload'];
+      if (raw is String) {
+        payload = jsonDecode(raw) as Map<String, dynamic>;
+      } else if (raw is Map) {
+        payload = raw.cast<String, dynamic>();
+      }
+    } catch (_) {}
+    if (tipo == 'pago_mensual') {
+      await revertirVencimientoOptimistaDeOp(op, txn: ex);
+    }
+    if (tipo == 'anular_pago' && payload != null) {
+      try {
+        final pid = (payload['pago_id'] as num?)?.toInt();
+        if (pid != null && pid > 0) {
+          await _desmarcarPagoAnuladoSiSinViva(ex, pid,
+              excluirOpUuid: uuid);
+        }
+      } catch (_) {}
+    }
+    if (tipo == 'liquidar_entrega_efectivo') {
+      try {
+        await ex.delete('entregas_efectivo',
+            where: 'op_uuid=?', whereArgs: [uuid]);
+      } catch (_) {}
+    }
+    if (tipo == 'inscripcion_venta_suplemento') {
+      await _limpiarOptimistaEn(ex, 'ventas_suplementos', uuid);
+    } else if (tipo == 'crear_categoria') {
+      await _limpiarOptimistaEn(ex, 'categorias_suplemento', uuid);
+    }
+    if (tipo == 'reponer_lote' && payload != null) {
+      try {
+        await revertirOptimismoReponerLote(payload,
+            opUuid: uuid, txn: ex);
+      } catch (_) {}
+    }
+    if (tipo == 'eliminar_suplemento') {
+      try {
+        for (final t in const [
+          'suplementos',
+          'servicio_pomos',
+          'servicio_botes',
+          'servicio_lotes',
+          'reservas',
+        ]) {
+          await setMetaEn(ex, 'forzar_redescarga_$t', '1');
+        }
+      } catch (_) {}
+    }
+    if (const {
+      'editar_cliente',
+      'cambiar_estado',
+      'update_cliente_sensible',
+      'regalar_mes_cumpleanos',
+    }.contains(tipo)) {
+      try {
+        await setMetaEn(ex, 'forzar_redescarga_clientes', '1');
+      } catch (_) {}
+    }
+    if (_tiposIncidenciaLocal.contains(tipo) && payload != null) {
+      try {
+        final incidenciaId =
+            (payload['id'] ?? payload['incidencia_id']) as String?;
+        if (incidenciaId != null) {
+          await ex.update(
+              'incidencias_local',
+              {
+                'sincronizada': 0,
+                'sync_estado': 'error',
+                'sync_error': motivo,
+              },
+              where: 'id=?',
+              whereArgs: [incidenciaId]);
+        }
+      } catch (_) {}
+    }
+  }
+
   /// Cancela una operación propia aún no aplicada ni rechazada
   /// definitivamente (no se subirá). Devuelve true si se eliminó.
+  ///
+  /// 1.32 (H-MUERTE-1): el descarte resuelve ANTES los efectos
+  /// locales de la op por el embudo [resolverEfectosOpMuerta],
+  /// DENTRO de la misma transacción que el DELETE: o la op
+  /// desaparece con sus efectos deshechos, o no desaparece.
+  /// Antes era un DELETE desnudo y cada efecto quedaba pegado
+  /// para siempre (vencimiento falso, pago anulado en falso,
+  /// entrega descontando, fila optimista fantasma...).
   Future<bool> cancelOp(String opUuid) async {
     final d = await db;
-    final n = await d.delete('ops_queue',
-        // v1.3.1 (E6): también se puede descartar una bloqueada.
-        where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\', \'rechazada\', \'necesita_revision\')',
-        whereArgs: [opUuid]);
-    return n > 0;
+    return d.transaction((txn) async {
+      final rows = await txn.query('ops_queue',
+          where: 'op_uuid=?', whereArgs: [opUuid], limit: 1);
+      if (rows.isEmpty) return false;
+      final estado = '${rows.first['estado']}';
+      // v1.3.1 (E6): también se puede descartar una bloqueada.
+      if (!const {'pendiente', 'error', 'rechazada', 'necesita_revision'}
+          .contains(estado)) {
+        return false;
+      }
+      final op = rows.first;
+      await resolverEfectosOpMuerta(
+          op, 'La operación fue descartada manualmente desde Salud.',
+          txn: txn);
+      final n = await txn.delete('ops_queue',
+          where: 'op_uuid=? AND estado IN (\'pendiente\', \'error\', \'rechazada\', \'necesita_revision\')',
+          whereArgs: [opUuid]);
+      if (n > 0 && '${op['tipo']}' == 'reponer_lote') {
+        // La marca de reversión de H-MUERTE-2 muere con su op.
+        await txn.delete('meta',
+            where: 'k=?',
+            whereArgs: [_claveReversionReponerLote(opUuid)]);
+      }
+      return n > 0;
+    });
   }
 
   // -- poda de ops_queue (v1.3.4, item 3) -------------------------------

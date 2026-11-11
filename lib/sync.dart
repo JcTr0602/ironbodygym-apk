@@ -4329,107 +4329,20 @@ class SyncEngine {
   }
 
   /// 1.24 Bloque 2: restaura el `pagado_hasta` del espejo al valor
-  /// que traía ANTES del cobro optimista, usando el
-  /// 'pagado_hasta_anterior' que el preview guarda en el payload
-  /// (contrato P1#4, el mismo que usa el Deshacer de la pantalla
-  /// de pagos). Sin ese campo en el payload no se inventa nada:
-  /// la op no nació del preview y su espejo no fue tocado por él.
+  /// que traía ANTES del cobro optimista. El núcleo (doble guarda
+  /// valor+identidad A-3/YS-5 y limpieza condicional del sello)
+  /// vive desde 1.32 en LocalDb
+  /// ([LocalDb.revertirVencimientoOptimistaDeOp]) para que el
+  /// embudo de muerte local de `cancelOp` (H-MUERTE-1) aplique
+  /// LA MISMA reversión; aquí solo se traduce su señal de
+  /// «procedencia ajena» al pull protegido en memoria de este
+  /// ciclo (el núcleo ya dejó pedida la re-descarga completa
+  /// por meta, el remedio persistente).
   Future<void> _revertirVencimientoOptimista(
       Map<String, dynamic> op) async {
-    try {
-      final p =
-          jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-      if (!p.containsKey('pagado_hasta_anterior')) return;
-      // Tolerante num-o-texto (auditoría de cierre 1.24): un
-      // cast `as num?` lanzaría si el id llegara como String
-      // y el catch tragaría la reversión en silencio.
-      final cid = int.tryParse('${p['cliente_id']}');
-      if (cid == null) return;
-      // Auditoría Definitiva (A-3): guarda de PROCEDENCIA. La
-      // reversión incondicional pisaba un pago POSTERIOR ya
-      // confirmado del mismo cliente: dos pagos en vuelo, el
-      // segundo se confirma y el primero se rechaza después ⇒
-      // el espejo volvía al vencimiento anterior al primer
-      // pago, borrando el efecto del pago válido. Solo se
-      // revierte si el `pagado_hasta` actual del espejo SIGUE
-      // siendo el valor optimista que ESTA op pintó (el
-      // 'pagado_hasta' de su propio payload, el mismo que el
-      // preview aplicó al espejo al encolar). Si otra op (o un
-      // pull con la verdad del servidor) ya lo movió, el
-      // vencimiento actual manda y no se toca.
-      final optimistaRaw = '${p['pagado_hasta'] ?? ''}';
-      if (optimistaRaw.isEmpty) {
-        // La op no pintó vencimiento optimista (el preview
-        // solo actualiza el espejo cuando el payload trae el
-        // nuevo vencimiento): no hay nada suyo que revertir.
-        return;
-      }
-      final optimista = optimistaRaw.length >= 10
-          ? optimistaRaw.substring(0, 10)
-          : optimistaRaw;
-      final filas = await _db.mirrorPorIds('clientes', [cid]);
-      if (filas.isEmpty) return;
-      // Yunque de Sincronización (YS-5): guarda de IDENTIDAD
-      // sobre la de valor. La guarda de valor no distingue el
-      // test MISMO VALOR: dos pagos en vuelo que pintan el
-      // mismo vencimiento (dos meses seguidos al mismo
-      // precio) — el rechazo del primero revertía también el
-      // segundo, ya confirmado. Si el espejo trae la
-      // procedencia (`ultimo_pago_op_uuid`, la pinta el
-      // preview y la papelera al aplicar el optimista):
-      //  - distinta de esta op → el vencimiento vigente NO es
-      //    de esta op: no se revierte (se borraría un pago
-      //    válido) y se pide el pull silencioso de fin de
-      //    ciclo para converger con el servidor.
-      //  - igual a esta op → el vencimiento es suyo: sigue la
-      //    guarda de valor y la reversión de siempre.
-      // Sin procedencia (ops pintadas antes de YS-5) manda la
-      // guarda de valor legada: tratar la ausencia como «no
-      // mío» dejaría vencimientos falsos eternos, porque el
-      // pull delta no cura el patrón Missail (la fila del
-      // servidor no cambia cuando una op se rechaza).
-      final procedencia =
-          '${filas.first['ultimo_pago_op_uuid'] ?? ''}';
-      final miUuid = '${op['op_uuid'] ?? ''}';
-      if (procedencia.isNotEmpty &&
-          miUuid.isNotEmpty &&
-          procedencia != miUuid) {
-        _pullProtegidoPendiente = true;
-        // H12 (revisión de Argón al Yunque de Sync): el pull
-        // silencioso es DELTA por sync_seq — si AMBAS ops del
-        // cliente fueron rechazadas, la fila del servidor
-        // nunca cambió, su seq nunca avanzó y el delta jamás
-        // traerá al cliente: el vencimiento falso quedaría
-        // pegado para siempre (patrón Missail). Se fuerza
-        // además la re-descarga completa de clientes, el
-        // mismo remedio que _marcarRestauracionSuplemento.
-        await _db.setMeta('forzar_redescarga_clientes', '1');
-        return;
-      }
-      final actualRaw = '${filas.first['pagado_hasta'] ?? ''}';
-      final actual = actualRaw.length >= 10
-          ? actualRaw.substring(0, 10)
-          : actualRaw;
-      if (actual != optimista) return;
-      final anterior = p['pagado_hasta_anterior'];
-      if (anterior == null || '$anterior'.isEmpty) {
-        await _db.updateMirrorBasico(cid, {'pagado_hasta': null});
-      } else {
-        final f = '$anterior';
-        await _db.updateMirrorPagadoHasta(
-            cid, f.length >= 10 ? f.substring(0, 10) : f);
-      }
-      // H5 (revisión de Argón al Yunque de Sync): la
-      // reversión consumió el vencimiento de ESTA op — el
-      // sello que la nombraba no debe sobrevivir a su propio
-      // desenlace, o quedaría apuntando a una op muerta y
-      // cualquier movimiento posterior sin firma (el regalo
-      // de cumpleaños, antes de sellar el suyo) heredaría
-      // una procedencia podrida. Solo se llega aquí si la
-      // procedencia era de esta op o no existía: la limpieza
-      // es condicional al uuid y no toca sellos ajenos.
-      await _db.limpiarProcedenciaPago(cid, miUuid);
-    } catch (_) {}
+    if (await _db.revertirVencimientoOptimistaDeOp(op)) {
+      _pullProtegidoPendiente = true;
+    }
   }
 
   /// Costura de test (Auditoría Definitiva A-3): expone la
