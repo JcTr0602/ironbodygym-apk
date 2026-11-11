@@ -1255,6 +1255,24 @@ class SyncEngine {
   // estado optimista local sin esperar al ciclo de 2 minutos.
   bool _pullProtegidoPendiente = false;
 
+  /// 1.23 AT-04: mutaciones sobre un cliente EXISTENTE (su fila
+  /// del espejo tiene id > 0): su reflejo optimista NO se deshace
+  /// borrando filas temporales (eso solo limpia ids < 0), así que
+  /// si la op muere —rechazo del servidor o bump a revisión— el
+  /// espejo solo converge con el pull protegido de fin de ciclo.
+  /// Fuente única desde 1.32 (H-MUERTE-3): la rama de rechazo de
+  /// [_aplicarEstadoServidor] y [_bumpConReversion] comparten
+  /// ESTE conjunto; antes el bump no lo consultaba y la edición
+  /// falsa quedaba pintada hasta que el servidor tocara la fila
+  /// por otro motivo.
+  static const Set<String> _tiposMutacionClienteExistente = {
+    'pago_mensual',
+    'cambiar_estado',
+    'editar_cliente',
+    'update_cliente_sensible',
+    'regalar_mes_cumpleanos',
+  };
+
   /// Se llama cuando el servidor rechaza la sesión (401).
   void Function()? onSessionExpired;
 
@@ -3789,6 +3807,19 @@ class SyncEngine {
           {int? httpStatus}) =>
       _bumpConReversion(op, error, httpStatus: httpStatus);
 
+  /// Costura de test (1.32, H-MUERTE-3): lee la bandera de pull
+  /// protegido AT-04 sin consumirla (el consumo real lo hace
+  /// [_pullSiProtegidoPendiente] al final del ciclo).
+  @visibleForTesting
+  bool get pullProtegidoPendienteParaTest => _pullProtegidoPendiente;
+
+  /// Costura de test (1.32, H-MUERTE-3): limpia la bandera entre
+  /// casos (el singleton del motor sobrevive a la suite).
+  @visibleForTesting
+  void limpiarPullProtegidoParaTest() {
+    _pullProtegidoPendiente = false;
+  }
+
   /// Costura de test (H2): ejerce
   /// [_resolverIncidenciaSiOpMuereLocal] contra la BD.
   @visibleForTesting
@@ -3844,6 +3875,15 @@ class SyncEngine {
           // servidor y quedó en revisión: la purga optimista se
           // restaura igual que en _aplicarEstadoServidor.
           await _marcarRestauracionSuplemento();
+        }
+        // 1.32 (H-MUERTE-3): la muerte por bump de una MUTACIÓN
+        // sobre cliente existente pide el mismo pull protegido
+        // AT-04 que la rama de rechazo del servidor. Sin la
+        // bandera, el cambio optimista (p. ej. un editar_cliente
+        // que jamás llegó al servidor) quedaba pintado hasta
+        // que la fila cambiara en el servidor por otro motivo.
+        if (_tiposMutacionClienteExistente.contains('${op['tipo']}')) {
+          _pullProtegidoPendiente = true;
         }
         // YS-3 (H2 de la revisión de Argón): si la op era de
         // incidencia, su fila local también se resuelve aquí:
@@ -4236,13 +4276,7 @@ class SyncEngine {
       // el servidor tocara esa fila por otro motivo. Para estos
       // tipos, el mismo pull silencioso de fin de ciclo pisa el
       // espejo con la verdad del servidor.
-      if (const {
-        'pago_mensual',
-        'cambiar_estado',
-        'editar_cliente',
-        'update_cliente_sensible',
-        'regalar_mes_cumpleanos',
-      }.contains('${op['tipo']}')) {
+      if (_tiposMutacionClienteExistente.contains('${op['tipo']}')) {
         _pullProtegidoPendiente = true;
       }
       if ('${op['tipo']}' == 'eliminar_suplemento') {
