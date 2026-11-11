@@ -146,4 +146,71 @@ void main() {
       expect(etiquetaCategoriaCongelacion('desconocida'), 'Otro');
     });
   });
+
+  // Contrato del sobre de admin_listar_congelaciones, fijado
+  // contra su definición viva en Supabase (verificada
+  // 2026-11-11): jsonb_build_object('ok', true, 'lista', […],
+  // 'hoy', fecha) y en error {ok:false, error:'…'}. NO existe
+  // clave 'congelaciones': el Yunque Cruzado cazó que
+  // listarRemoto la leía y la bandeja del dueño se vaciaba
+  // con ok=true. Si alguien vuelve a la clave vieja, el
+  // primer test de este grupo cae (la lista saldría vacía).
+  group('contrato admin_listar_congelaciones {ok, lista, hoy}',
+      () {
+    Map<String, dynamic> filaJson(String id, int clienteId) => {
+          'id': id,
+          'cliente_id': clienteId,
+          'cliente_nombre': 'Cliente $clienteId',
+          'cliente_telefono': '58191577',
+          'cliente_pagado_hasta': '2027-03-01',
+          'motivo_categoria': 'viaje',
+          'motivo': 'Viaje familiar',
+          'estado': 'pendiente',
+          'desde': '2027-03-02',
+          'hasta': '2027-03-11',
+          'creado_en': '2027-02-25T10:00:00Z',
+        };
+
+    test('el sobre real desenvuelve la lista bajo «lista»', () {
+      final res = CongelacionesService.parsearRespuestaListar({
+        'ok': true,
+        'lista': [filaJson('a1', 7), filaJson('b2', 9)],
+        'hoy': '2027-02-25',
+      });
+      expect(res.ok, isTrue);
+      expect(res.error, isNull);
+      expect(res.datos, hasLength(2));
+      expect(res.datos.first.id, 'a1');
+      expect(res.datos.first.clienteId, 7);
+      expect(res.datos.last.clienteNombre, 'Cliente 9');
+    });
+
+    test('lista vacía con ok=true es vacío real, no error', () {
+      final res = CongelacionesService.parsearRespuestaListar(
+          {'ok': true, 'lista': [], 'hoy': '2027-02-25'});
+      expect(res.ok, isTrue);
+      expect(res.datos, isEmpty);
+      expect(res.error, isNull);
+    });
+
+    test('el sobre de error de la RPC pasa como ok=false', () {
+      final res = CongelacionesService.parsearRespuestaListar({
+        'ok': false,
+        'error': 'Solo el dueño ve las congelaciones.',
+      });
+      expect(res.ok, isFalse);
+      expect(res.datos, isEmpty);
+      expect(res.error, 'Solo el dueño ve las congelaciones.');
+    });
+
+    test('una respuesta que no es el sobre es error, no vacío',
+        () {
+      for (final rara in [null, 'texto', 42]) {
+        final res =
+            CongelacionesService.parsearRespuestaListar(rara);
+        expect(res.ok, isFalse, reason: '$rara');
+        expect(res.datos, isEmpty);
+      }
+    });
+  });
 }
