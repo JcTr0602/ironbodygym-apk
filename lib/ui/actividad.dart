@@ -310,6 +310,69 @@ bool pasaFiltroMonto(double totalCup, String filtro, double? min,
   }
 }
 
+/// 1.32 (Dos horas en Actividad; diseño de Jc
+/// 2026-11-10, servido por el Escalón 0): el subtítulo de
+/// una fila del servidor enseña las DOS horas —
+/// «Hecho HH:MM · Subido HH:MM» — cuando la fila trae la
+/// captura del dispositivo (`captura_ts`, la llave
+/// aditiva del feed): Hecho = cuándo se hizo el cobro en
+/// el teléfono; Subido = cuándo llegó al servidor (el
+/// `ts` propio de la fila). Así un cobro hecho a las
+/// 09:12 y subido a las 21:40 al recuperar la conexión ya
+/// no se lee como si se hubiera cobrado a las 21:40.
+///
+/// Reglas: si `captura_ts` viene NULL (filas nacidas en
+/// el servidor: bot/CLI, incidencias aprobadas) se
+/// enseña SOLO la de subida, sin inventar la otra; las
+/// filas locales en cola (`_en_cola`) enseñan su única
+/// hora (su `ts` ES el hecho; aún no hay subida). El
+/// Hecho lleva prefijo dd/MM si no es de hoy; el Subido
+/// lleva dd/MM solo si su día difiere del día del Hecho.
+/// Función pura (top-level para tests).
+String horasSubtituloActividad(Map<String, dynamic> a, DateTime ahora) {
+  DateTime? instante(Object? v) {
+    final s = '${v ?? ''}'.trim();
+    if (s.isEmpty) return null;
+    final p = DateTime.tryParse(s);
+    if (p == null) return null;
+    return p.isUtc ? aHabana(p) : p;
+  }
+
+  String hhmm(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:'
+      '${d.minute.toString().padLeft(2, '0')}';
+  String conDia(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')} ${hhmm(d)}';
+  bool mismoDia(DateTime x, DateTime y) =>
+      x.year == y.year && x.month == y.month && x.day == y.day;
+
+  /// La hora única de siempre: hoy y <60 min, «ahora
+  /// mismo»/«hace X min»; hoy, HH:mm; otro día, dd/MM
+  /// HH:mm.
+  String unica(DateTime dt) {
+    if (mismoDia(dt, ahora)) {
+      final diff = ahora.difference(dt);
+      if (!diff.isNegative && diff.inMinutes < 60) {
+        final m = diff.inMinutes;
+        return m < 1 ? 'ahora mismo' : 'hace $m min';
+      }
+      return hhmm(dt);
+    }
+    return conDia(dt);
+  }
+
+  final subida = instante(a['ts']);
+  if (subida == null) return '';
+  if (a['_en_cola'] == true) return unica(subida);
+  final captura = instante(a['captura_ts']);
+  if (captura == null) return unica(subida);
+  final hechoTxt = mismoDia(captura, ahora) ? hhmm(captura) : conDia(captura);
+  final subidoTxt =
+      mismoDia(subida, captura) ? hhmm(subida) : conDia(subida);
+  return 'Hecho $hechoTxt · Subido $subidoTxt';
+}
+
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
@@ -1472,35 +1535,12 @@ class _ActividadScreenState extends State<ActividadScreen> {
     return '';
   }
 
-  /// v1.3.5 (Fase 1, C3): hora para el subtítulo — UN solo formato.
-  /// Hoy y <60 min: "hace X min" (o "ahora mismo"); hoy y >=60 min: HH:mm;
-  /// otro día: dd/MM HH:mm. Nunca "21:07 (ahora mismo)".
-  String _horaSubtitulo(Map<String, dynamic> a) {
-    final ts = '${a['ts'] ?? ''}';
-    if (ts.isEmpty) return '';
-    try {
-      final p0 = DateTime.parse(ts);
-      final dt = p0.isUtc ? aHabana(p0) : p0;
-      final ahora = ahoraHabana();
-      final esHoy = dt.year == ahora.year &&
-          dt.month == ahora.month &&
-          dt.day == ahora.day;
-      final hhmm = '${dt.hour.toString().padLeft(2, '0')}:'
-          '${dt.minute.toString().padLeft(2, '0')}';
-      if (esHoy) {
-        final diff = ahora.difference(dt);
-        if (!diff.isNegative && diff.inMinutes < 60) {
-          final m = diff.inMinutes;
-          return m < 1 ? 'ahora mismo' : 'hace $m min';
-        }
-        return hhmm;
-      }
-      return '${dt.day.toString().padLeft(2, '0')}/'
-          '${dt.month.toString().padLeft(2, '0')} $hhmm';
-    } catch (_) {
-      return '';
-    }
-  }
+  /// v1.3.5 (Fase 1, C3): hora para el subtítulo. 1.32:
+  /// la composición vive en la función pura
+  /// [horasSubtituloActividad] (dos horas cuando la fila
+  /// trae `captura_ts`; la única de siempre en el resto).
+  String _horaSubtitulo(Map<String, dynamic> a) =>
+      horasSubtituloActividad(a, ahoraHabana());
 
   /// v1.3.5 (Fase 1, C1+C2+C3): subtítulo compacto de 1 línea:
   /// "Tipo · Método · Hora · Entrenador". Sin duplicar el título ni
