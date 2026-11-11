@@ -170,8 +170,16 @@ class ServiciosScreen extends StatefulWidget {
   /// espejo de clientes (id, nombre, cuenta_casa…).
   final Map<String, dynamic>? clientePreseleccionado;
 
+  /// 1.32 «Mostrador Táctico»: embebida = vista del Pilar 3
+  /// (Tienda) — el hub se ENVUELVE sin reconstruirlo
+  /// (Addendum 98): mismas zonas, misma lógica, sin su AppBar.
+  final bool embebida;
+
   const ServiciosScreen(
-      {super.key, this.tipoInicial, this.clientePreseleccionado});
+      {super.key,
+      this.tipoInicial,
+      this.clientePreseleccionado,
+      this.embebida = false});
 
   @override
   State<ServiciosScreen> createState() => _ServiciosScreenState();
@@ -1607,7 +1615,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final zonaEfectiva =
         zonas.any((z) => z.id == _zona) ? _zona : 0;
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Servicios',
         acciones: [

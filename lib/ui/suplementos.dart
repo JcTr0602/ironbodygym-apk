@@ -44,8 +44,14 @@ class SuplementosScreen extends StatefulWidget {
   // venta rápida nace con ese comprador elegido.
   final int? clienteInicialId;
   final String? clienteInicialNombre;
+  /// 1.32 «Mostrador Táctico»: embebida = vista del Pilar 3
+  /// (Tienda), sin su AppBar.
+  final bool embebida;
   const SuplementosScreen(
-      {super.key, this.clienteInicialId, this.clienteInicialNombre});
+      {super.key,
+      this.clienteInicialId,
+      this.clienteInicialNombre,
+      this.embebida = false});
 
   @override
   State<SuplementosScreen> createState() => _SuplementosScreenState();
@@ -411,7 +417,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Suplementos',
         acciones: [

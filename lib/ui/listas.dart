@@ -137,7 +137,13 @@ class ListasScreen extends StatefulWidget {
   /// Pestaña inicial: 0=Hoy, 1=Por vencer, 2=Atrasados <30d, 3=Atrasados +30d,
   /// 4=Al día (v1.2.1).
   final int inicial;
-  const ListasScreen({super.key, this.inicial = 0});
+
+  /// 1.32 «Mostrador Táctico»: embebida = vista del Pilar 2
+  /// (Clientes) — sin su AppBar; la TabBar de vencimientos
+  /// baja al cuerpo (patrón de ActividadScreen en el Centro
+  /// de control).
+  final bool embebida;
+  const ListasScreen({super.key, this.inicial = 0, this.embebida = false});
   @override
   State<ListasScreen> createState() => _ListasScreenState();
 }
@@ -683,12 +689,10 @@ class _ListasScreenState extends State<ListasScreen>
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Vencimientos'), // v1.3.6: renombrado (era 'Listas')
-        bottom: TabBar(
+  /// 1.32: la barra de pestañas de vencimientos, compartida
+  /// entre el AppBar (pantalla suelta) y el cuerpo (embebida
+  /// en el Pilar 2).
+  TabBar _barraPestanas() => TabBar(
           controller: _tab,
           isScrollable: true,
           tabs: [
@@ -754,10 +758,20 @@ class _ListasScreenState extends State<ListasScreen>
               ),
             ), // v1.2.1
           ],
-        ),
-      ),
+        );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+            appBar: widget.embebida
+          ? null
+          : AppBar(
+              title: const Text('Vencimientos'), // v1.3.6: renombrado (era 'Listas')
+              bottom: _barraPestanas(),
+            ),
       body: Column(
         children: [
+          if (widget.embebida) _barraPestanas(),
           // 1.30 (Oleada D6, UI130-20): banner compacto,
           // como en Buscar, y la fila «Ordenar:» se funde
           // en la fila del buscador como menú de orden

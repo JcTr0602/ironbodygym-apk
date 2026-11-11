@@ -45,7 +45,13 @@ DateTime? _pullEnHabana(String ts) {
 }
 
 class BuscarScreen extends StatefulWidget {
-  const BuscarScreen({super.key});
+  /// 1.32 «Mostrador Táctico»: embebida = vista «Directorio»
+  /// del Pilar 2 (sin su AppBar) y [filtroInicial] = el filtro
+  /// de estado con el que nace (el Pulso del Día salta aquí
+  /// con «vencidos»/«aldia» ya puesto: D-3 absorbido).
+  final bool embebida;
+  final String? filtroInicial;
+  const BuscarScreen({super.key, this.embebida = false, this.filtroInicial});
   @override
   State<BuscarScreen> createState() => _BuscarScreenState();
 }
@@ -104,6 +110,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
   @override
   void initState() {
     super.initState();
+    // 1.32: el filtro pedido por el marco (salto con contexto
+    // desde el Pulso del Día) se aplica ANTES de la primera
+    // búsqueda; un valor desconocido se ignora.
+    final f = widget.filtroInicial;
+    if (f != null &&
+        const {'todos', 'aldia', 'vencidos', 'porvencer', 'sinfoto'}
+            .contains(f)) {
+      _filtro = f;
+    }
     _cargarConfig();
     _buscar(); // lista completa por defecto
   }
@@ -551,7 +566,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Buscar cliente',
         acciones: [

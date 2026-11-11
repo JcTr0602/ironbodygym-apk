@@ -36,7 +36,10 @@ import '../errores_sync.dart';
 import '../app_log.dart';
 
 class MiNominaScreen extends StatefulWidget {
-  const MiNominaScreen({super.key});
+  /// 1.32 «Mostrador Táctico»: embebida = pestaña «Mi Nómina»
+  /// del Pilar 4 (sin su AppBar).
+  final bool embebida;
+  const MiNominaScreen({super.key, this.embebida = false});
   @override
   State<MiNominaScreen> createState() => _MiNominaScreenState();
 }
@@ -615,12 +618,13 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     if (!AuthService().isOwner &&
         !PermisosEntrenador().canViewPayroll) {
       return Scaffold(
-          appBar: appBarIron(context, 'Mi nómina'),
+          appBar:
+              widget.embebida ? null : appBarIron(context, 'Mi nómina'),
           body: const Center(
               child: Text('No tienes permiso para ver tu nómina.')));
     }
     return Scaffold(
-      appBar: appBarIron(context, 'Mi nómina'),
+      appBar: widget.embebida ? null : appBarIron(context, 'Mi nómina'),
       body: Column(
         children: [
           const SyncBanner(compact: true),

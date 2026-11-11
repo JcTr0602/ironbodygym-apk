@@ -35,7 +35,11 @@ import '../app_log.dart';
 /// Fórmula (Jc): (clientes que pagaron el mes) × 150 CUP + bono manual.
 /// El dueño ve todo; el entrenador ve su tarjeta en el Home.
 class NominaScreen extends StatefulWidget {
-  const NominaScreen({super.key});
+  /// 1.32 «Mostrador Táctico»: embebida = pestaña «Nómina y
+  /// Mes» del Pilar 4 (sin su AppBar). Lee la foto sellada
+  /// igual que siempre: el cálculo no se retoca.
+  final bool embebida;
+  const NominaScreen({super.key, this.embebida = false});
 
   @override
   State<NominaScreen> createState() => _NominaScreenState();
@@ -865,7 +869,9 @@ class _NominaScreenState extends State<NominaScreen> {
         '${ahora.month.toString().padLeft(2, '0')}';
     final esDueno = AuthService().isOwner;
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Nómina del mes',
         acciones: [

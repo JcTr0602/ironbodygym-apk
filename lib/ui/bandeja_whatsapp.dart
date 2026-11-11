@@ -78,7 +78,10 @@ String rotuloTipoAvisoLote(String tipo) => switch (tipo) {
     };
 
 class BandejaWhatsappScreen extends StatefulWidget {
-  const BandejaWhatsappScreen({super.key});
+  /// 1.32 «Mostrador Táctico»: embebida = pestaña «Avisos
+  /// WhatsApp» del Pilar 2 (sin su AppBar).
+  final bool embebida;
+  const BandejaWhatsappScreen({super.key, this.embebida = false});
 
   @override
   State<BandejaWhatsappScreen> createState() =>
@@ -521,7 +524,9 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: appBarIron(
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
         context,
         'Avisos WhatsApp de hoy',
         acciones: [
