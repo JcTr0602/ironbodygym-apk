@@ -7881,6 +7881,12 @@ class SyncEngine {
     }
   }
 
+  /// Costura de test (H16): la política común de compresión
+  /// que reciben las fotos de incidencias antes de subir.
+  @visibleForTesting
+  Uint8List comprimirFotoParaTest(Uint8List bytes) =>
+      _comprimirFoto(bytes);
+
   /// Crea una subida tus reanudable. Devuelve la URL de subida o null
   /// si tus no está disponible / fue rechazada.
   Future<String?> _tusCrear(String objectPath, int length) async {
@@ -9040,8 +9046,18 @@ class SyncEngine {
               whereArgs: [fid]);
           continue;
         }
+        // H16 (revisión de Argón al Yunque de Sync): la
+        // foto se comprime con la política común (máx.
+        // 1024 px, JPEG 80) ANTES de subir, como las fotos
+        // de clientes — esta vía subía el archivo CRUDO de
+        // cámara (varios MB) por el PUT monolítico, y en
+        // datos móviles lentos la subida casi siempre
+        // moría tras agotar los reintentos y los 5 intentos
+        // de la fila. (La migración del transporte a la
+        // cola reanudable TUS queda fuera de este lote:
+        // mejora diferida, ver el informe de correcciones.)
         final bytes =
-            await file.readAsBytes();
+            _comprimirFoto(await file.readAsBytes());
         // Corrección A1-D1 (auditoría 1 de la 1.28): esta
         // subida monolítica era la ÚNICA que no recibía la
         // guarda QoS — durante su PUT (y sus 3 reintentos
