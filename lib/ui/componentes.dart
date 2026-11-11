@@ -1813,9 +1813,14 @@ class FranjaResumenLista extends StatelessWidget {
                     .copyWith(fontWeight: FontWeight.w700)),
           ),
           if (secundario != null)
-            Text(secundario!,
-                style: AppTexto.metadato.copyWith(
-                    color: AppColores.textoSecundario(context))),
+            Flexible(
+              child: Text(secundario!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context))),
+            ),
         ],
       ),
     );

@@ -15,8 +15,9 @@
 ///   spinners centrales.
 /// - El Modo Sol es SOLO manual (1 toque en la cabecera); el
 ///   automático por sensor no existe (guarda del contraste).
-/// - Por encima del 130 % de escala de fuente, la cabecera se
-///   apila en dos filas (resiliencia al 200 %).
+/// - La cabecera vive SIEMPRE en dos filas (identidad y
+///   acciones arriba, píldora a lo ancho debajo): a 420 dp
+///   la fila única desborda, y al 200 % ni se acerca.
 library;
 
 import 'dart:async';
@@ -226,18 +227,20 @@ class CabeceraMarco extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final escala = MediaQuery.textScalerOf(context).scale(1.0);
     final identidad = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Chip(
+        Flexible(
+          child: Chip(
           key: const ValueKey('marco-rol'),
-          label: Text(rol),
+          label: Text(rol,
+              maxLines: 1, overflow: TextOverflow.ellipsis),
           visualDensity: VisualDensity.compact,
           side: BorderSide(color: AppColores.cobaltoDe(context)),
           labelStyle: TextStyle(
               color: AppColores.cobaltoDe(context),
               fontWeight: FontWeight.w700),
+          ),
         ),
         const SizedBox(width: AppEspacio.sm),
         Flexible(
@@ -263,10 +266,15 @@ class CabeceraMarco extends StatelessWidget {
         _avatar(context),
       ],
     );
+    // Dos filas SIEMPRE: identidad + acciones arriba y la
+    // píldora de sync A LO ANCHO debajo (precedente de la
+    // casa desde UI130-07). A 420 dp — y no digamos con la
+    // letra al 200 % — la fila única no cabe: la costura de
+    // la 1.32 lo cazó con 50 px de desborde.
     final pildora = PildoraSyncPulso(
       key: const ValueKey('marco-pildora'),
       onTap: onSyncTap,
-      anchoCompleto: escala > 1.3,
+      anchoCompleto: true,
     );
     return Material(
       color: Theme.of(context).colorScheme.surface,
@@ -274,25 +282,17 @@ class CabeceraMarco extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: AppEspacio.md, vertical: AppEspacio.xs),
-        child: escala > 1.3
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(children: [
-                    Expanded(child: identidad),
-                    acciones,
-                  ]),
-                  const SizedBox(height: AppEspacio.xs),
-                  pildora,
-                ],
-              )
-            : Row(
-                children: [
-                  Expanded(child: identidad),
-                  Flexible(child: pildora),
-                  acciones,
-                ],
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              Expanded(child: identidad),
+              acciones,
+            ]),
+            const SizedBox(height: AppEspacio.xs),
+            pildora,
+          ],
+        ),
       ),
     );
   }

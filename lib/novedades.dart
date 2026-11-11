@@ -638,8 +638,12 @@ class DialogoNovedades extends StatelessWidget {
                         const Icon(Icons.new_releases_rounded,
                             color: AppColores.naranja, size: 20),
                         const SizedBox(width: AppEspacio.sm),
-                        Text('Versión ${n.version}',
-                            style: AppTexto.subtitulo),
+                        Flexible(
+                          child: Text('Versión ${n.version}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTexto.subtitulo),
+                        ),
                         if (esInstalada) ...[
                           const SizedBox(width: AppEspacio.sm),
                           Container(

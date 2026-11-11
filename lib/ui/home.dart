@@ -1678,8 +1678,12 @@ class _HomeScreenState extends State<HomeScreen>
                                 color:
                                     AppColores.textoSecundario(context)),
                             const SizedBox(width: 8),
-                            Text('Mi Turno Hoy',
-                                style: AppTexto.subtitulo),
+                            const Flexible(
+                              child: Text('Mi Turno Hoy',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTexto.subtitulo),
+                            ),
                             const SizedBox(width: 4),
                             Icon(Icons.chevron_right_rounded,
                                 color: Colors.grey, size: 18),
@@ -2776,15 +2780,15 @@ class _HomeScreenState extends State<HomeScreen>
 
 }
 
-/// 1.30 (Oleada D2, UI130-31 + UI130-23): la vista de
-/// «Hoy» del DUEÑO. Recibe las secciones ya construidas
-/// y solo las ordena: mostrador → Administración →
-/// Estadísticas Rápidas → bandeja → buzón → alertas.
-/// La tarjeta de Administración NO depende de los
-/// bloques de la estación personalizable (no se puede
-/// ocultar): es el acceso rápido fijo del rol. Las
-/// secciones entran en cascada (fundación de D1) con
-/// sus ValueKey estables de siempre.
+/// La vista del Mostrador del DUEÑO (1.30 D2 la ordenó;
+/// la 1.32 la reordena con el veredicto g132). Recibe las
+/// secciones ya construidas y solo las ordena:
+/// mostrador → Por Decidir → Estadísticas Rápidas
+/// (Pulso) → bandeja → buzón → alertas. La tarjeta de
+/// Administración de la 1.30 se jubiló: sus contadores
+/// viven en Por Decidir y sus destinos en el Pilar
+/// Negocio. Las secciones entran en cascada (fundación
+/// de D1) con sus ValueKey estables.
 class _VistaHoyDueno extends StatelessWidget {
   final Set<String> bloquesHoy;
   final Widget buscar;

@@ -32,7 +32,6 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
 import 'package:ironbody_gym/tarifa_especial.dart';
 import 'package:ironbody_gym/tiempo.dart';
-import 'package:ironbody_gym/ui/actividad.dart';
 import 'package:ironbody_gym/ui/ajustes.dart';
 import 'package:ironbody_gym/ui/buzon_dueno.dart';
 import 'package:ironbody_gym/ui/cola.dart';
@@ -500,44 +499,43 @@ void main() {
     });
   });
 
-  group('D-21/D-14 · cabecera premium de Home', () {
-    test('la zona de la cabecera no tiene literales de color', () {
+  group('D-21/D-14 · el marco táctico (reescrito en la 1.32)', () {
+    // La cabecera premium de la 1.29/1.30 (wordmark, logo en
+    // tarjeta, campana, selector de niveles y dial FAB) se
+    // jubiló con el rediseño «Mostrador Táctico»: la
+    // cabecera persistente es CabeceraMarco (marco.dart) y
+    // las acciones viven en el Dock. Los contratos de
+    // D-21/D-14 que SOBREVIVEN se fijan aquí contra su
+    // forma nueva; lo jubilado se afirma ausente.
+
+    test('el marco no tiene literales de color', () {
+      final marco = File('lib/ui/marco.dart').readAsStringSync();
+      expect(marco.contains('Color(0x'), isFalse,
+          reason: 'D-21: el marco vive de tokens (diseno.dart)');
+      // Y la cabecera vieja ya no existe en Home.
       final home = File('lib/ui/home.dart').readAsStringSync();
-      final desde = home.indexOf('Widget _cabecera()');
-      final hasta = home.indexOf('Widget _chipRol()');
-      expect(desde, greaterThanOrEqualTo(0));
-      expect(hasta, greaterThan(desde));
-      final zona = home.substring(desde, hasta);
-      expect(zona.contains('Color(0x'), isFalse,
-          reason: 'D-21: la cabecera vive de tokens');
-      // Los ayudantes tampoco. (1.30 D2, UI130-05/07:
-      // _BotonSyncCabecera salió de la lista porque la
-      // clase desaparece: el botón-icono de sync deja la
-      // cabecera y la píldora es la única señal.)
-      for (final clase in ['_EntradaCabecera', '_BotonCabecera']) {
-        final i = home.indexOf('class $clase');
-        expect(i, greaterThanOrEqualTo(0), reason: 'falta $clase');
-        final fin = home.indexOf('\n}\n', i);
-        expect(home.substring(i, fin).contains('Color(0x'), isFalse,
-            reason: '$clase con literal de color');
-      }
+      expect(home.contains('Widget _cabecera()'), isFalse);
+      expect(home.contains('class _EntradaCabecera'), isFalse);
+      expect(home.contains('class _BotonCabecera'), isFalse);
     });
 
-    test('D-14: el glifo canónico manda en Home y el activo va en grafito',
-        () {
-      final home = File('lib/ui/home.dart').readAsStringSync();
-      expect(home.contains('person_add_alt_1_rounded'), isFalse);
-      expect(home.contains('Icons.person_add_rounded'), isTrue);
-      // El segmento activo del selector de nivel: grafito
-      // sobre el naranja (regla fundacional de la oleada 1).
-      final desde = home.indexOf('Widget _selectorNivel()');
+    test('D-14: el glifo canónico manda y el Cobrar del Dock '
+        'va en grafito sobre la marca', () {
+      final marco = File('lib/ui/marco.dart').readAsStringSync();
+      expect(marco.contains('person_add_alt_1_rounded'), isFalse);
+      expect(marco.contains('Icons.person_add_rounded'), isTrue);
+      // El heredero del «activo en grafito sobre naranja»:
+      // el Cobrar del Dock — la única acción de marca —
+      // lleva icono y etiqueta en grafito (sobreMarca).
+      final desde = marco.indexOf('class DockMostrador');
       expect(desde, greaterThanOrEqualTo(0));
-      expect(home.substring(desde, desde + 1600),
-          contains('AppColores.sobreMarca'));
+      final dock = marco.substring(desde);
+      expect(dock, contains('AppColores.naranja'));
+      expect(dock, contains('AppColores.sobreMarca'));
     });
 
-    testWidgets('wordmark, logo en tarjeta y sync vivo navegan',
-        (tester) async {
+    testWidgets('la cabecera del marco: la píldora lleva a '
+        'la Cola y el perfil a Ajustes', (tester) async {
       _mockAppLinks();
       await tester.runAsync(() async {
         await _bdVacia();
@@ -563,9 +561,7 @@ void main() {
 
       // Tras un pop, la ruta Home vuelve con su
       // transición de entrada: se asienta a tramos
-      // cortos (un pump largo de golpe la deja a mitad
-      // en esta pila) y se descartan los diálogos que la
-      // carga tardía haya levantado.
+      // cortos y se descartan los diálogos tardíos.
       Future<void> volverAHome() async {
         for (var i = 0; i < 15; i++) {
           await tester.pump(const Duration(milliseconds: 100));
@@ -575,24 +571,21 @@ void main() {
 
       await descartarDialogos();
 
-      // El wordmark con la jerarquía de D-21.
-      final wordmark = find.byWidgetPredicate((w) =>
-          w is RichText && w.text.toPlainText() == 'IRON BODY GYM');
-      expect(wordmark, findsOneWidget);
+      // La cabecera vieja no vuelve: ni wordmark ni su
+      // llave en el árbol.
+      expect(
+          find.byWidgetPredicate((w) =>
+              w is RichText &&
+              w.text.toPlainText() == 'IRON BODY GYM'),
+          findsNothing);
+      expect(find.byKey(const ValueKey('home-cabecera')),
+          findsNothing);
 
-      // Los toques van al icono/imagen DENTRO de la
-      // cabecera (el centro del Tooltip es un surrogate
-      // que desvía el hit-test).
-      final cabecera = find.byKey(const ValueKey('home-cabecera'));
-      Finder enCabecera(Finder f) =>
-          find.descendant(of: cabecera, matching: f);
-
-      // La sincronización vive en la píldora de la fila
-      // de estado y lleva a la Cola. (1.30 D2, UI130-05:
-      // el botón-icono separado de la 1.29 desaparece; la
-      // píldora es la única puerta y la única señal.)
-      expect(enCabecera(find.byType(SyncPill)), findsOneWidget);
-      await tester.tap(enCabecera(find.byType(SyncPill)));
+      // La píldora de sync del marco: única señal y única
+      // puerta a la Cola (contrato UI130-05, heredado).
+      expect(find.byType(SyncPill), findsOneWidget);
+      await tester
+          .tap(find.byKey(const ValueKey('marco-pildora')));
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(ColaScreen), findsOneWidget);
@@ -600,50 +593,35 @@ void main() {
       await volverAHome();
       expect(find.byType(ColaScreen), findsNothing);
 
-      // La campana, en su botón circular, lleva a Actividad.
-      expect(find.byTooltip('Actividad'), findsOneWidget);
-      await tester
-          .tap(enCabecera(find.byIcon(Icons.notifications_rounded)));
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.pump(const Duration(seconds: 1));
-      expect(find.byType(ActividadScreen), findsOneWidget);
-      Navigator.of(tester.element(find.byType(ActividadScreen))).pop();
-      await volverAHome();
-      expect(find.byType(ActividadScreen), findsNothing);
-
-      // El logo en tarjeta sigue siendo el botón de
-      // Ajustes. Se toca la TARJETA (el Container grafito
-      // de 48×48): la Image del logo tiene tamaño cero en
-      // test (su stream no resuelve) y su centro no es
-      // tocable.
-      expect(find.byTooltip('Ajustes'), findsOneWidget);
-      await tester.tap(enCabecera(find.byWidgetPredicate((w) =>
-          w is Container &&
-          w.decoration is BoxDecoration &&
-          (w.decoration as BoxDecoration).color ==
-              AppColores.carbonProfundo)));
+      // El avatar abre el menú de perfil y «Mi perfil y
+      // ajustes» lleva a Ajustes (la puerta que el
+      // logo-tarjeta de la cabecera vieja abría).
+      await tester.tap(find.byKey(const ValueKey('marco-perfil')));
+      // El menú despliega con animación y su ruta ignora
+      // toques hasta asentarse: se asienta a tramos.
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+      expect(find.text('Mi perfil y ajustes'), findsOneWidget);
+      // El toque va a la FILA del ítem (su InkWell entero),
+      // no al texto: el centro del texto cae sobre la
+      // animación del menú en este arnés.
+      await tester.tap(find.widgetWithText(
+          PopupMenuItem<String>, 'Mi perfil y ajustes'));
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(AjustesScreen), findsOneWidget);
 
-      // Cierre: la cadena de emisión del motor avanza
-      // por entregas entre frames y su sonda de
-      // internet (_hayInternet) arma un temporizador de
-      // 5 s al final de cada cadena; mientras Home siga
-      // montada, cada bombeo hace avanzar otra cadena y
-      // el temporizador recién creado queda pendiente
-      // al cerrar. Se desmonta Home DENTRO del cuerpo
-      // (ya no nacen cadenas nuevas) y se drena: las que
-      // están en vuelo terminan y sus temporizadores
-      // disparan.
+      // Cierre: desmontar Home y drenar la cadena del
+      // motor (su temporizador de 5 s), como siempre.
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 500));
       }
     });
 
-    testWidgets('D-14: el dial abre solo con Servicios y el '
-        '«Inscribir» del mostrador navega', (tester) async {
+    testWidgets('el Dock sustituye al dial: sin FAB y su '
+        '«Inscribir» navega', (tester) async {
       _mockAppLinks();
       await tester.runAsync(() async {
         await _bdVacia();
@@ -662,47 +640,27 @@ void main() {
         await tester.pump(const Duration(milliseconds: 400));
       }
 
-      // El dial cerrado: un solo FAB, con su tooltip.
-      expect(find.byType(FloatingActionButton), findsOneWidget);
-      expect(find.byTooltip('Acciones rápidas'), findsOneWidget);
-      await tester.tap(find.byType(FloatingActionButton));
-      await tester.pump(const Duration(milliseconds: 700));
-      // Abierto: el mismo botón ahora cierra.
-      expect(find.byTooltip('Cerrar'), findsOneWidget);
-      // Las píldoras del dial, con sus textos. (1.30 D2,
-      // UI130-06: el dial queda SOLO con las tres ventas
-      // de Servicios; Cobrar / Pago diario / Inscribir
-      // salen del dial — viven en el mostrador, que es el
-      // sistema primario único.)
-      for (final texto in [
-        'Vender agua',
-        'Vender ración',
-        'Vender combo',
-      ]) {
-        expect(find.text(texto), findsWidgets,
-            reason: 'píldora «$texto» del dial');
-      }
-      // Se cierra el dial y el «Inscribir» del MOSTRADOR
-      // (ahora el único de la pantalla) lleva el glifo
-      // canónico de D-14 y navega a Inscribir.
-      await tester.tap(find.byTooltip('Cerrar'));
-      await tester.pump(const Duration(milliseconds: 700));
-      final pildora = find.text('Inscribir');
-      expect(pildora, findsOneWidget);
-      final fila = find.ancestor(
-          of: pildora, matching: find.byType(Row)).first;
+      // El dial flotante se jubiló con el marco: ni un FAB
+      // ni su tooltip en la cáscara (las ventas rápidas de
+      // Servicios viven ahora en el Pilar Tienda).
+      expect(find.byType(FloatingActionButton), findsNothing);
+      expect(find.byTooltip('Acciones rápidas'), findsNothing);
+
+      // El «Inscribir» del Dock — el único de la pantalla —
+      // lleva el glifo canónico de D-14 y navega.
+      final boton = find.byKey(const ValueKey('dock-inscribir'));
+      expect(boton, findsOneWidget);
       expect(
           find.descendant(
-              of: fila,
+              of: boton,
               matching: find.byIcon(Icons.person_add_rounded)),
           findsOneWidget);
-      await tester.tap(pildora);
+      await tester.tap(boton);
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(InscribirScreen), findsOneWidget);
 
-      // Cierre con el mismo drenaje del test de la
-      // cabecera (la cadena del motor y su temporizador).
+      // Cierre con el mismo drenaje de la cabecera.
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 500));

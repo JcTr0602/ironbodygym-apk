@@ -190,74 +190,86 @@ void main() {
       expect(caja.last.destino, DestinoPorRevisar.conciliaciones);
     });
   });
-  group('UI130-05 · cabecera en dos niveles', () {
+  group('UI130-05 · la cabecera (en la 1.32: CabeceraMarco)', () {
+    // La cabecera de dos niveles de Home se jubiló con el
+    // marco persistente: sus contratos viven en marco.dart.
+    final marco = File('lib/ui/marco.dart').readAsStringSync();
     final home = File('lib/ui/home.dart').readAsStringSync();
 
     test('la fila de estado lleva la píldora a lo ancho', () {
-      final cab = home.substring(home.indexOf('Widget _cabecera()'),
-          home.indexOf('Widget _chipRol()'));
-      expect(cab.contains('anchoCompleto: true'), isTrue,
-          reason: 'la píldora ocupa el ancho de la fila');
-      expect(cab.contains('SyncPill('), isTrue);
+      expect(marco.contains('anchoCompleto: true'), isTrue,
+          reason: 'la píldora ocupa el ancho de la fila '
+              '(CabeceraMarco, fila 2)');
+      expect(marco.contains('SyncPill('), isTrue);
+      expect(home.contains('Widget _cabecera()'), isFalse,
+          reason: 'la cabecera vieja no vuelve');
     });
 
     test('el botón-icono de sync separado desaparece', () {
       expect(home.contains('_BotonSyncCabecera'), isFalse,
           reason: 'UI130-07: una sola señal de sync, la '
               'píldora');
+      expect(marco.contains('_BotonSyncCabecera'), isFalse);
     });
 
-    test('Ayuda y Tema viven en el menú «más» (⋯)', () {
-      expect(home.contains('PopupMenuButton<String>'), isTrue);
-      expect(home.contains('Icons.more_vert_rounded'), isTrue);
+    test('Ayuda y Tema viven en el menú del perfil', () {
+      expect(marco.contains('PopupMenuButton<String>'), isTrue);
+      expect(marco.contains("Text('Ayuda')"), isTrue);
+      expect(marco.contains("Text('Tema claro/oscuro')"), isTrue);
+      // El despacho vive en Home (_accionPerfilMarco).
       final menu = home.substring(
-          home.indexOf('Widget _menuMasCabecera()'),
-          home.indexOf('Widget _chipRol()'));
-      expect(menu.contains("valor == 'ayuda'"), isTrue);
-      expect(menu.contains("valor == 'tema'"), isTrue);
+          home.indexOf('void _accionPerfilMarco'),
+          home.indexOf('/// Compuerta 5'));
+      expect(menu.contains("case 'ayuda'"), isTrue);
+      expect(menu.contains("case 'tema'"), isTrue);
       expect(menu.contains('ThemeController.ciclo()'), isTrue);
     });
 
-    test('el logo dice su destino: insignia de engranaje', () {
-      final cab = home.substring(home.indexOf('Widget _cabecera()'),
-          home.indexOf('Widget _chipRol()'));
-      expect(cab.contains('Icons.settings_rounded'), isTrue,
-          reason: 'la insignia sobre el logo dice Ajustes');
+    test('el destino Ajustes se dice en palabras en el menú', () {
+      // La insignia de engranaje sobre el logo (1.30) se
+      // funde en la etiqueta del ítem: el destino se LEE.
+      expect(marco.contains("Text('Mi perfil y ajustes')"),
+          isTrue);
+      final menu = home.substring(
+          home.indexOf('void _accionPerfilMarco'),
+          home.indexOf('/// Compuerta 5'));
+      expect(menu.contains("case 'perfil'"), isTrue);
+      expect(menu.contains('AjustesScreen'), isTrue);
     });
   });
 
-  group('UI130-06 · mostrador único y dial de Servicios', () {
+  group('UI130-06 · mostrador único (en la 1.32: el Dock)', () {
+    final marco = File('lib/ui/marco.dart').readAsStringSync();
     final home = File('lib/ui/home.dart').readAsStringSync();
 
-    test('el mostrador ya no es naranja pleno', () {
-      final ini = home.indexOf('Widget _mostradorRapido()');
-      final fin = home.indexOf('Widget _cabecera()', ini);
-      final dock = home.substring(ini, fin);
+    test('el Dock no es naranja pleno y conserva las '
+        'acciones de membresía', () {
+      final dock =
+          marco.substring(marco.indexOf('class DockMostrador'));
       expect(dock.contains('backgroundColor: AppColores.naranja'),
-          isFalse);
+          isFalse,
+          reason: 'la barra es de superficie; la marca vive '
+              'solo en el Cobrar');
       expect(dock.contains('Icons.payments_rounded'), isTrue,
           reason: 'Cobrar sigue en el mostrador');
       expect(dock.contains('Icons.person_add_rounded'), isTrue,
           reason: 'Inscribir sigue en el mostrador');
     });
 
-    test('el dial ya no conoce las acciones de membresía', () {
-      final ini = home.indexOf('class _FabAccionesRapidas');
-      final dial = home.substring(ini);
-      expect(dial.contains('onCobrar'), isFalse);
-      expect(dial.contains('onPagoDiario'), isFalse);
-      expect(dial.contains('onInscribir'), isFalse);
-      expect(dial.contains('onVenderAgua'), isTrue);
-      expect(dial.contains('onVenderRacion'), isTrue);
-      expect(dial.contains('onVenderCombo'), isTrue);
-      expect(dial.contains('const total = 3;'), isTrue,
-          reason: 'el escalonado se reparte entre 3 píldoras');
+    test('el dial desaparece entero, jubilado por el Dock', () {
+      // UI130-06 lo dejaba solo con Servicios; la 1.32 lo
+      // retira: ni la clase ni sus callbacks quedan.
+      expect(home.contains('_FabAccionesRapidas'), isFalse);
+      expect(marco.contains('_FabAccionesRapidas'), isFalse);
+      expect(home.contains('onVenderAgua'), isFalse);
     });
 
-    test('el FAB lleva el icono propio de dosis', () {
-      final ini = home.indexOf('class _FabAccionesRapidas');
-      final dial = home.substring(ini);
-      expect(dial.contains('Icons.science_rounded'), isTrue);
+    test('el icono propio de dosis vive en el «Servicio» '
+        'del Dock', () {
+      final dock =
+          marco.substring(marco.indexOf('class DockMostrador'));
+      expect(dock.contains('Icons.science_rounded'), isTrue);
+      expect(dock.contains("'dock-servicio'"), isTrue);
     });
   });
 
@@ -289,8 +301,9 @@ void main() {
     test('el orden del entrenador: alertas antes que finanzas',
         () {
       final ini = home.indexOf('class _VistaHoyEntrenador');
-      final fin = home.indexOf('class _FabAccionesRapidas', ini);
-      final vista = home.substring(ini, fin);
+      // La clase cierra el archivo (el ancla vieja, la
+      // clase del dial, se jubiló con él en la 1.32).
+      final vista = home.substring(ini);
       expect(
           vista.indexOf("ValueKey('hoy-alertas')") <
               vista.indexOf("ValueKey('hoy-finanzas')"),
@@ -305,14 +318,16 @@ void main() {
       final vista = home.substring(ini, fin);
       expect(
           vista.indexOf("ValueKey('hoy-mostrador')") <
-              vista.indexOf("ValueKey('hoy-admin')"),
+              vista.indexOf("ValueKey('hoy-pordecidir')"),
           isTrue);
       expect(
-          vista.indexOf("ValueKey('hoy-admin')") <
+          vista.indexOf("ValueKey('hoy-pordecidir')") <
               vista.indexOf("ValueKey('hoy-finanzas')"),
           isTrue,
-          reason: 'UI130-23: Administración entre el '
-              'mostrador y Estadísticas Rápidas');
+          reason: 'la 1.32 pone Por Decidir entre el '
+              'mostrador y Estadísticas Rápidas, en el '
+              'lugar que UI130-23 daba a Administración '
+              '(sus contadores viven ahí ahora)');
       expect(
           vista.indexOf("ValueKey('hoy-bandeja')") <
               vista.indexOf("ValueKey('hoy-alertas')"),
@@ -328,7 +343,7 @@ void main() {
         'hoy-alertas',
         'hoy-vacio',
         'hoy-aire',
-        'hoy-admin',
+        'hoy-pordecidir',
       ]) {
         expect(home.contains("ValueKey('$k')"), isTrue,
             reason: 'clave $k');
@@ -336,36 +351,37 @@ void main() {
     });
   });
 
-  group('UI130-23 · Administración en Hoy y rejilla cerrada',
-      () {
+  group('UI130-23 · Administración (en la 1.32: Pilar '
+      'Negocio)', () {
     final home = File('lib/ui/home.dart').readAsStringSync();
 
-    test('la tarjeta de Administración existe y va al Panel',
-        () {
-      expect(home.contains('_tarjetaAdministracionHoy()'), isTrue);
-      final ini =
-          home.indexOf('Widget _tarjetaAdministracionHoy()');
-      final tarjeta = home.substring(ini, ini + 1800);
-      expect(tarjeta.contains('AdminScreen'), isTrue);
-      expect(
-          tarjeta.contains(
-              'Precios y tarifas · Plus · Usuarios y permisos'),
-          isTrue,
-          reason: 'el subtítulo del diseño aprobado');
+    test('la tarjeta de Administración sale de Hoy y sus '
+        'destinos viven en el Pilar Negocio', () {
+      // Veredicto g132: fuera la tarjeta de Hoy; el Panel
+      // clásico cuelga de «App y Reglas» del pilar.
+      expect(home.contains('_tarjetaAdministracionHoy()'),
+          isFalse);
+      expect(home.contains("ValueKey('hoy-admin')"), isFalse);
+      final pilar =
+          File('lib/ui/pilar_negocio.dart').readAsStringSync();
+      expect(pilar.contains('AdminScreen'), isTrue,
+          reason: 'el Panel clásico sigue a un toque, en '
+              'su pilar');
     });
 
-    test('la rejilla cerrada sustituye a GridView.count', () {
-      expect(home.contains('_rejillaCerrada('), isTrue);
-      expect(home.contains('GridView.count('), isFalse,
-          reason: 'sin la celda vacía del conteo impar');
+    test('sin rejillas en la cáscara: ni GridView.count ni '
+        'la rejilla cerrada de los niveles', () {
+      expect(home.contains('GridView.count('), isFalse);
+      expect(home.contains('_rejillaCerrada('), isFalse,
+          reason: 'la rejilla se jubiló con los niveles; '
+              'los pilares no son una rejilla');
     });
 
-    test('Hoy no pinta el bloque de Módulos', () {
-      final ini = home.indexOf('class _VistaHoyDueno');
-      final fin = home.indexOf('class _FabAccionesRapidas', ini);
-      final hoy = home.substring(ini, fin);
-      expect(hoy.contains('_gridModulos'), isFalse);
-      expect(hoy.contains('_gridMas'), isFalse);
+    test('Hoy no pinta el bloque de Módulos (y ya no '
+        'existe en el archivo)', () {
+      expect(home.contains('_gridModulos'), isFalse);
+      expect(home.contains('_gridMas'), isFalse);
+      expect(home.contains('_selectorNivel'), isFalse);
     });
   });
 

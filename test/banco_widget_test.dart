@@ -129,8 +129,15 @@ void main() {
       }
     }
 
-    testWidgets('Home: dos niveles — Hoy por defecto y Módulos '
-        'a un toque con su grid', (tester) async {
+    testWidgets('Home: la cáscara de pilares — Mostrador por '
+        'defecto y Clientes a un toque', (tester) async {
+      // Viewport de teléfono real (420×800): la cáscara de
+      // pilares con su Dock no vive en la superficie
+      // 800×600 por defecto del tester (compuerta de campo
+      // de Jc, 2026-11-11).
+      tester.view.physicalSize = const Size(420, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
       await avanzarTiempo(tester);
       // En este entorno sin sesión, Home abre el diálogo de
@@ -144,35 +151,14 @@ void main() {
         await Future<void>.delayed(const Duration(seconds: 2));
       });
       await tester.pump(const Duration(milliseconds: 300));
-      // Puede haber DOS diálogos apilados al abrir (permisos,
-      // con botón «ENTENDIDO», y «Lo nuevo en esta versión»,
-      // con botón «Entendido»): se aceptan en cadena hasta
-      // que no quede ninguno tapando la pantalla.
-      // 1.23 (integración Bloque 5): descartar por TOQUE es
-      // frágil aquí, medido en corrida: (a) el orden del
-      // árbol de los dos AlertDialog no coincide con el
-      // orden visual de apilado — el toque al botón del de
-      // abajo lo absorbía el contenido del de arriba; (b) un
-      // diálogo en animación de salida sigue en el árbol
-      // pero ignora punteros, y el toque cae a la pantalla;
-      // (c) el diálogo de permisos llega por una lectura
-      // REAL asíncrona y bajo carga puede aparecer DESPUÉS
-      // del primer descarte. Descarte determinista: cerrar
-      // la ruta del diálogo con el propio Navigator (sin
-      // hit-test). El botón de permisos además dispararía
-      // signOut: efecto incidental que esta prueba no
-      // necesita (su fin es destapar Home). El toque al
-      // selector va en un ciclo descartar→tocar por si un
-      // diálogo tardío tapa el primer toque.
+      // Descarte determinista de los diálogos apilados
+      // (permisos y «Lo nuevo»): cerrar las rutas hasta la
+      // primera con el propio Navigator, sin hit-test (la
+      // historia completa de por qué, en la versión 1.23 de
+      // esta prueba, que fijaba los dos niveles jubilados).
       Future<void> descartarDialogos() async {
         for (var i = 0; i < 6; i++) {
           if (find.byType(AlertDialog).evaluate().isEmpty) break;
-          // popUntil a la PRIMERA ruta (la propia Home): cierra
-          // todos los diálogos apilados en una pasada y jamás
-          // puede cerrar Home. (Un pop() por vuelta resultó
-          // peligroso: con el diálogo aún en animación de
-          // salida, la siguiente vuelta podía cerrar la ruta
-          // de Home y dejar el Navigator vacío.)
           Navigator.of(tester.element(find.byType(HomeScreen)))
               .popUntil((r) => r.isFirst);
           await tester.pump(const Duration(milliseconds: 400));
@@ -180,28 +166,43 @@ void main() {
       }
 
       await descartarDialogos();
-      // Nivel 1 por defecto: el selector se ve y el grid no.
-      expect(find.text('Hoy'), findsOneWidget);
-      expect(find.text('Módulos'), findsOneWidget);
-      expect(find.text('MÓDULOS'), findsNothing);
+      // 1.32: la cáscara nueva — barra de 4 pilares y Dock
+      // del Mostrador; los niveles Hoy|Módulos ya no existen.
+      expect(find.byKey(const ValueKey('marco-pilares')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('dock-cobrar')),
+          findsOneWidget);
+      expect(find.text('Módulos'), findsNothing);
+      // El pilar Clientes nace al primer toque (IndexedStack
+      // perezoso) y su pantalla queda montada.
       for (var intento = 0; intento < 3; intento++) {
         if (find.byType(AlertDialog).evaluate().isNotEmpty) {
           await descartarDialogos();
           continue;
         }
-        if (find.text('Módulos').evaluate().isEmpty) break;
-        await tester.tap(find.text('Módulos'));
+        if (find.byKey(const ValueKey('pilar-clientes'))
+            .evaluate()
+            .isNotEmpty) {
+          break;
+        }
+        await tester.tap(
+            find.byKey(const ValueKey('pilar-tab-clientes')));
         await tester.pump(const Duration(milliseconds: 600));
-        if (find.text('MÓDULOS').evaluate().isNotEmpty) break;
       }
-      await avanzarTiempo(tester);
-      expect(find.text('MÓDULOS'), findsOneWidget);
-      // 1.30 (D2, UI130-23): Módulos ya no es un GridView —
-      // es la rejilla cerrada de filas de igual altura (sin
-      // celdas vacías); la garantía pasa a ser que el nivel
-      // se pinta SIN GridView (la rejilla la fija por fuente
-      // el test de la oleada D2).
+      expect(find.byKey(const ValueKey('pilar-clientes')),
+          findsOneWidget);
+      // La rejilla de módulos jubilada no vuelve: ningún
+      // GridView en la cáscara.
       expect(find.byType(GridView), findsNothing);
+      // Drenaje REAL simétrico al de home_a_entregar: el
+      // _cargarConfig de BuscarScreen (recién nacida en el
+      // pilar) lee por FFI fuera de FakeAsync; sin esta
+      // ventana su future sobrevive al test y revienta en
+      // el siguiente («tras completar el test»).
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      });
+      await avanzarTiempo(tester);
     });
 
     testWidgets('Servicios: construye con título y estado de carga',

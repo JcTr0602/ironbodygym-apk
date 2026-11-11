@@ -95,6 +95,19 @@ Future<void> _descartarDialogos(WidgetTester tester) async {
   }
 }
 
+
+/// 1.32: la lista de Inicio es perezosa y la bandeja «Por
+/// Decidir» va SOBRE la tarjeta financiera — la tarjeta ya
+/// no nace construida al abrir. Se revela arrastrando la
+/// lista, como hace el pulgar, hasta que el buscado exista.
+Future<void> _revelar(WidgetTester tester, Finder buscado) async {
+  for (var i = 0; i < 8; i++) {
+    if (buscado.evaluate().isNotEmpty) return;
+    await tester.drag(find.byType(ListView), const Offset(0, -260));
+    await tester.pump(const Duration(milliseconds: 350));
+  }
+}
+
 Future<void> _abrirHome(WidgetTester tester) async {
   tester.view.physicalSize = const Size(960, 1280);
   tester.view.devicePixelRatio = 2.0;
@@ -135,7 +148,9 @@ void main() {
         email: 'duany@ironbody.gym', telegramId: 969869611, nombre: 'Duany'));
     await _abrirHome(tester);
 
-    // La tarjeta que se pinta es la del entrenador.
+    // La tarjeta que se pinta es la del entrenador (se
+    // revela con scroll: la lista es perezosa).
+    await _revelar(tester, find.text('Mi Turno Hoy'));
     expect(find.text('Mi Turno Hoy'), findsOneWidget);
     final celda = find.text('A entregar');
     expect(celda, findsOneWidget);
@@ -155,7 +170,12 @@ void main() {
         findsOneWidget);
 
     // El toque navega al detalle completo de su pendiente.
-    await tester.tap(inkwell);
+    // 1.32: se toca la CELDA, no el InkWell — con la lista
+    // revelada por scroll, el centro geométrico del InkWell
+    // cae sobre la zona de la cabecera del marco y el
+    // hit-test lo intercepta otra capa (medido en sonda);
+    // la celda es lo que el pulgar toca en producción.
+    await tester.tap(celda);
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump(const Duration(seconds: 1));
     expect(find.byType(DetallePendienteScreen), findsOneWidget);
@@ -186,6 +206,7 @@ void main() {
         nombre: 'Jc'));
     await _abrirHome(tester);
 
+    await _revelar(tester, find.text('Estadísticas Rápidas'));
     expect(find.text('Estadísticas Rápidas'), findsOneWidget);
     expect(find.text('Por recoger'), findsOneWidget);
     expect(find.text('A entregar'), findsNothing);

@@ -1,23 +1,23 @@
 /// 1.26.1 (scroll de Home, veredicto de Argón): la Home
-/// pasó de SingleChildScrollView + Column ansiosa — toda
-/// la pantalla construida y maquetada de golpe, y cada
-/// _cargar por sync la reconstruía entera matando el
-/// impulso del gesto — a ListView.builder por secciones
-/// con RepaintBoundary, ScrollController en el State y
-/// offset recordado por nivel. Espejo del arreglo de
-/// Inicio en Clientes 0.16 (inicio_scroll_016_test).
+/// pasó de SingleChildScrollView + Column ansiosa a
+/// ListView.builder por secciones. 1.32 REESCRIBE el
+/// contrato sobre la cáscara de pilares:
 ///
-/// Contrato que fijan estos tests:
-/// 1. El contenedor es un ListView (perezoso): en
-///    «Módulos», el pie de la lista NO está construido
-///    al abrir (con la Column ansiosa sí lo estaba).
-/// 2. Un impulso/drag recorre la lista hasta el final:
-///    el pie aparece.
-/// 3. Cada nivel recuerda su offset: bajar en Módulos,
-///    ir a Hoy y volver deja la vista donde estaba.
-/// 4. Un rebuild del mismo árbol (lo que hace el
-///    setState de un _cargar por sync) no reinicia la
-///    posición.
+/// 1. El Mostrador sigue siendo un ListView perezoso
+///    (nada de SingleChildScrollView ansioso).
+/// 2. El gesto recorre la lista hasta el final: el offset
+///    crece y se acerca al máximo.
+/// 3. El offset del Mostrador SOBREVIVE a ir a otro pilar
+///    y volver (la pila IndexedStack conserva su State y
+///    su ScrollController; la PageStorageKey lo respalda)
+///    y a un rebuild del mismo árbol (el setState de un
+///    _cargar por sync no reinicia la posición — el «a
+///    veces no me deja subir» de Jc no vuelve).
+///
+/// Jubilado con los niveles Hoy|Módulos: el offset POR
+/// NIVEL y el pie «© Creado por JcTr0602» de la rejilla
+/// (la lista de módulos ya no existe; cada pilar guarda
+/// su propio scroll por su cuenta).
 ///
 /// Harness: el del banco widget (sin sesión = no dueño;
 /// las lecturas FFI no resuelven bajo FakeAsync, se
@@ -73,25 +73,24 @@ Future<void> _abrirHome(WidgetTester tester) async {
   await _descartarDialogos(tester);
 }
 
-Future<void> _irAModulos(WidgetTester tester) async {
-  for (var intento = 0; intento < 3; intento++) {
-    if (find.byType(AlertDialog).evaluate().isNotEmpty) {
-      await _descartarDialogos(tester);
-      continue;
-    }
-    if (find.text('Módulos').evaluate().isEmpty) break;
-    await tester.tap(find.text('Módulos'));
-    await tester.pump(const Duration(milliseconds: 600));
-    if (find.text('MÓDULOS').evaluate().isNotEmpty) break;
-  }
-  await _avanzarTiempo(tester);
-  expect(find.text('MÓDULOS'), findsOneWidget);
-}
+/// La lista del Mostrador, por su PageStorageKey (tras
+/// visitar otros pilares conviven más ListView en el
+/// árbol — fuera de escena — y buscar «el» ListView a
+/// secas deja de ser unívoco).
+Finder _listaMostrador() =>
+    find.byKey(const PageStorageKey<String>('mostrador-scroll'));
 
 double _offsetHome(WidgetTester tester) {
-  final lv = tester.widget<ListView>(find.descendant(
-      of: find.byType(HomeScreen), matching: find.byType(ListView)));
+  final lv = tester.widget<ListView>(_listaMostrador());
   return lv.controller?.offset ?? -1;
+}
+
+Future<void> _bajarMostrador(WidgetTester tester) async {
+  for (var i = 0; i < 14; i++) {
+    if (_offsetHome(tester) > 200) break;
+    await tester.drag(_listaMostrador(), const Offset(0, -320));
+    await tester.pump(const Duration(milliseconds: 300));
+  }
 }
 
 void main() {
@@ -116,94 +115,63 @@ void main() {
   });
 
   testWidgets(
-      'Home: ListView perezoso — el pie no nace construido '
-      'y el gesto recorre hasta el final', (tester) async {
+      'Home: ListView perezoso — el gesto recorre el '
+      'Mostrador hasta el final', (tester) async {
     await _abrirHome(tester);
-    await _irAModulos(tester);
     // 1. Contenedor perezoso, no la columna ansiosa.
-    expect(
-        find.descendant(
-            of: find.byType(HomeScreen),
-            matching: find.byType(ListView)),
-        findsOneWidget);
+    expect(_listaMostrador(), findsOneWidget);
     expect(
         find.descendant(
             of: find.byType(HomeScreen),
             matching: find.byType(SingleChildScrollView)),
         findsNothing);
-    // 2. El pie existe en los datos pero NO está
-    // construido: la lista es perezosa de verdad.
-    expect(find.text('© Creado por JcTr0602'), findsNothing);
-    // 3. El impulso recorre: arrastrar hasta que el pie
-    // aparezca (con la vista vieja el contenido ya nacía
-    // entero; aquí además se prueba que se puede llegar).
+    // 2. Al abrir, el offset es 0: la lista nace arriba.
+    expect(_offsetHome(tester), 0);
+    // 3. El gesto recorre hasta el final: el offset crece
+    // y termina pegado al máximo de la lista.
+    await _bajarMostrador(tester);
+    expect(_offsetHome(tester), greaterThan(200));
+    final lv = tester.widget<ListView>(_listaMostrador());
+    final maximo = lv.controller!.position.maxScrollExtent;
     for (var i = 0; i < 14; i++) {
-      if (find.text('© Creado por JcTr0602').evaluate().isNotEmpty) {
-        break;
-      }
-      await tester.drag(
-          find.byType(ListView), const Offset(0, -320));
+      if ((maximo - _offsetHome(tester)).abs() < 1) break;
+      await tester.drag(_listaMostrador(), const Offset(0, -320));
       await tester.pump(const Duration(milliseconds: 300));
     }
-    expect(find.text('© Creado por JcTr0602'), findsOneWidget);
-    expect(_offsetHome(tester), greaterThan(200));
+    expect(_offsetHome(tester), closeTo(maximo, 1.0));
     // Vaciar temporizadores pendientes (la tarjeta de
-    // diagnóstico programa evaluaciones con retardo): si
-    // queda uno vivo al desmontar, el marco de test lo
-    // marca como fallo aunque las aserciones pasaran.
+    // diagnóstico programa evaluaciones con retardo).
     await _avanzarTiempo(tester);
   });
 
   testWidgets(
-      'Home: cada nivel recuerda su offset y un rebuild '
-      'no reinicia la posición', (tester) async {
+      'Home: el offset del Mostrador sobrevive al cambio '
+      'de pilar y al rebuild', (tester) async {
     await _abrirHome(tester);
-    await _irAModulos(tester);
-    for (var i = 0; i < 14; i++) {
-      if (find.text('© Creado por JcTr0602').evaluate().isNotEmpty) {
-        break;
-      }
-      await tester.drag(
-          find.byType(ListView), const Offset(0, -320));
-      await tester.pump(const Duration(milliseconds: 300));
-    }
-    final offsetModulos = _offsetHome(tester);
-    expect(offsetModulos, greaterThan(200));
+    await _bajarMostrador(tester);
+    final offset = _offsetHome(tester);
+    expect(offset, greaterThan(200));
     // Rebuild del mismo árbol (análogo al setState de un
     // _cargar por sync): la posición se conserva.
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(_offsetHome(tester), closeTo(offsetModulos, 1.0));
-    // Ir a Hoy y volver: Módulos reaparece en el offset
-    // que tenía al salir (el que vale es el del momento
-    // de tocar la pestaña, como con el dedo: se sube un
-    // poco hasta ver el selector y se toca).
-    for (var i = 0; i < 6; i++) {
-      if (find.text('Hoy').evaluate().isNotEmpty) break;
-      await tester.drag(
-          find.byType(ListView), const Offset(0, 320));
-      await tester.pump(const Duration(milliseconds: 300));
-    }
-    expect(find.text('Hoy'), findsOneWidget);
-    // 1.30 (Oleada D6): ensureVisible antes de tocar —
-    // el bucle de arrastres paraba cuando «Hoy» existía
-    // en el árbol aunque siguiera fuera de pantalla
-    // (cacheExtent), y el ritmo nuevo de encabezados
-    // (UI130-10) desplazó el aterrizaje: el tap caía en
-    // el vacío. El contrato (offset por nivel) es el
-    // mismo; solo se toca cuando se VE de verdad.
-    await tester.ensureVisible(find.text('Hoy'));
-    await tester.pump(const Duration(milliseconds: 300));
-    final offsetAlSalir = _offsetHome(tester);
-    expect(offsetAlSalir, greaterThan(40));
-    await tester.tap(find.text('Hoy'));
+    expect(_offsetHome(tester), closeTo(offset, 1.0));
+    // Ir a otro pilar y volver: el Mostrador reaparece
+    // en el offset que tenía (su State nunca se destruyó).
+    // El tránsito va por Tienda a propósito: a esta altura
+    // corta (640) el Pilar Clientes arrastra el desborde
+    // conocido del EstadoVacio de BuscarScreen (residuo
+    // fijado en la costura del 200 %); este test mide el
+    // offset, no ese residuo.
+    await tester
+        .tap(find.byKey(const ValueKey('pilar-tab-tienda')));
     await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('MÓDULOS'), findsNothing);
-    await tester.tap(find.text('Módulos'));
+    expect(find.byKey(const ValueKey('pilar-tienda')),
+        findsOneWidget);
+    await tester
+        .tap(find.byKey(const ValueKey('pilar-tab-mostrador')));
     await tester.pump(const Duration(milliseconds: 600));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('MÓDULOS'), findsOneWidget);
-    expect(_offsetHome(tester), closeTo(offsetAlSalir, 24.0));
+    expect(_offsetHome(tester), closeTo(offset, 24.0));
     // Vaciar temporizadores pendientes (ver test 1).
     await _avanzarTiempo(tester);
   });

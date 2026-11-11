@@ -140,25 +140,31 @@ Future<void> guardarFotoPorDecidir(ConteosRemotosPorDecidir c) async {
   );
 }
 
-/// Las remotas reales: cada una con su timeout de 12 s;
-/// cualquier fallo o degradación devuelve null en SU campo
-/// (las demás no se contaminan).
+/// Las remotas reales: cualquier fallo o degradación
+/// devuelve null en SU campo (las demás no se contaminan).
+/// El timeout de 12 s NO se reaplica aquí a propósito:
+/// cada servicio ya lo lleva dentro (la unificación del
+/// Escalón 2 sobre el propio PostgrestBuilder), y apilar
+/// un segundo timeout sobre un builder de postgrest deja
+/// su error tardío sin escucha — medido en la costura de
+/// la oleada: el error escapaba como no manejado aunque el
+/// valor volviera null correctamente. La guarda de
+/// generación de la bandeja cubre las llegadas viejas.
 Future<ConteosRemotosPorDecidir> cargarRemotasPorDecidir() async {
-  Future<int?> conTope(Future<int?> Function() f) async {
+  Future<int?> tolerante(Future<int?> Function() f) async {
     try {
-      return await f().timeout(const Duration(seconds: 12),
-          onTimeout: () => null);
+      return await f();
     } catch (_) {
       return null;
     }
   }
 
   final r = await Future.wait<int?>([
-    conTope(() => contarValesPorAprobar()),
-    conTope(() async =>
+    tolerante(() => contarValesPorAprobar()),
+    tolerante(() async =>
         (await PlusReportesService().pendientes()).length),
-    conTope(() => contarReportesComunidadNuevos()),
-    conTope(() async =>
+    tolerante(() => contarReportesComunidadNuevos()),
+    tolerante(() async =>
         (await invitados_svc.InvitadosService().solicitudesPendientes())
             .length),
   ]);
@@ -226,6 +232,9 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
     setState(() => _remotasAhora = r);
     // La foto se renueva SOLO con lo verificado ahora; un
     // campo null conserva el de la foto anterior al guardar.
+    // Y una «foto» sin NINGÚN valor verificado no es foto:
+    // no se guarda ni se presenta como última (sería un
+    // cero disfrazado).
     final previa = _foto?.conteos;
     final fusion = ConteosRemotosPorDecidir(
       vales: r.vales ?? previa?.vales,
@@ -233,6 +242,11 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
       comunidad: r.comunidad ?? previa?.comunidad,
       solicitudes: r.solicitudes ?? previa?.solicitudes,
     );
+    final hayVerificado = fusion.vales != null ||
+        fusion.plus != null ||
+        fusion.comunidad != null ||
+        fusion.solicitudes != null;
+    if (!hayVerificado) return;
     await guardarFotoPorDecidir(fusion);
     if (!mounted || gen != _gen) return;
     setState(() => _foto =
