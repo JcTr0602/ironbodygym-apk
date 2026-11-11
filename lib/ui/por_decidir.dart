@@ -140,6 +140,35 @@ Future<void> guardarFotoPorDecidir(ConteosRemotosPorDecidir c) async {
   );
 }
 
+/// Fusión POR FUENTE de la foto (PURA, testeable) —
+/// 1.32 (Oleada 2, Fase 0; refinamiento del Defecto 1 de
+/// la Oleada 1 que pide el veredicto de g132dis_): cada
+/// fuente conserva SU último valor verificado en la foto
+/// persistida hasta que ESA fuente vuelva a verificar: un
+/// éxito parcial (1 de 4) actualiza esa 1 y jamás machaca
+/// las otras 3 con null/0. [verificadoAhora] dice si la
+/// corrida trajo al menos un valor nuevo: SOLO entonces la
+/// foto se renueva — con 0 verificadas, ni los valores ni
+/// la HORA de la foto se tocan (una hora fresca sobre una
+/// foto vieja fingiría una verificación que no ocurrió).
+({ConteosRemotosPorDecidir conteos, bool verificadoAhora})
+    fusionarFotoPorDecidir(
+        ConteosRemotosPorDecidir? previa, ConteosRemotosPorDecidir ahora) {
+  final verificadoAhora = ahora.vales != null ||
+      ahora.plus != null ||
+      ahora.comunidad != null ||
+      ahora.solicitudes != null;
+  return (
+    conteos: ConteosRemotosPorDecidir(
+      vales: ahora.vales ?? previa?.vales,
+      plus: ahora.plus ?? previa?.plus,
+      comunidad: ahora.comunidad ?? previa?.comunidad,
+      solicitudes: ahora.solicitudes ?? previa?.solicitudes,
+    ),
+    verificadoAhora: verificadoAhora,
+  );
+}
+
 /// Las remotas reales: cualquier fallo o degradación
 /// devuelve null en SU campo (las demás no se contaminan).
 /// El timeout de 12 s NO se reaplica aquí a propósito:
@@ -230,27 +259,18 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
     final r = await (widget.cargarRemotas ?? cargarRemotasPorDecidir)();
     if (!mounted || gen != _gen) return;
     setState(() => _remotasAhora = r);
-    // La foto se renueva SOLO con lo verificado ahora; un
-    // campo null conserva el de la foto anterior al guardar.
-    // Y una «foto» sin NINGÚN valor verificado no es foto:
-    // no se guarda ni se presenta como última (sería un
-    // cero disfrazado).
-    final previa = _foto?.conteos;
-    final fusion = ConteosRemotosPorDecidir(
-      vales: r.vales ?? previa?.vales,
-      plus: r.plus ?? previa?.plus,
-      comunidad: r.comunidad ?? previa?.comunidad,
-      solicitudes: r.solicitudes ?? previa?.solicitudes,
-    );
-    final hayVerificado = fusion.vales != null ||
-        fusion.plus != null ||
-        fusion.comunidad != null ||
-        fusion.solicitudes != null;
-    if (!hayVerificado) return;
-    await guardarFotoPorDecidir(fusion);
+    // Fusión POR FUENTE (fusionarFotoPorDecidir): un éxito
+    // parcial actualiza solo su fuente y conserva el último
+    // valor verificado de las demás. Y la foto solo se
+    // RENUEVA si algo verificó ahora: con 0 verificadas no
+    // se guarda ni se le mueve la hora (la hora de una foto
+    // es la de su última verificación real).
+    final fusion = fusionarFotoPorDecidir(_foto?.conteos, r);
+    if (!fusion.verificadoAhora) return;
+    await guardarFotoPorDecidir(fusion.conteos);
     if (!mounted || gen != _gen) return;
     setState(() => _foto =
-        FotoRemotaPorDecidir(fusion, ahoraHabana()));
+        FotoRemotaPorDecidir(fusion.conteos, ahoraHabana()));
   }
 
   Future<void> _cargarLocalesExtra() async {
