@@ -323,18 +323,44 @@ class LocalDb {
     }
   }
 
-  /// IDs de los clientes cuya data se puede decodificar: exactamente
-  /// los que el índice FTS debe contener (ni más, ni menos, ni otros).
-  static Future<Set<int>> _idsClientesDecodificables(Database db) async {
+  /// H17 (revisión de Argón al Yunque de Sync): UN solo
+  /// barrido del padrón para la sonda FTS de arranque, con
+  /// las tres lecturas que antes costaban dos pasadas
+  /// completas con jsonDecode de todas las filas (y hasta
+  /// cuatro si había reconstrucción) en cada arranque de
+  /// proceso:
+  /// - [ids]: clientes cuya data decodifica (cualquier
+  ///   JSON) — exactamente los que el índice debe contener.
+  /// - [firmas]: firma de contenido esperada por id
+  ///   (`nombre_norm` + separador + `telefonos`), solo para
+  ///   las filas cuya data decodifica como Map.
+  /// - [datos]: la data decodificada como Map por id, para
+  ///   que la reconstrucción repueble sin volver a barrer.
+  /// Las decisiones de sanidad son las de siempre: cada
+  /// resultado aplica su propio criterio de decodificación,
+  /// solo que compartiendo la única lectura de la tabla.
+  static Future<
+      ({
+        Set<int> ids,
+        Map<int, String> firmas,
+        Map<int, Map<String, dynamic>> datos,
+      })> _barridoFtsEsperado(Database db) async {
     final ids = <int>{};
+    final firmas = <int, String>{};
+    final datos = <int, Map<String, dynamic>>{};
     final rows = await db.query('clientes', columns: ['id', 'data']);
     for (final r in rows) {
       try {
-        jsonDecode(r['data'] as String);
-        ids.add(r['id'] as int);
+        final crudo = jsonDecode(r['data'] as String);
+        final id = r['id'] as int;
+        ids.add(id);
+        final data = crudo as Map<String, dynamic>;
+        datos[id] = data;
+        firmas[id] =
+            '${_normTexto('${data['nombre'] ?? ''}')}\u0001${_telefonosNorm(data)}';
       } catch (_) {}
     }
-    return ids;
+    return (ids: ids, firmas: firmas, datos: datos);
   }
 
   /// ¿El índice FTS existe, tiene el esquema esperado, responde a MATCH
@@ -353,7 +379,9 @@ class LocalDb {
           ['"zzzsincoincidencia"']);
       // Correspondencia de IDs: el conteo solo no basta (no detecta
       // filas ajenas o duplicadas).
-      final esperados = await _idsClientesDecodificables(db);
+      // H17: ids y firmas salen del MISMO barrido del padrón.
+      final barrido = await _barridoFtsEsperado(db);
+      final esperados = barrido.ids;
       final indexados = (await db.rawQuery('SELECT id FROM clientes_fts'))
           .map((r) => r['id'] as int)
           .toSet();
@@ -367,7 +395,7 @@ class LocalDb {
       // búsqueda por el nombre nuevo no encontraba al cliente.
       // Se compara la firma (nombre_norm + teléfonos) que el
       // índice debería tener según el espejo decodificable.
-      final firmas = await _firmasFtsEsperadas(db);
+      final firmas = barrido.firmas;
       final filasFts = await db.rawQuery(
           'SELECT id, nombre_norm, telefonos FROM clientes_fts');
       for (final r in filasFts) {
@@ -382,22 +410,6 @@ class LocalDb {
     }
   }
 
-  /// Firma de contenido FTS esperada por cliente decodificable:
-  /// id → `nombre_norm` + separador + `telefonos`, calculada
-  /// con los mismos normalizadores que escriben el índice.
-  static Future<Map<int, String>> _firmasFtsEsperadas(Database db) async {
-    final firmas = <int, String>{};
-    final rows = await db.query('clientes', columns: ['id', 'data']);
-    for (final r in rows) {
-      try {
-        final data = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        firmas[r['id'] as int] =
-            '${_normTexto('${data['nombre'] ?? ''}')}\u0001${_telefonosNorm(data)}';
-      } catch (_) {}
-    }
-    return firmas;
-  }
-
   /// Reconstruye el índice FTS desde cero. Si algo falla a la mitad, se
   /// elimina la tabla incompleta y se relanza: un índice a medias nunca
   /// debe poder validarse como sano en el siguiente intento.
@@ -409,24 +421,21 @@ class LocalDb {
       if (simularFalloReconstruccion) {
         throw StateError('fallo simulado de reconstrucción FTS (test)');
       }
-      final rows = await db.query('clientes', columns: ['id', 'data']);
+      // H17: la repoblación y la verificación final comparten
+      // el ÚNICO barrido del padrón (antes: un barrido para
+      // repoblar y otro más para los ids esperados).
+      final barrido = await _barridoFtsEsperado(db);
       final lote = db.batch();
-      for (final r in rows) {
-        try {
-          final data =
-              jsonDecode(r['data'] as String) as Map<String, dynamic>;
-          lote.insert('clientes_fts', {
-            'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
-            'telefonos': _telefonosNorm(data),
-            'id': r['id'],
-          });
-        } catch (_) {
-          // Fila indecodificable: se omite del índice (igual que en
-          // _idsClientesDecodificables).
-        }
+      for (final entrada in barrido.datos.entries) {
+        final data = entrada.value;
+        lote.insert('clientes_fts', {
+          'nombre_norm': _normTexto('${data['nombre'] ?? ''}'),
+          'telefonos': _telefonosNorm(data),
+          'id': entrada.key,
+        });
       }
       await lote.commit(noResult: true);
-      final esperados = await _idsClientesDecodificables(db);
+      final esperados = barrido.ids;
       final indexados = (await db.rawQuery('SELECT id FROM clientes_fts'))
           .map((r) => r['id'] as int)
           .toSet();
