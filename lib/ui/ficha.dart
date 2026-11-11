@@ -1320,14 +1320,20 @@ class _FichaScreenState extends State<FichaScreen> {
     // b) Encolar la operación para el servidor.
     // v1.3.3 (Argón): incluir 'fecha' para que el servidor use el día del
     // regalo, no el día de la sincronización (desfase si se regala offline).
+    final opUuidRegalo = const Uuid().v4();
     await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
+      opUuid: opUuidRegalo,
       tipo: 'regalar_mes_cumpleanos',
       payload: {
         'cliente_id': widget.clienteId,
         'fecha': isoHabana(ahoraHabana()).substring(0, 10), // v1.3.3 (Argón): fecha de negocio en hora de La Habana, no DateTime.now() crudo
       },
     );
+    // b1) YS-5 (H5 de la revisión de Argón): el regalo sella
+    // SU op como autora del vencimiento que acaba de pintar
+    // (ver el mismo paso en cumpleanos.dart).
+    await LocalDb.instance
+        .registrarProcedenciaPago(widget.clienteId, opUuidRegalo);
     // b2) Guardar datos del mensaje para reenvíos futuros (candado local).
     final anio = '${ahoraHabana().year}';
     await LocalDb.instance.setMeta(

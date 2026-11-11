@@ -5504,6 +5504,41 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// Yunque de Sincronización (YS-5, H5/H6 de la revisión de
+  /// Argón): LIMPIA el sello de procedencia SOLO si sigue
+  /// nombrando a [opUuid]. Lo usan los dos desenlaces que
+  /// consumen el vencimiento de una op sin que el servidor lo
+  /// confirme: la reversión del optimista al rechazarse la op
+  /// (sync.dart) y el Deshacer del preview de cobro, que borra
+  /// la op de la cola. Sin la limpieza, el sello quedaba
+  /// apuntando a una op muerta y la guarda de identidad de la
+  /// reversión decidía sobre un dato podrido: un cobro
+  /// anterior en vuelo, rechazado después, veía la procedencia
+  /// de la op deshecha y NO revertía su vencimiento falso.
+  /// Si el sello nombra a OTRA op (un cobro posterior ya
+  /// pintó el suyo), no se toca.
+  Future<void> limpiarProcedenciaPago(int clienteId, String opUuid,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor d = txn ?? await db;
+    await limpiarProcedenciaPagoEn(d, clienteId, opUuid);
+  }
+
+  /// Núcleo con ejecutor EXPLÍCITO de [limpiarProcedenciaPago].
+  Future<void> limpiarProcedenciaPagoEn(
+      DatabaseExecutor d, int clienteId, String opUuid) async {
+    if (opUuid.isEmpty) return;
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    // Misma red que el registro: JSON dañado → se omite.
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
+    if ('${data['ultimo_pago_op_uuid'] ?? ''}' != opUuid) return;
+    data.remove('ultimo_pago_op_uuid');
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
   /// Elimina entradas optimistas del espejo vinculadas a una op ya
   /// aplicada. Las entradas optimistas usan id temporal negativo y
   /// guardan el op_uuid; al aplicar la op, el registro real llega

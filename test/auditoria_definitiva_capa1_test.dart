@@ -65,6 +65,14 @@ Future<String?> _pagadoHastaEspejo(int clienteId) async {
   return v == null ? null : '$v';
 }
 
+Future<String?> _selloEspejo(int clienteId) async {
+  final filas =
+      await LocalDb.instance.mirrorPorIds('clientes', [clienteId]);
+  if (filas.isEmpty) return null;
+  final v = filas.first['ultimo_pago_op_uuid'];
+  return v == null ? null : '$v';
+}
+
 void main() {
   group('A-3 · reversión del vencimiento con guarda de procedencia',
       () {
@@ -211,6 +219,46 @@ void main() {
       expect(await _pagadoHastaEspejo(506), '2026-11-10',
           reason: 'la identidad coincide: la reversión es '
               'legítima y dejó de ocurrir');
+    });
+
+    test('H5: la reversión LIMPIA el sello de la op revertida',
+        () async {
+      await _abrirDbVacia();
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          507,
+          {'id': 507, 'nombre': 'H', 'pagado_hasta': '2026-12-10'},
+          1);
+      await LocalDb.instance
+          .registrarProcedenciaPago(507, 'op-test');
+      await SyncEngine.instance.revertirVencimientoOptimistaParaTest(
+          _opPago(
+              clienteId: 507,
+              optimista: '2026-12-10',
+              anterior: '2026-11-10'));
+      expect(await _pagadoHastaEspejo(507), '2026-11-10');
+      expect(await _selloEspejo(507), isNull,
+          reason: 'el sello sobrevivió a la reversión de su '
+              'op: quedó apuntando a una op muerta');
+    });
+
+    test('H5/H6: limpiarProcedenciaPago solo limpia si el '
+        'sello nombra a ESA op', () async {
+      await _abrirDbVacia();
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          509,
+          {'id': 509, 'nombre': 'I', 'pagado_hasta': '2026-12-10'},
+          1);
+      await LocalDb.instance
+          .registrarProcedenciaPago(509, 'op-b');
+      // Un uuid ajeno NO limpia: el sello es de un cobro
+      // posterior vivo.
+      await LocalDb.instance.limpiarProcedenciaPago(509, 'op-a');
+      expect(await _selloEspejo(509), 'op-b');
+      // El propio sí.
+      await LocalDb.instance.limpiarProcedenciaPago(509, 'op-b');
+      expect(await _selloEspejo(509), isNull);
     });
   });
 

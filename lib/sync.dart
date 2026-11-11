@@ -4419,6 +4419,16 @@ class SyncEngine {
         await _db.updateMirrorPagadoHasta(
             cid, f.length >= 10 ? f.substring(0, 10) : f);
       }
+      // H5 (revisión de Argón al Yunque de Sync): la
+      // reversión consumió el vencimiento de ESTA op — el
+      // sello que la nombraba no debe sobrevivir a su propio
+      // desenlace, o quedaría apuntando a una op muerta y
+      // cualquier movimiento posterior sin firma (el regalo
+      // de cumpleaños, antes de sellar el suyo) heredaría
+      // una procedencia podrida. Solo se llega aquí si la
+      // procedencia era de esta op o no existía: la limpieza
+      // es condicional al uuid y no toca sellos ajenos.
+      await _db.limpiarProcedenciaPago(cid, miUuid);
     } catch (_) {}
   }
 

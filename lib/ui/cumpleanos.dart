@@ -353,14 +353,23 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     // a) Espejo local.
     await LocalDb.instance.updateMirrorPagadoHasta(id, nuevoHasta);
     // b) Op al servidor.
+    final opUuidRegalo = const Uuid().v4();
     await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
+      opUuid: opUuidRegalo,
       tipo: 'regalar_mes_cumpleanos',
       payload: {
         'cliente_id': id,
         'fecha': hoyHabanaIso(),
       },
     );
+    // b1) YS-5 (H5 de la revisión de Argón): el regalo pinta
+    // el vencimiento SIN ser un pago — sella SU op como
+    // autora del vencimiento vigente. Sin el sello, la
+    // procedencia quedaba con el uuid de un pago anterior
+    // (quizá ya muerto) y la guarda de identidad de la
+    // reversión decidía sobre ese dato podrido.
+    await LocalDb.instance
+        .registrarProcedenciaPago(id, opUuidRegalo);
     // c) Meta local (candado anual).
     await LocalDb.instance.setMeta(
         'regalo_cumple_${id}_$_anio',
