@@ -53,93 +53,112 @@ int get _ahoraEpoch =>
     DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
 void main() {
-  group('Pieza 4a: la puerta del sello exige server_seq '
-      'leído en la corrida', () {
-    // La composición EXACTA de run(): el watermark solo
-    // alcanza si además el server_seq se leyó en ESTA
-    // corrida. El caso Duany: instalación limpia, meta
-    // server_seq en 0, watermark 0 → 0 >= 0 sin la lectura.
-    test('0 >= 0 SIN lectura en la corrida: no hay sello', () {
-      const wm = 0;
-      const ss = 0;
-      const serverSeqLeidoEnCorrida = false;
+  group('Pieza 4a ADJUDICADA (F-1): el sello exige el '
+      'server_seq confirmado EN ESTA CORRIDA', () {
+    // Contrato de la forma adjudicada por Argón: el juicio
+    // ya no consulta la meta — recibe el valor que
+    // _download devolvió fuera de su catch. El caso Duany:
+    // la lectura de sync_estado nunca ocurrió (sesión
+    // muerta) ⇒ null ⇒ sin sello, aunque watermark y meta
+    // valieran 0 y el juicio viejo comparara 0 >= 0.
+    test('sync_estado sin leer en la corrida (null): no '
+        'hay sello', () {
       expect(
           SyncEngine.cicloCompleto(
-              watermarkAlcanza: wm >= ss && serverSeqLeidoEnCorrida,
+              serverSeqConfirmado: null,
+              watermarkMinimo: 0,
+              clientesLegibles: false,
               incidenciasOk: true),
           isFalse,
-          reason: 'sin leer sync_estado en la corrida, el '
-              'juicio 0>=0 sellaba «al día» con la app vacía');
+          reason: 'sin la lectura confirmada en la corrida, '
+              'el juicio viejo sellaba «al día» con la app '
+              'vacía y la sesión muerta');
     });
-    test('con la lectura hecha y el watermark al día: sello', () {
-      const wm = 900;
-      const ss = 900;
-      const serverSeqLeidoEnCorrida = true;
+    test('sync_estado falló (500/timeout): la corrida NO '
+        'es completa aunque la meta vieja alcanzara', () {
+      // La meta podría decir 900 y el watermark 900, pero si
+      // ESTA corrida no confirmó el seq, llega null.
       expect(
           SyncEngine.cicloCompleto(
-              watermarkAlcanza: wm >= ss && serverSeqLeidoEnCorrida,
+              serverSeqConfirmado: null,
+              watermarkMinimo: 900,
+              clientesLegibles: true,
+              incidenciasOk: true),
+          isFalse);
+    });
+    test('confirmado en la corrida y watermark al día: '
+        'sello', () {
+      expect(
+          SyncEngine.cicloCompleto(
+              serverSeqConfirmado: 900,
+              watermarkMinimo: 900,
+              clientesLegibles: true,
               incidenciasOk: true),
           isTrue);
+    });
+    test('confirmado pero el watermark quedó corto: no '
+        'hay sello', () {
+      expect(
+          SyncEngine.cicloCompleto(
+              serverSeqConfirmado: 900,
+              watermarkMinimo: 850,
+              clientesLegibles: true,
+              incidenciasOk: true),
+          isFalse);
     });
   });
 
-  group('Pieza 4b: invariante del espejo vacío (BD real)',
-      () {
-    test('0 clientes legibles + server_seq>0 + testigo '
-        'previo: bloquea', () async {
+  group('Pieza 4b ADJUDICADA (F-2): condición POSITIVA de '
+      'sello — clientes legibles (BD real)', () {
+    // La pata «clientesLegibles» de run() sale de
+    // conteoMirrorLegible('clientes') sobre la BD real: la
+    // forma negativa original («meta server_seq>0 ⇒
+    // prohibido») nunca se disparaba en el teléfono de
+    // Duany porque su meta jamás se escribió.
+    test('0 legibles + seq confirmado 870 + watermark al '
+        'día: sello PROHIBIDO', () async {
       await _init();
       final db = LocalDb.instance;
-      await db.setMeta('clientes_previos_buenos', '186');
+      final legibles =
+          (await db.conteoMirrorLegible('clientes')).legibles;
+      expect(legibles, 0);
       expect(
-          await SyncEngine.instance
-              .invarianteEspejoVacioBloqueaParaTest(870),
-          isTrue);
+          SyncEngine.cicloCompleto(
+              serverSeqConfirmado: 870,
+              watermarkMinimo: 870,
+              clientesLegibles: legibles > 0,
+              incidenciasOk: true),
+          isFalse);
     });
-    test('con clientes legibles en el espejo: no bloquea',
-        () async {
+    test('primer pull correcto (ya hay legibles): sello '
+        'permitido', () async {
       await _init();
       final db = LocalDb.instance;
-      await db.setMeta('clientes_previos_buenos', '186');
       final d = await db.db;
       await d.insert('clientes', {
         'id': 1,
         'data': jsonEncode({'id': 1, 'nombre': 'Prueba'}),
         'sync_seq': 10,
       });
+      final legibles =
+          (await db.conteoMirrorLegible('clientes')).legibles;
+      expect(legibles, 1);
       expect(
-          await SyncEngine.instance
-              .invarianteEspejoVacioBloqueaParaTest(870),
-          isFalse);
-    });
-    test('sin evidencia de que hubiera clientes: no bloquea',
-        () async {
-      await _init();
-      expect(
-          await SyncEngine.instance
-              .invarianteEspejoVacioBloqueaParaTest(870),
-          isFalse,
-          reason: 'una instalación genuinamente nueva no '
-              'debe quedar bloqueada para siempre');
-    });
-    test('la evidencia puede venir de los conteos '
-        'publicados', () async {
-      await _init();
-      final db = LocalDb.instance;
-      await db.setMeta('conteos_espejo_publicados',
-          jsonEncode({'clientes': 186}));
-      expect(
-          await SyncEngine.instance
-              .invarianteEspejoVacioBloqueaParaTest(870),
+          SyncEngine.cicloCompleto(
+              serverSeqConfirmado: 870,
+              watermarkMinimo: 870,
+              clientesLegibles: legibles > 0,
+              incidenciasOk: true),
           isTrue);
     });
-    test('server_seq 0 (servidor vacío): no bloquea',
-        () async {
-      await _init();
-      final db = LocalDb.instance;
-      await db.setMeta('clientes_previos_buenos', '186');
+    test('instalación virgen (seq confirmado 0): «sin '
+        'confirmar», nunca sello', () {
       expect(
-          await SyncEngine.instance
-              .invarianteEspejoVacioBloqueaParaTest(0),
+          SyncEngine.cicloCompleto(
+              serverSeqConfirmado: 0,
+              watermarkMinimo: 0,
+              clientesLegibles: false,
+              incidenciasOk: true),
           isFalse);
     });
   });

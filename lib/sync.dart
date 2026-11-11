@@ -1390,13 +1390,16 @@ class SyncEngine {
   int _diarioComprobantes = 0;
 
   /// 1.32 (O2F2S, Pieza 4 — cierre del agujero del sello
-  /// falso de la incidencia Duany): ¿esta corrida LEYÓ de
-  /// verdad `sync_estado` (server_seq confirmado EN ESTA
-  /// corrida)? Sin esto, `run()` no puede sellar completo:
-  /// con la meta `server_seq` en 0 (instalación limpia) el
-  /// juicio viejo comparaba 0 ≥ 0 y sellaba «al día» un
-  /// teléfono vacío cuya sesión estaba muerta.
-  bool _serverSeqLeidoEnCorrida = false;
+  /// falso de la incidencia Duany; forma adjudicada por
+  /// Argón, F-1/F-2): el server_seq CONFIRMADO EN ESTA
+  /// CORRIDA, tal como lo devolvió `_download` en su valor
+  /// de retorno (capturado FUERA del catch de `sync_estado`:
+  /// si esa lectura falla, queda null y la corrida NO puede
+  /// sellarse completa — el gemelo del agujero era juzgar
+  /// con la meta vieja). Sin esto, `run()` comparaba la meta
+  /// (0 en una instalación limpia) contra el watermark (0) y
+  /// sellaba «al día» un teléfono vacío con la sesión muerta.
+  int? _serverSeqConfirmadoEnCorrida;
 
   /// 1.32 (O2F2S, Pieza 4): la bajada de esta corrida abortó
   /// en la guarda de JWT (sesión presente pero no vigente, o
@@ -1899,7 +1902,7 @@ class SyncEngine {
     _diarioFotosSubidas = 0;
     _diarioFotosFallidas = 0;
     _diarioComprobantes = 0;
-    _serverSeqLeidoEnCorrida = false;
+    _serverSeqConfirmadoEnCorrida = null;
     _sinSesionEnCorrida = false;
     try {
       await DiarioSync.instance.cerrarHuerfanasComoCortadas();
@@ -2037,7 +2040,7 @@ class SyncEngine {
       int? serverSeqCierre;
       int? wmMinCierre;
       try {
-        serverSeqCierre =
+        serverSeqCierre = _serverSeqConfirmadoEnCorrida ??
             int.tryParse(await _db.getMeta('server_seq') ?? '');
         wmMinCierre =
             await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
@@ -2059,31 +2062,6 @@ class SyncEngine {
       );
     } catch (e) {
       AppLog.error('sync', 'diario_cerrar_fallo', d: '$e');
-    }
-  }
-
-  /// Invariante troncal de la Pieza 4 (incidencia Duany):
-  /// espejo de clientes con 0 filas LEGIBLES y el servidor
-  /// con datos ⇒ «al día» está prohibido por definición. La
-  /// evidencia de «el servidor tiene clientes» es el testigo
-  /// W1 (`clientes_previos_buenos`: la última bajada buena
-  /// dejó N clientes) o los conteos publicados (M5-S) si ya
-  /// existen. Sin evidencia, no bloquea (un gym que de
-  /// verdad tuviera 0 clientes no quedaría condenado).
-  Future<bool> _invarianteEspejoVacioBloquea(int serverSeq) async {
-    if (serverSeq <= 0) return false;
-    try {
-      final legibles =
-          (await _db.conteoMirrorLegible('clientes')).legibles;
-      if (legibles > 0) return false;
-      final previos = int.tryParse(
-              await _db.getMeta('clientes_previos_buenos') ?? '0') ??
-          0;
-      if (previos > 0) return true;
-      final publicados = await DiarioSync.instance.conteosPublicados();
-      return (publicados?['clientes'] ?? 0) > 0;
-    } catch (_) {
-      return false;
     }
   }
 
@@ -2339,6 +2317,12 @@ class SyncEngine {
         } catch (_) {}
         // Pull repetido: si llegan cambios durante la descarga, seguir.
         bool completo = false;
+        // 1.32 (O2F2S, F-2 adjudicado): foto del último intento
+        // para diagnosticar tras el bucle si el ÚNICO motivo de
+        // no sellar fue el espejo de clientes vacío (reacción:
+        // forzar su re-descarga con mensaje propio).
+        var ultimoWmCorrida = 0;
+        var ultimosLegiblesCorrida = 0;
         for (var i = 0; i < 3; i++) {
           // 1.28 (M1-A1): cada intento de pull verifica que el
           // ciclo sigue siendo el dueño del lock.
@@ -2365,14 +2349,25 @@ class SyncEngine {
           // Yunque B (YB-SYNC-03): y con la pasada de
           // incidencias de ESTE intento — su fallo ya no se
           // sella en verde aunque el watermark alcance.
-          // 1.32 (O2F2S, Pieza 4a): y con el server_seq LEÍDO
-          // EN ESTA CORRIDA — sin esa lectura, la meta vale 0
-          // en una instalación limpia y el juicio comparaba
-          // 0 ≥ 0: el sello falso de la incidencia Duany.
+          // 1.32 (O2F2S, Pieza 4a en su forma ADJUDICADA por
+          // Argón, F-1/F-2): el juicio exige EN POSITIVO el
+          // server_seq confirmado EN ESTA CORRIDA (devuelto
+          // por la bajada, fuera de su catch) y un espejo de
+          // clientes con filas legibles. Sin la lectura, la
+          // meta vale 0 en una instalación limpia y el juicio
+          // viejo comparaba 0 ≥ 0: el sello falso de la
+          // incidencia Duany.
           final wm = await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
-          final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+          ultimoWmCorrida = wm;
+          var legibles = 0;
+          try {
+            legibles = (await _db.conteoMirrorLegible('clientes')).legibles;
+          } catch (_) {}
+          ultimosLegiblesCorrida = legibles;
           if (cicloCompleto(
-              watermarkAlcanza: wm >= ss && _serverSeqLeidoEnCorrida,
+              serverSeqConfirmado: _serverSeqConfirmadoEnCorrida,
+              watermarkMinimo: wm,
+              clientesLegibles: legibles > 0,
               incidenciasOk: _incidenciasOkUltimaPasada)) {
             completo = true;
             break;
@@ -2381,17 +2376,24 @@ class SyncEngine {
         // v1.2.9+47: guardar estados separados (Gemini: manejar los 3 casos).
         await _db.setMeta('last_push_error', errPush ?? '');
         await _db.setMeta('last_pull_error', errPull ?? '');
-        // 1.32 (O2F2S, Pieza 4b): invariante troncal — con el
-        // ciclo por lo demás completo, un espejo de clientes
-        // VACÍO con datos en el servidor prohíbe el sello y
-        // fuerza la re-descarga de clientes en el próximo
+        // 1.32 (O2F2S, Pieza 4b en su forma ADJUDICADA, F-2):
+        // el sello ya quedó prohibido dentro de cicloCompleto
+        // (condición positiva: sin clientes legibles no hay
+        // «completo»). Aquí solo se DIAGNOSTICA ese caso — el
+        // ciclo alcanzó el watermark confirmado y las
+        // incidencias pasaron, pero el espejo de clientes
+        // quedó vacío — para reaccionar con mensaje propio y
+        // forzar la re-descarga de clientes en el próximo
         // ciclo. Se evalúa antes de la cadena de veredictos.
-        final ssVeredicto =
-            int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
-        final espejoVacioBloquea = completo &&
+        final ssConfVeredicto = _serverSeqConfirmadoEnCorrida;
+        final espejoVacioBloquea = !completo &&
             pushOk &&
             !_sinSesionEnCorrida &&
-            await _invarianteEspejoVacioBloquea(ssVeredicto);
+            ssConfVeredicto != null &&
+            ssConfVeredicto > 0 &&
+            ultimoWmCorrida >= ssConfVeredicto &&
+            _incidenciasOkUltimaPasada &&
+            ultimosLegiblesCorrida == 0;
         // v1.3.1 (E3): solo registrar error real, nunca un estado
         // informativo que la UI interpreta como fallo.
         // Auditoría Definitiva (A-2): el sello «sincronizado» y
@@ -2656,13 +2658,6 @@ class SyncEngine {
   @visibleForTesting
   Future<void> marcarRedescargaPorCorruptasParaTest() =>
       _marcarRedescargaPorCorruptas();
-
-  /// Costura de test (1.32, O2F2S Pieza 4b): el invariante
-  /// troncal del espejo vacío sin correr un ciclo entero.
-  @visibleForTesting
-  Future<bool> invarianteEspejoVacioBloqueaParaTest(
-          int serverSeq) =>
-      _invarianteEspejoVacioBloquea(serverSeq);
 
   /// Conteo de pendientes al cierre de una corrida.
   /// Yunque B (YB-TRA-01): TRIESTADO. Antes, ante cualquier
@@ -3776,6 +3771,11 @@ class SyncEngine {
       if (!silencioso) _emit(SyncPhase.downloading);
       final resDownload =
           await _download(silencioso: silencioso, corte: corte);
+      // 1.32 (O2F2S, F-1 adjudicado): el server_seq confirmado
+      // de ESTA corrida se toma del VALOR DE RETORNO de la
+      // bajada — capturado fuera del catch de sync_estado —
+      // nunca de la meta, que puede ser vieja o valer 0.
+      _serverSeqConfirmadoEnCorrida = resDownload.serverSeqConfirmado;
       final n = resDownload.aplicadas;
       // 1.32 (O2F2S, Pieza 4a): la bajada abortó por sesión
       // no válida — cero filas y NINGÚN sello de bajada buena.
@@ -5835,11 +5835,29 @@ class SyncEngine {
   /// y un 400/500 persistente de incidencias quedaba sellado
   /// en verde para siempre (las tablas de incidencias no
   /// están en tablasConWatermark).
+  ///
+  /// 1.32 (O2F2S, adjudicación de Argón F-1/F-2): la forma
+  /// adjudicada exige además, EN POSITIVO, el server_seq
+  /// confirmado EN ESTA CORRIDA (el valor que `_download`
+  /// devuelve fuera de su catch; null o 0 = «sin confirmar»,
+  /// jamás sello) y un espejo de clientes con filas legibles
+  /// (esta app es monocliente: el servidor tiene clientes;
+  /// una instalación virgen antes de su primer pull bueno
+  /// recibe «sin confirmar», que es lo correcto). La forma
+  /// negativa original («server_seq guardado > 0 ⇒
+  /// prohibido») nunca se disparaba en el teléfono de Duany
+  /// porque su meta nunca se escribió.
   static bool cicloCompleto({
-    required bool watermarkAlcanza,
+    required int? serverSeqConfirmado,
+    required int watermarkMinimo,
+    required bool clientesLegibles,
     required bool incidenciasOk,
   }) =>
-      watermarkAlcanza && incidenciasOk;
+      serverSeqConfirmado != null &&
+      serverSeqConfirmado > 0 &&
+      watermarkMinimo >= serverSeqConfirmado &&
+      clientesLegibles &&
+      incidenciasOk;
 
   /// H-08 (1.23, capa 3 del diseño de Argón): espejos que un rol
   /// puede tener en el teléfono. Admin/dueño: las 39. Entrenador:
@@ -5875,8 +5893,13 @@ class SyncEngine {
     }
   }
 
-  Future<({int aplicadas, Map<String, int> porTabla, int fallidas})>
-      _download(
+  Future<
+      ({
+        int aplicadas,
+        Map<String, int> porTabla,
+        int fallidas,
+        int? serverSeqConfirmado
+      })> _download(
       {bool silencioso = false,
       List<String>? tablasFiltro,
       // 1.31: corte del ciclo de arranque (presupuesto +
@@ -5904,7 +5927,12 @@ class SyncEngine {
       // visible y persistido (la incidencia Duany selló
       // «al día» en ESTE camino).
       _sinSesionEnCorrida = true;
-      return (aplicadas: 0, porTabla: const <String, int>{}, fallidas: 0);
+      return (
+        aplicadas: 0,
+        porTabla: const <String, int>{},
+        fallidas: 0,
+        serverSeqConfirmado: null
+      );
     }
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
     // re-descarga completa desde cero en este ciclo.
@@ -6071,7 +6099,6 @@ class SyncEngine {
           // quedaban sin su meta de server_seq ese ciclo.
           serverSeq = enteroTolerante(rows.first['server_seq']);
           if (serverSeq != null) {
-            _serverSeqLeidoEnCorrida = true;
             await _db.setMeta('server_seq', '$serverSeq');
           }
         }
@@ -7528,7 +7555,16 @@ class SyncEngine {
     // resultado — los sellos de «pull OK» lo consultan para no
     // anunciar una bajada limpia cuando hubo filas rechazadas
     // por el conversor (la clase del incidente G-09).
-    return (aplicadas: aplicadas, porTabla: porTabla, fallidas: fallidas);
+    // 1.32 (O2F2S, F-1 adjudicado): el server_seq confirmado
+    // viaja EN EL RETORNO, fuera del catch de la lectura de
+    // sync_estado — si esa lectura falló, llega null y el
+    // llamador no puede sellar «completo» con la meta vieja.
+    return (
+      aplicadas: aplicadas,
+      porTabla: porTabla,
+      fallidas: fallidas,
+      serverSeqConfirmado: serverSeq
+    );
   }
 
   /// v1.3.4 (Ítem 6 Capa 1, veredicto de Argón): reconciliación
