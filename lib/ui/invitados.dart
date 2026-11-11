@@ -185,16 +185,47 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     if (_seleccion.isNotEmpty) setState(() => _seleccion.clear());
   }
 
-  Future<void> _cargar() async {
+  Future<void> _cargar({bool verificar = true}) async {
     final gen = ++_cargaGen;
     setState(() {
       _cargando = true;
       _error = null;
     });
-    // Primero cerrar conversiones cuya op ya subió (idempotente).
-    try {
-      await _svc.verificarConversiones();
-    } catch (_) {}
+    // 1.32 (H-B5-2): el cierre de conversiones SALE del camino
+    // de pintado. verificarConversiones puede disparar
+    // confirmarConversion, una ESCRITURA sin timeout a
+    // propósito (un corte del lado cliente no debe fingir que
+    // el servidor no aplicó): esperarla aquí dejaba el spinner
+    // eterno con la red colgada, antes de pintar nada. Ahora
+    // va en segundo plano y, si confirma alguna conversión, la
+    // lista se recarga sola (sin re-verificar).
+    if (verificar) {
+      unawaited(_verificarConversionesEnFondo(gen));
+    }
+    // 1.32 (H-B5-1): la caché local pinta en el primer frame
+    // (la vista «Todos», la única cacheada): la lista ya no
+    // espera a la RPC (12 s) para enseñar lo que el teléfono
+    // ya sabe. Se pinta en modo sin conexión (solo lectura) y
+    // la respuesta fresca la sustituye al llegar, como la
+    // ficha. Antes la caché solo entraba en el catch, tras el
+    // timeout entero.
+    var pintoCache = false;
+    if (_filtro == 'todos') {
+      final cache = await _svc.leerCacheInvitados();
+      if (!mounted || gen != _cargaGen) return;
+      if (cache != null && cache.lista.isNotEmpty) {
+        pintoCache = true;
+        setState(() {
+          _lista = cache.lista;
+          _conteos = cache.resumen;
+          _offline = true;
+          _cacheAt = cache.cachedAt;
+          _seleccion.clear();
+          _cargando = false;
+          _error = null;
+        });
+      }
+    }
     try {
       final lista = await _svc.listar(filtro: _filtro);
       final conteos = await _svc.resumen();
@@ -246,6 +277,19 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       unawaited(_actualizarConteoReportes(gen));
     } catch (e) {
       if (!mounted || gen != _cargaGen) return;
+      // 1.32 (H-B5-1): con la caché ya pintada en solo lectura,
+      // un fallo al refrescar no tumba la vista a la pantalla
+      // de error: se conserva la copia y se avisa.
+      if (pintoCache) {
+        setState(() => _cargando = false);
+        mostrarSnack(context,
+            e is InvitadoError
+                ? e.mensaje
+                : 'Sin conexión: se muestra la última lista '
+                    'guardada.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
       // 1.28 (M4-A11/R2M4-H6): si la pantalla YA enseña datos
       // frescos, un fallo de red de una recarga NO los pisa
       // con la caché vieja ni resetea el filtro elegido: se
@@ -284,6 +328,23 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         _cargando = false;
       });
     }
+  }
+
+  /// 1.32 (H-B5-2): el cierre de conversiones en SEGUNDO
+  /// PLANO (ver _cargar): la escritura de confirmación no
+  /// lleva timeout a propósito y jamás espera en el camino de
+  /// pintado. Si confirma alguna, la lista se recarga (sin
+  /// re-verificar) para reflejar al convertido; la guarda de
+  /// generación descarta el aterrizaje si la carga que lo
+  /// lanzó ya fue superada.
+  Future<void> _verificarConversionesEnFondo(int gen) async {
+    int confirmadas = 0;
+    try {
+      confirmadas = await _svc.verificarConversiones();
+    } catch (_) {}
+    if (confirmadas <= 0) return;
+    if (!mounted || gen != _cargaGen) return;
+    await _cargar(verificar: false);
   }
 
   /// 1.29 (FB-05 · D-B1-05): el conteo de reportes Plus por
@@ -1546,7 +1607,10 @@ String _estadoLegibleInvitado(String estado) => switch (estado) {
     };
 
 class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
-  final _svc = InvitadosService();
+  // 1.32 (H-B5-1): la misma costura de test que la lista —
+  // sin ella el detalle no se puede probar con RPC simulada.
+  final _svcReal = InvitadosService();
+  InvitadosService get _svc => servicioInvitadosParaTest ?? _svcReal;
   bool _cargando = true;
   bool _actuando = false;
   String? _error;
@@ -1566,6 +1630,10 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   String _claveVisitas = '';
   // 1.28 (M4-A1/R2M4-H8): registro de visita en curso.
   bool _registrandoVisita = false;
+  // 1.32 (H-B5-1): guarda de generación de la carga (la lista
+  // ya la tenía; el detalle solo miraba mounted y una carga
+  // vieja podía pintar sobre la nueva).
+  int _cargaGen = 0;
 
   @override
   void initState() {
@@ -1573,14 +1641,40 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     _cargar();
   }
 
-  Future<void> _cargar() async {
+  Future<void> _cargar({bool verificar = true}) async {
+    final gen = ++_cargaGen;
     setState(() {
       _cargando = true;
       _error = null;
     });
-    try {
-      await _svc.verificarConversiones();
-    } catch (_) {}
+    // 1.32 (H-B5-2): como en la lista, el cierre de
+    // conversiones va en segundo plano: su escritura de
+    // confirmación (sin timeout a propósito) ya no espera en
+    // el camino de pintado de la ficha del invitado.
+    if (verificar) {
+      unawaited(_verificarConversionesEnFondo(gen));
+    }
+    // 1.32 (H-B5-1): el detalle cacheado pinta en el primer
+    // frame, en solo lectura con su marca de frescura (la
+    // misma foto que el fallback del catch), y la RPC lo
+    // sustituye al llegar. Antes la caché solo entraba tras
+    // agotar el timeout de la RPC.
+    var pintoCache = false;
+    final cachePrevia = await _svc.leerDetalleCache(widget.invitadoId);
+    if (!mounted || gen != _cargaGen) return;
+    if (cachePrevia != null) {
+      pintoCache = true;
+      setState(() {
+        _d = cachePrevia.detalle;
+        _local = null;
+        _estadoConvertido = null;
+        _eliminadoEn = null;
+        _offlineCache = true;
+        _cacheAt = cachePrevia.cachedAt;
+        _cargando = false;
+        _error = null;
+      });
+    }
     try {
       final d = await _svc.detalle(widget.invitadoId);
       var local =
@@ -1630,7 +1724,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         estadoConvertido = res.estado;
         eliminadoEn = res.eliminadoEn;
       }
-      if (!mounted) return;
+      if (!mounted || gen != _cargaGen) return;
       setState(() {
         _d = d;
         _local = local;
@@ -1644,12 +1738,17 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       // ficha: se pinta cuando llega).
       _cargarVisitas(d);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _cargaGen) return;
+      // 1.32 (H-B5-1): con la copia cacheada ya pintada en
+      // solo lectura, el fallo al refrescar no tumba la
+      // ficha: se queda la copia (el fallback de abajo
+      // pintaría esa misma caché, tras el timeout).
+      if (pintoCache) return;
       // v1.12.0 (D5): sin conexión, el detalle en caché se muestra
       // en SOLO LECTURA con su marca de frescura (nunca acciones).
       if (e is InvitadoError && e.codigo == 'RED') {
         final cache = await _svc.leerDetalleCache(widget.invitadoId);
-        if (!mounted) return;
+        if (!mounted || gen != _cargaGen) return;
         if (cache != null) {
           setState(() {
             _d = cache.detalle;
@@ -1674,6 +1773,19 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         _cargando = false;
       });
     }
+  }
+
+  /// 1.32 (H-B5-2): el cierre de conversiones en SEGUNDO
+  /// PLANO (ver _cargar): si confirma alguna, la ficha se
+  /// recarga (sin re-verificar) para reflejar al convertido.
+  Future<void> _verificarConversionesEnFondo(int gen) async {
+    int confirmadas = 0;
+    try {
+      confirmadas = await _svc.verificarConversiones();
+    } catch (_) {}
+    if (confirmadas <= 0) return;
+    if (!mounted || gen != _cargaGen) return;
+    await _cargar(verificar: false);
   }
 
   void _snack(String texto) {
