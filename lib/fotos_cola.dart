@@ -452,6 +452,11 @@ class FotosColaService {
   Future<int> procesarCola() async {
     int subidas = 0;
     final db = await LocalDb.instance.db;
+    // YS-2 (H1-residual de la revisión de Argón): la
+    // anotación de las ops exentas de la puerta también sale
+    // de ESTE worker, una vez por corrida (helper compartido
+    // del motor; el de incidencias ya lo hacía solo).
+    await SyncEngine.instance.anotarOpsExentasPuerta();
     // Worker ID único para esta instancia del despachador.
     final workerId = const Uuid().v4();
 

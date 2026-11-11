@@ -8977,6 +8977,30 @@ class SyncEngine {
     }
   }
 
+  /// Yunque de Sincronización (YS-2, H1-residual de la
+  /// revisión de Argón): anota en bitácora, una vez por
+  /// corrida del worker que la invoca, las ops en error
+  /// EXENTAS de la puerta de la Regla de Hierro (dormidas en
+  /// su backoff o envenenadas): el atasco queda visible en
+  /// Salud, no silencioso. La exención vive dentro del
+  /// conteo ([LocalDb.countPendingOpsNoFoto]) y la comparten
+  /// todas las puertas; la ANOTACIÓN sale de CADA worker de
+  /// fotos — este, comprobantes y la cola de fotos — como
+  /// promete el diseño en localdb: una ventana en la que
+  /// solo corran los otros dos ya no deja el intervalo sin
+  /// rastro. Defensiva: jamás rompe al worker que la llama.
+  Future<void> anotarOpsExentasPuerta() async {
+    try {
+      final exentas = await _db.opsExentasPuerta();
+      if (exentas.isNotEmpty) {
+        AppLog.info('sync', 'puerta_ops_exenta',
+            d: '${exentas.length} op(s) en error fuera de la '
+                'puerta: ${exentas.map((e) => '${e['tipo']} '
+                    '(${e['intentos']} intentos)').join(', ')}');
+      }
+    } catch (_) {}
+  }
+
   Future<void> subirFotosIncidencias() async {
     final d = await _db.db;
     // 1.28 (M1-A5/R2M1-F2): rescate de reclamos HUÉRFANOS
@@ -8987,19 +9011,10 @@ class SyncEngine {
     try {
       await _db.rescatarFotosIncidenciasAtascadas();
     } catch (_) {}
-    // Yunque de Sincronización (YS-2): si hay ops exentas de la
-    // puerta de la Regla de Hierro (en error dormidas en su
-    // backoff o envenenadas), el atasco se anota una vez por
-    // corrida de este worker: visible en Salud, no silencioso.
-    try {
-      final exentas = await _db.opsExentasPuerta();
-      if (exentas.isNotEmpty) {
-        AppLog.info('sync', 'puerta_ops_exenta',
-            d: '${exentas.length} op(s) en error fuera de la '
-                'puerta: ${exentas.map((e) => '${e['tipo']} '
-                    '(${e['intentos']} intentos)').join(', ')}');
-      }
-    } catch (_) {}
+    // YS-2: anotación de las ops exentas de la puerta, una
+    // vez por corrida de este worker (helper compartido:
+    // también lo invocan comprobantes y la cola de fotos).
+    await anotarOpsExentasPuerta();
     final pendientes = await d.query(
         'incidencias_fotos',
         where: "sync_estado IN ('pending', 'retry')",

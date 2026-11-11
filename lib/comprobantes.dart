@@ -428,6 +428,11 @@ class ComprobantesService {
     // meta como el de fotos_cola ('comprobantes_worker_lease'),
     // reclamado atómicamente y liberado solo por su dueño.
     final db = await LocalDb.instance.db;
+    // YS-2 (H1-residual de la revisión de Argón): la
+    // anotación de las ops exentas de la puerta también sale
+    // de ESTE worker, una vez por corrida (helper compartido
+    // del motor; el de incidencias ya lo hacía solo).
+    await SyncEngine.instance.anotarOpsExentasPuerta();
     // Yunque R3-M3-4: puerta de la Regla de Hierro a la
     // ENTRADA. Antes la guarda solo vivía dentro de la subida
     // por chunk: con ops de cobro pendientes, los disparos

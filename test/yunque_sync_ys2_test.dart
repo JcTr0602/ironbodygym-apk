@@ -14,11 +14,14 @@ library;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/app_log.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/sync.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> _abrirLimpia() async {
   sqfliteFfiInit();
@@ -201,6 +204,70 @@ void main() {
       // Y con una op accionable real, la puerta vuelve a cerrar:
       await _insertarOp(uuid: 'cobro', estado: 'pendiente');
       expect(await LocalDb.instance.countPendingOpsNoFoto(), 1);
+    });
+  });
+
+  group('YS-2/H1-residual · anotación de la exención', () {
+    setUpAll(() async {
+      SharedPreferences.setMockInitialValues({});
+      // ignore: deprecated_member_use
+      await Supabase.initialize(
+          url: 'http://127.0.0.1:9', publishableKey: 'dummy');
+    });
+
+    test('el helper anota la op exenta en la bitácora',
+        () async {
+      await _abrirLimpia();
+      await _insertarOp(
+          uuid: 'zombi-log',
+          estado: 'error',
+          intentos: 7,
+          proximoReintento: _en(const Duration(minutes: 5)));
+      await SyncEngine.instance.anotarOpsExentasPuerta();
+      // eventosRecientes fuerza el flush del buffer de
+      // AppLog; se reintenta por si el volcado va en tandas.
+      Map<String, dynamic>? fila;
+      for (var i = 0; i < 30 && fila == null; i++) {
+        final filas =
+            await AppLog.eventosRecientes(limite: 200);
+        for (final f in filas) {
+          if (f['evento'] == 'puerta_ops_exenta') fila = f;
+        }
+        if (fila == null) {
+          await Future<void>.delayed(
+              const Duration(milliseconds: 100));
+        }
+      }
+      expect(fila, isNotNull,
+          reason: 'la exención no dejó rastro en la bitácora');
+      expect('${fila!['detalle'] ?? ''}',
+          contains('pago_mensual'));
+    });
+
+    test('sin ops exentas el helper no anota nada', () async {
+      await _abrirLimpia();
+      await SyncEngine.instance.anotarOpsExentasPuerta();
+      final filas = await AppLog.eventosRecientes(limite: 200);
+      expect(
+          filas.where((f) => f['evento'] == 'puerta_ops_exenta'),
+          isEmpty);
+    });
+
+    test('pin: los tres workers invocan el helper compartido',
+        () {
+      final sync = File('lib/sync.dart').readAsStringSync();
+      expect(sync,
+          contains('Future<void> anotarOpsExentasPuerta()'),
+          reason: 'el helper compartido desapareció');
+      expect(
+          File('lib/comprobantes.dart').readAsStringSync(),
+          contains('anotarOpsExentasPuerta()'),
+          reason: 'comprobantes dejó de anotar la exención '
+              'a su entrada');
+      expect(File('lib/fotos_cola.dart').readAsStringSync(),
+          contains('anotarOpsExentasPuerta()'),
+          reason: 'la cola de fotos dejó de anotar la '
+              'exención a su entrada');
     });
   });
 }
