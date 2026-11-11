@@ -3,7 +3,7 @@
 /// copiar o enviar por WhatsApp. No incluye notas internas
 /// ni datos de gestión: es el papel que el cliente puede
 /// ver. Todo sale de los espejos locales (y del residuo
-/// Plus, solo dueño, como en la ficha).
+/// Plus, consultado por todo el staff como en la ficha).
 library;
 
 import 'package:flutter/material.dart';
@@ -101,15 +101,17 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
         servicios: servicios,
         fiadoPendiente: fiado,
         plusResidualTexto:
-            AuthService().isOwner ? 'sin verificar' : null,
+            AuthService().session != null ? 'sin verificar' : null,
         hoyIso: hoyHabanaIso(),
       );
       _cargando = false;
     });
-    // Residuo Plus: solo el dueño obtiene dato real de la
-    // RPC (fail-closed, igual que en la ficha).
+    // Residuo Plus (plu06_ H5a): todo el staff autenticado
+    // obtiene dato real de la RPC — su guarda es
+    // es_staff() desde IMP-14 — con el mismo fail-closed
+    // que en la ficha («sin verificar» ante el fallo).
     String? plusTxt;
-    if (AuthService().isOwner) {
+    if (AuthService().session != null) {
       try {
         // Autoauditoría 1.22 #2: con timeout (12 s). Todo lo
         // demás de esta pantalla sale del espejo LOCAL y ya está

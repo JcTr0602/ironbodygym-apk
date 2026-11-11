@@ -50,7 +50,9 @@ import '../errores_sync.dart';
 import '../app_log.dart';
 
 /// Fila «Plus» de la tarjeta Membresía: consulta SOLA el Plus
-/// residual (solo dueño) y se repinta sola al llegar.
+/// residual (todo el staff autenticado, como manda la guarda
+/// es_staff() de la RPC desde IMP-14) y se repinta sola al
+/// llegar.
 class FilaPlusResidualFicha extends StatefulWidget {
   final int clienteId;
   const FilaPlusResidualFicha({super.key, required this.clienteId});
@@ -72,7 +74,12 @@ class _FilaPlusResidualFichaState extends State<FilaPlusResidualFicha> {
   }
 
   Future<void> _consultar() async {
-    if (!AuthService().isOwner) {
+    // plu06_ H5a: la consulta ya no es solo del dueño —
+    // la RPC responde el residual real a todo el staff
+    // (es_staff()) y el entrenador debe poder devolverlo.
+    // Sin sesión no hay llamador posible: se queda lista
+    // y sin fila, como antes para el no-dueño.
+    if (AuthService().session == null) {
       if (mounted) setState(() => _listo = true);
       return;
     }
