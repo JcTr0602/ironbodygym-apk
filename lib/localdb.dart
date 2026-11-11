@@ -221,7 +221,11 @@ class LocalDb {
   /// (el mismo hueco que v62 cazó en `acceso_blequeos`): la flota
   /// en v68 no lo creaba nunca. El paso oldV<69 llama al MISMO
   /// método que onCreate (idempotente).
-  static const int versionActual = 72;
+  /// v73 (1.32, Oleada 2 Fase 2 — M1 del sistema de detalle de
+  /// sync): el diario de sincronizaciones (sync_corridas,
+  /// sync_corrida_tablas, sync_corrida_ops). El paso oldV<73
+  /// llama al MISMO método que onCreate (idempotente).
+  static const int versionActual = 73;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1758,6 +1762,13 @@ class LocalDb {
           // MISMO método que onCreate (paridad garantizada).
           await _crearTablaCuarentenaIncidencias(db);
         }
+        if (oldV < 73) {
+          // 1.32 (Oleada 2 Fase 2, M1): diario de
+          // sincronizaciones — el registro persistente de cada
+          // corrida (fuente del Centro de Sincronización).
+          // MISMO método que onCreate (paridad garantizada).
+          await _crearTablasDiarioSync(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -3141,6 +3152,82 @@ class LocalDb {
     // retenidas caducadas. MISMO método en onCreate y en
     // onUpgrade (v72).
     await _crearTablaCuarentenaIncidencias(db);
+    // 1.32 (Oleada 2 Fase 2, M1): diario de sincronizaciones.
+    // MISMO método en onCreate y en onUpgrade (v73).
+    await _crearTablasDiarioSync(db);
+  }
+
+  /// 1.32 (Oleada 2 Fase 2, M1 — sistema de detalle de sync,
+  /// diseño syncdet_ EN FIRME): el diario local de corridas de
+  /// sincronización. Tres tablas:
+  /// - sync_corridas: una fila por corrida REAL (las que abren
+  ///   plaza según M1-R3; los chequeos automáticos vacíos no
+  ///   dejan fila, solo sellos en meta). La fila nace 'en_curso'
+  ///   y se cierra dentro del candado con su veredicto; la
+  ///   siguiente corrida cierra como 'cortada' la huérfana que
+  ///   encuentre (foto congelada en tabla_actual/pagina_actual).
+  /// - sync_corrida_tablas: el desenlace por tabla de la
+  ///   corrida (dirección 'bajada'; las pseudo-tablas
+  ///   'sync_borrados' y las 4 de incidencias viven aquí con su
+  ///   propio nombre).
+  /// - sync_corrida_ops: la FOTO resumida de cada op del push
+  ///   de la corrida (ops_queue se poda a 60 días; el historial
+  ///   no puede colgar de ella).
+  /// Idempotente: la llaman onCreate y la migración v73.
+  static Future<void> _crearTablasDiarioSync(
+      DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS sync_corridas (
+      id TEXT PRIMARY KEY,
+      tipo TEXT NOT NULL,
+      origen TEXT NOT NULL,
+      disparador TEXT,
+      inicio_epoch INTEGER NOT NULL,
+      fin_epoch INTEGER,
+      duracion_ms INTEGER,
+      estado TEXT NOT NULL DEFAULT 'en_curso',
+      subidos INTEGER NOT NULL DEFAULT 0,
+      bajados INTEGER NOT NULL DEFAULT 0,
+      fotos_subidas INTEGER NOT NULL DEFAULT 0,
+      fotos_fallidas INTEGER NOT NULL DEFAULT 0,
+      comprobantes_subidos INTEGER NOT NULL DEFAULT 0,
+      server_seq INTEGER,
+      watermark_min INTEGER,
+      motivo_no_sello TEXT,
+      error_codigo TEXT,
+      error_detalle TEXT,
+      tabla_actual TEXT,
+      pagina_actual INTEGER,
+      rol TEXT,
+      version_app TEXT
+    )''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_corridas_inicio '
+        'ON sync_corridas(inicio_epoch)');
+    await db.execute('''CREATE TABLE IF NOT EXISTS sync_corrida_tablas (
+      corrida_id TEXT NOT NULL,
+      tabla TEXT NOT NULL,
+      direccion TEXT NOT NULL DEFAULT 'bajada',
+      recibidas INTEGER NOT NULL DEFAULT 0,
+      aplicadas INTEGER NOT NULL DEFAULT 0,
+      sin_cambio INTEGER NOT NULL DEFAULT 0,
+      tumbas INTEGER NOT NULL DEFAULT 0,
+      fallidas INTEGER NOT NULL DEFAULT 0,
+      paginas INTEGER NOT NULL DEFAULT 0,
+      wm_antes INTEGER,
+      wm_despues INTEGER,
+      estado TEXT NOT NULL DEFAULT 'ok',
+      error TEXT,
+      PRIMARY KEY (corrida_id, tabla)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS sync_corrida_ops (
+      corrida_id TEXT NOT NULL,
+      op_uuid TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      resumen TEXT,
+      resultado TEXT NOT NULL DEFAULT 'pendiente',
+      motivo TEXT,
+      PRIMARY KEY (corrida_id, op_uuid)
+    )''');
   }
 
   /// Yunque de Sincronización (YS-4): tabla de cuarentena de

@@ -569,7 +569,7 @@ void main() {
       // a 71 (generación CAS de comprobantes). La columna de
       // v65 sigue naciendo en el esquema limpio, que es lo
       // que aquí se fija.
-      expect(LocalDb.versionActual, 72);
+      expect(LocalDb.versionActual, 73);
     });
   });
 

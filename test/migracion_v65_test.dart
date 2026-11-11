@@ -83,8 +83,8 @@ void main() {
       'incidencias_fotos trae reclamada_en TEXT', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 72);
-    expect(await db.getVersion(), 72);
+    expect(LocalDb.versionActual, 73);
+    expect(await db.getVersion(), 73);
     final info = await _infoIncidenciasFotos(db);
     expect(info['reclamada_en'], startsWith('TEXT'),
         reason: 'sin la columna, el reset del push devolvía '
@@ -106,7 +106,7 @@ void main() {
     await LocalDb.resetParaTest(borrarArchivo: false);
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 72);
+    expect(await db.getVersion(), 73);
     final filas = await db.query('incidencias_fotos',
         columns: ['id', 'reclamada_en', 'sync_estado'],
         orderBy: 'id');
