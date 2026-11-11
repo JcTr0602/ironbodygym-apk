@@ -44,9 +44,10 @@ Map<String, dynamic> _opPago({
   required int clienteId,
   required String? optimista,
   required String? anterior,
+  String opUuid = 'op-test',
 }) {
   return {
-    'op_uuid': 'op-test',
+    'op_uuid': opUuid,
     'tipo': 'pago_mensual',
     'payload': jsonEncode({
       'cliente_id': clienteId,
@@ -130,17 +131,14 @@ void main() {
 
     // 1.31 (H-04 residuo A-3, yunque de app): el caso
     // MISMO VALOR — dos pagos en vuelo que pintan el
-    // MISMO pagado_hasta resultante (p. ej. dos
-    // mensualidades seguidas que caen en la misma fecha
-    // tope). La guarda por VALOR no puede distinguirlos:
-    // el segundo se confirma, el primero se rechaza, y
-    // la reversión del primero pisa el vencimiento del
-    // segundo. Este test FIJA el comportamiento actual
-    // (revierte) como evidencia del residuo: la guarda
-    // por IDENTIDAD de op exige modelo nuevo y va
-    // especificada al Yunque de Sincronización.
-    test('MISMO VALOR: dos pagos con el mismo vencimiento '
-        '— la guarda por valor no distingue (residuo fijado)',
+    // MISMO pagado_hasta resultante. La guarda por VALOR
+    // no podía distinguirlos y la reversión del primero
+    // pisaba el segundo, confirmado. RESUELTO en el
+    // Yunque de Sincronización (YS-5) con la guarda por
+    // IDENTIDAD: el espejo guarda qué op pintó el
+    // vencimiento (`ultimo_pago_op_uuid`).
+    test('MISMO VALOR (YS-5): la procedencia es de la '
+        'SEGUNDA op — el rechazo de la primera NO revierte',
         () async {
       await _abrirDbVacia();
       await LocalDb.instance.upsertMirror(
@@ -148,18 +146,40 @@ void main() {
           505,
           {'id': 505, 'nombre': 'E', 'pagado_hasta': '2026-12-10'},
           1);
-      // La op rechazada es la PRIMERA; la segunda (con
-      // el mismo valor resultante) ya se confirmó y el
-      // espejo es correcto… pero la reversión lo pisa.
+      // La segunda op pintó el vencimiento vigente y se
+      // confirmó; la rechazada es la primera.
+      await LocalDb.instance
+          .registrarProcedenciaPago(505, 'op-segunda');
       await SyncEngine.instance.revertirVencimientoOptimistaParaTest(
           _opPago(
               clienteId: 505,
               optimista: '2026-12-10',
+              anterior: '2026-11-10',
+              opUuid: 'op-primera'));
+      expect(await _pagadoHastaEspejo(505), '2026-12-10',
+          reason: 'YS-5 roto: la reversión volvió a pisar el '
+              'pago confirmado con el mismo valor');
+    });
+
+    test('YS-5: procedencia de ESTA op + mismo valor → '
+        'revierte como siempre', () async {
+      await _abrirDbVacia();
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          506,
+          {'id': 506, 'nombre': 'F', 'pagado_hasta': '2026-12-10'},
+          1);
+      // El vencimiento vigente lo pintó esta misma op.
+      await LocalDb.instance
+          .registrarProcedenciaPago(506, 'op-test');
+      await SyncEngine.instance.revertirVencimientoOptimistaParaTest(
+          _opPago(
+              clienteId: 506,
+              optimista: '2026-12-10',
               anterior: '2026-11-10'));
-      expect(await _pagadoHastaEspejo(505), '2026-11-10',
-          reason: 'comportamiento ACTUAL fijado: con el '
-              'mismo valor, la reversión pisa el pago '
-              'confirmado (residuo H-04 → Yunque de Sync)');
+      expect(await _pagadoHastaEspejo(506), '2026-11-10',
+          reason: 'la identidad coincide: la reversión es '
+              'legítima y dejó de ocurrir');
     });
   });
 

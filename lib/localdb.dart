@@ -5430,6 +5430,43 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// Yunque de Sincronización (YS-5): registra en el JSON del
+  /// espejo QUÉ op pintó el vencimiento optimista vigente
+  /// (`ultimo_pago_op_uuid`). La guarda de valor de A-3 no
+  /// distingue dos pagos en vuelo que pintan el MISMO
+  /// vencimiento (el segundo mes consecutivo cobra lo mismo
+  /// que el primero habría pintado... y el rechazo del
+  /// primero revertía también el segundo, ya confirmado).
+  /// Con la identidad de la op, la reversión sabe si el
+  /// vencimiento vigente es SUYO o de otra op.
+  ///
+  /// Vive en el JSON `data` a propósito: una columna física
+  /// la borraría igual el `upsertMirror` al reemplazar la
+  /// fila con la verdad del servidor — y cuando el servidor
+  /// confirma, la procedencia ya no hace falta. Sin
+  /// migración.
+  Future<void> registrarProcedenciaPago(int clienteId, String opUuid,
+      {DatabaseExecutor? txn}) async {
+    final DatabaseExecutor d = txn ?? await db;
+    await registrarProcedenciaPagoEn(d, clienteId, opUuid);
+  }
+
+  /// Núcleo con ejecutor EXPLÍCITO de [registrarProcedenciaPago]
+  /// (la papelera pinta dentro de su transacción única).
+  Future<void> registrarProcedenciaPagoEn(
+      DatabaseExecutor d, int clienteId, String opUuid) async {
+    final rows = await d.query('clientes',
+        where: 'id=?', whereArgs: [clienteId], limit: 1);
+    if (rows.isEmpty) return;
+    // Misma red que updateMirrorPagadoHastaEn: JSON dañado →
+    // se omite (el próximo pull reescribe la fila entera).
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return;
+    data['ultimo_pago_op_uuid'] = opUuid;
+    await d.update('clientes', {'data': jsonEncode(data)},
+        where: 'id=?', whereArgs: [clienteId]);
+  }
+
   /// Elimina entradas optimistas del espejo vinculadas a una op ya
   /// aplicada. Las entradas optimistas usan id temporal negativo y
   /// guardan el op_uuid; al aplicar la op, el registro real llega

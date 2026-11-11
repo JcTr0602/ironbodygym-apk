@@ -4292,6 +4292,34 @@ class SyncEngine {
           : optimistaRaw;
       final filas = await _db.mirrorPorIds('clientes', [cid]);
       if (filas.isEmpty) return;
+      // Yunque de Sincronización (YS-5): guarda de IDENTIDAD
+      // sobre la de valor. La guarda de valor no distingue el
+      // test MISMO VALOR: dos pagos en vuelo que pintan el
+      // mismo vencimiento (dos meses seguidos al mismo
+      // precio) — el rechazo del primero revertía también el
+      // segundo, ya confirmado. Si el espejo trae la
+      // procedencia (`ultimo_pago_op_uuid`, la pinta el
+      // preview y la papelera al aplicar el optimista):
+      //  - distinta de esta op → el vencimiento vigente NO es
+      //    de esta op: no se revierte (se borraría un pago
+      //    válido) y se pide el pull silencioso de fin de
+      //    ciclo para converger con el servidor.
+      //  - igual a esta op → el vencimiento es suyo: sigue la
+      //    guarda de valor y la reversión de siempre.
+      // Sin procedencia (ops pintadas antes de YS-5) manda la
+      // guarda de valor legada: tratar la ausencia como «no
+      // mío» dejaría vencimientos falsos eternos, porque el
+      // pull delta no cura el patrón Missail (la fila del
+      // servidor no cambia cuando una op se rechaza).
+      final procedencia =
+          '${filas.first['ultimo_pago_op_uuid'] ?? ''}';
+      final miUuid = '${op['op_uuid'] ?? ''}';
+      if (procedencia.isNotEmpty &&
+          miUuid.isNotEmpty &&
+          procedencia != miUuid) {
+        _pullProtegidoPendiente = true;
+        return;
+      }
       final actualRaw = '${filas.first['pagado_hasta'] ?? ''}';
       final actual = actualRaw.length >= 10
           ? actualRaw.substring(0, 10)

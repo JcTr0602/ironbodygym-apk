@@ -200,6 +200,9 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       // acepta txn y su actualización optimista corre sobre el mismo
       // executor): si el proceso muere entre ambas, no queda ninguna.
       final db = await LocalDb.instance.db;
+      // YS-5: el uuid del pago nace en variable para poder
+      // firmar la procedencia del vencimiento optimista.
+      final opUuidPago = const Uuid().v4();
       await db.transaction((txn) async {
         await LocalDb.instance.queueOp(
           opUuid: const Uuid().v4(),
@@ -208,7 +211,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
           txn: txn,
         );
         await LocalDb.instance.queueOp(
-          opUuid: const Uuid().v4(),
+          opUuid: opUuidPago,
           tipo: 'pago_mensual',
           payload: payload,
           txn: txn,
@@ -223,6 +226,10 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
         if (nuevoHasta != null && nuevoHasta.isNotEmpty) {
           await LocalDb.instance
               .updateMirrorPagadoHasta(id, nuevoHasta, txn: txn);
+          // YS-5: procedencia del pintado, en la misma
+          // transacción que la op y el espejo.
+          await LocalDb.instance
+              .registrarProcedenciaPagoEn(txn, id, opUuidPago);
         }
       });
       if (!mounted) return;

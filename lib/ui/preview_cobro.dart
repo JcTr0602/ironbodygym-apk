@@ -783,6 +783,11 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
     try {
       await LocalDb.instance.updateMirrorPagadoHasta(
           clienteId, vencRaw.substring(0, 10));
+      // YS-5: esta op queda como la autora del vencimiento
+      // pintado — si el servidor la rechaza, la reversión
+      // sabrá si el vencimiento vigente sigue siendo suyo.
+      await LocalDb.instance
+          .registrarProcedenciaPago(clienteId, opUuid);
     } catch (_) {}
   }
   // F1: guardar la foto del comprobante en su cola local. Si
