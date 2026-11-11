@@ -7014,12 +7014,17 @@ class SyncEngine {
     // (supTablas) y son purgables, pero no se vigilaban: un
     // lote fantasma o ausente (servicios.dart lee el espejo
     // servicio_lotes) no divergía nunca. Si la RPC
-    // sync_manifiesto aún no las conociera, la tabla queda
+    // sync_manifiesto no conociera una tabla, quedaría
     // «sin verificar» (ver verificarManifiesto) sin envenenar
-    // el sello del resto. 1.30 (Oleada 1): lotes y compras son
-    // las ÚNICAS que la RPC sigue sin conocer — no existen
-    // como tabla sync_* en Supabase (el puente no las
-    // publica); el resto del mapa ya verifica (ver abajo).
+    // el sello del resto. 1.32 (Oleada 2, Fase 0 — corrección
+    // de la adjudicación syncdet_): la RPC viva SÍ conoce
+    // sync_servicio_lotes y sync_servicio_compras (están en
+    // su allowlist y en su rama genérica; el puente SÍ las
+    // publica). La afirmación anterior de este comentario
+    // (1.30: «las ÚNICAS que la RPC sigue sin conocer — no
+    // existen como tabla sync_*») era FALSA y llegó a inducir
+    // a error a una revisión externa (H-9 de syncdet_); se
+    // corrige aquí para que el comentario no vuelva a mentir.
     'sync_servicio_lotes': 'servicio_lotes',
     'sync_servicio_compras': 'servicio_compras',
     // 1.28 (M1-B1): la autocura cubre TODOS los espejos que
