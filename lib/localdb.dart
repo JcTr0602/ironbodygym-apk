@@ -5331,13 +5331,26 @@ class LocalDb {
     final rows = await d.query('ops_queue',
         columns: ['payload'],
         where: "estado NOT IN ('aplicada', 'rechazada', 'archivada') "
-            "AND payload LIKE ?",
-        whereArgs: ['%"cliente_id":$clienteId%']);
+            "AND (payload LIKE ? OR payload LIKE ?)",
+        // H12-sub (revisión de Argón al Yunque de Sync): el
+        // id puede venir en el payload como String
+        // ("cliente_id":"601") — el pre-filtro busca AMBAS
+        // formas y la igualdad de Dart es tolerante
+        // num-o-texto, como la reversión de sync.dart. Con
+        // solo la forma numérica, una op así se pasaba por
+        // alto y el refresco pisaba el espejo con la op en
+        // vuelo.
+        whereArgs: [
+          '%"cliente_id":$clienteId%',
+          '%"cliente_id":"$clienteId"%',
+        ]);
     for (final r in rows) {
       try {
         final p =
             jsonDecode(r['payload'] as String) as Map<String, dynamic>;
-        if (p['cliente_id'] == clienteId) return true;
+        if (int.tryParse('${p['cliente_id']}') == clienteId) {
+          return true;
+        }
       } catch (_) {}
     }
     return false;
@@ -5372,7 +5385,11 @@ class LocalDb {
         try {
           final p =
               jsonDecode(r['payload'] as String) as Map<String, dynamic>;
-          if (p['cliente_id'] == clienteId) return false;
+          // H12-sub: igualdad tolerante num-o-texto (ver
+          // tieneOpsPendientesParaCliente).
+          if (int.tryParse('${p['cliente_id']}') == clienteId) {
+            return false;
+          }
         } catch (_) {}
       }
       final n = await txn.update('clientes', valores,
