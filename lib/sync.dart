@@ -2657,6 +2657,13 @@ class SyncEngine {
   Future<void> marcarRedescargaPorCorruptasParaTest() =>
       _marcarRedescargaPorCorruptas();
 
+  /// Costura de test (1.32, O2F2S Pieza 4b): el invariante
+  /// troncal del espejo vacío sin correr un ciclo entero.
+  @visibleForTesting
+  Future<bool> invarianteEspejoVacioBloqueaParaTest(
+          int serverSeq) =>
+      _invarianteEspejoVacioBloquea(serverSeq);
+
   /// Conteo de pendientes al cierre de una corrida.
   /// Yunque B (YB-TRA-01): TRIESTADO. Antes, ante cualquier
   /// error devolvía ceros y el resultado decía «Todo estaba
