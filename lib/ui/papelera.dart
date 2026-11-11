@@ -210,10 +210,24 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
           payload: {'cliente_id': id, 'estado': 'activo'},
           txn: txn,
         );
+        // H13 (revisión de Argón al Yunque de Sync): el
+        // contrato de reversión exige 'pagado_hasta_anterior'
+        // en el payload del pago — la inyecta el preview en
+        // su flujo, pero este NO pasa por el preview y
+        // pagoDialogo no la trae: sin ella, si este
+        // pago_mensual se rechaza, la reversión sale por su
+        // guarda sin tocar nada y el vencimiento falso queda
+        // pegado, con el sello de procedencia huérfano. Se
+        // lee el valor previo DENTRO de esta transacción,
+        // antes de pintar el nuevo.
+        final pagadoHastaAnterior =
+            await LocalDb.instance.pagadoHastaEspejoEn(txn, id);
+        final payloadPago = Map<String, dynamic>.from(payload)
+          ..['pagado_hasta_anterior'] = pagadoHastaAnterior;
         await LocalDb.instance.queueOp(
           opUuid: opUuidPago,
           tipo: 'pago_mensual',
-          payload: payload,
+          payload: payloadPago,
           txn: txn,
         );
         // 1.23 (Delta Argón 3ª#2): reflejo optimista del nuevo

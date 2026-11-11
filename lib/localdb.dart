@@ -5539,6 +5539,29 @@ class LocalDb {
         where: 'id=?', whereArgs: [clienteId]);
   }
 
+  /// Yunque de Sincronización (H13 de la revisión de Argón):
+  /// el `pagado_hasta` vigente del espejo leído DENTRO del
+  /// ejecutor dado. La papelera lo usa en su transacción
+  /// única para inyectar 'pagado_hasta_anterior' en el
+  /// payload de su pago_mensual — el contrato que la guarda
+  /// de `_revertirVencimientoOptimista` exige — con el valor
+  /// fresco de la misma transacción, no con la fila que la
+  /// pantalla cargó al abrir. null si el cliente no está en
+  /// el espejo o no trae vencimiento.
+  Future<String?> pagadoHastaEspejoEn(
+      DatabaseExecutor d, int clienteId) async {
+    final rows = await d.query('clientes',
+        columns: ['data'],
+        where: 'id=?',
+        whereArgs: [clienteId],
+        limit: 1);
+    if (rows.isEmpty) return null;
+    final data = _decodificarDataGuardada(rows.first['data']);
+    if (data == null) return null;
+    final v = data['pagado_hasta'];
+    return v == null ? null : '$v';
+  }
+
   /// Elimina entradas optimistas del espejo vinculadas a una op ya
   /// aplicada. Las entradas optimistas usan id temporal negativo y
   /// guardan el op_uuid; al aplicar la op, el registro real llega
