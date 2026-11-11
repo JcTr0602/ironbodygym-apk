@@ -5175,18 +5175,63 @@ class LocalDb {
         where: 'id=?', whereArgs: [loteId]);
   }
 
+  /// Clave de `meta` que marca que el optimismo de una op
+  /// `reponer_lote` YA fue revertido (1.32, H-MUERTE-2). La
+  /// marca vive por identidad de op (regla §0.2-6: la limpieza
+  /// sigue a la identidad) y sobrevive al proceso, a diferencia
+  /// de cualquier guarda en memoria.
+  static String _claveReversionReponerLote(String opUuid) =>
+      'reponer_lote_revertida_$opUuid';
+
   /// v1.13.0 (Bloque 4, reponer_lote): revierte el optimismo de una
   /// reposición rechazada por el servidor. La llama sync.dart cuando
   /// una op `reponer_lote` queda 'rechazada' (en el POST o en el
   /// barrido de confirmación). El salvavidas 23514 (G3) NO pasa por
   /// aquí: un CHECK aún no ampliado deja la op en reintento, no la
   /// rechaza, así que el optimismo se mantiene hasta que aplique.
+  ///
+  /// 1.32 (H-MUERTE-2, Corte A — opción 1 de Argón): la reversión
+  /// es IDEMPOTENTE por op. Antes era aritmética sin memoria:
+  /// morir → reintentar desde Salud → volver a morir restaba las
+  /// dosis DOS veces y el pomo quedaba por debajo de la verdad
+  /// hasta una re-descarga completa de `servicio_lotes`. Con
+  /// [opUuid], la primera reversión deja la marca persistente
+  /// [_claveReversionReponerLote] en `meta` (misma transacción
+  /// que el descuento) y cualquier muerte posterior de la MISMA
+  /// op no repite el descuento. Variante elegida de las dos que
+  /// admitía el veredicto: la marca IMPIDE el segundo descuento
+  /// (no se re-pinta el optimismo al reintentar): mientras la op
+  /// viva en reintento, el lote muestra el valor previo a la op
+  /// — nunca por debajo — y si al fin aplica, el pull reemplaza
+  /// la fila entera con la verdad del servidor, reposiciones
+  /// incluidas. Sin [opUuid] (llamadores legados) se mantiene la
+  /// reversión directa de siempre. La marca se borra al
+  /// descartar la op en [cancelOp]; una marca huérfana de una op
+  /// aplicada es inerte (los uuid no se reutilizan).
   Future<void> revertirOptimismoReponerLote(
-      Map<String, dynamic> payload) async {
+      Map<String, dynamic> payload,
+      {String? opUuid, DatabaseExecutor? txn}) async {
     final loteId = (payload['lote_id'] as num?)?.toInt();
     final dosis = (payload['dosis'] as num?)?.toInt() ?? 0;
     if (loteId == null || dosis == 0) return;
-    await actualizarDosisRepuestasLote(loteId, -dosis);
+    if (opUuid == null) {
+      await actualizarDosisRepuestasLote(loteId, -dosis, txn: txn);
+      return;
+    }
+    Future<void> cuerpo(DatabaseExecutor ex) async {
+      final ya = await getMeta(_claveReversionReponerLote(opUuid),
+          txn: ex);
+      if (ya == '1') return;
+      await actualizarDosisRepuestasLote(loteId, -dosis, txn: ex);
+      await setMetaEn(ex, _claveReversionReponerLote(opUuid), '1');
+    }
+
+    if (txn != null) {
+      await cuerpo(txn);
+    } else {
+      final d = await db;
+      await d.transaction(cuerpo);
+    }
   }
 
   /// Una op de la cola por su uuid (para Deshacer E3: verificar que

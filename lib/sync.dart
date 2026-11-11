@@ -3836,7 +3836,7 @@ class SyncEngine {
           try {
             final p = jsonDecode(op['payload'] as String)
                 as Map<String, dynamic>;
-            await _db.revertirOptimismoReponerLote(p);
+            await _db.revertirOptimismoReponerLote(p, opUuid: uuid);
           } catch (_) {}
         }
         if (op['tipo'] == 'eliminar_suplemento') {
@@ -3965,7 +3965,7 @@ class SyncEngine {
               try {
                 final p =
                     jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-                await _db.revertirOptimismoReponerLote(p);
+                await _db.revertirOptimismoReponerLote(p, opUuid: uuid);
               } catch (_) {}
             }
             if ('${op['tipo']}' == 'eliminar_suplemento') {
@@ -4268,7 +4268,7 @@ class SyncEngine {
         try {
           final p =
               jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-          await _db.revertirOptimismoReponerLote(p);
+          await _db.revertirOptimismoReponerLote(p, opUuid: uuid);
         } catch (_) {}
       }
       return false;
@@ -4311,7 +4311,7 @@ class SyncEngine {
         try {
           final p =
               jsonDecode(op['payload'] as String) as Map<String, dynamic>;
-          await _db.revertirOptimismoReponerLote(p);
+          await _db.revertirOptimismoReponerLote(p, opUuid: uuid);
         } catch (_) {}
       }
       if ('${op['tipo']}' == 'eliminar_suplemento') {
