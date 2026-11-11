@@ -215,6 +215,37 @@ class CongelacionesService {
     };
   }
 
+  /// Desenvuelve el sobre de `admin_listar_congelaciones`.
+  /// Contrato fijado contra la definición viva de la RPC:
+  /// devuelve jsonb_build_object('ok', …, 'lista', […],
+  /// 'hoy', …) — la lista viaja bajo la clave 'lista', NO
+  /// 'congelaciones' (el Yunque Cruzado 2026-11-11 cazó que
+  /// aquí se leía la clave inexistente y la bandeja del
+  /// dueño se vaciaba con ok=true). Función pura para que
+  /// el test de contrato la ejercite sin red.
+  static ({bool ok, List<CongelacionGestion> datos, String? error})
+      parsearRespuestaListar(Object? res) {
+    if (res is Map && res['ok'] == true) {
+      final lista = (res['lista'] as List?) ?? const [];
+      return (
+        ok: true,
+        datos: [
+          for (final e in lista)
+            if (e is Map)
+              CongelacionGestion.fromJson(Map<String, dynamic>.from(e)),
+        ],
+        error: null,
+      );
+    }
+    return (
+      ok: false,
+      datos: const <CongelacionGestion>[],
+      error: res is Map
+          ? '${res['error'] ?? 'Error del servidor'}'
+          : 'Error del servidor',
+    );
+  }
+
   /// Lista enriquecida del servidor (nombre, teléfono y
   /// pagado_hasta ACTUAL del cliente). Devuelve ok=false con
   /// el error si la RPC falla: la pantalla distingue el fallo
@@ -225,26 +256,7 @@ class CongelacionesService {
       final res = await Supabase.instance.client
           .rpc('admin_listar_congelaciones')
           .timeout(_timeout);
-      if (res is Map && res['ok'] == true) {
-        final lista = (res['congelaciones'] as List?) ?? const [];
-        return (
-          ok: true,
-          datos: [
-            for (final e in lista)
-              if (e is Map)
-                CongelacionGestion.fromJson(
-                    Map<String, dynamic>.from(e)),
-          ],
-          error: null,
-        );
-      }
-      return (
-        ok: false,
-        datos: const <CongelacionGestion>[],
-        error: res is Map
-            ? '${res['error'] ?? 'Error del servidor'}'
-            : 'Error del servidor',
-      );
+      return parsearRespuestaListar(res);
     } catch (e) {
       return (ok: false, datos: const <CongelacionGestion>[], error: '$e');
     }
