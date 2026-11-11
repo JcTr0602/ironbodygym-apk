@@ -31,6 +31,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_log.dart';
 import '../tiempo.dart';
@@ -45,6 +46,132 @@ typedef RecuperadorFotoPerdida = Future<LostDataResponse> Function();
 
 bool _elegirFotoEnCurso = false;
 
+// ---------------------------------------------------------------------------
+// 1.32 (H-B6-1 + Compuerta 5 de Argón): contexto persistente
+// de la petición de foto y gancho de rehidratación.
+// ---------------------------------------------------------------------------
+
+const _kFotoCtxFlujo = 'foto_ctx_flujo_v1';
+const _kFotoCtxEntidad = 'foto_ctx_entidad_v1';
+
+/// El contexto de una petición de foto en curso: QUÉ flujo
+/// la pidió y para QUÉ entidad. Se persiste ANTES de abrir
+/// el plugin: si Android mata la actividad (y el proceso)
+/// con la cámara abierta, el contexto sobrevive en disco y
+/// el gancho de rehidratación sabe a quién pertenece la
+/// foto recuperada, en vez de inyectarla en silencio en el
+/// siguiente toque de cualquier pantalla.
+class ContextoFotoPendiente {
+  final String flujo;
+  final String? entidadId;
+
+  const ContextoFotoPendiente({required this.flujo, this.entidadId});
+}
+
+/// Persiste el contexto de la petición que va a abrirse.
+/// Nunca lanza: un fallo de preferencias no puede romper
+/// el flujo de foto.
+Future<void> registrarContextoFoto({
+  required String flujo,
+  String? entidadId,
+}) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kFotoCtxFlujo, flujo);
+    if (entidadId == null || entidadId.isEmpty) {
+      await prefs.remove(_kFotoCtxEntidad);
+    } else {
+      await prefs.setString(_kFotoCtxEntidad, entidadId);
+    }
+  } catch (e) {
+    AppLog.aviso('foto_elegir', 'contexto_registrar_fallo', d: '$e');
+  }
+}
+
+/// El contexto persistido, o null si no hay petición
+/// pendiente registrada. Nunca lanza.
+Future<ContextoFotoPendiente?> leerContextoFoto() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final flujo = (prefs.getString(_kFotoCtxFlujo) ?? '').trim();
+    if (flujo.isEmpty) return null;
+    final entidad = prefs.getString(_kFotoCtxEntidad);
+    return ContextoFotoPendiente(
+      flujo: flujo,
+      entidadId: (entidad == null || entidad.isEmpty) ? null : entidad,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Borra el contexto persistido. Nunca lanza.
+Future<void> limpiarContextoFoto() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kFotoCtxFlujo);
+    await prefs.remove(_kFotoCtxEntidad);
+  } catch (_) {}
+}
+
+/// Lo que el gancho de rehidratación entrega: la foto
+/// recuperada y el contexto de la petición que la pidió
+/// (null si la petición no registró contexto — flujos aún
+/// no cableados: la cáscara decide qué ofrecer).
+class FotoRecuperadaArranque {
+  final XFile archivo;
+  final ContextoFotoPendiente? contexto;
+
+  const FotoRecuperadaArranque({required this.archivo, this.contexto});
+}
+
+/// 1.32 (H-B6-1): gancho de REHIDRATACIÓN — consulta
+/// `retrieveLostData()` al recrearse la app, no solo al
+/// iniciar la siguiente petición. Si Android mató la
+/// actividad con la cámara abierta, la foto estaba
+/// esperando en el plugin y NINGUNA pantalla la recogía:
+/// aparecía inyectada sin explicación en el siguiente
+/// toque (el fallo de campo 2026-11-07, en su segunda
+/// cara). Devuelve la foto con su contexto persistido y
+/// limpia el contexto; sin foto, limpia un contexto
+/// rancio (su petición ya no existe) y devuelve null.
+///
+/// PUNTO DE ENGANCHE (lo cablea el escalón del rediseño,
+/// no esta pieza): la cáscara raíz de los 4 Pilares lo
+/// llamará en su `initState` tras el primer frame y
+/// encaminará [FotoRecuperadaArranque.archivo] al flujo
+/// nombrado en [FotoRecuperadaArranque.contexto]
+/// (`ficha_cliente` con su entidad, `inscribir`, …),
+/// ofreciéndola al usuario como «foto recuperada» para
+/// que la acepte o la descarte — nunca aplicarla en
+/// silencio. Respeta la guarda global: si un flujo está
+/// en curso, no roba sus datos perdidos (devuelve null).
+Future<FotoRecuperadaArranque?> consultarFotoRecuperadaAlRehidratar({
+  RecuperadorFotoPerdida? recuperador,
+}) async {
+  if (_elegirFotoEnCurso) return null;
+  try {
+    final perdida = await (recuperador ??
+        () => ImagePicker().retrieveLostData())();
+    if (perdida.exception != null) {
+      AppLog.aviso('foto_elegir', 'rehidratar_datos_con_error',
+          d: '${perdida.exception}');
+    }
+    final foto = perdida.file;
+    if (foto == null) {
+      await limpiarContextoFoto();
+      return null;
+    }
+    final contexto = await leerContextoFoto();
+    await limpiarContextoFoto();
+    return FotoRecuperadaArranque(archivo: foto, contexto: contexto);
+  } catch (e, stack) {
+    AppLog.error('foto_elegir', 'rehidratar_foto_fallo',
+        d: '$e', stack: stack);
+    return null;
+  }
+}
+
 /// Abre el selector (o recupera la foto de una petición
 /// interrumpida), copia la elegida a documentos propios, la pasa
 /// por el editor y devuelve el archivo EDITADO listo para usar.
@@ -57,9 +184,17 @@ Future<File?> elegirFotoEditada(
   ImageSource origen, {
   SelectorFoto? selector,
   RecuperadorFotoPerdida? recuperador,
+  // 1.32 (Compuerta 5): el contexto de la petición, para
+  // el gancho de rehidratación si el proceso muere con el
+  // selector abierto (ver ContextoFotoPendiente).
+  String? flujoFoto,
+  String? entidadIdFoto,
 }) async {
   if (_elegirFotoEnCurso) return null;
   _elegirFotoEnCurso = true;
+  if (flujoFoto != null) {
+    await registrarContextoFoto(flujo: flujoFoto, entidadId: entidadIdFoto);
+  }
   try {
     return await _elegirFotoFlujo(
       context,
@@ -69,6 +204,11 @@ Future<File?> elegirFotoEditada(
     );
   } finally {
     _elegirFotoEnCurso = false;
+    // El flujo terminó con el proceso VIVO: el contexto
+    // ya no hace falta. Si el proceso hubiera muerto a
+    // mitad, este finally no corre y el contexto sobrevive
+    // para el gancho de rehidratación.
+    if (flujoFoto != null) await limpiarContextoFoto();
   }
 }
 
@@ -101,9 +241,17 @@ Future<XFile?> elegirFotoSegura(
   int? imageQuality,
   SelectorFoto? selector,
   RecuperadorFotoPerdida? recuperador,
+  // 1.32 (Compuerta 5): el contexto de la petición, para
+  // el gancho de rehidratación si el proceso muere con el
+  // selector abierto (ver ContextoFotoPendiente).
+  String? flujoFoto,
+  String? entidadIdFoto,
 }) async {
   if (_elegirFotoEnCurso) return null;
   _elegirFotoEnCurso = true;
+  if (flujoFoto != null) {
+    await registrarContextoFoto(flujo: flujoFoto, entidadId: entidadIdFoto);
+  }
   try {
     try {
       // Datos perdidos primero: recupera la foto de una
@@ -116,7 +264,20 @@ Future<XFile?> elegirFotoSegura(
         AppLog.aviso('foto_elegir', 'datos_perdidos_con_error',
             d: '${perdida.exception}');
       }
-      if (perdida.file != null) return perdida.file;
+      if (perdida.file != null) {
+        // 1.32 (H-B6-1): la foto recuperada se ANUNCIA —
+        // antes volvía en silencio y el usuario veía una
+        // foto «de la nada» en un flujo que acababa de
+        // tocar por otro motivo.
+        if (context.mounted) {
+          mostrarSnack(
+            context,
+            'Se recuperó la foto de la petición interrumpida.',
+            significado: SignificadoChip.info,
+          );
+        }
+        return perdida.file;
+      }
       return await (selector ??
           (o) => ImagePicker().pickImage(
                 source: o,
@@ -152,6 +313,10 @@ Future<XFile?> elegirFotoSegura(
     }
   } finally {
     _elegirFotoEnCurso = false;
+    // Con el proceso vivo, el contexto de la petición ya
+    // no hace falta (si hubiera muerto a mitad, este
+    // finally no corre y lo recoge el gancho).
+    if (flujoFoto != null) await limpiarContextoFoto();
   }
 }
 
@@ -175,8 +340,13 @@ Future<File?> _elegirFotoFlujo(
       AppLog.aviso('foto_elegir', 'datos_perdidos_con_error',
           d: '${perdida.exception}');
     }
+    // 1.32 (H-B6-1): si la foto viene de la recuperación,
+    // se anuncia al entregar el resultado (ver el aviso
+    // tras el editor): que no entre «de la nada».
+    var recuperada = false;
     if (perdida.file != null) {
       elegida = perdida.file;
+      recuperada = true;
     } else {
       // 2) Petición nueva al selector.
       elegida = await (selector ?? _selectorReal)(origen);
@@ -210,6 +380,18 @@ Future<File?> _elegirFotoFlujo(
       // no tiene dueño; no dejar huérfanos.
       await _borrar(editada);
       return null;
+    }
+    if (recuperada) {
+      // 1.32 (H-B6-1): el aviso va AQUÍ, con el resultado
+      // ya en la mano: durante el editor la barra quedaría
+      // detrás del modal y expiraría sin verse. Si el
+      // usuario canceló en el editor, no hay aviso (él
+      // mismo descartó la foto).
+      mostrarSnack(
+        context,
+        'Se recuperó la foto de la petición interrumpida.',
+        significado: SignificadoChip.info,
+      );
     }
     return editada;
   } on PlatformException catch (e, stack) {

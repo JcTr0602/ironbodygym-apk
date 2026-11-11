@@ -2096,7 +2096,11 @@ class _FichaScreenState extends State<FichaScreen> {
     // elegirFotoEditada — esta copia no tenía try/catch y un error
     // del selector (already_active por una petición colgada)
     // mataba el toque en silencio, igual que en Inscribir.
-    final editada = await elegirFotoEditada(context, src);
+    // 1.32 (Compuerta 5): la petición registra su contexto
+    // (flujo + cliente) para el gancho de rehidratación.
+    final editada = await elegirFotoEditada(context, src,
+        flujoFoto: 'ficha_cliente',
+        entidadIdFoto: '${widget.clienteId}');
     if (editada == null || !mounted) return;
     // v1.2.9: usar la cola persistente (no fotos_pendientes).
     final opUuid = const Uuid().v4();

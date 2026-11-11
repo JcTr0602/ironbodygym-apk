@@ -126,6 +126,15 @@ void main() {
     expect(find.text('con-foto'), findsOneWidget);
     expect(llamadasSelector, 0,
         reason: 'con foto recuperada no se abre el selector');
+    // 1.32 (H-B6-1): la recuperación se ANUNCIA al entregar
+    // el resultado — la foto ya no entra «de la nada».
+    expect(
+        find.text('Se recuperó la foto de la petición interrumpida.'),
+        findsOneWidget);
+    // Dejar vencer el aviso para no dejar temporizadores pendientes.
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('excepción genérica: SnackBar visible y sin foto',

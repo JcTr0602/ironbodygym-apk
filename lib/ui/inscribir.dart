@@ -220,7 +220,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // elegirFotoEditada — antes esta copia no tenía try/catch y un
     // error del selector (already_active por una petición colgada)
     // mataba el toque en silencio, sin cámara ni editor.
-    final editada = await elegirFotoEditada(context, origen);
+    // 1.32 (Compuerta 5): la petición registra su contexto
+    // (flujo de inscripción; el cliente aún no existe, sin
+    // entidad) para el gancho de rehidratación.
+    final editada = await elegirFotoEditada(context, origen,
+        flujoFoto: 'inscribir');
     if (editada == null) return; // cancelado o error ya anunciado
     if (!mounted) {
       try {

@@ -71,6 +71,11 @@ void main() {
         '/tmp/recuperada.jpg');
     expect(llamadasSelector, 0,
         reason: 'con foto recuperada no se pide otra');
+    // 1.32 (H-B6-1): la recuperación se ANUNCIA.
+    expect(
+        find.text('Se recuperó la foto de la petición interrumpida.'),
+        findsOneWidget);
+    await vencerAviso(tester);
   });
 
   testWidgets('recuperador con error y sin foto: se sigue '
