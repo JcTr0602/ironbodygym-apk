@@ -8483,7 +8483,6 @@ class SyncEngine {
         if (rows.length < 100 || maxSeq <= wm) break;
         wm = maxSeq;
       }
-      await _cerrarRetencionesPull('incidencias', ret, wm);
       AppLog.info('sync', 'pull_inc_ok', d: 'n=$total');
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias', '');
@@ -8497,6 +8496,19 @@ class SyncEngine {
           errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       // Argón B2: rethrow para que pull() detecte el fallo.
       rethrow;
+    } finally {
+      // H11 (revisión de Argón al Yunque de Sync): el cierre
+      // de retenciones va en finally. Cada página comitea por
+      // separado (watermark y cuarentena dentro de su
+      // transacción): si la petición de la página siguiente
+      // lanza por red, el cierre debe correr igual, con el
+      // watermark vigente al fallar — si no, la retención
+      // anotada en una página ya comiteada nunca se persiste
+      // (su reloj de 7 días no empieza) y una cuarentena ya
+      // aplicada no limpia su meta ni deja bitácora.
+      // _cerrarRetencionesPull es defensiva (try/catch
+      // propio): segura en un finally.
+      await _cerrarRetencionesPull('incidencias', ret, wm);
     }
   }
 
@@ -8605,8 +8617,6 @@ class SyncEngine {
         if (rows.length < 100 || maxSeq <= wm) break;
         wm = maxSeq;
       }
-      await _cerrarRetencionesPull(
-          'incidencias_comentarios', ret, wm);
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias_comentarios', '');
       return total;
@@ -8619,6 +8629,11 @@ class SyncEngine {
       await _db.setMeta('wm_err_incidencias_comentarios',
           errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       rethrow;
+    } finally {
+      // H11: cierre de retenciones garantizado (ver
+      // _pullIncidencias).
+      await _cerrarRetencionesPull(
+          'incidencias_comentarios', ret, wm);
     }
   }
 
@@ -8725,7 +8740,6 @@ class SyncEngine {
         if (rows.length < 100 || maxSeq <= wm) break;
         wm = maxSeq;
       }
-      await _cerrarRetencionesPull('incidencias_fotos', ret, wm);
       await _db.setMeta('wm_err_incidencias_fotos', '');
       return total;
     } catch (e) {
@@ -8734,6 +8748,10 @@ class SyncEngine {
       await _db.setMeta('wm_err_incidencias_fotos',
           errTxt.length > 200 ? errTxt.substring(0, 200) : errTxt);
       rethrow;
+    } finally {
+      // H11: cierre de retenciones garantizado (ver
+      // _pullIncidencias).
+      await _cerrarRetencionesPull('incidencias_fotos', ret, wm);
     }
   }
 

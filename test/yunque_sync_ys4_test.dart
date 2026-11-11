@@ -244,6 +244,56 @@ void main() {
     });
   });
 
+  group('YS-4/H11 · el cierre de retenciones vive en un '
+      'finally (estructural)', () {
+    final sync = File('lib/sync.dart').readAsStringSync();
+
+    String cuerpoDe(String firma, List<String> siguientes) {
+      final i = sync.indexOf(firma);
+      expect(i, isNonNegative, reason: 'no se encontró $firma');
+      var fin = sync.length;
+      for (final s in siguientes) {
+        final j = sync.indexOf(s, i + firma.length);
+        if (j > i && j < fin) fin = j;
+      }
+      return sync.substring(i, fin);
+    }
+
+    void pinFinally(String firma, List<String> siguientes) {
+      final cuerpo = cuerpoDe(firma, siguientes);
+      final iFinally = cuerpo.indexOf('} finally {');
+      expect(iFinally, isNonNegative,
+          reason: '$firma no tiene bloque finally');
+      final cierres = 'await _cerrarRetencionesPull'
+          .allMatches(cuerpo)
+          .toList();
+      expect(cierres, hasLength(1),
+          reason: '$firma debe cerrar retenciones una sola '
+              'vez (en el finally)');
+      expect(cierres.single.start, greaterThan(iFinally),
+          reason: '$firma: el cierre de retenciones quedó '
+              'fuera del finally — un fallo de red en la '
+              'página 2 lo saltaría');
+    }
+
+    test('_pullIncidencias cierra en finally', () {
+      pinFinally('Future<int> _pullIncidencias()', [
+        'Future<int> _pullIncidenciasComentarios()',
+      ]);
+    });
+    test('_pullIncidenciasComentarios cierra en finally', () {
+      pinFinally('Future<int> _pullIncidenciasComentarios()', [
+        'String? _detalleIncidenciaTexto',
+        'Future<int> _pullIncidenciasFotos()',
+      ]);
+    });
+    test('_pullIncidenciasFotos cierra en finally', () {
+      pinFinally('Future<int> _pullIncidenciasFotos()', [
+        'Future<void> _pullIncidenciasHistorial()',
+      ]);
+    });
+  });
+
   group('YS-4 · cableado de los cuatro pulls (estructural)', () {
     final sync = File('lib/sync.dart').readAsStringSync();
 
