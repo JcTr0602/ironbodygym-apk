@@ -147,6 +147,27 @@ double? horasSinSubirDesde(String? isoCreada, DateTime ahoraHabana) {
 /// exacto NO avisa: el umbral es «baja de 5».
 bool avisoLotePorAgotarse(int saldo) => saldo < kUmbralLotePorAgotarse;
 
+/// 1.32 (Oleada 2 Fase 2 · Momento 2D de Argón, blindaje):
+/// la banda ámbar de «pocas dosis» SOLO existe en la vista
+/// del DUEÑO. En el teléfono del ENTRENADOR jamás se pinta
+/// aviso alguno ligado al nivel de su pomo: verlo cruzar el
+/// umbral le deja inferir el saldo (pomo ciego, regla dura
+/// de Jc). La alerta vive en «Por Decidir» y en el
+/// Inventario del dueño. Hasta la 1.31 la banda C6 (v1.12.0)
+/// SÍ se pintaba al entrenador con su variante de texto
+/// («Te quedan pocas dosis»): el Momento 2D la revierte.
+bool bandaPocasDosisVisible(
+        {required bool esDueno, required int saldo}) =>
+    esDueno && avisoLotePorAgotarse(saldo);
+
+/// La acción de pedir relleno del entrenador es CIEGA y
+/// PERMANENTE: se ofrece siempre, con el pomo lleno o bajo.
+/// Si su visibilidad dependiera del nivel (hasta la 1.31
+/// solo salía cuando NO había banda), el propio ir y venir
+/// de la acción delataría que el pomo cruzó el umbral.
+bool accionRellenoEntrenadorVisible({required bool esDueno}) =>
+    !esDueno;
+
 // ---------------------------------------------------------------------------
 // A1–A6: búsqueda, orden y letras sobre la página cargada (puros)
 // ---------------------------------------------------------------------------

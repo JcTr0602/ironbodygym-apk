@@ -2117,13 +2117,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           // 1.31 (Mejoras · hub, Fase C*): pedir relleno NO
           // espera a que el pomo esté por agotarse — la acción
           // (o el estado «ya pediste») vive SIEMPRE en la
-          // tarjeta cuando la banda de «pocas dosis» no está
-          // en pantalla (con la banda, manda la banda). Ciega,
-          // como todo lo del entrenador aquí: sin saldos.
+          // tarjeta del entrenador. 1.32 (Momento 2D): su
+          // visibilidad ya NO depende del nivel del pomo ni
+          // de la banda: que la acción aparezca y desaparezca
+          // con el saldo delataría el umbral (pomo ciego).
+          // El predicado es accionRellenoEntrenadorVisible.
           if (pomo != null &&
-              !_esDueno &&
-              !avisoLotePorAgotarse(
-                  (pomo['saldo_local'] as num?)?.toInt() ?? 999))
+              accionRellenoEntrenadorVisible(esDueno: _esDueno))
             Padding(
               padding: const EdgeInsets.only(top: AppEspacio.sm),
               child: _rellenoPedidoSel
@@ -2150,12 +2150,22 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     ),
             ),
           // v1.12.0 (C6): aviso de pomo por agotarse (< 5, umbral
-          // fijo de Jc). NO revela el saldo exacto al entrenador
-          // (pomo ciego, ítem 6): solo que quedan pocas dosis.
-          // NUNCA bloquea la venta, solo advierte. Banda ámbar.
+          // fijo de Jc). NUNCA bloquea la venta, solo advierte.
+          // Banda ámbar SOLO del dueño — 1.32 (Momento 2D de
+          // Argón): hasta la 1.31 la banda también se pintaba
+          // en el teléfono del entrenador («Te quedan pocas
+          // dosis»), y eso le dejaba inferir que su pomo cruzó
+          // el umbral: el Momento 2D la retira de su vista por
+          // completo (la alerta vive en Por Decidir y en el
+          // Inventario del dueño). Su «Pedir relleno» es la
+          // acción ciega permanente de arriba. El predicado
+          // es bandaPocasDosisVisible (bloque3, blindado por
+          // test).
           if (pomo != null &&
-              avisoLotePorAgotarse(
-                  (pomo['saldo_local'] as num?)?.toInt() ?? 999))
+              bandaPocasDosisVisible(
+                  esDueno: _esDueno,
+                  saldo:
+                      (pomo['saldo_local'] as num?)?.toInt() ?? 999))
             Padding(
               padding: const EdgeInsets.only(top: AppEspacio.sm),
               child: Container(
@@ -2165,39 +2175,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   color: AppColores.alertaOscuro
                       .withValues(alpha: 0.15),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _esDueno
-                          ? '⚠ Quedan pocas dosis en este pomo (menos de 5).'
-                          : '⚠ Te quedan pocas dosis en este pomo '
-                              '(menos de 5).',
-                      style: AppTexto.cuerpo.copyWith(
-                          color: AppColores.alertaOscuro,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    // 1.29 (Oleada 4, FB-09): el entrenador pide
-                    // el relleno desde aquí, sin salir de la
-                    // pantalla. Con petición viva no se ofrece
-                    // otra: se enseña el estado.
-                    if (!_esDueno) ...[
-                      const SizedBox(height: AppEspacio.xs),
-                      if (_rellenoPedidoSel)
-                        Text(
-                          'Ya pediste relleno · esperando al dueño',
-                          style: AppTexto.cuerpo.copyWith(
-                              color: AppColores.alertaOscuro),
-                        )
-                      else
-                        FilledButton.tonal(
-                          onPressed: _pidiendoRelleno
-                              ? null
-                              : () => _pedirRelleno(pomo),
-                          child: const Text('Pedir relleno'),
-                        ),
-                    ],
-                  ],
+                child: Text(
+                  '⚠ Quedan pocas dosis en este pomo (menos de 5).',
+                  style: AppTexto.cuerpo.copyWith(
+                      color: AppColores.alertaOscuro,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ),
