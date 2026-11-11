@@ -31,7 +31,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../config.dart';
 import '../negocio.dart';
+import '../novedades.dart';
 import 'admin.dart';
 import 'ajustes.dart';
 import 'arqueo.dart';
@@ -278,6 +280,42 @@ class _PilarNegocioState extends State<PilarNegocio> {
               ),
             ),
           ),
+        // Pie de cierre del Pilar 4 (1.32, Oleada 2 F1 —
+        // desviación 8 de Argón; decisión de Jc: SÍ al
+        // copyright): versión de compilación, acceso a
+        // Novedades y la firma, al final del scroll de las
+        // listas de destinos del pilar. NO va en el Mostrador
+        // (zona operativa, cero ruido). La versión sale de la
+        // misma fuente que usa Ajustes (AppConfig.appVersion).
+        const SizedBox(height: AppEspacio.lg),
+        Center(
+          child: Text(
+            'Versión ${AppConfig.appVersion}',
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.textoSecundario(context)),
+          ),
+        ),
+        const SizedBox(height: AppEspacio.xs),
+        Center(
+          child: TextButton.icon(
+            icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+            label: const Text('Lo nuevo'),
+            onPressed: () => mostrarVitrinaNovedades(
+              context,
+              novedadesDeMiVersion(),
+              titulo: 'Novedades de mi versión',
+            ),
+          ),
+        ),
+        Center(
+          child: Text(
+            '© Creado por JcTr0602',
+            key: const ValueKey('pie-autoria-pilar4'),
+            style: AppTexto.minuscula.copyWith(
+                color: AppColores.textoSecundario(context)),
+          ),
+        ),
+        const SizedBox(height: AppEspacio.md),
       ],
     );
   }

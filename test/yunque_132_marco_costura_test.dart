@@ -150,12 +150,40 @@ void main() {
         findsOneWidget);
     expect(find.text('Mi Caja'), findsOneWidget);
 
+    // Pie de autoría (Oleada 2 F1, desviación 8): vive al
+    // final del scroll de las listas del Pilar 4 — aquí en
+    // «Mis Turnos» (la vista del entrenador sin sesión) — y
+    // NO está en el Mostrador (se afirma al volver, abajo).
+    await tester.ensureVisible(find.descendant(
+        of: find.byType(PilarNegocio),
+        matching: find.text('Mis Turnos')));
+    await tester.pump();
+    await tester.tap(find.descendant(
+        of: find.byType(PilarNegocio),
+        matching: find.text('Mis Turnos')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('pie-autoria-pilar4')),
+      300,
+      scrollable: find.descendant(
+          of: find.byKey(const ValueKey('pilar-negocio-misturnos')),
+          matching: find.byType(Scrollable)),
+    );
+    await tester.pump();
+    expect(find.text('© Creado por JcTr0602'), findsOneWidget);
+    expect(find.text('Lo nuevo'), findsOneWidget);
+
     // De vuelta al Mostrador: el Dock sigue ahí (el pilar
     // no se destruyó al salir).
     await tester
         .tap(find.byKey(const ValueKey('pilar-tab-mostrador')));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const ValueKey('dock-cobrar')), findsOneWidget);
+    // El pie de autoría NO va en el Mostrador: con el
+    // Mostrador activo, la firma no está en escena (el
+    // Pilar 4 sigue montado fuera de escena, como el resto
+    // de pilares visitados).
+    expect(find.text('© Creado por JcTr0602'), findsNothing);
     // El pilar visitado SIGUE montado en la pila (IndexedStack
     // solo expone como «onstage» al activo: por eso aquí se
     // busca también fuera de escena).
