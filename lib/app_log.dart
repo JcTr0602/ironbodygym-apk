@@ -507,6 +507,25 @@ class AppLog {
           PlatformDispatcher.instance.onError;
       PlatformDispatcher.instance.onError =
           (error, stack) {
+        // Yunque de Sincronización (YS-8): el refresco de
+        // token sin red NO es un crash. gotrue refresca por su
+        // cuenta y su excepción reintentable escapaba sin
+        // await hasta aquí, se volcaba a last_crash.json y al
+        // reiniciar se ingería como FATAL — los 4 «fatales»
+        // de la bitácora del 2026-11-10 fueron esto, con la
+        // app sana. Se degrada a error normal de bitácora por
+        // el flujo asíncrono (el proceso no está muriendo: no
+        // hace falta el volcado síncrono).
+        if (esErrorAsyncNoFatal(error)) {
+          try {
+            AppLog.error('sync', 'refresco_token_sin_red',
+                d: '$error');
+          } catch (_) {}
+          if (previoAsync != null) {
+            return previoAsync(error, stack);
+          }
+          return true;
+        }
         _volcarCrashSync(
             'async_error', '$error', stack);
         if (previoAsync != null) {
@@ -515,6 +534,37 @@ class AppLog {
         return true;
       };
     } catch (_) {}
+  }
+
+  /// YS-8 (pura y probada): ¿es este error async el refresco
+  /// de token de gotrue que no llegó a la red? Dos formas de
+  /// reconocerlo sin importar el paquete de auth:
+  ///  - la representación trae el tipo de la excepción
+  ///    reintentable de gotrue (`AuthRetryableFetchException`),
+  ///  - o el texto nombra el endpoint de refresco
+  ///    (`/auth/v1/token`) junto a un marcador de fallo de red
+  ///    (host inalcanzable, timeout, conexión rechazada…).
+  /// Cualquier otra cosa devuelve false y sigue el camino de
+  /// crash de siempre.
+  @visibleForTesting
+  static bool esErrorAsyncNoFatal(Object error) {
+    final texto = '$error';
+    if (texto.contains('AuthRetryableFetchException')) {
+      return true;
+    }
+    if (!texto.contains('/auth/v1/token')) return false;
+    const marcadoresRed = [
+      'Failed host lookup',
+      'SocketException',
+      'timed out',
+      'TimeoutException',
+      'Network is unreachable',
+      'Connection refused',
+      'Connection reset',
+      'Connection closed',
+      'Software caused connection abort',
+    ];
+    return marcadoresRed.any(texto.contains);
   }
 
   /// Volcado SÍNCRONO del crash a last_crash.json.
