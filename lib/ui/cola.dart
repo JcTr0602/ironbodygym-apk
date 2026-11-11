@@ -1859,6 +1859,14 @@ class _ColaScreenState extends State<ColaScreen> {
                     File(ruta),
                     width: 48,
                     height: 48,
+                    // 1.32 (S-G3/Paso 0): la decodificación
+                    // se acota al triple del destino físico
+                    // (48 dp × 3): sin cota, cada miniatura
+                    // de la lista decodificaba la foto
+                    // entera. Solo cacheWidth (la regla de
+                    // componentes.dart: fijar también la
+                    // altura fuerza «exact» y estira).
+                    cacheWidth: 144,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
                       width: 48,

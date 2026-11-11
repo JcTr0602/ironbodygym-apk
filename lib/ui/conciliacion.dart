@@ -110,7 +110,13 @@ Future<void> verComprobanteTransferencia(
       contenido: InteractiveViewer(
         minScale: 1.0,
         maxScale: 4.0,
+        // 1.32 (S-G3/Paso 0): NO es una lista — es el
+        // comprobante a pantalla con zoom ×4, donde la
+        // legibilidad bancaria manda: la cota es generosa
+        // (1600 px) y solo evita decodificar una foto de
+        // 100+ MP entera; el detalle del zoom no se toca.
         child: Image.file(archivo,
+            cacheWidth: 1600,
             errorBuilder: (context, error, stackTrace) => const Text(
                 'No se pudo mostrar la imagen del comprobante.')),
       ),

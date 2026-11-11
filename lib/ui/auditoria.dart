@@ -1065,6 +1065,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                     File(fotoPath),
                     width: 40,
                     height: 40,
+                    // 1.32 (S-G3/Paso 0): decodificación
+                    // acotada al triple del destino (40 dp
+                    // × 3); solo cacheWidth (fijar también
+                    // la altura estira el bitmap).
+                    cacheWidth: 120,
                     fit: BoxFit.cover,
                   ),
                 )
