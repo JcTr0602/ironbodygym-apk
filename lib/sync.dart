@@ -6168,13 +6168,20 @@ class SyncEngine {
               // el nombre nuevo y el índice con el viejo (y la
               // sonda de IDs no lo veía; ahora la sonda
               // también compara contenido, como segunda red).
+              // 1.32 (fluidez, Paso 0 G2b): el mantenimiento va
+              // EN BLOQUE por página (LocalDb.
+              // actualizarFtsClientesBloque), no fila a fila:
+              // el bucle medía 1.880,9 ms al poblar el padrón
+              // de 2.225 clientes.
               if (tabla == 'clientes') {
-                for (final op in opsPagina) {
-                  await _db.actualizarFtsCliente(
-                      op['id'] as int, op['dataJson'] as String,
-                      op['oldFoto'] as String?,
-                      txn: txn);
-                }
+                await _db.actualizarFtsClientesBloque([
+                  for (final op in opsPagina)
+                    (
+                      id: op['id'] as int,
+                      dataJson: op['dataJson'] as String,
+                      oldFoto: op['oldFoto'] as String?,
+                    ),
+                ], txn: txn);
               }
             });
             for (final op in opsPagina) {

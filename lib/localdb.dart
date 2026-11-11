@@ -4315,6 +4315,73 @@ class LocalDb {
     } catch (_) {}
   }
 
+  /// 1.32 (fluidez, Paso 0 G2b): mantenimiento FTS de clientes
+  /// EN BLOQUE para la página del pull — sustituye el bucle
+  /// fila-a-fila dentro de la transacción de página, que en la
+  /// medición de Paso 0 costaba 1.880,9 ms para poblar los
+  /// 2.225 clientes del padrón (0,845 ms/fila entre DELETE,
+  /// INSERT y decodificación sueltos). Aquí: una decodificación
+  /// por fila, DELETE por lotes `IN (...)` troceados e INSERT
+  /// con UN batch por página.
+  ///
+  /// Semántica idéntica a [actualizarFtsCliente] por fila:
+  /// - la fila que no decodifica se salta en silencio;
+  /// - si un id viene dos veces en la página, gana la ÚLTIMA
+  ///   (el delete+insert secuencial dejaba la última);
+  /// - la invalidación de la foto cambiada se aplica por cada
+  ///   fila recibida, en orden, como hacía la vía por fila;
+  /// - sin FTS5 disponible, no se toca nada (la vía por fila
+  ///   tragaba el error de la tabla ausente; el bloque no
+  ///   puede tumbar la transacción de la página).
+  Future<void> actualizarFtsClientesBloque(
+      List<({int id, String dataJson, String? oldFoto})> filas,
+      {required DatabaseExecutor txn}) async {
+    try {
+      if (!await _ftsDisponible(txn)) return;
+      final porId = <int, Map<String, dynamic>>{};
+      for (final f in filas) {
+        // Invalidación de foto por fila, en orden (mismo
+        // efecto lateral que la vía por fila).
+        try {
+          final data = jsonDecode(f.dataJson) as Map<String, dynamic>;
+          porId[f.id] = data;
+          final newFoto = data['foto_storage'] as String?;
+          if (f.oldFoto != newFoto &&
+              f.oldFoto != null &&
+              f.oldFoto!.isNotEmpty) {
+            await FotoCache.instance.invalidar(f.oldFoto!);
+          }
+        } catch (_) {
+          // Fila indescifrable: se salta en silencio, como la
+          // vía por fila.
+        }
+      }
+      if (porId.isEmpty) return;
+      final ids = porId.keys.toList();
+      // DELETE por lotes (bajo el límite de variables de
+      // SQLite en cualquier versión).
+      for (var i = 0; i < ids.length; i += 400) {
+        final lote =
+            ids.sublist(i, i + 400 > ids.length ? ids.length : i + 400);
+        final ph = List.filled(lote.length, '?').join(',');
+        await txn.delete('clientes_fts',
+            where: 'id IN ($ph)', whereArgs: lote);
+      }
+      final batch = txn.batch();
+      for (final e in porId.entries) {
+        batch.insert('clientes_fts', {
+          'nombre_norm': _normTexto('${e.value['nombre'] ?? ''}'),
+          'telefonos': _telefonosNorm(e.value),
+          'id': e.key,
+        });
+      }
+      await batch.commit(noResult: true);
+    } catch (_) {
+      // Misma postura que la vía por fila: un fallo del
+      // mantenimiento FTS no tumba la página del pull.
+    }
+  }
+
   /// Variante de [upsertMirror] para espejos con id TEXT (turnos_cierre:
   /// los ids de Supabase son UUID).
   Future<bool> upsertMirrorTexto(String tabla, String id,
