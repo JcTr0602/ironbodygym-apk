@@ -384,6 +384,13 @@ class SyncScope {
 class SyncDetalle {
   final DateTime? ultimaPull;
   final DateTime? ultimaPush;
+
+  /// 1.32 (O2F2S, adjudicación F-3): el último sello
+  /// COMPLETO de ciclo (`last_sync_ok`). El héroe de la
+  /// Cola solo pinta verde si esto NO es null: un teléfono
+  /// que nunca completó una corrida no está «al día» por
+  /// defecto, está «sin confirmar».
+  final DateTime? ultimaSyncOk;
   final int subidosUltimo;
   final int bajadosUltimo;
   final int totalSubidos;
@@ -392,6 +399,7 @@ class SyncDetalle {
   const SyncDetalle(
       {this.ultimaPull,
       this.ultimaPush,
+      this.ultimaSyncOk,
       this.subidosUltimo = 0,
       this.bajadosUltimo = 0,
       this.totalSubidos = 0,
@@ -589,6 +597,11 @@ class SyncResultado {
   bool get alDia =>
       corrio &&
       error == null &&
+      // 1.32 (O2F2S, adjudicación de Argón F-28): un ciclo
+      // CORTADO por pérdida del lock no está «al día» aunque
+      // la cola haya quedado en cero — el corte pudo dejar
+      // la bajada a mitad; el resumen lo dice «interrumpida».
+      !cortadoPorLock &&
       !conteoIndeterminado &&
       pendientesRestantes == 0;
 
@@ -601,6 +614,9 @@ class SyncResultado {
           : 'Ya hay una sincronización en curso';
     }
     if (error != null) return 'No se pudo sincronizar';
+    if (cortadoPorLock) {
+      return 'Sincronización interrumpida: otro ciclo tomó el turno';
+    }
     if (conteoIndeterminado) {
       return 'No se pudo verificar la cola de pendientes';
     }
@@ -1359,6 +1375,14 @@ class SyncEngine {
   /// intentadas y no ensucian el veredicto).
   int _fallosUltimoPush = 0;
 
+  /// 1.32 (O2F2S, adjudicación F-13): corte del último
+  /// `_uploadUnaPorUna` — 'auth' si una op salió bumpAuth,
+  /// 'transporte' si el fallo fue de red/timeout, null si
+  /// el sub-lote corrió entero. Lo lee `_uploadOps` para
+  /// abortar el push (la firma `Future<int>` de
+  /// `_uploadUnaPorUna` es contrato M1-4 y no cambia).
+  String? _corteUnaPorUna;
+
   /// 1.32 (IMP-23): el veredicto que el último `_doPush`
   /// PUBLICÓ al cerrar (ver [VeredictoPush]). Nace limpio,
   /// como nacía el contador: antes del primer push no hay
@@ -2109,6 +2133,7 @@ class SyncEngine {
     return SyncDetalle(
       ultimaPull: pull,
       ultimaPush: push,
+      ultimaSyncOk: await _ultimaOk(),
       subidosUltimo: subidosUltimo,
       bajadosUltimo: bajadosUltimo,
       totalSubidos:
@@ -3039,20 +3064,38 @@ class SyncEngine {
             subidos: subidos, bajados: bajados);
         return;
       }
+      // v1.0.17: pull silencioso tras el push para actualizar el watermark.
+      // Sin esto, el server_seq avanza por las ops propias y el banner
+      // muestra "Hay cambios nuevos" aunque no haya nada que bajar.
+      // 1.32 (O2F2S, adjudicación de Argón F-6): el pull va
+      // PRIMERO y su desenlace manda sobre la limpieza del
+      // error — antes el push limpio borraba last_sync_error
+      // ANTES del pull y el catch del pull tragaba todo: un
+      // push horario limpio podía borrar el error de una
+      // bajada muerta sin que nadie lo viera. Ahora: si el
+      // pull lanza, el error queda VISIBLE (meta + AppLog);
+      // el borrado por push limpio solo ocurre con el pull
+      // del mismo ciclo verificado.
+      var pullVerificado = false;
+      try {
+        bajados = await _doPull(silencioso: true);
+        pullVerificado = !_sinSesionEnCorrida;
+      } catch (e) {
+        AppLog.error('sync', 'push_pull_silencioso_fallo', d: '$e');
+        try {
+          await _db.setMeta('last_sync_error',
+              (await _describeErrorVisible(e)).mensaje);
+        } catch (_) {}
+      }
       // v1.0.14: limpiar error viejo si el push tuvo éxito.
       // Auditoría Definitiva (A-2): el éxito se juzga por el
       // resultado REAL de la subida (cero ops golpeadas), no
       // por «_doPush retornó»: con ops vivas golpeadas el
       // error NO se limpia y el gancho de éxito no suena.
-      if (_ultimoPushLimpio) {
+      // 1.32 (F-6): y solo si el pull del ciclo se verificó.
+      if (_ultimoPushLimpio && pullVerificado) {
         await _db.setMeta('last_sync_error', '');
       }
-      // v1.0.17: pull silencioso tras el push para actualizar el watermark.
-      // Sin esto, el server_seq avanza por las ops propias y el banner
-      // muestra "Hay cambios nuevos" aunque no haya nada que bajar.
-      try {
-        bajados = await _doPull(silencioso: true);
-      } catch (_) {}
       // Cliente protegido (2026-10-26, A4): ídem que en pull().
       await _pullSiProtegidoPendiente();
       // 1.23: cierre de la tubería del drenado de fondo — las
@@ -3166,6 +3209,16 @@ class SyncEngine {
       var totalOps = resPush1.aplicadas;
       final uuidsPush = <String>[...resPush1.uuids];
       AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
+      // 1.32 (O2F2S, adjudicación F-9, de R2#1): si la
+      // subida abortó por AUTH, el ciclo NO sigue a fotos/
+      // comprobantes NI dispara el segundo _uploadOps: con
+      // la sesión rechazada todo lo demás repite el mismo
+      // 401 y cada op quemaba dos intentos por ciclo camino
+      // a la reversión automática de sus efectos.
+      final abortadoPorAuth = resPush1.abortadoPorAuth;
+      if (abortadoPorAuth) {
+        AppLog.aviso('sync', 'push_abortado_auth_salta_fotos');
+      }
       // v1.2.9+46: las fotos SIEMPRE se suben en cada sincronización,
       // como en v1.2.3. La puerta de ahorro de datos se eliminó por
       // orden de Jc (2026-10-13): hacía que las fotos nunca se intentaran.
@@ -3199,20 +3252,35 @@ class SyncEngine {
         // FGS (desdeForeground), la guarda no salta el drenado
         // — saltarlo dejaba al servicio girando sin hacer su
         // trabajo principal.
-        if (!fgCorriendo || desdeForeground) {
-          fotosSubidas =
-              await FotosColaService.instance.procesarCola();
+        // 1.32 (F-9): con el push abortado por auth, tampoco.
+        if (!abortadoPorAuth && (!fgCorriendo || desdeForeground)) {
+          try {
+            fotosSubidas =
+                await FotosColaService.instance.procesarCola();
+          } catch (e) {
+            debugPrint('ERROR procesarCola falló: $e');
+            AppLog.error('sync', 'cola_fotos_fallo', d: '$e');
+            // 1.32 (O2F2S, adjudicación F-14): el fallo de la
+            // cola de fotos ENSUCIA el veredicto del push —
+            // antes la corrida podía limpiar el error y sonar
+            // a éxito con las fotos atascadas.
+            _fallosUltimoPush++;
+          }
         }
         AppLog.info('sync', 'cola_fotos', d: 'subidas=$fotosSubidas');
       } catch (e) {
-        debugPrint('ERROR procesarCola falló: $e');
-        AppLog.error('sync', 'cola_fotos_fallo', d: '$e');
+        // La GUARDA del FGS no se pudo evaluar (canal
+        // ausente): no es un fallo de la cola de fotos y no
+        // ensucia el veredicto (F-14 va sobre procesarCola).
+        AppLog.error('sync', 'cola_fotos_guarda_fallo', d: '$e');
       }
       // F1 (1.20): comprobantes de pagos por transferencia
       // pendientes de subida (servicio propio, tras las fotos).
       try {
-        final compSubidos =
-            await ComprobantesService.instance.procesar();
+        // 1.32 (F-9): abortado por auth ⇒ ni se intentan.
+        final compSubidos = abortadoPorAuth
+            ? 0
+            : await ComprobantesService.instance.procesar();
         // 1.32 (O2F2S, M1): conteo para la corrida del diario.
         _diarioComprobantes = compSubidos;
         if (compSubidos > 0) {
@@ -3221,6 +3289,10 @@ class SyncEngine {
         }
       } catch (e) {
         AppLog.error('sync', 'comprobantes_fallo', d: '$e');
+        // 1.32 (F-14): ídem fotos — los comprobantes son la
+        // evidencia de los pagos por transferencia; su fallo
+        // no puede convivir con un sello de éxito pleno.
+        _fallosUltimoPush++;
       }
       // Si se subieron fotos y se generaron ops de vinculación,
       // vaciar ops_queue hacia Supabase de inmediato.
@@ -3236,7 +3308,10 @@ class SyncEngine {
       // 1.28 (M1-A1): punto de control del ciclo zombi antes
       // de la segunda subida (las fotos pudieron tardar).
       _exigirLockVivo();
-      if (fotosSubidas > 0 || pendientesTrasFotos > 0) {
+      // 1.32 (F-9): abortado por auth ⇒ NO hay segundo
+      // intento en este ciclo (era el doble golpe de R2#1).
+      if (!abortadoPorAuth &&
+          (fotosSubidas > 0 || pendientesTrasFotos > 0)) {
         // v1.2.9+46 (Gemini): sumar al total para last_uploaded.
         final resPush2 = await _uploadOps(forzar: forzar);
         totalOps += resPush2.aplicadas;
@@ -3253,7 +3328,13 @@ class SyncEngine {
       final pushFalloTotal = pendientesAlEntrar > 0 &&
           totalOps == 0 &&
           pendientesAlSalir > 0;
-      if (!pushFalloTotal) {
+      // 1.32 (O2F2S, adjudicación F-15, residual de R1#3A):
+      // un push PARCIAL (algunas aplicadas, otras golpeadas)
+      // NO sella last_push_ok pleno: el sello exige cero
+      // fallos en la corrida — si no, «última subida buena»
+      // mentía sobre un push a medias.
+      final pushLimpio = _fallosUltimoPush == 0;
+      if (!pushFalloTotal && pushLimpio) {
         await _db.setMeta('last_push_ok', isoHabana(ahoraHabana()));
       }
       // v1.3.0: acumulativo (no solo última sincronización).
@@ -3270,7 +3351,8 @@ class SyncEngine {
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
       // 1.24.2: con fallo total de push tampoco se sella
       // ultimo_sincronizado (misma compuerta que last_push_ok).
-      if (!pushFalloTotal) {
+      // 1.32 (F-15): la misma compuerta exige push limpio.
+      if (!pushFalloTotal && pushLimpio) {
         await marcarSincronizado();
       }
       _emit(SyncPhase.idle);
@@ -4016,6 +4098,15 @@ class SyncEngine {
           [for (final o in sinConfirmar) o['op_uuid'] as String]);
     } catch (e) {
       debugPrint('WARN confirmación batch falló, se reintenta luego: $e');
+      // 1.32 (O2F2S, adjudicación F-14, de R1#6D): el fallo
+      // de verificación del barrido deja RASTRO VISIBLE
+      // (AppLog + meta), no solo debugPrint — las ops quedan
+      // en limbo 'enviada' y alguien debe poder ver por qué.
+      AppLog.error('sync', 'barrido_confirmacion_fallo', d: '$e');
+      try {
+        await _db.setMeta('ultimo_barrido_fallo',
+            '${isoHabana(ahoraHabana())}|$e');
+      } catch (_) {}
     }
     for (final op in sinConfirmar) {
       final uuid = op['op_uuid'] as String;
@@ -4080,8 +4171,8 @@ class SyncEngine {
   /// Envío en lote (punto 19): varias ops por petición PostgREST
   /// (bulk + on_conflict para idempotencia), menos viajes de ida y vuelta
   /// con conexiones de alta latencia.
-  Future<({int aplicadas, List<String> uuids})> _uploadOps(
-      {bool forzar = false}) async {
+  Future<({int aplicadas, List<String> uuids, bool abortadoPorAuth})>
+      _uploadOps({bool forzar = false}) async {
     var aplicadas = 0;
     // v1.3.5 (detalle Subidos): UUIDs confirmados en esta corrida, para
     // que el detalle liste exactamente lo que cuenta last_uploaded.
@@ -4095,45 +4186,47 @@ class SyncEngine {
     try {
       habiaEnviadas = (await _db.opsByEstado('enviada')).isNotEmpty;
     } catch (_) {}
+    // F-13: el corte del una-por-una es de ESTA corrida.
+    _corteUnaPorUna = null;
     var algunEnvioAceptado = false;
     var resultadoAmbiguo = false;
     var falloInequivoco = false;
-    // v1.2.9+46 (Gemini): las ops en 'enviada' por más de 2 minutos
-    // vuelven a 'pendiente' para reintento idempotente. Evita que
-    // queden en limbo perpetuo si la confirmación falló.
+    // 1.32 (O2F2S, adjudicación F-10, de R3#1 — CRÍTICA): el
+    // destrabe de 'enviada' viejas se INVIERTE. Antes la
+    // degradación a 'pendiente' se escribía EN DISCO antes
+    // de confirmar nada: si el servidor YA había aplicado
+    // la op (un cobro real), quedaba 'pendiente' =
+    // CANCELABLE por el usuario en el teléfono mientras el
+    // servidor conservaba el cargo. Ahora:
+    //   (1) las candidatas se calculan SIN escribir nada;
+    //   (2) el Paso 1 de confirmación corre sobre
+    //       pendientes + candidatas;
+    //   (3) solo se degrada la candidata AUSENTE del lote
+    //       (el servidor confirmó no conocerla); la que el
+    //       servidor tiene en vuelo sigue 'enviada'; la
+    //       aplicada/terminal la resuelve el bucle de
+    //       aplicación. Si la confirmación FALLA por red,
+    //       no se degrada NINGUNA.
+    // El cálculo de candidatas conserva las reglas de
+    // siempre: corte por INSTANTE en Dart
+    // (enviadaDebeResetear; la comparación lexicográfica
+    // vieja resbalaba en la hora repetida del fall-back) y
+    // nunca ops de otro usuario (user_id NULL sí: previas
+    // a la atribución por usuario).
+    final candidatasReset = <Map<String, dynamic>>[];
     try {
-      // 1.23 (Push-S P-4): el corte se evalúa por INSTANTE en
-      // Dart (enviadaDebeResetear) y el UPDATE va por UUIDs
-      // explícitos. La comparación anterior era lexicográfica
-      // en SQL sobre el texto ISO: en la hora repetida del
-      // fall-back el orden de los textos no es el orden de los
-      // instantes y el reset resbalaba hasta una hora.
-      // Argón P1#3: igual que _forzarAtascadas, no reactivar
-      // ops de otro usuario en este teléfono (user_id NULL sí:
-      // son previas a la atribución por usuario).
       final corteMs = ahoraUtcReal()
           .subtract(const Duration(minutes: 2))
           .millisecondsSinceEpoch;
       final uidR = _auth.userId;
-      final aResetear = <String>[];
       for (final op in await _db.opsByEstado('enviada')) {
         final duenio = op['user_id'];
         if (uidR != null && duenio != null && '$duenio' != '$uidR') {
           continue;
         }
         if (enviadaDebeResetear(op['enviada_ts'] as String?, corteMs)) {
-          aResetear.add(op['op_uuid'] as String);
+          candidatasReset.add(op);
         }
-      }
-      if (aResetear.isNotEmpty) {
-        final db = await _db.db;
-        final marcas = List.filled(aResetear.length, '?').join(',');
-        await db.update(
-          'ops_queue',
-          {'estado': 'pendiente', 'error': null},
-          where: "estado = 'enviada' AND op_uuid IN ($marcas)",
-          whereArgs: aResetear,
-        );
       }
     } catch (_) {}
     // v1.0.16: solo subir las ops del usuario actual. Las de otro
@@ -4151,16 +4244,68 @@ class SyncEngine {
     // Opción A (preferida): RPC op_aplicada_con_resultado_batch;
     // Opción B (fallback): un solo GET por lote con op_uuid=in.(...).
     // Si la verificación falla (red), se reenvía todo: el POST es
-    // idempotente por op_uuid.
+    // idempotente por op_uuid. (F-10: las CANDIDATAS al
+    // destrabe entran en esta misma verificación y su
+    // degradación espera a su resultado.)
     final porEnviar = <Map<String, dynamic>>[];
     Map<String, ResultadoOpServidor> estados = {};
+    var verificacionOk = true;
     try {
-      estados = await _resultadosOpsBatch(
-          [for (final o in ops) o['op_uuid'] as String]);
+      estados = await _resultadosOpsBatch([
+        for (final o in ops) o['op_uuid'] as String,
+        for (final o in candidatasReset) o['op_uuid'] as String,
+      ]);
     } catch (e) {
+      verificacionOk = false;
       debugPrint('WARN verificación batch falló, se reenvía todo: $e');
     }
-    for (final op in ops) {
+    // (3) F-10: el destrabe, SOLO con la confirmación en la
+    // mano. Las candidatas que el bucle de aplicación debe
+    // procesar (degradadas y aplicadas/terminales) se
+    // suman a su lista; las que el servidor tiene en vuelo
+    // quedan 'enviada' intactas.
+    final candidatasAlBucle = <Map<String, dynamic>>[];
+    if (candidatasReset.isNotEmpty) {
+      final aDegradar = <String>[];
+      for (final op in candidatasReset) {
+        final uuid = op['op_uuid'] as String;
+        if (!verificacionOk) {
+          // La confirmación falló por red: NO se degrada
+          // ninguna — quedan 'enviada' (no cancelables) y
+          // el próximo ciclo reintenta la confirmación.
+          continue;
+        }
+        final rec = estados[uuid];
+        if (rec == null) {
+          // El servidor confirmó NO conocerla: el destrabe
+          // es seguro y la op vuelve al flujo de envío.
+          aDegradar.add(uuid);
+          candidatasAlBucle.add(op);
+        } else if (rec.estado == 'pendiente' &&
+            !esAccesoPausado(rec.resultado)) {
+          // El servidor la tiene EN VUELO: sigue 'enviada';
+          // ni se degrada ni se reenvía en este ciclo.
+          continue;
+        } else {
+          // Aplicada o terminal en el servidor: la resuelve
+          // el bucle de aplicación, sin degradar.
+          candidatasAlBucle.add(op);
+        }
+      }
+      if (aDegradar.isNotEmpty) {
+        try {
+          final db = await _db.db;
+          final marcas = List.filled(aDegradar.length, '?').join(',');
+          await db.update(
+            'ops_queue',
+            {'estado': 'pendiente', 'error': null},
+            where: "estado = 'enviada' AND op_uuid IN ($marcas)",
+            whereArgs: aDegradar,
+          );
+        } catch (_) {}
+      }
+    }
+    for (final op in [...ops, ...candidatasAlBucle]) {
       final uuid = op['op_uuid'] as String;
       final rec = estados[uuid];
       if (rec == null ||
@@ -4307,6 +4452,13 @@ class SyncEngine {
           await _bumpConReversion(op, e);
         }
       }
+      // 1.32 (O2F2S, F-13): si el una-por-una cortó (auth o
+      // transporte), el push de esta corrida aborta igual
+      // que con el bumpAuth del propio lote.
+      if (_corteUnaPorUna != null) {
+        abortarPush = true;
+        falloInequivoco = true;
+      }
       // Ítem 4: el lote cuenta como éxito solo si el POST del lote
       // completo fue aceptado; cualquier otro desenlace baja a 10.
       if (loteOk) {
@@ -4340,7 +4492,16 @@ class SyncEngine {
         await _db.marcarTiposComentariosSincronizados();
       } catch (_) {}
     }
-    return (aplicadas: aplicadas, uuids: uuids);
+    // 1.32 (O2F2S, adjudicación F-9): el llamador necesita
+    // saber si el push abortó por AUTH — con la sesión
+    // rechazada, _doPush no debe seguir a fotos/
+    // comprobantes ni disparar el segundo intento (cada
+    // ciclo quemaba DOS veces los intentos de las ops).
+    return (
+      aplicadas: aplicadas,
+      uuids: uuids,
+      abortadoPorAuth: abortarPush || _corteUnaPorUna == 'auth'
+    );
   }
 
   /// Yunque de Sincronización (YS-3, H2 de la revisión de
@@ -4489,6 +4650,8 @@ class SyncEngine {
   /// lote caía a 10 aunque todas las individuales salieran.
   Future<int> _uploadUnaPorUna(List<Map<String, dynamic>> lote) async {
     var aceptadas = 0;
+    // F-13: el corte de ESTA pasada nace limpio.
+    _corteUnaPorUna = null;
     final tag = await deviceTag();
     for (final op in lote) {
       final uuid = op['op_uuid'] as String;
@@ -4548,6 +4711,14 @@ class SyncEngine {
           if (decision == Decision4xxPush.bumpAuth) {
             await _bumpConReversion(op, 'HTTP ${r.statusCode}',
                 httpStatus: r.statusCode);
+            // 1.32 (O2F2S, adjudicación F-13, de R3#9): ante
+            // bumpAuth el sub-lote CORTA — seguir op a op
+            // repetiría el mismo 401/403 contra cada una,
+            // quemando un intento por op por un único fallo
+            // de sesión común (el camino por lote ya cortaba
+            // desde YS-1; este no).
+            _corteUnaPorUna = 'auth';
+            break;
           } else if (decision == Decision4xxPush.bumpCheck) {
             await _bumpConReversion(op,
                 'CHECK del servidor aún no conoce este tipo (23514): '
@@ -4608,6 +4779,13 @@ class SyncEngine {
       } catch (e) {
         if (e is SessionExpired) rethrow;
         await _bumpConReversion(op, e);
+        // 1.32 (O2F2S, F-13): un fallo de TRANSPORTE también
+        // corta el sub-lote: con la red muerta, encadenar 50
+        // esperas en serie quema un intento por op por el
+        // mismo fallo común. Esta op ya gastó el suyo; el
+        // resto queda intacto para el próximo ciclo.
+        _corteUnaPorUna = 'transporte';
+        break;
       }
     }
     return aceptadas;
@@ -5876,19 +6054,44 @@ class SyncEngine {
                 if (!LocalDb.tablasProhibidasEntrenador.contains(t)) t,
             ];
 
+  /// 1.32 (O2F2S, F-5 adjudicado): el último chequeo de JWT
+  /// falló por TRANSPORTE (sin respuesta del servidor de
+  /// auth), no por rechazo. La guarda de `_download` lo
+  /// distingue: sin confirmación por red la bajada falla
+  /// como un fallo de red cualquiera — jamás como «sesión
+  /// no válida» (offline en Cuba no es sesión muerta).
+  bool _jwtFalloFueTransporte = false;
+
   /// H-08 (1.23): ¿hay un JWT utilizable AHORA? Si el de la
   /// sesión venció, se intenta UN refresco (el mismo camino que
   /// _reqAuth, pero verificado ANTES de cualquier descarga o
   /// purga, no a mitad del bucle).
+  ///
+  /// 1.32 (O2F2S, F-5 adjudicado, R1#7A): ante «vencido por
+  /// reloj» se intenta el refresco y juzga la RESPUESTA DEL
+  /// SERVIDOR, no el `isExpired` local: con el reloj
+  /// adelantado >1 h (la vida del access token), hasta un
+  /// token recién emitido «nacía vencido» para el reloj
+  /// local y la guarda devolvía falso para siempre.
   Future<bool> _jwtVigente() async {
+    _jwtFalloFueTransporte = false;
+    final ses = _auth.session;
+    if (ses == null) return false;
+    if (!ses.isExpired) return true;
     try {
-      final ses = _auth.session;
-      if (ses == null) return false;
-      if (!ses.isExpired) return true;
       final res = await Supabase.instance.client.auth.refreshSession();
-      final nueva = res.session;
-      return nueva != null && !nueva.isExpired;
+      // El servidor respondió: si concedió sesión, el token
+      // vale (su juicio manda sobre el reloj del teléfono).
+      return res.session != null;
+    } on AuthApiException {
+      // El servidor de auth RECHAZÓ el refresco: sesión
+      // muerta de verdad (refresh rotado/revocado).
+      return false;
     } catch (_) {
+      // Sin respuesta: no hay confirmación posible, pero
+      // tampoco hay rechazo — queda marcado como transporte
+      // para que la guarda no lo vista de sesión muerta.
+      _jwtFalloFueTransporte = true;
       return false;
     }
   }
@@ -5921,6 +6124,15 @@ class SyncEngine {
     // y el próximo reintenta con la sesión sana.
     if (!await _jwtVigente()) {
       AppLog.aviso('sync', 'pull_sin_jwt_valido');
+      // 1.32 (O2F2S, F-5 adjudicado): si el chequeo falló por
+      // TRANSPORTE (sin red para confirmar la sesión), esto
+      // NO es una sesión muerta: la bajada se cae como un
+      // fallo de red cualquiera — visible y reintentable —
+      // y nadie queda sellado ni expulsado por estar offline.
+      if (_jwtFalloFueTransporte) {
+        throw StateError(
+            'Sin conexión para confirmar la sesión; se reintenta luego');
+      }
       // 1.32 (O2F2S, Pieza 4a): la guarda YA NO es un éxito
       // vacío silencioso: la corrida queda marcada con
       // sesión no válida y el llamador la traduce a error

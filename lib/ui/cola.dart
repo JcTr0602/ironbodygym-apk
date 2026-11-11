@@ -2257,6 +2257,20 @@ class _ColaScreenState extends State<ColaScreen> {
       subtitulo = totalPendiente == 1
           ? '1 elemento esperando conexión'
           : '$totalPendiente elementos esperando conexión';
+    } else if (_det.ultimaSyncOk == null) {
+      // 1.32 (O2F2S, adjudicación de Argón F-3): el verde
+      // «Todo al día» EXIGE un sello completo real
+      // (last_sync_ok). Un teléfono que nunca completó una
+      // corrida — sin error y sin pendientes, como el de la
+      // incidencia Duany — no pinta verde por defecto:
+      // pinta «sin confirmar», que es la verdad.
+      estadoSync = 'sin_confirmar';
+      colorEstado = AppColores.alerta;
+      fondoEstado = AppColores.avisoFondo;
+      cifraHeroe = null;
+      iconoEstado = Icons.help_outline_rounded;
+      titulo = 'Sin confirmar';
+      subtitulo = 'Aún no se ha sincronizado en este teléfono';
     } else {
       estadoSync = 'ok';
       colorEstado = AppColores.exito;

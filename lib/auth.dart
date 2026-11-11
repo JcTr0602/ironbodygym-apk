@@ -60,14 +60,19 @@ class AuthService {
   static const textoSesionMuerta =
       'La sesión no es válida: cierra sesión y entra de nuevo.';
 
-  /// 1.32 (O2F2S, Pieza 4d): ¿este error de refresco es un
-  /// RECHAZO de auth del servidor? El SDK lo distingue:
-  /// AuthApiException = el servidor respondió y rechazó
-  /// (refresh token rotado/revocado); AuthRetryableFetch
-  /// Exception y los timeouts = la red no respondió. Solo
-  /// el rechazo mata la sesión; la red caída da gracia
-  /// offline (la sesión se conserva intacta).
-  static bool esRechazoDeAuth(Object e) => e is AuthApiException;
+  /// 1.32 (O2F2S, Pieza 4d en su forma ADJUDICADA por Argón,
+  /// F-5): ¿este error de refresco es un RECHAZO de auth del
+  /// servidor? La regla es la que `_reqAuth` ya aplica en el
+  /// motor: SOLO AuthApiException con statusCode 400/401/403
+  /// (token inválido/revocado, con respuesta HTTP del
+  /// servidor de auth) mata la sesión. Un 5xx del servidor
+  /// de auth NO expulsa, y un fallo de transporte (sin
+  /// respuesta: AuthRetryableFetchException, timeouts)
+  /// JAMÁS expulsa — offline en Cuba no puede echar a los
+  /// entrenadores de su propia app.
+  static bool esRechazoDeAuth(Object e) =>
+      e is AuthApiException &&
+      const {'400', '401', '403'}.contains(e.statusCode);
 
   /// Verificación de arranque: si la sesión guardada está
   /// vencida, intenta UN refresco y clasifica el desenlace:
@@ -86,13 +91,20 @@ class AuthService {
     try {
       final ses = session;
       if (ses == null) return true;
+      // F-12: la sesión restaurada también deja su respaldo
+      // de autoría (no solo el login fresco).
+      unawaited(registrarAutorActivo());
       if (!ses.isExpired) return true;
       try {
         final res = await _c.auth
             .refreshSession()
             .timeout(const Duration(seconds: 12));
         final nueva = res.session;
-        if (nueva != null && !nueva.isExpired) return true;
+        // F-5 adjudicado: juzga la RESPUESTA DEL SERVIDOR, no
+        // el reloj local — si el servidor concedió sesión, la
+        // sesión vale aunque el reloj del teléfono (adelantado
+        // >1 h) crea «vencido» hasta el token recién emitido.
+        if (nueva != null) return true;
         // El servidor respondió sin conceder sesión: muerta.
         await _sellarSesionMuerta();
         return false;
@@ -179,9 +191,32 @@ class AuthService {
     await _c.auth
         .signInWithPassword(email: email, password: password)
         .timeout(const Duration(seconds: 12));
+    // 1.32 (O2F2S, adjudicación F-12): respaldo persistido
+    // de autoría — si queueOpEn no puede leer la sesión
+    // (isolate sin inicializar, ventana post-cierre), la op
+    // nace con ESTE autor en vez de NULL (una op con
+    // user_id NULL la subía el siguiente usuario que
+    // entrara, con SU nombre: R3#2).
+    unawaited(registrarAutorActivo());
     // v1.3.3: reportar la versión de la app para que el dueño la vea
     // en "Usuarios APK" (no bloquea el login si falla).
     unawaited(reportAppVersion());
+  }
+
+  /// 1.32 (O2F2S, F-12): persiste en meta el autor de la
+  /// sesión activa (`ultimo_user_id_activo` /
+  /// `ultimo_telegram_id_activo`). Nunca lanza.
+  Future<void> registrarAutorActivo() async {
+    try {
+      final uid = userId;
+      if (uid == null) return;
+      await LocalDb.instance.setMeta('ultimo_user_id_activo', uid);
+      final tg = telegramId;
+      if (tg != null) {
+        await LocalDb.instance
+            .setMeta('ultimo_telegram_id_activo', '$tg');
+      }
+    } catch (_) {}
   }
 
   /// Informa al servidor qué versión de la app está instalada.

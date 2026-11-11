@@ -4743,10 +4743,17 @@ class LocalDb {
       // escribir en la bitácora: app_log vive sobre LocalDb).
       // Un conjunto vacío NO aborta: ese caso lo gobiernan
       // las guardas de la puerta (purgaPermitida y H-08).
+      // 1.32 (O2F2S, adjudicación F-22, residual de R2#5):
+      // la red también aborta con el conjunto del servidor
+      // VACÍO si hay confirmadas que borrar — el hueco que
+      // quedaba: una tabla pequeña (≤4 filas, bajo el radar
+      // de purgaPermitida) podía vaciarse entera ante un
+      // conteo degradado */0 «confirmado» 0==0. La versión
+      // catastrófica de R2#5 estaba refutada (≥5 filas ya
+      // bloqueaba la puerta); este es su residual exacto.
       if (borrar.isNotEmpty &&
           confirmadas > 0 &&
-          borrar.length == confirmadas &&
-          idsServidor.isNotEmpty) {
+          borrar.length == confirmadas) {
         await setMetaEn(
             txn,
             'purga_interseccion_sospechosa_$tabla',
@@ -8694,7 +8701,11 @@ class LocalDb {
       final f = await _archivoMantenimiento();
       if (!await f.exists()) return false;
       final mod = await f.lastModified();
-      return ahoraDispositivoParaFs().difference(mod) <
+      // 1.32 (O2F2S, adjudicación de Argón F-26): con .abs()
+      // — sin él, un reloj ATRASADO hacía la diferencia
+      // negativa y el «mantenimiento» duraba todo el
+      // desfase + 15 min, bloqueando la sync sin motivo.
+      return ahoraDispositivoParaFs().difference(mod).abs() <
           const Duration(minutes: 15);
     } catch (_) {
       return false;
@@ -10141,6 +10152,35 @@ class LocalDb {
       userId = auth.userId;
       telegramId = auth.telegramId;
     } catch (_) {}
+    // 1.32 (O2F2S, adjudicación F-12, de R3#2): si el acceso
+    // a la sesión falló (isolate sin inicializar, ventana
+    // post-cierre) la autoría sale del respaldo persistido
+    // al login: ninguna op nace con user_id NULL habiendo
+    // habido sesión — la op NULL la subía DESPUÉS otro
+    // usuario con su JWT y quedaba a su nombre en el
+    // servidor. La lectura va por el mismo ejecutor (la op
+    // puede nacer dentro de una transacción).
+    if (userId == null) {
+      try {
+        final mu = await ex.query('meta',
+            columns: ['valor'],
+            where: 'clave = ?',
+            whereArgs: ['ultimo_user_id_activo'],
+            limit: 1);
+        if (mu.isNotEmpty) {
+          final v = mu.first['valor'];
+          if (v is String && v.isNotEmpty) userId = v;
+        }
+        final mt = await ex.query('meta',
+            columns: ['valor'],
+            where: 'clave = ?',
+            whereArgs: ['ultimo_telegram_id_activo'],
+            limit: 1);
+        if (mt.isNotEmpty) {
+          telegramId = int.tryParse('${mt.first['valor']}');
+        }
+      } catch (_) {}
+    }
     // FIX (Gemini BUG 4): normalizar clave de ajuste antes de encolar.
     var payloadFinal = payload;
     if (tipo == 'ajuste' && payload['clave'] is String) {
@@ -10676,6 +10716,16 @@ class LocalDb {
       await txn.update(
           'ops_queue', {'estado': 'aplicada', 'error': null},
           where: 'op_uuid=?', whereArgs: [opUuid]);
+      // 1.32 (O2F2S, adjudicación F-16, de R3#10): la
+      // confirmación deja enviada_ts si la op nunca pasó
+      // por 'enviada' en ESTE teléfono (confirmada tarde
+      // vía barrido): sin él, la poda de 60 días la medía
+      // por creada_ts y podía borrarla el mismo día de su
+      // confirmación, perdiendo el rastro del Detalle.
+      await txn.rawUpdate(
+          'UPDATE ops_queue SET enviada_ts = COALESCE(enviada_ts, ?) '
+          'WHERE op_uuid = ?',
+          [isoHabana(ahoraHabana()), opUuid]);
       if (resultadoJson != null) {
         await txn.update(
             'ops_queue', {'resultado_servidor': resultadoJson},
@@ -10819,6 +10869,18 @@ class LocalDb {
   /// anunciar «deshecho»: entre su lectura del estado y este
   /// borrado, un push forzado pudo subir la op (la WHERE la
   /// protege, pero el anuncio salía igual y era falso).
+  /// ⚠️ PRIMITIVA PELIGROSA (1.32, adjudicación F-17,
+  /// residual de R2#7): borra la op SIN revertir sus
+  /// efectos optimistas en el espejo — a diferencia de
+  /// [cancelOp], que pasa por [resolverEfectosOpMuerta] en
+  /// la misma transacción. Queda viva SOLO porque sus dos
+  /// llamadores actuales compensan a mano y solo crean ops
+  /// `pago_mensual` («Deshacer último pago» de pago.dart y
+  /// `_deshacer` de confirmacion_cobro.dart: restauran el
+  /// espejo con updateMirrorPagadoHasta tras borrar).
+  /// Un llamador NUEVO con otro tipo de op NO debe usarla:
+  /// que use cancelOp. El contrato lo vigila
+  /// test/oleada2_fase2_adjudicacion_c_test.dart (F-17).
   Future<int> deleteOp(String opUuid) async {
     final d = await db;
     return d.delete('ops_queue',
@@ -11106,13 +11168,23 @@ class LocalDb {
         ? '1=0'
         : '(user_id IS NOT NULL AND user_id != ?)';
     final args = <Object?>[
-      if (userId != null) ...[userId, userId, userId],
+      // Un userId por cada CASE con $esPropia/$esAjena, en el
+      // orden del SELECT: esperando, por_subir, con_error,
+      // ajenas (F-11 sumó el de «esperando»).
+      if (userId != null) ...[userId, userId, userId, userId],
     ];
     final r = await d.rawQuery(
         'SELECT '
-        "COALESCE(SUM(CASE WHEN estado = 'enviada' THEN 1 ELSE 0 END), 0) AS esperando, "
+        // 1.32 (O2F2S, adjudicación F-11): «esperando» también
+        // filtra por usuario activo — la 'enviada' AJENA no
+        // es mi confirmación pendiente (antes contaba TODAS
+        // y el resumen del entrenador la mostraba como suya).
+        // F-14: 'necesita_revision' cuenta como «con problema»
+        // en con_error — antes el resumen del ciclo podía dar
+        // 0 problemas con una op en revisión.
+        "COALESCE(SUM(CASE WHEN estado = 'enviada' AND $esPropia THEN 1 ELSE 0 END), 0) AS esperando, "
         "COALESCE(SUM(CASE WHEN estado = 'pendiente' AND $esPropia THEN 1 ELSE 0 END), 0) AS por_subir, "
-        "COALESCE(SUM(CASE WHEN estado = 'error' AND $esPropia THEN 1 ELSE 0 END), 0) AS con_error, "
+        "COALESCE(SUM(CASE WHEN estado IN ('error', 'necesita_revision') AND $esPropia THEN 1 ELSE 0 END), 0) AS con_error, "
         "COALESCE(SUM(CASE WHEN estado IN ('pendiente', 'error') AND $esAjena THEN 1 ELSE 0 END), 0) AS ajenas "
         'FROM ops_queue',
         args);
@@ -11231,14 +11303,31 @@ class LocalDb {
   /// (`sync/puerta_ops_exenta`, ver [opsExentasPuerta]).
   Future<int> countPendingOpsNoFoto() async {
     final d = await db;
+    // 1.32 (O2F2S, adjudicación F-11): las puertas de fotos y
+    // comprobantes (Regla de Hierro) solo se cierran por MIS
+    // ops: la 'enviada'/'pendiente' de OTRO usuario en este
+    // teléfono no puede bloquearme (su confirmación cruzada
+    // es imposible desde mi sesión: la RPC es INVOKER).
+    // user_id NULL cuenta como propia (previa a la
+    // atribución por usuario), como en el resto de conteos.
+    String? uidActivo;
+    try {
+      uidActivo = AuthService().userId;
+    } catch (_) {}
+    final filtroPropia = uidActivo != null
+        ? ' AND (user_id IS NULL OR user_id = ?)'
+        : '';
+    final argsPropia = uidActivo != null ? [uidActivo] : const [];
     final r = await d.rawQuery(
         "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente', 'enviada') "
-        "AND tipo NOT IN ('foto', 'foto_suplemento')");
+        "AND tipo NOT IN ('foto', 'foto_suplemento')$filtroPropia",
+        argsPropia);
     var n = (r.first['c'] as int?) ?? 0;
     final errores = await d.rawQuery(
         "SELECT intentos, creada_ts, proximo_reintento "
         "FROM ops_queue WHERE estado = 'error' "
-        "AND tipo NOT IN ('foto', 'foto_suplemento')");
+        "AND tipo NOT IN ('foto', 'foto_suplemento')$filtroPropia",
+        argsPropia);
     final ahora = ahoraHabana();
     for (final f in errores) {
       if (!opEnErrorExentaDePuerta(
@@ -11643,21 +11732,34 @@ class LocalDb {
   Future<int> purgarOpsAplicadas() async {
     final d = await db;
     try {
-      final corte =
-          isoHabana(ahoraHabana().subtract(const Duration(days: 60)));
+      // 1.32 (O2F2S, adjudicación F-16): la comparación va
+      // por ÉPOCA (strftime honra el offset de cada texto),
+      // no lexicográfica: el texto ISO mezcla offsets
+      // -04:00/-05:00 en los bordes DST y el orden de
+      // caracteres no es el orden de los instantes — la
+      // protección de las últimas 200 y el corte de 60 días
+      // se medían mal justo en el cambio de hora.
+      // (El corte sale de DateTime.now(): instante REAL en
+      // cualquier zona — ahoraHabana() reconstruye la hora
+      // habanera como hora local y su época solo es real en
+      // La Habana; misma regla que pendientesParaEnvio.)
+      final corteEpoch = DateTime.now()
+              .subtract(const Duration(days: 60))
+              .millisecondsSinceEpoch ~/
+          1000;
       final n = await d.rawDelete(
         'DELETE FROM ops_queue '
         "WHERE estado = 'aplicada' "
-        'AND coalesce(enviada_ts, creada_ts) < ? '
+        "AND CAST(strftime('%s', coalesce(enviada_ts, creada_ts)) AS INTEGER) < ? "
         'AND op_uuid NOT IN ('
         'SELECT op_uuid FROM ops_queue '
         "WHERE estado = 'aplicada' "
-        'ORDER BY coalesce(enviada_ts, creada_ts) DESC '
+        "ORDER BY CAST(strftime('%s', coalesce(enviada_ts, creada_ts)) AS INTEGER) DESC "
         'LIMIT 200'
         ')',
-        [corte],
+        [corteEpoch],
       );
-      debugPrint('[poda_ops] aplicadas borradas=$n corte=$corte');
+      debugPrint('[poda_ops] aplicadas borradas=$n corteEpoch=$corteEpoch');
       return n;
     } catch (e) {
       // Defensiva: "no such table" u otro fallo de SQLite -> log y

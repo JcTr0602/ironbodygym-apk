@@ -66,17 +66,30 @@ void main() {
     expect(pubs.map((a) => a['id']), ['art-vivo']);
   });
 
-  test('conjunto vacío: borra todas las filas de servidor '
-      '(el motor decide cuándo un vacío es de fiar)', () async {
+  test('conjunto vacío: la red F-22 aborta el vaciado del '
+      '100 % (1.32, adjudicación de Argón)', () async {
+    // SUPERSEDE al contrato v1.4.4 de este caso («el motor
+    // decide cuándo un vacío es de fiar»): la adjudicación
+    // del paquete syncsello_ (F-22, residual de R2#5) mete
+    // la red DENTRO de la primitiva — con el conjunto del
+    // servidor vacío y filas confirmadas que borrar, un
+    // conteo degradado */0 podía vaciar una tabla pequeña
+    // entera pasando la puerta (≤4 filas, no troncal,
+    // conteo «confirmado» 0==0). Ahora no se borra nada y
+    // el aborto queda registrado en meta.
     final db = await _abrir();
     await db.upsertMirror('pagos', 7, {'id': 7, 'monto': 2000}, 33);
     await db.upsertMirror('pagos', 8, {'id': 8, 'monto': 2000}, 34);
     await db.upsertMirror('pagos', 9, {'id': 9, 'monto': 500}, 0);
     final borradas = await db.purgarMirrorAusentes('pagos', {});
-    expect(borradas.toSet(), {7, 8},
-        reason: 'las de servidor caen; la optimista (seq 0) queda');
+    expect(borradas, isEmpty,
+        reason: 'la red F-22 aborta: no se borra nada');
     final restantes = await db.allMirror('pagos');
-    expect(restantes.map((p) => p['id']), [9]);
+    expect(restantes.map((p) => p['id']), containsAll([7, 8, 9]));
+    final rastro =
+        await db.getMeta('purga_interseccion_sospechosa_pagos');
+    expect(rastro, isNotNull);
+    expect(rastro, contains('ids_servidor=0'));
   });
 
   test('sin fantasmas no borra nada', () async {
