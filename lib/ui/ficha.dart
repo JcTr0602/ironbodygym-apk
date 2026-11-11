@@ -158,16 +158,19 @@ class CacheSeccionesFicha {
 /// 1.32 «Mostrador Táctico»: la pestaña de cada sección de la
 /// ficha — 0 «Pagos y Notas» · 1 «Progreso y Marcas» · 2 «App
 /// Clientes» (plano consolidado §4.2, con los destinos del
-/// inventario: G-17 Notas va con Pagos; G-19/G-20 con Progreso;
+/// inventario: G-17 Notas va con Pagos — vive como fila de la
+/// tarjeta «Información personal» —; G-19/G-20 con Progreso;
 /// G-21/G-22/G-24 con App Clientes). Las tarjetas con clase
 /// propia se reconocen por tipo; las genéricas, por su rótulo
 /// (la composición de _seccionesCrudas es fija y los rótulos
-/// son estables). La foto personal y las fotos de progreso
-/// viven DENTRO de la tarjeta «Información personal» en el
-/// código vivo: viajan con ella a Pagos y Notas (partir la
-/// tarjeta es cirugía de otra oleada).
+/// son estables). La foto personal va como sección suelta
+/// tras «Información personal» y viaja con ella a Pagos y
+/// Notas; la galería de Fotos de Progreso (G-23) es sección
+/// propia tras las medidas y va a Progreso y Marcas (Oleada
+/// 2, Fase 1 — desviación 2 de Argón).
 int pestanaDeSeccionFicha(Widget w) {
   if (w is TarjetaMedidas) return 1;
+  if (w is SeccionFotosProgresoNube) return 1;
   if (w is SeccionAccesoAppFicha) return 2;
   if (w is Tarjeta) {
     if (_subarbolDice(w.child, 'Panel del dueño')) return 2;
@@ -3361,13 +3364,13 @@ class _FichaScreenState extends State<FichaScreen> {
                           onVerFotoGestion:
                               _foto != null ? _verFotoGrande : null,
                         ),
-                        // 1.27 (Fotos en la nube, Pieza G):
-                        // las fotos de progreso que el
-                        // cliente guardó en la nube; sin
-                        // fotos, el widget no ocupa espacio.
-                        const SizedBox(height: AppEspacio.md),
-                        SeccionFotosProgresoNube(
-                            clienteId: widget.clienteId),
+                        // 1.32 (Oleada 2 F1, desviación 2 de
+                        // Argón): la galería de Fotos de
+                        // Progreso (G-23) ya no viaja aquí: es
+                        // sección propia tras las medidas, en
+                        // la pestaña «Progreso y Marcas». La
+                        // foto personal se queda con
+                        // Información personal.
                       ],
                       const SizedBox(
                           height: AppEspacio.md),
@@ -3604,6 +3607,22 @@ class _FichaScreenState extends State<FichaScreen> {
                       ),
                       const SizedBox(
                           height: AppEspacio.md),
+                      // 1.27 (Fotos en la nube, Pieza G) +
+                      // 1.32 (Oleada 2 F1, desviación 2 de
+                      // Argón): la galería de fotos de
+                      // progreso que el cliente guardó en la
+                      // nube, como sección de «Progreso y
+                      // Marcas» (tras las medidas). Solo
+                      // dueño, igual que en su sitio anterior:
+                      // con otro rol el widget ni se
+                      // construye ni se llama su RPC. Sin
+                      // fotos, el widget no ocupa espacio.
+                      if (AuthService().isOwner) ...[
+                        SeccionFotosProgresoNube(
+                            clienteId: widget.clienteId),
+                        const SizedBox(
+                            height: AppEspacio.md),
+                      ],
                       // v1.2.5 (#10): incidencias relacionadas con el cliente.
                       if (_incidencias.isNotEmpty) ...[
                         Tarjeta(
