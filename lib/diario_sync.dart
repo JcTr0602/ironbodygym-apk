@@ -353,6 +353,16 @@ class CorridaOpSync {
   }
 }
 
+/// Estados de UNA tabla dentro de una corrida (columna
+/// `estado` de sync_corrida_tablas).
+abstract final class EstadoTablaDiario {
+  static const ok = 'ok';
+  static const sinCambios = 'sin_cambios';
+  static const sinVerificar = 'sin_verificar';
+  static const fallida = 'fallida';
+  static const ausente = 'ausente';
+}
+
 /// Acumulador en memoria de UNA tabla durante una corrida.
 /// El motor anota aquí lo que ya calcula (por intento de
 /// pull: `_doPull` reintenta y `_download` se repite, así

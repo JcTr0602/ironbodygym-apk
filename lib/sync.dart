@@ -38,6 +38,7 @@ import 'aviso_pendientes.dart';
 import 'auth.dart';
 import 'comprobantes.dart';
 import 'diagnostico_espejo.dart';
+import 'diario_sync.dart';
 import 'config.dart';
 import 'errores_sync.dart';
 import 'fotos.dart';
@@ -1368,6 +1369,49 @@ class SyncEngine {
   /// Lee el veredicto PUBLICADO al cierre, no el acumulador.
   bool get _ultimoPushLimpio => _veredictoUltimoPush.limpio;
 
+  // ── 1.32 (Oleada 2 Fase 2, M1): estado del DIARIO de la
+  // corrida en curso en ESTE isolate. Lo abre y lo cierra
+  // `_conLock` (el embudo de los 4 puntos de entrada); las
+  // fases anotan y los puntos de entrada fijan el veredicto
+  // provisional con `_diarioVeredicto`. Todo el diario es
+  // tolerante a fallos (M1-R5): si registrar falla, la sync
+  // sigue y el hueco se declara, jamás se inventa.
+  String? _diarioCorridaId;
+  Stopwatch? _diarioCronometro;
+  String? _diarioEstadoProv;
+  String? _diarioMotivoProv;
+  String? _diarioErrorProv;
+  int _diarioSubidosProv = 0;
+  int _diarioBajadosProv = 0;
+  final Map<String, AcumTablaDiario> _diarioTablas = {};
+  final List<String> _diarioUuidsPush = [];
+  int _diarioFotosSubidas = 0;
+  int _diarioFotosFallidas = 0;
+  int _diarioComprobantes = 0;
+
+  /// 1.32 (O2F2S, Pieza 4 — cierre del agujero del sello
+  /// falso de la incidencia Duany): ¿esta corrida LEYÓ de
+  /// verdad `sync_estado` (server_seq confirmado EN ESTA
+  /// corrida)? Sin esto, `run()` no puede sellar completo:
+  /// con la meta `server_seq` en 0 (instalación limpia) el
+  /// juicio viejo comparaba 0 ≥ 0 y sellaba «al día» un
+  /// teléfono vacío cuya sesión estaba muerta.
+  bool _serverSeqLeidoEnCorrida = false;
+
+  /// 1.32 (O2F2S, Pieza 4): la bajada de esta corrida abortó
+  /// en la guarda de JWT (sesión presente pero no vigente, o
+  /// ausente). Es un estado DISTINGUIBLE del «no había
+  /// novedades»: los puntos de entrada lo traducen al error
+  /// visible de sesión, nunca a éxito vacío.
+  bool _sinSesionEnCorrida = false;
+
+  /// Mensaje único del error de sesión de la Pieza 4: lo
+  /// comparten el sello de `run()`, el resultado de `pull()`
+  /// y el diario, para que el teléfono diga lo mismo en
+  /// todas partes.
+  static const String mensajeSesionInvalida =
+      'La sesión no es válida: cierra sesión y entra de nuevo.';
+
   /// Costura de test (IMP-23): el veredicto publicado por el
   /// último cierre de push.
   VeredictoPush get veredictoUltimoPushParaTest => _veredictoUltimoPush;
@@ -1811,24 +1855,289 @@ class SyncEngine {
   Future<void> _marcarOk() =>
       _db.setMeta('last_sync_ok', isoHabana(ahoraHabana()));
 
+  // ── Diario M1: apertura/cierre dentro del candado ──────
+
+  /// Fija el veredicto provisional de la corrida en curso.
+  /// Los puntos de entrada lo llaman en sus ramas de
+  /// veredicto (donde hoy deciden sellos y errores); el
+  /// cierre real ocurre UNA vez, en el `finally` de
+  /// `_conLock`, con el candado aún tomado.
+  void _diarioVeredicto(
+    String estado, {
+    int subidos = 0,
+    int bajados = 0,
+    String? motivo,
+    String? error,
+  }) {
+    _diarioEstadoProv = estado;
+    _diarioSubidosProv = subidos;
+    _diarioBajadosProv = bajados;
+    _diarioMotivoProv = motivo;
+    _diarioErrorProv = error;
+  }
+
+  /// Abre la corrida del diario JUSTO tras adquirir el
+  /// candado (la llama `_conLock`): primero cierra como
+  /// 'cortada' cualquier huérfana 'en_curso' (M1-A4: es el
+  /// único instante con exclusividad entre isolates) y
+  /// después abre la propia. El origen 'instalacion' se
+  /// deriva del terreno: la corrida arranca con el cursor
+  /// global en 0.
+  Future<void> _diarioAbrirEnLock({
+    required String tipo,
+    String? origen,
+    String? disparador,
+  }) async {
+    _diarioCorridaId = null;
+    _diarioEstadoProv = null;
+    _diarioMotivoProv = null;
+    _diarioErrorProv = null;
+    _diarioSubidosProv = 0;
+    _diarioBajadosProv = 0;
+    _diarioTablas.clear();
+    _diarioUuidsPush.clear();
+    _diarioFotosSubidas = 0;
+    _diarioFotosFallidas = 0;
+    _diarioComprobantes = 0;
+    _serverSeqLeidoEnCorrida = false;
+    _sinSesionEnCorrida = false;
+    try {
+      await DiarioSync.instance.cerrarHuerfanasComoCortadas();
+      var org = origen ?? OrigenCorrida.automatica;
+      if (org != OrigenCorrida.manual) {
+        try {
+          if (await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro) ==
+              0) {
+            org = OrigenCorrida.instalacion;
+          }
+        } catch (_) {}
+      }
+      _diarioCorridaId = await DiarioSync.instance.abrirCorrida(
+        tipo: tipo,
+        origen: org,
+        disparador: disparador,
+        rol: _esAdminSeguro ? 'dueno' : 'entrenador',
+        versionApp: AppConfig.appVersion,
+      );
+      _diarioCronometro = Stopwatch()..start();
+    } catch (e) {
+      // M1-R5: sin diario la sync sigue; la corrida queda
+      // «sin registro detallado» y la UI lo declara.
+      AppLog.error('sync', 'diario_abrir_fallo', d: '$e');
+      _diarioCorridaId = null;
+    }
+  }
+
+  /// Progreso en vivo (tabla/página) para la foto congelada
+  /// de una posible cortada. Sin espera: la escritura va por
+  /// la misma conexión serializada y su fallo se traga.
+  void _diarioProgreso(String tabla, int pagina) {
+    final id = _diarioCorridaId;
+    if (id == null) return;
+    unawaited(() async {
+      try {
+        await DiarioSync.instance
+            .anotarProgreso(id, tabla: tabla, pagina: pagina);
+      } catch (_) {}
+    }());
+  }
+
+  /// La foto resumida de las ops de push de la corrida,
+  /// construida desde la cola al cerrar (el desenlace ya es
+  /// firme: estado y resultado_servidor de cada op).
+  Future<void> _diarioVolcarOps(String corridaId) async {
+    if (_diarioUuidsPush.isEmpty) return;
+    final uuids = _diarioUuidsPush.toSet().toList();
+    final ops = <CorridaOpSync>[];
+    final d = await _db.db;
+    for (var i = 0; i < uuids.length; i += 400) {
+      final fin = i + 400 > uuids.length ? uuids.length : i + 400;
+      final chunk = uuids.sublist(i, fin);
+      final filas = await d.query('ops_queue',
+          columns: [
+            'op_uuid',
+            'tipo',
+            'payload',
+            'estado',
+            'error',
+            'resultado_servidor',
+          ],
+          where:
+              'op_uuid IN (${List.filled(chunk.length, '?').join(',')})',
+          whereArgs: chunk);
+      final porUuid = {for (final f in filas) '${f['op_uuid']}': f};
+      for (final u in chunk) {
+        final f = porUuid[u];
+        if (f == null) {
+          // Ya no está en la cola: salió aplicada y la poda
+          // la retiró; su desenlace conocido es «aplicada».
+          ops.add(CorridaOpSync(
+              opUuid: u, tipo: '', resultado: 'aplicada'));
+          continue;
+        }
+        Map<String, dynamic> payload = {};
+        try {
+          final raw = f['payload'];
+          if (raw is String && raw.isNotEmpty) {
+            payload =
+                Map<String, dynamic>.from(jsonDecode(raw) as Map);
+          }
+        } catch (_) {}
+        final estadoOp = '${f['estado']}';
+        final resultado = switch (estadoOp) {
+          'aplicada' => 'aplicada',
+          'rechazada' => 'rechazada',
+          'necesita_revision' => 'revision',
+          'error' => 'error',
+          _ => 'pendiente',
+        };
+        String? motivo;
+        if (resultado == 'rechazada' ||
+            resultado == 'revision' ||
+            resultado == 'error') {
+          dynamic res;
+          try {
+            res = jsonDecode('${f['resultado_servidor'] ?? ''}');
+          } catch (_) {}
+          motivo = motivoRechazo(res, f['error'] as String?) ??
+              (f['error'] as String?);
+        }
+        ops.add(CorridaOpSync(
+          opUuid: u,
+          tipo: '${f['tipo']}',
+          resumen: resumenOpDiario('${f['tipo']}', payload),
+          resultado: resultado,
+          motivo: motivo,
+        ));
+      }
+    }
+    await DiarioSync.instance.volcarOps(corridaId, ops);
+  }
+
+  /// Cierra la corrida del diario (la llama el `finally` de
+  /// `_conLock`, con el candado aún tomado): vuelca tablas y
+  /// ops acumuladas y escribe el veredicto. Si el punto de
+  /// entrada no fijó veredicto, se infiere del terreno
+  /// (excepción que escapó → fallida; candado perdido →
+  /// cortada; si no, parcial: corrió pero nadie puede jurar
+  /// que selló).
+  Future<void> _diarioCerrarEnLock({Object? errorFn}) async {
+    final id = _diarioCorridaId;
+    if (id == null) return;
+    _diarioCorridaId = null;
+    try {
+      await DiarioSync.instance.volcarTablas(id, _diarioTablas);
+      await _diarioVolcarOps(id);
+      final estado = _diarioEstadoProv ??
+          (errorFn != null
+              ? EstadoCorrida.fallida
+              : _lockPerdido
+                  ? EstadoCorrida.cortada
+                  : EstadoCorrida.parcial);
+      int? serverSeqCierre;
+      int? wmMinCierre;
+      try {
+        serverSeqCierre =
+            int.tryParse(await _db.getMeta('server_seq') ?? '');
+        wmMinCierre =
+            await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
+      } catch (_) {}
+      await DiarioSync.instance.cerrarCorrida(
+        id,
+        estado: estado,
+        duracionMs: _diarioCronometro?.elapsedMilliseconds ?? 0,
+        subidos: _diarioSubidosProv,
+        bajados: _diarioBajadosProv,
+        fotosSubidas: _diarioFotosSubidas,
+        fotosFallidas: _diarioFotosFallidas,
+        comprobantesSubidos: _diarioComprobantes,
+        serverSeq: serverSeqCierre,
+        watermarkMin: wmMinCierre,
+        motivoNoSello: _diarioMotivoProv,
+        errorDetalle:
+            _diarioErrorProv ?? (errorFn != null ? '$errorFn' : null),
+      );
+    } catch (e) {
+      AppLog.error('sync', 'diario_cerrar_fallo', d: '$e');
+    }
+  }
+
+  /// Invariante troncal de la Pieza 4 (incidencia Duany):
+  /// espejo de clientes con 0 filas LEGIBLES y el servidor
+  /// con datos ⇒ «al día» está prohibido por definición. La
+  /// evidencia de «el servidor tiene clientes» es el testigo
+  /// W1 (`clientes_previos_buenos`: la última bajada buena
+  /// dejó N clientes) o los conteos publicados (M5-S) si ya
+  /// existen. Sin evidencia, no bloquea (un gym que de
+  /// verdad tuviera 0 clientes no quedaría condenado).
+  Future<bool> _invarianteEspejoVacioBloquea(int serverSeq) async {
+    if (serverSeq <= 0) return false;
+    try {
+      final legibles =
+          (await _db.conteoMirrorLegible('clientes')).legibles;
+      if (legibles > 0) return false;
+      final previos = int.tryParse(
+              await _db.getMeta('clientes_previos_buenos') ?? '0') ??
+          0;
+      if (previos > 0) return true;
+      final publicados = await DiarioSync.instance.conteosPublicados();
+      return (publicados?['clientes'] ?? 0) > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<SyncDetalle> detalle() async {
     DateTime? pull, push;
     final p1 = await _db.getMeta('last_pull_ok');
     final p2 = await _db.getMeta('last_push_ok');
     if (p1 != null) pull = DateTime.tryParse(p1);
     if (p2 != null) push = DateTime.tryParse(p2);
+    var subidosUltimo =
+        int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0;
+    var bajadosUltimo =
+        int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0;
+    var error = await _db.getMeta('last_sync_error');
+    // 1.32 (O2F2S, M1/M3): con el diario vivo, los conteos
+    // «último» son los de la ÚLTIMA CORRIDA (etiquetados con
+    // su hora y origen en la UI: M3-R1 cierra el engaño del
+    // 2026-10-13) y el error visible también sale de ella si
+    // es posterior al último OK sellado (Pieza 4e: el héroe
+    // no pinta «Todo al día» por defecto contra un error
+    // persistido más nuevo que el sello).
+    try {
+      // Los conteos «último» salen del último lote REAL de
+      // cada dirección (la última corrida CON ops / CON
+      // tablas), como hacían las metas jubiladas — pero con
+      // su corrida identificada en el detalle (M3-R5).
+      final conOps = await DiarioSync.instance.ultimaCorridaConOps();
+      if (conOps != null) subidosUltimo = conOps.subidos;
+      final conTablas =
+          await DiarioSync.instance.ultimaCorridaConTablas();
+      if (conTablas != null) bajadosUltimo = conTablas.bajados;
+      final ultima = await DiarioSync.instance.ultimaCorrida();
+      if (ultima != null && ultima.estado != EstadoCorrida.enCurso) {
+        if ((error == null || error.isEmpty) &&
+            ultima.estado != EstadoCorrida.completa) {
+          final ultimoOk = await _ultimaOk();
+          final finEpoch = ultima.finEpoch ?? ultima.inicioEpoch;
+          if (ultimoOk == null ||
+              finEpoch * 1000 > ultimoOk.millisecondsSinceEpoch) {
+            error = ultima.errorDetalle ?? ultima.motivoNoSello;
+          }
+        }
+      }
+    } catch (_) {}
     return SyncDetalle(
       ultimaPull: pull,
       ultimaPush: push,
-      subidosUltimo:
-          int.tryParse(await _db.getMeta('last_uploaded') ?? '0') ?? 0,
-      bajadosUltimo:
-          int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0,
+      subidosUltimo: subidosUltimo,
+      bajadosUltimo: bajadosUltimo,
       totalSubidos:
           int.tryParse(await _db.getMeta('total_subidos') ?? '0') ?? 0,
       totalBajados:
           int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0,
-      error: await _db.getMeta('last_sync_error'),
+      error: error,
     );
   }
 
@@ -2048,14 +2357,22 @@ class SyncEngine {
                 'sync', 'pull_fallo', d: 'intento=$i error=$e');
             continue;
           }
+          // 1.32 (O2F2S, Pieza 4): sin sesión válida no hay
+          // más intentos que valgan: la bajada abortó en la
+          // guarda de JWT y repetirla solo quema refrescos.
+          if (_sinSesionEnCorrida) break;
           // H-08: «completo» se juzga con las tablas del rol.
           // Yunque B (YB-SYNC-03): y con la pasada de
           // incidencias de ESTE intento — su fallo ya no se
           // sella en verde aunque el watermark alcance.
+          // 1.32 (O2F2S, Pieza 4a): y con el server_seq LEÍDO
+          // EN ESTA CORRIDA — sin esa lectura, la meta vale 0
+          // en una instalación limpia y el juicio comparaba
+          // 0 ≥ 0: el sello falso de la incidencia Duany.
           final wm = await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
           final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
           if (cicloCompleto(
-              watermarkAlcanza: wm >= ss,
+              watermarkAlcanza: wm >= ss && _serverSeqLeidoEnCorrida,
               incidenciasOk: _incidenciasOkUltimaPasada)) {
             completo = true;
             break;
@@ -2064,6 +2381,17 @@ class SyncEngine {
         // v1.2.9+47: guardar estados separados (Gemini: manejar los 3 casos).
         await _db.setMeta('last_push_error', errPush ?? '');
         await _db.setMeta('last_pull_error', errPull ?? '');
+        // 1.32 (O2F2S, Pieza 4b): invariante troncal — con el
+        // ciclo por lo demás completo, un espejo de clientes
+        // VACÍO con datos en el servidor prohíbe el sello y
+        // fuerza la re-descarga de clientes en el próximo
+        // ciclo. Se evalúa antes de la cadena de veredictos.
+        final ssVeredicto =
+            int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
+        final espejoVacioBloquea = completo &&
+            pushOk &&
+            !_sinSesionEnCorrida &&
+            await _invarianteEspejoVacioBloquea(ssVeredicto);
         // v1.3.1 (E3): solo registrar error real, nunca un estado
         // informativo que la UI interpreta como fallo.
         // Auditoría Definitiva (A-2): el sello «sincronizado» y
@@ -2071,7 +2399,35 @@ class SyncEngine {
         // antes esta rama mandaba sola y sellaba en verde un
         // ciclo cuya subida había fallado con bumps (el error
         // quedaba borrado y el aviso de éxito sonaba igual).
-        if (completo && pushOk) {
+        if (_sinSesionEnCorrida) {
+          // 1.32 (O2F2S, Pieza 4a): la sesión no es válida —
+          // error VISIBLE y persistido, jamás éxito vacío.
+          // Es el desenlace que la incidencia Duany no tuvo:
+          // su teléfono selló «al día» con la sesión muerta.
+          await _db.setMeta('last_sync_error', mensajeSesionInvalida);
+          errorCorrida = mensajeSesionInvalida;
+          _diarioVeredicto(
+              subidos > 0 || bajados > 0
+                  ? EstadoCorrida.parcial
+                  : EstadoCorrida.fallida,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: mensajeSesionInvalida,
+              error: mensajeSesionInvalida);
+        } else if (espejoVacioBloquea) {
+          const msgEspejoVacio =
+              'El teléfono quedó sin clientes aunque el servidor '
+              'tiene datos: se forzará la re-descarga de clientes '
+              'en el próximo ciclo.';
+          await _db.setMeta('forzar_redescarga_clientes', '1');
+          await _db.setMeta('last_sync_error', msgEspejoVacio);
+          errorCorrida = msgEspejoVacio;
+          _diarioVeredicto(EstadoCorrida.parcial,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: msgEspejoVacio,
+              error: msgEspejoVacio);
+        } else if (completo && pushOk) {
           await _marcarOk();
           await _db.setMeta('last_sync_error', '');
           // v1.3.4 (Ítem 6 Capa 1, Argón): reconciliación silenciosa
@@ -2084,6 +2440,8 @@ class SyncEngine {
           // caras). Dentro del ciclo, el espejo está quieto y el
           // latido mantiene el lock vivo; es 1 vez al día.
           await manifiestoDiarioSiToca();
+          _diarioVeredicto(EstadoCorrida.completa,
+              subidos: subidos, bajados: bajados);
         } else if (completo) {
           // Auditoría Definitiva (A-2): la bajada SÍ alcanzó el
           // watermark, pero la subida dejó ops golpeadas (o
@@ -2096,6 +2454,11 @@ class SyncEngine {
                   'el próximo ciclo.';
           await _db.setMeta('last_sync_error', msgPushSucio);
           errorCorrida = msgPushSucio;
+          _diarioVeredicto(EstadoCorrida.parcial,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: msgPushSucio,
+              error: msgPushSucio);
         } else if (errPush != null) {
           await _db.setMeta('last_sync_error', errPush);
           // B-8: el fallo es de la SUBIDA de ops ya encoladas:
@@ -2105,10 +2468,23 @@ class SyncEngine {
               error: traducirErrorSync(errPush,
                   persistenciaConfirmada: true));
           errorCorrida = errPush;
+          _diarioVeredicto(EstadoCorrida.fallida,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: errPush,
+              error: errPush);
           return;
         } else if (errPull != null) {
           await _db.setMeta('last_sync_error', errPull);
           errorCorrida = errPull;
+          _diarioVeredicto(
+              subidos > 0 || bajados > 0
+                  ? EstadoCorrida.parcial
+                  : EstadoCorrida.fallida,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: errPull,
+              error: errPull);
         } else if (!_incidenciasOkUltimaPasada) {
           // Yunque B (YB-SYNC-03): la bajada principal llegó
           // al watermark pero la pasada de incidencias falló
@@ -2124,6 +2500,11 @@ class SyncEngine {
               d: _errorIncidenciasUltimaPasada ?? '');
           await _db.setMeta('last_sync_error', msgIncidencias);
           errorCorrida = msgIncidencias;
+          _diarioVeredicto(EstadoCorrida.parcial,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: msgIncidencias,
+              error: msgIncidencias);
         } else {
           // 1.28 (M1-A7/R1M1-H2): push OK y pull SIN
           // excepciones pero INCOMPLETO (el watermark no
@@ -2144,6 +2525,11 @@ class SyncEngine {
               '${atasco.nombre != null ? ' Tabla atascada: ${atasco.nombre}.' : ''}';
           await _db.setMeta('last_sync_error', msgIncompleto);
           errorCorrida = msgIncompleto;
+          _diarioVeredicto(EstadoCorrida.parcial,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: msgIncompleto,
+              error: msgIncompleto);
         }
         // v1.0.17: resumen discreto de lo que realmente cambió.
         // v1.8.0: sale de los conteos de ESTA corrida (los que
@@ -2178,19 +2564,37 @@ class SyncEngine {
         errorCorrida = 'La sincronización se interrumpió '
             'porque otro proceso tomó el relevo; se reintentará '
             'en el próximo ciclo.';
+        _diarioVeredicto(EstadoCorrida.cortada,
+            subidos: subidos,
+            bajados: bajados,
+            motivo: errorCorrida);
       } on SessionExpired {
         _sesionVencida();
         _emit(SyncPhase.idle);
         errorCorrida = 'La sesión venció. Entra de nuevo.';
+        _diarioVeredicto(EstadoCorrida.fallida,
+            subidos: subidos,
+            bajados: bajados,
+            motivo: errorCorrida,
+            error: errorCorrida);
       } catch (e) {
         final errSync = await _describeErrorVisible(e);
         await _db.setMeta('last_sync_error', errSync.mensaje);
         _emit(SyncPhase.error, error: errSync);
         errorCorrida = errSync.mensaje;
+        _diarioVeredicto(EstadoCorrida.fallida,
+            subidos: subidos,
+            bajados: bajados,
+            motivo: errSync.mensaje,
+            error: errSync.mensaje);
         await Future.delayed(const Duration(seconds: 2));
         _emit(SyncPhase.idle);
       }
-    });
+    },
+        tipoCorrida: TipoCorrida.completa,
+        origenCorrida:
+            esArranque ? OrigenCorrida.automatica : OrigenCorrida.manual,
+        disparadorCorrida: esArranque ? 'arranque' : 'boton');
     if (noCorrio != null) {
       return SyncResultado.noCorrio(noCorrio);
     }
@@ -2369,14 +2773,13 @@ class SyncEngine {
         // Tablas normales vía _download.
         final tablasNormales =
             tablas.where((t) => !tablasIncidencias.contains(t)).toList();
-        // v1.3.5 (veredicto Argón 2026-10-17): conservar el desglose por
-        // tabla para cuadrarlo con DetalleSyncScreen.
-        var porTablaScope = <String, int>{};
+        // (El desglose por tabla de la corrida vive en el
+        // diario desde M1: resScope.porTabla ya no alimenta
+        // ninguna meta.)
         var fallidasScope = 0;
         if (tablasNormales.isNotEmpty) {
           final resScope = await _download(tablasFiltro: tablasNormales);
           n += resScope.aplicadas;
-          porTablaScope = resScope.porTabla;
           fallidasScope = resScope.fallidas;
         }
         // 1.28 (M1-A7/R1M1-H5): los sellos del alcance siguen
@@ -2390,22 +2793,14 @@ class SyncEngine {
         // v1.3.1 (E5): scope sync es manual, siempre refleja el ciclo real.
         await _db.setMeta('last_downloaded', '$n');
         await _db.setMeta('last_scope', scope);
-        // v1.3.5 (veredicto Argón 2026-10-17): los pulls por alcance también
-        // actualizan el detalle de "Bajados" (acumulan total_bajados igual que
-        // el ciclo normal), para que la tarjeta no muestre un desglose viejo.
-        final prevBajados =
-            int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
-        await _db.setMeta('total_bajados', '${prevBajados + n}');
+        // (1.32: total_bajados ya no se acumula aquí — la meta
+        // jubilada ultimo_pull_detalle salió con M1; el diario
+        // es la fuente del detalle y de los conteos.)
         final tsPullScope = isoHabana(ahoraHabana());
         // 1.28 (M1-A7/R1M1-H5): ultimo_pull_ts también se
         // sella solo con la bajada del alcance limpia.
         if (fallidasScope == 0) {
           await _db.setMeta('ultimo_pull_ts', tsPullScope);
-        }
-        if (debeActualizarDetallePull(n)) {
-          await _db.setMeta(
-              'ultimo_pull_detalle', serializarDetallePull(porTablaScope));
-          await _db.setMeta('ultimo_pull_detalle_ts', tsPullScope);
         }
         // v1.3.5: resumen con nombre amigable del alcance (no claves técnicas).
         final nombreScope = {
@@ -2429,6 +2824,15 @@ class SyncEngine {
         // v1.5.0 (Bloque G): el push del alcance es global → el
         // gancho de fin de sync también corre aquí.
         _avisarSyncExitoso();
+        // 1.32 (O2F2S, M1): veredicto del alcance en el diario.
+        _diarioVeredicto(
+            fallidasScope == 0
+                ? EstadoCorrida.completa
+                : EstadoCorrida.parcial,
+            bajados: bajadosScope,
+            motivo: fallidasScope == 0
+                ? null
+                : 'Alcance con $fallidasScope filas fallidas');
       } on _CicloSinLock {
         // 1.28 (M1-A1): mismo cierre silencioso que push/pull.
         // Perder el candado a mitad del alcance NO es un error
@@ -2438,15 +2842,23 @@ class SyncEngine {
         // B-6: el cierre silencioso se mantiene (deliberado),
         // pero el resultado lo DECLARA en su marca `cortado`.
         cortadoScope = true;
+        _diarioVeredicto(EstadoCorrida.cortada, bajados: bajadosScope);
         _emit(SyncPhase.idle);
       } catch (e) {
         errorEnCiclo = true;
         final errSync = await _describeErrorVisible(e);
         _emit(SyncPhase.error, error: errSync);
+        _diarioVeredicto(EstadoCorrida.fallida,
+            bajados: bajadosScope,
+            motivo: errSync.mensaje,
+            error: errSync.mensaje);
         await Future.delayed(const Duration(seconds: 2));
         _emit(SyncPhase.idle);
       }
-    });
+    },
+        tipoCorrida: TipoCorrida.scope,
+        origenCorrida: OrigenCorrida.manual,
+        disparadorCorrida: 'alcance:$scope');
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
     if (noCorrioScope == null) _lanzarFotosIncidencias();
     return (
@@ -2491,7 +2903,12 @@ class SyncEngine {
   /// lock se renueva cada minuto; si el proceso muere, el latido
   /// cesa y el lock se puede robar al vencer la ventana de
   /// expiración (ver LocalDb.syncLockTimeoutMs).
-  Future<SyncMotivoNoCorrio?> _conLock(Future<void> Function() fn) async {
+  Future<SyncMotivoNoCorrio?> _conLock(
+    Future<void> Function() fn, {
+    String tipoCorrida = TipoCorrida.completa,
+    String? origenCorrida,
+    String? disparadorCorrida,
+  }) async {
     if (_running) return SyncMotivoNoCorrio.enCurso;
     if (!_haySesion) return SyncMotivoNoCorrio.sinSesion;
     // 1.23: barrera de mantenimiento (importación de respaldo
@@ -2521,10 +2938,25 @@ class SyncEngine {
             d: 'el ciclo se detiene: otro proceso tomó el relevo');
       }
     });
+    Object? errorFn;
     try {
+      // 1.32 (O2F2S, M1): el diario abre y cierra DENTRO del
+      // candado — la apertura cierra antes las huérfanas
+      // 'en_curso' como 'cortada' (M1-A4) y el cierre vuelca
+      // conteos y veredicto antes de soltar el candado, para
+      // que el relevo jamás vea una corrida a medio cerrar.
+      await _diarioAbrirEnLock(
+        tipo: tipoCorrida,
+        origen: origenCorrida,
+        disparador: disparadorCorrida,
+      );
       await fn();
       return null;
+    } catch (e) {
+      errorFn = e;
+      rethrow;
     } finally {
+      await _diarioCerrarEnLock(errorFn: errorFn);
       latido.cancel();
       _running = false;
       await _db.liberarSyncLock(owner);
@@ -2601,6 +3033,8 @@ class SyncEngine {
         subidos = await _doPush(desdeForeground: desdeForeground);
       } on _CicloSinLock {
         cortadoPorLock = true;
+        _diarioVeredicto(EstadoCorrida.cortada,
+            subidos: subidos, bajados: bajados);
         return;
       }
       // v1.0.14: limpiar error viejo si el push tuvo éxito.
@@ -2626,7 +3060,33 @@ class SyncEngine {
       }
       // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
       if (_ultimoPushLimpio) _avisarSyncExitoso();
-    });
+      // 1.32 (O2F2S, M1): veredicto de la corrida de push —
+      // con la sesión muerta el pull silencioso no pudo
+      // confirmar nada: la corrida queda parcial con su
+      // motivo, no «completa».
+      if (_sinSesionEnCorrida) {
+        _diarioVeredicto(EstadoCorrida.parcial,
+            subidos: subidos,
+            bajados: bajados,
+            motivo: mensajeSesionInvalida,
+            error: mensajeSesionInvalida);
+      } else if (_ultimoPushLimpio) {
+        _diarioVeredicto(EstadoCorrida.completa,
+            subidos: subidos, bajados: bajados);
+      } else {
+        _diarioVeredicto(
+            subidos == 0 && bajados == 0
+                ? EstadoCorrida.fallida
+                : EstadoCorrida.parcial,
+            subidos: subidos,
+            bajados: bajados,
+            motivo: 'La subida dejó operaciones sin enviar');
+      }
+    },
+        tipoCorrida: TipoCorrida.soloPush,
+        origenCorrida: OrigenCorrida.automatica,
+        disparadorCorrida:
+            desdeForeground ? 'segundo_plano' : 'ciclo');
     if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
     // S2: fotos fuera del candado (ver _lanzarFotosIncidencias).
     // Con esperarIncidencias ya corrieron dentro: no relanzar.
@@ -2751,6 +3211,8 @@ class SyncEngine {
       try {
         final compSubidos =
             await ComprobantesService.instance.procesar();
+        // 1.32 (O2F2S, M1): conteo para la corrida del diario.
+        _diarioComprobantes = compSubidos;
         if (compSubidos > 0) {
           AppLog.info('sync', 'comprobantes',
               d: 'subidos=$compSubidos');
@@ -2798,20 +3260,11 @@ class SyncEngine {
       await _db.setMeta(
           'total_subidos', '${prevSubidos + totalOps}');
       await _db.setMeta('last_uploaded', '$totalOps');
-      // v1.3.5 (detalle Subidos, veredicto Argón): UUIDs procesados en
-      // esta corrida + hora Habana. El detalle lista exactamente estos
-      // UUIDs para concordar con el contador de la tarjeta.
-      // v1.3.5 (Argón ajuste 1): simetría con _doPull. ultimo_push_ts
-      // siempre se actualiza; ultimo_push_op_uuids solo se sobrescribe
-      // si este push procesó ops. Un push vacío preserva el detalle del
-      // último lote real.
-      final tsPush = isoHabana(ahoraHabana());
-      await _db.setMeta('ultimo_push_ts', tsPush);
-      if (uuidsPush.isNotEmpty) {
-        await _db.setMeta(
-            'ultimo_push_op_uuids', serializarUuidsPush(uuidsPush));
-        await _db.setMeta('ultimo_push_detalle_ts', tsPush);
-      }
+      // (1.32, O2F2S: las metas ultimo_push_op_uuids /
+      // ultimo_push_detalle_ts quedaron JUBILADAS con M1 —
+      // las ops de la corrida viven en el diario; ultimo_push_ts
+      // se conserva como sello de la última subida.)
+      await _db.setMeta('ultimo_push_ts', isoHabana(ahoraHabana()));
       // v1.2.5 (D12): el servidor confirmó (ack real, no optimista).
       // 1.24.2: con fallo total de push tampoco se sella
       // ultimo_sincronizado (misma compuerta que last_push_ok).
@@ -2821,6 +3274,18 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       // v1.2.9+46 (AppLog): push completo.
       AppLog.info('sync', 'push_fin', d: 'ops=$totalOps fotos=$fotosSubidas');
+      // 1.32 (O2F2S, M1): el diario anota las ops de ESTA
+      // corrida (su foto se construye al cerrar, con el
+      // desenlace ya firme en la cola) y los conteos de
+      // fotos: subidas y las que quedaron sin subir.
+      if (_diarioCorridaId != null) {
+        _diarioUuidsPush.addAll(uuidsPush);
+        _diarioFotosSubidas = fotosSubidas;
+        try {
+          _diarioFotosFallidas =
+              await FotosColaService.instance.contarPendientes();
+        } catch (_) {}
+      }
       // 1.32 (IMP-23): PUBLICACIÓN del veredicto al cierre —
       // la única escritura del veredicto, en la única salida
       // normal de _doPush. Las salidas por excepción no
@@ -2847,8 +3312,13 @@ class SyncEngine {
   /// v1.8.0 (Frente 5): devuelve el [SyncResultado] de la corrida
   /// (o el «no corrió»); si el pull falla, la excepción se propaga
   /// como antes.
-  Future<SyncResultado> pull() async {
+  Future<SyncResultado> pull(
+      {String tipoCorrida = TipoCorrida.soloPull}) async {
     var bajados = 0;
+    // 1.32 (O2F2S): la marca de sesión muerta se captura
+    // DENTRO del candado (fuera, la siguiente corrida del
+    // mismo isolate podría ya haberla reiniciado).
+    var sinSesionPull = false;
     // Auditoría Definitiva (B-6): marca de corte por lock.
     var cortadoPorLock = false;
     final noCorrio = await _conLock(() async {
@@ -2860,6 +3330,7 @@ class SyncEngine {
         bajados = await _doPull();
       } on _CicloSinLock {
         cortadoPorLock = true;
+        _diarioVeredicto(EstadoCorrida.cortada, bajados: bajados);
         return;
       }
       // 1.15 (caso c): verificación silenciosa si hay ops
@@ -2873,15 +3344,41 @@ class SyncEngine {
       // descartó una op por CLIENTE_PROTEGIDO, un pull silencioso
       // extra pisa el estado optimista local.
       await _pullSiProtegidoPendiente();
-      // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
-      // las ops) → gancho de fin de sync.
-      _avisarSyncExitoso();
-    });
+      // 1.32 (O2F2S, Pieza 4a): con la sesión muerta la
+      // bajada no ocurrió — el resultado lo DECLARA (antes
+      // este camino devolvía éxito vacío y el gancho de
+      // éxito sonaba igual). El error queda persistido para
+      // la pantalla y para el diario.
+      if (_sinSesionEnCorrida) {
+        sinSesionPull = true;
+        await _db.setMeta('last_sync_error', mensajeSesionInvalida);
+        _diarioVeredicto(EstadoCorrida.fallida,
+            bajados: bajados,
+            motivo: mensajeSesionInvalida,
+            error: mensajeSesionInvalida);
+      } else {
+        // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
+        // las ops) → gancho de fin de sync.
+        _avisarSyncExitoso();
+        _diarioVeredicto(
+            _incidenciasOkUltimaPasada
+                ? EstadoCorrida.completa
+                : EstadoCorrida.parcial,
+            bajados: bajados,
+            motivo: _incidenciasOkUltimaPasada
+                ? null
+                : 'La descarga de incidencias falló');
+      }
+    },
+        tipoCorrida: tipoCorrida,
+        origenCorrida: OrigenCorrida.automatica,
+        disparadorCorrida: 'ciclo');
     if (noCorrio != null) return SyncResultado.noCorrio(noCorrio);
     final conteo = await _conteoPendientesSeguro();
     return SyncResultado(
       corrio: true,
       bajados: bajados,
+      error: sinSesionPull ? mensajeSesionInvalida : null,
       pendientesRestantes: conteo.total,
       esperandoConfirmacion: conteo.esperandoConfirmacion,
       porSubir: conteo.porSubir,
@@ -2913,7 +3410,10 @@ class SyncEngine {
     for (final t in tablasEspejo) {
       await _db.setMeta('forzar_redescarga_$t', '1');
     }
-    final res = await pull();
+    // 1.32 (O2F2S, M1): la corrida se registra con su tipo
+    // propio (es forense: queda exenta de la poda por
+    // cantidad como última bajada completa).
+    final res = await pull(tipoCorrida: TipoCorrida.bajadaCompleta);
     // Misma vista que el bucle de descarga: solo cuentan las
     // banderas con valor no vacío (metasConPrefijo filtra '').
     final conBandera =
@@ -3270,6 +3770,17 @@ class SyncEngine {
       final resDownload =
           await _download(silencioso: silencioso, corte: corte);
       final n = resDownload.aplicadas;
+      // 1.32 (O2F2S, Pieza 4a): la bajada abortó por sesión
+      // no válida — cero filas y NINGÚN sello de bajada buena.
+      // El llamador (run/pull) traduce la marca a error
+      // visible; aquí, además, la pasada de incidencias no
+      // se intenta (moriría igual contra la misma guarda).
+      if (_sinSesionEnCorrida) {
+        _incidenciasOkUltimaPasada = true;
+        _errorIncidenciasUltimaPasada = null;
+        _emit(SyncPhase.idle);
+        return 0;
+      }
       // Yunque B (YB-TRA-10): esta bajada acaba de procesar
       // acceso_bloqueos; si su marca de error quedó limpia,
       // el espejo del candado vuelve a ser fiable tras una
@@ -3287,24 +3798,15 @@ class SyncEngine {
       final prevBajados =
           int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0;
       await _db.setMeta('total_bajados', '${prevBajados + n}');
-      // v1.3.5 (detalle Bajados, veredicto Argón): persistir el desglose
-      // por tabla SOLO si este pull trajo filas (> 0). Un pull vacío
-      // preserva el desglose del último pull con datos (la UI lo indica
-      // con una nota). El pull silencioso tras el push no pisa el
-      // detalle, igual que no pisa last_downloaded: el detalle
-      // corresponde al último ciclo visible para el usuario.
-      // Todo en meta: sin migraciones ni columnas nuevas.
+      // (1.32, O2F2S: las metas ultimo_pull_detalle /
+      // ultimo_pull_detalle_ts quedaron JUBILADAS con M1 —
+      // el desglose por tabla vive en el diario de corridas;
+      // ultimo_pull_ts se conserva como sello estricto.)
       if (!silencioso && resDownload.fallidas == 0) {
         // 1.24.2: ultimo_pull_ts SOLO con la bajada limpia —
         // es el sello que Buscar presenta como «Actualizado»;
         // sellarlo con filas fallidas mentía (M3-H03).
-        final tsPull = isoHabana(ahoraHabana());
-        await _db.setMeta('ultimo_pull_ts', tsPull);
-        if (debeActualizarDetallePull(n)) {
-          await _db.setMeta('ultimo_pull_detalle',
-              serializarDetallePull(resDownload.porTabla));
-          await _db.setMeta('ultimo_pull_detalle_ts', tsPull);
-        }
+        await _db.setMeta('ultimo_pull_ts', isoHabana(ahoraHabana()));
       }
       // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
       // Fix #11 (Sol): si falla, no se marca last_pull_ok general.
@@ -3333,6 +3835,23 @@ class SyncEngine {
       // sello con ESTA pasada, no solo con el watermark.
       _incidenciasOkUltimaPasada = incidenciasOk;
       if (incidenciasOk) _errorIncidenciasUltimaPasada = null;
+      // 1.32 (O2F2S, M1): las 4 tablas de incidencias entran
+      // al diario con su watermark de cierre y su estado:
+      // la marca wm_err_<tabla> de la pasada manda; sin
+      // marca, el veredicto global de la pasada.
+      if (_diarioCorridaId != null) {
+        for (final t in tablasIncidencias) {
+          final errT = await _db.getMeta('wm_err_$t');
+          final acum = _diarioTablas.putIfAbsent(
+              t, () => AcumTablaDiario());
+          acum.wmDespues = await _db.getWatermarkTabla(t);
+          acum.estado = (errT != null && errT.isNotEmpty)
+              ? EstadoTablaDiario.fallida
+              : (incidenciasOk
+                  ? EstadoTablaDiario.ok
+                  : EstadoTablaDiario.fallida);
+        }
+      }
 
       // Fix #11: solo marcar OK si todo (incl. incidencias) funcionó.
       // 1.24.2: y sin filas fallidas en la bajada principal.
@@ -5372,6 +5891,12 @@ class SyncEngine {
     // y el próximo reintenta con la sesión sana.
     if (!await _jwtVigente()) {
       AppLog.aviso('sync', 'pull_sin_jwt_valido');
+      // 1.32 (O2F2S, Pieza 4a): la guarda YA NO es un éxito
+      // vacío silencioso: la corrida queda marcada con
+      // sesión no válida y el llamador la traduce a error
+      // visible y persistido (la incidencia Duany selló
+      // «al día» en ESTE camino).
+      _sinSesionEnCorrida = true;
       return (aplicadas: 0, porTabla: const <String, int>{}, fallidas: 0);
     }
     // v1.2.5 (D19): si el manifiesto marcó algún ámbito divergente,
@@ -5539,6 +6064,7 @@ class SyncEngine {
           // quedaban sin su meta de server_seq ese ciclo.
           serverSeq = enteroTolerante(rows.first['server_seq']);
           if (serverSeq != null) {
+            _serverSeqLeidoEnCorrida = true;
             await _db.setMeta('server_seq', '$serverSeq');
           }
         }
@@ -5546,6 +6072,24 @@ class SyncEngine {
     } catch (e) {
       AppLog.error('sync', 'pull_estado_fallo', d: '$e');
     }
+    // 1.32 (O2F2S, M5-S preparado): conteos publicados por el
+    // servidor («total publicado» del Centro). Lectura
+    // SEPARADA y tolerante como la de actividad_serie: si la
+    // columna aún no existe en sync_estado, un 400 aquí NO
+    // debe tumbar la lectura de server_seq de arriba — el
+    // denominador simplemente no se ofrece.
+    try {
+      final rc = await _getAuth(Uri.parse(
+          '$_base/rest/v1/sync_estado?id=eq.1'
+          '&select=conteos_espejo'));
+      if (rc.statusCode == 200) {
+        final rowsC = jsonDecode(rc.body) as List;
+        if (rowsC.isNotEmpty && rowsC.first['conteos_espejo'] is Map) {
+          await _db.setMeta('conteos_espejo_publicados',
+              jsonEncode(rowsC.first['conteos_espejo']));
+        }
+      }
+    } catch (_) {}
 
     // v1.2.5-rev6 (Gemini #16): watermarks por tabla. Cada espejo tiene su
     // propio cursor (`wm_<tabla>`); el fallo de una tabla no bloquea a
@@ -5715,6 +6259,12 @@ class SyncEngine {
       // de TODA la pasada (el de página se reinicia por página):
       // es el rastro que se persiste al cerrar la tabla.
       int? minSinVerificarTabla;
+      // 1.32 (O2F2S, M1): foto por tabla del diario — deltas
+      // contra los acumuladores globales al entrar a la tabla.
+      final dVistasIni = vistas;
+      final dAplicadasIni = aplicadas;
+      final dSinCambiosIni = sinCambios;
+      var paginasTabla = 0;
       try {
         while (true) {
           // gastos y turnos_cierre tienen esquema plano en Supabase
@@ -5950,6 +6500,8 @@ class SyncEngine {
             finTabla = true;
             break;
           }
+          // 1.32 (O2F2S, M1): página con filas del diario.
+          paginasTabla++;
           // v1.2.7 (Paso 1 Gemini): commit atómico por página.
           // Se preparan las filas primero (sin escribir), luego en una sola
           // transacción se hace batch insert + actualización del watermark.
@@ -6206,6 +6758,11 @@ class SyncEngine {
             // NULL por fallo de extracción, el contador se
             // vuelca a app_log (antes el fallo era invisible).
             await _db.registrarAnomaliasExtraccionBatch();
+          }
+          // 1.32 (O2F2S, M1): progreso en vivo del diario —
+          // la página ya comiteó (tabla/página en curso).
+          if (_diarioCorridaId != null) {
+            _diarioProgreso(tabla, paginasTabla);
           }
           // S3: si el tope impidió avanzar (la fila sin verificar
           // sigue siendo la primera pendiente), no re-pedir la
@@ -6466,9 +7023,42 @@ class SyncEngine {
           }
         }
       }
+      // 1.32 (O2F2S, M1): la tabla entra al diario con los
+      // deltas de ESTA pasada (la acumulación entre intentos
+      // de la misma corrida la hace el cierre, vía
+      // volcarTablas). Ausente/sin permiso salen de las marcas
+      // que la propia pasada dejó.
+      if (_diarioCorridaId != null) {
+        final estadoErrTabla =
+            erroresTablas.any((e) => e.startsWith('$tabla:'));
+        final acum = _diarioTablas.putIfAbsent(
+            tabla, () => AcumTablaDiario());
+        acum.recibidas += vistas - dVistasIni;
+        acum.aplicadas += aplicadas - dAplicadasIni;
+        acum.sinCambio += sinCambios - dSinCambiosIni;
+        acum.fallidas += fallidasTabla;
+        acum.paginas += paginasTabla;
+        acum.wmAntes ??= cursor;
+        acum.wmDespues = await _db.getWatermarkTabla(tabla);
+        final ausenteD = await _db.getMeta('wm_${tabla}_ausente') == '1';
+        final sinPermisoD =
+            await _db.getMeta('wm_${tabla}_sin_permiso') == '1';
+        acum.estado = (estadoErrTabla || acum.fallidas > 0)
+            ? EstadoTablaDiario.fallida
+            : tablaConSinVerificar
+                ? EstadoTablaDiario.sinVerificar
+                : (ausenteD || sinPermisoD)
+                    ? EstadoTablaDiario.ausente
+                    : (acum.aplicadas == 0 && acum.sinCambio == 0)
+                        ? EstadoTablaDiario.sinCambios
+                        : EstadoTablaDiario.ok;
+      }
       // v1.2.9+47 (AppLog): tabla completa.
       AppLog.info('sync', 'pull_tabla_fin', d: tabla);
     }
+    // 1.32 (O2F2S, M1): tumbas aplicadas en esta pasada, por
+    // tabla destino (se vuelcan al diario al final, M1-A6).
+    final tumbasPorTabla = <String, int>{};
     // borrados (tombstones)
     // INVARIANTE (auditoría 2026-10-16): los tombstones SIEMPRE se procesan
     // completos, nunca filtrados por categoría. wm_borrados es un cursor
@@ -6609,6 +7199,7 @@ class SyncEngine {
             // no bloquee el guardado de ultimo_pull_detalle en _doPull.
             aplicadas++;
             contarEnDetallePull(porTabla, tabla);
+            tumbasPorTabla[tabla] = (tumbasPorTabla[tabla] ?? 0) + 1;
           } else {
             // 1.23 (Argón Pull H-06): parseo defensivo — el id
             // puede llegar como texto desde PostgREST; el cast
@@ -6631,6 +7222,7 @@ class SyncEngine {
             // v1.3.5 (auditoría 2026-10-16): ver comentario arriba.
             aplicadas++;
             contarEnDetallePull(porTabla, tabla);
+            tumbasPorTabla[tabla] = (tumbasPorTabla[tabla] ?? 0) + 1;
           }
           } catch (_) {
             if (minBorradoFallido == null ||
@@ -6746,6 +7338,8 @@ class SyncEngine {
             await _db.gympediaAplicarTumba(slug, seq);
             aplicadas++;
             contarEnDetallePull(porTabla, 'gympedia_articulos');
+            tumbasPorTabla['gympedia_articulos'] =
+                (tumbasPorTabla['gympedia_articulos'] ?? 0) + 1;
             if (seq > gbMax) gbMax = seq;
           }
           if (paginaCortada || rows.length < kPisoPagina) break;
@@ -6816,6 +7410,8 @@ class SyncEngine {
             await _db.guiaAplicarTumba(slug, seq);
             aplicadas++;
             contarEnDetallePull(porTabla, 'guia_fichas');
+            tumbasPorTabla['guia_fichas'] =
+                (tumbasPorTabla['guia_fichas'] ?? 0) + 1;
             if (seq > guiaMax) guiaMax = seq;
           }
           if (paginaCortada || rows.length < kPisoPagina) break;
@@ -6878,6 +7474,30 @@ class SyncEngine {
     } catch (_) {}
     // Sincronizar estado final de operaciones enviadas (aplicada/rechazada)
     await _syncOpStatus();
+    // 1.32 (O2F2S, M1-A6): las tumbas se vuelcan al diario —
+    // se suman a la fila de su tabla destino (vistas no,
+    // aplicadas SÍ: su fila ya contaba ahí vía aplicadas++)
+    // y queda la pseudo-fila 'sync_borrados' con el total y
+    // el cursor de la pasada. Corre antes del throw: la
+    // foto parcial de una bajada incompleta es la más útil.
+    if (_diarioCorridaId != null) {
+      var totalTumbas = 0;
+      for (final e in tumbasPorTabla.entries) {
+        totalTumbas += e.value;
+        final acum = _diarioTablas.putIfAbsent(
+            e.key, () => AcumTablaDiario());
+        acum.tumbas += e.value;
+      }
+      final acumB = _diarioTablas.putIfAbsent(
+          'sync_borrados', () => AcumTablaDiario());
+      acumB.recibidas += totalTumbas;
+      acumB.aplicadas += totalTumbas;
+      acumB.wmAntes = cursorBorrados;
+      acumB.wmDespues = await _db.getWatermarkTabla('borrados');
+      acumB.estado = borradosOk
+          ? EstadoTablaDiario.ok
+          : EstadoTablaDiario.fallida;
+    }
     // v1.2.5 (D20): resumen honesto, no "todo bien".
     await _db.setMeta(
         'last_download_stats',
