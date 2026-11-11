@@ -30,6 +30,38 @@ import 'usuarios.dart';
 import 'widgets.dart';
 import 'componentes.dart';
 
+/// 1.32 (H-RPC-1, Corte A): un resultado de la generación
+/// masiva SOLO cuenta como generado si trae un PIN real. La
+/// RPC individual devuelve la omisión deliberada (conversión
+/// con vale vivo) como `{ok:true, omitido:true, pin_temporal:
+/// NULL}` y la masiva viva la traduce a `ok:false, omitido:
+/// true`; la app no puede fiarse del `ok` a secas: un resultado
+/// sin PIN jamás sale de «sin acceso» ni se pinta como PIN
+/// («PIN: null» en el diálogo y en el WhatsApp, con el cliente
+/// fuera del radar, era el defecto).
+bool resultadoMasivoEsGenerado(Map<String, dynamic> r) =>
+    r['ok'] == true &&
+    r['omitido'] != true &&
+    '${r['pin_temporal'] ?? ''}'.trim().isNotEmpty;
+
+/// 1.32 (H-RPC-1): el resultado es una OMISIÓN deliberada del
+/// servidor (o un ok sin PIN, que a efectos de pantalla es lo
+/// mismo: no hay acceso nuevo que entregar): se enseña con su
+/// motivo/mensaje, no como error ni como PIN.
+bool resultadoMasivoEsOmitido(Map<String, dynamic> r) =>
+    r['omitido'] == true ||
+    (r['ok'] == true && !resultadoMasivoEsGenerado(r));
+
+/// 1.32 (H-RPC-1): los ids que la masiva SÍ generó (con PIN):
+/// son los únicos que salen de la lista «sin acceso» y de la
+/// selección tras el lote.
+Set<int> idsGeneradosMasivos(List<Map<String, dynamic>> resultados) =>
+    resultados
+        .where(resultadoMasivoEsGenerado)
+        .map((r) => int.tryParse('${r['cliente_id']}'))
+        .whereType<int>()
+        .toSet();
+
 class ControlAccesoScreen extends StatelessWidget {
   const ControlAccesoScreen({super.key});
 
@@ -1056,11 +1088,12 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         // Auditoría OpenCode 2026-10-20: solo salen de la lista los
         // que el servidor confirmó; los fallidos quedan seleccionados
         // para reintentarlos sin recargar.
-        final okIds = resultados
-            .where((r) => r['ok'] == true)
-            .map((r) => int.tryParse('${r['cliente_id']}'))
-            .whereType<int>()
-            .toSet();
+        // 1.32 (H-RPC-1): «confirmado» = generado CON PIN
+        // (idsGeneradosMasivos): una omisión deliberada del
+        // servidor (ok sin PIN) ya no saca al cliente de
+        // «sin acceso» — queda en la lista y en la selección,
+        // visible para cuando su vale se canjee o caduque.
+        final okIds = idsGeneradosMasivos(resultados);
         setState(() {
           _sinAcceso.removeWhere((c) => okIds.contains(c.clienteId));
           _seleccion.removeWhere((id) => okIds.contains(id));
@@ -1100,7 +1133,22 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                   itemCount: resultados.length,
                   itemBuilder: (ctx, i) {
                     final r = resultados[i];
-                    if (r['ok'] != true) {
+                    // 1.32 (H-RPC-1): la omisión deliberada se
+                    // enseña como lo que es (con su mensaje del
+                    // servidor), no como error ni como PIN.
+                    if (resultadoMasivoEsOmitido(r)) {
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(
+                            Icons.info_outline_rounded,
+                            color: AppColores.naranja,
+                            size: 18),
+                        title: Text(
+                            '${r['nombre'] ?? 'Cliente ${r['cliente_id']}'}'),
+                        subtitle: Text('${r['mensaje'] ?? r['motivo'] ?? 'Omitido por el servidor: no se generó PIN.'}'),
+                      );
+                    }
+                    if (!resultadoMasivoEsGenerado(r)) {
                       return ListTile(
                         dense: true,
                         leading: const Icon(Icons.error_outline_rounded,
