@@ -6107,6 +6107,11 @@ class SyncEngine {
                 }
               }
             }
+            // 1.32 (H-NULL-3): la página ya quedó aplicada; si
+            // alguna fila entró con sus columnas dedicadas en
+            // NULL por fallo de extracción, el contador se
+            // vuelca a app_log (antes el fallo era invisible).
+            await _db.registrarAnomaliasExtraccionBatch();
           }
           // S3: si el tope impidió avanzar (la fila sin verificar
           // sigue siendo la primera pendiente), no re-pedir la

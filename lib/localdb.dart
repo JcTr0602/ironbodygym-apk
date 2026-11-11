@@ -2320,6 +2320,37 @@ class LocalDb {
     await actualizarFtsCliente(clienteId, jsonEncode(data), null);
   }
 
+  /// 1.32 (H-NULL-3): anomalías de extracción del batch del pull
+  /// pendientes de registrar. [filaParaBatchMirror] es síncrona y
+  /// sin acceso a la BD: cuando el extractor de una tabla falla,
+  /// la fila entra con sus columnas dedicadas en NULL (los
+  /// lectores la recogen por el fallback, no se pierde) y antes
+  /// nadie lo registraba — una regresión de formato del servidor
+  /// pasaría invisible. El contador se vuelca a `app_log` con
+  /// [registrarAnomaliasExtraccionBatch], que el motor de sync
+  /// llama al cerrar cada página aplicada del pull.
+  static int anomaliasExtraccionBatch = 0;
+
+  /// 1.32 (H-NULL-3): vuelca [anomaliasExtraccionBatch] a
+  /// `app_log` (mismo patrón que el backfill de la migración
+  /// v26) y reinicia el contador. Sin anomalías, no escribe nada.
+  Future<void> registrarAnomaliasExtraccionBatch() async {
+    final n = anomaliasExtraccionBatch;
+    if (n <= 0) return;
+    anomaliasExtraccionBatch = 0;
+    try {
+      final d = await db;
+      await d.insert('app_log', {
+        'ts': isoHabana(ahoraHabana()),
+        'modulo': 'sync',
+        'evento': 'batch_extraccion_anomala',
+        'detalle': '$n filas del pull entraron con sus columnas '
+            'dedicadas en NULL por fallo de extracción (H-NULL-3)',
+        'nivel': 'aviso',
+      });
+    } catch (_) {}
+  }
+
   /// v1.3.4 (ítem 2): construye el mapa de columnas para el INSERT del
   /// batch del pull (sync.dart). Para `pagos` incluye las 4 columnas
   /// indexadas extraídas del JSON; las demás tablas quedan igual.
@@ -2336,7 +2367,9 @@ class LocalDb {
       try {
         fila.addAll(
             columnasPagos(jsonDecode(dataJson) as Map<String, dynamic>));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     // 1.23 (v61, P1): el batch del pull también puebla las
     // columnas dedicadas de los espejos de ventas (mismo punto
@@ -2346,13 +2379,17 @@ class LocalDb {
       try {
         fila.addAll(columnasServicioVentas(
             jsonDecode(dataJson) as Map<String, dynamic>));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     if (tabla == 'ventas_suplementos') {
       try {
         fila.addAll(columnasVentasSuplementos(
             jsonDecode(dataJson) as Map<String, dynamic>));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     // Fase A 2026-10-25 (A1): la fila del batch también puebla la
     // columna método de pagos_diarios (mismo punto de verdad que
@@ -2362,6 +2399,10 @@ class LocalDb {
         fila['metodo'] =
             metodoPagoDiarioDe(jsonDecode(dataJson) as Map<String, dynamic>);
       } catch (_) {
+        // El default 'efectivo' es el diseño para método ausente;
+        // si lo que falló fue el jsonDecode, la fila está dañada:
+        // se cuenta como anomalía igualmente (H-NULL-3).
+        anomaliasExtraccionBatch++;
         fila['metodo'] = 'efectivo';
       }
     }
@@ -2371,7 +2412,9 @@ class LocalDb {
       try {
         fila.addAll(
             columnasMoneda(jsonDecode(dataJson) as Map<String, dynamic>));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     // v1.7.0 (v36): la fila del batch también puebla las columnas
     // cuenta_casa del espejo clientes y el nivel de GymPedia.
@@ -2379,14 +2422,18 @@ class LocalDb {
       try {
         fila.addAll(
             columnasClientes(jsonDecode(dataJson) as Map<String, dynamic>));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     if (tabla == 'gympedia_articulos') {
       try {
         final data = jsonDecode(dataJson) as Map<String, dynamic>;
         data['id'] = '$id';
         fila.addAll(columnasGympedia(data));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     // Biblioteca / Guía (v47): columnas derivadas del espejo de
     // equipos (el otro camino —upsertMirrorTexto— hace lo mismo).
@@ -2395,7 +2442,9 @@ class LocalDb {
         final data = jsonDecode(dataJson) as Map<String, dynamic>;
         data['equipoId'] = '$id';
         fila.addAll(columnasGuiaEquipos(data));
-      } catch (_) {}
+      } catch (_) {
+        anomaliasExtraccionBatch++;
+      }
     }
     return fila;
   }
@@ -2437,6 +2486,9 @@ class LocalDb {
   /// la migración v26. Intenta un único UPDATE con json_extract; si el
   /// módulo JSON1 no responde, fallback en Dart puro (jsonDecode) por
   /// lotes. Las fechas anómalas quedan en NULL y se cuentan en app_log.
+  /// 1.32 (H-NULL-1): tras el acelerador corre SIEMPRE la pasada de
+  /// normalización con [columnasPagos] (el UPDATE SQL cortaba la
+  /// fecha sin convertirla a La Habana).
   static Future<void> _backfillColumnasPagos(Database db) async {
     // Sin la tabla no hay nada que rellenar (BD mínima de test).
     try {
@@ -2494,23 +2546,71 @@ class LocalDb {
           "ELSE CAST(json_extract(data, '\$.telegram_user_id') AS INTEGER) END, "
           "metodo = CASE WHEN typeof(json_extract(data, '\$.metodo')) = 'text' "
           "THEN json_extract(data, '\$.metodo') ELSE NULL END");
-      final c = await db.rawQuery(
-          "SELECT COUNT(*) AS n FROM pagos WHERE fecha IS NULL AND "
-          "json_extract(data, '\$.fecha') IS NOT NULL");
-      anomalas = (c.first['n'] as num?)?.toInt() ?? 0;
     } catch (_) {
       // Sin JSON1 (u otro fallo): fallback en Dart puro.
       await viaDart();
     }
-    if (anomalas > 0) {
+    // 1.32 (H-NULL-1): pasada de normalización SIEMPRE, tras el
+    // acelerador. El UPDATE SQL cortaba la fecha cruda
+    // (substr(...,1,10)) sin convertirla a La Habana ni validar
+    // el calendario, mientras las escrituras vivas usan
+    // columnasPagos/fechaNegocioHabana (AT-07): la fila migrada
+    // con fecha zonificada de madrugada UTC quedaba indexada en
+    // el día equivocado hasta que un pull la reescribiera. Aquí
+    // se recomputan las 4 columnas con el extractor Dart —el
+    // único punto de verdad— solo en las filas que difieren, y
+    // el conteo de anómalas se rehace sobre el estado FINAL (las
+    // zonificadas ya no cuentan como anómalas: tienen día de
+    // negocio; las inexistentes o ilegibles siguen en NULL).
+    var corregidas = 0;
+    anomalas = 0;
+    try {
+      final rows = await db.rawQuery(
+          'SELECT id, data, fecha, cliente_id, telegram_user_id, '
+          'metodo FROM pagos');
+      final batch = db.batch();
+      var hayCambios = false;
+      for (final r in rows) {
+        try {
+          final data =
+              jsonDecode(r['data'] as String) as Map<String, dynamic>;
+          final cols = columnasPagos(data);
+          if (data['fecha'] != null && cols['fecha'] == null) {
+            anomalas++;
+          }
+          if (cols['fecha'] != r['fecha'] ||
+              cols['cliente_id'] != r['cliente_id'] ||
+              cols['telegram_user_id'] != r['telegram_user_id'] ||
+              cols['metodo'] != r['metodo']) {
+            hayCambios = true;
+            corregidas++;
+            batch.rawUpdate(
+                'UPDATE pagos SET fecha = ?, cliente_id = ?, '
+                'telegram_user_id = ?, metodo = ? WHERE id = ?',
+                [
+                  cols['fecha'],
+                  cols['cliente_id'],
+                  cols['telegram_user_id'],
+                  cols['metodo'],
+                  r['id'],
+                ]);
+          }
+        } catch (_) {
+          anomalas++;
+        }
+      }
+      if (hayCambios) await batch.commit(noResult: true);
+    } catch (_) {}
+    if (anomalas > 0 || corregidas > 0) {
       try {
         await db.insert('app_log', {
           'ts': isoHabana(ahoraHabana()),
           'modulo': 'migracion',
           'evento': 'backfill_pagos_v26',
-          'detalle':
-              '$anomalas filas con fecha anómala (columna fecha en NULL)',
-          'nivel': 'aviso',
+          'detalle': '$anomalas filas con fecha anómala '
+              '(columna fecha en NULL); $corregidas filas '
+              'normalizadas a la fecha de negocio (H-NULL-1)',
+          'nivel': anomalas > 0 ? 'aviso' : 'info',
         });
       } catch (_) {}
     }

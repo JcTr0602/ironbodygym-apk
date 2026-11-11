@@ -485,10 +485,16 @@ Future<List<Map<String, dynamic>>> pagosDe(int clienteId,
     {int limit = 10}) async {
   final d = await LocalDb.instance.db;
   final res = <Map<String, dynamic>>[];
+  // 1.32 (H-NULL-2): SIN LIMIT en SQL. El tope se aplicaba sobre
+  // la columna `fecha` ANTES de unir el fallback: con más de
+  // `limit` pagos, una fila cuya columna fecha quedó NULL (o
+  // desfasada del día de negocio) salía del «top» por el ORDER
+  // BY de la columna aunque su fecha del JSON fuera la más
+  // reciente. El volumen por cliente es acotado: se trae todo,
+  // se une con el fallback y el límite se aplica al final, tras
+  // ordenar (mismo arreglo que ya cerraba la función).
   final rows = await d.rawQuery(
-      'SELECT id, data FROM pagos WHERE cliente_id = ? '
-      'ORDER BY fecha DESC LIMIT ?',
-      [clienteId, limit]);
+      'SELECT id, data FROM pagos WHERE cliente_id = ?', [clienteId]);
   for (final r in rows) {
     try {
       res.add({
@@ -511,7 +517,19 @@ Future<List<Map<String, dynamic>>> pagosDe(int clienteId,
       }
     } catch (_) {}
   }
-  res.sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
+  // 1.32 (H-NULL-2): se ordena por el DÍA DE NEGOCIO (Habana) de
+  // la fecha del JSON, no por su texto crudo: '2026-11-01T02:30Z'
+  // es 31-oct en Cuba y compite como 2026-10-31, no como
+  // «noviembre». Desempate por id descendente (el servidor
+  // asigna ids crecientes: el mayor es el más reciente) para un
+  // orden total y estable entre días iguales.
+  res.sort((a, b) {
+    final da = fechaNegocioHabana('${a['fecha'] ?? ''}');
+    final db2 = fechaNegocioHabana('${b['fecha'] ?? ''}');
+    final c = db2.compareTo(da);
+    if (c != 0) return c;
+    return ((b['id'] as num?) ?? 0).compareTo((a['id'] as num?) ?? 0);
+  });
   return res.take(limit).toList();
 }
 
