@@ -194,6 +194,33 @@ bool esOpAlerta(Map<String, dynamic> op) {
   return false;
 }
 
+/// 1.32 (Oleada 2 Fase 2 · G-80): resumen de la cabecera de
+/// día de la Auditoría, con la plantilla del Día de Servicios:
+/// cuántas operaciones VISIBLES trae el grupo y cuántas de
+/// ellas son alerta (tipo sensible o estado de fallo, según
+/// [esOpAlerta]). Función pura.
+({int operaciones, int alertas}) resumenDiaAuditoria(
+    List<Map<String, dynamic>> ops) {
+  var alertas = 0;
+  for (final op in ops) {
+    if (esOpAlerta(op)) alertas++;
+  }
+  return (operaciones: ops.length, alertas: alertas);
+}
+
+/// Texto de totales de la cabecera de día (plantilla):
+/// «N operaciones» y, solo si las hay, «· M alertas», con su
+/// singular cuando toca. Función pura.
+String textoTotalesDiaAuditoria(
+    ({int operaciones, int alertas}) r) {
+  final ops = r.operaciones == 1
+      ? '1 operación'
+      : '${r.operaciones} operaciones';
+  if (r.alertas == 0) return ops;
+  return '$ops · ${r.alertas} '
+      'alerta${r.alertas == 1 ? '' : 's'}';
+}
+
 /// Visibilidad de una op según el filtro elegido y el actor de la
 /// sesión ([miActor]: AuthService.displayName; [miTelegramId]:
 /// AuthService.telegramId). Función pura.
@@ -915,16 +942,34 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                 crossAxisAlignment:
                                     CrossAxisAlignment.start,
                                 children: [
+                                  // G-80: cabecera de día de
+                                  // la plantilla de Servicios —
+                                  // el día a la izquierda y los
+                                  // totales del grupo visible a
+                                  // la derecha.
                                   Padding(
                                     padding:
                                         const EdgeInsets.fromLTRB(
                                             16, 12, 16, 4),
-                                    child: Text(
-                                      _etiquetaDia(dia),
-                                      style: AppTexto.subtitulo
-                                          .copyWith(
-                                        color: AppColores.naranja,
-                                      ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.baseline,
+                                      textBaseline:
+                                          TextBaseline.alphabetic,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            _etiquetaDia(dia),
+                                            style: AppTexto.subtitulo,
+                                          ),
+                                        ),
+                                        Text(
+                                          textoTotalesDiaAuditoria(
+                                              resumenDiaAuditoria(
+                                                  items)),
+                                          style: AppTexto.metadato,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   for (final op in items)
