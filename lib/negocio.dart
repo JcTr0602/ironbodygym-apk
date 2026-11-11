@@ -3034,7 +3034,14 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
 
   String nombreDe(Map<String, dynamic> c) =>
       '${c['nombre'] ?? 'Cliente'}'.trim();
-  String telDe(Map<String, dynamic> c) => '${c['telefono'] ?? ''}';
+  // 1.32 (H-CAMPO-1, familia teléfono efectivo): el teléfono
+  // del aviso es el EFECTIVO (movil primero, regla FB-01): con
+  // el crudo, el cliente migrado (carnet en `telefono`, número
+  // en `movil`) salía como «Sin teléfono» y su aviso era
+  // inenviable desde la bandeja aunque su ficha muestra el
+  // número. La bandeja normaliza al clasificar/enviar, así
+  // que la forma wa.me del efectivo es compatible.
+  String telDe(Map<String, dynamic> c) => telefonoEfectivoWa(c);
 
   // 0) Vencidos (1-30 días de atraso). Van primero: son los que más
   // dinero representan (v1.3.8, 1C: Vencidos > Vencen hoy > Por vencer

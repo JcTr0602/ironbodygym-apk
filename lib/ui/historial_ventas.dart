@@ -835,9 +835,12 @@ class _HistorialVentasScreenState
     );
     final cid = (v['cliente_id'] as num?)?.toInt() ??
         (v['fiado_cliente_id'] as num?)?.toInt();
-    final telCliente =
-        cid != null ? '${_clientes[cid]?['telefono'] ?? ''}' : '';
-    final waNum = normalizarTelefonoWaMe(telCliente);
+    // 1.32 (D-6, familia teléfono efectivo): el recibo se
+    // pre-rellena desde el teléfono EFECTIVO (movil primero),
+    // no desde el `telefono` crudo (que en el migrado es el
+    // carnet y nacía vacío, o un número viejo).
+    final cliHist = cid != null ? _clientes[cid] : null;
+    final waNum = cliHist != null ? telefonoEfectivoWa(cliHist) : '';
     // El campo guarda 8 dígitos (como el resto de la app); el 53
     // va solo al armar el wa.me (igual que en ficha.dart).
     if (!mounted) return;

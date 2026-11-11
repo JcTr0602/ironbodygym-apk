@@ -175,21 +175,24 @@ void main() {
   });
 
   group('1.19 telefonoPreferido', () {
+    // 1.32 (S-2): telefonoPreferido delega en la regla única
+    // telefonoEfectivoWa: devuelve la forma wa.me validada
+    // ('53' + 8) en vez del crudo preferido.
     test('movil con solo espacios cae a telefono', () {
       expect(telefonoPreferido({'movil': ' ', 'telefono': '58123456'}),
-          '58123456');
+          '5358123456');
     });
 
     test('movil vacío cae a telefono', () {
       expect(telefonoPreferido({'movil': '', 'telefono': '58123456'}),
-          '58123456');
+          '5358123456');
     });
 
     test('movil presente gana y se recorta', () {
       expect(
           telefonoPreferido(
               {'movil': ' 50998877 ', 'telefono': '58123456'}),
-          '50998877');
+          '5350998877');
     });
 
     test('sin movil ni telefono devuelve vacío', () {

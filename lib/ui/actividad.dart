@@ -56,10 +56,17 @@ String sinTildes(String s) {
 /// cuando movil es null, no cuando es '' o espacios; aquí se elige
 /// el primer valor no vacío (movil, si no telefono). Top-level
 /// para tests, igual que sinTildes.
-String telefonoPreferido(Map<String, dynamic> c) {
-  final movil = '${c['movil'] ?? ''}'.trim();
-  return movil.isNotEmpty ? movil : '${c['telefono'] ?? ''}'.trim();
-}
+///
+/// 1.32 (S-2, familia teléfono efectivo): la preferencia ahora
+/// es la regla ÚNICA de la app — delega en telefonoEfectivoWa,
+/// que VALIDA cada campo: un `movil` con basura no vacía ya no
+/// tapa un `telefono` válido (antes el botón del recibo
+/// desaparecía aunque hubiera número bueno). Devuelve la
+/// forma wa.me ('53' + 8) o '' si ninguno normaliza; los
+/// consumidores ya normalizan al enviar, y normalizar la
+/// forma wa.me es idempotente.
+String telefonoPreferido(Map<String, dynamic> c) =>
+    telefonoEfectivoWa(c);
 
 /// 1.18 (Jc 2026-10-29, fix Actividad B): el nombre del inscrito
 /// desde el texto del detalle del servidor

@@ -240,8 +240,12 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   Future<void> _felicitarFlujo(Map<String, dynamic> c) async {
     final id = (c['id'] as num?)?.toInt() ?? 0;
     final nombre = '${c['nombre'] ?? 'Cliente'}';
-    final tel = '${c['telefono'] ?? ''}'.trim();
-    final waNum = normalizarTelefonoWaMe(tel);
+    // 1.32 (D-1, familia teléfono efectivo): el wa.me sale del
+    // teléfono EFECTIVO (movil primero): con el crudo, al
+    // migrado (carnet en `telefono`) se le decía «no tiene
+    // teléfono» y al de número viejo el saludo le iba a otra
+    // persona.
+    final waNum = telefonoEfectivoWa(c);
     if (waNum.isEmpty) {
       if (mounted) {
         mostrarSnack(context, 'Este cliente no tiene teléfono registrado.', significado: SignificadoChip.alerta);
@@ -383,8 +387,8 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     // #1 (Argón cumpleaños + regla de Jc): el regalo YA se aplicó
     // arriba; sin teléfono NO se devuelve en silencio: se avisa
     // para felicitar en persona.
-    final tel = '${c['telefono'] ?? ''}'.trim();
-    final waNum = normalizarTelefonoWaMe(tel);
+    // 1.32 (D-1): también con el teléfono EFECTIVO.
+    final waNum = telefonoEfectivoWa(c);
     if (waNum.isEmpty) {
       if (mounted) {
         mostrarSnack(context, 'Regalo aplicado. Este cliente no tiene '
@@ -546,8 +550,9 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     final id = (c['id'] as num?)?.toInt() ?? 0;
     final felicitado = _felicitados.contains(_claveFelicitado(id));
     final regalado = _regaladosAnio.contains(id);
-    final tieneTelefono =
-        normalizarTelefonoWaMe('${c['telefono'] ?? ''}').isNotEmpty;
+    // 1.32 (D-1): «tiene teléfono» también por el efectivo —
+    // el migrado con número solo en `movil` SÍ tiene.
+    final tieneTelefono = telefonoEfectivoWa(c).isNotEmpty;
     final diasPara = c['_dias_para'] as int?;
     // CU1 (estéticas 1.19): el cumpleañero de hoy destaca sobre
     // el resto (misma condición que la etiqueta '¡Hoy!').

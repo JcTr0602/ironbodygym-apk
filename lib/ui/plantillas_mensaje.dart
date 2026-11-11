@@ -299,7 +299,9 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
       ),
     );
     if (enviar != true || !mounted) return;
-    final tel = normalizarTelefonoWaMe('${cliente['telefono'] ?? ''}');
+    // 1.32 (D-5, familia teléfono efectivo): la plantilla va
+    // al teléfono EFECTIVO (movil primero), no al crudo.
+    final tel = telefonoEfectivoWa(cliente);
     if (tel.isEmpty) {
       mostrarSnack(context, 'El cliente no tiene un teléfono válido.', significado: SignificadoChip.alerta);
       return;

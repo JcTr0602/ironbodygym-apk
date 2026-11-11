@@ -527,8 +527,12 @@ class _VentaSuplementoScreenState
             (c) => (c?['id'] as num?)?.toInt() == _clienteId,
             orElse: () => null,
           );
-      final tel = '${cli?['telefono'] ?? ''}'.trim();
-      if (tel.isNotEmpty) waNum = normalizarTelefonoWaMe(tel);
+      // 1.32 (D-4, familia teléfono efectivo): el comprobante
+      // va al teléfono EFECTIVO (movil primero): con el crudo,
+      // al migrado no se le ofrecía enviar y al de número
+      // viejo el comprobante le iba a otra persona.
+      final waEfectivo = cli != null ? telefonoEfectivoWa(cli) : '';
+      if (waEfectivo.isNotEmpty) waNum = waEfectivo;
       if (conPromo) {
         final hastaActual = '${cli?['pagado_hasta'] ?? ''}'.trim();
         nuevoVencimiento =
