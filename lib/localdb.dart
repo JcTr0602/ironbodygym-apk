@@ -118,7 +118,7 @@ class LocalDb {
   /// (el mismo hueco que v62 cazó en `acceso_blequeos`): la flota
   /// en v68 no lo creaba nunca. El paso oldV<69 llama al MISMO
   /// método que onCreate (idempotente).
-  static const int versionActual = 71;
+  static const int versionActual = 72;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1636,6 +1636,15 @@ class LocalDb {
           // viejos.
           await _addColumnIfMissing(db, 'comprobantes_pago',
               'generacion', 'INTEGER NOT NULL DEFAULT 0');
+        }
+        if (oldV < 72) {
+          // Yunque de Sincronización (YS-3): motivo del
+          // servidor sobre la fila local de la incidencia
+          // cuando su op se rechaza o queda en revisión (la
+          // fila sale de 'pending' a 'error' con el motivo
+          // legible, en vez de congelar el pull para siempre).
+          await _addColumnIfMissing(db, 'incidencias_local',
+              'sync_error', 'TEXT');
         }
       },
     );
@@ -3699,6 +3708,9 @@ class LocalDb {
       ['actualizado_en', 'TEXT'],
       ['sync_estado', "TEXT NOT NULL DEFAULT 'synced'"],
       ['op_uuid', 'TEXT'],
+      // YS-3: motivo del rechazo/revisión del servidor sobre
+      // la fila local (ver resolverOpIncidenciaRechazada).
+      ['sync_error', 'TEXT'],
     ]) {
       await _addColumnIfMissing(
           db, 'incidencias_local', col[0], col[1]);
@@ -10070,6 +10082,57 @@ class LocalDb {
           } catch (_) {}
         }
       }
+    });
+  }
+
+  /// Yunque de Sincronización (YS-3, IMP-5 residuo A): resuelve
+  /// la fila local de una incidencia cuya op el servidor
+  /// RECHAZÓ ([revision] = false) o dejó en REVISIÓN
+  /// ([revision] = true), en UNA transacción con el marcado de
+  /// la op — la réplica de [confirmarOpAplicada] con el
+  /// desenlace contrario.
+  ///
+  /// Antes, `_aplicarEstadoServidor` solo resolvía la fila en
+  /// la rama aplicada: un rechazo dejaba la incidencia en
+  /// `sync_estado='pending'` PARA SIEMPRE, y `_pullIncidencias`
+  /// congela el avance de su cursor ante cualquier fila
+  /// 'pending' (la fila eterna fabricaba la re-descarga
+  /// perpetua de la ventana (b) de IMP-5). Ahora la fila sale a
+  /// un estado terminal visible — 'error' con el motivo del
+  /// servidor en `sync_error` — sin borrarse en silencio: es
+  /// información del usuario, que puede descartarla o
+  /// reintentarla desde la UI como ya hace con las ops.
+  Future<void> resolverOpIncidenciaRechazada(
+    String opUuid, {
+    required String incidenciaId,
+    required String motivo,
+    String? resultadoJson,
+    required bool revision,
+  }) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await txn.update(
+          'ops_queue',
+          {
+            'estado': revision ? 'necesita_revision' : 'rechazada',
+            'error': motivo,
+          },
+          where: 'op_uuid=?',
+          whereArgs: [opUuid]);
+      if (resultadoJson != null) {
+        await txn.update(
+            'ops_queue', {'resultado_servidor': resultadoJson},
+            where: 'op_uuid=?', whereArgs: [opUuid]);
+      }
+      await txn.update(
+          'incidencias_local',
+          {
+            'sincronizada': 0,
+            'sync_estado': 'error',
+            'sync_error': motivo,
+          },
+          where: 'id=?',
+          whereArgs: [incidenciaId]);
     });
   }
 

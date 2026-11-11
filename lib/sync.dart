@@ -3978,6 +3978,33 @@ class SyncEngine {
       await _guardarResultadoServidor(uuid, rec.resultado);
       return false;
     }
+    // Yunque de Sincronización (YS-3): el id de la incidencia
+    // se extrae UNA vez para las TRES ramas con desenlace: la
+    // rama aplicada lo marca 'synced' (vía confirmarOpAplicada)
+    // y las ramas rechazada/necesita_revision lo RESUELVEN
+    // (vía resolverOpIncidenciaRechazada). Antes la extracción
+    // vivía solo dentro de la rama aplicada y un rechazo
+    // dejaba la fila local en 'pending' para siempre (IMP-5
+    // residuo A).
+    const tiposIncidencia = {
+      'incidencia',
+      'crear_incidencia',
+      'editar_incidencia',
+      'cambiar_estado_incidencia',
+    };
+    String? incidenciaId;
+    if (tiposIncidencia.contains('${op['tipo']}')) {
+      try {
+        final pl = jsonDecode(op['payload'] as String);
+        incidenciaId = (pl['id'] ?? pl['incidencia_id']) as String?;
+      } catch (_) {}
+    }
+    String? resultadoJsonYS3;
+    if (rec.resultado != null) {
+      try {
+        resultadoJsonYS3 = jsonEncode(rec.resultado);
+      } catch (_) {}
+    }
     final rechazadaPorPuente = esRechazoServidor(rec.resultado);
     if (rec.estado == 'aplicada' && !rechazadaPorPuente) {
       // 1.23 (Push-S P-3; Argón, pasada 2 del Push — H-01 Alta):
@@ -3993,28 +4020,13 @@ class SyncEngine {
       // UNA transacción (LocalDb.confirmarOpAplicada): morir
       // entre el markOp y la limpieza dejaba el duplicado
       // permanente, porque la purga solo borra sync_seq > 0.
-      String? incidenciaId;
-      // 1.31 (IMP-5 residuos, yunque de app): la
-      // extracción no es solo del tipo legado
-      // 'incidencia': los tipos vivos de incidencia
-      // (crear/editar/cambiar_estado) también llevan el
-      // id en el payload ('id' o 'incidencia_id'), y sin
-      // extraerlo la fila local no se marcaba
-      // sincronizada en esta ruta (la cubría solo el
-      // barrido estacionario de comentarios).
-      const tiposIncidencia = {
-        'incidencia',
-        'crear_incidencia',
-        'editar_incidencia',
-        'cambiar_estado_incidencia',
-      };
-      if (tiposIncidencia.contains('${op['tipo']}')) {
-        try {
-          final pl = jsonDecode(op['payload'] as String);
-          incidenciaId =
-              (pl['id'] ?? pl['incidencia_id']) as String?;
-        } catch (_) {}
-      }
+      // El incidenciaId viene extraído arriba (YS-3): la
+      // extracción no es solo del tipo legado 'incidencia':
+      // los tipos vivos (crear/editar/cambiar_estado) también
+      // llevan el id en el payload ('id' o 'incidencia_id'), y
+      // sin extraerlo la fila local no se marcaba sincronizada
+      // en esta ruta (la cubría solo el barrido estacionario
+      // de comentarios).
       final tablaOptimista =
           '${op['tipo']}' == 'inscripcion_venta_suplemento'
               ? 'ventas_suplementos'
@@ -4037,7 +4049,20 @@ class SyncEngine {
     }
     if (rec.estado == 'rechazada' ||
         (rec.estado == 'aplicada' && rechazadaPorPuente)) {
-      await _marcarRechazadaServidor(uuid, rec);
+      if (incidenciaId != null) {
+        // YS-3: el rechazo también resuelve la fila local de
+        // la incidencia, en la misma transacción que el
+        // marcado de la op (antes quedaba 'pending' eterna y
+        // congelaba el cursor del pull de incidencias).
+        await _db.resolverOpIncidenciaRechazada(uuid,
+            incidenciaId: incidenciaId,
+            motivo: motivoRechazo(rec.resultado, rec.error) ??
+                'El servidor rechazó la operación.',
+            resultadoJson: resultadoJsonYS3,
+            revision: false);
+      } else {
+        await _marcarRechazadaServidor(uuid, rec);
+      }
       // 1.15 (fix4): la fila optimista (id negativo) también se limpia
       // cuando la op es RECHAZADA, no solo cuando es aplicada: si no,
       // una venta al fiado o una categoría rechazada quedaba fantasma
@@ -4107,10 +4132,21 @@ class SyncEngine {
       return false;
     }
     if (rec.estado == 'necesita_revision') {
-      await _db.markOp(uuid, 'necesita_revision',
-          error: motivoRechazo(rec.resultado, rec.error) ??
-              'El servidor pidió revisión manual de esta operación.');
-      await _guardarResultadoServidor(uuid, rec.resultado);
+      if (incidenciaId != null) {
+        // YS-3: la revisión también resuelve la fila local
+        // (mismo desenlace terminal visible que el rechazo).
+        await _db.resolverOpIncidenciaRechazada(uuid,
+            incidenciaId: incidenciaId,
+            motivo: motivoRechazo(rec.resultado, rec.error) ??
+                'El servidor pidió revisión manual de esta operación.',
+            resultadoJson: resultadoJsonYS3,
+            revision: true);
+      } else {
+        await _db.markOp(uuid, 'necesita_revision',
+            error: motivoRechazo(rec.resultado, rec.error) ??
+                'El servidor pidió revisión manual de esta operación.');
+        await _guardarResultadoServidor(uuid, rec.resultado);
+      }
       // 1.24 Bloque 2: en revisión el pago TAMPOCO está aplicado:
       // el vencimiento optimista no debe quedarse pintado como si
       // fuera real. Si el dueño aprueba la op en el servidor, la
