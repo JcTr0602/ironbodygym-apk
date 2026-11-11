@@ -534,14 +534,10 @@ class LocalDb {
           // actualizaron desde ≤v1.2.3. En esos teléfonos la tabla no
           // existe y el ALTER reventaba ("no such table"), dejando la BD
           // sin abrir y la app vacía. Se crean si faltan.
-          await db.execute('CREATE TABLE IF NOT EXISTS incidencias_local ('
-              'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
-              'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
-              'detalle TEXT, estado TEXT NOT NULL DEFAULT \'pendiente\', '
-              'creada_por TEXT NOT NULL, creada_en TEXT NOT NULL, '
-              'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
-              'version INTEGER NOT NULL DEFAULT 1, '
-              'sincronizada INTEGER NOT NULL DEFAULT 0)');
+          // 1.32 (H-MIG-1): también aquí manda la única fuente
+          // de DDL (_crearTablaIncidenciasLocal); el texto viejo
+          // de esta migración divergía en NOT NULL y defaults.
+          await _crearTablaIncidenciasLocal(db);
           await db.execute('CREATE TABLE IF NOT EXISTS incidencias_mirror ('
               'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
               'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
@@ -2904,20 +2900,11 @@ class LocalDb {
         // v1.2.4: incidencias (diseño ChatGPT: bidireccional, offline-first).
         // incidencias_local: creadas en este dispositivo, pendientes de subir.
         // incidencias_mirror: copia de la tabla central de Supabase.
-        await db.execute('CREATE TABLE IF NOT EXISTS incidencias_local ('
-            'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
-            'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
-            'detalle TEXT, estado TEXT NOT NULL DEFAULT \'pendiente\', '
-            'creada_por TEXT NOT NULL, creada_en TEXT NOT NULL, '
-            'resuelta_por TEXT, resuelta_en TEXT, nota_resolucion TEXT, '
-            'visibilidad TEXT NOT NULL DEFAULT \'compartida\', '
-            'version INTEGER NOT NULL DEFAULT 1, '
-            // v1.12.0 (G1): op_uuid nace en la creación (antes solo
-            // existía en _crearEsquemaIncidencias, donde el CREATE
-            // IF NOT EXISTS ya no hacía nada porque la tabla ya
-            // existía sin la columna).
-            'op_uuid TEXT, '
-            'sincronizada INTEGER NOT NULL DEFAULT 0)');
+        // 1.32 (H-MIG-1): el CREATE de incidencias_local vive en
+        // _crearTablaIncidenciasLocal, la única fuente de DDL
+        // (antes este texto divergía del de _crearEsquemaIncidencias
+        // en NOT NULL y defaults; op_uuid nace en la creación).
+        await _crearTablaIncidenciasLocal(db);
         await db.execute('CREATE TABLE IF NOT EXISTS incidencias_mirror ('
             'id TEXT PRIMARY KEY, tipo TEXT NOT NULL, '
             'entidad TEXT, entidad_id INTEGER, descripcion TEXT NOT NULL, '
@@ -3730,10 +3717,28 @@ class LocalDb {
     }
   }
 
-  /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
-  /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
-  static Future<void> _crearEsquemaIncidencias(Database db) async {
-    // Tablas base de incidencias (esquema v19 real, Argón).
+  /// 1.32 (H-MIG-1): ÚNICA fuente de DDL de `incidencias_local`.
+  ///
+  /// La tabla nacía de TRES textos distintos —el CREATE de
+  /// [_crearTablas], el de la migración v8 y el de
+  /// [_crearEsquemaIncidencias]— con NOT NULL y defaults
+  /// divergentes (los dos primeros exigían tipo/descripcion/
+  /// creada_por/creada_en NOT NULL sin defaults; el tercero los
+  /// dejaba anulables con tipo DEFAULT 'sync'). Como el
+  /// `CREATE IF NOT EXISTS` + `_addColumnIfMissing` solo
+  /// convergen el CONJUNTO de columnas (SQLite no puede
+  /// reescribir el NOT NULL ni el default de una columna ya
+  /// creada), dos teléfonos con la misma versión podían tener
+  /// esquemas reales distintos según su cohorte de instalación.
+  /// Todo camino que crea la tabla pasa ahora por este método,
+  /// con la forma v19 como canónica (la que el código vivo
+  /// asume: sync_estado/sync_error y los defaults 'sync'/'media').
+  /// Las tablas viejas ya creadas conservan sus restricciones
+  /// —divergencia histórica declarada, no reparable sin
+  /// reconstruir la tabla— y la cadena de `_addColumnIfMissing`
+  /// de [_crearEsquemaIncidencias] sigue convergiendo el
+  /// conjunto de columnas de esas cohortes.
+  static Future<void> _crearTablaIncidenciasLocal(Database db) async {
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_local (
       id TEXT PRIMARY KEY, tipo TEXT NOT NULL DEFAULT 'sync',
       entidad TEXT, entidad_id INTEGER,
@@ -3748,8 +3753,18 @@ class LocalDb {
       sincronizada INTEGER NOT NULL DEFAULT 0,
       visibilidad TEXT NOT NULL DEFAULT 'compartida',
       sync_estado TEXT NOT NULL DEFAULT 'synced',
+      sync_error TEXT,
       op_uuid TEXT
     )''');
+  }
+
+  /// v1.3.0 (Sol #4): DDL de Incidencias v19, idempotente.
+  /// Llamado desde _crearTablas (clean install) y onUpgrade (migración).
+  static Future<void> _crearEsquemaIncidencias(Database db) async {
+    // Tablas base de incidencias (esquema v19 real, Argón).
+    // 1.32 (H-MIG-1): el CREATE de incidencias_local vive en
+    // _crearTablaIncidenciasLocal, la única fuente de DDL.
+    await _crearTablaIncidenciasLocal(db);
     await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_mirror (
       id TEXT PRIMARY KEY, tipo TEXT,
       entidad TEXT, entidad_id INTEGER,
