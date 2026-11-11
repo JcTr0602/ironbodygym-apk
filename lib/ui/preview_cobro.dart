@@ -942,6 +942,16 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         await LocalDb.instance.updateMirrorPagadoHasta(
             clienteId, pagadoHastaAnterior.substring(0, 10));
       }
+      // YS-5 (H6 de la revisión de Argón): el sello de
+      // procedencia tampoco sobrevive a la op deshecha. Si
+      // quedara apuntando a esta op (ya borrada de la cola),
+      // un cobro ANTERIOR aún en vuelo y rechazado después
+      // vería la procedencia de la op deshecha y NO
+      // revertiría su vencimiento falso. La limpieza es
+      // condicional al uuid: si un cobro posterior ya selló
+      // el suyo, no se toca.
+      await LocalDb.instance
+          .limpiarProcedenciaPago(clienteId, opUuid);
     } catch (_) {}
   }
   return resultado == 'deshecho'

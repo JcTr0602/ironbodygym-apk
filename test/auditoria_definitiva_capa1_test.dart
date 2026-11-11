@@ -242,6 +242,59 @@ void main() {
               'op: quedó apuntando a una op muerta');
     });
 
+    test('H6: deshacer el cobro B no bloquea la reversión '
+        'del cobro A anterior en vuelo', () async {
+      await _abrirDbVacia();
+      // A pinta su vencimiento (2026-12-10) y queda en vuelo.
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          510,
+          {'id': 510, 'nombre': 'J', 'pagado_hasta': '2026-12-10'},
+          1);
+      await LocalDb.instance
+          .registrarProcedenciaPago(510, 'op-a');
+      // B pinta encima (2027-01-09) y sella su op…
+      await LocalDb.instance
+          .updateMirrorPagadoHasta(510, '2027-01-09');
+      await LocalDb.instance
+          .registrarProcedenciaPago(510, 'op-b');
+      // …y el cajero lo DESHACE en la ventana de 15 s: la
+      // rama deshecho restaura el valor previo (el de A) y
+      // limpia el sello de B.
+      await LocalDb.instance
+          .updateMirrorPagadoHasta(510, '2026-12-10');
+      await LocalDb.instance.limpiarProcedenciaPago(510, 'op-b');
+      expect(await _selloEspejo(510), isNull,
+          reason: 'el sello de la op deshecha sobrevivió');
+      // A se rechaza después: sin el sello podrido de B, la
+      // guarda de identidad no delega y la reversión de A
+      // ocurre como siempre.
+      await SyncEngine.instance.revertirVencimientoOptimistaParaTest(
+          _opPago(
+              clienteId: 510,
+              optimista: '2026-12-10',
+              anterior: '2026-11-10',
+              opUuid: 'op-a'));
+      expect(await _pagadoHastaEspejo(510), '2026-11-10',
+          reason: 'la reversión de A quedó bloqueada por el '
+              'sello huérfano de B');
+    });
+
+    test('H6: pin — la rama deshecho del preview limpia el '
+        'sello de la op deshecha', () {
+      final preview =
+          File('lib/ui/preview_cobro.dart').readAsStringSync();
+      final i = preview
+          .indexOf("resultado == 'deshecho' && clienteId != null");
+      expect(i, isNonNegative);
+      // La rama vive casi al final del archivo: se lee
+      // hasta el fin en vez de una ventana fija.
+      final rama = preview.substring(i);
+      expect(rama, contains('limpiarProcedenciaPago'),
+          reason: 'la rama deshecho dejó de limpiar el sello: '
+              'volvería el bloqueo de H6');
+    });
+
     test('H5/H6: limpiarProcedenciaPago solo limpia si el '
         'sello nombra a ESA op', () async {
       await _abrirDbVacia();
