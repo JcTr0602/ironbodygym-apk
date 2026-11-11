@@ -8321,7 +8321,14 @@ class SyncEngine {
                   retenidaDesde: ret.registroPrevio?.desde,
                   caducadaEn: isoHabana(ahoraHabana()));
               ret.cuarentenaAplicada = true;
-              if (seq > maxSeq) maxSeq = seq;
+              // H10 (revisión de Argón al Yunque de Sync): el
+              // avance respeta la bandera pegajosa, como la
+              // rama normal — si OTRA fila de esta página quedó
+              // retenida antes (seq menor), el cursor NO salta
+              // por encima de ella: la apartada ya quedó en
+              // cuarentena (inserción idempotente) y se
+              // re-pedirá cuando la retenida se resuelva.
+              if (!huboConflicto && seq > maxSeq) maxSeq = seq;
               continue;
             }
             // Argón: congelar avance de maxSeq ante conflicto,
@@ -8564,7 +8571,9 @@ class SyncEngine {
                   retenidaDesde: ret.registroPrevio?.desde,
                   caducadaEn: isoHabana(ahoraHabana()));
               ret.cuarentenaAplicada = true;
-              if (seq > maxSeq) maxSeq = seq;
+              // H10: sin saltar una huérfana retenida antes en
+              // la misma página (ver _pullIncidencias).
+              if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
               continue;
             }
             huboHuerfano = true;
@@ -8681,7 +8690,9 @@ class SyncEngine {
                   retenidaDesde: ret.registroPrevio?.desde,
                   caducadaEn: isoHabana(ahoraHabana()));
               ret.cuarentenaAplicada = true;
-              if (seq > maxSeq) maxSeq = seq;
+              // H10: sin saltar una huérfana retenida antes en
+              // la misma página (ver _pullIncidencias).
+              if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
               continue;
             }
             huboHuerfano = true;
@@ -8778,7 +8789,9 @@ class SyncEngine {
                   retenidaDesde: ret.registroPrevio?.desde,
                   caducadaEn: isoHabana(ahoraHabana()));
               ret.cuarentenaAplicada = true;
-              if (seq > maxSeq) maxSeq = seq;
+              // H10: sin saltar una huérfana retenida antes en
+              // la misma página (ver _pullIncidencias).
+              if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
               continue;
             }
             huboHuerfano = true;

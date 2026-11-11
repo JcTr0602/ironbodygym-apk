@@ -206,6 +206,44 @@ void main() {
     });
   });
 
+  group('YS-4/H10 · la cuarentena no salta una retenida de la '
+      'misma página (estructural)', () {
+    final sync = File('lib/sync.dart').readAsStringSync();
+
+    void pinCuarentena(String nombre, String guarda) {
+      final i = sync.contains('Future<int> $nombre')
+          ? sync.indexOf('Future<int> $nombre')
+          : sync.indexOf('Future<void> $nombre');
+      expect(i, isNonNegative, reason: 'no se encontró $nombre');
+      final cuerpo = sync.substring(i, i + 12000);
+      final j = cuerpo.indexOf('esCuarentena');
+      expect(j, isNonNegative,
+          reason: '$nombre ya no consulta la caducidad');
+      final rama = cuerpo.substring(j, j + 1200);
+      expect(rama, contains('if ($guarda && seq > maxSeq)'),
+          reason: '$nombre: la rama de cuarentena avanza el '
+              'cursor sin mirar la bandera pegajosa y saltaría '
+              'la fila retenida de la misma página');
+    }
+
+    test('_pullIncidencias guarda con !huboConflicto', () {
+      pinCuarentena('_pullIncidencias()', '!huboConflicto');
+    });
+    test('_pullIncidenciasComentarios guarda con !huboHuerfano',
+        () {
+      pinCuarentena(
+          '_pullIncidenciasComentarios()', '!huboHuerfano');
+    });
+    test('_pullIncidenciasFotos guarda con !huboHuerfano', () {
+      pinCuarentena('_pullIncidenciasFotos()', '!huboHuerfano');
+    });
+    test('_pullIncidenciasHistorial guarda con !huboHuerfano',
+        () {
+      pinCuarentena(
+          '_pullIncidenciasHistorial()', '!huboHuerfano');
+    });
+  });
+
   group('YS-4 · cableado de los cuatro pulls (estructural)', () {
     final sync = File('lib/sync.dart').readAsStringSync();
 
