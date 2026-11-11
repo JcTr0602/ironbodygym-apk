@@ -48,6 +48,7 @@ import 'panel_comunidad.dart';
 import 'vista_previa_cliente.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
+import 'acciones_acceso.dart' show mensajeOmitidoGeneracion;
 
 /// Fila «Plus» de la tarjeta Membresía: consulta SOLA el Plus
 /// residual (todo el staff autenticado, como manda la guarda
@@ -672,6 +673,20 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
+      // 1.32 (H-RPC-3/B1-H2): la omisión deliberada del
+      // servidor (conversión con vale vivo) trae su
+      // explicación en `mensaje`: se enseña como aviso y
+      // NO se invalida ni se recarga como si se hubiera
+      // generado un PIN.
+      final omitido = mensajeOmitidoGeneracion(data);
+      if (omitido != null) {
+        if (mounted) {
+          mostrarSnack(context, omitido,
+              significado: SignificadoChip.alerta,
+              duracion: const Duration(seconds: 6));
+        }
+        return;
+      }
       final pin = '${data['pin_temporal'] ?? ''}';
       if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
       // A6: invalidar antes de recargar (foto post-mutación).

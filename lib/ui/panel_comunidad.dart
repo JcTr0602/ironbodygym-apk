@@ -833,14 +833,13 @@ Future<int?> contarReportesComunidadNuevos() async {
     final res = await Supabase.instance.client
         .rpc('admin_comunidad_perfiles')
         .timeout(const Duration(seconds: 12));
-    if (res is! Map) return null;
-    final json = Map<String, dynamic>.from(res);
     final prefs = await SharedPreferences.getInstance();
     final vistos = prefs.getInt(claveReportesComunidadVistos(
             AuthService().telegramId ?? 0)) ??
         0;
-    return reportesNuevosComunidad(
-        parseIdsReportesPendientes(json), vistos);
+    // 1.32 (H-RPC-5/B1-H5): el {ok:false} devuelve null
+    // vía la función pura (antes degradaba a un 0 falso).
+    return reportesNuevosDesdeRespuesta(res, vistos);
   } catch (_) {
     return null;
   }

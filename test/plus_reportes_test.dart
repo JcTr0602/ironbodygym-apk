@@ -127,9 +127,13 @@ void main() {
     // Mapa con 'reportes' y con 'pendientes'.
     expect(parsearReportesPlus({'reportes': [filaOk]}).length, 1);
     expect(parsearReportesPlus({'pendientes': [filaOk]}).length, 1);
-    // Monto por la clave alterna precio_cup.
+    // Monto por la clave alterna precio_cup. 1.32
+    // (H-RPC-4/B1-H4): la fila del LISTADO trae la clave
+    // viva `id` (la `reporte_id` es la del payload de las
+    // ops de decisión, no la de la fila); el doble usa la
+    // forma viva.
     lista = parsearReportesPlus([
-      {'reporte_id': 'r9', 'invitado_id': 'i9', 'precio_cup': '1000'}
+      {'id': 'r9', 'invitado_id': 'i9', 'precio_cup': '1000'}
     ]);
     expect(lista.single.id, 'r9');
     expect(lista.single.monto, 1000.0);

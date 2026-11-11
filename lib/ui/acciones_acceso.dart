@@ -27,6 +27,23 @@ void _snack(BuildContext ctx, String mensaje) {
   mostrarSnack(ctx, mensaje);
 }
 
+/// 1.32 (H-RPC-3/B1-H2): el mensaje que la generación
+/// INDIVIDUAL de acceso debe enseñar cuando el servidor
+/// OMITE la generación a propósito (conversión con vale de
+/// canje vivo): la explicación del propio servidor
+/// (`mensaje`), como aviso — no el error genérico «El
+/// servidor no devolvió el PIN», que hacía al dueño
+/// reintentar durante horas creyendo que era la conexión.
+/// Devuelve null si la respuesta NO es una omisión (trae
+/// PIN o es otro desenlace): el llamador sigue su curso.
+String? mensajeOmitidoGeneracion(Map<String, dynamic> data) {
+  if (data['omitido'] != true) return null;
+  final m = '${data['mensaje'] ?? ''}'.trim();
+  return m.isEmpty
+      ? 'El servidor omitió la generación del PIN para este cliente.'
+      : m;
+}
+
 /// 1.28 (M4-A5/R2M4-H1): guarda «en curso» del helper
 /// COMPARTIDO (patrón de reportes_plus). Las acciones de un
 /// mismo cliente se ejecutan DE UNA EN UNA: un segundo toque

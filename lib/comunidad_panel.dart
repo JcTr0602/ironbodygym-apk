@@ -266,6 +266,23 @@ List<int> parseIdsReportesPendientes(Map<String, dynamic> json) {
   return out;
 }
 
+/// 1.32 (H-RPC-5/B1-H5): el desenlace del contador de
+/// reportes nuevos a partir de la respuesta CRUDA de
+/// `admin_comunidad_perfiles`. El `{ok:false}` de la RPC
+/// (la sesión dejó de ser admin, la guarda cambió) NO es
+/// «0 reportes»: es «no se pudo saber» (null), la misma
+/// regla del contador hermano de vales. Sin esta puerta,
+/// el parseo degradaba a [] y el Panel pintaba un 0
+/// mentiroso con reportes reales pendientes. Función
+/// pura, sin red ni estado.
+int? reportesNuevosDesdeRespuesta(Object? res, int maxIdVisto) {
+  if (res is! Map) return null;
+  final json = Map<String, dynamic>.from(res);
+  if (json['ok'] != true) return null;
+  return reportesNuevosComunidad(
+      parseIdsReportesPendientes(json), maxIdVisto);
+}
+
 /// La clave de la marca de vistos de reportes
 /// (SharedPreferences), por telegram del dueño.
 /// Desde A1-M5-01 la marca es el ID MAYOR visto (no

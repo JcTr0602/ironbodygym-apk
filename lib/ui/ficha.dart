@@ -862,6 +862,14 @@ class _FichaScreenState extends State<FichaScreen> {
       final res = await Supabase.instance.client
           .rpc('obtener_estado_cliente', params: {'p_id': widget.clienteId})
           .timeout(const Duration(seconds: 12));
+      // 1.32 (H-RPC-6/B1-H6): la RPC devuelve null SIN
+      // lanzar cuando el cliente no existe en el servidor
+      // (recién inscrito sin subir, o borrado allá): es un
+      // TERCER desenlace, distinto de «al día» y de error
+      // de red — antes caía en el «Datos al día» y la
+      // verificación daba un verde falso justo en el caso
+      // que debía cazar.
+      final noExisteEnServidor = res == null;
       var omitidoPorPendientes = false;
       if (res != null) {
         // Actualizar solo este cliente en el mirror local.
@@ -906,7 +914,12 @@ class _FichaScreenState extends State<FichaScreen> {
           }
         }
       }
-      if (omitidoPorPendientes) {
+      if (noExisteEnServidor) {
+        mostrarSnack(context,
+            'Este cliente aún no está en el servidor',
+            significado: SignificadoChip.alerta,
+            duracion: const Duration(seconds: 3));
+      } else if (omitidoPorPendientes) {
         mostrarSnack(context,
             'Hay cambios locales pendientes de subir: '
             'no se tocaron los datos de este teléfono',

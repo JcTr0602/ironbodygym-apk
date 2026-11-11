@@ -1003,6 +1003,19 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
       final data = Map<String, dynamic>.from(res as Map);
+      // 1.32 (H-RPC-3/B1-H2): la omisión deliberada del
+      // servidor (conversión con vale vivo) se enseña con
+      // su `mensaje` como aviso; el cliente NO sale de
+      // «sin acceso» ni se finge un PIN generado.
+      final omitido = mensajeOmitidoGeneracion(data);
+      if (omitido != null) {
+        if (mounted) {
+          mostrarSnack(context, omitido,
+              significado: SignificadoChip.alerta,
+              duracion: const Duration(seconds: 6));
+        }
+        return;
+      }
       final pin = '${data['pin_temporal'] ?? ''}';
       if (pin.isEmpty) throw 'El servidor no devolvió el PIN';
       await AccesoAppCache.instance.cargar();

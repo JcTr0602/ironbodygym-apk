@@ -1077,19 +1077,26 @@ void main() {
   });
 
   group('FB-19 · la bandeja ofrece el WhatsApp', () {
+    // 1.32 (H-RPC-4/B1-H4): la forma VIVA de
+    // admin_premios_vales: {vales, recientes} SIN `ok` y
+    // SIN `meta`, y las filas con las claves vivas
+    // (logro_id, dias_al_reclamar, creado_nota). El doble
+    // anterior traía ok/meta y `tipo_logro`: el parser
+    // tolerante lo dejaba pasar y la red de seguridad
+    // quedaría verde con producción vacía.
     Map<String, dynamic> bandeja() => {
-          'ok': true,
-          'meta': 15,
           'vales': [
             {
               'id': 7,
               'cliente_id': 5,
               'nombre': 'Ana Vale',
               'telefono': '52893421',
-              'tipo_logro': 'constancia',
+              'logro_id': 'constancia_real',
               'premio_dias': 15,
+              'dias_al_reclamar': 15,
               'pagado_hasta': '2026-11-20',
               'creado_en': '2026-11-06T10:00:00',
+              'creado_nota': '',
             }
           ],
           'recientes': <dynamic>[],
@@ -1201,8 +1208,10 @@ void main() {
           },
           cargarReportes: () async =>
               {'ok': true, 'reportes': <dynamic>[]},
+          // 1.32 (H-RPC-4/B1-H4): la viva y el parser usan
+          // la clave `eventos`, no `historial`.
           cargarHistorial: () async =>
-              {'ok': true, 'historial': <dynamic>[]},
+              {'ok': true, 'eventos': <dynamic>[]},
           ocultarPerfil: (id, ocultar) async {
             ocultados.add(id);
             return {'ok': true};
