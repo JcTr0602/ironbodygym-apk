@@ -1189,6 +1189,22 @@ class SyncEngine {
   SyncEngine._();
   static final SyncEngine instance = SyncEngine._();
 
+  /// Yunque de Sincronización (YS-3): tipos de op que mutan
+  /// una fila de `incidencias_local`. Compartido por
+  /// [_aplicarEstadoServidor] (desenlace por estados del
+  /// servidor) y por [_resolverIncidenciaSiOpMuereLocal]
+  /// (desenlace cuando la op muere en el teléfono y jamás
+  /// llega al servidor): ambos caminos deben resolver la
+  /// fila local de la incidencia, o queda en 'pending'
+  /// eterno y congela el cursor del pull (H2 de la revisión
+  /// de Argón al Yunque de Sync).
+  static const _tiposIncidencia = {
+    'incidencia',
+    'crear_incidencia',
+    'editar_incidencia',
+    'cambiar_estado_incidencia',
+  };
+
   final _status = StreamController<SyncStatus>.broadcast();
   Stream<SyncStatus> get statusStream => _status.stream;
   SyncStatus _current = const SyncStatus();
@@ -3739,6 +3755,49 @@ class SyncEngine {
     return (aplicadas: aplicadas, uuids: uuids);
   }
 
+  /// Yunque de Sincronización (YS-3, H2 de la revisión de
+  /// Argón): resuelve la fila local de una incidencia cuya op
+  /// MUERE EN EL TELÉFONO (4xx directo de PostgREST o
+  /// agotamiento de intentos): esa op nunca llega a
+  /// `sync_ops`, así que [_aplicarEstadoServidor] jamás la
+  /// procesará y, sin esta resolución, su fila quedaría en
+  /// `sync_estado='pending'` para siempre — y el pull de
+  /// incidencias congela su cursor ante cualquier 'pending'.
+  /// Devuelve true si la op era de incidencia y su fila quedó
+  /// resuelta (la resolución también marca la op en la misma
+  /// transacción, vía [LocalDb.resolverOpIncidenciaRechazada]:
+  /// el llamador NO debe marcarla otra vez).
+  Future<bool> _resolverIncidenciaSiOpMuereLocal(
+      Map<String, dynamic> op,
+      {required bool revision, required String motivo}) async {
+    if (!_tiposIncidencia.contains('${op['tipo']}')) return false;
+    String? incidenciaId;
+    try {
+      final pl = jsonDecode(op['payload'] as String);
+      incidenciaId = (pl['id'] ?? pl['incidencia_id']) as String?;
+    } catch (_) {}
+    if (incidenciaId == null) return false;
+    await _db.resolverOpIncidenciaRechazada('${op['op_uuid']}',
+        incidenciaId: incidenciaId, motivo: motivo, revision: revision);
+    return true;
+  }
+
+  /// Costura de test (H2): ejerce [_bumpConReversion] sin red.
+  @visibleForTesting
+  Future<void> bumpConReversionParaTest(Map<String, dynamic> op,
+          Object error,
+          {int? httpStatus}) =>
+      _bumpConReversion(op, error, httpStatus: httpStatus);
+
+  /// Costura de test (H2): ejerce
+  /// [_resolverIncidenciaSiOpMuereLocal] contra la BD.
+  @visibleForTesting
+  Future<bool> resolverIncidenciaSiOpMuereLocalParaTest(
+          Map<String, dynamic> op,
+          {required bool revision, required String motivo}) =>
+      _resolverIncidenciaSiOpMuereLocal(op,
+          revision: revision, motivo: motivo);
+
   /// Reintenta un lote op por op: la que falle con 4xx se marca
   /// 'rechazada' (definitiva y visible en la cola) y NO bloquea a las
   /// demás. Los fallos de red siguen siendo transitorios (reintento).
@@ -3786,6 +3845,15 @@ class SyncEngine {
           // restaura igual que en _aplicarEstadoServidor.
           await _marcarRestauracionSuplemento();
         }
+        // YS-3 (H2 de la revisión de Argón): si la op era de
+        // incidencia, su fila local también se resuelve aquí:
+        // esta op jamás llegará a _aplicarEstadoServidor y su
+        // fila quedaría en 'pending' eterno, congelando el
+        // cursor del pull de incidencias.
+        await _resolverIncidenciaSiOpMuereLocal(op,
+            revision: true,
+            motivo: 'La subida falló repetidamente y la '
+                'operación quedó en revisión ($error).');
       }
     } catch (_) {}
   }
@@ -3862,9 +3930,23 @@ class SyncEngine {
                 'en espera de ampliación',
                 httpStatus: r.statusCode);
           } else {
-            await _db.markOp(uuid, 'rechazada',
-                error: 'El servidor la rechazó (HTTP ${r.statusCode}). '
-                    '$cuerpo Revisa los datos o cancela la operación.');
+            // YS-3 (H2 de la revisión de Argón): si la op es de
+            // incidencia, la resolución marca la op Y resuelve
+            // su fila local en una transacción — esta op nunca
+            // llega a sync_ops y _aplicarEstadoServidor jamás
+            // la procesará; sin esto la fila quedaba en
+            // 'pending' eterno. Para el resto de tipos, el
+            // marcado es el de siempre.
+            final motivoRechazo4xx =
+                'El servidor la rechazó (HTTP ${r.statusCode}). '
+                '$cuerpo Revisa los datos o cancela la operación.';
+            final incidenciaResuelta =
+                await _resolverIncidenciaSiOpMuereLocal(op,
+                    revision: false, motivo: motivoRechazo4xx);
+            if (!incidenciaResuelta) {
+              await _db.markOp(uuid, 'rechazada',
+                  error: motivoRechazo4xx);
+            }
             // 1.24.1 (Argón G-10a): un 4xx de PostgREST nunca
             // llega a sync_ops, así que _aplicarEstadoServidor
             // jamás procesa esta op: la limpieza del rechazo
@@ -4051,12 +4133,7 @@ class SyncEngine {
     // vivía solo dentro de la rama aplicada y un rechazo
     // dejaba la fila local en 'pending' para siempre (IMP-5
     // residuo A).
-    const tiposIncidencia = {
-      'incidencia',
-      'crear_incidencia',
-      'editar_incidencia',
-      'cambiar_estado_incidencia',
-    };
+    const tiposIncidencia = _tiposIncidencia;
     String? incidenciaId;
     if (tiposIncidencia.contains('${op['tipo']}')) {
       try {

@@ -160,6 +160,94 @@ void main() {
     await db.close();
   });
 
+  test('YS-3/H2: la resolución local de una muerte por 4xx de '
+      'PostgREST resuelve la fila y marca la op rechazada',
+      () async {
+    final db = await _abrirDbVacia();
+    await _siembra(db,
+        uuid: 'op-ys3-muerte-4xx',
+        tipo: 'crear_incidencia',
+        payload: {'id': 'inc-ys3', 'descripcion': 'x'});
+    // El camino (a) de _uploadUnaPorUna no se puede ejercer
+    // sin red real: se prueba el helper que su rama de
+    // rechazada invoca (el cableado queda fijado por el pin
+    // estructural de abajo).
+    final resuelta = await SyncEngine.instance
+        .resolverIncidenciaSiOpMuereLocalParaTest(
+      {
+        'op_uuid': 'op-ys3-muerte-4xx',
+        'tipo': 'crear_incidencia',
+        'payload': jsonEncode({'id': 'inc-ys3'}),
+      },
+      revision: false,
+      motivo: 'El servidor la rechazó (HTTP 422). detalle',
+    );
+    expect(resuelta, isTrue);
+    expect(await _estadoOp(db, 'op-ys3-muerte-4xx'), 'rechazada');
+    final fila = await _filaIncidencia(db, 'inc-ys3');
+    expect(fila['sync_estado'], 'error',
+        reason: 'la fila siguió pending: el pull de '
+            'incidencias quedaría congelado para siempre');
+    expect(fila['sync_error'], contains('HTTP 422'));
+    await db.close();
+  });
+
+  test('YS-3/H2: una op de incidencia que cae en '
+      'necesita_revision por el bump resuelve su fila', () async {
+    final db = await _abrirDbVacia();
+    await _siembra(db,
+        uuid: 'op-ys3-muerte-bump',
+        tipo: 'editar_incidencia',
+        payload: {'incidencia_id': 'inc-ys3', 'descripcion': 'y'});
+    // HTTP 422 clasifica como validación: el bump la manda a
+    // revisión al primer intento y _bumpConReversion debe
+    // resolver la fila (la op jamás llega al servidor).
+    await SyncEngine.instance.bumpConReversionParaTest(
+      {
+        'op_uuid': 'op-ys3-muerte-bump',
+        'tipo': 'editar_incidencia',
+        'payload': jsonEncode({'incidencia_id': 'inc-ys3'}),
+      },
+      'HTTP 422',
+      httpStatus: 422,
+    );
+    expect(await _estadoOp(db, 'op-ys3-muerte-bump'),
+        'necesita_revision');
+    final fila = await _filaIncidencia(db, 'inc-ys3');
+    expect(fila['sync_estado'], 'error',
+        reason: 'la muerte local por bump no resolvió la '
+            'fila: el pull de incidencias quedaría congelado');
+    expect(fila['sync_error'], contains('revisión'));
+    await db.close();
+  });
+
+  test('YS-3/H2: pin — las dos muertes locales invocan el '
+      'helper de resolución de incidencias', () {
+    final sync = File('lib/sync.dart').readAsStringSync();
+    final iBump = sync.indexOf('Future<void> _bumpConReversion(');
+    final iUp = sync.indexOf('Future<int> _uploadUnaPorUna(');
+    final iRes = sync.indexOf(
+        'Future<Map<String, ResultadoOpServidor>> '
+        '_resultadosOpsBatch(');
+    expect(iBump, isNonNegative);
+    expect(iUp, greaterThan(iBump));
+    expect(iRes, greaterThan(iUp));
+    expect(
+        sync
+            .substring(iBump, iUp)
+            .contains('_resolverIncidenciaSiOpMuereLocal(op,'),
+        isTrue,
+        reason: 'la rama necesita_revision de _bumpConReversion '
+            'dejó de resolver la fila de la incidencia');
+    expect(
+        sync
+            .substring(iUp, iRes)
+            .contains('_resolverIncidenciaSiOpMuereLocal(op,'),
+        isTrue,
+        reason: 'la rama rechazada de _uploadUnaPorUna dejó de '
+            'resolver la fila de la incidencia');
+  });
+
   test('YS-3: el pull solo congela ante pending (pin del '
       'contrato que la resolución desbloquea)', () {
     final sync = File('lib/sync.dart').readAsStringSync();
