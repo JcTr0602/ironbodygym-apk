@@ -915,6 +915,71 @@ bool enviadaDebeResetear(String? enviadaTs, int corteEpochMs) {
   return inst.millisecondsSinceEpoch < corteEpochMs;
 }
 
+/// Yunque de Sincronización (YS-4, pura y probada): ¿la
+/// retención de una fila de incidencias ya caducó? Una fila
+/// retenida (su padre no está en local, o la fila local sigue
+/// 'pending') protege su tabla topando el cursor; la retención
+/// es legítima mientras el padre puede estar en camino, pero
+/// no eterna: a los [dias] días la fila se aparta a la
+/// cuarentena local y el cursor se libera (la política de
+/// descarte del no-admin, aplicada también en admin pero sin
+/// perder la fila). Sello ausente o ilegible → NO caducada
+/// (dirección segura: retener).
+bool retencionIncidenciaCaducada(String? desdeIso, DateTime ahora,
+    {int dias = 7}) {
+  if (desdeIso == null) return false;
+  final desde = DateTime.tryParse(desdeIso);
+  if (desde == null) return false;
+  return ahora.difference(desde) >= Duration(days: dias);
+}
+
+/// YS-4: el registro de retención persistido en meta
+/// (`retencion_<tabla>`): la fila que hoy topa el cursor de un
+/// pull de incidencias, desde cuándo y por qué.
+typedef RegistroRetencion = ({
+  String id,
+  int seq,
+  String? desde,
+  String motivo,
+});
+
+/// YS-4: estado de las retenciones de UNA pasada de un pull de
+/// incidencias. El cursor sigue topado en la primera fila
+/// retenida (la bandera pegajosa de siempre), pero ahora la
+/// retención queda registrada y CADUCA: si la fila registrada
+/// lleva más de 7 días retenida, esta pasada la aparta a la
+/// cuarentena y el cursor la salta.
+class _RetencionesPull {
+  _RetencionesPull({this.registroPrevio})
+      : descartarId = (registroPrevio != null &&
+                retencionIncidenciaCaducada(
+                    registroPrevio.desde, ahoraHabana()))
+            ? registroPrevio.id
+            : null;
+
+  /// El registro que ya existía al abrir la pasada (si lo hay).
+  final RegistroRetencion? registroPrevio;
+
+  /// La fila cuya retención caducó: en esta pasada va a
+  /// cuarentena en vez de retener.
+  final String? descartarId;
+
+  String? primeraRetenidaId;
+  int primeraRetenidaSeq = 0;
+  String primeraRetenidaMotivo = '';
+  bool cuarentenaAplicada = false;
+
+  bool esCuarentena(String filaId) =>
+      descartarId != null && descartarId == filaId;
+
+  void anotarRetencion(String filaId, int seq, String motivo) {
+    if (primeraRetenidaId != null) return;
+    primeraRetenidaId = filaId;
+    primeraRetenidaSeq = seq;
+    primeraRetenidaMotivo = motivo;
+  }
+}
+
 /// true si el puente procesó la op pero la RECHAZÓ: la fila quedó con
 /// aplicada=true pero el envelope trae ok=false (ver sync_bridge.py:
 /// "se marca aplicada para no reintentarla infinitamente").
@@ -7967,10 +8032,115 @@ class SyncEngine {
 
   /// v1.3.0: Pull de incidencias con OCC por version.
   /// Fix #11 (Sol): no silenciar errores HTTP.
+  /// YS-4: lee el registro de retención de [tabla] desde meta
+  /// (`retencion_<tabla>`). JSON ausente o dañado → sin
+  /// registro (la retención volverá a nacer si la fila sigue
+  /// retenida: se pierde el reloj, nunca una fila).
+  Future<RegistroRetencion?> _leerRetencionIncidencia(
+      String tabla) async {
+    try {
+      final crudo = await _db.getMeta('retencion_$tabla');
+      if (crudo == null || crudo.isEmpty) return null;
+      final m = jsonDecode(crudo) as Map<String, dynamic>;
+      final id = '${m['id'] ?? ''}';
+      if (id.isEmpty) return null;
+      return (
+        id: id,
+        seq: (m['seq'] as num?)?.toInt() ?? 0,
+        desde: m['desde'] as String?,
+        motivo: '${m['motivo'] ?? ''}',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// YS-4: abre la contabilidad de retenciones de una pasada:
+  /// si la fila registrada lleva > 7 días retenida, esta
+  /// pasada la tratará como caducada (cuarentena).
+  Future<_RetencionesPull> _abrirRetencionesPull(String tabla) async {
+    return _RetencionesPull(
+        registroPrevio: await _leerRetencionIncidencia(tabla));
+  }
+
+  /// YS-4: cierra la contabilidad tras la pasada.
+  ///
+  /// - Si se apartó una fila a cuarentena: el registro se
+  ///   borra y la caducidad queda en bitácora.
+  /// - Si hubo una (nueva) primera retenida: se registra con
+  ///   su reloj empezando hoy — salvo que el registro ya fuera
+  ///   de ESA fila: su reloj sigue corriendo desde el primer
+  ///   día.
+  /// - Si no hubo retención y el cursor ya pasó la fila
+  ///   registrada: la retención terminó (el padre llegó o la
+  ///   fila se resolvió) y el registro se borra.
+  Future<void> _cerrarRetencionesPull(
+      String tabla, _RetencionesPull ret, int wmFinal) async {
+    try {
+      if (ret.cuarentenaAplicada) {
+        await _db.setMeta('retencion_$tabla', '');
+        AppLog.error('sync', 'incidencia_retenida_caducada',
+            d: '$tabla/${ret.descartarId}: retenida desde '
+                '${ret.registroPrevio?.desde ?? '?'} (> 7 días); '
+                'fila apartada a incidencias_cuarentena y '
+                'cursor liberado');
+      }
+      final retenida = ret.primeraRetenidaId;
+      if (retenida != null) {
+        final previa = ret.registroPrevio;
+        if (previa == null || previa.id != retenida) {
+          await _db.setMeta(
+              'retencion_$tabla',
+              jsonEncode({
+                'id': retenida,
+                'seq': ret.primeraRetenidaSeq,
+                'desde': isoHabana(ahoraHabana()),
+                'motivo': ret.primeraRetenidaMotivo,
+              }));
+        }
+      } else if (!ret.cuarentenaAplicada) {
+        final previa = ret.registroPrevio;
+        if (previa != null && previa.seq <= wmFinal) {
+          await _db.setMeta('retencion_$tabla', '');
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Costura de test (YS-4): la fila que una pasada de [tabla]
+  /// apartaría hoy a cuarentena por retención caducada, o
+  /// null si ninguna.
+  @visibleForTesting
+  Future<String?> descartarIdRetencionParaTest(String tabla) async {
+    final ret = await _abrirRetencionesPull(tabla);
+    return ret.descartarId;
+  }
+
+  /// Costura de test (YS-4): cierra una pasada simulada con
+  /// los desenlaces dados y deja la contabilidad aplicada.
+  @visibleForTesting
+  Future<void> cerrarRetencionParaTest(
+    String tabla, {
+    String? retenidaId,
+    int retenidaSeq = 0,
+    String motivo = '',
+    bool cuarentenaAplicada = false,
+    required int wmFinal,
+  }) async {
+    final ret = await _abrirRetencionesPull(tabla);
+    if (retenidaId != null) {
+      ret.anotarRetencion(retenidaId, retenidaSeq, motivo);
+    }
+    ret.cuarentenaAplicada = cuarentenaAplicada;
+    await _cerrarRetencionesPull(tabla, ret, wmFinal);
+  }
+
   Future<int> _pullIncidencias() async {
     var wm =
         await _db.getWatermarkTabla('incidencias');
     var total = 0;
+    // YS-4: contabilidad de retenciones de esta pasada.
+    final ret = await _abrirRetencionesPull('incidencias');
     try {
       // 1.28 (M1-A8/R1M1-H4): paginación real (ver
       // _pullTiposIncidencia): seguir hasta página corta/vacía.
@@ -8019,9 +8189,29 @@ class SyncEngine {
           if (local.isNotEmpty &&
               local.first['sync_estado'] ==
                   'pending') {
+            // YS-4: si ESTA fila lleva retenida > 7 días, su
+            // copia del servidor se aparta a cuarentena y el
+            // cursor la salta (la fila local sigue 'pending':
+            // su op manda, no el pull). Si no, retención
+            // normal registrada.
+            if (ret.esCuarentena('${m['id']}')) {
+              await _db.guardarCuarentenaIncidenciaEn(txn,
+                  tabla: 'incidencias',
+                  filaId: '${m['id']}',
+                  seq: seq,
+                  payloadJson: jsonEncode(m),
+                  motivo: 'conflicto_local_pendiente',
+                  retenidaDesde: ret.registroPrevio?.desde,
+                  caducadaEn: isoHabana(ahoraHabana()));
+              ret.cuarentenaAplicada = true;
+              if (seq > maxSeq) maxSeq = seq;
+              continue;
+            }
             // Argón: congelar avance de maxSeq ante conflicto,
             // pero seguir aplicando las demás filas.
             huboConflicto = true;
+            ret.anotarRetencion(
+                '${m['id']}', seq, 'conflicto_local_pendiente');
             continue;
           }
           if (!huboConflicto &&
@@ -8169,6 +8359,7 @@ class SyncEngine {
         if (rows.length < 100 || maxSeq <= wm) break;
         wm = maxSeq;
       }
+      await _cerrarRetencionesPull('incidencias', ret, wm);
       AppLog.info('sync', 'pull_inc_ok', d: 'n=$total');
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias', '');
@@ -8190,6 +8381,9 @@ class SyncEngine {
     var wm = await _db.getWatermarkTabla(
         'incidencias_comentarios');
     var total = 0;
+    // YS-4: contabilidad de retenciones de esta pasada.
+    final ret =
+        await _abrirRetencionesPull('incidencias_comentarios');
     try {
       // 1.28 (M1-A8/R1M1-H4): paginación real (ver
       // _pullTiposIncidencia): seguir hasta página corta/vacía.
@@ -8240,7 +8434,24 @@ class SyncEngine {
               if (seq > maxSeq) maxSeq = seq;
               continue;
             }
+            // YS-4: huérfana retenida > 7 días → cuarentena y
+            // el cursor la salta (su padre nunca llegó; la
+            // fila no se pierde: queda apartada e inspeccionable).
+            if (ret.esCuarentena('${m['id']}')) {
+              await _db.guardarCuarentenaIncidenciaEn(txn,
+                  tabla: 'incidencias_comentarios',
+                  filaId: '${m['id']}',
+                  seq: seq,
+                  payloadJson: jsonEncode(m),
+                  motivo: 'padre_ausente',
+                  retenidaDesde: ret.registroPrevio?.desde,
+                  caducadaEn: isoHabana(ahoraHabana()));
+              ret.cuarentenaAplicada = true;
+              if (seq > maxSeq) maxSeq = seq;
+              continue;
+            }
             huboHuerfano = true;
+            ret.anotarRetencion('${m['id']}', seq, 'padre_ausente');
             continue;
           }
           if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
@@ -8268,6 +8479,8 @@ class SyncEngine {
         if (rows.length < 100 || maxSeq <= wm) break;
         wm = maxSeq;
       }
+      await _cerrarRetencionesPull(
+          'incidencias_comentarios', ret, wm);
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
       await _db.setMeta('wm_err_incidencias_comentarios', '');
       return total;
@@ -8304,6 +8517,8 @@ class SyncEngine {
     var wm =
         await _db.getWatermarkTabla('incidencias_fotos');
     var total = 0;
+    // YS-4: contabilidad de retenciones de esta pasada.
+    final ret = await _abrirRetencionesPull('incidencias_fotos');
     try {
       // 1.28 (M1-A8/R1M1-H4): paginación real (ver
       // _pullTiposIncidencia): seguir hasta página corta/vacía.
@@ -8337,7 +8552,23 @@ class SyncEngine {
               if (seq > maxSeq) maxSeq = seq;
               continue;
             }
+            // YS-4: huérfana retenida > 7 días → cuarentena y
+            // el cursor la salta.
+            if (ret.esCuarentena('${m['id']}')) {
+              await _db.guardarCuarentenaIncidenciaEn(txn,
+                  tabla: 'incidencias_fotos',
+                  filaId: '${m['id']}',
+                  seq: seq,
+                  payloadJson: jsonEncode(m),
+                  motivo: 'padre_ausente',
+                  retenidaDesde: ret.registroPrevio?.desde,
+                  caducadaEn: isoHabana(ahoraHabana()));
+              ret.cuarentenaAplicada = true;
+              if (seq > maxSeq) maxSeq = seq;
+              continue;
+            }
             huboHuerfano = true;
+            ret.anotarRetencion('${m['id']}', seq, 'padre_ausente');
             continue;
           }
           if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
@@ -8366,6 +8597,7 @@ class SyncEngine {
         if (rows.length < 100 || maxSeq <= wm) break;
         wm = maxSeq;
       }
+      await _cerrarRetencionesPull('incidencias_fotos', ret, wm);
       await _db.setMeta('wm_err_incidencias_fotos', '');
       return total;
     } catch (e) {
@@ -8381,6 +8613,10 @@ class SyncEngine {
   Future<void> _pullIncidenciasHistorial() async {
     final wm = await _db.getWatermarkTabla(
         'incidencias_historial');
+    // YS-4: contabilidad de retenciones de esta pasada.
+    final ret =
+        await _abrirRetencionesPull('incidencias_historial');
+    var maxSeqHist = wm;
     try {
       final r = await _getAuth(Uri.parse(
           '$_base/rest/v1/sync_incidencias_historial?sync_seq=gt.$wm'
@@ -8411,7 +8647,25 @@ class SyncEngine {
               whereArgs: [m['incidencia_id']],
               limit: 1);
           if (padreH.isEmpty) {
+            // YS-4: huérfana retenida > 7 días → cuarentena y
+            // el cursor la salta (este pull no distingue por
+            // rol: la caducidad es su única salida, como
+            // especifica la pieza).
+            if (ret.esCuarentena('${m['id']}')) {
+              await _db.guardarCuarentenaIncidenciaEn(txn,
+                  tabla: 'incidencias_historial',
+                  filaId: '${m['id']}',
+                  seq: seq,
+                  payloadJson: jsonEncode(m),
+                  motivo: 'padre_ausente',
+                  retenidaDesde: ret.registroPrevio?.desde,
+                  caducadaEn: isoHabana(ahoraHabana()));
+              ret.cuarentenaAplicada = true;
+              if (seq > maxSeq) maxSeq = seq;
+              continue;
+            }
             huboHuerfano = true;
+            ret.anotarRetencion('${m['id']}', seq, 'padre_ausente');
             continue;
           }
           if (!huboHuerfano && seq > maxSeq) maxSeq = seq;
@@ -8437,7 +8691,10 @@ class SyncEngine {
         // _pullTiposIncidencia.
         await _db.setWatermarkTablaEn(
             txn, 'incidencias_historial', maxSeq);
+        maxSeqHist = maxSeq;
       });
+      await _cerrarRetencionesPull(
+          'incidencias_historial', ret, maxSeqHist);
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_hist_fallo',

@@ -282,7 +282,7 @@ void main() {
       final cols = await d.rawQuery(
           "SELECT name FROM pragma_table_info('comprobantes_pago')");
       expect(cols.map((c) => c['name']), contains('generacion'));
-      expect(LocalDb.versionActual, 71);
+      expect(LocalDb.versionActual, 72);
     });
   });
 

@@ -1645,6 +1645,10 @@ class LocalDb {
           // legible, en vez de congelar el pull para siempre).
           await _addColumnIfMissing(db, 'incidencias_local',
               'sync_error', 'TEXT');
+          // Yunque de Sincronización (YS-4): cuarentena local
+          // de filas de incidencias retenidas que caducan.
+          // MISMO método que onCreate (paridad garantizada).
+          await _crearTablaCuarentenaIncidencias(db);
         }
       },
     );
@@ -2934,6 +2938,60 @@ class LocalDb {
             'creada_en TEXT NOT NULL, sincronizada INTEGER NOT NULL DEFAULT 0)');
     // v1.3.0 (Sol #4): esquema de Incidencias también en instalación limpia.
     await _crearEsquemaIncidencias(db);
+    // Yunque de Sincronización (YS-4): cuarentena de filas
+    // retenidas caducadas. MISMO método en onCreate y en
+    // onUpgrade (v72).
+    await _crearTablaCuarentenaIncidencias(db);
+  }
+
+  /// Yunque de Sincronización (YS-4): tabla de cuarentena de
+  /// los pulls de incidencias. Cuando una fila retenida
+  /// (huérfana o en conflicto) supera la retención máxima, el
+  /// pull la aparta AQUÍ — con su payload íntegro, su motivo y
+  /// desde cuándo llevaba retenida — en vez de perderla en
+  /// silencio, y el cursor de su tabla queda liberado.
+  /// Idempotente: la llaman onCreate y la migración v72.
+  static Future<void> _crearTablaCuarentenaIncidencias(
+      DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS incidencias_cuarentena (
+      tabla TEXT NOT NULL,
+      fila_id TEXT NOT NULL,
+      sync_seq INTEGER NOT NULL DEFAULT 0,
+      payload TEXT NOT NULL,
+      motivo TEXT NOT NULL,
+      retenida_desde TEXT,
+      caducada_en TEXT NOT NULL,
+      PRIMARY KEY (tabla, fila_id)
+    )''');
+  }
+
+  /// YS-4: guarda (o sustituye) una fila retenida caducada en
+  /// la cuarentena, DENTRO del ejecutor del pull (la llamada
+  /// vive en la transacción de la página: fila apartada y
+  /// avance del cursor se confirman juntos o no se confirma
+  /// ninguno).
+  Future<void> guardarCuarentenaIncidenciaEn(
+    DatabaseExecutor d, {
+    required String tabla,
+    required String filaId,
+    required int seq,
+    required String payloadJson,
+    required String motivo,
+    String? retenidaDesde,
+    required String caducadaEn,
+  }) async {
+    await d.insert(
+        'incidencias_cuarentena',
+        {
+          'tabla': tabla,
+          'fila_id': filaId,
+          'sync_seq': seq,
+          'payload': payloadJson,
+          'motivo': motivo,
+          'retenida_desde': retenidaDesde,
+          'caducada_en': caducadaEn,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// v1.3.3 (v24): DDL de la tabla local de turnos, idempotente.
