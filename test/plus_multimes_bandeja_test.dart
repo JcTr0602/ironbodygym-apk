@@ -13,6 +13,8 @@
 /// runAsync con esperas reales, como el banco de la casa.
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
@@ -155,5 +157,61 @@ void main() {
         findsNothing);
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'plu06_ H6a: confirmar deja la tarjeta en «Decisión '
+      'encolada» y el reporte se encola UNA sola vez',
+      (tester) async {
+    // Servicio de UN solo reporte: los botones del árbol son
+    // los de esta tarjeta y solo esta.
+    final svc = PlusReportesService(
+      rpc: (nombre, params) async => [
+        _fila(id: 31, nombre: 'Marta', monto: 1000, referencia: 'REF31'),
+      ],
+    );
+    tester.view.physicalSize = const Size(1080, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: ReportesPlusScreen(servicio: svc, esDueno: true),
+    ));
+    expect(await _esperarTexto(tester, 'Marta'), isTrue,
+        reason: 'la bandeja carga el reporte del servicio falso');
+    // Confirmar desde la tarjeta y aceptar en el diálogo
+    // (su «Confirmar» es el último del árbol: la ruta del
+    // diálogo va encima de la bandeja).
+    await tester.tap(find.text('Confirmar'));
+    expect(await _esperarTexto(tester, 'Confirmar pago App Plus'),
+        isTrue);
+    await tester.tap(find.text('Confirmar').last);
+    // La tarjeta pasa a «Decisión encolada» y los botones
+    // de decisión desaparecen: no hay segundo toque posible.
+    expect(
+        await _esperarTexto(tester, 'Decisión encolada'), isTrue,
+        reason: 'la tarjeta refleja la decisión encolada');
+    expect(
+        find.text('Decisión encolada: se aplica al sincronizar'),
+        findsOneWidget);
+    expect(find.text('Confirmar'), findsNothing);
+    expect(find.text('Rechazar'), findsNothing);
+    // Y en la cola hay EXACTAMENTE una op de confirmación
+    // para este reporte.
+    await tester.runAsync(() async {
+      final ops = await LocalDb.instance.pendingOps();
+      final delReporte = ops.where((op) {
+        if (op['tipo'] != kTipoOpConfirmarPlus) return false;
+        final p = op['payload'];
+        final mapa = p is Map
+            ? Map<String, dynamic>.from(p)
+            : (p is String && p.isNotEmpty
+                ? Map<String, dynamic>.from(
+                    jsonDecode(p) as Map)
+                : null);
+        return mapa?['reporte_id']?.toString() == '31';
+      }).toList();
+      expect(delReporte.length, 1,
+          reason: 'una sola op de confirmación por reporte');
+    });
   });
 }
