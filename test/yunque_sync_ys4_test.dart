@@ -48,7 +48,9 @@ Future<Database> _abrirDbVacia() async {
 void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    // ignore: deprecated_member_use
+    await Supabase.initialize(
+        url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   group('YS-4 · retencionIncidenciaCaducada (pura)', () {
@@ -215,7 +217,7 @@ void main() {
     ]) {
       test('$nombre abre/cierra retenciones y aparta a '
           'cuarentena', () {
-        final i = sync.indexOf('Future<int> $nombre') >= 0
+        final i = sync.contains('Future<int> $nombre')
             ? sync.indexOf('Future<int> $nombre')
             : sync.indexOf('Future<void> $nombre');
         expect(i, isNonNegative, reason: 'no se encontró $nombre');

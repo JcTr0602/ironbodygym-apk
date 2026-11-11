@@ -87,7 +87,9 @@ Future<void> _barrer(String estado, dynamic resultado) async {
 void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    // ignore: deprecated_member_use
+    await Supabase.initialize(
+        url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   test('YS-3: op de incidencia RECHAZADA resuelve su fila local '

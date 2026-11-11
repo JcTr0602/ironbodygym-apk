@@ -57,7 +57,9 @@ Future<List<int>> _idsVivos() async {
 void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    // ignore: deprecated_member_use
+    await Supabase.initialize(
+        url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   group('YS-7 · purgarMirrorAusentes', () {
