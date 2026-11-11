@@ -21,6 +21,14 @@
 /// error) o quita el reinicio, el criterio se rompe en
 /// silencio. Estos pines estructurales lo fijan (mismo patrón
 /// que el grupo A-2 de la Auditoría Definitiva).
+///
+/// 1.32 (IMP-23): el mecanismo evolucionó a veredicto
+/// DECLARATIVO: `_doPush` publica al cierre un `VeredictoPush`
+/// construido SOLO con el contador de esta corrida, y el
+/// getter `_ultimoPushLimpio` lee ese veredicto publicado (ya
+/// no el contador en vivo). El criterio de este YS-6 —el
+/// sello juzga solo esta corrida— se conserva y se endurece:
+/// el tercer pin fija la forma nueva.
 library;
 
 import 'dart:io';
@@ -68,10 +76,20 @@ void main() {
 
     test('el veredicto de la corrida depende solo del '
         'contador', () {
+      // 1.32 (IMP-23): el getter lee el veredicto PUBLICADO
+      // al cierre, y el veredicto nace solo del contador de
+      // esta corrida (ver la nota de la cabecera).
       expect(sync,
-          contains('bool get _ultimoPushLimpio => _fallosUltimoPush == 0;'),
-          reason: 'el getter cambió: el sello ya no es función '
-              'pura de los golpes de esta corrida');
+          contains(
+              'bool get _ultimoPushLimpio => _veredictoUltimoPush.limpio;'),
+          reason: 'el getter cambió: el sello ya no lee el '
+              'veredicto publicado al cierre de _doPush');
+      expect(sync,
+          contains(
+              '_veredictoUltimoPush = VeredictoPush(fallos: _fallosUltimoPush);'),
+          reason: 'el veredicto publicado ya no nace solo '
+              'del contador de esta corrida: el sello pasaría '
+              'a juzgar otra cosa');
       expect(sync, contains('pushOk = _ultimoPushLimpio;'),
           reason: 'run() dejó de sellar con el veredicto de '
               'la corrida');
