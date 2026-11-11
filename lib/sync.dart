@@ -660,6 +660,23 @@ class SessionExpired implements Exception {
 /// v1.2.9: estado tipado de subida (corrección Gemini #3).
 enum EstadoSubida { subida, reintentable, permanente, permitirFallback, pausadaPorQos }
 
+/// Yunque de Sincronización (YS-1): desenlace que corresponde a
+/// un 4xx del POST de subida, decidido por
+/// [SyncEngine.decisionAnte4xxPush].
+///
+/// - [bumpAuth]: 401/403 — la sesión falló (el caso de campo: el
+///   refresco de token sin red hace que `_reqAuth` devuelva el
+///   401 original). La op NO es culpable: bump sin rechazo ni
+///   reversión; la reintentará el flujo de sesión.
+/// - [bumpCheck]: 4xx con código PG 23514 — el CHECK de
+///   sync_ops aún no conoce el tipo: bump en espera de que el
+///   CHECK se amplíe, jamás rechazo definitivo.
+/// - [rechazada]: 4xx de validación real del servidor: la op se
+///   marca 'rechazada' con su limpieza, como hasta hoy.
+/// - [bumpTransitorio]: 408/429/5xx o cualquier otro código no
+///   4xx: backoff transitorio de siempre.
+enum Decision4xxPush { bumpAuth, bumpCheck, rechazada, bumpTransitorio }
+
 /// Argón (sync adaptativa, paso 3): pausa de QoS a mitad de una
 /// subida TUS. No es un error: el offset ya quedó guardado tras
 /// cada chunk confirmado y las claves TUS se conservan, así que
@@ -3247,6 +3264,35 @@ class SyncEngine {
     return true;
   }
 
+  /// Yunque de Sincronización (YS-1, pura y probada): qué hacer
+  /// con una op cuyo POST de subida devolvió [statusCode] con
+  /// [cuerpo] de respuesta. Es la tabla que blinda la familia
+  /// YS-2/NEW-1: antes, la rama 4xx de `_uploadUnaPorUna` marcaba
+  /// 'rechazada' TODO 4xx sin salvavidas 23514, y un 401 nacido
+  /// de un refresco de token imposible (sin red, `_reqAuth`
+  /// devuelve el 401 original indistinguible de un rechazo)
+  /// quemaba la op y revertía su cobro; como el camino en lote
+  /// derivaba TODO 4xx al una-por-una, un solo corte de red
+  /// durante el refresco podía quemar la cola entera en un
+  /// ciclo. Ahora 401/403 se clasifican auth (la misma clase que
+  /// `clasificarError` ya les daba) y van al bump seguro: la op
+  /// queda en 'error' sin backoff ni reversión, a la espera del
+  /// flujo de sesión.
+  static Decision4xxPush decisionAnte4xxPush(
+      int statusCode, String cuerpo) {
+    if (statusCode == 401 || statusCode == 403) {
+      return Decision4xxPush.bumpAuth;
+    }
+    if (statusCode == 408 || statusCode == 429 || statusCode >= 500) {
+      return Decision4xxPush.bumpTransitorio;
+    }
+    if (statusCode >= 400 && statusCode < 500) {
+      if (cuerpo.contains('23514')) return Decision4xxPush.bumpCheck;
+      return Decision4xxPush.rechazada;
+    }
+    return Decision4xxPush.bumpTransitorio;
+  }
+
   /// 1.15 (caso c): verificación silenciosa del pull — solo barre
   /// cuando existen ops que salieron alguna vez. Ops 'pendiente'
   /// que nunca salieron o 'error' NO disparan el barrido (no hay
@@ -3496,6 +3542,10 @@ class SyncEngine {
     // NOTA: gzip en subida DESCARTADO (Supabase devuelve HTTP 400).
     final tagLote = await deviceTag();
     var i = 0;
+    // YS-1: un 401/403 del lote aborta el push de esta corrida
+    // (las ops ya salieron con su bump auth; seguir lotando solo
+    // repetiría el mismo fallo de sesión contra cada lote).
+    var abortarPush = false;
     while (i < porEnviar.length) {
       final tam = _loteAdaptativo.tam;
       final fin =
@@ -3537,14 +3587,31 @@ class SyncEngine {
           loteOk = true;
           algunEnvioAceptado = true;
         } else if (r.statusCode >= 400 && r.statusCode < 500) {
-          // error de cliente: reintenta op por op para aislar la
-          // culpable en vez de atascar el lote entero
-          // Yunque R3-M1-4: si el fallback aceptó ALGUNA op, el
-          // envío sí funcionó: se contabiliza como aceptado
-          // (antes el lote caía a 10 igualmente y, con un
-          // servidor que rechaza lotes pero acepta
-          // individuales, el push vivía en el mínimo + N POSTs).
-          if (await _uploadUnaPorUna(lote) > 0) {
+          // Yunque de Sincronización (YS-1): un 401/403 del lote
+          // es un fallo de SESIÓN, no de las ops: derivarlo al
+          // una-por-una repetiría el mismo 401 op a op (y antes
+          // de YS-1 cada una salía 'rechazada' con su cobro
+          // revertido: un corte de red durante el refresco
+          // quemaba la cola entera en un ciclo). Bump auth del
+          // lote completo y fin del push por esta corrida; el
+          // barrido se omite por fallo inequívoco, como ya
+          // decide debeBarrerTrasPush con falloInequivoco.
+          if (decisionAnte4xxPush(r.statusCode, r.body) ==
+              Decision4xxPush.bumpAuth) {
+            falloInequivoco = true;
+            abortarPush = true;
+            for (final op in lote) {
+              await _bumpConReversion(op, 'HTTP ${r.statusCode}',
+                  httpStatus: r.statusCode);
+            }
+          } else if (await _uploadUnaPorUna(lote) > 0) {
+            // error de cliente: reintenta op por op para aislar la
+            // culpable en vez de atascar el lote entero
+            // Yunque R3-M1-4: si el fallback aceptó ALGUNA op, el
+            // envío sí funcionó: se contabiliza como aceptado
+            // (antes el lote caía a 10 igualmente y, con un
+            // servidor que rechaza lotes pero acepta
+            // individuales, el push vivía en el mínimo + N POSTs).
             algunEnvioAceptado = true;
             loteOk = true;
           }
@@ -3579,6 +3646,7 @@ class SyncEngine {
         _loteAdaptativo.fallo();
       }
       i = fin;
+      if (abortarPush) break;
     }
     // 3) segunda pasada: confirmar en lote (sin N+1) y capturar el
     // resultado del servidor en ops_queue.resultado_servidor.
@@ -3712,7 +3780,18 @@ class SyncEngine {
           final cuerpo = r.body.length > 500
               ? r.body.substring(0, 500)
               : r.body;
-          if (cuerpo.contains('23514')) {
+          // Yunque de Sincronización (YS-1): la decisión ante el
+          // 4xx sale de la función pura. Un 401/403 (el 401 que
+          // _reqAuth devuelve cuando el refresco de token falló
+          // por red, o un 403 tras refresco válido) JAMÁS llega
+          // al markOp('rechazada') de abajo ni revierte nada:
+          // bump auth y la op sobrevive en 'error' hasta que el
+          // flujo de sesión la reintente.
+          final decision = decisionAnte4xxPush(r.statusCode, cuerpo);
+          if (decision == Decision4xxPush.bumpAuth) {
+            await _bumpConReversion(op, 'HTTP ${r.statusCode}',
+                httpStatus: r.statusCode);
+          } else if (decision == Decision4xxPush.bumpCheck) {
             await _bumpConReversion(op,
                 'CHECK del servidor aún no conoce este tipo (23514): '
                 'en espera de ampliación',
