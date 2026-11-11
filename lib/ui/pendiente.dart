@@ -31,7 +31,10 @@ import 'widgets.dart';
 import '../app_log.dart';
 
 class PendienteScreen extends StatefulWidget {
-  const PendienteScreen({super.key});
+  /// 1.32 «Mostrador Táctico»: embebida = pestaña «A Entregar»
+  /// de Mi Caja (Pilar 4), sin su AppBar.
+  final bool embebida;
+  const PendienteScreen({super.key, this.embebida = false});
   @override
   State<PendienteScreen> createState() => _PendienteScreenState();
 }
@@ -772,10 +775,12 @@ class _PendienteScreenState extends State<PendienteScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: appBarIron(
-        context,
-        _esDueno ? 'Pendiente a recoger' : 'Pendiente a entregar',
-      ),
+      appBar: widget.embebida
+          ? null
+          : appBarIron(
+              context,
+              _esDueno ? 'Pendiente a recoger' : 'Pendiente a entregar',
+            ),
       body: Column(
         children: [
           const SyncBanner(),
