@@ -61,6 +61,109 @@ class _CondicionVentaSuplemento {
       this.sql, this.args, this.sqlNulo, this.dart);
 }
 
+/// 1.32 (IMP-23) · CATÁLOGO ÚNICO DE ESPEJOS — eje watermark.
+///
+/// La herencia del watermark global de cada espejo se declara
+/// UNA sola vez, aquí. Antes vivía como cadena de ifs dentro de
+/// `getWatermarkTabla` mientras las migraciones sembraban
+/// `wm_<t>='0'` por su cuenta: dos listas manuales que debían
+/// crecer juntas (observación O-1 del Yunque de Sync). El fallo
+/// SB-02 nació de esa divergencia: liquidaciones_caja se purgaba
+/// pero no estaba en la lista, heredó el global congelado y su
+/// re-descarga tras re-login fue parcial y silenciosa.
+///
+/// Reglas al nacer un espejo nuevo:
+/// 1. Se clasifica AQUÍ antes de su primer pull. Hereda el
+///    global solo quien ya descargaba por el cursor global
+///    histórico (los espejos originales); todo espejo nacido
+///    con el global ya avanzado NO hereda — heredaría una
+///    posición que no es suya y se saltaría su descarga
+///    inicial entera, sin error visible.
+/// 2. Su migración siembra `wm_<t>='0'` al crear la tabla
+///    (defensa en profundidad: con la fila presente, ni
+///    siquiera hace falta la clasificación). Estado real
+///    fijado por el test de paridad: en instalación limpia 14
+///    de las 24 no-herederas exactas nacen sembradas; las
+///    demás y ambas familias por prefijo dependen SOLO de
+///    esta clasificación hasta que su primer pull escribe
+///    `wm_<t>` al aplicar la primera página.
+/// 3. `test/yunque_132_e1_imp23_test.dart` verifica el
+///    catálogo contra el comportamiento real (meta ausente +
+///    global alto ⇒ 0 para cada no-heredera; global para las
+///    herederas) y contra las semillas de la instalación
+///    limpia: una divergencia nueva rompe la suite, no el gym.
+///
+/// Fuera de este eje: los espejos con cursor PROPIO que no
+/// pasan por `getWatermarkTabla` (bandeja GymPedia:
+/// gympedia_solicitudes, permisos_bandeja,
+/// espejo_gympedia_borradores; congelaciones:
+/// cliente_congelaciones) — su semilla '0' es su punto de
+/// arranque, no herencia. Y las herederas sembradas
+/// (turnos_cierre, cliente_mediciones): su semilla solo fija
+/// el arranque de la instalación limpia; si la fila se pierde,
+/// heredan como las originales.
+class CatalogoEspejos {
+  CatalogoEspejos._();
+
+  /// Espejos que NO heredan el watermark global (nombre exacto).
+  static const Set<String> noHerederos = {
+    // v1.4.4 (v33) y 1.12.0 (G2): artículos y tumbas de GymPedia.
+    'gympedia_articulos',
+    'gympedia_borrados',
+    // Auditoría Definitiva (B-25): tombstones generales; la
+    // migración v27 resetea su cursor para re-aplicarlos.
+    'borrados',
+    // Biblioteca 1.15 (H2): catálogo de la Guía.
+    'guia_fichas',
+    'guia_equipos',
+    'guia_borrados',
+    // Reservas v2 (v34).
+    'reservas',
+    // v1.8.0 (v39): aperturas de turno.
+    'turnos_apertura',
+    // 1.20: F5 ajustes de stock, T22 nómina, T5 diferencias.
+    'suplemento_ajustes',
+    'nomina_liquidada_snapshot',
+    'nomina_confirmaciones',
+    'diferencias_caja',
+    // 1.21: candado de acceso.
+    'acceso_bloqueos',
+    // v1.8.0 (v40) y SB-02: adelantos y liquidaciones.
+    'adelantos',
+    'nomina_liquidada',
+    'liquidaciones_caja',
+    // 1.12.0 (G2): espejos del Bloque 3.
+    'solicitudes_adelanto',
+    'solicitudes_relleno',
+    'avisos_entrenadores',
+    'avisos_vistos',
+    // Fase A 2026-10-25 (v45): bonos, tarifas, entregas,
+    // recordatorios.
+    'nomina_bonos',
+    'espejo_tarifas_especiales',
+    'espejo_entregas_efectivo',
+    'espejo_recordatorio_config',
+  };
+
+  /// Familias que NO heredan, por prefijo de nombre:
+  /// incidencias* (v1.3.1 C3: en teléfonos viejos se saltaban
+  /// registros) y servicio_* (v1.8.0 v38: servicios por dosis).
+  static const List<String> noHerederosPrefijos = [
+    'incidencias',
+    'servicio_',
+  ];
+
+  /// ¿[tabla] hereda el watermark global si aún no tiene
+  /// cursor propio (`wm_<tabla>` ausente)?
+  static bool heredaGlobal(String tabla) {
+    if (noHerederos.contains(tabla)) return false;
+    for (final p in noHerederosPrefijos) {
+      if (tabla.startsWith(p)) return false;
+    }
+    return true;
+  }
+}
+
 class LocalDb {
   LocalDb._();
   static final LocalDb instance = LocalDb._();
@@ -9519,79 +9622,13 @@ class LocalDb {
   Future<int> getWatermarkTabla(String tabla) async {
     final v = await getMeta('wm_$tabla');
     if (v != null) return int.tryParse(v) ?? 0;
-    // v1.3.1 (C3): las tablas de incidencias NO heredan el watermark
-    // global; si no, en teléfonos viejos se saltan registros.
-    if (tabla.startsWith('incidencias')) return 0;
-    // v1.4.4 (v33): GymPedia tampoco hereda el global (nace en v33 con
-    // el global ya avanzado; heredar saltaría todos los artículos).
-    if (tabla == 'gympedia_articulos') return 0;
-    // v1.12.0 (G2): las tumbas de GymPedia tampoco heredan el global
-    // (nacen con la tabla; heredar saltaría tumbas viejas).
-    if (tabla == 'gympedia_borrados') return 0;
-    // Auditoría Definitiva (B-25): los tombstones generales
-    // tampoco heredan el global. Su cursor es propio y la
-    // migración v27 lo resetea para re-aplicarlos desde cero;
-    // sin este caso, una meta ausente (BD anterior a v27 que
-    // nunca la tuvo, o fila perdida) heredaba el global alto y
-    // los borrados de seq menor no se aplicaban nunca.
-    if (tabla == 'borrados') return 0;
-    // Biblioteca 1.15 (H2): las tablas de la Guía tampoco heredan el
-    // global (nacen con el global ya avanzado; heredar saltaría toda
-    // la descarga inicial del catálogo).
-    if (tabla == 'guia_fichas' ||
-        tabla == 'guia_equipos' ||
-        tabla == 'guia_borrados') {
-      return 0;
-    }
-    // Reservas v2 (v34): mismo motivo — la proyección nace con la
-    // tabla y debe descargarse desde cero.
-    if (tabla == 'reservas') return 0;
-    // v1.8.0 (v38): servicios por dosis — nacen con la tabla y deben
-    // descargarse desde cero, por el mismo motivo.
-    if (tabla.startsWith('servicio_')) return 0;
-    // v1.8.0 (v39): aperturas de turno, mismo motivo.
-    if (tabla == 'turnos_apertura') return 0;
-    // F5 (1.20): ajustes de stock, mismo motivo.
-    if (tabla == 'suplemento_ajustes') return 0;
-    // T22 (1.20): foto de liquidación y confirmaciones de
-    // nómina, mismo motivo.
-    if (tabla == 'nomina_liquidada_snapshot' ||
-        tabla == 'nomina_confirmaciones') {
-      return 0;
-    }
-    // T5 (1.20): expedientes de diferencia de caja, mismo
-    // motivo.
-    if (tabla == 'diferencias_caja') return 0;
-    // 1.21: candado de acceso, mismo motivo.
-    if (tabla == 'acceso_bloqueos') return 0;
-    // v1.8.0 (v40): adelantos y liquidaciones, mismo motivo.
-    // SB-02 (auditoría sync 1.21): liquidaciones_caja faltaba en
-    // esta lista — la purga SÍ borra su wm (meta) pero aquí
-    // heredaba el watermark GLOBAL congelado (setWatermark no
-    // tiene llamadores) y tras re-login la re-descarga era
-    // parcial y silenciosa, sin cura automática.
-    if (tabla == 'adelantos' ||
-        tabla == 'nomina_liquidada' ||
-        tabla == 'liquidaciones_caja') {
-      return 0;
-    }
-    // v1.12.0 (G2): los espejos nuevos del Bloque 3 nacen con la
-    // tabla y deben descargarse desde cero, por el mismo motivo.
-    if (tabla == 'solicitudes_adelanto' ||
-        tabla == 'solicitudes_relleno' ||
-        tabla == 'avisos_entrenadores' ||
-        tabla == 'avisos_vistos') {
-      return 0;
-    }
-    // Fase A 2026-10-25 (v45): los espejos de bonos, tarifas,
-    // entregas y recordatorios nacen con la tabla y deben
-    // descargarse desde cero, por el mismo motivo.
-    if (tabla == 'nomina_bonos' ||
-        tabla == 'espejo_tarifas_especiales' ||
-        tabla == 'espejo_entregas_efectivo' ||
-        tabla == 'espejo_recordatorio_config') {
-      return 0;
-    }
+    // 1.32 (IMP-23): sin cursor propio, la herencia del global
+    // se decide en el Catálogo Único de Espejos
+    // (CatalogoEspejos, sobre la clase LocalDb): la cadena de
+    // ifs que vivía aquí era una de las dos listas manuales
+    // que debían crecer juntas (observación O-1 del Yunque
+    // de Sync).
+    if (!CatalogoEspejos.heredaGlobal(tabla)) return 0;
     return getWatermark(); // hereda el global (migración)
   }
 
@@ -10534,6 +10571,33 @@ class LocalDb {
   /// servidor en `sync_error` — sin borrarse en silencio: es
   /// información del usuario, que puede descartarla o
   /// reintentarla desde la UI como ya hace con las ops.
+  /// 1.32 (IMP-23): el marcado terminal de la op que comparten
+  /// los resolutores de incidencias (la op y su fila local se
+  /// resuelven en LA MISMA transacción: morir entre ambos
+  /// dejaba la fila 'pending' con la op ya terminal, el modo
+  /// de fallo que IMP-5 vino a cerrar).
+  Future<void> _marcarOpResueltaEn(
+    DatabaseExecutor txn,
+    String opUuid, {
+    required String motivo,
+    String? resultadoJson,
+    required bool revision,
+  }) async {
+    await txn.update(
+        'ops_queue',
+        {
+          'estado': revision ? 'necesita_revision' : 'rechazada',
+          'error': motivo,
+        },
+        where: 'op_uuid=?',
+        whereArgs: [opUuid]);
+    if (resultadoJson != null) {
+      await txn.update(
+          'ops_queue', {'resultado_servidor': resultadoJson},
+          where: 'op_uuid=?', whereArgs: [opUuid]);
+    }
+  }
+
   Future<void> resolverOpIncidenciaRechazada(
     String opUuid, {
     required String incidenciaId,
@@ -10543,19 +10607,8 @@ class LocalDb {
   }) async {
     final d = await db;
     await d.transaction((txn) async {
-      await txn.update(
-          'ops_queue',
-          {
-            'estado': revision ? 'necesita_revision' : 'rechazada',
-            'error': motivo,
-          },
-          where: 'op_uuid=?',
-          whereArgs: [opUuid]);
-      if (resultadoJson != null) {
-        await txn.update(
-            'ops_queue', {'resultado_servidor': resultadoJson},
-            where: 'op_uuid=?', whereArgs: [opUuid]);
-      }
+      await _marcarOpResueltaEn(txn, opUuid,
+          motivo: motivo, resultadoJson: resultadoJson, revision: revision);
       await txn.update(
           'incidencias_local',
           {
@@ -10565,6 +10618,38 @@ class LocalDb {
           },
           where: 'id=?',
           whereArgs: [incidenciaId]);
+    });
+  }
+
+  /// 1.32 (IMP-23, cierre de IMP-5): resuelve la fila local de
+  /// un COMENTARIO cuya op murió en el teléfono o fue
+  /// rechazada/en revisión en el servidor. Era el cuarto tipo
+  /// vivo sin resolutor: el embudo de muerte local y el
+  /// barrido solo extraían el id para los tipos de
+  /// incidencias_local, así que un comentario rechazado dejaba
+  /// su fila en 'pending' para siempre (el barrido de
+  /// confirmación lo trata como bloqueado por su op terminal
+  /// y nunca lo marca). La fila de comentarios no tiene
+  /// columna de motivo: el motivo vive en la op, que se marca
+  /// en la misma transacción vía [_marcarOpResueltaEn]. La
+  /// incidencia PADRE no se toca: que un comentario muera no
+  /// ensucia el estado de la incidencia misma.
+  Future<void> resolverComentarioIncidenciaRechazado(
+    String opUuid, {
+    required String comentarioId,
+    required String motivo,
+    String? resultadoJson,
+    required bool revision,
+  }) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      await _marcarOpResueltaEn(txn, opUuid,
+          motivo: motivo, resultadoJson: resultadoJson, revision: revision);
+      await txn.update(
+          'incidencias_comentarios',
+          {'sync_estado': 'error'},
+          where: 'id=?',
+          whereArgs: [comentarioId]);
     });
   }
 

@@ -462,6 +462,34 @@ List<String> resumenBajadaCompleta(BajadaCompletaResultado r) {
   return out;
 }
 
+/// 1.32 (IMP-23): veredicto DECLARATIVO del cierre de un push.
+///
+/// Hasta la 1.31, «push limpio» era un contador mutable
+/// (`_fallosUltimoPush`) que los consumidores leían donde
+/// estuvieran: el veredicto no existía como dato, solo como
+/// lectura oportunista de un acumulador. Desde la 1.32,
+/// `_doPush` PUBLICA este veredicto al cerrar (una sola vez,
+/// en su única salida normal) y todos los consumidores —el
+/// sello «sincronizado» de run(), la limpieza de
+/// `last_sync_error` y el gancho de éxito de push()— leen el
+/// veredicto publicado, no el acumulador. Si el push muere con
+/// excepción, NO se publica veredicto nuevo: queda el de la
+/// corrida anterior y los llamadores ya tratan la excepción
+/// como push no-OK por su propio cauce.
+class VeredictoPush {
+  /// Ops que esta corrida intentó subir y quedaron golpeadas
+  /// (con bump) en `_bumpConReversion`.
+  final int fallos;
+
+  const VeredictoPush({required this.fallos});
+
+  /// Un push limpio: ninguna op intentada quedó golpeada en
+  /// ESTA corrida. Las que esperan su backoff o su ventana de
+  /// Deshacer no fueron intentadas y no ensucian el veredicto
+  /// (definición de A-2, sin cambio).
+  bool get limpio => fallos == 0;
+}
+
 /// v1.8.0 (Frente 5): resultado REAL de una corrida del motor
 /// ([SyncEngine.run], [SyncEngine.push], [SyncEngine.pull]).
 /// subidos/bajados son los de ESTA corrida (confirmados por el
@@ -1330,8 +1358,19 @@ class SyncEngine {
   /// intentadas y no ensucian el veredicto).
   int _fallosUltimoPush = 0;
 
+  /// 1.32 (IMP-23): el veredicto que el último `_doPush`
+  /// PUBLICÓ al cerrar (ver [VeredictoPush]). Nace limpio,
+  /// como nacía el contador: antes del primer push no hay
+  /// nada que haya fallado.
+  VeredictoPush _veredictoUltimoPush = const VeredictoPush(fallos: 0);
+
   /// ¿El último `_doPush` terminó sin una sola op golpeada?
-  bool get _ultimoPushLimpio => _fallosUltimoPush == 0;
+  /// Lee el veredicto PUBLICADO al cierre, no el acumulador.
+  bool get _ultimoPushLimpio => _veredictoUltimoPush.limpio;
+
+  /// Costura de test (IMP-23): el veredicto publicado por el
+  /// último cierre de push.
+  VeredictoPush get veredictoUltimoPushParaTest => _veredictoUltimoPush;
 
   /// v1.2.9+43: cliente HTTP singleton para reutilizar conexiones TCP/TLS
   /// (Keep-Alive). Evita el handshake de 800ms-2s por cada petición.
@@ -2782,6 +2821,11 @@ class SyncEngine {
       _emit(SyncPhase.idle);
       // v1.2.9+46 (AppLog): push completo.
       AppLog.info('sync', 'push_fin', d: 'ops=$totalOps fotos=$fotosSubidas');
+      // 1.32 (IMP-23): PUBLICACIÓN del veredicto al cierre —
+      // la única escritura del veredicto, en la única salida
+      // normal de _doPush. Las salidas por excepción no
+      // publican (ver la doc de VeredictoPush).
+      _veredictoUltimoPush = VeredictoPush(fallos: _fallosUltimoPush);
       return totalOps;
     } on SessionExpired {
       _sesionVencida();
@@ -3788,6 +3832,20 @@ class SyncEngine {
   Future<bool> _resolverIncidenciaSiOpMuereLocal(
       Map<String, dynamic> op,
       {required bool revision, required String motivo}) async {
+    // 1.32 (IMP-23, cierre de IMP-5): el comentario es el
+    // cuarto tipo vivo — su fila vive en incidencias_comentarios
+    // y se resuelve SIN tocar la incidencia padre.
+    if ('${op['tipo']}' == 'agregar_comentario_incidencia') {
+      String? comentarioId;
+      try {
+        final pl = jsonDecode(op['payload'] as String);
+        comentarioId = pl['id'] as String?;
+      } catch (_) {}
+      if (comentarioId == null) return false;
+      await _db.resolverComentarioIncidenciaRechazado('${op['op_uuid']}',
+          comentarioId: comentarioId, motivo: motivo, revision: revision);
+      return true;
+    }
     if (!_tiposIncidencia.contains('${op['tipo']}')) return false;
     String? incidenciaId;
     try {
@@ -4181,6 +4239,17 @@ class SyncEngine {
         incidenciaId = (pl['id'] ?? pl['incidencia_id']) as String?;
       } catch (_) {}
     }
+    // 1.32 (IMP-23, cierre de IMP-5): el comentario extrae SU
+    // id (el de la fila en incidencias_comentarios), no el de
+    // la incidencia padre: su rechazo/revisión resuelve la
+    // fila del comentario y deja la padre intacta.
+    String? comentarioId;
+    if ('${op['tipo']}' == 'agregar_comentario_incidencia') {
+      try {
+        final pl = jsonDecode(op['payload'] as String);
+        comentarioId = pl['id'] as String?;
+      } catch (_) {}
+    }
     String? resultadoJsonYS3;
     if (rec.resultado != null) {
       try {
@@ -4231,7 +4300,16 @@ class SyncEngine {
     }
     if (rec.estado == 'rechazada' ||
         (rec.estado == 'aplicada' && rechazadaPorPuente)) {
-      if (incidenciaId != null) {
+      if (comentarioId != null) {
+        // 1.32 (IMP-23): el rechazo del comentario resuelve
+        // SU fila, no la de la incidencia padre.
+        await _db.resolverComentarioIncidenciaRechazado(uuid,
+            comentarioId: comentarioId,
+            motivo: motivoRechazo(rec.resultado, rec.error) ??
+                'El servidor rechazó la operación.',
+            resultadoJson: resultadoJsonYS3,
+            revision: false);
+      } else if (incidenciaId != null) {
         // YS-3: el rechazo también resuelve la fila local de
         // la incidencia, en la misma transacción que el
         // marcado de la op (antes quedaba 'pending' eterna y
@@ -4308,7 +4386,16 @@ class SyncEngine {
       return false;
     }
     if (rec.estado == 'necesita_revision') {
-      if (incidenciaId != null) {
+      if (comentarioId != null) {
+        // 1.32 (IMP-23): la revisión del comentario resuelve
+        // SU fila, no la de la incidencia padre.
+        await _db.resolverComentarioIncidenciaRechazado(uuid,
+            comentarioId: comentarioId,
+            motivo: motivoRechazo(rec.resultado, rec.error) ??
+                'El servidor pidió revisión manual de esta operación.',
+            resultadoJson: resultadoJsonYS3,
+            revision: true);
+      } else if (incidenciaId != null) {
         // YS-3: la revisión también resuelve la fila local
         // (mismo desenlace terminal visible que el rechazo).
         await _db.resolverOpIncidenciaRechazada(uuid,

@@ -1,0 +1,310 @@
+/// 1.32 · Escalón 1 — IMP-23 completo (sugerencias de
+/// arquitectura de la Auditoría Definitiva, destino 1.32):
+///
+/// (1) CATÁLOGO ÚNICO DE ESPEJOS: la herencia del watermark
+/// global vive en CatalogoEspejos (localdb) y getWatermarkTabla
+/// lo consulta. Paridad CONDUCTUAL: con la meta `wm_<t>`
+/// ausente y el global alto, cada no-heredera devuelve 0 y
+/// cada heredera devuelve el global — es el fallo SB-02
+/// convertido en test. Más la foto exacta de las semillas de
+/// la instalación limpia (19 claves `wm_*`='0').
+/// (2) PUSH LIMPIO DECLARATIVO: el veredicto se publica UNA
+/// vez al cierre de _doPush; un bump a mitad de corrida mueve
+/// el acumulador pero NO republica el veredicto que leen los
+/// consumidores.
+/// (3) TRANSICIÓN DE INCIDENCIAS: matriz de los 4 tipos vivos
+/// por el embudo central. El comentario era el tipo sin
+/// resolutor (su fila quedaba 'pending' eterna al morir o ser
+/// rechazada su op): ahora se resuelve SU fila sin tocar la
+/// incidencia padre, por el barrido y por la muerte local.
+library;
+
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/sync.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+Future<Database> _abrirDbVacia() async {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+  SharedPreferences.setMockInitialValues({});
+  final dir = await getDatabasesPath();
+  final dbPath = p.join(dir, 'ironbody.db');
+  try {
+    await File(dbPath).delete();
+  } catch (_) {}
+  await LocalDb.resetParaTest();
+  return await LocalDb.instance.db;
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    SharedPreferences.setMockInitialValues({});
+    // ignore: deprecated_member_use
+    await Supabase.initialize(
+        url: 'http://127.0.0.1:9', publishableKey: 'dummy');
+  });
+
+  group('IMP-23(1) · Catálogo Único de Espejos', () {
+    test('instalación limpia: las semillas wm_* son las 19 '
+        'declaradas', () async {
+      final db = await _abrirDbVacia();
+      final rows = await db.query('meta',
+          columns: ['k'], where: "k LIKE 'wm\\_%' ESCAPE '\\'");
+      final semillas = {for (final r in rows) '${r['k']}'.substring(3)};
+      expect(semillas, {
+        // No-herederas sembradas al nacer (14).
+        'avisos_entrenadores', 'avisos_vistos',
+        'espejo_entregas_efectivo', 'espejo_recordatorio_config',
+        'espejo_tarifas_especiales', 'guia_borrados', 'guia_equipos',
+        'guia_fichas', 'gympedia_articulos', 'gympedia_borrados',
+        'nomina_bonos', 'reservas', 'solicitudes_adelanto',
+        'solicitudes_relleno',
+        // Cursor propio, fuera del eje de herencia (4).
+        'cliente_congelaciones', 'espejo_gympedia_borradores',
+        'gympedia_solicitudes', 'permisos_bandeja',
+        // Heredera sembrada: la semilla fija solo el arranque
+        // de la instalación limpia (1).
+        'cliente_mediciones',
+      },
+          reason: 'una semilla nueva o retirada obliga a '
+              'actualizar el catálogo y esta foto a la vez');
+      await db.close();
+    });
+
+    test('sin meta wm_<t> y global alto: la herencia es la '
+        'del catálogo (paridad SB-02)', () async {
+      final db = await _abrirDbVacia();
+      await LocalDb.instance.setWatermark(999999);
+      Future<int> sinMeta(String t) async {
+        await db.delete('meta', where: 'k=?', whereArgs: ['wm_$t']);
+        return LocalDb.instance.getWatermarkTabla(t);
+      }
+
+      for (final t in CatalogoEspejos.noHerederos) {
+        expect(await sinMeta(t), 0,
+            reason: '$t es no-heredera en el catálogo: con su '
+                'meta ausente no puede heredar el global');
+      }
+      // Familias por prefijo (representantes reales).
+      for (final t in [
+        'incidencias_sync',
+        'incidencias_comentarios',
+        'servicio_pomos',
+        'servicio_ventas',
+      ]) {
+        expect(await sinMeta(t), 0,
+            reason: '$t entra por la familia de prefijo del '
+                'catálogo');
+      }
+      // Herederas: espejos originales y las sembradas cuya
+      // semilla no cambia la clasificación.
+      for (final t in [
+        'clientes',
+        'pagos',
+        'gastos',
+        'turnos_cierre',
+        'cliente_mediciones',
+      ]) {
+        expect(await sinMeta(t), 999999,
+            reason: '$t hereda el global si su meta se pierde');
+      }
+      await db.close();
+    });
+
+    test('getWatermarkTabla consulta el catálogo (guarda de '
+        'fuente)', () {
+      final fuente = File('lib/localdb.dart').readAsStringSync();
+      final i = fuente.indexOf('Future<int> getWatermarkTabla');
+      final j = fuente.indexOf('Future<void> setWatermarkTabla', i);
+      expect(i, isNonNegative);
+      expect(j, isNonNegative);
+      expect(fuente.substring(i, j),
+          contains('CatalogoEspejos.heredaGlobal'),
+          reason: 'la función no puede volver a llevar su '
+              'propia lista: la clasificación es del catálogo');
+    });
+  });
+
+  group('IMP-23(2) · veredicto declarativo del push', () {
+    test('un bump mueve el acumulador pero NO republica el '
+        'veredicto', () async {
+      final db = await _abrirDbVacia();
+      final motor = SyncEngine.instance;
+      // Estado inicial: el veredicto nace limpio.
+      expect(motor.veredictoUltimoPushParaTest.fallos, 0);
+      expect(motor.veredictoUltimoPushParaTest.limpio, isTrue);
+
+      // Una op golpeada a mitad de corrida (el embudo de
+      // bumps incrementa el acumulador interno)...
+      await db.insert('clientes', {
+        'id': 42,
+        'data': jsonEncode({'id': 42, 'nombre': 'V', 'estado': 'activo'}),
+        'sync_seq': 1,
+      });
+      await db.insert('ops_queue', {
+        'op_uuid': 'op-imp23-bump',
+        'tipo': 'pago_mensual',
+        'payload': jsonEncode(
+            {'cliente_id': 42, 'pagado_hasta': '2026-12-01'}),
+        'estado': 'enviada',
+        'creada_ts': '2026-11-10T10:00:00-04:00',
+      });
+      final op = (await db.query('ops_queue',
+              where: 'op_uuid=?', whereArgs: ['op-imp23-bump']))
+          .single;
+      await motor.bumpConReversionParaTest(op, 'HTTP 500',
+          httpStatus: 500);
+
+      // ...y el veredicto PUBLICADO sigue siendo el del
+      // cierre anterior: los consumidores (sello, limpieza
+      // de error, gancho de éxito) solo ven veredictos de
+      // pushes CERRADOS, no acumuladores a medio camino.
+      expect(motor.veredictoUltimoPushParaTest.fallos, 0,
+          reason: 'el veredicto solo se publica al cierre de '
+              '_doPush (IMP-23)');
+      expect(motor.veredictoUltimoPushParaTest.limpio, isTrue);
+      await db.close();
+    });
+
+    test('la publicación es única y vive al cierre de _doPush '
+        '(guarda de fuente)', () {
+      final fuente = File('lib/sync.dart').readAsStringSync();
+      expect(
+          '_veredictoUltimoPush = VeredictoPush(fallos: _fallosUltimoPush)'
+              .allMatches(fuente)
+              .length,
+          1,
+          reason: 'una sola escritura del veredicto con el '
+              'acumulador de la corrida: su publicación al '
+              'cierre (la declaración del campo nace con la '
+              'constante limpia, no cuenta)');
+      final i = fuente.indexOf('Future<int> _doPush(');
+      final j = fuente.indexOf(
+          '_veredictoUltimoPush = VeredictoPush(fallos: _fallosUltimoPush)',
+          i);
+      expect(j, isNonNegative,
+          reason: 'la publicación está dentro de _doPush');
+    });
+  });
+
+  group('IMP-23(3) · el comentario se resuelve por el embudo',
+      () {
+    Future<void> sembrarComentario(Database db,
+        {required String opUuid}) async {
+      await db.insert('incidencias_local', {
+        'id': 'inc-imp23',
+        'tipo': 'sync',
+        'descripcion': 'Padre del comentario',
+        'creada_por': 'test',
+        'creada_en': '2026-11-10T10:00:00-04:00',
+        'sync_estado': 'synced',
+        'sincronizada': 1,
+      });
+      await db.insert('incidencias_comentarios', {
+        'id': 'com-imp23',
+        'incidencia_id': 'inc-imp23',
+        'texto': 'Comentario de prueba',
+        'creado_por': 'test',
+        'creado_en': '2026-11-10T10:05:00-04:00',
+        'sync_estado': 'pending',
+        'op_uuid': opUuid,
+      });
+      await db.insert('ops_queue', {
+        'op_uuid': opUuid,
+        'tipo': 'agregar_comentario_incidencia',
+        'payload': jsonEncode({
+          'id': 'com-imp23',
+          'incidencia_id': 'inc-imp23',
+          'texto': 'Comentario de prueba',
+        }),
+        'estado': 'enviada',
+        'creada_ts': '2026-11-10T10:05:00-04:00',
+      });
+    }
+
+    Future<String?> estadoComentario(Database db) async {
+      final f = await db.query('incidencias_comentarios',
+          columns: ['sync_estado'],
+          where: 'id=?',
+          whereArgs: ['com-imp23']);
+      return f.single['sync_estado'] as String?;
+    }
+
+    Future<String?> estadoPadre(Database db) async {
+      final f = await db.query('incidencias_local',
+          columns: ['sync_estado'],
+          where: 'id=?',
+          whereArgs: ['inc-imp23']);
+      return f.single['sync_estado'] as String?;
+    }
+
+    Future<void> barrer(String estado, dynamic resultado) async {
+      await SyncEngine.instance.barridoConfirmacion(
+        verificar: (uuids) async => {
+          for (final u in uuids)
+            u: (estado: estado, resultado: resultado, error: null),
+        },
+      );
+    }
+
+    test('barrido RECHAZADA: el comentario sale a error y el '
+        'padre queda intacto', () async {
+      final db = await _abrirDbVacia();
+      await sembrarComentario(db, opUuid: 'op-imp23-rec');
+      await barrer('rechazada', {'ok': false, 'error': 'spam'});
+      expect(await estadoComentario(db), 'error',
+          reason: 'antes de la 1.32 el comentario quedaba '
+              'pending para siempre: nadie resolvía su fila');
+      expect(await estadoPadre(db), 'synced',
+          reason: 'la muerte de un comentario no ensucia la '
+              'incidencia padre');
+      final op = await db.query('ops_queue',
+          columns: ['estado'],
+          where: 'op_uuid=?',
+          whereArgs: ['op-imp23-rec']);
+      expect(op.single['estado'], 'rechazada');
+      await db.close();
+    });
+
+    test('barrido NECESITA_REVISION: el comentario también '
+        'se resuelve', () async {
+      final db = await _abrirDbVacia();
+      await sembrarComentario(db, opUuid: 'op-imp23-rev');
+      await barrer('necesita_revision', {'error': 'a revisar'});
+      expect(await estadoComentario(db), 'error');
+      expect(await estadoPadre(db), 'synced');
+      final op = await db.query('ops_queue',
+          columns: ['estado'],
+          where: 'op_uuid=?',
+          whereArgs: ['op-imp23-rev']);
+      expect(op.single['estado'], 'necesita_revision');
+      await db.close();
+    });
+
+    test('muerte local de la op: el embudo resuelve el '
+        'comentario', () async {
+      final db = await _abrirDbVacia();
+      await sembrarComentario(db, opUuid: 'op-imp23-muerte');
+      final op = (await db.query('ops_queue',
+              where: 'op_uuid=?', whereArgs: ['op-imp23-muerte']))
+          .single;
+      final resuelta = await SyncEngine.instance
+          .resolverIncidenciaSiOpMuereLocalParaTest(op,
+              revision: false, motivo: 'HTTP 422 de PostgREST');
+      expect(resuelta, isTrue,
+          reason: 'el embudo reconoce el tipo comentario');
+      expect(await estadoComentario(db), 'error');
+      expect(await estadoPadre(db), 'synced');
+      await db.close();
+    });
+  });
+}
