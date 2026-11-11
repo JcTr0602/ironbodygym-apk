@@ -544,13 +544,21 @@ class _RaizSesionState extends State<RaizSesion> {
   bool _logueado = AuthService().loggedIn;
   StreamSubscription<AuthState>? _sub;
 
+  /// 1.32 (O2F2S, Pieza 4d): motivo visible cuando la
+  /// verificación de arranque encuentra la sesión muerta.
+  String? _avisoSesionMuerta;
+
   @override
   void initState() {
     super.initState();
     _sub = Supabase.instance.client.auth.onAuthStateChange.listen((s) {
       final hay = s.session != null;
       if (hay != _logueado && mounted) {
-        setState(() => _logueado = hay);
+        setState(() {
+          _logueado = hay;
+          // Con una sesión nueva el motivo viejo caduca.
+          if (hay) _avisoSesionMuerta = null;
+        });
         // Panel v1.4.4: al PERDER la sesión hay que replegar la
         // pila entera hasta la raíz. Cambiar solo el contenido de
         // la ruta raíz dejaba vivas las pantallas apiladas encima
@@ -560,6 +568,27 @@ class _RaizSesionState extends State<RaizSesion> {
         }
       }
     });
+    // 1.32 (O2F2S, Pieza 4d): verificación de la sesión al
+    // arranque, SIN await: la raíz pinta ya (offline-first) y
+    // si la sesión guardada está muerta, el desenlace llega
+    // por el stream (signOut) + este aviso.
+    unawaited(_verificarSesionArranque());
+  }
+
+  Future<void> _verificarSesionArranque() async {
+    final viva = await AuthService().verificarSesionAlArranque();
+    if (viva || !mounted) return;
+    var motivo = AuthService.textoSesionMuerta;
+    try {
+      final m = await LocalDb.instance
+          .getMeta(AuthService.metaMotivoSesionMuerta);
+      if (m != null && m.isNotEmpty) motivo = m;
+      // Se muestra una vez: la meta se limpia al consumirla.
+      await LocalDb.instance
+          .setMeta(AuthService.metaMotivoSesionMuerta, '');
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _avisoSesionMuerta = motivo);
   }
 
   @override
@@ -569,6 +598,7 @@ class _RaizSesionState extends State<RaizSesion> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      _logueado ? const HomeScreen() : const LoginScreen();
+  Widget build(BuildContext context) => _logueado
+      ? const HomeScreen()
+      : LoginScreen(aviso: _avisoSesionMuerta);
 }

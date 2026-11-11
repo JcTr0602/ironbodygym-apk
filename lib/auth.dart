@@ -52,6 +52,76 @@ class AuthService {
   Session? get session => _c.auth.currentSession;
   bool get loggedIn => session != null;
 
+  /// Meta con el motivo cuando la verificación de arranque
+  /// descubre una sesión muerta (Login lo muestra una vez).
+  static const metaMotivoSesionMuerta = 'motivo_sesion_muerta';
+
+  /// Texto del motivo (mismo que usa el motor de sync).
+  static const textoSesionMuerta =
+      'La sesión no es válida: cierra sesión y entra de nuevo.';
+
+  /// 1.32 (O2F2S, Pieza 4d): ¿este error de refresco es un
+  /// RECHAZO de auth del servidor? El SDK lo distingue:
+  /// AuthApiException = el servidor respondió y rechazó
+  /// (refresh token rotado/revocado); AuthRetryableFetch
+  /// Exception y los timeouts = la red no respondió. Solo
+  /// el rechazo mata la sesión; la red caída da gracia
+  /// offline (la sesión se conserva intacta).
+  static bool esRechazoDeAuth(Object e) => e is AuthApiException;
+
+  /// Verificación de arranque: si la sesión guardada está
+  /// vencida, intenta UN refresco y clasifica el desenlace:
+  /// - vigente o renovada → true, nada más que hacer.
+  /// - el servidor RECHAZA el refresco (el caso de la
+  ///   sesión resucitada por Auto Backup con el refresh ya
+  ///   rotado en la instalación vieja) → la sesión está
+  ///   MUERTA: signOut + motivo persistido, y devuelve
+  ///   false para que la raíz mande a Login con el motivo.
+  /// - la red no responde → GRACIA OFFLINE: devuelve true
+  ///   y la sesión se conserva (el motor juzgará en su
+  ///   corrida, como siempre).
+  /// Nunca lanza. La raíz la dispara SIN await: jamás
+  /// bloquea el primer pintado (regla offline-first).
+  Future<bool> verificarSesionAlArranque() async {
+    try {
+      final ses = session;
+      if (ses == null) return true;
+      if (!ses.isExpired) return true;
+      try {
+        final res = await _c.auth
+            .refreshSession()
+            .timeout(const Duration(seconds: 12));
+        final nueva = res.session;
+        if (nueva != null && !nueva.isExpired) return true;
+        // El servidor respondió sin conceder sesión: muerta.
+        await _sellarSesionMuerta();
+        return false;
+      } catch (e) {
+        if (esRechazoDeAuth(e)) {
+          await _sellarSesionMuerta();
+          return false;
+        }
+        // Red caída / timeout: gracia offline.
+        return true;
+      }
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Sella la sesión muerta: motivo persistido (Login lo
+  /// lee una vez) y cierre local de la sesión para que
+  /// `loggedIn` deje de mentir «hay sesión».
+  Future<void> _sellarSesionMuerta() async {
+    try {
+      await LocalDb.instance
+          .setMeta(metaMotivoSesionMuerta, textoSesionMuerta);
+    } catch (_) {}
+    try {
+      await signOut();
+    } catch (_) {}
+  }
+
   String get displayName {
     final meta = session?.user.userMetadata;
     final nombre = meta?['nombre'] as String?;
