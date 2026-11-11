@@ -85,6 +85,37 @@ Future<String> registrarMedicionCliente({
   return medicionId;
 }
 
+/// 1.32 (H-RPC-2): cancela la op `registrar_medicion_cliente`
+/// aún pendiente de ESTE teléfono para la medición
+/// [medicionId] (UUID de la vía de ops). Es la vía de
+/// edición/borrado de una medición que solo tiene identidad
+/// local: las RPC de staff exigen el id bigint del servidor y
+/// enviarles el UUID rebotaba con 400. Devuelve true si la op
+/// estaba pendiente (o en error) y quedó cancelada — la fila
+/// desaparece de la lectura local, que la compone desde
+/// pendingOps. False si ya salió de la cola (aplicada o
+/// enviada): la fila ya vive en el servidor.
+Future<bool> cancelarMedicionPendienteSiExiste(
+    String medicionId) async {
+  if (medicionId.isEmpty) return false;
+  final db = LocalDb.instance;
+  for (final op in await db.pendingOps()) {
+    if ('${op['tipo']}' != 'registrar_medicion_cliente') continue;
+    try {
+      final p = jsonDecode(op['payload'] as String);
+      if (p is Map && '${p['medicion_id'] ?? ''}' == medicionId) {
+        // La columna del uuid en ops_queue es op_uuid (uuid
+        // solo es el nombre legado que leen algunos sitios).
+        return await db
+            .cancelOp('${op['op_uuid'] ?? op['uuid'] ?? ''}');
+      }
+    } catch (_) {
+      // Payload ilegible: no es la op buscada.
+    }
+  }
+  return false;
+}
+
 /// Lectura local de medidas de un cliente: espejo + ops pendientes
 /// del propio teléfono (dedupe por medicion_id: la fila espejada
 /// manda sobre la op pendiente con el mismo id). Recientes primero.

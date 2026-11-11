@@ -28,8 +28,16 @@ class Medicion {
   // 1.28 (M4-A12/R1M4-M16): el id CRUDO de la medición. Las
   // filas nacidas de la vía de ops llevan un UUID por
   // medicion_id y el `int.tryParse` de la reconstrucción
-  // offline lo dejaba en 0: editar/borrar esa fila llamaba
-  // a la RPC con p_medicion_id = 0. El UUID viaja aquí.
+  // offline lo dejaba en 0.
+  // 1.32 (H-RPC-2): OJO al contrato real — ese UUID es la
+  // identidad de la VÍA DE OPS, no la de las RPC de staff:
+  // guardar_medicion_staff/eliminar_medicion declaran
+  // p_medicion_id BIGINT y la tabla viva
+  // (sync_progreso_mediciones) ni siquiera tiene columna
+  // medicion_id; su identidad es la columna `id`. Enviar el
+  // UUID a la RPC rebotaba con 400 disfrazado de «revisa la
+  // conexión». Para las RPC manda [idServidor]; el UUID solo
+  // sirve para localizar la op pendiente local.
   final String? idCrudo;
   final String clienteId;
   // 1.28 (M4-A12/R1M4-B19): nullable — una medición sin peso
@@ -60,6 +68,16 @@ class Medicion {
     required this.registradoPor,
     required this.createdAt,
   });
+
+  /// 1.32 (H-RPC-2): el id NUMÉRICO de servidor de la medición
+  /// (la identidad que aceptan guardar_medicion_staff y
+  /// eliminar_medicion, `p_medicion_id bigint`), o null si la
+  /// fila solo tiene identidad local (UUID de la vía de ops):
+  /// en ese caso NO se llama a la RPC con id — se edita/borra
+  /// por la vía de ops. El entero del modelo manda; el crudo
+  /// solo vale si también es numérico.
+  int? get idServidor =>
+      id > 0 ? id : int.tryParse((idCrudo ?? '').trim());
 
   factory Medicion.fromJson(Map<String, dynamic> j) {
     return Medicion(
@@ -138,8 +156,11 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       return Medicion.fromJson({
         // 1.28 (M4-A12): el medicion_id viaja CRUDO
         // (puede ser UUID de la vía de ops): el modelo
-        // lo conserva en idCrudo para editar/borrar;
-        // el int queda solo como respaldo de orden.
+        // lo conserva en idCrudo; el int queda solo como
+        // respaldo de orden. 1.32 (H-RPC-2): ese UUID
+        // localiza la op pendiente para editar/borrar por
+        // la vía de ops — a las RPC de staff solo va el id
+        // numérico de servidor (Medicion.idServidor).
         'id': int.tryParse('${r['medicion_id'] ?? ''}') ?? 0,
         'medicion_id': '${r['medicion_id'] ?? ''}',
         'cliente_id': widget.clienteId,
@@ -612,6 +633,64 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       return;
     }
 
+    // 1.32 (H-RPC-2): editar una medición que solo tiene
+    // identidad local (UUID de la vía de ops) NO va a la RPC
+    // de staff: p_medicion_id es bigint y el UUID rebotaba
+    // con 400 disfrazado de fallo de conexión. Va por la vía
+    // de ops: si su op aún está pendiente en este teléfono se
+    // cancela y se encola la corregida (la fila nunca salió);
+    // si ya se sincronizó, la corrección entra como fila
+    // nueva — el modelo de mediciones es inmutable: una
+    // corrección es una fila posterior.
+    if (existente != null && existente.idServidor == null) {
+      final cidOps = int.tryParse(widget.clienteId);
+      if (cidOps == null) {
+        if (mounted) {
+          mostrarSnack(context,
+              'No se pudo guardar la medición.',
+              significado: SignificadoChip.error);
+        }
+        return;
+      }
+      final eraPendiente = await cancelarMedicionPendienteSiExiste(
+          existente.idCrudo ?? '');
+      try {
+        await registrarMedicionCliente(
+          clienteId: cidOps,
+          medidas: {
+            ...medidasForm,
+            if (existente.grasaPct != null)
+              'grasa_pct': existente.grasaPct!,
+            if (existente.pechoCm != null)
+              'pecho_cm': existente.pechoCm!,
+            if (existente.caderaCm != null)
+              'cadera_cm': existente.caderaCm!,
+          },
+        );
+      } catch (e) {
+        AppLog.error('progreso', 'guardar_medicion_ops_fallo',
+            d: '$e');
+        if (mounted) {
+          mostrarSnack(context,
+              'No se pudo guardar la medición: $e',
+              significado: SignificadoChip.error);
+        }
+        return;
+      }
+      if (mounted) {
+        mostrarSnack(
+            context,
+            eraPendiente
+                ? 'Medición actualizada'
+                : 'La medición ya estaba sincronizada: la '
+                    'corrección quedó registrada como una '
+                    'medición nueva.',
+            significado: SignificadoChip.exito);
+        _cargar();
+      }
+      return;
+    }
+
     try {
       await Supabase.instance.client
           .rpc('guardar_medicion_staff', params: {
@@ -626,10 +705,13 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         'p_brazo_cm': _parseNum(brazoStr),
         'p_muslo_cm': _parseNum(musloStr),
         'p_notas': notasStr.trim().isEmpty ? null : notasStr.trim(),
-        // 1.28 (M4-A12): el id CRUDO (UUID de la vía de ops)
-        // cuando existe; el entero solo es el respaldo de
-        // las filas del servidor.
-        'p_medicion_id': existente?.idCrudo ?? existente?.id,
+        // 1.32 (H-RPC-2): SOLO el id numérico de servidor
+        // (idServidor), null al crear. El UUID de la vía de
+        // ops jamás viaja aquí: la RPC declara bigint y la
+        // tabla viva no tiene columna medicion_id (el
+        // comentario de la 1.28 afirmaba el contrato al
+        // revés y el UUID rebotaba con 400).
+        'p_medicion_id': existente?.idServidor,
           })
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
@@ -673,11 +755,37 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       peligro: true,
     );
     if (!ok || !mounted) return;
+    // 1.32 (H-RPC-2): borrar una medición que solo tiene
+    // identidad local (UUID de la vía de ops) tampoco va a la
+    // RPC (bigint): si su op aún está pendiente aquí, se
+    // cancela y la fila desaparece; si ya se sincronizó, aquí
+    // aún no tiene su número de servidor y se dice con
+    // claridad en vez de disparar una RPC condenada al 400 —
+    // con conexión, la lista se repone desde el servidor ya
+    // con el id numérico y el borrado sale por la RPC.
+    if (m.idServidor == null) {
+      final cancelada =
+          await cancelarMedicionPendienteSiExiste(m.idCrudo ?? '');
+      if (mounted) {
+        if (cancelada) {
+          mostrarSnack(context, 'Medición eliminada',
+              significado: SignificadoChip.exito);
+          _cargar();
+        } else {
+          mostrarSnack(context,
+              'Esta medición ya está en el servidor y en este '
+              'teléfono aún no tiene su número: conéctate, '
+              'actualiza la lista y vuelve a intentarlo.',
+              significado: SignificadoChip.alerta);
+        }
+      }
+      return;
+    }
     try {
       await Supabase.instance.client
           .rpc('eliminar_medicion', params: {
-            // 1.28 (M4-A12): id crudo (UUID) si lo hay.
-            'p_medicion_id': m.idCrudo ?? m.id,
+            // 1.32 (H-RPC-2): solo el id numérico de servidor.
+            'p_medicion_id': m.idServidor,
           })
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
