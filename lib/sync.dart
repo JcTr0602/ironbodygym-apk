@@ -8191,8 +8191,17 @@ class SyncEngine {
   /// - Si no hubo retención y el cursor ya pasó la fila
   ///   registrada: la retención terminó (el padre llegó o la
   ///   fila se resolvió) y el registro se borra.
+  /// - H4 (revisión de Argón al Yunque de Sync): si la
+  ///   pasada llegó al FIN DEL FLUJO ([finDeFlujo]: la
+  ///   consulta desde el watermark devolvió página vacía o
+  ///   corta) sin retener nada, la fila registrada ya no
+  ///   puede reaparecer — fue borrada en el servidor — y el
+  ///   registro se borra aunque el cursor no la haya pasado
+  ///   (sin esto la meta quedaba colgada para siempre,
+  ///   ocupando el hueco único de retención).
   Future<void> _cerrarRetencionesPull(
-      String tabla, _RetencionesPull ret, int wmFinal) async {
+      String tabla, _RetencionesPull ret, int wmFinal,
+      {bool finDeFlujo = false}) async {
     try {
       if (ret.cuarentenaAplicada) {
         await _db.setMeta('retencion_$tabla', '');
@@ -8217,7 +8226,8 @@ class SyncEngine {
         }
       } else if (!ret.cuarentenaAplicada) {
         final previa = ret.registroPrevio;
-        if (previa != null && previa.seq <= wmFinal) {
+        if (previa != null &&
+            (finDeFlujo || previa.seq <= wmFinal)) {
           await _db.setMeta('retencion_$tabla', '');
         }
       }
@@ -8242,6 +8252,7 @@ class SyncEngine {
     int retenidaSeq = 0,
     String motivo = '',
     bool cuarentenaAplicada = false,
+    bool finDeFlujo = false,
     required int wmFinal,
   }) async {
     final ret = await _abrirRetencionesPull(tabla);
@@ -8249,7 +8260,8 @@ class SyncEngine {
       ret.anotarRetencion(retenidaId, retenidaSeq, motivo);
     }
     ret.cuarentenaAplicada = cuarentenaAplicada;
-    await _cerrarRetencionesPull(tabla, ret, wmFinal);
+    await _cerrarRetencionesPull(tabla, ret, wmFinal,
+        finDeFlujo: finDeFlujo);
   }
 
   Future<int> _pullIncidencias() async {
@@ -8258,6 +8270,8 @@ class SyncEngine {
     var total = 0;
     // YS-4: contabilidad de retenciones de esta pasada.
     final ret = await _abrirRetencionesPull('incidencias');
+    // H4: ¿la pasada alcanzó el fin del flujo del servidor?
+    var finDeFlujo = false;
     try {
       // 1.28 (M1-A8/R1M1-H4): paginación real (ver
       // _pullTiposIncidencia): seguir hasta página corta/vacía.
@@ -8271,7 +8285,10 @@ class SyncEngine {
             'pull_incidencias HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) break;
+      if (rows.isEmpty) {
+        finDeFlujo = true; // H4: nada sobre el watermark.
+        break;
+      }
       final d = await _db.db;
       var maxSeq = wm;
       await d.transaction((txn) async {
@@ -8480,7 +8497,12 @@ class SyncEngine {
         await _db.setWatermarkTablaEn(txn, 'incidencias', maxSeq);
       });
         total += rows.length;
-        if (rows.length < 100 || maxSeq <= wm) break;
+        if (rows.length < 100 || maxSeq <= wm) {
+          // H4: página corta = no quedan filas sobre el
+          // watermark: fin del flujo.
+          if (rows.length < 100) finDeFlujo = true;
+          break;
+        }
         wm = maxSeq;
       }
       AppLog.info('sync', 'pull_inc_ok', d: 'n=$total');
@@ -8508,7 +8530,8 @@ class SyncEngine {
       // aplicada no limpia su meta ni deja bitácora.
       // _cerrarRetencionesPull es defensiva (try/catch
       // propio): segura en un finally.
-      await _cerrarRetencionesPull('incidencias', ret, wm);
+      await _cerrarRetencionesPull('incidencias', ret, wm,
+          finDeFlujo: finDeFlujo);
     }
   }
 
@@ -8520,6 +8543,8 @@ class SyncEngine {
     // YS-4: contabilidad de retenciones de esta pasada.
     final ret =
         await _abrirRetencionesPull('incidencias_comentarios');
+    // H4: ¿la pasada alcanzó el fin del flujo del servidor?
+    var finDeFlujo = false;
     try {
       // 1.28 (M1-A8/R1M1-H4): paginación real (ver
       // _pullTiposIncidencia): seguir hasta página corta/vacía.
@@ -8533,7 +8558,10 @@ class SyncEngine {
             'pull_inc_comentarios HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) break;
+      if (rows.isEmpty) {
+        finDeFlujo = true; // H4: nada sobre el watermark.
+        break;
+      }
       final d = await _db.db;
       var maxSeq = wm;
       await d.transaction((txn) async {
@@ -8614,7 +8642,12 @@ class SyncEngine {
             txn, 'incidencias_comentarios', maxSeq);
       });
         total += rows.length;
-        if (rows.length < 100 || maxSeq <= wm) break;
+        if (rows.length < 100 || maxSeq <= wm) {
+          // H4: página corta = fin del flujo (ver
+          // _pullIncidencias).
+          if (rows.length < 100) finDeFlujo = true;
+          break;
+        }
         wm = maxSeq;
       }
       // v1.3.1 (Argón pull r2): limpiar error por tabla.
@@ -8633,7 +8666,8 @@ class SyncEngine {
       // H11: cierre de retenciones garantizado (ver
       // _pullIncidencias).
       await _cerrarRetencionesPull(
-          'incidencias_comentarios', ret, wm);
+          'incidencias_comentarios', ret, wm,
+          finDeFlujo: finDeFlujo);
     }
   }
 
@@ -8660,6 +8694,8 @@ class SyncEngine {
     var total = 0;
     // YS-4: contabilidad de retenciones de esta pasada.
     final ret = await _abrirRetencionesPull('incidencias_fotos');
+    // H4: ¿la pasada alcanzó el fin del flujo del servidor?
+    var finDeFlujo = false;
     try {
       // 1.28 (M1-A8/R1M1-H4): paginación real (ver
       // _pullTiposIncidencia): seguir hasta página corta/vacía.
@@ -8673,7 +8709,10 @@ class SyncEngine {
             'pull_inc_fotos HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) break;
+      if (rows.isEmpty) {
+        finDeFlujo = true; // H4: nada sobre el watermark.
+        break;
+      }
       final d = await _db.db;
       var maxSeq = wm;
       await d.transaction((txn) async {
@@ -8737,7 +8776,12 @@ class SyncEngine {
             txn, 'incidencias_fotos', maxSeq);
       });
         total += rows.length;
-        if (rows.length < 100 || maxSeq <= wm) break;
+        if (rows.length < 100 || maxSeq <= wm) {
+          // H4: página corta = fin del flujo (ver
+          // _pullIncidencias).
+          if (rows.length < 100) finDeFlujo = true;
+          break;
+        }
         wm = maxSeq;
       }
       await _db.setMeta('wm_err_incidencias_fotos', '');
@@ -8751,7 +8795,8 @@ class SyncEngine {
     } finally {
       // H11: cierre de retenciones garantizado (ver
       // _pullIncidencias).
-      await _cerrarRetencionesPull('incidencias_fotos', ret, wm);
+      await _cerrarRetencionesPull('incidencias_fotos', ret, wm,
+          finDeFlujo: finDeFlujo);
     }
   }
 
@@ -8773,7 +8818,15 @@ class SyncEngine {
             'pull_inc_historial HTTP ${r.statusCode}');
       }
       final rows = jsonDecode(r.body) as List;
-      if (rows.isEmpty) return;
+      if (rows.isEmpty) {
+        // H4: la consulta completó limpia — cerrar la
+        // contabilidad (y limpiar una retención cuya fila ya
+        // no existe en el servidor) antes de salir; este
+        // retorno temprano antes no cerraba nunca.
+        await _cerrarRetencionesPull(
+            'incidencias_historial', ret, wm, finDeFlujo: true);
+        return;
+      }
       final d = await _db.db;
       await d.transaction((txn) async {
         var maxSeq = wm;
@@ -8842,7 +8895,8 @@ class SyncEngine {
         maxSeqHist = maxSeq;
       });
       await _cerrarRetencionesPull(
-          'incidencias_historial', ret, maxSeqHist);
+          'incidencias_historial', ret, maxSeqHist,
+          finDeFlujo: rows.length < 100);
     } catch (e) {
       AppLog.error(
           'sync', 'pull_inc_hist_fallo',

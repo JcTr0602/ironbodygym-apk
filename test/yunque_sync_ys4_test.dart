@@ -204,6 +204,33 @@ void main() {
           .cerrarRetencionParaTest(tabla, wmFinal: 60);
       expect(await leerRegistro(), isNull);
     });
+
+    test('H4: la fila retenida desapareció del servidor — '
+        'pasada en fin de flujo sin avanzar el cursor limpia '
+        'el registro', () async {
+      await _abrirDbVacia();
+      final desde =
+          isoHabana(ahoraHabana().subtract(const Duration(days: 1)));
+      await sembrarRegistro('h-7', 50, desde);
+      // La consulta desde wm=49 volvió vacía (fin de flujo):
+      // la fila 50 ya no puede reaparecer y el registro no
+      // debe quedar colgado ocupando el hueco de retención.
+      await SyncEngine.instance.cerrarRetencionParaTest(tabla,
+          wmFinal: 49, finDeFlujo: true);
+      expect(await leerRegistro(), isNull,
+          reason: 'la meta quedó colgada de una fila que ya '
+              'no existe en el servidor');
+      expect(
+          await SyncEngine.instance
+              .descartarIdRetencionParaTest(tabla),
+          isNull);
+      // Control: la misma pasada SIN fin de flujo conserva
+      // el registro (la fila podría seguir en camino).
+      await sembrarRegistro('h-7', 50, desde);
+      await SyncEngine.instance
+          .cerrarRetencionParaTest(tabla, wmFinal: 49);
+      expect(await leerRegistro(), isNotNull);
+    });
   });
 
   group('YS-4/H10 · la cuarentena no salta una retenida de la '
