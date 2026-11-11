@@ -4395,6 +4395,15 @@ class SyncEngine {
           miUuid.isNotEmpty &&
           procedencia != miUuid) {
         _pullProtegidoPendiente = true;
+        // H12 (revisión de Argón al Yunque de Sync): el pull
+        // silencioso es DELTA por sync_seq — si AMBAS ops del
+        // cliente fueron rechazadas, la fila del servidor
+        // nunca cambió, su seq nunca avanzó y el delta jamás
+        // traerá al cliente: el vencimiento falso quedaría
+        // pegado para siempre (patrón Missail). Se fuerza
+        // además la re-descarga completa de clientes, el
+        // mismo remedio que _marcarRestauracionSuplemento.
+        await _db.setMeta('forzar_redescarga_clientes', '1');
         return;
       }
       final actualRaw = '${filas.first['pagado_hasta'] ?? ''}';

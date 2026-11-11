@@ -161,6 +161,37 @@ void main() {
               'pago confirmado con el mismo valor');
     });
 
+    test('H12: procedencia de OTRA op → no revierte, pero '
+        'deja puesta la re-descarga forzada de clientes',
+        () async {
+      await _abrirDbVacia();
+      await LocalDb.instance.upsertMirror(
+          'clientes',
+          508,
+          {'id': 508, 'nombre': 'G', 'pagado_hasta': '2026-12-10'},
+          1);
+      await LocalDb.instance
+          .registrarProcedenciaPago(508, 'op-segunda');
+      await SyncEngine.instance.revertirVencimientoOptimistaParaTest(
+          _opPago(
+              clienteId: 508,
+              optimista: '2026-12-10',
+              anterior: '2026-11-10',
+              opUuid: 'op-primera'));
+      // No revierte: el vencimiento vigente es de la segunda.
+      expect(await _pagadoHastaEspejo(508), '2026-12-10');
+      // Y la convergencia no queda fiada al pull delta: si
+      // AMBAS ops hubieran sido rechazadas, la fila del
+      // servidor nunca avanzó su sync_seq y el delta jamás
+      // traería al cliente (patrón Missail).
+      expect(
+          await LocalDb.instance
+              .getMeta('forzar_redescarga_clientes'),
+          '1',
+          reason: 'la rama procedencia != miUuid no activó la '
+              're-descarga forzada');
+    });
+
     test('YS-5: procedencia de ESTA op + mismo valor → '
         'revierte como siempre', () async {
       await _abrirDbVacia();
