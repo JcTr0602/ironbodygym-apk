@@ -6244,13 +6244,31 @@ class LocalDb {
         });
       } catch (_) {}
     }
-    final nulos = await d.rawQuery(
-        'SELECT id, data FROM pagos WHERE fecha IS NULL$whereExtra',
-        argsExtra);
+    // H19 (revisión de Argón al Yunque de Sync): el fallback
+    // filtraba telegram_user_id en SQL también para las filas
+    // con la columna en NULL — y NULL = ? es UNKNOWN: un pago
+    // cuya proyección no pobló la columna (legado pre-v26 o
+    // id no numérico en el JSON) se perdía en silencio para
+    // su entrenador («Mi día» subcontaba). Espejo de la
+    // hermana pagosPorDiaYEntrenador: el fallback trae
+    // `fecha IS NULL OR telegram_user_id IS NULL` SIN filtro
+    // de entrenador en SQL y valida AMBOS campos en Dart con
+    // normalizarTelegramId. Sin soloTelegramId (vista del
+    // dueño) el fallback queda como estaba. Las filas del
+    // fallback son disjuntas de la consulta principal (esta
+    // exige ambas columnas pobladas), sin duplicados.
+    final nulos = soloTelegramId == null
+        ? await d.rawQuery(
+            'SELECT id, data FROM pagos WHERE fecha IS NULL')
+        : await d.rawQuery('SELECT id, data FROM pagos WHERE '
+            'fecha IS NULL OR telegram_user_id IS NULL');
     for (final r in nulos) {
       try {
         final p = jsonDecode(r['data'] as String) as Map<String, dynamic>;
-        if (fechaNegocioHabana(p['fecha']) == fechaIso) {
+        if (fechaNegocioHabana(p['fecha']) == fechaIso &&
+            (soloTelegramId == null ||
+                normalizarTelegramId(p['telegram_user_id']) ==
+                    soloTelegramId)) {
           res.add({...p, 'id': r['id']});
         }
       } catch (_) {}
