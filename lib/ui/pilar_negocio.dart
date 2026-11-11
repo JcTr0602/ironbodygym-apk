@@ -376,14 +376,25 @@ class _TabCajaState extends State<_TabCaja> {
     final r = await mostrarHojaLiquidarArqueo(context,
         telegramId: tid, nombre: nombre);
     if (r == null) return;
-    mostrarAvisoLiquidacionConDeshacer(
-      messenger,
-      mensaje: 'Liquidación registrada para $nombre.',
-      liqId: r.liqId,
-      alDeshacer: () async {
-        await _cargar();
-      },
-    );
+    if (r.modo == ModoHojaArqueo.entregaC1) {
+      // Modo C1: no hay Deshacer (la entrega queda en el
+      // libro; igual que la pantalla C1 original).
+      mostrarSnackEnMessenger(
+        messenger,
+        'Entrega anticipada registrada para $nombre '
+        '(${r.entregado.toStringAsFixed(0)} CUP).',
+        significado: SignificadoChip.exito,
+      );
+    } else {
+      mostrarAvisoLiquidacionConDeshacer(
+        messenger,
+        mensaje: 'Liquidación registrada para $nombre.',
+        liqId: r.liquidacion!.liqId,
+        alDeshacer: () async {
+          await _cargar();
+        },
+      );
+    }
     await _cargar();
   }
 

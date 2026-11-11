@@ -503,14 +503,23 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
     final r = await mostrarHojaLiquidarArqueo(context,
         telegramId: tid, nombre: nombre);
     if (r == null) return;
-    mostrarAvisoLiquidacionConDeshacer(
-      messenger,
-      mensaje: 'Liquidación registrada para $nombre.',
-      liqId: r.liqId,
-      alDeshacer: () async {
-        await _cargarLocalesExtra();
-      },
-    );
+    if (r.modo == ModoHojaArqueo.entregaC1) {
+      mostrarSnackEnMessenger(
+        messenger,
+        'Entrega anticipada registrada para $nombre '
+        '(${r.entregado.toStringAsFixed(0)} CUP).',
+        significado: SignificadoChip.exito,
+      );
+    } else {
+      mostrarAvisoLiquidacionConDeshacer(
+        messenger,
+        mensaje: 'Liquidación registrada para $nombre.',
+        liqId: r.liquidacion!.liqId,
+        alDeshacer: () async {
+          await _cargarLocalesExtra();
+        },
+      );
+    }
     await _cargarLocalesExtra();
   }
 }

@@ -54,6 +54,7 @@ import 'hub_comunicacion.dart';
 import 'centro_control.dart';
 import 'actividad.dart';
 import 'buscar.dart';
+import 'marco.dart';
 import 'admin_secciones.dart';
 import 'salud_sync_screen.dart';
 import 'cola.dart';
@@ -1099,13 +1100,25 @@ class _AdminScreenState extends State<AdminScreen> {
         pendientesSubir: _pendientesSubir,
       );
 
+  /// Oleada 2 (Fase 1, desviación 1): liquidar ya no abre
+  /// una pantalla propia del Panel — la puerta única vive
+  /// en la Caja del Pilar 4 (la hoja «Liquidar Arqueo» con
+  /// selector de modo cierre/C1). El Panel se cierra y el
+  /// marco salta a la Caja: el mismo gesto que la Lupa usa
+  /// para el destino 'liquidar'. (ArqueoEntregaScreen quedó
+  /// sin llamadores y se retiró.)
+  void _irACajaPilar() {
+    Navigator.of(context).pop();
+    MarcoNav.irANegocio('caja');
+  }
+
   /// 1.29 (Oleada 5, D-23): el destino de un ítem «POR
   /// REVISAR» — las mismas pantallas que abren las
   /// tarjetas de cada módulo.
   void _abrirItemPorRevisar(ItemPorRevisar item) {
     switch (item.destino) {
       case DestinoPorRevisar.liquidacion:
-        _ir(const ArqueoEntregaScreen());
+        _irACajaPilar();
       case DestinoPorRevisar.solicitudesInvitados:
         _ir(const InvitadosScreen());
       case DestinoPorRevisar.reportesPlus:
@@ -1325,7 +1338,8 @@ class _AdminScreenState extends State<AdminScreen> {
       case 'cierre_caja':
         _ir(_pantallaCierre());
       case 'liquidar':
-        _ir(const ArqueoEntregaScreen());
+        // Puerta única en la Caja del Pilar 4 (Oleada 2 F1).
+        _irACajaPilar();
       case 'extracto':
         _ir(const CentroComprasScreen());
       case 'gastos':
@@ -2935,8 +2949,8 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.handshake_rounded,
         'Liquidar efectivo de entrenadores',
-        'Cuadra lo entregado por cada entrenador',
-        () => _ir(const ArqueoEntregaScreen()),
+        'La puerta única de liquidación vive en la Caja',
+        () => _irACajaPilar(),
       ),
       _tarjetaFlujo(
         Icons.receipt_long_rounded,
