@@ -158,6 +158,11 @@ String detalleActividadCliente(ActividadCliente a) {
     partes.add(dias == 1 ? 'Premio: 1 día' : 'Premio: $dias días');
   }
   agrega('Fecha', d['fecha']);
+  // 1.32 (B1-H9): las filas de SESIÓN de la RPC viva
+  // emiten la fecha como `fecha_sesion`; sin leerla, la
+  // sesión salía sin fecha en su detalle. Solo una de las
+  // dos claves vendrá no vacía por fuente.
+  agrega('Fecha', d['fecha_sesion']);
   agrega('Turno', d['turno']);
   agrega('Entrenador', d['entrenador_id']);
   agrega('Nota', d['nota']);

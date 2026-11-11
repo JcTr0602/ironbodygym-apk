@@ -159,6 +159,25 @@ String fmtFechaHabana(DateTime dt) {
   return '${h.day}/${h.month}/${h.year}';
 }
 
+/// 1.32 (H-B7-3/B567): fecha corta dd/mm/aaaa de un
+/// INSTANTE crudo del servidor (timestamptz serializado,
+/// p. ej. «2026-11-01T02:00:00+00:00»), pintada en hora de
+/// La Habana. Varias etiquetas de Vales cortaban los 10
+/// primeros caracteres del texto (`substring(0, 10)`) y
+/// pintaban el DÍA UTC: un vale reclamado a las 22:00
+/// habaneras (02:00 UTC del día siguiente) salía con la
+/// fecha de mañana. Si el texto no parsea como instante,
+/// se respeta la fecha plana que traiga, sin inventar.
+String fmtFechaDeInstanteServidor(String? crudo) {
+  final t = (crudo ?? '').trim();
+  if (t.isEmpty) return '';
+  final d = DateTime.tryParse(t);
+  if (d == null) return t.length >= 10 ? t.substring(0, 10) : t;
+  final h = d.isUtc ? aHabana(d) : d;
+  String dos(int n) => n.toString().padLeft(2, '0');
+  return '${dos(h.day)}/${dos(h.month)}/${h.year}';
+}
+
 /// ISO-8601 con offset explícito (p. ej. 2026-10-15T14:30:00-04:00),
 /// coherente con la fecha/franja calculadas en hora de La Habana
 /// (auditoría ChatGPT #13).

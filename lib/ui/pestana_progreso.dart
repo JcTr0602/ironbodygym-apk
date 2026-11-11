@@ -782,7 +782,12 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       return;
     }
     try {
-      await Supabase.instance.client
+      // 1.32 (B1-H7): la RPC devuelve un BOOLEAN (¿borró de
+      // verdad?): un false significa «ya no estaba» (otra
+      // sesión la borró) y no puede anunciarse como si se
+      // hubiera borrado ahora — la lista se recarga igual
+      // para que la fila desaparezca de pantalla.
+      final res = await Supabase.instance.client
           .rpc('eliminar_medicion', params: {
             // 1.32 (H-RPC-2): solo el id numérico de servidor.
             'p_medicion_id': m.idServidor,
@@ -790,7 +795,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           // 1.24 Bloque 4: timeout de escritura (12 s).
           .timeout(const Duration(seconds: 12));
       if (mounted) {
-        mostrarSnack(context, 'Medición eliminada', significado: SignificadoChip.exito);
+        if (res == true) {
+          mostrarSnack(context, 'Medición eliminada',
+              significado: SignificadoChip.exito);
+        } else {
+          mostrarSnack(context,
+              'Esa medición ya no estaba en el servidor',
+              significado: SignificadoChip.alerta);
+        }
         _cargar();
       }
     } catch (e) {

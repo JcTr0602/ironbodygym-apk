@@ -837,8 +837,8 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
           ),
           Text(
             'Reclamado con ${v.diasAlReclamar} días verificados'
-            '${v.creadoEn.length >= 10 ? ' · ${fmtFecha(v.creadoEn.substring(0, 10))}' : ''}'
-            '${v.resueltoEn != null && v.resueltoEn!.length >= 10 ? ' · Resuelto el ${fmtFecha(v.resueltoEn!.substring(0, 10))}' : ''}',
+            '${v.creadoEn.isNotEmpty ? ' · ${fmtFechaDeInstanteServidor(v.creadoEn)}' : ''}'
+            '${v.resueltoEn != null && v.resueltoEn!.isNotEmpty ? ' · Resuelto el ${fmtFechaDeInstanteServidor(v.resueltoEn)}' : ''}',
             style: AppTexto.secundario,
           ),
           if (v.creadoNota.isNotEmpty)
@@ -848,7 +848,7 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
                 style: AppTexto.secundario),
           if (v.estado == 'anulado' && v.anuladoEn != null)
             Text(
-              'Anulado el ${fmtFecha(v.anuladoEn!.length >= 10 ? v.anuladoEn!.substring(0, 10) : v.anuladoEn!)}',
+              'Anulado el ${fmtFechaDeInstanteServidor(v.anuladoEn)}',
               style: AppTexto.secundario,
             ),
           // S7: anular un vale canjeado con pago. El

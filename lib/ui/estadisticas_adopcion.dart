@@ -14,6 +14,30 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
+/// 1.32 (B1-H8): el mensaje de ORIGEN de un error de la
+/// RPC de estadísticas. El `RAISE` del servidor («Solo el
+/// administrador puede ver las estadísticas.») viaja en el
+/// mensaje de la PostgrestException; se detecta por el
+/// nombre del tipo, sin importar Supabase en el clasificador
+/// (mismo espíritu que `mensajeErrorAmable`).
+String mensajeDeErrorServidor(Object e) {
+  if (e.runtimeType.toString() == 'PostgrestException') {
+    return ((e as dynamic).message?.toString() ?? '').trim();
+  }
+  return e.toString();
+}
+
+/// 1.32 (B1-H8): ¿el desenlace de la carga es un error de
+/// PERMISO? Verdadero si la guarda local de dueño lo marcó
+/// ([mostrado] empieza por «Solo el dueño») o si el mensaje
+/// de ORIGEN del servidor dice «administrador» (el RAISE de
+/// la RPC). Antes el catch sustituía el error por el
+/// genérico de conexión y la clase de permiso quedaba
+/// inalcanzable por la vía del servidor.
+bool esErrorPermisoEstadisticas({String? mostrado, String? origen}) =>
+    (mostrado != null && mostrado.startsWith('Solo el dueño')) ||
+    (origen != null && origen.contains('administrador'));
+
 class EstadisticasAdopcionScreen extends StatefulWidget {
   const EstadisticasAdopcionScreen({super.key});
 
@@ -26,12 +50,18 @@ class _EstadisticasAdopcionScreenState
     extends State<EstadisticasAdopcionScreen> {
   bool _cargando = true;
   String? _error;
+
+  /// 1.32 (B1-H8): el mensaje de ORIGEN del último error
+  /// del servidor, conservado aparte del texto amable que
+  /// se pinta: es sobre él (y no sobre el genérico) que se
+  /// clasifica el permiso.
+  String _errorOrigen = '';
   Map<String, dynamic> _d = {};
 
   /// El aviso de permiso (no es un fallo de lectura): B6 lo
   /// clasifica C4 y no ofrece Reintentar.
-  bool get _esErrorDePermiso =>
-      _error != null && _error!.startsWith('Solo el dueño');
+  bool get _esErrorDePermiso => esErrorPermisoEstadisticas(
+      mostrado: _error, origen: _errorOrigen);
 
   @override
   void initState() {
@@ -47,6 +77,7 @@ class _EstadisticasAdopcionScreenState
         setState(() {
           _cargando = false;
           _error = 'Solo el dueño ve estas estadísticas.';
+          _errorOrigen = '';
         });
       }
       return;
@@ -54,6 +85,7 @@ class _EstadisticasAdopcionScreenState
     setState(() {
       _cargando = true;
       _error = null;
+      _errorOrigen = '';
     });
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s): sin
@@ -71,8 +103,13 @@ class _EstadisticasAdopcionScreenState
     } catch (e) {
       if (mounted) {
         setState(() {
+          // 1.32 (B1-H8): el texto pintado sigue siendo el
+          // amable, pero el ORIGEN se conserva para que la
+          // clase de permiso sea alcanzable (el RAISE del
+          // servidor ya no se pierde en el catch).
           _error = 'No se pudieron cargar las estadísticas. '
               'Revisa la conexión e inténtalo de nuevo.';
+          _errorOrigen = mensajeDeErrorServidor(e);
           _cargando = false;
         });
       }

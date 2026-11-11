@@ -616,7 +616,7 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
                   _ => 'Rechazado',
                 }}'
                 '${r.logroId.isNotEmpty ? ' · ${tituloLogroPremio(r.logroId)}' : ''}'
-                '${r.resueltoEn.length >= 10 ? ' el ${fmtFecha(r.resueltoEn.substring(0, 10))}' : ''}'
+                '${r.resueltoEn.isNotEmpty ? ' el ${fmtFechaDeInstanteServidor(r.resueltoEn)}' : ''}'
                 '${r.resueltoNota.isNotEmpty ? ' · ${r.resueltoNota}' : ''}'),
           );
         },
@@ -664,7 +664,7 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
           ),
           Text(
             'Vence ahora: ${fmtFecha(v.pagadoHasta)}'
-            '${v.creadoEn.length >= 10 ? ' · Reclamado el ${fmtFecha(v.creadoEn.substring(0, 10))}' : ''}',
+            '${v.creadoEn.isNotEmpty ? ' · Reclamado el ${fmtFechaDeInstanteServidor(v.creadoEn)}' : ''}',
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 10),

@@ -53,10 +53,11 @@ class ValeReciente {
   final String creadoNota;
 
   /// 1.28 (M5-C4): el logro del vale, para nombrarlo en
-  /// «Resueltos recientemente». La RPC viva aún NO lo
-  /// devuelve en «recientes» (pendiente de servidor
-  /// documentado): el parseo lo lee si viene y la fila
-  /// lo enseña cuando exista.
+  /// «Resueltos recientemente». La RPC viva SÍ lo
+  /// devuelve en «recientes» (`'logro_id', v.logro_id`,
+  /// verificado contra el servidor el 2026-11-11 —
+  /// 1.32/B1-H10: la nota anterior decía que no, y era
+  /// falsa): el parseo lo lee y la fila lo enseña.
   final String logroId;
 
   const ValeReciente({

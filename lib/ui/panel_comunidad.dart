@@ -606,11 +606,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
     );
   }
 
-  String _fechaCorta(String? iso) {
-    final d = DateTime.tryParse(iso ?? '');
-    if (d == null) return '';
-    return '${d.day}/${d.month}/${d.year}';
-  }
+  String _fechaCorta(String? iso) => fechaCortaHabana(iso);
 
   /// FB-20: el destino al tocar una tarjeta de perfil —
   /// la ficha del cliente en Gestión.
@@ -818,6 +814,18 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
       ),
     );
   }
+}
+
+/// 1.32 (H-B7-2/B567): la fecha corta (d/m/aaaa) de un
+/// instante del servidor, compuesta en hora de La Habana:
+/// antes se componía del día/mes/año del instante UTC
+/// crudo y un alta de las 21:30 habaneras se pintaba con
+/// el día siguiente. Función pura.
+String fechaCortaHabana(String? iso) {
+  final d = DateTime.tryParse(iso ?? '');
+  if (d == null) return '';
+  final h = d.isUtc ? aHabana(d) : d;
+  return '${h.day}/${h.month}/${h.year}';
 }
 
 /// 1.29 (Comunidad C3, COM-25 + DF-27): cuántos
