@@ -77,15 +77,30 @@ import 'usuarios.dart';
 const _kRecientesLupa = 'lupa_recientes_v1';
 const _kMaxRecientesLupa = 3;
 
-/// Resolvedor de la lupa: el MISMO destino que abriría la
-/// tarjeta del Panel (admin.dart) para cada id del catálogo.
-/// Los destinos atados a estado del Panel viejo (cierre de
-/// caja, liquidar, nómina, exportaciones) saltan a su pestaña
-/// del Pilar 4 por [MarcoNav]: el marco es su casa nueva.
-void abrirFuncionLupa(BuildContext context, String id) {
+/// Resolvedor ÚNICO de destinos por id (1.32, Oleada 2 F1 —
+/// desviación 3 de Argón): lo usan la Lupa y el buscador del
+/// Panel clásico (admin.dart delega aquí todo lo que no está
+/// atado al estado del Panel). Los destinos atados a estado
+/// del Panel viejo (cierre de caja, liquidar, nómina,
+/// exportaciones) saltan a su pestaña del Pilar 4 por
+/// [MarcoNav]: el marco es su casa nueva.
+///
+/// [cerrarActual]: la Lupa es una pantalla pasajera y se
+/// cierra antes de empujar el destino (true, el defecto); el
+/// Panel queda DEBAJO del destino y no se cierra (false).
+/// Los saltos de pilar siempre cierran la pantalla actual:
+/// su destino es la cáscara, no una ruta encima.
+///
+/// Devuelve el futuro de la ruta empujada (completa al
+/// volver), para que el llamador pueda recargar al regreso;
+/// en los saltos de pilar completa de inmediato.
+Future<void> abrirFuncionLupa(BuildContext context, String id,
+    {bool cerrarActual = true}) {
+  var navegacion = Future<void>.value();
   void ir(Widget pantalla) {
-    Navigator.of(context).pop();
-    Navigator.of(context).push(RutaIron(builder: (_) => pantalla));
+    if (cerrarActual) Navigator.of(context).pop();
+    navegacion =
+        Navigator.of(context).push(RutaIron(builder: (_) => pantalla));
   }
 
   void irPilar(VoidCallback salto) {
@@ -242,6 +257,7 @@ void abrirFuncionLupa(BuildContext context, String id) {
     case 'bajada':
       ir(const BajadaCompletaScreen());
   }
+  return navegacion;
 }
 
 /// La pantalla de la lupa: campo arriba, recientes con el

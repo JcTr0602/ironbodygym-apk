@@ -1803,43 +1803,12 @@ class _NominaScreenState extends State<NominaScreen> {
   }
 }
 
-/// Tarjeta compacta para el Home del entrenador (v1.3.9 #8).
-class TarjetaNominaEntrenador extends StatelessWidget {
-  const TarjetaNominaEntrenador({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tarjeta(
-      padding: const EdgeInsets.all(AppEspacio.lg),
-      child: InkWell(
-        onTap: () {
-          // #1 (Argón nómina + decisión Jc): la tarjeta del
-          // entrenador abre SU resumen (MiNominaScreen, con sus
-          // bonos), no la pantalla del dueño.
-          Navigator.push(
-            context,
-            RutaIron(
-                builder: (_) => const MiNominaScreen()),
-          );
-        },
-        child: Row(
-          children: [
-            IconoModuloBadge.naranja(
-                Icons.payments_rounded),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Mi nómina (estimado)',
-                style: AppTexto.cuerpo,
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded),
-          ],
-        ),
-      ),
-    );
-  }
-}
+/// 1.32 (Oleada 2, Fase 1 — desviación 3): la tarjeta
+/// TarjetaNominaEntrenador (v1.3.9, para la Home vieja
+/// del entrenador) se retiró: cero llamadores en lib/ y
+/// test/ (grep probado al retirarla). El resumen del
+/// entrenador vive en MiNominaScreen, su destino de
+/// siempre, y en la pestaña «Mi Nómina» del Pilar 4.
 
 /// 1.25 T118 (F2-23): diálogo «Registrar adelanto» como
 /// StatefulWidget propio con DialogoApp: posee y dispone sus

@@ -452,8 +452,15 @@ void main() {
       // Panel con la puerta (decisión de Jc).
       expect(admin, isNot(contains("case 'anuncios':")));
       expect(admin, isNot(contains('PanelAnunciosScreen')));
-      expect(admin, contains("case 'incidencias_sync':"));
-      expect(admin, contains('const IncidenciasSyncScreen()'));
+      // 1.32 (Oleada 2 F1, desviación 3): el resolvedor del
+      // Panel DELEGA en el único, el de la Lupa — el caso
+      // «incidencias_sync» vive ahora allí y el Panel lo
+      // alcanza por la delegación.
+      expect(admin, contains('abrirFuncionLupa'));
+      final lupa =
+          File('lib/ui/lupa_universal.dart').readAsStringSync();
+      expect(lupa, contains("case 'incidencias_sync':"));
+      expect(lupa, contains('const IncidenciasSyncScreen()'));
     });
   });
 

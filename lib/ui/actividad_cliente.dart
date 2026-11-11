@@ -396,27 +396,13 @@ class _SeccionActividadAppClientesState
   }
 }
 
-/// Pantalla completa de la sección (la puerta desde la
-/// ficha del cliente la abre con la persona ya elegida es
-/// la tarjeta de FB-20; esta pantalla queda para un acceso
-/// directo si un día se quiere).
-class ActividadAppClientesScreen extends StatelessWidget {
-  final ActividadClienteService? servicio;
-  const ActividadAppClientesScreen({super.key, this.servicio});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: appBarIron(context, 'Actividad en la app de clientes'),
-      body: ListView(
-        padding: const EdgeInsets.all(AppEspacio.md),
-        children: [
-          SeccionActividadAppClientes(servicio: servicio),
-        ],
-      ),
-    );
-  }
-}
+/// 1.32 (Oleada 2, Fase 1 — desviación 3): la pantalla
+/// completa ActividadAppClientesScreen se retiró: cero
+/// llamadores en lib/ y test/ (grep probado al retirarla).
+/// Su propio comentario la describía como una reserva «para
+/// un acceso directo si un día se quiere»; la sección
+/// (SeccionActividadAppClientes) sigue viva dentro de
+/// Auditoría y la vista por cliente es la de abajo.
 
 /// 1.30 (Oleada 10, FICHA-08): la actividad en la app de
 /// UN cliente, abierta desde su ficha: la misma sección

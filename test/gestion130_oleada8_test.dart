@@ -233,12 +233,19 @@ void main() {
       // numero de tarjeta y 11 del detalle tecnico T20.
       final conteo = contar(RegExp(r'fontSize:\s*[0-9]'),
           excluir: {'lib/ui/diseno.dart', 'lib/ui/cierre_nomina_imagen.dart'});
+      // 1.32 (Oleada 2 F1): transferencia.dart sale del
+      // inventario — su pantalla (la del literal de 21 del
+      // número de tarjeta) se retiró sin llamadores y quedan
+      // solo funciones puras. Entra marco.dart: 2 (el reloj
+      // del Pulso a 10 px, de la Oleada 1): la excepción no
+      // se declaró entonces y el test ya venía rojo en la
+      // base fb34e6f — se declara ahora, verificado.
       expect(conteo, {
         'lib/ui/panel_comunidad.dart': 1,
         'lib/ui/fotos_progreso_nube_ficha.dart': 2,
         'lib/ui/capa_candado.dart': 1,
         'lib/ui/cierre_mes.dart': 1,
-        'lib/ui/transferencia.dart': 1,
+        'lib/ui/marco.dart': 2,
         'lib/ui/vista_previa_cliente.dart': 1,
       });
     });

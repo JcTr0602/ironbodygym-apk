@@ -24,7 +24,7 @@ import '../plus_reportes.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../visitas_invitados.dart';
-import 'admin.dart';
+import 'panel_resto_caja.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -2845,16 +2845,19 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
                     style: AppTexto.secundario),
               ),
           ],
-          // v1.12.0 (C4): el precio del Plus se edita SOLO en
-          // Administración; desde aquí solo un enlace.
+          // v1.12.0 (C4): el precio del Plus se edita en la
+          // pantalla de Precios; desde aquí solo un enlace.
+          // 1.32 (Oleada 2 F1): el enlace va DIRECTO a Precios
+          // (PreciosMetodoScreen), sin abrir el Panel clásico.
           if (esDueno) ...[
             const SizedBox(height: AppEspacio.sm),
             TextButton.icon(
               icon: const Icon(Icons.tune_rounded, size: 18),
               label: const Text(
-                  'Editar precio del Plus en Administración'),
+                  'Editar precio del Plus (en Precios)'),
               onPressed: () => Navigator.of(context).push(
-                RutaIron(builder: (_) => const AdminScreen()),
+                RutaIron(
+                    builder: (_) => const PreciosMetodoScreen()),
               ),
             ),
           ],

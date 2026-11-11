@@ -220,8 +220,15 @@ void main() {
       expect(_fuente('lib/ui/arqueo.dart'),
           contains('!entregado.isFinite'));
       final prc = _fuente('lib/ui/panel_resto_caja.dart');
-      expect(prc, contains('!monto.isFinite'),
-          reason: 'entrega parcial C1');
+      // 1.32 (Oleada 2 F1): la pantalla C1 se retiró y la
+      // entrega vive en la hoja única «Liquidar Arqueo»
+      // (modo entregaC1): la guarda sigue la validación a
+      // su sitio nuevo, como ya hizo con parsePrecioCampo.
+      expect(_fuente('lib/ui/hoja_liquidar_arqueo.dart'),
+          contains('!entregado.isFinite'),
+          reason: 'entrega parcial C1 (hoja única)');
+      expect(prc, isNot(contains('class ArqueoEntregaScreen')),
+          reason: 'la pantalla C1 ya no existe');
       // 1.25 T99: la validación de los precios del gym se
       // centralizó en parsePrecioCampo (bloque2_resto): la
       // guarda sigue la validación a su sitio nuevo, como

@@ -54,6 +54,7 @@ import 'hub_comunicacion.dart';
 import 'centro_control.dart';
 import 'actividad.dart';
 import 'buscar.dart';
+import 'lupa_universal.dart';
 import 'marco.dart';
 import 'admin_secciones.dart';
 import 'salud_sync_screen.dart';
@@ -61,12 +62,9 @@ import 'cola.dart';
 import 'conciliacion.dart';
 import 'arqueo.dart';
 import 'guia.dart';
-import 'auditoria.dart';
-import 'auditoria_persona.dart';
 import 'categorias_suplemento.dart';
 import 'por_cobrar.dart';
 import 'historial_ventas.dart';
-import 'auditoria_silenciosa.dart';
 import 'nomina.dart';
 import 'horario_gym.dart';
 import 'riesgo.dart';
@@ -83,8 +81,6 @@ import 'app_bar.dart';
 import 'invitados.dart';
 import 'solicitudes_adelanto.dart';
 import 'congelaciones.dart';
-import 'avisos_entrenador.dart';
-import 'editor_avisos_clientes.dart';
 import 'editor_rutinas_gym.dart';
 import 'bandeja.dart';
 import 'exportar_excel.dart';
@@ -105,13 +101,10 @@ import 'panel_comunidad.dart';
 import 'panel_premios_hub.dart';
 import 'panel_resto_config.dart';
 import 'panel_resto_sistema.dart';
-import 'recordatorios.dart';
 import 'centro_compras.dart';
-import 'plantillas_mensaje.dart';
 import 'tarifas_especiales.dart';
 import 'usuarios.dart';
 import 'servicios_admin.dart';
-import 'cumpleanos.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -1318,9 +1311,34 @@ class _AdminScreenState extends State<AdminScreen> {
     _abrirFuncionPanel(id);
   }
 
-  /// 1.25 T100: el resolvedor del buscador — los mismos
-  /// destinos que abren las tarjetas de los módulos.
-  void _abrirFuncionPanel(String id) {
+  /// 1.25 T100: el resolvedor del buscador.
+  ///
+  /// 1.32 (Oleada 2, Fase 1 — desviación 3 de Argón): el
+  /// resolvedor de destinos es ÚNICO, el de la Lupa
+  /// (abrirFuncionLupa). Aquí solo quedan los destinos
+  /// atados al ESTADO de esta pantalla, que la Lupa no puede
+  /// abrir igual:
+  /// - 'cliente:' — el buscador devuelve el id del cliente
+  ///   y su ficha se abre desde aquí.
+  /// - 'cierre_caja' — la SeccionCobrosScreen de
+  ///   _pantallaCierre, atada a los getters del Panel.
+  /// - 'gastos' — SeccionGastosScreen con los callbacks del
+  ///   Panel (su lista _gastos y _agregarGasto).
+  /// - 'tipos_pago' / 'bancarios' — Ajustes abierto en la
+  ///   sección exacta, con recarga de configuración.
+  /// - 'pago_base' — el diálogo _elegirPagoEntrenador.
+  /// - 'permisos_explicados' — un diálogo sobre esta
+  ///   pantalla, sin navegar.
+  /// - 'exportar_csv' / 'exportar_excel' / 'bitacora' —
+  ///   acciones sobre los datos cargados del Panel.
+  /// - 'liquidar' — la puerta única vive en la Caja del
+  ///   Pilar 4 (_irACajaPilar).
+  /// Todo lo demás delega en la Lupa con cerrarActual: false
+  /// (el Panel queda debajo del destino); al volver se
+  /// recargan los datos, como hacía el _ir de siempre (los
+  /// viejos _irSoloLectura/_irLigera no recargaban: recargar
+  /// de más es un refresco inocuo, nunca un dato inventado).
+  Future<void> _abrirFuncionPanel(String id) async {
     // 1.25 Panel 11: un resultado de cliente del buscador
     // global abre su ficha directamente.
     if (id.startsWith('cliente:')) {
@@ -1329,157 +1347,49 @@ class _AdminScreenState extends State<AdminScreen> {
       return;
     }
     switch (id) {
-      case 'centro_control':
-        _irSoloLectura(const CentroControlScreen());
-      case 'comunicacion':
-        _ir(const HubComunicacionScreen());
-      case 'arqueo':
-        _ir(const ArqueoScreen());
       case 'cierre_caja':
         _ir(_pantallaCierre());
+        return;
       case 'liquidar':
         // Puerta única en la Caja del Pilar 4 (Oleada 2 F1).
         _irACajaPilar();
-      case 'extracto':
-        _ir(const CentroComprasScreen());
+        return;
       case 'gastos':
         _ir(SeccionGastosScreen(
           getGastos: () => _gastos,
           onAgregarGasto: _agregarGasto,
         ));
-      case 'historial_caja':
-        _ir(const HistorialCajaScreen());
-      case 'pagos_metodo':
-        _ir(const PagosPorMetodo());
-      case 'comparativa':
-        _ir(const ComparativaMensual());
-      case 'ingresos_periodo':
-        _ir(const IngresosPeriodoScreen());
-      case 'nomina':
-        _ir(const NominaScreen());
-      case 'nomina_precalculada':
-        _ir(const NominaPrecalculadaScreen());
-      case 'adelantos':
-        _ir(const AdelantosListaScreen());
-      case 'solicitudes_adelanto':
-        _ir(const SolicitudesAdelantoScreen());
-      case 'congelaciones':
-        _ir(const CongelacionesScreen());
-      case 'usuarios':
-        _ir(const ControlAccesoScreen());
-      case 'candado':
-        _ir(const PanelCandadoScreen());
-      case 'recuperar':
-        _ir(const RiesgoScreen());
-      case 'congeladas':
-        _ir(const CongeladosScreen());
-      case 'papelera':
-        _ir(const PapeleraScreen());
-      case 'cuentas_casa':
-        _ir(const CuentasCasaScreen());
-      case 'vencimientos':
-        _ir(const VencimientosProximosScreen());
-      case 'cumpleanos':
-        _ir(const CumpleanosScreen());
-      case 'solicitudes_invitados':
-        _ir(const InvitadosScreen());
-      case 'invitados_frecuentes':
-        _ir(const InvitadosFrecuentesScreen());
-      case 'plantillas':
-        _ir(const PlantillasScreen());
-      case 'avisos_entrenadores':
-        _ir(const AvisosEntrenadorScreen());
-      case 'avisos_clientes':
-        _ir(const EditorAvisosClientesScreen());
-      case 'recordatorios':
-        _ir(const RecordatoriosScreen());
-      case 'info_publica':
-        _ir(const InfoPublicaScreen());
-      case 'entrenadores_apk':
-        _ir(const UsuariosScreen());
-      case 'plan_turnos':
-        _ir(const TurnosHubScreen());
-      case 'horario_apertura':
-        _ir(const HorarioGym());
-      case 'permisos':
-        _ir(const PanelPermisos());
-      case 'permisos_explicados':
-        mostrarPermisosExplicados(context);
-      case 'suplementos':
-        _ir(const SuplementosScreen());
-      case 'categorias':
-        _ir(const CategoriasSuplementoScreen());
-      case 'historial_ventas':
-        _ir(const HistorialVentasScreen());
-      case 'fiados':
-        _ir(const PorCobrarScreen(pestanaInicial: 1));
-      case 'sin_foto':
-        _ir(const SinFotoPrecioScreen());
-      case 'botes':
-        _ir(const ServiciosAdminScreen());
-      case 'reportes_plus':
-        _ir(const ReportesPlusScreen());
-      case 'reservas':
-        _ir(const ReservasScreen());
-      case 'biblioteca':
-        _ir(const BibliotecaScreen());
-      case 'rutinas_gym':
-        _ir(const EditorRutinasGymScreen());
-      case 'bandeja_gympedia':
-        _ir(const BandejaScreen());
-      case 'precios_metodo':
-        _irConfig(const PreciosMetodoScreen());
+        return;
       case 'tipos_pago':
         _irConfig(_pantallaAjustes(seccion: 'tipos'));
-      case 'tarifas':
-        _ir(const TarifasScreen());
+        return;
       case 'bancarios':
         _irConfig(_pantallaAjustes(seccion: 'bancarios'));
+        return;
       case 'pago_base':
         _elegirPagoEntrenador();
-      case 'ajustes_gym':
-        _irConfig(const AjustesGymScreen());
-      case 'registro_mensual':
-        _ir(const RegistroMensualScreen());
-      case 'estado_sync':
-        _irLigera(const SaludSyncScreen());
-      case 'cola_sync':
-        _ir(const ColaScreen());
-      case 'historial_sync':
-        _irSoloLectura(const HistorialSyncScreen());
-      case 'verificacion_espejo':
-        _ir(const VerificacionEspejoScreen());
-      case 'incidencias':
-        _ir(const ListaIncidenciasScreen());
-      // 1.29 (Oleada 5, D-23): las de sync, por su
-      // propio id (antes «incidencias» cargaba con los
-      // sinónimos de sync y abría los reportes).
-      case 'incidencias_sync':
-        _ir(const IncidenciasSyncScreen());
-      case 'premios':
-        _ir(const PremiosHubScreen());
-      case 'comunidad':
-        _ir(const ComunidadPanelScreen());
-      case 'errores_sync':
-        _ir(const ErroresSyncPanelScreen());
-      case 'auditoria':
-        _irSoloLectura(const AuditoriaScreen());
-      case 'auditoria_persona':
-        _irSoloLectura(const AuditoriaPersonaScreen());
-      case 'anomalias':
-        _irSoloLectura(const AuditoriaSilenciosaScreen());
-      case 'mantenimiento':
-        _ir(const MantenimientoScreen());
-      case 'copia':
-        _ir(const CopiaSeguridadScreen());
+        return;
+      case 'permisos_explicados':
+        mostrarPermisosExplicados(context);
+        return;
       case 'exportar_csv':
         _exportar();
+        return;
       case 'exportar_excel':
         _exportarExcel();
+        return;
       case 'bitacora':
         _exportarBitacora();
-      case 'bajada':
-        _ir(const BajadaCompletaScreen());
+        return;
+    }
+    await abrirFuncionLupa(context, id, cerrarActual: false);
+    // Si el destino era un salto de pilar, esta pantalla ya
+    // salió de la pila y la recarga no aplica. Si no, se
+    // hace lo mismo que _ir al volver: recarga completa y
+    // señal de retorno.
+    if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) {
+      await _cargar();
+      _notificarRetorno();
     }
   }
 
