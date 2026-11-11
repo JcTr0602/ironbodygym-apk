@@ -1,11 +1,16 @@
 /// Plus residual del cliente en la ficha (17/25, 1.19).
 ///
 /// La RPC staff `cliente_plus_residual_staff` devuelve
-/// `{activo: bool, hasta: 'YYYY-MM-DD' | null}`. Solo el dueño
-/// obtiene un resultado real: la RPC devuelve {activo:false} a
-/// cualquier otro llamador, así que la fila solo aparece para el
-/// dueño y solo cuando el residuo está activo.
+/// `{activo: bool, hasta: <instante UTC> | null}`. Desde
+/// IMP-14 la guarda del servidor es `es_staff()`: TODO el
+/// staff autenticado (dueño y entrenadores) obtiene el
+/// residual real — el entrenador debe devolverlo al cliente
+/// que pregunta — y la RPC devuelve {activo:false} solo a
+/// quien no es staff. La fila aparece cuando el residuo
+/// está activo.
 library;
+
+import 'invitados.dart';
 
 /// Parsea la respuesta de la RPC. Ante cualquier forma inesperada
 /// devuelve inactivo (fail-closed: sin fila, nunca un dato raro).
@@ -33,7 +38,24 @@ String? textoPlusResidual({
   required String hoyIso,
 }) {
   if (!activo || hasta == null || hasta.length < 10) return null;
-  final h = hasta.substring(0, 10);
+  // plu06_ H3: el servidor devuelve el instante UTC crudo
+  // («2026-12-09T17:26:08+00:00»): el día que manda es el
+  // de La Habana, no el del string UTC — truncar con
+  // substring(0, 10) pintaba +1 día en los vencimientos
+  // de tarde-noche habanera (19:00–23:59). Si la cadena
+  // es SOLO fecha (YYYY-MM-DD, la forma clásica), se lee
+  // tal cual: parsearla como instante UTC la correría
+  // al día habanero anterior.
+  final String h;
+  if (hasta.length == 10) {
+    h = hasta;
+  } else {
+    final instante = instanteServidorHabana(hasta);
+    if (instante == null) return null;
+    h = '${instante.year.toString().padLeft(4, '0')}-'
+        '${instante.month.toString().padLeft(2, '0')}-'
+        '${instante.day.toString().padLeft(2, '0')}';
+  }
   DateTime? fecha;
   DateTime? hoy;
   try {
@@ -56,5 +78,15 @@ String? textoPlusResidual({
       '${h.substring(8, 10)}/${h.substring(5, 7)}/${h.substring(0, 4)}';
   if (dias == 0) return 'Activo hasta $fechaFmt · vence hoy';
   if (dias == 1) return 'Activo hasta $fechaFmt · queda 1 día';
+  // plu06_ H4b (regla D5, la misma fórmula canónica de
+  // textoVigenciaPlus en Clientes): desde 60 días se
+  // habla en meses aproximados — (dias/30).round() —
+  // con el total de días entre paréntesis; un residual
+  // de un año no se lee «quedan 360 días».
+  if (dias >= 60) {
+    final meses = (dias / 30).round();
+    return 'Activo hasta $fechaFmt · quedan ≈ $meses '
+        '${meses == 1 ? 'mes' : 'meses'} ($dias días en total)';
+  }
   return 'Activo hasta $fechaFmt · quedan $dias días';
 }
