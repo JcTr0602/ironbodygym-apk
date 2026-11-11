@@ -10,6 +10,7 @@
 // abrir WhatsApp, al volver la tanda se puede reanudar justo
 // donde iba ("Reanudar tanda (N/40)"). Un destinatario marcado
 // "abierto" no se da por enviado: al reanudar se pregunta.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -26,6 +27,14 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'componentes.dart';
+
+/// Gancho de test (patrón de la casa, como
+/// `cargarCatalogoRutinasParaTest`): sustituye la carga
+/// de la caché de accesos en los tests de apertura de la
+/// pantalla (H-B5-3: la red puede colgar PARA SIEMPRE y
+/// la pantalla pinta igual con lo local). Null en
+/// producción.
+Future<void> Function()? cargarAccesosCampanaParaTest;
 
 class CampanaWaScreen extends StatefulWidget {
   const CampanaWaScreen({super.key});
@@ -91,9 +100,16 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
   }
 
   Future<void> _preparar() async {
-    try {
-      await AccesoAppCache.instance.cargar();
-    } catch (_) {}
+    // 1.32 (H-B5-3/B567): la pantalla pinta PRIMERO lo
+    // local — las plantillas de los ajustes del espejo y
+    // la tanda previa de disco — y la caché de accesos
+    // (que hace la RPC de la audiencia) carga DETRÁS, sin
+    // bloquear el primer pintado: con la red colgada,
+    // abrir Campañas tardaba los 12 s del timeout de la
+    // RPC teniendo todo lo demás en el teléfono. La
+    // audiencia se deriva de la caché al construir y se
+    // marca «sin verificar» mientras no haya cargado (el
+    // aviso que la pantalla ya tenía).
     try {
       final aj = await LocalDb.instance.getAjustes();
       final p = aj['plantillas_wa'];
@@ -112,6 +128,22 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
     } catch (_) {}
     await _revisarTandaPrevia();
     if (mounted) setState(() => _cargando = false);
+    unawaited(_cargarAccesosDetras());
+  }
+
+  /// La carga de la caché de accesos tras el primer
+  /// pintado: al completarse se repinta (la audiencia y
+  /// su aviso de «sin verificar» se derivan de la caché).
+  Future<void> _cargarAccesosDetras() async {
+    try {
+      final gancho = cargarAccesosCampanaParaTest;
+      if (gancho != null) {
+        await gancho();
+      } else {
+        await AccesoAppCache.instance.cargar();
+      }
+    } catch (_) {}
+    if (mounted) setState(() {});
   }
 
   Future<void> _revisarTandaPrevia() async {

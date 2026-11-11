@@ -885,7 +885,13 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
 // ---------------------------------------------------------------------------
 
 class IngresosPeriodoScreen extends StatefulWidget {
-  const IngresosPeriodoScreen({super.key});
+  /// El servicio de reportes Plus es inyectable SOLO en
+  /// tests (patrón de la casa): permite colgar la RPC de
+  /// confirmados y verificar que el resumen local pinta
+  /// sin esperarla (H-B5-4). Null en producción.
+  final PlusReportesService? servicioPlus;
+
+  const IngresosPeriodoScreen({super.key, this.servicioPlus});
   @override
   State<IngresosPeriodoScreen> createState() =>
       _IngresosPeriodoScreenState();
@@ -898,7 +904,16 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
   String _hasta = '';
   ResumenIngresos? _resumen;
   bool _plusSinDatos = false;
+
+  /// 1.32 (H-B5-4): la línea Plus aún se está consultando
+  /// al servidor; la pantalla ya pintó el resumen local.
+  bool _plusConsultando = false;
   int _nPlus = 0;
+
+  /// Guarda de generación: cambiar de rango relanza la
+  /// carga y la respuesta Plus de una carga vieja no
+  /// puede recomponer el resumen del rango nuevo.
+  int _generacion = 0;
 
   @override
   void initState() {
@@ -931,47 +946,79 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
     // Pasada 2 de Argón (1.20): los ingresos del gym son solo
     // del dueño (C5 no guardaba; C1/C2/C6 sí).
     if (!AuthService().isOwner) return;
-    setState(() => _cargando = true);
+    final gen = ++_generacion;
+    setState(() {
+      _cargando = true;
+      _plusConsultando = false;
+      _plusSinDatos = false;
+      _nPlus = 0;
+    });
+    final List<FilaIngreso> filas;
     try {
       // 1.29 (Oleada 2, D-A2): lectura por consultas de
       // rango (índice en pagos, filtro SQL en las demás)
       // en vez de cargar los cuatro espejos enteros y
       // filtrar en Dart; las cifras no cambian (la
       // equivalencia la vigila un test).
-      final filas = await filasIngresoPeriodo(_desde, _hasta);
-      // Plus: línea propia, solo por transferencia, desde reportes
-      // CONFIRMADOS del servidor (el espejo local no existe). Si la
-      // RPC falla o no hay red, la línea queda marcada sin datos y
-      // NO suma al total (nunca se inventa un número).
-      var plusSinDatos = false;
-      var nPlus = 0;
-      try {
-        final reps = await PlusReportesService().confirmados();
-        for (final r in reps) {
-          // Fecha del ingreso: cuando se confirmó (resueltoEn); si
-          // falta, cuando se reportó (creadoEn).
-          final fecha = r.resueltoEn ?? r.creadoEn;
-          if (fecha == null) continue;
-          final f = '${fecha.year.toString().padLeft(4, '0')}-'
-              '${fecha.month.toString().padLeft(2, '0')}-'
-              '${fecha.day.toString().padLeft(2, '0')}';
-          filas.add(FilaIngreso('plus', 'transferencia', r.monto, f));
-          nPlus++;
-        }
-      } catch (_) {
-        plusSinDatos = true;
-      }
-      final resumen = resumenIngresos(filas, _desde, _hasta);
-      if (mounted) {
-        setState(() {
-          _resumen = resumen;
-          _plusSinDatos = plusSinDatos;
-          _nPlus = nPlus;
-          _cargando = false;
-        });
-      }
+      filas = await filasIngresoPeriodo(_desde, _hasta);
     } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted && gen == _generacion) {
+        setState(() => _cargando = false);
+      }
+      return;
+    }
+    if (!mounted || gen != _generacion) return;
+    // 1.32 (H-B5-4/B567): el resumen LOCAL se pinta ya,
+    // con la línea Plus en estado «consultando»; la RPC
+    // de confirmados va DETRÁS y al resolver recompone el
+    // resumen sumándola. Antes, una conexión colgada
+    // dejaba la pantalla en spinner eterno con el resumen
+    // ya calculable en el teléfono (la clase de la ficha).
+    setState(() {
+      _resumen = resumenIngresos(filas, _desde, _hasta);
+      _plusConsultando = true;
+      _cargando = false;
+    });
+    unawaited(_sumarPlusDetras(filas, gen));
+  }
+
+  /// La línea Plus tras el primer pintado: reportes
+  /// CONFIRMADOS del servidor (el espejo local no existe),
+  /// solo por transferencia. Si la RPC falla o no hay red,
+  /// la línea queda marcada sin datos y NO suma al total
+  /// (nunca se inventa un número).
+  Future<void> _sumarPlusDetras(
+      List<FilaIngreso> filasLocales, int gen) async {
+    try {
+      final reps =
+          await (widget.servicioPlus ?? PlusReportesService())
+              .confirmados();
+      final filas = [...filasLocales];
+      var nPlus = 0;
+      for (final r in reps) {
+        // Fecha del ingreso: cuando se confirmó (resueltoEn); si
+        // falta, cuando se reportó (creadoEn).
+        final fecha = r.resueltoEn ?? r.creadoEn;
+        if (fecha == null) continue;
+        final f = '${fecha.year.toString().padLeft(4, '0')}-'
+            '${fecha.month.toString().padLeft(2, '0')}-'
+            '${fecha.day.toString().padLeft(2, '0')}';
+        filas.add(FilaIngreso('plus', 'transferencia', r.monto, f));
+        nPlus++;
+      }
+      if (!mounted || gen != _generacion) return;
+      setState(() {
+        _resumen = resumenIngresos(filas, _desde, _hasta);
+        _nPlus = nPlus;
+        _plusSinDatos = false;
+        _plusConsultando = false;
+      });
+    } catch (_) {
+      if (!mounted || gen != _generacion) return;
+      setState(() {
+        _plusSinDatos = true;
+        _plusConsultando = false;
+      });
     }
   }
 
@@ -1066,9 +1113,11 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
                             style: AppTexto.cuerpo),
                         subtitle: c == 'plus'
                             ? Text(
-                                _plusSinDatos
-                                    ? 'Sin datos del servidor (sin conexión o la RPC no devolvió confirmados): no suma al total.'
-                                    : '$_nPlus confirmados en el rango · suma a Transferencias y al Total.',
+                                _plusConsultando
+                                    ? 'Consultando los confirmados al servidor…'
+                                    : _plusSinDatos
+                                        ? 'Sin datos del servidor (sin conexión o la RPC no devolvió confirmados): no suma al total.'
+                                        : '$_nPlus confirmados en el rango · suma a Transferencias y al Total.',
                                 style: AppTexto.secundario)
                             : null,
                       ),

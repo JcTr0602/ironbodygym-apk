@@ -284,14 +284,15 @@ class AccesoAppCache {
       }
     }
     try {
-      // Timeout propio (10 s): sin conexión, una RPC sin
+      // Timeout propio (12 s, la norma de lectura de
+      // Gestión desde la 1.32): sin conexión, una RPC sin
       // timeout puede no devolver nunca, y hay llamadores que
       // la esperan para pintar (la ficha lo hacía y se quedaba
       // en el spinner; reporte de Jc 2026-11-02). Al vencer,
       // TimeoutException cae en el catch y devuelve false.
       final res = await Supabase.instance.client
           .rpc('listar_accesos_clientes')
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 12));
       // A6/R1M4-B8: fila a fila tolerante — una fila mala se
       // salta; no tumba la carga ni se disfraza de «sin
       // conexión».

@@ -110,7 +110,8 @@ class PerfilService {
       final username = _cleanUsername(AuthService().username);
       if (username.isEmpty) return;
       final emailPrefix = username;
-      // Autoauditoría 1.22 #2: con timeout (10 s). El login
+      // Autoauditoría 1.22 #2: con timeout (12 s desde la
+      // 1.32, la norma de lectura de Gestión). El login
       // ESPERA esta lectura en _entrar antes de verificar el
       // dispositivo y arrancar la sync: con la conexión colgada
       // no devolvía nunca (un cuelgue no es un error y el catch
@@ -121,7 +122,7 @@ class PerfilService {
           .select('movil, carnet')
           .eq('username', emailPrefix)
           .maybeSingle()
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 12));
       if (res != null) {
         if (faltaMovil && res['movil'] != null) {
           await p.setString(_key('perfil_movil'), res['movil'] as String);

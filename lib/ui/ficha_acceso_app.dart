@@ -90,7 +90,9 @@ class _FilaPlusResidualFichaState extends State<FilaPlusResidualFicha> {
             'cliente_plus_residual_staff',
             params: {'p_cliente_id': widget.clienteId},
           )
-          .timeout(const Duration(seconds: 8));
+          // 1.32: 12 s, la norma de lectura de Gestión
+          // (antes 8 s, fuera de norma según el barrido).
+          .timeout(const Duration(seconds: 12));
       if (!mounted) return;
       // Cola menor del estudio (R1M4-B7): una RPC que devuelve
       // null SIN lanzar no es «sin Plus»: es «no se pudo
