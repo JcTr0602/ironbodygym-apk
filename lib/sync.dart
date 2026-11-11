@@ -6237,6 +6237,18 @@ class SyncEngine {
               AppLog.info('sync', 'purga_reconciliacion',
                   d: '$tabla borradas=${borradas.length}');
             }
+            // YS-7: la primitiva pudo abortar por intersección
+            // sospechosa (lo registra en meta porque localdb
+            // no escribe en bitácora); se traslada aquí y se
+            // limpia.
+            final sospechosa = await _db
+                .getMeta('purga_interseccion_sospechosa_$tabla');
+            if (sospechosa != null && sospechosa.isNotEmpty) {
+              AppLog.aviso('sync', 'purga_interseccion_sospechosa',
+                  d: '$tabla $sospechosa');
+              await _db.setMeta(
+                  'purga_interseccion_sospechosa_$tabla', '');
+            }
             await _db.setMeta('purga_v144_$tabla', '');
           } else {
             AppLog.aviso('sync', 'purga_omitida',

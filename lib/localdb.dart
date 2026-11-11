@@ -4327,16 +4327,53 @@ class LocalDb {
       String tabla, Set<Object> idsServidor) async {
     final d = await db;
     final borrar = <Object>[];
+    // Yunque de Sincronización (YS-7): la comparación va en
+    // forma TEXTO canónica a ambos lados. La comparación
+    // tipada histórica (`idsServidor.contains(id)`) fallaba
+    // en silencio si el conjunto del servidor llegaba con los
+    // ids como texto y el espejo los guarda como enteros (o
+    // al revés): NADA coincidía y la purga borraba todas las
+    // filas confirmadas creyendo que el servidor las había
+    // eliminado. El borrado sigue usando el valor original
+    // tipado de la fila local.
+    final idsServidorTxt = {for (final id in idsServidor) '$id'};
     // Selección y borrado en la MISMA transacción (panel v1.4.4):
     // ninguna escritura local puede colarse entre inspeccionar
     // las candidatas y borrarlas.
     await d.transaction((txn) async {
       final rows = await txn.query(tabla, columns: ['id', 'sync_seq']);
+      var confirmadas = 0;
       for (final r in rows) {
         final id = r['id'];
         if (id == null) continue;
         final seq = (r['sync_seq'] as num?)?.toInt() ?? 0;
-        if (seq > 0 && !idsServidor.contains(id)) borrar.add(id);
+        if (seq <= 0) continue;
+        confirmadas++;
+        if (!idsServidorTxt.contains('$id')) borrar.add(id);
+      }
+      // YS-7, red de intersección: si la purga borraría el
+      // 100 % de las filas confirmadas habiendo un conjunto
+      // del servidor NO vacío, la intersección es sospechosa
+      // (los conteos de la puerta pudieron cuadrar por
+      // casualidad con ids que no se cruzan: otra cuenta,
+      // otro espejo, tipos cruzados no normalizados aguas
+      // arriba). Se aborta ESTA tabla, no se borra nada y el
+      // aborto queda registrado en meta (localdb no puede
+      // escribir en la bitácora: app_log vive sobre LocalDb).
+      // Un conjunto vacío NO aborta: ese caso lo gobiernan
+      // las guardas de la puerta (purgaPermitida y H-08).
+      if (borrar.isNotEmpty &&
+          confirmadas > 0 &&
+          borrar.length == confirmadas &&
+          idsServidor.isNotEmpty) {
+        await setMetaEn(
+            txn,
+            'purga_interseccion_sospechosa_$tabla',
+            'ids_servidor=${idsServidor.length} '
+            'confirmadas=$confirmadas '
+            'en=${isoHabana(ahoraHabana())}');
+        borrar.clear();
+        return;
       }
       for (final id in borrar) {
         if (id is int) {
