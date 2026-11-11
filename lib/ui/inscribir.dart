@@ -26,6 +26,7 @@ import 'dialogo_confirmar_inscripcion.dart';
 import 'diseno.dart';
 import 'permisos_ui.dart';
 import 'foto_elegir.dart';
+import 'invitados.dart';
 import 'widgets.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
@@ -36,7 +37,13 @@ class InscribirScreen extends StatefulWidget {
   /// `inscribir` lleva `invitado_id`, `conversion_uuid` y las
   /// medidas sincronizadas del invitado.
   final DatosConversionInvitado? conversion;
-  const InscribirScreen({super.key, this.conversion});
+
+  /// 1.32 (Compuerta 5): foto recuperada al rehidratar — la
+  /// cáscara raíz la ofrece tras un cierre de Android a mitad
+  /// del selector y, si se acepta, Inscribir nace con ella
+  /// puesta (la misma ranura que llena _tomarFoto).
+  final File? fotoInicial;
+  const InscribirScreen({super.key, this.conversion, this.fotoInicial});
   @override
   State<InscribirScreen> createState() => _InscribirScreenState();
 }
@@ -112,6 +119,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
   // v1.7.0: inscribir directamente como Cuenta a la Casa (solo
   // dueño; el servidor revalida que el actor sea admin).
   bool _cuentaCasa = false;
+  // 1.32 (Disparador 2B): la caché LOCAL de invitados, leída
+  // una vez al abrir (LocalDb meta; jamás red al teclear —
+  // Compuerta 2). La coincidencia se calcula en build con la
+  // función pura del servicio.
+  List<InvitadoResumen> _cacheInvitados2B = const [];
   double _precioMenorVal = 1500;
 
   @override
@@ -141,8 +153,23 @@ class _InscribirScreenState extends State<InscribirScreen> {
           : (conv.carnetSugerido ?? conv.carnet);
       if (carnet != null) _carnet.text = carnet;
     }
+    // 1.32 (Compuerta 5): la foto recuperada entra por la
+    // misma ranura que la del selector.
+    if (widget.fotoInicial != null) _foto = widget.fotoInicial;
+    _cargarCacheInvitados2B();
     _cargarPrecioMenor();
     _cargarTiposCustom();
+  }
+
+  /// 1.32 (Disparador 2B): lee la caché local de invitados
+  /// una sola vez. Si nunca se abrió Invitados, la caché no
+  /// existe y el disparador simplemente no se ofrece.
+  Future<void> _cargarCacheInvitados2B() async {
+    try {
+      final cache = await InvitadosService().leerCacheInvitados();
+      if (!mounted || cache == null) return;
+      setState(() => _cacheInvitados2B = cache.lista);
+    } catch (_) {}
   }
 
   /// v1.3.9: cargar tipos de pago personalizados (ej. "Oferta 50%").
@@ -986,6 +1013,58 @@ class _InscribirScreenState extends State<InscribirScreen> {
                           },
                           etiqueta: 'Teléfono (8 dígitos)',
                           icono: Icons.phone_rounded),
+                      // 1.32 (Disparador 2B · Compuerta 2):
+                      // si el número tecleado pertenece a un
+                      // invitado de la caché LOCAL, se ofrece
+                      // su ficha para convertirlo en vez de
+                      // duplicarlo. Sin caché o sin
+                      // coincidencia, no ocupa espacio.
+                      if (widget.conversion == null)
+                        Builder(builder: (context) {
+                          final coincide =
+                              InvitadosService.invitadoPorTelefonoEnCache(
+                                  _cacheInvitados2B, _telefono.text);
+                          if (coincide == null) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(
+                                top: AppEspacio.md),
+                            child: Tarjeta(
+                              color: AppColores.alerta
+                                  .withValues(alpha: 0.12),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                      Icons.person_search_rounded,
+                                      color: AppColores.alerta),
+                                  const SizedBox(
+                                      width: AppEspacio.sm),
+                                  Expanded(
+                                    child: Text(
+                                      'Este número pertenece al '
+                                      'invitado ${coincide.nombre}. '
+                                      'Si es la misma persona, '
+                                      'conviértelo desde su ficha '
+                                      'para no duplicarlo.',
+                                      style: AppTexto.secundario,
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => Navigator.of(
+                                            context)
+                                        .push(RutaIron(
+                                            builder: (_) =>
+                                                InvitadoDetalleScreen(
+                                                    invitadoId:
+                                                        coincide.id))),
+                                    child: const Text('Su ficha'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
                       const SizedBox(
                           height: AppEspacio.md),
                       CampoTexto(

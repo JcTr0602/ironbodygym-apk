@@ -155,6 +155,63 @@ class CacheSeccionesFicha {
   void limpiar() => _cache.clear();
 }
 
+/// 1.32 «Mostrador Táctico»: la pestaña de cada sección de la
+/// ficha — 0 «Pagos y Notas» · 1 «Progreso y Marcas» · 2 «App
+/// Clientes» (plano consolidado §4.2, con los destinos del
+/// inventario: G-17 Notas va con Pagos; G-19/G-20 con Progreso;
+/// G-21/G-22/G-24 con App Clientes). Las tarjetas con clase
+/// propia se reconocen por tipo; las genéricas, por su rótulo
+/// (la composición de _seccionesCrudas es fija y los rótulos
+/// son estables). La foto personal y las fotos de progreso
+/// viven DENTRO de la tarjeta «Información personal» en el
+/// código vivo: viajan con ella a Pagos y Notas (partir la
+/// tarjeta es cirugía de otra oleada).
+int pestanaDeSeccionFicha(Widget w) {
+  if (w is TarjetaMedidas) return 1;
+  if (w is SeccionAccesoAppFicha) return 2;
+  if (w is Tarjeta) {
+    if (_subarbolDice(w.child, 'Panel del dueño')) return 2;
+    if (_subarbolDice(w.child, 'Marcas en la app')) return 1;
+    return 0;
+  }
+  if (w is Padding && _subarbolDice(w, 'Última medida:')) return 1;
+  return 0;
+}
+
+/// Busca un rótulo en el subárbol de widgets (solo lectura de
+/// la configuración, sin montar nada): Text, ListTile y los
+/// contenedores de un hijo o de varios.
+bool _subarbolDice(Widget w, String texto, [int profundidad = 0]) {
+  if (profundidad > 14) return false;
+  if (w is Text) {
+    final t = w.data ?? w.textSpan?.toPlainText() ?? '';
+    if (t.contains(texto)) return true;
+    return false;
+  }
+  if (w is ListTile) {
+    for (final parte in [w.leading, w.title, w.subtitle, w.trailing]) {
+      if (parte != null &&
+          _subarbolDice(parte, texto, profundidad + 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (w is Tarjeta) {
+    return _subarbolDice(w.child, texto, profundidad + 1);
+  }
+  if (w is SingleChildRenderObjectWidget) {
+    final h = w.child;
+    return h != null && _subarbolDice(h, texto, profundidad + 1);
+  }
+  if (w is MultiChildRenderObjectWidget) {
+    for (final h in w.children) {
+      if (_subarbolDice(h, texto, profundidad + 1)) return true;
+    }
+  }
+  return false;
+}
+
 class FichaScreen extends StatefulWidget {
   final int clienteId;
 
@@ -209,6 +266,21 @@ class _FichaScreenState extends State<FichaScreen> {
   // barra compacta se muestra cuando la cabecera ya salió
   // de pantalla (desplazamiento por encima del umbral).
   final ScrollController _scrollFicha = ScrollController();
+  // 1.32 «Mostrador Táctico»: la ficha se reparte en 3
+  // pestañas (Pagos y Notas · Progreso y Marcas · App
+  // Clientes) con la cabecera FIJA arriba; cada pestaña
+  // conserva su propio scroll (controlador propio +
+  // PageStorageKey). La barra compacta sigue al controlador
+  // de la pestaña activa.
+  int _pestanaFicha = 0;
+  final ScrollController _scrollFicha2 = ScrollController();
+  final ScrollController _scrollFicha3 = ScrollController();
+
+  ScrollController get _scrollActivo => switch (_pestanaFicha) {
+        1 => _scrollFicha2,
+        2 => _scrollFicha3,
+        _ => _scrollFicha,
+      };
   bool _cabeceraCompacta = false;
   static const double _umbralCabeceraCompacta = 170;
   // 1.28 (M4-C2): secciones que YA animaron su entrada en
@@ -315,20 +387,26 @@ class _FichaScreenState extends State<FichaScreen> {
     // 1.28 (M4-C3): la barra compacta solo cambia de estado
     // al cruzar el umbral — setState únicamente en el cruce.
     _scrollFicha.addListener(_alMoverScrollFicha);
+    _scrollFicha2.addListener(_alMoverScrollFicha);
+    _scrollFicha3.addListener(_alMoverScrollFicha);
     _cargar();
   }
 
   @override
   void dispose() {
     _scrollFicha.removeListener(_alMoverScrollFicha);
+    _scrollFicha2.removeListener(_alMoverScrollFicha);
+    _scrollFicha3.removeListener(_alMoverScrollFicha);
     _scrollFicha.dispose();
+    _scrollFicha2.dispose();
+    _scrollFicha3.dispose();
     super.dispose();
   }
 
   void _alMoverScrollFicha() {
-    if (!_scrollFicha.hasClients) return;
-    final mostrar =
-        _scrollFicha.offset > _umbralCabeceraCompacta;
+    final activo = _scrollActivo;
+    if (!activo.hasClients) return;
+    final mostrar = activo.offset > _umbralCabeceraCompacta;
     if (mostrar != _cabeceraCompacta && mounted) {
       setState(() => _cabeceraCompacta = mostrar);
     }
@@ -340,7 +418,7 @@ class _FichaScreenState extends State<FichaScreen> {
   /// final para forzar su construcción y luego se ajusta
   /// con ensureVisible.
   Future<void> _irASeccionAcceso() =>
-      _desplazarASeccion(_claveSeccionAcceso);
+      _desplazarASeccion(_claveSeccionAcceso, pestana: 2);
 
   /// 1.30 (Oleada 10, FICHA-12): desplaza la ficha hasta
   /// la sección de la [clave] (el mecanismo nació para
@@ -349,7 +427,16 @@ class _FichaScreenState extends State<FichaScreen> {
   /// (lista perezosa: está muy abajo), primero se va al
   /// final para forzar su construcción y luego se ajusta
   /// con ensureVisible.
-  Future<void> _desplazarASeccion(GlobalKey clave) async {
+  Future<void> _desplazarASeccion(GlobalKey clave,
+      {int? pestana}) async {
+    // 1.32: si la sección vive en OTRA pestaña, primero se
+    // cambia de pestaña y se espera a que monte.
+    if (pestana != null && pestana != _pestanaFicha && mounted) {
+      setState(() => _pestanaFicha = pestana);
+      await WidgetsBinding.instance.endOfFrame;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     final ctxSeccion = clave.currentContext;
     if (ctxSeccion != null) {
       await Scrollable.ensureVisible(
@@ -360,9 +447,9 @@ class _FichaScreenState extends State<FichaScreen> {
       );
       return;
     }
-    if (!_scrollFicha.hasClients) return;
-    await _scrollFicha.animateTo(
-      _scrollFicha.position.maxScrollExtent,
+    if (!_scrollActivo.hasClients) return;
+    await _scrollActivo.animateTo(
+      _scrollActivo.position.maxScrollExtent,
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOut,
     );
@@ -2524,6 +2611,46 @@ class _FichaScreenState extends State<FichaScreen> {
             protegido: protegido,
           );
 
+    // 1.32: reparto de las secciones — cabecera FIJA (todo lo
+    // anterior a «qué le falta») + las 3 pestañas. Los
+    // espaciadores siguen a la sección que preceden.
+    final corteFicha =
+        items.indexWhere((it) => it.widget is SeccionQueFaltaFicha);
+    final itemsCabecera =
+        corteFicha < 0 ? items : items.sublist(0, corteFicha);
+    final porPestana = <int, List<({String clave, Object version, Widget widget})>>{
+      0: [],
+      1: [],
+      2: [],
+    };
+    if (corteFicha >= 0) {
+      var pestanaEnCurso = 0;
+      for (final it in items.sublist(corteFicha)) {
+        if (it.widget is! SizedBox) {
+          pestanaEnCurso = pestanaDeSeccionFicha(it.widget);
+        }
+        porPestana[pestanaEnCurso]!.add(it);
+      }
+    }
+    final controladoresFicha = [
+      _scrollFicha,
+      _scrollFicha2,
+      _scrollFicha3,
+    ];
+    Widget itemFicha(
+        ({String clave, Object version, Widget widget}) it, int indice) {
+      return RepaintBoundary(
+        key: ValueKey('ficha_${it.clave}'),
+        child: EntradaSeccionFicha(
+          claveSeccion: it.clave,
+          indice: indice,
+          yaAnimadas: _seccionesAnimadas,
+          child:
+              _cacheSecciones.obtener(it.clave, it.version, it.widget),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: appBarIron(
         context,
@@ -2638,60 +2765,81 @@ class _FichaScreenState extends State<FichaScreen> {
                 ? const SkeletonFicha()
                 : c == null
                     ? _clienteNoEncontrado()
-                    : Stack(
-                    children: [
-                      // 1.30 FICHA-07: tirar hacia abajo
-                      // refresca la ficha (ver _refrescarFicha).
-                      RefreshIndicator(
-                        onRefresh: _refrescarFicha,
-                        child: ListView.builder(
-                        controller: _scrollFicha,
-                        padding: const EdgeInsets.all(
-                            AppEspacio.lg),
-                        itemCount: items.length,
-                        itemBuilder: (ctx, i) {
-                          final it = items[i];
-                          return RepaintBoundary(
-                            key: ValueKey('ficha_${it.clave}'),
-                            // 1.28 (M4-C2): entrada por
-                            // secciones — fundido corto y
-                            // escalonado SOLO la primera vez
-                            // que la sección entra en
-                            // pantalla en esta visita.
-                            child: EntradaSeccionFicha(
-                              claveSeccion: it.clave,
-                              indice: i,
-                              yaAnimadas: _seccionesAnimadas,
-                              child: _cacheSecciones.obtener(
-                                  it.clave, it.version, it.widget),
+                    : Column(
+                        children: [
+                          // 1.32: cabecera FIJA de la ficha
+                          // (foto, nombre, estado y la fila
+                          // Editar/Vender): no se desplaza ni
+                          // cambia con la pestaña.
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                                AppEspacio.lg,
+                                AppEspacio.lg,
+                                AppEspacio.lg,
+                                0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (var i = 0;
+                                    i < itemsCabecera.length;
+                                    i++)
+                                  itemFicha(itemsCabecera[i], i),
+                              ],
                             ),
-                          );
-                        },
-                        ),
+                          ),
+                          _barraPestanasFicha(),
+                          Expanded(
+                            child: Stack(
+                              children: [
+                                IndexedStack(
+                                  index: _pestanaFicha,
+                                  children: [
+                                    for (var t = 0; t < 3; t++)
+                                      // 1.30 FICHA-07: tirar
+                                      // hacia abajo refresca la
+                                      // ficha (ver
+                                      // _refrescarFicha), ahora
+                                      // en cada pestaña.
+                                      RefreshIndicator(
+                                        onRefresh: _refrescarFicha,
+                                        child: ListView.builder(
+                                          key: PageStorageKey<String>(
+                                              'ficha-pestana-$t'),
+                                          controller:
+                                              controladoresFicha[t],
+                                          padding:
+                                              const EdgeInsets.all(
+                                                  AppEspacio.lg),
+                                          itemCount:
+                                              porPestana[t]!.length,
+                                          itemBuilder: (ctx, i) =>
+                                              itemFicha(
+                                                  porPestana[t]![i],
+                                                  i),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                // 1.28 (M4-C3): cabecera
+                                // compacta al bajar, sobre la
+                                // pestaña activa.
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: _barraCompactaFicha(
+                                    nombre: nombre,
+                                    esCasa: esCasa,
+                                    congelado: pausado,
+                                    dias: dias,
+                                    colorMarco: colorMarco,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      // 1.28 (M4-C3): cabecera compacta al
-                      // bajar — foto pequeña, nombre, estado
-                      // y la acción del momento, sin volver
-                      // arriba para cobrar.
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: _barraCompactaFicha(
-                          nombre: nombre,
-                          esCasa: esCasa,
-                          // Yunque de cambios 1.31 (M1): la
-                          // barra recibe la fusión `pausado`
-                          // (su parámetro se llama congelado):
-                          // con la pausa nueva decía «Vencido
-                          // hace N días» con el anillo en azul.
-                          congelado: pausado,
-                          dias: dias,
-                          colorMarco: colorMarco,
-                        ),
-                      ),
-                    ],
-                  ),
           ),
         ],
       ),
@@ -2707,6 +2855,60 @@ class _FichaScreenState extends State<FichaScreen> {
   /// el cliente no tiene acceso a la app y quien mira
   /// puede darlo (la generación vive en la sección, con
   /// las guardas de A8: la barra solo desplaza hasta ella).
+  /// 1.32: la barra de las 3 pestañas de la ficha (Pagos y
+  /// Notas · Progreso y Marcas · App Clientes). Sin alturas
+  /// fijas: la etiqueta puede crecer a 2 líneas al 200 %.
+  Widget _barraPestanasFicha() {
+    Widget pestana(int i, String texto, String clave) {
+      final activa = _pestanaFicha == i;
+      return Expanded(
+        child: InkWell(
+          key: ValueKey(clave),
+          onTap: () => setState(() => _pestanaFicha = i),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(vertical: AppEspacio.sm),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: activa
+                      ? AppColores.cobaltoDe(context)
+                      : Colors.transparent,
+                  width: 2.5,
+                ),
+              ),
+            ),
+            child: Text(
+              texto,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: AppTexto.etiqueta.copyWith(
+                fontWeight:
+                    activa ? FontWeight.w800 : FontWeight.w500,
+                color: activa
+                    ? AppColores.cobaltoDe(context)
+                    : AppColores.textoSecundario(context),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
+      child: Row(
+        children: [
+          pestana(0, 'Pagos y Notas', 'ficha-tab-pagos'),
+          pestana(1, 'Progreso y Marcas', 'ficha-tab-progreso'),
+          pestana(2, 'App Clientes', 'ficha-tab-app'),
+        ],
+      ),
+    );
+  }
+
   Widget _barraCompactaFicha({
     required String nombre,
     required bool esCasa,
@@ -3005,7 +3207,8 @@ class _FichaScreenState extends State<FichaScreen> {
                         // una sola puerta (la última
                         // medida).
                         onMedicion: () => _desplazarASeccion(
-                            _claveSeccionMedidas),
+                            _claveSeccionMedidas,
+                            pestana: 1),
                       ),
                       // Información personal
                       Tarjeta(

@@ -1527,6 +1527,28 @@ class InvitadosService {
     }
   }
 
+  /// 1.32 (Disparador 2B · Compuerta 2 del veredicto g132):
+  /// busca en una lista YA CACHEADA de invitados el que tenga
+  /// este teléfono (dígitos limpios, últimos 8). Es una
+  /// función pura sobre la caché local: al teclear en
+  /// Inscribir está PROHIBIDO tocar la red — la detección
+  /// cruzada vive o muere con la caché que Invitados ya
+  /// guardó. Los ya convertidos no cuentan (su teléfono ya
+  /// es de un cliente).
+  static InvitadoResumen? invitadoPorTelefonoEnCache(
+      List<InvitadoResumen> lista, String telefono) {
+    final digitos = telefono.replaceAll(RegExp(r'\D'), '');
+    if (digitos.length < 8) return null;
+    final buscado = digitos.substring(digitos.length - 8);
+    for (final r in lista) {
+      if (r.estado == 'convertido') continue;
+      final t = r.telefono.replaceAll(RegExp(r'\D'), '');
+      if (t.length < 8) continue;
+      if (t.substring(t.length - 8) == buscado) return r;
+    }
+    return null;
+  }
+
   Future<InvitadoDetalle> detalle(String invitadoId) async {
     // Autoauditoría 1.22 #1 (2026-11-03): detalle es LECTURA y
     // va por _rpcLectura (timeout 12 s), como listar/resumen
