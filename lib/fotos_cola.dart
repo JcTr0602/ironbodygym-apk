@@ -507,7 +507,7 @@ class FotosColaService {
       // el epoch va como ENTERO. Como texto, SQLite lo compara
       // por TIPO (INTEGER < TEXT siempre verdadero) y el reclamo
       // pasaba aunque otro worker tuviera un lease vigente.
-      [leaseValor, DateTime.now().millisecondsSinceEpoch ~/ 1000],
+      [leaseValor, ahoraUtcReal().millisecondsSinceEpoch ~/ 1000],
     );
     if (leaseReclamado != 1) {
       AppLog.aviso('fotos', 'worker_activo',
@@ -596,11 +596,14 @@ class FotosColaService {
       // (epoch vía strftime), no como texto: en el borde DST el
       // offset del ISO cambia y la comparación lexicográfica
       // liberaba el lease hasta 1 h antes o después.
-      // AA2 H-1: epoch de DateTime.now() (instante real en
+      // AA2 H-1: epoch de ahoraUtcReal() (instante real en
       // cualquier zona); el de ahoraHabana() solo es real con
       // el teléfono en La Habana. Ver LocalDb.pendientesParaEnvio.
+      // 1.32 (H-B7-4): la forma es ahoraUtcReal() en todo el
+      // archivo; el instante crudo sin pasar por tiempo.dart
+      // queda fuera de la norma.
       final ahoraEpoch =
-        DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        ahoraUtcReal().millisecondsSinceEpoch ~/ 1000;
       await db.update(
         'fotos_cola',
         {
@@ -638,7 +641,10 @@ class FotosColaService {
       // Caza Fotos: el epoch va como ENTERO (como texto, SQLite
       // compara por tipo y el corte <= pasaba SIEMPRE: el backoff
       // de proximo_intento_en no se respetaba en la selección).
-      final ahoraIso = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      // (Nombre propio —ahoraCorteEpoch—: el ámbito ya declara
+      // el ahoraEpoch de la liberación de leases de arriba.)
+      final ahoraCorteEpoch =
+          ahoraUtcReal().millisecondsSinceEpoch ~/ 1000;
       final fotos = await db.query(
         'fotos_cola',
         where: "estado = 'pendiente' AND intentos < 5 "
@@ -654,7 +660,7 @@ class FotosColaService {
             // (5 min de holgura + display rápido, o 15 min de holgura
             // extendida sin medición).
             "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
-        whereArgs: [ahoraIso],
+        whereArgs: [ahoraCorteEpoch],
         orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
             "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
         limit: 1,
@@ -1765,13 +1771,13 @@ class FotosColaService {
     // v1.3.4 (Argón): hora Habana, estándar obligatorio.
     // SA-04: comparación por epoch (ver procesarCola).
     // Caza Fotos: epoch ENTERO (ver la selección en procesarCola).
-    final ahoraIso = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ahoraEpoch = ahoraUtcReal().millisecondsSinceEpoch ~/ 1000;
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR "
             "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)",
-        [ahoraIso]);
+        [ahoraEpoch]);
     return (r.first['n'] as int? ?? 0);
   }
 
@@ -1795,20 +1801,20 @@ class FotosColaService {
     // SA-04: comparación por epoch (ver procesarCola).
     // Caza Fotos: epoch ENTERO (ver la selección en procesarCola).
     // Autoauditoría 1.22 #2: el epoch sale del INSTANTE REAL
-    // (DateTime.now()), no de ahoraHabana(): millisecondsSinceEpoch
+    // (ahoraUtcReal()), no de ahoraHabana(): millisecondsSinceEpoch
     // de la hora de pared Habana reinterpretada en la zona del
     // teléfono se desplaza horas si la zona no es America/Havana
     // (doctrina AA2 H-1; así lo hacen contarPendientes y las
     // selecciones de procesarCola). [ahora] se conserva solo para
     // la QoS de 'original', que sí razona en hora de pared.
-    final ahoraIso = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ahoraEpoch = ahoraUtcReal().millisecondsSinceEpoch ~/ 1000;
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR "
             "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)"
         "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
-        [ahoraIso]);
+        [ahoraEpoch]);
     return (r.first['n'] as int? ?? 0);
   }
 

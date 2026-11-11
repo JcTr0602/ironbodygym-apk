@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
@@ -81,6 +82,38 @@ const nombresDetectores = <String, String>{
   'ediciones': 'las ediciones de pagos',
   'sync': 'la sincronización',
 };
+
+/// 1.32 (H-B7-1): ¿existe un `ajuste` de caja del mismo autor
+/// dentro de la ventana ±[horas] alrededor de [instante]?
+///
+/// La comparación es por INSTANTE —epoch entero contra
+/// `CAST(strftime('%s', creada_ts) AS INTEGER)`, el patrón A-05
+/// de la casa—, nunca por texto: la columna `creada_ts` guarda
+/// textos con offset habanero y el borde construido con
+/// `toIso8601String()` salía con «Z»; el orden lexicográfico
+/// entre designadores distintos desplazaba AMBOS bordes de la
+/// ventana el offset completo (4-5 h): un ajuste legítimo a −23 h
+/// parecía fuera (falsa anomalía) y uno a +25 h parecía dentro
+/// (anomalía invisible). SQLite interpreta el offset de cada
+/// texto al calcular su epoch, así que la comparación por
+/// instante es inmune al formato guardado y al cambio de hora.
+@visibleForTesting
+Future<bool> ajusteRespaldaEnVentana(
+    Database db, int telegramId, DateTime instante, int horas) async {
+  final iniE =
+      instante.subtract(Duration(hours: horas)).millisecondsSinceEpoch ~/
+          1000;
+  final finE =
+      instante.add(Duration(hours: horas)).millisecondsSinceEpoch ~/ 1000;
+  final ajustes = await db.query('ops_queue',
+      columns: ['op_uuid'],
+      where: "tipo = 'ajuste' AND telegram_id = ? "
+          "AND CAST(strftime('%s', creada_ts) AS INTEGER) >= ? "
+          "AND CAST(strftime('%s', creada_ts) AS INTEGER) <= ?",
+      whereArgs: [telegramId, iniE, finE],
+      limit: 1);
+  return ajustes.isNotEmpty;
+}
 
 // v1.3.7 (Fase B, nota de Argón): umbrales centralizados como constantes
 // nombradas (antes literales dispersos). Conservadores para evitar
@@ -269,9 +302,15 @@ class _AuditoriaSilenciosaScreenState
     final db = await LocalDb.instance.db;
     List<Map<String, dynamic>> ops = [];
     try {
-      final desde = ahoraHabana()
-          .subtract(Duration(days: _Umbrales.edicionesDias))
-          .toIso8601String();
+      // 1.32 (H-B7-1, residuo del mismo detector): el corte de
+      // días también compara por instante (epoch entero), no
+      // por texto: el toIso8601String() salía SIN zona y la
+      // columna guarda offset, así que el borde se desplazaba
+      // las horas del día de corte.
+      final desdeE = ahoraHabana()
+              .subtract(Duration(days: _Umbrales.edicionesDias))
+              .millisecondsSinceEpoch ~/
+          1000;
       ops = await db.query('ops_queue',
           columns: [
             'op_uuid',
@@ -282,8 +321,8 @@ class _AuditoriaSilenciosaScreenState
             'payload'
           ],
           where: "tipo IN ('editar_pago', 'editar_pago_diario') "
-              "AND creada_ts >= ?",
-          whereArgs: [desde],
+              "AND CAST(strftime('%s', creada_ts) AS INTEGER) >= ?",
+          whereArgs: [desdeE],
           orderBy: 'creada_ts DESC',
           limit: 50);
     } catch (_) {
@@ -296,21 +335,14 @@ class _AuditoriaSilenciosaScreenState
       var respaldada = false;
       if (tid != null && ts.isNotEmpty) {
         try {
-          final dt = DateTime.parse(ts);
-          final ini = dt
-              .subtract(
-                  Duration(hours: _Umbrales.ajusteVentanaHoras))
-              .toIso8601String();
-          final fin = dt
-              .add(Duration(hours: _Umbrales.ajusteVentanaHoras))
-              .toIso8601String();
-          final ajustes = await db.query('ops_queue',
-              columns: ['op_uuid'],
-              where: "tipo = 'ajuste' AND telegram_id = ? "
-                  "AND creada_ts >= ? AND creada_ts <= ?",
-              whereArgs: [tid, ini, fin],
-              limit: 1);
-          respaldada = ajustes.isNotEmpty;
+          // 1.32 (H-B7-1): comparación por instante (epoch),
+          // no por texto ISO de formatos mezclados — ver
+          // ajusteRespaldaEnVentana.
+          final tidInt = tid is num ? tid.toInt() : null;
+          if (tidInt != null) {
+            respaldada = await ajusteRespaldaEnVentana(db, tidInt,
+                DateTime.parse(ts), _Umbrales.ajusteVentanaHoras);
+          }
         } catch (_) {}
       }
       if (respaldada) continue;
