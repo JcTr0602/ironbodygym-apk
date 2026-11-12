@@ -293,12 +293,13 @@ void main() {
     // El error queda persistido para la pantalla.
     // 1.33 (coherencia de sync): la meta persiste el
     // CÓDIGO estable, no el mensaje — la sentencia se
-    // compone una sola vez al pintar, y detalle() debe
-    // devolver exactamente la misma de siempre.
+    // compone una sola vez al pintar: detalle() devuelve
+    // la misma sentencia de siempre, con el sufijo de la
+    // hora del desenlace que el §7.2 manda componer.
     expect(await LocalDb.instance.getMeta('last_sync_error'),
         'sesion_invalida');
     expect((await SyncEngine.instance.detalle()).error,
-        SyncEngine.mensajeSesionInvalida);
+        startsWith(SyncEngine.mensajeSesionInvalida));
     // Y la corrida del diario lo cuenta como fallida.
     final ultima = await DiarioSync.instance.ultimaCorrida();
     expect(ultima, isNotNull);
