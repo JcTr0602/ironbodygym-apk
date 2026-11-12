@@ -235,6 +235,13 @@ class FotoCache {
   /// negativa (_falloEn) del llamador.
   final _fallo401 = <String>{};
 
+  /// 1.33: invalidaciones DIFERIDAS por cambio de variante
+  /// (ruta vieja → ruta nueva): cuando el pull cambia
+  /// foto_storage entre variantes de la MISMA foto
+  /// (display→original), la copia vieja NO se borra hasta
+  /// que la nueva esté en disco (ver [invalidarCambioFoto]).
+  final _invalidacionesDiferidas = <String, String>{};
+
   /// 1.31: la cola de precarga de las listas (ver su doc). Su
   /// descargador mira primero la caché (la ruta pudo aterrizar
   /// por otra vía entre el encolado y el turno) y luego baja
@@ -272,6 +279,17 @@ class FotoCache {
     _memoria[storagePath] = f;
     while (_memoria.length > _maxEntradasMemoria) {
       _memoria.remove(_memoria.keys.first);
+    }
+    // 1.33: si esta ruta era la variante nueva que una
+    // invalidación diferida esperaba, la variante vieja ya
+    // sobra: se invalida ahora, con la nueva SÍ en disco.
+    final cumplidas = <String>[
+      for (final e in _invalidacionesDiferidas.entries)
+        if (e.value == storagePath) e.key,
+    ];
+    for (final vieja in cumplidas) {
+      _invalidacionesDiferidas.remove(vieja);
+      unawaited(invalidar(vieja));
     }
   }
 
@@ -436,6 +454,9 @@ class FotoCache {
   /// v1.3.3: preserva la extensión original al buscar el archivo.
   Future<void> invalidar(String? storagePath) async {
     if (storagePath == null || storagePath.isEmpty) return;
+    // 1.33: una invalidación directa cancela la diferida
+    // que hubiera pendiente sobre esta misma ruta.
+    _invalidacionesDiferidas.remove(storagePath);
     _memoria.remove(storagePath);
     // 1.31: una foto invalidada (nueva en la misma ruta) no
     // hereda el backoff de la anterior.
@@ -448,6 +469,57 @@ class FotoCache {
       final f = _archivoCache(d, storagePath);
       if (await f.exists()) await f.delete();
     } catch (_) {}
+  }
+
+  /// 1.33: ¿[a] y [b] son dos variantes de la MISMA foto?
+  /// Las variantes de una foto cuelgan del mismo foto_uuid
+  /// (`clientes/<id>/<uuid>_display.jpg`, `..._original.jpg`,
+  /// `..._thumb.jpg`): coinciden si al quitar la extensión y
+  /// el sufijo de variante queda la misma raíz. Una foto
+  /// DISTINTA (otro uuid, otra carpeta) nunca coincide.
+  static bool _esVarianteDeLaMismaFoto(String a, String b) {
+    String raiz(String p) {
+      var s = p.toLowerCase();
+      s = s.replaceFirst(RegExp(r'\.(jpg|jpeg|png|webp)$'), '');
+      s = s.replaceFirst(RegExp(r'_(display|original|thumb)$'), '');
+      return s;
+    }
+
+    return a != b && raiz(a) == raiz(b);
+  }
+
+  /// 1.33: invalidación al cambiar foto_storage en un pull
+  /// (la llaman los tres sitios de localdb y el de
+  /// suplementos en sync, con la ruta vieja y la nueva).
+  ///
+  /// - Si vieja y nueva son variantes de la MISMA foto, la
+  ///   copia vieja NO se borra: sigue sirviendo hasta que la
+  ///   nueva variante esté descargada y verificada en disco;
+  ///   al aterrizar, [_recordar] ejecuta la invalidación
+  ///   diferida. Así el cliente nunca se queda sin foto por
+  ///   un cambio de enlace entre variantes — el vaivén de
+  ///   la 1.32: el servidor promovía display→original y el
+  ///   pull borraba la display ya descargada, dejando la
+  ///   fila a merced de bajar la original por un enlace malo.
+  /// - Si la nueva ya está en disco, la vieja sobra ya.
+  /// - Cualquier otro cambio (otra foto, foto quitada) se
+  ///   comporta como [invalidar] de siempre.
+  Future<void> invalidarCambioFoto(String? vieja, String? nueva) async {
+    if (vieja == null || vieja.isEmpty || vieja == nueva) return;
+    if (nueva != null &&
+        nueva.isNotEmpty &&
+        _esVarianteDeLaMismaFoto(vieja, nueva)) {
+      // La ruta que manda ahora nunca puede quedar como
+      // víctima de una invalidación diferida anterior.
+      _invalidacionesDiferidas.remove(nueva);
+      if (await enCache(nueva) != null) {
+        await invalidar(vieja);
+        return;
+      }
+      _invalidacionesDiferidas[vieja] = nueva;
+      return;
+    }
+    await invalidar(vieja);
   }
 
   /// Actualiza la marca de tiempo (para LRU real por acceso).

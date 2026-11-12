@@ -7342,7 +7342,10 @@ class SyncEngine {
                             as Map<String, dynamic>)['foto_storage']
                         as String?;
                     if (oldFoto != nuevo) {
-                      await FotoCache.instance.invalidar(oldFoto);
+                      // 1.33: invalidación segura entre
+                      // variantes (mismo criterio que clientes).
+                      await FotoCache.instance
+                          .invalidarCambioFoto(oldFoto, nuevo);
                     }
                   } catch (_) {}
                 }
