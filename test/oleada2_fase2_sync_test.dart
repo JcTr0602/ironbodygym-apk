@@ -304,13 +304,13 @@ void main() {
     });
     test('A1: instalación cortada sin completa posterior', () {
       final corridas = [
-        CorridaSync(
+        const CorridaSync(
             id: '2',
             tipo: 'solo_pull',
             origen: 'automatica',
             inicioEpoch: 200,
             estado: 'parcial'),
-        CorridaSync(
+        const CorridaSync(
             id: '1',
             tipo: 'completa',
             origen: 'instalacion',
@@ -321,13 +321,13 @@ void main() {
     });
     test('A1: una completa posterior la cura', () {
       final corridas = [
-        CorridaSync(
+        const CorridaSync(
             id: '2',
             tipo: 'completa',
             origen: 'automatica',
             inicioEpoch: 200,
             estado: 'completa'),
-        CorridaSync(
+        const CorridaSync(
             id: '1',
             tipo: 'completa',
             origen: 'instalacion',

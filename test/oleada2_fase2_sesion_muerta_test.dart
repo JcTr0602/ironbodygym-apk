@@ -243,7 +243,7 @@ void main() {
     LocalDb.nombreArchivoDbForzado = 'test_o2f2s_sesion.db';
     server = await _servidorFake();
     HttpOverrides.global = _RedirigirSupabase(server.port);
-    await Supabase.initialize(url: AppConfig.supabaseUrl, anonKey: 'dummy');
+    await Supabase.initialize(url: AppConfig.supabaseUrl, publishableKey: 'dummy');
     await Supabase.instance.client.auth.signInWithPassword(
       email: 'jctr0602@ironbody.gym',
       password: 'x',
