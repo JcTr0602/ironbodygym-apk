@@ -214,8 +214,16 @@ void main() {
 
     test('Ayuda y Tema viven en el menú del perfil', () {
       expect(marco.contains('PopupMenuButton<String>'), isTrue);
-      expect(marco.contains("Text('Ayuda')"), isTrue);
-      expect(marco.contains("Text('Tema claro/oscuro')"), isTrue);
+      // 1.33 (diseño): los ítems ya no son Text pelados:
+      // los construye _filaMenu (icono en chip + Text con
+      // su parámetro «texto»); el contrato es el destino
+      // con su etiqueta legible, no la forma vieja.
+      expect(RegExp(r'Text\(\s+texto,').hasMatch(marco), isTrue,
+          reason: '_filaMenu pinta su etiqueta con Text');
+      expect(marco.contains("value: 'ayuda'"), isTrue);
+      expect(marco.contains("'Ayuda'"), isTrue);
+      expect(marco.contains("value: 'tema'"), isTrue);
+      expect(marco.contains("'Tema claro/oscuro'"), isTrue);
       // El despacho vive en Home (_accionPerfilMarco).
       final menu = home.substring(
           home.indexOf('void _accionPerfilMarco'),
@@ -228,8 +236,9 @@ void main() {
     test('el destino Ajustes se dice en palabras en el menú', () {
       // La insignia de engranaje sobre el logo (1.30) se
       // funde en la etiqueta del ítem: el destino se LEE.
-      expect(marco.contains("Text('Mi perfil y ajustes')"),
-          isTrue);
+      // 1.33 (diseño): la etiqueta llega vía _filaMenu.
+      expect(marco.contains("value: 'perfil'"), isTrue);
+      expect(marco.contains("'Mi perfil y ajustes'"), isTrue);
       final menu = home.substring(
           home.indexOf('void _accionPerfilMarco'),
           home.indexOf('/// Compuerta 5'));
