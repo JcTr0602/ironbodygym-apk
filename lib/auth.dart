@@ -6,7 +6,9 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'acceso_app_cache.dart';
@@ -32,6 +34,43 @@ String emailToUsername(String email) {
   return base[0].toUpperCase() + base.substring(1);
 }
 
+/// 1.32 (O2F2S, AP-5 verificado contra gotrue 2.27.2):
+/// ¿la sesión PERSISTIDA (SharedPreferences, compartida
+/// por todos los isolates) ya caducó o está a ≤120 s de
+/// caducar? Se lee ANTES de inicializar Supabase en un
+/// isolate de fondo, a propósito:
+/// - gotrue refresca con el token EN MEMORIA y jamás relee
+///   el almacenamiento: si este isolate refrescara y
+///   rotara el token, el isolate principal presentaría
+///   luego su token viejo y, fuera del intervalo de
+///   reutilización del servidor, la familia entera de
+///   tokens se revoca (mueren todas las sesiones).
+/// - y con autoRefreshToken desactivado, inicializar sobre
+///   una sesión caducada la BORRA del almacenamiento
+///   compartido — peor todavía.
+/// Sin sesión persistida devuelve false (no hay nada que
+/// proteger: el flujo normal dirá «sin sesión»).
+/// Fuente única de los isolates de fondo (WorkManager en
+/// main.dart y el Foreground Service de fotos): la regla
+/// no puede divergir entre ellos.
+Future<bool> sesionPersistidaCaducadaParaFondo() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final ref = Uri.parse(AppConfig.supabaseUrl).host.split('.').first;
+    final jsonStr = prefs.getString('sb-$ref-auth-token');
+    if (jsonStr == null || jsonStr.isEmpty) return false;
+    final mapa = jsonDecode(jsonStr);
+    if (mapa is! Map) return false;
+    final exp = mapa['expires_at'];
+    if (exp is! num) return false;
+    final ahoraEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return exp.toInt() <= ahoraEpoch + 120;
+  } catch (_) {
+    return false;
+  }
+}
+
 class AuthService {
   SupabaseClient get _c => Supabase.instance.client;
 
@@ -51,6 +90,147 @@ class AuthService {
 
   Session? get session => _c.auth.currentSession;
   bool get loggedIn => session != null;
+
+  /// Meta con el motivo cuando la verificación de arranque
+  /// descubre una sesión muerta (Login lo muestra una vez).
+  static const metaMotivoSesionMuerta = 'motivo_sesion_muerta';
+
+  /// Texto del motivo (mismo que usa el motor de sync).
+  static const textoSesionMuerta =
+      'La sesión no es válida: cierra sesión y entra de nuevo.';
+
+  /// 1.32 (O2F2S, Pieza 4d en su forma ADJUDICADA por Argón,
+  /// F-5): ¿este error de refresco es un RECHAZO de auth del
+  /// servidor? La regla es la que `_reqAuth` ya aplica en el
+  /// motor: SOLO AuthApiException con statusCode 400/401/403
+  /// (token inválido/revocado, con respuesta HTTP del
+  /// servidor de auth) mata la sesión. Un 5xx del servidor
+  /// de auth NO expulsa, y un fallo de transporte (sin
+  /// respuesta: AuthRetryableFetchException, timeouts)
+  /// JAMÁS expulsa — offline en Cuba no puede echar a los
+  /// entrenadores de su propia app.
+  static bool esRechazoDeAuth(Object e) =>
+      e is AuthApiException &&
+      const {'400', '401', '403'}.contains(e.statusCode);
+
+  /// Verificación de arranque: si la sesión guardada está
+  /// vencida, intenta UN refresco y clasifica el desenlace:
+  /// - vigente o renovada → true, nada más que hacer.
+  /// - el servidor RECHAZA el refresco (el caso de la
+  ///   sesión resucitada por Auto Backup con el refresh ya
+  ///   rotado en la instalación vieja) → la sesión está
+  ///   MUERTA: retirada local (SIN purga) + motivo
+  ///   persistido, y devuelve false para que la raíz mande
+  ///   a Login con el motivo.
+  /// - la red no responde → GRACIA OFFLINE: devuelve true
+  ///   y la sesión se conserva (el motor juzgará en su
+  ///   corrida, como siempre).
+  /// Nunca lanza. La raíz la dispara SIN await: jamás
+  /// bloquea el primer pintado (regla offline-first).
+  Future<bool> verificarSesionAlArranque() async {
+    try {
+      final ses = session;
+      if (ses == null) return true;
+      // F-12: la sesión restaurada también deja su respaldo
+      // de autoría (no solo el login fresco).
+      unawaited(registrarAutorActivo());
+      if (!ses.isExpired) return true;
+      try {
+        final res = await _c.auth
+            .refreshSession()
+            .timeout(const Duration(seconds: 12));
+        final nueva = res.session;
+        // F-5 adjudicado: juzga la RESPUESTA DEL SERVIDOR, no
+        // el reloj local — si el servidor concedió sesión, la
+        // sesión vale aunque el reloj del teléfono (adelantado
+        // >1 h) crea «vencido» hasta el token recién emitido.
+        if (nueva != null) return true;
+        // El servidor respondió sin conceder sesión: muerta.
+        await _sellarSesionMuerta();
+        return false;
+      } catch (e) {
+        if (esRechazoDeAuth(e)) {
+          await _sellarSesionMuerta();
+          return false;
+        }
+        // Red caída / timeout: gracia offline.
+        return true;
+      }
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Sella la sesión muerta: motivo persistido (Login lo
+  /// lee una vez) y retirada local de la sesión para que
+  /// `loggedIn` deje de mentir «hay sesión».
+  Future<void> _sellarSesionMuerta() async {
+    try {
+      await LocalDb.instance
+          .setMeta(metaMotivoSesionMuerta, textoSesionMuerta);
+    } catch (_) {}
+    try {
+      await retirarSesionLocal();
+    } catch (_) {}
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-5 + ampliación de la
+  /// síntesis total): retira SOLO la sesión local — ámbito
+  /// local de gotrue: quita la sesión de memoria y del
+  /// almacenamiento, sin pasar por [signOut]. La ruta de
+  /// signOut() de esta clase purga los datos sensibles
+  /// (purgaAlCerrarSesion) y destruiría las ops aún sin
+  /// subir de un entrenador cuya sesión murió sola; con la
+  /// retirada local, la BD queda intacta y al entrar de
+  /// nuevo esas ops se suben. Es la salida de TODOS los
+  /// caminos de vencimiento (arranque/reloj, motor vía
+  /// onSessionExpired, stream de auth). El cierre
+  /// DELIBERADO del usuario sigue yendo por [signOut] con
+  /// su purga, como siempre.
+  Future<void> retirarSesionLocal() async {
+    AccesoAppCache.instance.limpiar();
+    await _c.auth.signOut(scope: SignOutScope.local);
+  }
+
+  /// 1.32 (O2F2S, AP-5 verificado contra gotrue 2.27.2):
+  /// al volver a primer plano, relee la sesión PERSISTIDA
+  /// y la adopta si su refresh token difiere del que este
+  /// isolate guarda en memoria. Motivo: gotrue jamás relee
+  /// el almacenamiento antes de refrescar (refreshSession
+  /// usa el token EN MEMORIA); si un isolate de fondo
+  /// refrescó y rotó el token, presentar luego el token
+  /// viejo fuera del intervalo de reutilización del
+  /// servidor revoca la familia entera y mueren todas las
+  /// sesiones. Adoptar la persistida —la más fresca— antes
+  /// de cualquier refresco propio corta esa cadena.
+  /// Nunca lanza; ante cualquier duda conserva la sesión
+  /// en memoria. Devuelve true si adoptó la persistida.
+  Future<bool> releerSesionPersistida() async {
+    try {
+      final actual = session;
+      if (actual == null) return false;
+      final prefs = await SharedPreferences.getInstance();
+      // La caché de ESTE isolate puede estar vieja: el
+      // valor bueno es el del almacén de la plataforma.
+      await prefs.reload();
+      final ref =
+          Uri.parse(AppConfig.supabaseUrl).host.split('.').first;
+      final jsonStr = prefs.getString('sb-$ref-auth-token');
+      if (jsonStr == null || jsonStr.isEmpty) return false;
+      final mapa = jsonDecode(jsonStr);
+      if (mapa is! Map) return false;
+      final rtPersistido = mapa['refresh_token'];
+      if (rtPersistido is! String ||
+          rtPersistido.isEmpty ||
+          rtPersistido == actual.refreshToken) {
+        return false;
+      }
+      final res = await _c.auth.recoverSession(jsonStr);
+      return res.session != null;
+    } catch (_) {
+      return false;
+    }
+  }
 
   String get displayName {
     final meta = session?.user.userMetadata;
@@ -109,9 +289,32 @@ class AuthService {
     await _c.auth
         .signInWithPassword(email: email, password: password)
         .timeout(const Duration(seconds: 12));
+    // 1.32 (O2F2S, adjudicación F-12): respaldo persistido
+    // de autoría — si queueOpEn no puede leer la sesión
+    // (isolate sin inicializar, ventana post-cierre), la op
+    // nace con ESTE autor en vez de NULL (una op con
+    // user_id NULL la subía el siguiente usuario que
+    // entrara, con SU nombre: R3#2).
+    unawaited(registrarAutorActivo());
     // v1.3.3: reportar la versión de la app para que el dueño la vea
     // en "Usuarios APK" (no bloquea el login si falla).
     unawaited(reportAppVersion());
+  }
+
+  /// 1.32 (O2F2S, F-12): persiste en meta el autor de la
+  /// sesión activa (`ultimo_user_id_activo` /
+  /// `ultimo_telegram_id_activo`). Nunca lanza.
+  Future<void> registrarAutorActivo() async {
+    try {
+      final uid = userId;
+      if (uid == null) return;
+      await LocalDb.instance.setMeta('ultimo_user_id_activo', uid);
+      final tg = telegramId;
+      if (tg != null) {
+        await LocalDb.instance
+            .setMeta('ultimo_telegram_id_activo', '$tg');
+      }
+    } catch (_) {}
   }
 
   /// Informa al servidor qué versión de la app está instalada.

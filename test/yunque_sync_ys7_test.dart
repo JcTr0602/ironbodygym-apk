@@ -18,8 +18,10 @@
 ///    un conjunto del servidor NO vacío → aborta esa tabla,
 ///    no borra nada y lo registra en meta
 ///    (`purga_interseccion_sospechosa_<tabla>`), que el motor
-///    traslada a la bitácora. Un conjunto vacío no aborta
-///    aquí: ese caso lo gobiernan las guardas de la puerta.
+///    traslada a la bitácora. (La adjudicación F-22 de la
+///    1.32 extendió la red: también aborta con el conjunto
+///    del servidor vacío si borraría el 100 % de las
+///    confirmadas — el pin de ese caso se actualizó.)
 library;
 
 import 'dart:io';
@@ -104,17 +106,32 @@ void main() {
           reason: 'el aborto no quedó registrado');
     });
 
-    test('conjunto vacío: la primitiva conserva su conducta '
-        '(ese caso lo gobierna la puerta, no esta red)',
+    test('conjunto vacío: la red aborta también sin ids '
+        '(adjudicación F-22 supersede el pin YS-7 original)',
         () async {
+      // Pin original YS-7: con conjunto vacío la primitiva
+      // borraba la confirmada (ese caso «lo gobernaba la
+      // puerta»). La adjudicación F-22 (residual de R2#5)
+      // cerró el hueco: una tabla pequeña (≤4 confirmadas,
+      // bajo el radar de purgaPermitida) podía vaciarse
+      // entera ante un conteo degradado */0. Ahora la red
+      // aborta TAMBIÉN con el conjunto vacío si borraría
+      // el 100 % de las confirmadas, con su rastro en meta.
       await _abrirDbVacia();
       await _sembrar(1, 5);
       await _sembrar(4, 0);
       final borradas = await LocalDb.instance
           .purgarMirrorAusentes('clientes', <Object>{});
-      expect(borradas, [1]);
-      expect(await _idsVivos(), [4],
-          reason: 'la fila optimista (seq 0) nunca se toca');
+      expect(borradas, isEmpty,
+          reason: 'F-22: conjunto vacío + confirmadas = '
+              'aborto, no vaciado');
+      expect(await _idsVivos(), [1, 4],
+          reason: 'no se borra nada; la optimista (seq 0) '
+              'tampoco se toca');
+      final meta = await LocalDb.instance
+          .getMeta('purga_interseccion_sospechosa_clientes');
+      expect(meta, isNotNull);
+      expect(meta, contains('confirmadas=1'));
     });
   });
 

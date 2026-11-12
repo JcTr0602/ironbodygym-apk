@@ -85,14 +85,31 @@ Future<void> _trasSyncExitosa() async {
 /// que enterraba los fallos. Y el push ESPERA las fotos de
 /// incidencias: en este isolate, el disparo sin esperar moría al
 /// retornar el callback.
+/// AP-5: la pre-guardia de caducidad de los isolates de
+/// fondo vive en auth.dart (`sesionPersistidaCaducadaParaFondo`),
+/// compartida con el Foreground Service de fotos — una
+/// sola fuente para la regla.
+
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     try {
       WidgetsFlutterBinding.ensureInitialized();
+      // AP-5 (forma condicionada de F-5): con la sesión
+      // persistida caducada, este isolate NO inicializa ni
+      // refresca — devuelve false (WorkManager reintenta)
+      // y el refresco queda para el primer plano, dueño del
+      // token. Ver sesionPersistidaCaducadaParaFondo
+      // (auth.dart).
+      if (await sesionPersistidaCaducadaParaFondo()) return false;
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.anonKey,
+        // AP-5: sin auto-refresco en el isolate de fondo
+        // (con la pre-guardia de arriba, la sesión que aquí
+        // se recupera está vigente y se adopta tal cual).
+        authOptions:
+            const FlutterAuthClientOptions(autoRefreshToken: false),
       );
       SyncEngine.instance.onSyncExitoso = _trasSyncExitosa;
       final auth = AuthService();
@@ -347,6 +364,11 @@ class _IronBodyAppState extends State<IronBodyApp>
         unawaited(programarOneOffSyncSiPendientes());
       }
     } else if (state == AppLifecycleState.resumed) {
+      // 1.32 (O2F2S, AP-5): antes de rearmar nada, adoptar
+      // la sesión persistida si un isolate de fondo la
+      // refrescó y rotó el token (ver
+      // AuthService.releerSesionPersistida).
+      unawaited(AuthService().releerSesionPersistida());
       _iniciarTimers();
       // v1.5.0 (Bloque G): al volver a primer plano se verifican
       // las conversiones pendientes aunque el ciclo de sync aún
@@ -544,13 +566,21 @@ class _RaizSesionState extends State<RaizSesion> {
   bool _logueado = AuthService().loggedIn;
   StreamSubscription<AuthState>? _sub;
 
+  /// 1.32 (O2F2S, Pieza 4d): motivo visible cuando la
+  /// verificación de arranque encuentra la sesión muerta.
+  String? _avisoSesionMuerta;
+
   @override
   void initState() {
     super.initState();
     _sub = Supabase.instance.client.auth.onAuthStateChange.listen((s) {
       final hay = s.session != null;
       if (hay != _logueado && mounted) {
-        setState(() => _logueado = hay);
+        setState(() {
+          _logueado = hay;
+          // Con una sesión nueva el motivo viejo caduca.
+          if (hay) _avisoSesionMuerta = null;
+        });
         // Panel v1.4.4: al PERDER la sesión hay que replegar la
         // pila entera hasta la raíz. Cambiar solo el contenido de
         // la ruta raíz dejaba vivas las pantallas apiladas encima
@@ -560,6 +590,28 @@ class _RaizSesionState extends State<RaizSesion> {
         }
       }
     });
+    // 1.32 (O2F2S, Pieza 4d): verificación de la sesión al
+    // arranque, SIN await: la raíz pinta ya (offline-first) y
+    // si la sesión guardada está muerta, el desenlace llega
+    // por el stream (retirada local de la sesión) + este
+    // aviso.
+    unawaited(_verificarSesionArranque());
+  }
+
+  Future<void> _verificarSesionArranque() async {
+    final viva = await AuthService().verificarSesionAlArranque();
+    if (viva || !mounted) return;
+    var motivo = AuthService.textoSesionMuerta;
+    try {
+      final m = await LocalDb.instance
+          .getMeta(AuthService.metaMotivoSesionMuerta);
+      if (m != null && m.isNotEmpty) motivo = m;
+      // Se muestra una vez: la meta se limpia al consumirla.
+      await LocalDb.instance
+          .setMeta(AuthService.metaMotivoSesionMuerta, '');
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _avisoSesionMuerta = motivo);
   }
 
   @override
@@ -569,6 +621,7 @@ class _RaizSesionState extends State<RaizSesion> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      _logueado ? const HomeScreen() : const LoginScreen();
+  Widget build(BuildContext context) => _logueado
+      ? const HomeScreen()
+      : LoginScreen(aviso: _avisoSesionMuerta);
 }

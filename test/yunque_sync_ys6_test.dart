@@ -63,15 +63,36 @@ void main() {
 
     test('el contador SOLO se incrementa en un sitio: el bump '
         'de esta corrida', () {
-      expect('_fallosUltimoPush++'.allMatches(sync).length, 1,
-          reason: 'otro sitio incrementa el contador (¿al '
-              'marcar error una op vieja?): el sello pasaría a '
-              'juzgar la historia, no la corrida');
+      // 1.32 (O2F2S, adjudicación F-14): el contador tiene
+      // ahora TRES sitios, todos fallos DE ESTA corrida
+      // dentro de _doPush: (1) el bump de ops
+      // (_bumpConReversion), (2) el catch de la cola de
+      // fotos y (3) el catch de comprobantes — antes el
+      // ciclo podía sellar éxito con las fotos o los
+      // comprobantes atascados. La semántica de YS-6 se
+      // conserva: ningún sitio marca error sobre trabajo
+      // de otra corrida ni sobre ops viejas; el conjunto
+      // de sitios es cerrado y este pin lo enumera.
+      expect('_fallosUltimoPush++'.allMatches(sync).length, 3,
+          reason: 'apareció un cuarto sitio que incrementa el '
+              'contador (¿al marcar error una op vieja?): el '
+              'sello pasaría a juzgar la historia, no la '
+              'corrida');
       final i = sync.indexOf('Future<void> _bumpConReversion');
       expect(i, isNonNegative);
       final cuerpo = sync.substring(i, i + 500);
       expect(cuerpo, contains('_fallosUltimoPush++'),
-          reason: 'el incremento único ya no está en el bump');
+          reason: 'el incremento del bump ya no está');
+      // Los sitios F-14: cada catch que ensucia el
+      // veredicto lleva su incremento junto al registro.
+      for (final marca in ['cola_fotos_fallo', 'comprobantes_fallo']) {
+        final j = sync.indexOf(marca);
+        expect(j, isNonNegative, reason: 'falta el sitio $marca');
+        final zona = sync.substring(j, j + 700);
+        expect(zona, contains('_fallosUltimoPush++'),
+            reason: 'el catch de $marca ya no ensucia el '
+                'veredicto de la corrida (F-14)');
+      }
     });
 
     test('el veredicto de la corrida depende solo del '

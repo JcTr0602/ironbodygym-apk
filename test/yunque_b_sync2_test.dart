@@ -279,19 +279,59 @@ void main() {
 
   test('YB-SYNC-03: el sello completo exige watermark E incidencias',
       () {
+    // 1.32 (O2F2S, adjudicación F-1/F-2): la firma adjudicada
+    // pide además el server_seq confirmado EN ESTA CORRIDA y
+    // clientes legibles, en positivo. La intención original
+    // de este test (watermark E incidencias) se conserva.
     expect(
         SyncEngine.cicloCompleto(
-            watermarkAlcanza: true, incidenciasOk: true),
+            serverSeqConfirmado: 500,
+            watermarkMinimo: 500,
+            clientesLegibles: true,
+            incidenciasOk: true),
         isTrue);
     // El caso del hallazgo: watermark al día pero la pasada
     // de incidencias falló → la corrida NO es completa.
     expect(
         SyncEngine.cicloCompleto(
-            watermarkAlcanza: true, incidenciasOk: false),
+            serverSeqConfirmado: 500,
+            watermarkMinimo: 500,
+            clientesLegibles: true,
+            incidenciasOk: false),
         isFalse);
     expect(
         SyncEngine.cicloCompleto(
-            watermarkAlcanza: false, incidenciasOk: true),
+            serverSeqConfirmado: 500,
+            watermarkMinimo: 499,
+            clientesLegibles: true,
+            incidenciasOk: true),
+        isFalse);
+    // F-1: sin lectura confirmada en esta corrida (la de
+    // sync_estado falló), jamás sello — aunque la meta vieja
+    // dijera otra cosa, el juicio ya no la consulta.
+    expect(
+        SyncEngine.cicloCompleto(
+            serverSeqConfirmado: null,
+            watermarkMinimo: 500,
+            clientesLegibles: true,
+            incidenciasOk: true),
+        isFalse);
+    // F-2: espejo de clientes vacío con servidor con datos
+    // ⇒ sello prohibido; instalación virgen (seq 0) ⇒ «sin
+    // confirmar», nunca sello.
+    expect(
+        SyncEngine.cicloCompleto(
+            serverSeqConfirmado: 500,
+            watermarkMinimo: 500,
+            clientesLegibles: false,
+            incidenciasOk: true),
+        isFalse);
+    expect(
+        SyncEngine.cicloCompleto(
+            serverSeqConfirmado: 0,
+            watermarkMinimo: 0,
+            clientesLegibles: false,
+            incidenciasOk: true),
         isFalse);
   });
 

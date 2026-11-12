@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../comprobantes.dart';
+import '../diario_sync.dart';
 import '../errores_sync.dart';
 import '../fotos_qos.dart';
 import '../bloque3.dart';
@@ -23,6 +24,7 @@ import '../tiempo.dart';
 import '../tipos_operacion.dart';
 import 'app_bar.dart';
 import 'auditoria.dart';
+import 'centro_sync.dart';
 import 'componentes.dart';
 import 'skeleton.dart';
 import 'diseno.dart';
@@ -2255,6 +2257,20 @@ class _ColaScreenState extends State<ColaScreen> {
       subtitulo = totalPendiente == 1
           ? '1 elemento esperando conexión'
           : '$totalPendiente elementos esperando conexión';
+    } else if (_det.ultimaSyncOk == null) {
+      // 1.32 (O2F2S, adjudicación de Argón F-3): el verde
+      // «Todo al día» EXIGE un sello completo real
+      // (last_sync_ok). Un teléfono que nunca completó una
+      // corrida — sin error y sin pendientes, como el de la
+      // incidencia Duany — no pinta verde por defecto:
+      // pinta «sin confirmar», que es la verdad.
+      estadoSync = 'sin_confirmar';
+      colorEstado = AppColores.alerta;
+      fondoEstado = AppColores.avisoFondo;
+      cifraHeroe = null;
+      iconoEstado = Icons.help_outline_rounded;
+      titulo = 'Sin confirmar';
+      subtitulo = 'Aún no se ha sincronizado en este teléfono';
     } else {
       estadoSync = 'ok';
       colorEstado = AppColores.exito;
@@ -2409,6 +2425,41 @@ class _ColaScreenState extends State<ColaScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+            // 1.32 (O2F2S, Pieza 2): puerta al Centro de
+            // Sincronización (historial de corridas, cobertura
+            // por tabla y avisos de vigilancia, desde el
+            // diario M1). La píldora del Mostrador sigue
+            // abriendo ESTA pantalla; el Centro cuelga de aquí.
+            Tarjeta(
+              onTap: () => Navigator.of(context).push(RutaIron(
+                  builder: (_) => const CentroSyncScreen())),
+              child: Row(
+                children: [
+                  const Icon(Icons.radar_rounded,
+                      color: AppColores.info),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Centro de sincronización',
+                            style: AppTexto.subtitulo),
+                        Text(
+                          'Historial de corridas, qué hay en el '
+                          'teléfono por tabla y avisos',
+                          style: AppTexto.minuscula.copyWith(
+                              color: AppColores.textoSecundario(
+                                  context)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: AppColores.textoSecundario(context)),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             // v1.12.0 (E1): la cola en sencillo — cuántas, de qué
@@ -2769,10 +2820,21 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   /// v1.3.4: abre el detalle ampliable de las ops del último push.
+  /// 1.32 (O2F2S, M1): la puerta es el DIARIO (la última
+  /// corrida con ops); la meta jubilada queda como respaldo
+  /// para instalaciones que aún no han corrido con el diario.
   Future<void> _abrirDetalleSubidos() async {
-    final uuids = parsearUuidsPush(
-        await LocalDb.instance.getMeta('ultimo_push_op_uuids'));
-    if (uuids.isEmpty) {
+    var hay = false;
+    try {
+      hay =
+          await DiarioSync.instance.ultimaCorridaConOps() != null;
+    } catch (_) {}
+    if (!hay) {
+      final uuids = parsearUuidsPush(
+          await LocalDb.instance.getMeta('ultimo_push_op_uuids'));
+      hay = uuids.isNotEmpty;
+    }
+    if (!hay) {
       if (!mounted) return;
       mostrarSnack(context, 'No hay registros en este ciclo', significado: SignificadoChip.alerta);
       return;
@@ -2784,10 +2846,19 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   /// v1.3.4: abre el detalle ampliable del último pull.
+  /// 1.32 (O2F2S, M1): ídem Subidos — diario primero.
   Future<void> _abrirDetalleBajados() async {
-    final detalle = parsearDetallePull(
-        await LocalDb.instance.getMeta('ultimo_pull_detalle'));
-    if (detalle.isEmpty) {
+    var hay = false;
+    try {
+      hay = await DiarioSync.instance.ultimaCorridaConTablas() !=
+          null;
+    } catch (_) {}
+    if (!hay) {
+      final detalle = parsearDetallePull(
+          await LocalDb.instance.getMeta('ultimo_pull_detalle'));
+      hay = detalle.isNotEmpty;
+    }
+    if (!hay) {
       if (!mounted) return;
       mostrarSnack(context, 'No hay registros en este ciclo', significado: SignificadoChip.alerta);
       return;
@@ -2896,6 +2967,12 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
   Map<String, int> _detallePull = {};
   String? _detalleTs;
   String? _pullTs;
+  // 1.32 (O2F2S, M1): fuente primaria = el diario de
+  // corridas; las metas de arriba quedan como respaldo para
+  // instalaciones que aún no han corrido con el diario.
+  List<CorridaOpSync>? _opsDiario;
+  List<CorridaTablaSync>? _tablasDiario;
+  String? _corridaDiarioTxt;
 
   @override
   void initState() {
@@ -2907,7 +2984,32 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     }
   }
 
+  /// Cabecera de la corrida del diario (hora Habana).
+  String _txtCorrida(CorridaSync c) {
+    final h = aHabana(c.inicio);
+    String p(int n) => n.toString().padLeft(2, '0');
+    return 'Corrida de ${p(h.hour)}:${p(h.minute)} '
+        'del ${p(h.day)}/${p(h.month)}';
+  }
+
   Future<void> _cargarSubidos() async {
+    // 1.32 (O2F2S, M1): diario primero.
+    try {
+      final corrida =
+          await DiarioSync.instance.ultimaCorridaConOps();
+      if (corrida != null) {
+        final opsD = await DiarioSync.instance.opsDe(corrida.id);
+        if (opsD.isNotEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _opsDiario = opsD;
+            _corridaDiarioTxt = _txtCorrida(corrida);
+            _cargando = false;
+          });
+          return;
+        }
+      }
+    } catch (_) {}
     final uuids = parsearUuidsPush(
         await LocalDb.instance.getMeta('ultimo_push_op_uuids'));
     final ts = await LocalDb.instance.getMeta('ultimo_push_ts');
@@ -2934,6 +3036,24 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
   }
 
   Future<void> _cargarBajados() async {
+    // 1.32 (O2F2S, M1): diario primero.
+    try {
+      final corrida =
+          await DiarioSync.instance.ultimaCorridaConTablas();
+      if (corrida != null) {
+        final tablasD =
+            await DiarioSync.instance.tablasDe(corrida.id);
+        if (tablasD.isNotEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _tablasDiario = tablasD;
+            _corridaDiarioTxt = _txtCorrida(corrida);
+            _cargando = false;
+          });
+          return;
+        }
+      }
+    } catch (_) {}
     final detalle = parsearDetallePull(
         await LocalDb.instance.getMeta('ultimo_pull_detalle'));
     final detalleTs =
@@ -3152,6 +3272,93 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     );
   }
 
+  /// 1.32 (O2F2S, M1): Subidos desde el DIARIO — las ops de
+  /// la última corrida con ops, con su desenlace y motivo.
+  Widget _buildSubidosDiario() {
+    final ops = _opsDiario!;
+    if (ops.isEmpty) return _placeholder();
+    String estadoChip(String resultado) => switch (resultado) {
+          'aplicada' => 'aplicada',
+          'rechazada' => 'rechazada',
+          'revision' => 'necesita_revision',
+          'error' => 'error',
+          _ => 'pendiente',
+        };
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+          child:
+              Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
+        ),
+        ...ops.map((op) => Card(
+              margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+              child: ListTile(
+                title: Text(op.resumen ?? describirTipoOp(op.tipo)),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(describirTipoOp(op.tipo)),
+                    if (op.motivo != null && op.motivo!.isNotEmpty)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(top: AppEspacio.xs),
+                        child: Text(
+                          op.motivo!,
+                          style: AppTexto.minuscula.copyWith(
+                              color: op.resultado == 'rechazada'
+                                  ? AppColores.error
+                                  : AppColores.alerta),
+                        ),
+                      ),
+                  ],
+                ),
+                trailing: chipEstadoOp(estadoChip(op.resultado)),
+              ),
+            )),
+      ],
+    );
+  }
+
+  /// 1.32 (O2F2S, M1): Bajados desde el DIARIO — por tabla:
+  /// nuevas (aplicadas), vistas y eliminadas (tumbas).
+  Widget _buildBajadosDiario() {
+    final tablas = _tablasDiario!
+        .where((t) => t.aplicadas > 0 || t.tumbas > 0)
+        .toList();
+    if (tablas.isEmpty) return _placeholder();
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+          child:
+              Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
+        ),
+        ...tablas.map(
+          (t) => Card(
+            margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child: ListTile(
+              leading:
+                  const Icon(Icons.download_rounded, color: AppColores.info),
+              title: Text(kEtiquetasTablaSync[t.tabla] ??
+                  SyncEngine.nombreAmigableTabla(t.tabla)),
+              subtitle: t.tumbas > 0
+                  ? Text('${t.tumbas} eliminadas')
+                  : null,
+              trailing: Text(
+                '${t.aplicadas}',
+                style:
+                    AppTexto.subtitulo.copyWith(color: AppColores.info),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final esSubidos = widget.tipo == TipoDetalleSync.subidos;
@@ -3166,8 +3373,12 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
               padding: EdgeInsets.all(AppEspacio.lg),
               child: SkeletonLista(items: 4))
           : esSubidos
-              ? _buildSubidos()
-              : _buildBajados(),
+              ? (_opsDiario != null
+                  ? _buildSubidosDiario()
+                  : _buildSubidos())
+              : (_tablasDiario != null
+                  ? _buildBajadosDiario()
+                  : _buildBajados()),
     );
   }
 }

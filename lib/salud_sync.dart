@@ -19,6 +19,38 @@ import 'ultimo_sync.dart';
 /// Semáforo de una tabla espejo.
 enum SemaforoTabla { verde, ambar, rojo, gris }
 
+/// 1.32 (O2F2S, adjudicación F-8): pasadas consecutivas con
+/// 404/403 para que una tabla que ANTES bajaba bien escale
+/// de ámbar («aún no tiene esta tabla») a ROJO en Salud.
+/// Un 404/403 suelto puede ser despliegue a medias; el
+/// persistente es regresión (tabla renombrada/caída, grant
+/// revocado) y no puede sellar «completo» en silencio
+/// eterno (R1#2B).
+const int umbralCaidaPersistenteSync = 3;
+
+/// F-8 (pura): ¿la ausencia/permiso de esta tabla ya es
+/// una caída persistente? Exige el umbral de pasadas Y
+/// sustancia previa (filas locales o watermark avanzado):
+/// una tabla que nunca bajó no «cayó», simplemente aún no
+/// existe para este teléfono.
+bool esCaidaPersistente({
+  required bool ausente,
+  required bool sinPermiso,
+  required int ciclosAusente,
+  required int ciclosSinPermiso,
+  required int filas,
+  required int watermark,
+}) {
+  if (filas <= 0 && watermark <= 0) return false;
+  if (ausente && ciclosAusente >= umbralCaidaPersistenteSync) {
+    return true;
+  }
+  if (sinPermiso && ciclosSinPermiso >= umbralCaidaPersistenteSync) {
+    return true;
+  }
+  return false;
+}
+
 /// Clasifica el estado de UNA tabla. FUNCIÓN PURA.
 /// Orden de severidad: primero lo que exige acción (rojo),
 /// luego lo que aún no se puede afirmar (ámbar), luego la
@@ -37,8 +69,15 @@ SemaforoTabla semaforoTabla({
   // bajada con filas sin verificar (rastro del pull). No es
   // un atraso que se cure solo como el ámbar: es rojo.
   bool atascadaSinVerificar = false,
+  // 1.32 (F-8): 404/403 persistente en una tabla que antes
+  // bajaba bien — regresión, no despliegue a medias: rojo.
+  bool caidaPersistente = false,
 }) {
-  if (hayError || corruptas > 0 || divergente || atascadaSinVerificar) {
+  if (hayError ||
+      corruptas > 0 ||
+      divergente ||
+      atascadaSinVerificar ||
+      caidaPersistente) {
     return SemaforoTabla.rojo;
   }
   if (ausente ||
@@ -72,6 +111,20 @@ class EstadoTablaSalud {
   /// WhatsApp nacía ciego. '' = sin error registrado.
   final String errorBajada;
 
+  /// 1.32 (O2F2S, M4): la tabla quedó atascada en la bajada
+  /// con filas sin verificar (la meta wm_sinverificar_ está
+  /// activa). La vigilancia M4 lo consume como campo (la
+  /// regla A7 exige aviso inmediato) en vez de parsear la
+  /// nota; hasta hoy solo vivía dentro de cargarSaludSync.
+  final bool atascadaSinVerificar;
+
+  /// 1.32 (O2F2S, adjudicación F-8): 404/403 persistente
+  /// (≥ [umbralCaidaPersistenteSync] pasadas) en una tabla
+  /// que antes bajaba bien: la Salud la pinta ROJA y la
+  /// vigilancia puede avisarla; el ámbar queda para el
+  /// 404/403 suelto.
+  final bool caidaPersistente;
+
   const EstadoTablaSalud({
     required this.tablaLocal,
     required this.nombre,
@@ -81,6 +134,8 @@ class EstadoTablaSalud {
     required this.estado,
     required this.nota,
     this.errorBajada = '',
+    this.atascadaSinVerificar = false,
+    this.caidaPersistente = false,
   });
 }
 
@@ -164,6 +219,7 @@ String _notaTabla({
   required int serverSeq,
   required int filas,
   bool atascadaSinVerificar = false,
+  bool caidaPersistente = false,
 }) {
   switch (s) {
     case SemaforoTabla.rojo:
@@ -174,6 +230,12 @@ String _notaTabla({
       // Yunque B (YB-SYNC-02): el atasco tiene su propia nota.
       if (atascadaSinVerificar) {
         return 'Atascada: una fila no se pudo verificar al bajar';
+      }
+      // 1.32 (F-8): la caída persistente tiene su propia nota.
+      if (caidaPersistente) {
+        return ausente
+            ? 'El servidor lleva varias pasadas sin mostrar esta tabla que antes bajaba bien'
+            : 'Tu rol lleva varias pasadas sin poder ver esta tabla que antes bajaba bien';
       }
       // Pieza añadida (incidencia de Jc): con el texto real
       // del error, la nota lo trae (recortado: la meta puede
@@ -231,6 +293,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     var divergente = false;
     var sinVerificar = false;
     var atascada = false;
+    var caidaPersistente = false;
     try {
       // 'incidencias' se guarda en SQLite como
       // incidencias_local (el resto usa su propio nombre).
@@ -249,6 +312,22 @@ Future<SaludSyncDatos> cargarSaludSync() async {
           (await db.getMeta('wm_sinverificar_$t') ?? '').isNotEmpty;
       ausente = await db.getMeta('wm_${t}_ausente') == '1';
       sinPermiso = await db.getMeta('wm_${t}_sin_permiso') == '1';
+      // 1.32 (F-8): la persistencia de la caída (contador
+      // de pasadas que mantiene el motor en _download).
+      final ciclosAus = int.tryParse(
+              await db.getMeta('wm_${t}_ausente_ciclos') ?? '') ??
+          0;
+      final ciclosSin = int.tryParse(
+              await db.getMeta('wm_${t}_sin_permiso_ciclos') ?? '') ??
+          0;
+      caidaPersistente = esCaidaPersistente(
+        ausente: ausente,
+        sinPermiso: sinPermiso,
+        ciclosAusente: ciclosAus,
+        ciclosSinPermiso: ciclosSin,
+        filas: filas,
+        watermark: wm,
+      );
       final man = await db.getMeta('manifiesto_tabla_$t');
       divergente = man == 'divergente';
       sinVerificar = man == 'sin_verificar';
@@ -274,6 +353,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       serverSeq: serverSeqTabla,
       filas: filas,
       atascadaSinVerificar: atascada,
+      caidaPersistente: caidaPersistente,
     );
     tablas.add(EstadoTablaSalud(
       tablaLocal: t,
@@ -283,6 +363,8 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       watermark: wm,
       estado: s,
       errorBajada: errorBajada,
+      atascadaSinVerificar: atascada,
+      caidaPersistente: caidaPersistente,
       nota: _notaTabla(
         s: s,
         hayError: hayError,
@@ -296,6 +378,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
         serverSeq: serverSeqTabla,
         filas: filas,
         atascadaSinVerificar: atascada,
+        caidaPersistente: caidaPersistente,
       ),
     ));
   }

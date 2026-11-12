@@ -562,7 +562,7 @@ void main() {
       // D-A3: sello de autor en fotos_cola); 69 desde la
       // 1.30 (cierre §17: paso de migración del espejo
       // avisos_vistos).
-      expect(LocalDb.versionActual, 72);
+      expect(LocalDb.versionActual, 73);
       final cols = await db
           .rawQuery("PRAGMA table_info(recordatorio_config)");
       expect(cols.map((c) => c['name']),

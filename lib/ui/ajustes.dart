@@ -1210,6 +1210,18 @@ class _AjustesScreenState extends State<AjustesScreen> {
             .setMeta(kMetaCandadoTrasImportar, '1');
         unawaited(AccesoBloqueoService.instance.reevaluar());
       } catch (_) {}
+      // 1.32 (O2F2S, F-24 ampliación iv): la base importada
+      // trae en su meta los SELLOS de sync del teléfono que
+      // hizo el respaldo (last_sync_ok, server_seq y la
+      // calibración de hora contra el servidor): sin
+      // borrarlos, este teléfono pintaría «al día» sobre un
+      // espejo que él jamás bajó — el sello falso de la
+      // incidencia Duany por la puerta de la importación.
+      // Puerta única: la misma limpieza que usa la purga
+      // de datos sensibles.
+      try {
+        await LocalDb.instance.limpiarSellosSyncEnMeta();
+      } catch (_) {}
         } finally {
           // El candado vivía en la base VIEJA (ya reemplazada):
           // liberarlo escribe sobre la base reabierta y limpia

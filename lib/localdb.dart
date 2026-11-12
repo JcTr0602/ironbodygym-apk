@@ -88,10 +88,16 @@ class _CondicionVentaSuplemento {
 ///    esta clasificación hasta que su primer pull escribe
 ///    `wm_<t>` al aplicar la primera página.
 /// 3. `test/yunque_132_e1_imp23_test.dart` verifica el
-///    catálogo contra el comportamiento real (meta ausente +
-///    global alto ⇒ 0 para cada no-heredera; global para las
-///    herederas) y contra las semillas de la instalación
+///    catálogo contra las semillas de la instalación
 ///    limpia: una divergencia nueva rompe la suite, no el gym.
+///
+/// 1.32 (O2F2S, síntesis AP-2): la herencia VIVA murió —
+/// `getWatermarkTabla` sin fila devuelve 0 para todas las
+/// tablas. Esta clasificación queda como oráculo de la
+/// materialización única (migración v74 + siembra en
+/// onCreate, `_sembrarWatermarksAp2`): heredera ⇒ su fila
+/// nace con el global vigente al materializar; el resto,
+/// con '0'.
 ///
 /// Fuera de este eje: los espejos con cursor PROPIO que no
 /// pasan por `getWatermarkTabla` (bandeja GymPedia:
@@ -153,10 +159,32 @@ class CatalogoEspejos {
     'servicio_',
   ];
 
+  /// Espejos de secuencia PROPIA (su sync_seq no es la
+  /// global): jamás reciben el global ni por herencia ni
+  /// por materialización — su cursor nace en 0 y avanza
+  /// solo con su propia secuencia. Las 4 de incidencias
+  /// quedan cubiertas por el prefijo `incidencias` de
+  /// [noHerederosPrefijos]; estas 4 son las de bandeja y
+  /// congelaciones de `SyncEngine.tablasConSecuenciaPropia`.
+  static const Set<String> secuenciaPropiaSinHerencia = {
+    'gympedia_solicitudes',
+    'permisos_bandeja',
+    'espejo_gympedia_borradores',
+    'cliente_congelaciones',
+  };
+
   /// ¿[tabla] hereda el watermark global si aún no tiene
   /// cursor propio (`wm_<tabla>` ausente)?
+  ///
+  /// 1.32 (O2F2S, síntesis AP-2): desde la migración v74
+  /// esta clasificación SOLO se consulta para materializar
+  /// la herencia una única vez en filas explícitas
+  /// (`_sembrarWatermarksAp2`). La lectura viva
+  /// (`getWatermarkTabla`) ya no hereda: sin fila, el
+  /// cursor es 0 para todas las tablas.
   static bool heredaGlobal(String tabla) {
     if (noHerederos.contains(tabla)) return false;
+    if (secuenciaPropiaSinHerencia.contains(tabla)) return false;
     for (final p in noHerederosPrefijos) {
       if (tabla.startsWith(p)) return false;
     }
@@ -221,7 +249,11 @@ class LocalDb {
   /// (el mismo hueco que v62 cazó en `acceso_blequeos`): la flota
   /// en v68 no lo creaba nunca. El paso oldV<69 llama al MISMO
   /// método que onCreate (idempotente).
-  static const int versionActual = 72;
+  /// v73 (1.32, Oleada 2 Fase 2 — M1 del sistema de detalle de
+  /// sync): el diario de sincronizaciones (sync_corridas,
+  /// sync_corrida_tablas, sync_corrida_ops). El paso oldV<73
+  /// llama al MISMO método que onCreate (idempotente).
+  static const int versionActual = 74;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -584,6 +616,12 @@ class LocalDb {
       },
       onCreate: (db, _) async {
         await _crearTablas(db);
+        // 1.32 (O2F2S, síntesis AP-2): todo espejo nace
+        // con su wm_<t> sembrado ('0' en instalación
+        // limpia): la fila existe desde el primer día y
+        // la regla «sin fila = 0» nunca depende de que
+        // nadie la pierda.
+        await _sembrarWatermarksAp2(db);
       },
       onUpgrade: (db, oldV, _) async {
         // v2: espejo de gastos (cierre de caja del admin).
@@ -1168,9 +1206,12 @@ class LocalDb {
             await db.insert(
                 'meta', {'k': 'wm_borrados', 'v': '0'},
                 conflictAlgorithm: ConflictAlgorithm.replace);
-          } catch (_) {
+          } catch (e) {
             // La tabla meta puede no existir en BDs revertidas a v24
-            // en tests; el reseteo es best-effort.
+            // en tests; ese desenlace se traga. AP-6: un error
+            // transitorio NO — relanza y el upgrade revierte
+            // entero en vez de perder el reseteo para siempre.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         // v28 (v1.3.6, ítems 1B+1C): espejos de arqueo de caja e
@@ -1205,7 +1246,11 @@ class LocalDb {
                 'meta',
                 {'k': 'wm_incidencias_sync', 'v': '0'},
                 conflictAlgorithm: ConflictAlgorithm.replace);
-          } catch (_) {}
+          } catch (e) {
+            // AP-6: solo se traga «meta aún no existe»; un
+            // transitorio relanza y el upgrade revierte.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
+          }
         }
         // v29 (v1.3.7, Fase B §6.2): campos nuevos de suplementos en el
         // JSON del espejo (best-effort; el código tolera su ausencia con
@@ -1245,8 +1290,11 @@ class LocalDb {
           try {
             await db.execute(
                 'ALTER TABLE fotos_cola ADD COLUMN forzar_qos INTEGER NOT NULL DEFAULT 0');
-          } catch (_) {
-            // Columna ya existe o tabla no existe; tolerante.
+          } catch (e) {
+            // Columna ya existe o tabla no existe; tolerante
+            // SOLO en esos desenlaces (AP-6): un transitorio
+            // relanza y el upgrade revierte entero.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         // v31 (v1.4.0): tabla nomina_precalc (caché del conteo de
@@ -1258,8 +1306,11 @@ class LocalDb {
                 'clientes_pagados INTEGER NOT NULL, '
                 'huella TEXT NOT NULL, '
                 'calculado_en TEXT NOT NULL)');
-          } catch (_) {
-            // Tabla ya existe; tolerante.
+          } catch (e) {
+            // AP-6: con IF NOT EXISTS, un fallo aquí es
+            // transitorio, no «ya existe»: relanza y el
+            // upgrade revierte entero.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         // v32 (v1.5): limpieza del camino legado de fotos. La
@@ -1515,10 +1566,13 @@ class LocalDb {
           try {
             await db.execute(
                 "ALTER TABLE recordatorio_config ADD COLUMN frecuencia TEXT NOT NULL DEFAULT 'ninguna'");
-          } catch (_) {
+          } catch (e) {
             // Tabla aún no creada en esta ruta de upgrade:
             // _crearTablasBloque2Resto la crea ya con la
-            // columna cuando toque.
+            // columna cuando toque. AP-6: solo ese
+            // desenlace (y columna duplicada) se traga; un
+            // transitorio relanza y el upgrade revierte.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         if (oldV < 53) {
@@ -1526,8 +1580,11 @@ class LocalDb {
           try {
             await db.execute(
                 'ALTER TABLE turnos ADD COLUMN cubre_a TEXT');
-          } catch (_) {
+          } catch (e) {
             // La tabla se crea con la columna cuando toque.
+            // AP-6: solo «no such table»/duplicada se
+            // tragan; un transitorio relanza.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         if (oldV < 54) {
@@ -1758,6 +1815,21 @@ class LocalDb {
           // MISMO método que onCreate (paridad garantizada).
           await _crearTablaCuarentenaIncidencias(db);
         }
+        if (oldV < 73) {
+          // 1.32 (Oleada 2 Fase 2, M1): diario de
+          // sincronizaciones — el registro persistente de cada
+          // corrida (fuente del Centro de Sincronización).
+          // MISMO método que onCreate (paridad garantizada).
+          await _crearTablasDiarioSync(db);
+        }
+        if (oldV < 74) {
+          // 1.32 (O2F2S, síntesis AP-2): la herencia del
+          // watermark global se MATERIALIZA una sola vez
+          // en filas wm_<t> explícitas y muere como regla
+          // viva (getWatermarkTabla ya no hereda: sin fila,
+          // 0). MISMO método que onCreate (que siembra '0').
+          await _sembrarWatermarksAp2(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -1766,9 +1838,31 @@ class LocalDb {
     return _db!;
   }
 
+  /// 1.32 (O2F2S, síntesis AP-6): ¿es un error de migración
+  /// BENIGNO? Solo estos tres desenlaces se tragan en los
+  /// pasos de migración: la tabla aún no existe en esta
+  /// ruta, la columna ya estaba, el objeto ya existía.
+  /// Cualquier otro error (SQLITE_BUSY, I/O, constraint)
+  /// debe RELANZARSE: sqflite envuelve el onUpgrade en una
+  /// transacción, así que el upgrade revierte entero y se
+  /// reintenta al siguiente arranque. Tragarlo dejaba la
+  /// columna sin crear o el cursor sin resetear con
+  /// user_version ya subida — y el paso no se reintentaba
+  /// nunca.
+  static bool _esErrorBenignoMigracion(Object e) {
+    if (e is! DatabaseException) return false;
+    final msg = '$e'.toLowerCase();
+    return msg.contains('no such table') ||
+        msg.contains('duplicate column') ||
+        msg.contains('already exists');
+  }
+
   /// ALTER TABLE ADD COLUMN solo si la columna no existe (SQLite no
   /// tiene IF NOT EXISTS para ADD COLUMN). Tolerante: si la tabla no
   /// existe, no hace nada (no debe reventar el onUpgrade).
+  /// AP-6: la tolerancia es SOLO para los desenlaces
+  /// benignos; un error transitorio relanza y el upgrade
+  /// entero revierte (ver _esErrorBenignoMigracion).
   static Future<void> _addColumnIfMissing(
       Database db, String tabla, String columna, String tipo) async {
     try {
@@ -1781,7 +1875,9 @@ class LocalDb {
       if (!existe) {
         await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
       }
-    } catch (_) {}
+    } catch (e) {
+      if (!_esErrorBenignoMigracion(e)) rethrow;
+    }
   }
 
   /// v37: vuelca las marcas de info pública pendiente que la
@@ -3141,6 +3237,82 @@ class LocalDb {
     // retenidas caducadas. MISMO método en onCreate y en
     // onUpgrade (v72).
     await _crearTablaCuarentenaIncidencias(db);
+    // 1.32 (Oleada 2 Fase 2, M1): diario de sincronizaciones.
+    // MISMO método en onCreate y en onUpgrade (v73).
+    await _crearTablasDiarioSync(db);
+  }
+
+  /// 1.32 (Oleada 2 Fase 2, M1 — sistema de detalle de sync,
+  /// diseño syncdet_ EN FIRME): el diario local de corridas de
+  /// sincronización. Tres tablas:
+  /// - sync_corridas: una fila por corrida REAL (las que abren
+  ///   plaza según M1-R3; los chequeos automáticos vacíos no
+  ///   dejan fila, solo sellos en meta). La fila nace 'en_curso'
+  ///   y se cierra dentro del candado con su veredicto; la
+  ///   siguiente corrida cierra como 'cortada' la huérfana que
+  ///   encuentre (foto congelada en tabla_actual/pagina_actual).
+  /// - sync_corrida_tablas: el desenlace por tabla de la
+  ///   corrida (dirección 'bajada'; las pseudo-tablas
+  ///   'sync_borrados' y las 4 de incidencias viven aquí con su
+  ///   propio nombre).
+  /// - sync_corrida_ops: la FOTO resumida de cada op del push
+  ///   de la corrida (ops_queue se poda a 60 días; el historial
+  ///   no puede colgar de ella).
+  /// Idempotente: la llaman onCreate y la migración v73.
+  static Future<void> _crearTablasDiarioSync(
+      DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS sync_corridas (
+      id TEXT PRIMARY KEY,
+      tipo TEXT NOT NULL,
+      origen TEXT NOT NULL,
+      disparador TEXT,
+      inicio_epoch INTEGER NOT NULL,
+      fin_epoch INTEGER,
+      duracion_ms INTEGER,
+      estado TEXT NOT NULL DEFAULT 'en_curso',
+      subidos INTEGER NOT NULL DEFAULT 0,
+      bajados INTEGER NOT NULL DEFAULT 0,
+      fotos_subidas INTEGER NOT NULL DEFAULT 0,
+      fotos_fallidas INTEGER NOT NULL DEFAULT 0,
+      comprobantes_subidos INTEGER NOT NULL DEFAULT 0,
+      server_seq INTEGER,
+      watermark_min INTEGER,
+      motivo_no_sello TEXT,
+      error_codigo TEXT,
+      error_detalle TEXT,
+      tabla_actual TEXT,
+      pagina_actual INTEGER,
+      rol TEXT,
+      version_app TEXT
+    )''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sync_corridas_inicio '
+        'ON sync_corridas(inicio_epoch)');
+    await db.execute('''CREATE TABLE IF NOT EXISTS sync_corrida_tablas (
+      corrida_id TEXT NOT NULL,
+      tabla TEXT NOT NULL,
+      direccion TEXT NOT NULL DEFAULT 'bajada',
+      recibidas INTEGER NOT NULL DEFAULT 0,
+      aplicadas INTEGER NOT NULL DEFAULT 0,
+      sin_cambio INTEGER NOT NULL DEFAULT 0,
+      tumbas INTEGER NOT NULL DEFAULT 0,
+      fallidas INTEGER NOT NULL DEFAULT 0,
+      paginas INTEGER NOT NULL DEFAULT 0,
+      wm_antes INTEGER,
+      wm_despues INTEGER,
+      estado TEXT NOT NULL DEFAULT 'ok',
+      error TEXT,
+      PRIMARY KEY (corrida_id, tabla)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS sync_corrida_ops (
+      corrida_id TEXT NOT NULL,
+      op_uuid TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      resumen TEXT,
+      resultado TEXT NOT NULL DEFAULT 'pendiente',
+      motivo TEXT,
+      PRIMARY KEY (corrida_id, op_uuid)
+    )''');
   }
 
   /// Yunque de Sincronización (YS-4): tabla de cuarentena de
@@ -4119,29 +4291,49 @@ class LocalDb {
       String tabla, int id, Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
     final nuevoJson = jsonEncode(data);
+    // 1.32 (O2F2S, F-21 ampliación de la síntesis total,
+    // MWAPI B1#8): guarda anti-fantasmas de la primitiva.
+    // (a) Una escritura OPTIMISTA (syncSeq 0) sobre una
+    // fila ya confirmada NO la deja en sync_seq 0: quedaba
+    // invisible para la purga, para borrarEspejosConfirmados
+    // y para la re-descarga (fantasma: cambio local que el
+    // servidor ya superó y nadie repone). El seq efectivo
+    // nunca retrocede respecto al guardado.
+    // (b) El camino «sin cambio» (JSON idéntico) REPONE el
+    // sync_seq entrante si es mayor que el guardado; sin
+    // esto, una fila cuyo JSON ya coincidía conservaba un
+    // seq viejo/0 pese a estar confirmada en el servidor.
+    final previas = await d.query(tabla,
+        columns: ['data', 'sync_seq'],
+        where: 'id=?',
+        whereArgs: [id],
+        limit: 1);
+    final seqGuardado = previas.isEmpty
+        ? 0
+        : ((previas.first['sync_seq'] as num?)?.toInt() ?? 0);
+    final seqEfectivo = syncSeq > seqGuardado ? syncSeq : seqGuardado;
+    if (previas.isNotEmpty && previas.first['data'] == nuevoJson) {
+      if (syncSeq > seqGuardado) {
+        await d.update(tabla, {'sync_seq': syncSeq},
+            where: 'id=?', whereArgs: [id]);
+      }
+      return false;
+    }
     // v1.0.9.1: si cambia foto_storage, invalidar caché para forzar re-descarga.
     // v1.3.3: también para 'suplementos' (antes solo 'clientes').
-    if (tabla == 'clientes' || tabla == 'suplementos') {
-      final rows = await d.query(tabla,
-          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-      if (rows.isNotEmpty) {
-        if (rows.first['data'] == nuevoJson) return false;
-        try {
-          final old = jsonDecode(rows.first['data'] as String)
-              as Map<String, dynamic>;
-          final oldFoto = old['foto_storage'] as String?;
-          final newFoto = data['foto_storage'] as String?;
-          if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
-            // Importación diferida para evitar ciclo
-            // ignore: avoid_dynamic_calls
-            await FotoCache.instance.invalidar(oldFoto);
-          }
-        } catch (_) {}
-      }
-    } else {
-      final rows = await d.query(tabla,
-          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-      if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
+    if ((tabla == 'clientes' || tabla == 'suplementos') &&
+        previas.isNotEmpty) {
+      try {
+        final old = jsonDecode(previas.first['data'] as String)
+            as Map<String, dynamic>;
+        final oldFoto = old['foto_storage'] as String?;
+        final newFoto = data['foto_storage'] as String?;
+        if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
+          // Importación diferida para evitar ciclo
+          // ignore: avoid_dynamic_calls
+          await FotoCache.instance.invalidar(oldFoto);
+        }
+      } catch (_) {}
     }
     if (tabla == 'suplementos') {
       // v1.3.1: preservar ultimo_precio (columna SQL, no JSON).
@@ -4149,12 +4341,12 @@ class LocalDb {
       await d.rawInsert(
           'INSERT INTO suplementos (id, data, sync_seq, moneda) VALUES (?, ?, ?, ?)'
           ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq, moneda=excluded.moneda',
-          [id, nuevoJson, syncSeq, monedaDe(data)]);
+          [id, nuevoJson, seqEfectivo, monedaDe(data)]);
     } else {
       final fila = <String, Object?>{
         'id': id,
         'data': nuevoJson,
-        'sync_seq': syncSeq,
+        'sync_seq': seqEfectivo,
       };
       // v1.3.4 (ítem 2): poblar las columnas indexadas del espejo pagos.
       // (El otro camino de escritura —batch del pull— lo hace vía
@@ -4388,13 +4580,29 @@ class LocalDb {
       Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
     final nuevoJson = jsonEncode(data);
+    // 1.32 (F-21, ampliación): la misma guarda
+    // anti-fantasmas de upsertMirror — el seq efectivo
+    // nunca retrocede y el camino «sin cambio» repone el
+    // seq entrante si es mayor.
     final rows = await d.query(tabla,
-        columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-    if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
+        columns: ['data', 'sync_seq'],
+        where: 'id=?',
+        whereArgs: [id],
+        limit: 1);
+    final seqGuardado = rows.isEmpty
+        ? 0
+        : ((rows.first['sync_seq'] as num?)?.toInt() ?? 0);
+    if (rows.isNotEmpty && rows.first['data'] == nuevoJson) {
+      if (syncSeq > seqGuardado) {
+        await d.update(tabla, {'sync_seq': syncSeq},
+            where: 'id=?', whereArgs: [id]);
+      }
+      return false;
+    }
     final fila = <String, Object?>{
       'id': id,
       'data': nuevoJson,
-      'sync_seq': syncSeq,
+      'sync_seq': syncSeq > seqGuardado ? syncSeq : seqGuardado,
     };
     // v1.7.0 (v36): poblar la columna nivel del espejo GymPedia
     // (el otro camino de escritura —batch del pull— lo hace vía
@@ -4618,7 +4826,8 @@ class LocalDb {
   /// (seq 0: p. ej. un cliente recién creado cuyo op sigue en la
   /// cola) jamás se toca. Devuelve los ids borrados.
   Future<List<Object>> purgarMirrorAusentes(
-      String tabla, Set<Object> idsServidor) async {
+      String tabla, Set<Object> idsServidor,
+      {bool permitirMayoriaConfirmada = false}) async {
     final d = await db;
     final borrar = <Object>[];
     // Yunque de Sincronización (YS-7): la comparación va en
@@ -4656,15 +4865,48 @@ class LocalDb {
       // escribir en la bitácora: app_log vive sobre LocalDb).
       // Un conjunto vacío NO aborta: ese caso lo gobiernan
       // las guardas de la puerta (purgaPermitida y H-08).
+      // 1.32 (O2F2S, adjudicación F-22, residual de R2#5):
+      // la red también aborta con el conjunto del servidor
+      // VACÍO si hay confirmadas que borrar — el hueco que
+      // quedaba: una tabla pequeña (≤4 filas, bajo el radar
+      // de purgaPermitida) podía vaciarse entera ante un
+      // conteo degradado */0 «confirmado» 0==0. La versión
+      // catastrófica de R2#5 estaba refutada (≥5 filas ya
+      // bloqueaba la puerta); este es su residual exacto.
       if (borrar.isNotEmpty &&
           confirmadas > 0 &&
-          borrar.length == confirmadas &&
-          idsServidor.isNotEmpty) {
+          borrar.length == confirmadas) {
         await setMetaEn(
             txn,
             'purga_interseccion_sospechosa_$tabla',
             'ids_servidor=${idsServidor.length} '
             'confirmadas=$confirmadas '
+            'en=${isoHabana(ahoraHabana())}');
+        borrar.clear();
+        return;
+      }
+      // 1.32 (O2F2S, F-22 ampliación de la síntesis total,
+      // Conflicto 1): umbral RELATIVO dentro de la propia
+      // primitiva, como defensa en profundidad para
+      // llamadores futuros — borrar más del 50 % de las
+      // filas confirmadas de una tabla en una sola pasada
+      // no es una poda, es un vaciado parcial: se aborta
+      // esta tabla y queda rastro propio en meta. La puerta
+      // del motor (purgaPermitida) ya exige confirmación de
+      // conteo para este caso; la primitiva no se fía de que
+      // todo llamador la consulte, y solo lo permite con el
+      // flag explícito [permitirMayoriaConfirmada] de quien
+      // ya confirmó el conteo contra el servidor.
+      if (!permitirMayoriaConfirmada &&
+          borrar.isNotEmpty &&
+          confirmadas > 0 &&
+          borrar.length * 2 > confirmadas) {
+        await setMetaEn(
+            txn,
+            'purga_umbral_relativo_$tabla',
+            'a_borrar=${borrar.length} '
+            'confirmadas=$confirmadas '
+            'ids_servidor=${idsServidor.length} '
             'en=${isoHabana(ahoraHabana())}');
         borrar.clear();
         return;
@@ -4678,6 +4920,45 @@ class LocalDb {
       }
     });
     return borrar;
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-24 ampliación iv): borra
+  /// de meta los sellos de sincronización (último OK de
+  /// sync/pull/push, el server_seq confirmado y la
+  /// calibración de hora contra el servidor). Lo usan la
+  /// purga de datos sensibles y —como puerta única— debe
+  /// usarlo la importación de respaldo al terminar: tras
+  /// vaciar o reemplazar el espejo, ningún sello viejo
+  /// puede seguir pintando «al día».
+  Future<void> limpiarSellosSyncEnMeta(
+      [DatabaseExecutor? ejecutor]) async {
+    final ex = ejecutor ?? await db;
+    await ex.delete('meta',
+        where: "k IN ('last_sync_ok', 'last_pull_ok', "
+            "'last_push_ok', 'server_seq', "
+            "'server_timestamp_ultimo_sync', "
+            "'server_timestamp_recibido_en')");
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-24): ¿hay una purga de
+  /// datos sensibles en curso AHORA? La señal es la meta
+  /// `purga_en_curso` (ISO Habana) que escribe
+  /// [purgarDatosSensibles] al empezar y limpia al
+  /// terminar; una señal con más de 15 minutos se trata
+  /// como rezago de un proceso muerto a mitad de purga y
+  /// NO bloquea (la purga es rápida; 15 min es holgura, no
+  /// una duración plausible).
+  Future<bool> purgaEnCursoActiva() async {
+    try {
+      final txt = await getMeta('purga_en_curso');
+      if (txt == null || txt.isEmpty) return false;
+      final desde = DateTime.tryParse(txt);
+      if (desde == null) return false;
+      return ahoraHabana().difference(desde) <
+          const Duration(minutes: 15);
+    } catch (_) {
+      return false;
+    }
   }
 
   /// H-08 (1.23): borra las filas CONFIRMADAS por el servidor
@@ -4695,18 +4976,43 @@ class LocalDb {
   /// — no había nada que borrar —; cualquier otro error sí se
   /// reporta para que el llamador no dé la purga por completa.
   Future<({int borradas, List<String> fallos})> borrarEspejosConfirmados(
-      List<String> tablas) async {
+      List<String> tablas,
+      {Map<String, Set<int>> excluirIds = const {}}) async {
     final d = await db;
     var borradas = 0;
     final fallos = <String>[];
     await d.transaction((txn) async {
       for (final t in tablas) {
         try {
-          borradas +=
-              await txn.rawDelete('DELETE FROM "$t" WHERE sync_seq > 0');
+          // 1.32 (O2F2S, adjudicación F-19): subconjunto
+          // exceptuado por tabla — las filas tocadas por
+          // ops VIVAS no se borran ni en el resync por
+          // cambio de huella (la re-bajada las fusiona con
+          // la guarda F-18 en vez de destruirlas).
+          final excl = excluirIds[t];
+          final clausula = (excl != null && excl.isNotEmpty)
+              ? ' AND id NOT IN (${excl.join(',')})'
+              : '';
+          borradas += await txn.rawDelete(
+              'DELETE FROM "$t" WHERE sync_seq > 0$clausula');
         } catch (e) {
           if (!'$e'.contains('no such table')) fallos.add(t);
         }
+        // 1.32 (O2F2S, F-19 ampliación de la síntesis total,
+        // Conflicto 2): el reseteo del watermark va DENTRO
+        // de esta misma transacción, no en los llamadores.
+        // Hasta hoy cada llamador compensaba por disciplina
+        // (resync por huella y transición H-08), pero la
+        // primitiva sola dejaba el espejo vacío con el
+        // cursor alto — un llamador futuro que lo olvide
+        // rompe la bajada para siempre y sin error. Con el
+        // reseteo aquí, borrar confirmado ⇒ cursor en 0,
+        // atómico. (Las filas exceptuadas por ops vivas
+        // conservan su fila; su cursor también vuelve a 0 y
+        // la re-bajada las fusiona con la guarda F-18.)
+        try {
+          await setWatermarkTablaEn(txn, t, 0);
+        } catch (_) {}
       }
     });
     return (borradas: borradas, fallos: fallos);
@@ -5789,6 +6095,49 @@ class LocalDb {
       }
       return true;
     });
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-18): ids de clientes
+  /// referenciados por alguna op VIVA (el payload trae
+  /// cliente_id) — el criterio de [refrescarMirrorCliente]
+  /// en forma de conjunto, para la guarda del commit por
+  /// página del pull: mientras la op viva, la bajada no
+  /// pisa las llaves optimistas de ese cliente.
+  Future<Set<int>> clientesConOpViva() async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['payload'],
+        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+    final ids = <int>{};
+    for (final r in rows) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        final id = int.tryParse('${p['cliente_id']}');
+        if (id != null) ids.add(id);
+      } catch (_) {}
+    }
+    return ids;
+  }
+
+  /// 1.32 (O2F2S, F-18): ids de pagos referenciados por
+  /// alguna op VIVA (el payload trae pago_id: anular_pago,
+  /// editar_pago y afines).
+  Future<Set<int>> pagosConOpViva() async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['payload'],
+        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+    final ids = <int>{};
+    for (final r in rows) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        final id = int.tryParse('${p['pago_id']}');
+        if (id != null) ids.add(id);
+      } catch (_) {}
+    }
+    return ids;
   }
 
   /// Actualización optimista de la tarifa especial por transferencia
@@ -7629,39 +7978,33 @@ class LocalDb {
     // v1.12.0 (G1): 'rechazada' bloquea marcar synced — un comentario
     // rechazado por el servidor NO se marca como sincronizado (antes
     // se perdía en silencio como si hubiera subido).
-    const estadosPend =
-        "'pendiente','enviada','error','necesita_revision','rechazada'";
-    // v1.3.1 (Argón): dos ramas — con op_uuid se cruza por op_uuid; sin
-    // op_uuid (filas previas a la migración v22) se verifica que no haya
-    // ninguna op del TIPO correspondiente pendiente en la cola.
-    // Cada tabla usa solo sus tipos: un comentario atascado no bloquea
-    // las incidencias ni los tipos.
-    Future<void> marcarSelectivo(String tabla, String tiposTabla) async {
+    // 1.32 (O2F2S, síntesis AP-3): la forma anterior marcaba
+    // por AUSENCIA de op viva (NOT EXISTS en estados
+    // pendientes): una op cancelada, archivada o purgada de
+    // la cola dejaba la fila 'synced' como si el servidor la
+    // hubiera visto — un sello sin confirmación. Y las filas
+    // sin op_uuid se marcaban por inferencia de tipo. Ahora
+    // solo marca la EVIDENCIA POSITIVA: existe la op con el
+    // op_uuid de la fila y está 'aplicada'. Las filas sin
+    // op_uuid no se tocan: las resuelve el pull, no una
+    // inferencia.
+    Future<void> marcarSelectivo(String tabla) async {
       await d.rawUpdate('''
         UPDATE $tabla SET sync_estado='synced'
           ${tabla == 'incidencias_local' ? ', sincronizada=1' : ''}
-        WHERE sync_estado='pending' AND (
-          (op_uuid IS NOT NULL AND NOT EXISTS (
+        WHERE sync_estado='pending'
+          AND op_uuid IS NOT NULL
+          AND EXISTS (
             SELECT 1 FROM ops_queue
             WHERE ops_queue.op_uuid = $tabla.op_uuid
-              AND ops_queue.estado IN ($estadosPend)
-          ))
-          OR
-          (op_uuid IS NULL AND NOT EXISTS (
-            SELECT 1 FROM ops_queue
-            WHERE ops_queue.tipo IN ($tiposTabla)
-              AND ops_queue.estado IN ($estadosPend)
-          ))
-        )
+              AND ops_queue.estado = 'aplicada'
+          )
       ''');
     }
 
-    await marcarSelectivo('incidencias_local',
-        "'crear_incidencia','editar_incidencia','cambiar_estado_incidencia'");
-    await marcarSelectivo('incidencias_tipos',
-        "'upsert_tipo_incidencia','reordenar_tipos_incidencia'");
-    await marcarSelectivo(
-        'incidencias_comentarios', "'agregar_comentario_incidencia'");
+    await marcarSelectivo('incidencias_local');
+    await marcarSelectivo('incidencias_tipos');
+    await marcarSelectivo('incidencias_comentarios');
   }
 
   Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {
@@ -7830,14 +8173,35 @@ class LocalDb {
   /// Borra incidencias privadas y datos sensibles locales. Retorna conteo.
   Future<int> purgarDatosSensibles(
       {bool conservarComprobantesPendientes = false}) async {
-    final d = await db;
-    var n = 0;
+    final dbReal = await db;
+    // 1.32 (O2F2S, adjudicación F-24): SEÑAL persistida de
+    // purga en curso, escrita ANTES de tocar nada y
+    // limpiada al terminar. Los ciclos que arrancan la ven
+    // en _conLock y no corren; los que están en vuelo la
+    // ven en el latido y se detienen en su próximo punto de
+    // control (_exigirLockVivo). Sin la señal, un ciclo a
+    // mitad de bajada re-escribía filas que la purga acababa
+    // de borrar (o la purga borraba filas a medio bajar).
+    await setMeta('purga_en_curso', isoHabana(ahoraHabana()));
+    // Archivos físicos a borrar DESPUÉS del commit (el
+    // sistema de archivos no es transaccional: borrarlos
+    // dentro y abortar la transacción dejaría filas que
+    // apuntan a archivos ya ido).
+    final archivosTrasCommit = <String>[];
+    var borrarDirectorioComprobantes = false;
+    try {
+      return await dbReal.transaction((txn) async {
+        final d = txn;
+        var n = 0;
     // Argón 1.21 AR-C04: recoger ANTES de borrar las filas los
     // ids de las incidencias privadas y las rutas de sus fotos:
     // los archivos físicos en disco y las ops encoladas que las
     // referencian también son datos sensibles y sobrevivían a
     // la purga (la fila se iba, la foto y la op se quedaban).
     final idsPrivadas = <String>{};
+    // 1.32 (F-24 ampliación ii): mínimo sync_seq de las
+    // privadas que SÍ se purgan (rebobinado del cursor).
+    int? minSeqPrivadasPurgadas;
     try {
       for (final t in ['incidencias_local', 'incidencias_mirror']) {
         final filas = await d.query(t,
@@ -7848,10 +8212,68 @@ class LocalDb {
         }
       }
     } catch (_) {}
+    // 1.32 (O2F2S, adjudicación F-23): CONSERVACIÓN — una
+    // incidencia privada cuyo trabajo local aún no se
+    // confirmó (sync_estado != 'synced' en su fila local)
+    // o que tiene una op VIVA referenciándola NO se purga:
+    // su fila, sus ops y los archivos de sus fotos
+    // sobreviven a la purga (automática o manual). Purgarla
+    // destruía trabajo real aún no subido disfrazado de
+    // limpieza de privacidad; la ya sincronizada sí se
+    // purga como siempre. Las protegidas se excluyen de
+    // TODOS los borrados de esta purga.
+    final idsProtegidas = <String>{};
     if (idsPrivadas.isNotEmpty) {
+      try {
+        final locales = await d.query('incidencias_local',
+            columns: ['id', 'sync_estado'],
+            where: "visibilidad='privada'");
+        for (final f in locales) {
+          if ('${f['sync_estado']}' != 'synced') {
+            final id = '${f['id']}';
+            if (id.isNotEmpty && id != 'null') {
+              idsProtegidas.add(id);
+            }
+          }
+        }
+        final opsVivas = await d.query('ops_queue',
+            columns: ['payload'],
+            where:
+                "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+        for (final op in opsVivas) {
+          try {
+            final p = jsonDecode(op['payload'] as String)
+                as Map<String, dynamic>;
+            for (final clave in const ['id', 'incidencia_id']) {
+              final ref = '${p[clave]}';
+              if (idsPrivadas.contains(ref)) {
+                idsProtegidas.add(ref);
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    final idsPurgables = idsPrivadas.difference(idsProtegidas);
+    if (idsPurgables.isNotEmpty) {
+      try {
+        final filasSeq = await d.query('incidencias_mirror',
+            columns: ['sync_seq'],
+            where:
+                'id IN (${List.filled(idsPurgables.length, '?').join(',')})',
+            whereArgs: idsPurgables.toList());
+        for (final f in filasSeq) {
+          final sq = (f['sync_seq'] as num?)?.toInt();
+          if (sq != null &&
+              (minSeqPrivadasPurgadas == null ||
+                  sq < minSeqPrivadasPurgadas)) {
+            minSeqPrivadasPurgadas = sq;
+          }
+        }
+      } catch (_) {}
       final marcas =
-          List.filled(idsPrivadas.length, '?').join(',');
-      final argsIds = idsPrivadas.toList();
+          List.filled(idsPurgables.length, '?').join(',');
+      final argsIds = idsPurgables.toList();
       try {
         final fotos = await d.query('incidencias_fotos',
             columns: ['local_path'],
@@ -7860,9 +8282,8 @@ class LocalDb {
         for (final f in fotos) {
           final ruta = (f['local_path'] as String?) ?? '';
           if (ruta.isEmpty) continue;
-          try {
-            await File(ruta).delete();
-          } catch (_) {}
+          // F-24: el archivo se borra tras el commit.
+          archivosTrasCommit.add(ruta);
         }
       } catch (_) {}
       try {
@@ -7872,10 +8293,50 @@ class LocalDb {
             where: 'incidencia_id IN ($marcas)', whereArgs: argsIds);
       } catch (_) {}
     }
+    // F-23: las protegidas quedan fuera también aquí.
+    final marcasProt =
+        List.filled(idsProtegidas.length, '?').join(',');
+    final wherePrivadas = idsProtegidas.isEmpty
+        ? "visibilidad='privada'"
+        : "visibilidad='privada' AND id NOT IN ($marcasProt)";
+    final argsPrivadas =
+        idsProtegidas.isEmpty ? null : idsProtegidas.toList();
     n += await d.delete('incidencias_mirror',
-        where: "visibilidad='privada'");
+        where: wherePrivadas, whereArgs: argsPrivadas);
     n += await d.delete('incidencias_local',
-        where: "visibilidad='privada'");
+        where: wherePrivadas, whereArgs: argsPrivadas);
+    // 1.32 (F-24 ampliación ii): rebobinar los cursores de
+    // incidencias — sin esto, al volver a entrar el dueño,
+    // el pull (sync_seq > wm) jamás re-baja las privadas
+    // purgadas y su historial se pierde en este teléfono.
+    // La principal rebobina justo bajo la más antigua
+    // purgada; comentarios y fotos no guardan sync_seq por
+    // fila, así que su cursor vuelve a 0 (re-bajada
+    // completa de dos tablas acotadas, solo si se borraron
+    // filas hijas de privadas purgadas).
+    if (minSeqPrivadasPurgadas != null) {
+      try {
+        final wmRows = await d.query('meta',
+            columns: ['v'],
+            where: "k = 'wm_incidencias'",
+            limit: 1);
+        final wmAct = wmRows.isEmpty
+            ? 0
+            : int.tryParse('${wmRows.first['v']}') ?? 0;
+        final destino = minSeqPrivadasPurgadas - 1;
+        if (destino < wmAct) {
+          await d.insert(
+              'meta', {'k': 'wm_incidencias', 'v': '$destino'},
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+        await d.insert(
+            'meta', {'k': 'wm_incidencias_comentarios', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        await d.insert(
+            'meta', {'k': 'wm_incidencias_fotos', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      } catch (_) {}
+    }
     n += await d.delete('incidencia_eventos_mirror',
         where: 'incidencia_id NOT IN (SELECT id FROM incidencias_mirror)');
     // v1.2.5-rev5 (Gemini): las ops de incidencias privadas
@@ -7885,16 +8346,22 @@ class LocalDb {
     // los tipos vivos son crear/editar (su payload lleva la
     // visibilidad) y cambiar_estado/agregar_comentario/
     // registrar_foto (referencian la incidencia por id).
+    // F-23: una op de crear/editar cuya incidencia está
+    // protegida NO se borra (su payload trae el id; un id
+    // ausente da NULL en el NOT IN y la op también se
+    // conserva: dirección segura).
     n += await d.delete('ops_queue',
-        where:
-            "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada'");
-    if (idsPrivadas.isNotEmpty) {
+        where: idsProtegidas.isEmpty
+            ? "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada'"
+            : "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada' AND json_extract(payload,'\$.id') NOT IN ($marcasProt)",
+        whereArgs: argsPrivadas);
+    if (idsPurgables.isNotEmpty) {
       final marcas =
-          List.filled(idsPrivadas.length, '?').join(',');
+          List.filled(idsPurgables.length, '?').join(',');
       n += await d.delete('ops_queue',
           where:
               "tipo IN ('cambiar_estado_incidencia','agregar_comentario_incidencia','registrar_foto_incidencia') AND (json_extract(payload,'\$.id') IN ($marcas) OR json_extract(payload,'\$.incidencia_id') IN ($marcas))",
-          whereArgs: [...idsPrivadas, ...idsPrivadas]);
+          whereArgs: [...idsPurgables, ...idsPurgables]);
     }
     // v1.3.2 (Argón #19): al cerrar sesión, limpiar también gastos,
     // auditoría local y la caché de usuarios APK (un entrenador no debe
@@ -8036,9 +8503,8 @@ class LocalDb {
         for (final f in subidos) {
           final ruta = (f['ruta_local'] as String?) ?? '';
           if (ruta.isEmpty) continue;
-          try {
-            await File(ruta).delete();
-          } catch (_) {}
+          // F-24: el archivo se borra tras el commit.
+          archivosTrasCommit.add(ruta);
         }
         n += await d.delete('comprobantes_pago',
             where: "estado = 'subido'");
@@ -8050,17 +8516,47 @@ class LocalDb {
       // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
       // son fotos de transferencias: tampoco pueden quedar en un
       // teléfono compartido tras cerrar sesión.
-      try {
-        final docs = await getApplicationDocumentsDirectory();
-        final dirComp = Directory(p.join(docs.path, 'comprobantes'));
-        if (await dirComp.exists()) {
-          await dirComp.delete(recursive: true);
-        }
-      } catch (_) {}
+      // F-24: el borrado del directorio va tras el commit
+      // (marca para el finally de la envoltura).
+      borrarDirectorioComprobantes = true;
     }
+    // 1.32 (F-24 ampliación iv): la purga borra también
+    // los SELLOS de sincronización en meta — último OK
+    // (sync/pull/push), el server_seq y la calibración de
+    // hora contra el servidor: sobre un espejo recién
+    // vaciado, la UI no puede seguir pintando «al día»
+    // con la foto del usuario anterior. (La misma limpieza
+    // debe hacerla la importación de respaldo al terminar:
+    // LocalDb.limpiarSellosSyncEnMeta queda como puerta
+    // única para ambos caminos.)
+    await limpiarSellosSyncEnMeta(d);
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
-    return n;
+        return n;
+      });
+    } finally {
+      // Archivos físicos fuera de la transacción ya
+      // comiteada (fotos de privadas purgadas y
+      // comprobantes 'subido'; en la manual, el directorio
+      // entero de comprobantes).
+      for (final ruta in archivosTrasCommit) {
+        try {
+          await File(ruta).delete();
+        } catch (_) {}
+      }
+      if (borrarDirectorioComprobantes) {
+        try {
+          final docs = await getApplicationDocumentsDirectory();
+          final dirComp = Directory(p.join(docs.path, 'comprobantes'));
+          if (await dirComp.exists()) {
+            await dirComp.delete(recursive: true);
+          }
+        } catch (_) {}
+      }
+      try {
+        await setMeta('purga_en_curso', '');
+      } catch (_) {}
+    }
   }
 
   /// v1.2.5 (#10): incidencias relacionadas con una entidad.
@@ -8607,7 +9103,11 @@ class LocalDb {
       final f = await _archivoMantenimiento();
       if (!await f.exists()) return false;
       final mod = await f.lastModified();
-      return ahoraDispositivoParaFs().difference(mod) <
+      // 1.32 (O2F2S, adjudicación de Argón F-26): con .abs()
+      // — sin él, un reloj ATRASADO hacía la diferencia
+      // negativa y el «mantenimiento» duraba todo el
+      // desfase + 15 min, bloqueando la sync sin motivo.
+      return ahoraDispositivoParaFs().difference(mod).abs() <
           const Duration(minutes: 15);
     } catch (_) {
       return false;
@@ -9686,23 +10186,77 @@ class LocalDb {
                 if (!tablasProhibidasEntrenador.contains(t)) t,
             ];
 
+  /// 1.32 (O2F2S, síntesis AP-2): siembra/materialización
+  /// de los cursores `wm_<t>` de TODOS los espejos (toda
+  /// tabla local con columna sync_seq), sin tocar las
+  /// filas que ya existen:
+  /// - heredera según [CatalogoEspejos] → recibe el
+  ///   watermark global vigente (la herencia, materializada
+  ///   UNA sola vez: en instalación limpia el global es 0);
+  /// - no heredera o de secuencia propia → '0'.
+  /// La llaman onCreate (siembra al nacer) y la migración
+  /// v74 (materializa en las instalaciones vivas). Sin
+  /// esta red, una fila `wm_<t>` perdida (purga,
+  /// restauración parcial, borrarMeta) dejaba a la tabla
+  /// heredando el global alto para siempre y sin error.
+  static Future<void> _sembrarWatermarksAp2(Database db) async {
+    var global = 0;
+    final g = await db.query('meta',
+        columns: ['v'], where: 'k = ?', whereArgs: ['sync_seq']);
+    if (g.isNotEmpty) global = int.tryParse('${g.first['v']}') ?? 0;
+    final tablas = await db.rawQuery("SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+    for (final fila in tablas) {
+      final nombre = '${fila['name']}';
+      final info = await db.rawQuery('PRAGMA table_info($nombre)');
+      if (!info.any((c) => '${c['name']}' == 'sync_seq')) continue;
+      final clave = 'wm_$nombre';
+      final ya = await db.query('meta',
+          columns: ['v'], where: 'k = ?', whereArgs: [clave]);
+      if (ya.isNotEmpty) continue;
+      await db.insert(
+          'meta',
+          {'k': clave, 'v': CatalogoEspejos.heredaGlobal(nombre) ? '$global' : '0'},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+
+  /// Gancho de test: corre la materialización AP-2 sobre
+  /// la BD abierta (la migración v74 la corre sola al
+  /// actualizar; esto la ejercita sin reabrir).
+  Future<void> materializarWatermarksParaTest() async {
+    await _sembrarWatermarksAp2(await db);
+  }
+
   Future<int> getWatermarkTabla(String tabla) async {
     final v = await getMeta('wm_$tabla');
     if (v != null) return int.tryParse(v) ?? 0;
-    // 1.32 (IMP-23): sin cursor propio, la herencia del global
-    // se decide en el Catálogo Único de Espejos
-    // (CatalogoEspejos, sobre la clase LocalDb): la cadena de
-    // ifs que vivía aquí era una de las dos listas manuales
-    // que debían crecer juntas (observación O-1 del Yunque
-    // de Sync).
-    if (!CatalogoEspejos.heredaGlobal(tabla)) return 0;
-    return getWatermark(); // hereda el global (migración)
+    // 1.32 (O2F2S, síntesis AP-2): sin fila, el cursor es
+    // 0 para TODAS las tablas — la herencia viva del
+    // global (IMP-23) queda jubilada: se materializó una
+    // sola vez en la migración v74 y todo espejo nace
+    // sembrado desde onCreate. Si aun así una fila se
+    // pierde, lo peor que ocurre es una re-descarga de
+    // esa tabla, nunca un espejo congelado en silencio.
+    return 0;
   }
 
   Future<void> setWatermarkTabla(String tabla, int seq,
       {DatabaseExecutor? executor}) async {
     final d = executor ?? await db;
     await setWatermarkTablaEn(d, tabla, seq);
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-21): filas CONFIRMADAS
+  /// (sync_seq > 0) de un espejo — el conteo que la pasada
+  /// completa del manifiesto compara contra el total
+  /// esperado del servidor para detectar filas fantasma
+  /// (confirmadas localmente que el servidor no enumera).
+  Future<int> contarMirrorConfirmadas(String tabla) async {
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) AS n FROM "$tabla" WHERE sync_seq > 0');
+    return (r.first['n'] as num?)?.toInt() ?? 0;
   }
 
   /// Ajuste Argón 1.28 (hallazgo #1): núcleo con ejecutor
@@ -10054,6 +10608,35 @@ class LocalDb {
       userId = auth.userId;
       telegramId = auth.telegramId;
     } catch (_) {}
+    // 1.32 (O2F2S, adjudicación F-12, de R3#2): si el acceso
+    // a la sesión falló (isolate sin inicializar, ventana
+    // post-cierre) la autoría sale del respaldo persistido
+    // al login: ninguna op nace con user_id NULL habiendo
+    // habido sesión — la op NULL la subía DESPUÉS otro
+    // usuario con su JWT y quedaba a su nombre en el
+    // servidor. La lectura va por el mismo ejecutor (la op
+    // puede nacer dentro de una transacción).
+    if (userId == null) {
+      try {
+        final mu = await ex.query('meta',
+            columns: ['v'],
+            where: 'k = ?',
+            whereArgs: ['ultimo_user_id_activo'],
+            limit: 1);
+        if (mu.isNotEmpty) {
+          final v = mu.first['v'];
+          if (v is String && v.isNotEmpty) userId = v;
+        }
+        final mt = await ex.query('meta',
+            columns: ['v'],
+            where: 'k = ?',
+            whereArgs: ['ultimo_telegram_id_activo'],
+            limit: 1);
+        if (mt.isNotEmpty) {
+          telegramId = int.tryParse('${mt.first['v']}');
+        }
+      } catch (_) {}
+    }
     // FIX (Gemini BUG 4): normalizar clave de ajuste antes de encolar.
     var payloadFinal = payload;
     if (tipo == 'ajuste' && payload['clave'] is String) {
@@ -10589,6 +11172,16 @@ class LocalDb {
       await txn.update(
           'ops_queue', {'estado': 'aplicada', 'error': null},
           where: 'op_uuid=?', whereArgs: [opUuid]);
+      // 1.32 (O2F2S, adjudicación F-16, de R3#10): la
+      // confirmación deja enviada_ts si la op nunca pasó
+      // por 'enviada' en ESTE teléfono (confirmada tarde
+      // vía barrido): sin él, la poda de 60 días la medía
+      // por creada_ts y podía borrarla el mismo día de su
+      // confirmación, perdiendo el rastro del Detalle.
+      await txn.rawUpdate(
+          'UPDATE ops_queue SET enviada_ts = COALESCE(enviada_ts, ?) '
+          'WHERE op_uuid = ?',
+          [isoHabana(ahoraHabana()), opUuid]);
       if (resultadoJson != null) {
         await txn.update(
             'ops_queue', {'resultado_servidor': resultadoJson},
@@ -10732,6 +11325,18 @@ class LocalDb {
   /// anunciar «deshecho»: entre su lectura del estado y este
   /// borrado, un push forzado pudo subir la op (la WHERE la
   /// protege, pero el anuncio salía igual y era falso).
+  /// ⚠️ PRIMITIVA PELIGROSA (1.32, adjudicación F-17,
+  /// residual de R2#7): borra la op SIN revertir sus
+  /// efectos optimistas en el espejo — a diferencia de
+  /// [cancelOp], que pasa por [resolverEfectosOpMuerta] en
+  /// la misma transacción. Queda viva SOLO porque sus dos
+  /// llamadores actuales compensan a mano y solo crean ops
+  /// `pago_mensual` («Deshacer último pago» de pago.dart y
+  /// `_deshacer` de confirmacion_cobro.dart: restauran el
+  /// espejo con updateMirrorPagadoHasta tras borrar).
+  /// Un llamador NUEVO con otro tipo de op NO debe usarla:
+  /// que use cancelOp. El contrato lo vigila
+  /// test/oleada2_fase2_adjudicacion_c_test.dart (F-17).
   Future<int> deleteOp(String opUuid) async {
     final d = await db;
     return d.delete('ops_queue',
@@ -11019,13 +11624,23 @@ class LocalDb {
         ? '1=0'
         : '(user_id IS NOT NULL AND user_id != ?)';
     final args = <Object?>[
-      if (userId != null) ...[userId, userId, userId],
+      // Un userId por cada CASE con $esPropia/$esAjena, en el
+      // orden del SELECT: esperando, por_subir, con_error,
+      // ajenas (F-11 sumó el de «esperando»).
+      if (userId != null) ...[userId, userId, userId, userId],
     ];
     final r = await d.rawQuery(
         'SELECT '
-        "COALESCE(SUM(CASE WHEN estado = 'enviada' THEN 1 ELSE 0 END), 0) AS esperando, "
+        // 1.32 (O2F2S, adjudicación F-11): «esperando» también
+        // filtra por usuario activo — la 'enviada' AJENA no
+        // es mi confirmación pendiente (antes contaba TODAS
+        // y el resumen del entrenador la mostraba como suya).
+        // F-14: 'necesita_revision' cuenta como «con problema»
+        // en con_error — antes el resumen del ciclo podía dar
+        // 0 problemas con una op en revisión.
+        "COALESCE(SUM(CASE WHEN estado = 'enviada' AND $esPropia THEN 1 ELSE 0 END), 0) AS esperando, "
         "COALESCE(SUM(CASE WHEN estado = 'pendiente' AND $esPropia THEN 1 ELSE 0 END), 0) AS por_subir, "
-        "COALESCE(SUM(CASE WHEN estado = 'error' AND $esPropia THEN 1 ELSE 0 END), 0) AS con_error, "
+        "COALESCE(SUM(CASE WHEN estado IN ('error', 'necesita_revision') AND $esPropia THEN 1 ELSE 0 END), 0) AS con_error, "
         "COALESCE(SUM(CASE WHEN estado IN ('pendiente', 'error') AND $esAjena THEN 1 ELSE 0 END), 0) AS ajenas "
         'FROM ops_queue',
         args);
@@ -11144,14 +11759,31 @@ class LocalDb {
   /// (`sync/puerta_ops_exenta`, ver [opsExentasPuerta]).
   Future<int> countPendingOpsNoFoto() async {
     final d = await db;
+    // 1.32 (O2F2S, adjudicación F-11): las puertas de fotos y
+    // comprobantes (Regla de Hierro) solo se cierran por MIS
+    // ops: la 'enviada'/'pendiente' de OTRO usuario en este
+    // teléfono no puede bloquearme (su confirmación cruzada
+    // es imposible desde mi sesión: la RPC es INVOKER).
+    // user_id NULL cuenta como propia (previa a la
+    // atribución por usuario), como en el resto de conteos.
+    String? uidActivo;
+    try {
+      uidActivo = AuthService().userId;
+    } catch (_) {}
+    final filtroPropia = uidActivo != null
+        ? ' AND (user_id IS NULL OR user_id = ?)'
+        : '';
+    final argsPropia = uidActivo != null ? [uidActivo] : const [];
     final r = await d.rawQuery(
         "SELECT COUNT(*) c FROM ops_queue WHERE estado IN ('pendiente', 'enviada') "
-        "AND tipo NOT IN ('foto', 'foto_suplemento')");
+        "AND tipo NOT IN ('foto', 'foto_suplemento')$filtroPropia",
+        argsPropia);
     var n = (r.first['c'] as int?) ?? 0;
     final errores = await d.rawQuery(
         "SELECT intentos, creada_ts, proximo_reintento "
         "FROM ops_queue WHERE estado = 'error' "
-        "AND tipo NOT IN ('foto', 'foto_suplemento')");
+        "AND tipo NOT IN ('foto', 'foto_suplemento')$filtroPropia",
+        argsPropia);
     final ahora = ahoraHabana();
     for (final f in errores) {
       if (!opEnErrorExentaDePuerta(
@@ -11556,21 +12188,34 @@ class LocalDb {
   Future<int> purgarOpsAplicadas() async {
     final d = await db;
     try {
-      final corte =
-          isoHabana(ahoraHabana().subtract(const Duration(days: 60)));
+      // 1.32 (O2F2S, adjudicación F-16): la comparación va
+      // por ÉPOCA (strftime honra el offset de cada texto),
+      // no lexicográfica: el texto ISO mezcla offsets
+      // -04:00/-05:00 en los bordes DST y el orden de
+      // caracteres no es el orden de los instantes — la
+      // protección de las últimas 200 y el corte de 60 días
+      // se medían mal justo en el cambio de hora.
+      // (El corte sale de DateTime.now(): instante REAL en
+      // cualquier zona — ahoraHabana() reconstruye la hora
+      // habanera como hora local y su época solo es real en
+      // La Habana; misma regla que pendientesParaEnvio.)
+      final corteEpoch = DateTime.now()
+              .subtract(const Duration(days: 60))
+              .millisecondsSinceEpoch ~/
+          1000;
       final n = await d.rawDelete(
         'DELETE FROM ops_queue '
         "WHERE estado = 'aplicada' "
-        'AND coalesce(enviada_ts, creada_ts) < ? '
+        "AND CAST(strftime('%s', coalesce(enviada_ts, creada_ts)) AS INTEGER) < ? "
         'AND op_uuid NOT IN ('
         'SELECT op_uuid FROM ops_queue '
         "WHERE estado = 'aplicada' "
-        'ORDER BY coalesce(enviada_ts, creada_ts) DESC '
+        "ORDER BY CAST(strftime('%s', coalesce(enviada_ts, creada_ts)) AS INTEGER) DESC "
         'LIMIT 200'
         ')',
-        [corte],
+        [corteEpoch],
       );
-      debugPrint('[poda_ops] aplicadas borradas=$n corte=$corte');
+      debugPrint('[poda_ops] aplicadas borradas=$n corteEpoch=$corteEpoch');
       return n;
     } catch (e) {
       // Defensiva: "no such table" u otro fallo de SQLite -> log y
@@ -11629,6 +12274,23 @@ class LocalDb {
       // json_valid no lanza sobre texto mal formado (devuelve
       // 0), así que este paso no puede reventar por la misma
       // causa.
+      // 1.32 (O2F2S, F-24 ampliación de la síntesis): ANTES
+      // de borrarlas, rebobinar wm_reservas justo bajo la
+      // ilegible más antigua — sin esto la frase «el espejo
+      // las re-baja» era falsa: el pull solo trae
+      // sync_seq > wm y las borradas quedaban por debajo
+      // del cursor para siempre.
+      final minIleg = await d.rawQuery(
+          'SELECT MIN(sync_seq) AS m FROM reservas '
+          'WHERE sync_seq > 0 AND NOT json_valid(data)');
+      final minSeqIleg = (minIleg.first['m'] as num?)?.toInt();
+      if (minSeqIleg != null) {
+        final wmRes = await getWatermarkTabla('reservas');
+        final destinoRes = minSeqIleg - 1;
+        if (destinoRes < wmRes) {
+          await setWatermarkTabla('reservas', destinoRes);
+        }
+      }
       final ilegibles = await d.rawDelete(
         'DELETE FROM reservas '
         'WHERE sync_seq > 0 AND NOT json_valid(data)',

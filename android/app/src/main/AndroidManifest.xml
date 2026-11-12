@@ -21,10 +21,20 @@
          exención: el botón de Ajustes parecía muerto. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- Huella digital: entrada rápida (v1.0.12) -->
+    <!-- 1.32 (O2F2S, Pieza 4c): Auto Backup DESACTIVADO. Sin
+         esto (targetSdk 36 lo deja activo por defecto), al
+         reinstalar Android restauraba las SharedPreferences
+         con la sesión de Supabase guardada; el refresh token
+         ya rotado/revocado dejaba una sesión muerta pero
+         «existente» y la app sellaba «al día» sin bajar nada
+         (incidencia Duany 2026-11-11). El respaldo del negocio
+         es el de la propia app (exportar/importar BD). -->
     <application
         android:label="Iron Body Gestión"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"
