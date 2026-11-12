@@ -311,15 +311,20 @@ void main() {
           reason: 'primero sus vencimientos de hoy');
     });
 
-    test('el orden del dueño conserva finanzas tras el '
-        'mostrador y la bandeja sobre las alertas', () {
+    test('el orden del dueño: finanzas abre (la zona del '
+        'mostrador se jubiló) y la bandeja va sobre las '
+        'alertas', () {
       final ini = home.indexOf('class _VistaHoyDueno');
       final fin = home.indexOf('class _VistaHoyEntrenador', ini);
       final vista = home.substring(ini, fin);
       expect(
-          vista.indexOf("ValueKey('hoy-mostrador')") <
-              vista.indexOf("ValueKey('hoy-finanzas')"),
-          isTrue);
+          vista.contains("ValueKey('hoy-mostrador')"),
+          isFalse,
+          reason: 'la 1.33 retira la zona del mostrador '
+              'rápido de Hoy: la barra «Buscar cliente» era '
+              'un resto pre-pilares (la búsqueda vive en el '
+              'Pilar Clientes y en la lupa de la cabecera) y '
+              'las acciones rápidas viven en el Dock');
       expect(
           vista.indexOf("ValueKey('hoy-finanzas')") <
               vista.indexOf("ValueKey('hoy-pordecidir')"),
@@ -338,7 +343,6 @@ void main() {
 
     test('las claves de sección se conservan', () {
       for (final k in [
-        'hoy-mostrador',
         'hoy-finanzas',
         'hoy-bandeja',
         'hoy-buzon',
