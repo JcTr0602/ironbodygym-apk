@@ -394,7 +394,7 @@ void main() {
     await _avanzarTiempo(tester);
   });
 
-  testWidgets('captura · propuesta: Servicio directo a vender',
+  testWidgets('captura · Servicio directo a vender (dock)',
       (tester) async {
     _telefono(tester);
     await _sesionDueno(tester);
@@ -405,7 +405,7 @@ void main() {
     ));
     await _drenar(tester, vueltas: 10);
     expect(find.byType(ServiciosScreen), findsOneWidget);
-    await _capturar(tester, k, 'propuesta_servicio_directo.png');
+    await _capturar(tester, k, 'servicio_directo_despues.png');
     expect(tester.takeException(), isNull);
     await _cerrarCascara(tester);
     await _avanzarTiempo(tester);
