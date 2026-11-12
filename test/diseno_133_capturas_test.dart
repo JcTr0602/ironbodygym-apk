@@ -32,6 +32,7 @@ import 'package:ironbody_gym/ui/ficha.dart';
 import 'package:ironbody_gym/ui/home.dart';
 import 'package:ironbody_gym/ui/pilar_negocio.dart';
 import 'package:ironbody_gym/ui/por_decidir.dart';
+import 'package:ironbody_gym/ui/servicios.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -365,6 +366,51 @@ void main() {
     await _avanzarTiempo(tester);
   });
 
+  testWidgets('captura · menú del avatar abierto', (tester) async {
+    _telefono(tester);
+    await _sesionDueno(tester);
+    final k = GlobalKey();
+    // El menú vive en el Overlay del Navigator, POR ENCIMA
+    // del home: la frontera de captura envuelve aquí a la
+    // MaterialApp entera o el menú no sale en la foto.
+    await tester.pumpWidget(RepaintBoundary(
+      key: k,
+      child: MaterialApp(
+        theme: _temaCaptura(),
+        home: const HomeScreen(),
+      ),
+    ));
+    await _drenar(tester, vueltas: 10);
+    await _descartarDialogos(tester);
+    await _drenar(tester, vueltas: 4);
+    await tester.tap(find.byKey(const ValueKey('marco-perfil')));
+    // La ruta del menú anima ~300 ms: se deja terminar
+    // para capturar el menú asentado.
+    await _drenar(tester, vueltas: 6, ms: 80);
+    expect(find.text('Cerrar sesión'), findsOneWidget);
+    await _capturar(tester, k, 'menu_avatar_$_fase.png');
+    expect(tester.takeException(), isNull);
+    await _cerrarCascara(tester);
+    await _avanzarTiempo(tester);
+  });
+
+  testWidgets('captura · propuesta: Servicio directo a vender',
+      (tester) async {
+    _telefono(tester);
+    await _sesionDueno(tester);
+    final k = GlobalKey();
+    await tester.pumpWidget(MaterialApp(
+      theme: _temaCaptura(),
+      home: RepaintBoundary(key: k, child: const ServiciosScreen()),
+    ));
+    await _drenar(tester, vueltas: 10);
+    expect(find.byType(ServiciosScreen), findsOneWidget);
+    await _capturar(tester, k, 'propuesta_servicio_directo.png');
+    expect(tester.takeException(), isNull);
+    await _cerrarCascara(tester);
+    await _avanzarTiempo(tester);
+  });
+
   testWidgets('captura · Ficha expandida y al bajar', (tester) async {
     _telefono(tester);
     await LocalDb.instance.upsertMirror('clientes', 501, {
@@ -391,7 +437,7 @@ void main() {
         find.byKey(const PageStorageKey<String>('ficha-pestana-0')),
         const Offset(0, -520));
     await _drenar(tester, vueltas: 6, ms: 60);
-    await _capturar(tester, k, 'ficha_al_bajar_$_fase.png');
+    await _capturar(tester, k, 'ficha_plegada_$_fase.png');
     expect(tester.takeException(), isNull);
     await _cerrarCascara(tester);
     await _avanzarTiempo(tester);
