@@ -16,6 +16,29 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.32.0', [
+    'Diseño nuevo «Mostrador Táctico»: la app se organiza en pilares con todo a un toque de distancia, los botones principales tienen el tamaño que pide un teléfono de verdad y el Modo Sol se enciende a mano cuando trabajas a pleno sol',
+    'Centro de Sincronización: toca la píldora de sincronizar y ves en vivo por qué tabla va la bajada y cuánto lleva; y queda el historial completo de cada sincronización —qué subió y qué bajó, operación a operación—; si una se cortó a mitad, la app te dice en qué tabla quedó y continúa desde ahí, sin repetir lo ya bajado',
+    'La app vigila su propia sincronización: si un teléfono lleva tiempo sin bajar todo o una tabla se quedó atrás, lo avisa con la acción para resolverlo, antes de que trabajes con datos a medias creyendo que están completos',
+    'Publicador unificado: los avisos, anuncios y publicaciones salen de un solo sitio, que abre al instante con lo que ya hay en el teléfono mientras lo demás se actualiza',
+    'Arqueo en una sola puerta: cerrar la caja o hacer una entrega anticipada se elige en la misma pantalla, sin dos caminos que se pisen',
+    'La ficha del cliente se abre por la sección que buscas —Pagos y Notas, Progreso y Marcas— y la foto del cliente se cambia tocando su propia foto en la ficha',
+    'Historiales parejos en toda la app: caja, nómina y servicios cuentan cada día con su total y su detalle, y las acciones de dinero importante —cerrar turno o mes, anular un pago, liquidar a un entrenador— piden deslizar para confirmar',
+    'La nómina avisa en vivo: al registrar un adelanto que supera lo que el entrenador lleva acumulado en el mes, la app te lo dice en el momento, sin bloquearte el registro',
+    'Las horas ya son las de aquí: se corrigió el desfase que hacía que algunas actividades salieran con la hora corrida, y el horario del gym queda visible en la app para consultarlo sin salir de tu pantalla',
+    'Correcciones del ciclo de campo: lo que la versión anterior dejaba a medias —una sincronización que parecía al día sin estarlo, la sesión que se quedaba muerta tras reinstalar, el selector de fotos que se cortaba— queda cerrado y probado',
+  ]),
+  Novedad('1.31.0', [
+    'Servicios en un solo sitio: Vender, Día, Inventario y Análisis, con el historial completo de cada día y el detalle de cada venta al tocarla',
+    'Sincronización reforzada de arriba abajo: un corte de conexión ya no quema operaciones pendientes ni deshace cobros, una operación atascada ya no bloquea las fotos ni los comprobantes, y las incidencias rechazadas dejan de quedar «pendientes» para siempre',
+    'Congelación de mensualidad reparada de punta a punta: el cliente la pide desde su app, solo el dueño la aprueba leyendo el motivo completo, y el cliente en pausa ya no aparece como vencido en ningún sitio',
+    'Recibo de cobro más bonito, también compartible como imagen además del texto de siempre',
+    'La bandeja del App Plus enseña el paquete comprado (meses y días) y avisa si el monto que escribes no coincide con el paquete pagado',
+    'Convertir un invitado en cliente ya no queda invisible: si la confirmación queda pendiente, la app lo muestra y deja reintentar sin sincronizar a mano',
+    '«Olvidé mi PIN» funciona de verdad, y al cerrar sesión ya no quedan nombres de clientes en las notificaciones ni en las listas guardadas',
+    'Las exportaciones salen limpias: fuera los pagos anulados, las cortesías y las cuentas de la Casa que antes podían inflar los números; y la foto de la nómina usa el importe que se liquidó de verdad',
+    'Auditoría completa de la app: se revisaron todos los módulos y se corrigieron los fallos encontrados en cobros, caja, nómina, exportaciones y campañas',
+  ]),
   Novedad('1.30.0', [
     'Diseño renovado en toda la app: los encabezados de sección se ven iguales en todas las pantallas, las listas abren con su franja de resumen, las pantallas de carga muestran la forma real de lo que viene y el movimiento al pasar de una pantalla a otra es suave y uniforme',
     '«Visto por» en los avisos al equipo: en el aviso ves quién lo vio y cuándo, para saber que llegó sin tener que preguntar (el servidor ya lo soporta, no hace falta tocar nada más)',
