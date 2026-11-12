@@ -6176,6 +6176,28 @@ class SyncEngine {
     'incidencias_fotos',
   };
 
+  /// 1.32 (Corte B, H-CB-5 — Hydrogen B-2): fragmento de
+  /// cota de la foto confirmada (AP-1) para la petición de
+  /// bajada de [tabla]: `&sync_seq=lte.<serverSeq>` o ''.
+  /// FUNCIÓN PURA, para probarla sin red.
+  ///
+  /// Las tablas de [tablasConSecuenciaPropia] NUNCA se
+  /// acotan por el serverSeq global: su sync_seq es un
+  /// BIGSERIAL por tabla, incomparable con el global —
+  /// acotarlas ocultaría filas válidas en cuanto un
+  /// entorno nuevo tuviera el global por debajo de la
+  /// secuencia propia (hoy es inocuo solo porque el
+  /// global va por ~212k). Es la misma incomparabilidad
+  /// por la que su watermark nunca salta a serverSeq
+  /// (H-02). OJO: `sync_borrados` NO pasa por aquí — las
+  /// tumbas comparten la secuencia global por diseño y
+  /// su cota en el bucle de borrados es correcta.
+  static String cotaFotoParaTabla(String tabla, int? serverSeq) {
+    if (serverSeq == null) return '';
+    if (tablasConSecuenciaPropia.contains(tabla)) return '';
+    return '&sync_seq=lte.$serverSeq';
+  }
+
   /// Yunque B (YB-SYNC-03): las 4 tablas de incidencias bajan
   /// por su propio camino dentro de `_doPull` (fuera de
   /// `tablasEspejo`), y cada sub-pull ya persiste su
@@ -6879,7 +6901,7 @@ class SyncEngine {
                 Uri.parse(
                     '$_base/rest/v1/$supTabla?select=$select'
                     '&sync_seq=gt.$pageWm'
-                    '${serverSeq != null ? '&sync_seq=lte.$serverSeq' : ''}'
+                    '${cotaFotoParaTabla(tabla, serverSeq)}'
                     '&order=sync_seq.asc'
                     '&limit=${escalera.limite}'),
                 // H-03: solo las tablas que purgan piden el conteo
