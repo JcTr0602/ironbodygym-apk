@@ -138,16 +138,24 @@ void main() {
   });
 
   group('T8 speed dial de Home', () {
-    test('el despliegue gana rebote: escala con easeOutBack; '
-        'el fade sigue en easeOutCubic', () {
+    test('el speed dial se jubiló con el Mostrador Táctico: '
+        'el rebote vive en el pulso de la píldora del marco',
+        () {
+      // 1.32 (pin E5): la Home clásica y su speed dial de
+      // píldoras (`_animsPildoraEscala`, easeOutBack sobre
+      // 0.82→1.0) salieron con el rediseño — home.dart ya no
+      // contiene ni el dial ni sus curvas. La garantía de
+      // fondo (el despliegue con rebote se conserva en la
+      // casa) la hereda el PULSO de la píldora de sync del
+      // marco global: ScaleTransition con easeOut al crecer
+      // y elasticOut al volver (marco.dart, _PildoraSync).
       final home = _fuente('lib/ui/home.dart');
-      expect(home.contains('Curves.easeOutBack'), isTrue);
-      expect(home.contains('_animsPildoraEscala'), isTrue);
-      expect(home.contains('ScaleTransition'), isTrue);
-      // El fade/deslizamiento NO hereda la curva con
-      // sobreimpulso (rompería el FadeTransition).
-      expect(home.contains('Curves.easeOutCubic'), isTrue);
-      expect(home.contains('begin: 0.82, end: 1.0'), isTrue);
+      expect(home.contains('_animsPildoraEscala'), isFalse);
+      expect(home.contains('Curves.easeOutBack'), isFalse);
+      final marco = _fuente('lib/ui/marco.dart');
+      expect(marco.contains('ScaleTransition'), isTrue);
+      expect(marco.contains('Curves.easeOut'), isTrue);
+      expect(marco.contains('Curves.elasticOut'), isTrue);
     });
   });
 
@@ -163,16 +171,30 @@ void main() {
       // tarjeta del logo, de 48×48 por construcción, y
       // la fija el widget test de la oleada 5; aquí se
       // ancla su rastro en la fuente.
-      expect('1.23 B11'.allMatches(home).length, 5);
+      // 1.32 (pin E5): el 5.º marcador era el del SEGMENTO
+      // de niveles de la Home clásica («alto mínimo cómodo
+      // de 48 (antes ~42»), que salió con el rediseño: la
+      // navegación entre áreas es hoy la BarraPilares del
+      // marco (NavigationBar, destinos ≥48 por construcción)
+      // y su costura la fijan los tests del marco. Quedan 4.
+      expect('1.23 B11'.allMatches(home).length, 4);
       // 1.30 (D2, UI130-05): la cabecera se rehízo en dos
       // niveles y el comentario «borde hairline naranja» del
       // logo D-21 salió con ella; el rastro anclado pasa a
       // ser la insignia de engranaje del logo nuevo (el área
       // tocable de 48 la fijan los widget tests de cabecera).
-      expect(home.contains('insignia de engranaje'), isTrue);
-      // Garantías de alto mínimo exactas: las 3 de B11
-      // más la fila tocable del buzón del dueño (FB-12).
-      expect('minHeight: 48'.allMatches(home).length, 4);
+      // 1.32 (pin E5): esa cabecera TAMBIÉN se jubiló — la
+      // puerta única a Perfil/Respaldo/Auditoría/Diagnóstico
+      // es el avatar de la CabeceraMarco, cuyo rastro es el
+      // arreglo RD-3 (círculo de 34 + relleno transparente
+      // de 7 = área tocable de 48×48) en marco.dart.
+      final marco = _fuente('lib/ui/marco.dart');
+      expect(marco.contains('área tocable a 48×48'), isTrue);
+      // Garantías de alto mínimo exactas en home.dart: las
+      // 2 de B11 que quedan más la fila tocable del buzón
+      // del dueño (FB-12); la del segmento vive ahora en la
+      // BarraPilares (ver arriba).
+      expect('minHeight: 48'.allMatches(home).length, 3);
       // La X crece por padding (icono intacto en 16).
       expect(
           home.contains('padding: EdgeInsets.all(AppEspacio.lg)'),
