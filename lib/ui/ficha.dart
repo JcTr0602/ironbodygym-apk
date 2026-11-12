@@ -2912,8 +2912,12 @@ class _FichaScreenState extends State<FichaScreen> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
+                  // 1.33 (diseño): la pestaña activa se
+                  // subraya y se lee en la marca (borde
+                  // naranja pleno, texto en el naranja
+                  // accesible), no en cobalto.
                   color: activa
-                      ? AppColores.cobaltoDe(context)
+                      ? AppColores.naranja
                       : Colors.transparent,
                   width: 2.5,
                 ),
@@ -2928,7 +2932,7 @@ class _FichaScreenState extends State<FichaScreen> {
                 fontWeight:
                     activa ? FontWeight.w800 : FontWeight.w500,
                 color: activa
-                    ? AppColores.cobaltoDe(context)
+                    ? AppColores.textoNaranja(context)
                     : AppColores.textoSecundario(context),
               ),
             ),

@@ -225,10 +225,14 @@ class CabeceraMarco extends StatelessWidget {
         padding: const EdgeInsets.all(7),
         child: CircleAvatar(
           radius: 17,
-          backgroundColor: AppColores.cobaltoDe(context),
+          // 1.33 (diseño): el avatar de identidad va en la
+          // marca (naranja con la inicial en grafito, la
+          // pareja del FAB y de onPrimary), no en cobalto.
+          backgroundColor: AppColores.naranja,
           child: Text(inicial,
               style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w700)),
+                  color: AppColores.sobreMarca,
+                  fontWeight: FontWeight.w700)),
         ),
       ),
     );
@@ -245,9 +249,12 @@ class CabeceraMarco extends StatelessWidget {
           label: Text(rol,
               maxLines: 1, overflow: TextOverflow.ellipsis),
           visualDensity: VisualDensity.compact,
-          side: BorderSide(color: AppColores.cobaltoDe(context)),
+          // 1.33 (diseño): el rol se lee en la marca
+          // (borde y texto en el naranja accesible), no en
+          // el cobalto plano que Jc rechazó en campo.
+          side: BorderSide(color: AppColores.textoNaranja(context)),
           labelStyle: TextStyle(
-              color: AppColores.cobaltoDe(context),
+              color: AppColores.textoNaranja(context),
               fontWeight: FontWeight.w700),
           ),
         ),

@@ -394,8 +394,13 @@ class _DetalleIncidenciaScreenState
                     },
                     child: Text(
                       '👤 $nombre',
-                      style: const TextStyle(
-                        color: Colors.blue,
+                      // 1.33 (diseño): el enlace a la ficha
+                      // se lee en la marca, no en el azul
+                      // plano de hipervínculo web; el
+                      // subrayado conserva la señal de
+                      // «esto se toca».
+                      style: TextStyle(
+                        color: AppColores.textoNaranja(context),
                         decoration:
                             TextDecoration.underline,
                       ),
