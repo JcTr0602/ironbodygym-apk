@@ -66,8 +66,8 @@ void main() {
   });
 
   group('Pieza (c)(i) Salud con el texto real de wm_err', () {
-    test('la fila trae errorBajada y la nota lo incluye',
-        () async {
+    test('la fila trae errorBajada crudo y la nota lo '
+        'traduce (1.33)', () async {
       await _abrirDbVacia();
       await LocalDb.instance.setMeta(
           'wm_err_clientes', 'HTTP 400: fila ilegible (falso)');
@@ -75,8 +75,16 @@ void main() {
       final fila = salud.tablas
           .firstWhere((t) => t.tablaLocal == 'clientes');
       expect(fila.estado, SemaforoTabla.rojo);
+      // El CRUDO sigue en errorBajada (lo lee el
+      // Diagnóstico técnico)…
       expect(fila.errorBajada, 'HTTP 400: fila ilegible (falso)');
-      expect(fila.nota, contains('fila ilegible (falso)'));
+      // …pero la NOTA ya no lo vuelca: desde la 1.33
+      // (coherencia de sync, §7.6) pasa por
+      // resumenErrorDiagnostico, que para un texto sin
+      // causa reconocible cae al resumen genérico seguro.
+      expect(fila.nota, contains('error de sincronización'));
+      expect(fila.nota, isNot(contains('HTTP 400')));
+      expect(fila.nota, isNot(contains('fila ilegible')));
     });
 
     test('sin error: errorBajada vacío y nota sin inventar',
