@@ -1083,7 +1083,14 @@ class AppTema {
         style: SegmentedButton.styleFrom(
           selectedBackgroundColor: AppColores.naranja.withValues(alpha: 0.2),
           selectedForegroundColor: texto,
-          minimumSize: const Size(48, 44),
+          // 1.32 (integración, RD-1 del inventario): el
+          // SegmentedButton es la navegación principal de
+          // los Pilares 2/3/4 y de Servicios: su objetivo
+          // táctil es 48 dp de alto, no los 44 de antes
+          // (Material 3 parte de 40). En el mostrador, con
+          // las manos ocupadas, es el fallo táctil más
+          // probable del rediseño.
+          minimumSize: const Size(48, 48),
         ),
       ),
       progressIndicatorTheme:

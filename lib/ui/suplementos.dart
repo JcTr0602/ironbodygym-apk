@@ -787,9 +787,10 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 onSelectionChanged: (s) =>
                     setState(() => _vistaLista = s.first),
                 showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                ),
+                // 1.32 (integración, RD-1): sin densidad
+                // compacta — el conmutador hereda el mínimo
+                // táctil de 48 del tema, como el resto de
+                // SegmentedButton de la app.
               ),
             ],
           ),

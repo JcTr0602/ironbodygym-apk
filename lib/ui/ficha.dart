@@ -2871,6 +2871,14 @@ class _FichaScreenState extends State<FichaScreen> {
           key: ValueKey(clave),
           onTap: () => setState(() => _pestanaFicha = i),
           child: Container(
+            // 1.32 (integración, RD-2): objetivo táctil de
+            // 48 dp — antes la pestaña medía ≈31 dp a escala
+            // 1.0 (8 de padding + texto de 12). Es MÍNIMO, no
+            // altura fija: al 200 % la etiqueta sigue
+            // creciendo a 2 líneas, como manda el comentario
+            // de la barra.
+            constraints: const BoxConstraints(minHeight: 48),
+            alignment: Alignment.center,
             padding:
                 const EdgeInsets.symmetric(vertical: AppEspacio.sm),
             decoration: BoxDecoration(
@@ -2951,7 +2959,10 @@ class _FichaScreenState extends State<FichaScreen> {
           style: FilledButton.styleFrom(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppEspacio.md),
-            minimumSize: const Size(0, 40),
+            // 1.32 (integración, RD-9): es la acción
+            // principal de la barra compacta (Cobrar /
+            // Conciliar / Dar acceso): 48 dp, no 40.
+            minimumSize: const Size(0, 48),
           ),
         );
     final Widget? botonPrincipal = switch (accion) {

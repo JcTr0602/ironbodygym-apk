@@ -1624,7 +1624,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
           ? Colors.white.withValues(alpha: 0.14)
           : null,
       side: sobreOscuro ? BorderSide.none : null,
-      visualDensity: VisualDensity.compact,
+      // 1.32 (integración, RD-5): son los filtros
+      // PRINCIPALES del Directorio, tocados con el dedo en
+      // movimiento: fuera la densidad compacta (≈32 dp) y
+      // objetivo táctil acolchado de 48.
+      materialTapTargetSize: MaterialTapTargetSize.padded,
       onSelected: (_) {
         setState(() => _filtro = valor);
         _buscar();
@@ -1638,7 +1642,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
     return ChoiceChip(
       label: Text(etiqueta, style: AppTexto.metadato),
       selected: activo,
-      visualDensity: VisualDensity.compact,
+      // 1.32 (integración, RD-5): como _chipFiltro — sin
+      // densidad compacta y con objetivo de 48.
+      materialTapTargetSize: MaterialTapTargetSize.padded,
       onSelected: (_) {
         setState(() => _rangoEdad = valor);
         _buscar();

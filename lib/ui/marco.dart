@@ -215,12 +215,21 @@ class CabeceraMarco extends StatelessWidget {
         PopupMenuDivider(),
         PopupMenuItem(value: 'salir', child: Text('Cerrar sesión')),
       ],
-      child: CircleAvatar(
-        radius: 17,
-        backgroundColor: AppColores.cobaltoDe(context),
-        child: Text(inicial,
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.w700)),
+      // 1.32 (integración, RD-3): el avatar es la ÚNICA
+      // puerta a Respaldo, Auditoría, Diagnóstico y Ayuda
+      // y medía 34×34 dp: fallar el toque caía en la
+      // cabecera sin acción. El círculo se queda en 34
+      // (visual intacto) y un relleno transparente de 7 dp
+      // lleva el área tocable a 48×48.
+      child: Padding(
+        padding: const EdgeInsets.all(7),
+        child: CircleAvatar(
+          radius: 17,
+          backgroundColor: AppColores.cobaltoDe(context),
+          child: Text(inicial,
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w700)),
+        ),
       ),
     );
   }
@@ -326,16 +335,19 @@ class BarraPilares extends StatelessWidget {
       destinations: [
         NavigationDestination(
           key: const ValueKey('pilar-tab-mostrador'),
+          // 1.32 (integración, RD-10): la cifra de la
+          // insignia usa el token mínimo de la escala
+          // (minuscula, 11) en vez del literal 10.
           icon: Badge(
             isLabelVisible: urgencias > 0,
             label: Text('$urgencias',
-                style: AppTexto.conTabulares(const TextStyle(fontSize: 10))),
+                style: AppTexto.conTabulares(AppTexto.minuscula)),
             child: const Icon(Icons.storefront_outlined),
           ),
           selectedIcon: Badge(
             isLabelVisible: urgencias > 0,
             label: Text('$urgencias',
-                style: AppTexto.conTabulares(const TextStyle(fontSize: 10))),
+                style: AppTexto.conTabulares(AppTexto.minuscula)),
             child: const Icon(Icons.storefront_rounded),
           ),
           label: 'Mostrador',
@@ -421,14 +433,34 @@ class DockMostrador extends StatelessWidget {
                       size: 22,
                       color: esCobrar ? AppColores.sobreMarca : null),
                   const SizedBox(height: 2),
-                  Text(
-                    texto,
-                    maxLines: 2,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTexto.etiqueta.copyWith(
-                      color: esCobrar ? AppColores.sobreMarca : null,
-                      fontWeight: FontWeight.w700,
+                  // 1.32 (integración, RD-4): a 360 dp el
+                  // Dock del dueño reparte ≈48 dp por acción
+                  // y «Suplemento» (≈62 dp a 12) se partía en
+                  // dos líneas o se elidía, dejando además
+                  // las pastillas a alturas distintas. Una
+                  // sola línea que se encoge lo justo
+                  // (scaleDown) conserva la palabra entera;
+                  // la caja de alto FIJO (la línea natural
+                  // de AppTexto.etiqueta a la escala de
+                  // texto vigente) hace que el encogido no
+                  // arrastre el alto de la pastilla y la fila
+                  // quede uniforme.
+                  SizedBox(
+                    height: MediaQuery.textScalerOf(context).scale(
+                        AppTexto.etiqueta.fontSize! *
+                            (AppTexto.etiqueta.height ?? 1)),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        texto,
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                        style: AppTexto.etiqueta.copyWith(
+                          color:
+                              esCobrar ? AppColores.sobreMarca : null,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ),
                 ],
