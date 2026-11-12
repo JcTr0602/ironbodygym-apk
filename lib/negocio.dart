@@ -6485,6 +6485,30 @@ Future<List<Map<String, dynamic>>> alertasStockBajo() async =>
         .where(esAlertaStockBajo)
         .toList();
 
+/// 1.32 (Oleada 2, Fase 3 — Momento 4 del plano, 5º):
+/// ¿este suplemento pide una decisión del dueño sobre
+/// el catálogo? Stock crítico — la regla ÚNICA de
+/// [esAlertaStockBajo], que ya incluye el agotado — o
+/// precio sin fijar: ni `precio_oficial` ni el legado
+/// `precio` traen un valor positivo (en el catálogo se
+/// enseñaría $0, que jamás debe salir a un cliente).
+/// Inactivos y eliminados fuera, como en toda alerta.
+bool esAlertaCatalogo(Map<String, dynamic> s) {
+  if (estadoStockSuplemento(s) == EstadoStockSuplemento.inactivo) {
+    return false;
+  }
+  if (esAlertaStockBajo(s)) return true;
+  final precio = (s['precio_oficial'] as num?)?.toDouble() ??
+      (s['precio'] as num?)?.toDouble();
+  return precio == null || precio <= 0;
+}
+
+/// Cuántas alertas de catálogo hay en una foto del
+/// espejo de suplementos (Momento 4, 5º de Por
+/// Decidir).
+int conteoAlertasCatalogo(List<Map<String, dynamic>> suplementos) =>
+    suplementos.where(esAlertaCatalogo).length;
+
 /// Dashboard 1.19 (Q1 Argón): turnos de AYER que quedaron
 /// abiertos (apertura sin cierre que le corresponda). Lectura
 /// por fecha en SQL en ambos espejos; el cruce es el puro

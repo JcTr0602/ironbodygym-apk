@@ -28,6 +28,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../congelaciones_gestion.dart';
 import '../invitados.dart' as invitados_svc;
+import '../localdb.dart';
 import '../negocio.dart';
 import '../plus_reportes.dart';
 import '../tiempo.dart';
@@ -43,6 +44,7 @@ import 'panel_premios.dart';
 import 'panel_premios_hub.dart';
 import 'reportes_plus.dart';
 import 'solicitudes_adelanto.dart' as ui_adelantos;
+import 'suplementos.dart';
 
 /// Conteos remotos de la bandeja: null en un campo = esa
 /// fuente NO se pudo verificar (sin conexión o degradada).
@@ -217,6 +219,10 @@ class BandejaPorDecidir extends StatefulWidget {
       cargarCongelaciones;
   final Future<List<Map<String, dynamic>>> Function()? cargarArqueos;
 
+  /// 1.32 (Fase 3 — Momento 4, 5º): alertas de catálogo
+  /// locales (stock crítico o precio sin fijar).
+  final Future<int> Function()? cargarCatalogo;
+
   const BandejaPorDecidir({
     super.key,
     required this.incidencias,
@@ -226,6 +232,7 @@ class BandejaPorDecidir extends StatefulWidget {
     this.cargarRemotas,
     this.cargarCongelaciones,
     this.cargarArqueos,
+    this.cargarCatalogo,
   });
 
   @override
@@ -238,6 +245,8 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
   int _gen = 0;
   int? _congelaciones;
   bool _congelacionesOk = true;
+  int _alertasCatalogo = 0;
+  bool _catalogoOk = true;
   List<Map<String, dynamic>> _arqueos = const [];
 
   @override
@@ -296,6 +305,25 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
       final a = await (widget.cargarArqueos ?? entrenadoresConPendiente)();
       if (mounted) setState(() => _arqueos = a);
     } catch (_) {}
+    // 1.32 (Fase 3 — Momento 4, 5º): las alertas de
+    // catálogo salen del espejo LOCAL de suplementos
+    // (sin red, como todo lo local de esta bandeja).
+    // Si la lectura falla, la fila no se finge vacía:
+    // se marca no-ok y la bandeja lo dice, como con
+    // las congelaciones (error ≠ vacío).
+    try {
+      final n = await (widget.cargarCatalogo ??
+          () async => conteoAlertasCatalogo(
+              await LocalDb.instance.allMirror('suplementos')))();
+      if (mounted) {
+        setState(() {
+          _catalogoOk = true;
+          _alertasCatalogo = n;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _catalogoOk = false);
+    }
   }
 
   /// El valor EFECTIVO de una remota: el de ahora si
@@ -325,7 +353,8 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
     final locales = widget.incidencias +
         widget.rellenos +
         widget.adelantos +
-        (_congelacionesOk ? (_congelaciones ?? 0) : 0);
+        (_congelacionesOk ? (_congelaciones ?? 0) : 0) +
+        (_catalogoOk ? _alertasCatalogo : 0);
     final verificadasAhora = ahora?.todasVerificadas ?? false;
     final algunaSinVerificar = !verificadasAhora;
     final t = titularPorDecidir(
@@ -387,12 +416,38 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
           ),
           Text(t.titular, style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.xs),
-          // --- Locales (frame 1, sin red) ---
+          // --- Prioridad del dueño (1.32, Fase 3 —
+          // Momento 4 del plano): 1º incidencias y
+          // conversiones, 2º Plus, 3º congelaciones,
+          // 4º vales, 5º alertas de catálogo. El resto
+          // de la bandeja (rellenos, adelantos, comunidad)
+          // sigue debajo en su orden de siempre, y los
+          // arqueos cierran como franja de acción. Las
+          // locales pintan en el frame 1 y las remotas
+          // con su foto/sello: el orden visual no cambia
+          // esa compuerta (cada fila enseña su estado).
           fila(
             icono: Icons.sync_problem_rounded,
             titulo: 'Incidencias de sincronización',
             valor: widget.incidencias,
             onTap: () => widget.onIr(const ListaIncidenciasScreen()),
+          ),
+          fila(
+            icono: Icons.person_add_rounded,
+            titulo: 'Solicitudes de inscripción',
+            valor: vSol.valor,
+            deFoto: vSol.deFoto,
+            localOk: false,
+            onTap: () => MarcoNav.irAClientes(
+                const DestinoClientes(segmento: 'invitados')),
+          ),
+          fila(
+            icono: Icons.workspace_premium_rounded,
+            titulo: 'Reportes App Plus por confirmar',
+            valor: vPlus.valor,
+            deFoto: vPlus.deFoto,
+            localOk: false,
+            onTap: () => widget.onIr(const ReportesPlusScreen()),
           ),
           fila(
             icono: Icons.ac_unit_rounded,
@@ -404,6 +459,26 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
           if (!_congelacionesOk)
             const Text(
               'Congelaciones: no se pudo leer el espejo local.',
+              style: AppTexto.metadato,
+            ),
+          fila(
+            icono: Icons.emoji_events_rounded,
+            titulo: 'Vales de premio por aprobar',
+            valor: vVales.valor,
+            deFoto: vVales.deFoto,
+            localOk: false,
+            onTap: () => widget.onIr(const PremiosHubScreen()),
+          ),
+          fila(
+            icono: Icons.inventory_2_rounded,
+            titulo: 'Alertas de catálogo (stock o precio)',
+            valor: _catalogoOk ? _alertasCatalogo : null,
+            localOk: _catalogoOk,
+            onTap: () => widget.onIr(const SuplementosScreen()),
+          ),
+          if (!_catalogoOk)
+            const Text(
+              'Catálogo: no se pudo leer el espejo local.',
               style: AppTexto.metadato,
             ),
           fila(
@@ -419,23 +494,6 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
             onTap: () =>
                 widget.onIr(const ui_adelantos.SolicitudesAdelantoScreen()),
           ),
-          // --- Remotas (foto + refresco detrás) ---
-          fila(
-            icono: Icons.emoji_events_rounded,
-            titulo: 'Vales de premio por aprobar',
-            valor: vVales.valor,
-            deFoto: vVales.deFoto,
-            localOk: false,
-            onTap: () => widget.onIr(const PremiosHubScreen()),
-          ),
-          fila(
-            icono: Icons.workspace_premium_rounded,
-            titulo: 'Reportes App Plus por confirmar',
-            valor: vPlus.valor,
-            deFoto: vPlus.deFoto,
-            localOk: false,
-            onTap: () => widget.onIr(const ReportesPlusScreen()),
-          ),
           fila(
             icono: Icons.groups_rounded,
             titulo: 'Reportes de Comunidad',
@@ -443,15 +501,6 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
             deFoto: vCom.deFoto,
             localOk: false,
             onTap: () => widget.onIr(const ComunidadPanelScreen()),
-          ),
-          fila(
-            icono: Icons.person_add_rounded,
-            titulo: 'Solicitudes de inscripción',
-            valor: vSol.valor,
-            deFoto: vSol.deFoto,
-            localOk: false,
-            onTap: () => MarcoNav.irAClientes(
-                const DestinoClientes(segmento: 'invitados')),
           ),
           // --- Arqueos (Momento 3A): liquidar sin salir ---
           for (final e in _arqueos.take(2))

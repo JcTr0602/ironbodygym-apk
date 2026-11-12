@@ -37,6 +37,10 @@ BandejaPorDecidir _bandeja({
             vales: 0, plus: 0, comunidad: 0, solicitudes: 0),
     cargarCongelaciones: () async => (ok: true, pendientes: 0),
     cargarArqueos: () async => const [],
+    // 1.32 (Fase 3): la bandeja sumó la fuente local de
+    // catálogo (Momento 4); el arnés la inyecta como las
+    // demás para que «todo verificado» lo sea de verdad.
+    cargarCatalogo: () async => 0,
   );
 }
 
