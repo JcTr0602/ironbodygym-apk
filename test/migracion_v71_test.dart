@@ -93,8 +93,8 @@ void main() {
       'trae generacion NOT NULL DEFAULT 0', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 73);
-    expect(await db.getVersion(), 73);
+    expect(LocalDb.versionActual, 74);
+    expect(await db.getVersion(), 74);
     final info = await _info(db);
     expect(info['generacion'], 'INTEGER|nn=1|dflt=0|pk=0',
         reason: 'sin la columna, el CAS del worker de '
@@ -105,7 +105,7 @@ void main() {
       'generacion 0 y sigue reclamable', () async {
     await _init();
     final db = await _reabrirTrasDegradar();
-    expect(await db.getVersion(), 73);
+    expect(await db.getVersion(), 74);
     final filas = await db.query('comprobantes_pago');
     expect(filas, hasLength(1),
         reason: 'la migración no puede perder comprobantes '

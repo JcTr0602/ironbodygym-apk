@@ -60,8 +60,8 @@ void main() {
       'trae id/data/sync_seq', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 73);
-    expect(await db.getVersion(), 73);
+    expect(LocalDb.versionActual, 74);
+    expect(await db.getVersion(), 74);
     final info = await _info(db);
     expect(info.keys, containsAll(['id', 'data', 'sync_seq']),
         reason: 'sin la tabla, el espejo de congelaciones '
@@ -83,7 +83,7 @@ void main() {
     await LocalDb.resetParaTest(borrarArchivo: false);
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 73);
+    expect(await db.getVersion(), 74);
     final info = await _info(db);
     expect(info.keys, containsAll(['id', 'data', 'sync_seq']),
         reason: 'el paso oldV<70 debe crear el espejo en '

@@ -62,8 +62,8 @@ void main() {
     // migración del espejo avisos_vistos). Lo que este
     // test fija de v64 es que la instalación limpia trae
     // su columna de backoff.
-    expect(LocalDb.versionActual, 73);
-    expect(await db.getVersion(), 73);
+    expect(LocalDb.versionActual, 74);
+    expect(await db.getVersion(), 74);
     expect(
         await _tieneColumna(db, 'comprobantes_pago', 'proximo_intento_en'),
         isTrue,
@@ -88,7 +88,7 @@ void main() {
     // La apertura corre la cadena 63→64→65→66→67→68→69: el
     // destino es la versión vigente y los efectos de v64
     // quedan aplicados.
-    expect(await db.getVersion(), 73);
+    expect(await db.getVersion(), 74);
     expect(
         await LocalDb.instance
             .getWatermarkTabla('espejo_recordatorio_config'),

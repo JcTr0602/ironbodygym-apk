@@ -35,8 +35,8 @@ void main() {
     // D-A3) la subió a 68 (sello de autor en fotos_cola) y
     // la 1.30 (cierre §17) a 69 (paso de migración del
     // espejo avisos_vistos).
-    expect(LocalDb.versionActual, 73);
-    expect(await db.getVersion(), 73);
+    expect(LocalDb.versionActual, 74);
+    expect(await db.getVersion(), 74);
   });
 
   test('upgrade 66→67: resetea el watermark de '
@@ -55,7 +55,7 @@ void main() {
     db = await LocalDb.instance.db;
     // La cadena corre 66→67→68→69: el destino es la vigente y
     // el efecto de v67 (el reset) queda aplicado.
-    expect(await db.getVersion(), 73);
+    expect(await db.getVersion(), 74);
     expect(
         await LocalDb.instance
             .getWatermarkTabla('espejo_recordatorio_config'),

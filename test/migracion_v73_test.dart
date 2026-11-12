@@ -6,10 +6,13 @@
 ///   sync_corridas, sync_corrida_tablas y sync_corrida_ops,
 ///   más el índice por inicio de corrida.
 ///
-/// 1. Instalación limpia: la BD nace en 73 con las tres tablas
-///    y el índice (paridad onCreate).
-/// 2. Upgrade 72→73 con datos vivos: una fila de negocio
-///    sobrevive intacta y el diario nace vacío.
+/// 1. Instalación limpia: la BD nace en la versión actual
+///    (74 desde AP-2: el paso v74 no crea tablas, solo
+///    siembra watermarks) con las tres tablas y el índice
+///    (paridad onCreate).
+/// 2. Upgrade 72→actual con datos vivos (pasa por v73 y
+///    v74): una fila de negocio sobrevive intacta y el
+///    diario nace vacío.
 /// 3. Paridad de esquema: PRAGMA de las tres tablas en la
 ///    limpia == en la migrada (salvaguarda de Argón: esquema
 ///    normalizado idéntico entre onCreate y onUpgrade).
@@ -97,12 +100,12 @@ Future<Database> _reabrirTrasDegradar() async {
 }
 
 void main() {
-  test('v73 limpia: la BD nace en 73 con el diario completo',
-      () async {
+  test('limpia: la BD nace en la versión actual (74) con '
+      'el diario completo', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 73);
-    expect(await db.getVersion(), 73);
+    expect(LocalDb.versionActual, 74);
+    expect(await db.getVersion(), 74);
     final info = await _infoDiario(db);
     for (final t in _tablasDiario) {
       expect(info[t], isNotEmpty,
@@ -120,11 +123,11 @@ void main() {
             'entero en cada apertura del Centro');
   });
 
-  test('upgrade 72→73: el dato vivo sobrevive y el diario '
-      'nace vacío', () async {
+  test('upgrade 72→actual: el dato vivo sobrevive y el '
+      'diario nace vacío', () async {
     await _init();
     final db = await _reabrirTrasDegradar();
-    expect(await db.getVersion(), 73);
+    expect(await db.getVersion(), 74);
     final filas = await db.query('clientes',
         where: 'id = ?', whereArgs: [9001]);
     expect(filas, hasLength(1),
@@ -137,8 +140,8 @@ void main() {
     }
   });
 
-  test('paridad: table_info del diario onCreate v73 == '
-      'onUpgrade 72→73', () async {
+  test('paridad: table_info del diario onCreate == '
+      'onUpgrade 72→actual', () async {
     await _init();
     var db = await LocalDb.instance.db;
     final limpia = await _infoDiario(db);
