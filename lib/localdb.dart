@@ -4954,7 +4954,14 @@ class LocalDb {
       if (txt == null || txt.isEmpty) return false;
       final desde = DateTime.tryParse(txt);
       if (desde == null) return false;
-      return ahoraHabana().difference(desde) <
+      // 1.32 (Corte B, H-CB-4 — Hydrogen B-1): contra el
+      // instante UTC real y con diferencia ABSOLUTA, el
+      // patrón de mantenimientoActivo (F-26). Con el
+      // wall-clock habanero sin abs, una señal escrita con
+      // el reloj del dispositivo adelantado daba diferencia
+      // negativa y el rezago bloqueaba la sync «de más»
+      // para siempre (toda diferencia negativa es < 15 min).
+      return ahoraUtcReal().difference(desde).abs() <
           const Duration(minutes: 15);
     } catch (_) {
       return false;
