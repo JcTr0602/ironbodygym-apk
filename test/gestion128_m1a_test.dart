@@ -566,10 +566,14 @@ void main() {
       // fotos_cola); 1.30 (cierre §17): a 69 (paso de
       // migración del espejo avisos_vistos); 1.31 (Yunque
       // de Cambios): a 70; 1.31 (Auditoría Definitiva A-5):
-      // a 71 (generación CAS de comprobantes). La columna de
+      // a 71 (generación CAS de comprobantes); 1.32 (Yunque
+      // de Sincronización): a 72 (sync_error y cuarentena
+      // de incidencias); 1.32 (Oleada 2 Fase 2, M1): a 73
+      // (diario de sincronizaciones); 1.32 (O2F2S, AP-2):
+      // a 74 (materialización de watermarks). La columna de
       // v65 sigue naciendo en el esquema limpio, que es lo
       // que aquí se fija.
-      expect(LocalDb.versionActual, 73);
+      expect(LocalDb.versionActual, 74);
     });
   });
 

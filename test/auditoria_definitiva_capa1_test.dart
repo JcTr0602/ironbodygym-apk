@@ -440,7 +440,10 @@ void main() {
       final cols = await d.rawQuery(
           "SELECT name FROM pragma_table_info('comprobantes_pago')");
       expect(cols.map((c) => c['name']), contains('generacion'));
-      expect(LocalDb.versionActual, 73);
+      // 1.32 (integración): la columna de v71 sigue naciendo
+      // en el esquema limpio; la versión vigente es 74
+      // (v72 sync_error/cuarentena, v73 diario, v74 AP-2).
+      expect(LocalDb.versionActual, 74);
     });
   });
 
