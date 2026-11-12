@@ -407,6 +407,7 @@ void main() {
           cantidad: 3,
           metodo: 'efectivo',
           vendedorEsDueno: false,
+          actorEsDueno: false,
         ),
         throwsA(predicate((e) => '$e'.contains('de una en una'))),
       );
@@ -416,6 +417,7 @@ void main() {
         pomosM: 0,
         metodo: 'efectivo',
         vendedorEsDueno: false,
+        actorEsDueno: false,
         topeDosis: 10,
         topePomos: 10,
       );

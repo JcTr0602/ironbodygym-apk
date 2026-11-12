@@ -864,6 +864,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           casa: esCasaCliente || paraDuenoCasa,
           beneficiario: paraDuenoCasa ? 'dueno' : null,
           vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+          actorEsDueno: _esDueno,
           vendedorId: _esDueno ? vendedorSel : null,
           responsableEfectivoId: responsableForm,
           comisionUnitaria: comisionForm,
@@ -889,6 +890,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             beneficiario: paraDuenoCasa ? 'dueno' : null,
             // Ítem 8: el vendedor es el dueño solo si vende a su nombre.
             vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+          actorEsDueno: _esDueno,
             vendedorId: _esDueno ? vendedorSel : null,
             responsableEfectivoId: responsableForm,
             comisionUnitaria: comisionForm,
@@ -1494,6 +1496,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         // simple, con los selectores del diálogo (vendedor y
         // responsable del efectivo pueden diferir).
         vendedorEsDueno: _esDueno && vendedorSel == _miTid,
+        actorEsDueno: _esDueno,
         vendedorId: _esDueno ? vendedorSel : null,
         responsableEfectivoId:
             _esDueno && !esCasa && metodo == 'efectivo'

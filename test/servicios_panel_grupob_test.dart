@@ -51,6 +51,10 @@ Future<void> _venta({
   int? clienteId,
   String? beneficiario,
   required bool vendedorEsDueno,
+  // 1.32 Compuertas (fila X-3): el ACTOR de la venta; la
+  // guarda de la Casa para el dueño lo mira a él, no al
+  // vendedor atribuido.
+  bool actorEsDueno = false,
   bool casa = true,
 }) =>
     registrarVentaMultipleServicio(
@@ -61,6 +65,7 @@ Future<void> _venta({
       casa: casa,
       beneficiario: beneficiario,
       vendedorEsDueno: vendedorEsDueno,
+      actorEsDueno: actorEsDueno,
       topeDosis: 10,
       topePomos: 10,
     );
@@ -69,7 +74,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Panel Grupo B V7: beneficiario dueno en Casa', () {
-    test('no dueño + beneficiario dueno sin cliente → rechaza', () async {
+    test('actor no dueño + beneficiario dueno sin cliente → rechaza',
+        () async {
       await _bdVacia();
       final db = await LocalDb.instance.db;
       await expectLater(
@@ -77,12 +83,12 @@ void main() {
         throwsA(isA<Exception>().having(
             (e) => e.toString(),
             'mensaje',
-            contains('Casa para el dueño'))),
+            contains('Solo el dueño puede marcar'))),
       );
       await db.close();
     });
 
-    test('cliente + beneficiario dueno (aunque venda el dueño) → rechaza',
+    test('cliente + beneficiario dueno (aunque opere el dueño) → rechaza',
         () async {
       await _bdVacia();
       final db = await LocalDb.instance.db;
@@ -91,11 +97,12 @@ void main() {
         _venta(
             clienteId: 20,
             beneficiario: 'dueno',
-            vendedorEsDueno: true),
+            vendedorEsDueno: true,
+            actorEsDueno: true),
         throwsA(isA<Exception>().having(
             (e) => e.toString(),
             'mensaje',
-            contains('Casa para el dueño'))),
+            contains('no lleva cliente'))),
       );
       await db.close();
     });
@@ -107,7 +114,7 @@ void main() {
       // Pasa el guard y cae en el pomo (inexistente): el error de
       // lote prueba que el guard no lo rechazó.
       await expectLater(
-        _venta(clienteId: 21, vendedorEsDueno: true),
+        _venta(clienteId: 21, vendedorEsDueno: true, actorEsDueno: true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'mensaje',
             contains('El pomo no está activo'))),
       );
@@ -119,7 +126,33 @@ void main() {
       await _bdVacia();
       final db = await LocalDb.instance.db;
       await expectLater(
-        _venta(beneficiario: 'dueno', vendedorEsDueno: true),
+        _venta(
+            beneficiario: 'dueno',
+            vendedorEsDueno: true,
+            actorEsDueno: true),
+        throwsA(isA<Exception>().having((e) => e.toString(), 'mensaje',
+            contains('El pomo no está activo'))),
+      );
+      await db.close();
+    });
+
+    test(
+        'X-3: dueño operando desde pomo AJENO (vendedor no dueño) '
+        'también pasa el guard', () async {
+      await _bdVacia();
+      final db = await LocalDb.instance.db;
+      // El escenario del defecto de campo 2026-11-12: el
+      // ACTOR es el dueño pero el vendedor atribuido es el
+      // titular del pomo (un entrenador). Antes del arreglo,
+      // la guarda miraba vendedorEsDueno y rechazaba con
+      // «Casa para el dueño: sin cliente y solo la marca el
+      // dueño»; ahora pasa el guard y cae en el pomo
+      // (inexistente), como el caso del pomo propio.
+      await expectLater(
+        _venta(
+            beneficiario: 'dueno',
+            vendedorEsDueno: false,
+            actorEsDueno: true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'mensaje',
             contains('El pomo no está activo'))),
       );

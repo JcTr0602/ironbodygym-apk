@@ -683,6 +683,7 @@ void main() {
           'pomo_id': 10,
         },
         topePomosAgua: 10,
+        actorEsDueno: false,
       );
       expect(uuids, hasLength(1));
       expect(await saldoPomoLocal(10), 9);
@@ -706,6 +707,7 @@ void main() {
           'pomo_id': 10,
         },
         topePomosAgua: 10,
+        actorEsDueno: false,
       );
       expect(uuids, isNotEmpty);
       expect(await saldoPomoLocal(10), 7);

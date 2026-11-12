@@ -92,6 +92,7 @@ void main() {
       pomosM: 0,
       metodo: 'efectivo',
       vendedorEsDueno: true,
+      actorEsDueno: true,
       topeDosis: 10,
       topePomos: 0,
     );
@@ -105,6 +106,7 @@ void main() {
         pomosM: 0,
         metodo: 'efectivo',
         vendedorEsDueno: true,
+        actorEsDueno: true,
         topeDosis: 10,
         topePomos: 0,
       ),
@@ -133,6 +135,7 @@ void main() {
         pomosM: 1,
         metodo: 'efectivo',
         vendedorEsDueno: true,
+        actorEsDueno: true,
         topeDosis: 10,
         topePomos: 4,
       ),
@@ -147,7 +150,8 @@ void main() {
         tipo: 'dosis_sin_agua',
         pomoId: 3,
         metodo: 'efectivo',
-        vendedorEsDueno: true);
+        vendedorEsDueno: true,
+        actorEsDueno: true);
     final resultados = await Future.wait([
       intento().then((u) => 'ok', onError: (Object e) => 'err'),
       intento().then((u) => 'ok', onError: (Object e) => 'err'),

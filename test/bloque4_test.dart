@@ -207,6 +207,7 @@ void main() {
               pomosM: 0,
               metodo: 'efectivo',
               vendedorEsDueno: false,
+              actorEsDueno: false,
               topeDosis: 40,
               topePomos: 10),
           throwsException);
@@ -217,6 +218,7 @@ void main() {
               pomosM: 0,
               metodo: 'efectivo',
               vendedorEsDueno: false,
+              actorEsDueno: false,
               topeDosis: 40,
               topePomos: 10),
           throwsException);
@@ -227,6 +229,7 @@ void main() {
               pomosM: 4,
               metodo: 'efectivo',
               vendedorEsDueno: false,
+              actorEsDueno: false,
               topeDosis: 40,
               topePomos: 10),
           throwsException);
@@ -237,6 +240,7 @@ void main() {
               pomosM: 3,
               metodo: 'efectivo',
               vendedorEsDueno: false,
+              actorEsDueno: false,
               topeDosis: 40,
               topePomos: 2),
           throwsException);
@@ -252,6 +256,7 @@ void main() {
           pomosM: 2,
           metodo: 'efectivo',
           vendedorEsDueno: false,
+          actorEsDueno: false,
           topeDosis: 40,
           topePomos: 10);
       expect(uuids, hasLength(2));
@@ -281,6 +286,7 @@ void main() {
           pomosM: 0,
           metodo: 'efectivo',
           vendedorEsDueno: false,
+          actorEsDueno: false,
           topeDosis: 40,
           topePomos: 10);
       expect(u0, hasLength(1));
@@ -295,6 +301,7 @@ void main() {
           pomosM: 2,
           metodo: 'efectivo',
           vendedorEsDueno: false,
+          actorEsDueno: false,
           topeDosis: 40,
           topePomos: 10);
       expect(uN, hasLength(1));
@@ -310,6 +317,7 @@ void main() {
           pomosM: 1,
           metodo: 'efectivo',
           vendedorEsDueno: false,
+          actorEsDueno: false,
           topeDosis: 40,
           topePomos: 10);
       expect(await _opsPendientes(), hasLength(2));

@@ -1062,6 +1062,11 @@ int ventasEnColaDeEntrenador({
 Future<List<String>> repetirUltimaVentaServicio(
   Map<String, dynamic> ultima, {
   required int topePomosAgua,
+  // 1.32 Compuertas (fila X-3): el actor de la repetición,
+  // con el mismo criterio que en la venta original (la
+  // guarda de la Casa mira a quien opera, no al vendedor
+  // atribuido, que al repetir sigue sin ser el dueño).
+  required bool actorEsDueno,
 }) async {
   final metodo = ultima['metodo'] as String?;
   final pomoId = (ultima['pomo_id'] as num?)?.toInt();
@@ -1074,6 +1079,7 @@ Future<List<String>> repetirUltimaVentaServicio(
       pomosM: (ultima['pomos_m'] as num?)?.toInt() ?? 0,
       metodo: metodo,
       vendedorEsDueno: false,
+      actorEsDueno: actorEsDueno,
       clienteId: clienteId,
       casa: casa,
       // El entrenador no ve los saldos (regla dura): su tope
@@ -1090,6 +1096,7 @@ Future<List<String>> repetirUltimaVentaServicio(
       cantidad: (ultima['cantidad'] as num?)?.toInt() ?? 1,
       metodo: metodo,
       vendedorEsDueno: false,
+      actorEsDueno: actorEsDueno,
       clienteId: clienteId,
       casa: casa,
     ),
@@ -1718,6 +1725,12 @@ Future<({Map<String, dynamic> payload, String? retener})>
   // registra): true si quien vende es el dueño. Los demás roles
   // solo los envía el dueño al vender «a nombre de» otro.
   required bool vendedorEsDueno,
+  // 1.32 Compuertas (fila X-3, defecto de campo 2026-11-12):
+  // «actorEsDueno» describe a quien OPERA la pantalla (la
+  // sesión), distinto del vendedor atribuido. Solo lo consume
+  // la guarda de la Casa para el dueño: el consumo propio lo
+  // marca el dueño esté operando desde el pomo que esté.
+  required bool actorEsDueno,
   int? vendedorId,
   int? responsableEfectivoId,
   double? comisionUnitaria,
@@ -1758,12 +1771,29 @@ Future<({Map<String, dynamic> payload, String? retener})>
   }
   if (casa) {
     // Panel Grupo B V7: beneficiario 'dueno' solo sin cliente y
-    // vendiendo el dueño (defensa en profundidad: la UI ya lo
+    // marcándolo el dueño (defensa en profundidad: la UI ya lo
     // impide, pero el helper no debe confiar en el llamador).
-    if (beneficiario == 'dueno' &&
-        (cliente != null || !vendedorEsDueno)) {
-      throw Exception(
-          'Casa para el dueño: sin cliente y solo la marca el dueño');
+    // 1.32 Compuertas (fila X-3, defecto de campo 2026-11-12):
+    // la guarda miraba vendedorEsDueno — el vendedor ATRIBUIDO
+    // (el titular del pomo) — y bloqueaba en falso al dueño
+    // que marca su consumo propio operando desde el pomo de un
+    // entrenador: la dosis sale del pomo abierto en el
+    // mostrador, pero quien consume y marca es el dueño, y el
+    // servidor acepta la op (con 'dueno' solo limpia
+    // cliente_id). La restricción de la Casa es sobre el
+    // ACTOR; vendedorEsDueno sigue mandando en saldo y
+    // comisión, no aquí.
+    if (beneficiario == 'dueno') {
+      if (cliente != null) {
+        throw Exception(
+            'Casa para el dueño: el consumo propio del dueño '
+            'no lleva cliente');
+      }
+      if (!actorEsDueno) {
+        throw Exception(
+            'Solo el dueño puede marcar su propio consumo '
+            'a la Casa');
+      }
     }
     final esCasaCliente =
         cliente != null && (cliente['cuenta_casa'] as num?)?.toInt() == 1;
@@ -1894,6 +1924,7 @@ Future<String> registrarVentaServicio({
   bool casa = false,
   String? beneficiario,
   required bool vendedorEsDueno,
+  required bool actorEsDueno,
   int? vendedorId,
   int? responsableEfectivoId,
   double? comisionUnitaria,
@@ -1915,6 +1946,7 @@ Future<String> registrarVentaServicio({
       casa: casa,
       beneficiario: beneficiario,
       vendedorEsDueno: vendedorEsDueno,
+      actorEsDueno: actorEsDueno,
       vendedorId: vendedorId,
       responsableEfectivoId: responsableEfectivoId,
       comisionUnitaria: comisionUnitaria,
@@ -1949,6 +1981,7 @@ Future<List<String>> registrarVentaMultipleServicio({
   bool casa = false,
   String? beneficiario,
   required bool vendedorEsDueno,
+  required bool actorEsDueno,
   int? vendedorId,
   int? responsableEfectivoId,
   double? comisionUnitaria,
@@ -2003,6 +2036,7 @@ Future<List<String>> registrarVentaMultipleServicio({
         casa: casa,
         beneficiario: beneficiario,
         vendedorEsDueno: vendedorEsDueno,
+        actorEsDueno: actorEsDueno,
         vendedorId: vendedorId,
         responsableEfectivoId: responsableEfectivoId,
         comisionUnitaria: comisionUnitaria,

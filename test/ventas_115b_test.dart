@@ -422,6 +422,7 @@ void main() {
         clienteId: 80,
         casa: true,
         vendedorEsDueno: false,
+        actorEsDueno: false,
         topeDosis: 40,
         topePomos: 10,
       );
@@ -455,6 +456,7 @@ void main() {
         casa: true,
         beneficiario: 'dueno',
         vendedorEsDueno: true,
+        actorEsDueno: true,
         topeDosis: 40,
         topePomos: 10,
       );
@@ -476,6 +478,7 @@ void main() {
             clienteId: 81,
             casa: true,
             vendedorEsDueno: false,
+            actorEsDueno: false,
             topeDosis: 40,
             topePomos: 10,
           ),
@@ -491,6 +494,7 @@ void main() {
         pomosM: 1,
         metodo: 'efectivo',
         vendedorEsDueno: false,
+        actorEsDueno: false,
         topeDosis: 40,
         topePomos: 10,
       );

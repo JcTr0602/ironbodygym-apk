@@ -235,6 +235,7 @@ void main() {
             pomoId: 1,
             metodo: 'efectivo',
             vendedorEsDueno: false,
+            actorEsDueno: false,
             vendedorId: gabriel,
             comisionUnitaria: mala,
           ),
@@ -253,6 +254,7 @@ void main() {
         pomoId: 1,
         metodo: 'efectivo',
         vendedorEsDueno: false,
+        actorEsDueno: false,
         vendedorId: gabriel,
         comisionUnitaria: 50,
       );

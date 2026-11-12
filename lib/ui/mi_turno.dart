@@ -444,7 +444,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     try {
       final agua = await svc.stockAguaLocal();
       await svc.repetirUltimaVentaServicio(u,
-          topePomosAgua: agua.saldo);
+          topePomosAgua: agua.saldo, actorEsDueno: _auth.isOwner);
       if (!mounted) return;
       mostrarSnack(context, 'Venta repetida: ${_etiquetaUltimaVenta()}');
       await _cargar();
