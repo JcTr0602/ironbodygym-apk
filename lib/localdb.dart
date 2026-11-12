@@ -8382,10 +8382,16 @@ class LocalDb {
     // protegida NO se borra (su payload trae el id; un id
     // ausente da NULL en el NOT IN y la op también se
     // conserva: dirección segura).
+    // 1.32 (Corte B, H-CB-3 — Argón): SOLO ops TERMINALES.
+    // Sin el filtro de estado, una edición viva que pasa
+    // una incidencia de compartida a privada se borraba
+    // aquí: su id no está en idsPrivadas (la fila aún es
+    // compartida) ni en idsProtegidas, y el payload ya
+    // dice 'privada' — la edición se perdía antes de subir.
     n += await d.delete('ops_queue',
         where: idsProtegidas.isEmpty
-            ? "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada'"
-            : "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada' AND json_extract(payload,'\$.id') NOT IN ($marcasProt)",
+            ? "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada' AND estado IN ($estadosOpsTerminalesSql)"
+            : "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada' AND estado IN ($estadosOpsTerminalesSql) AND json_extract(payload,'\$.id') NOT IN ($marcasProt)",
         whereArgs: argsPrivadas);
     if (idsPurgables.isNotEmpty) {
       final marcas =
