@@ -342,7 +342,13 @@ void main() {
           reason: 'falta la rama «bajada completa, subida '
               'sucia» que conserva el error');
       final rama = sync.substring(j, j + 700);
-      expect(rama, contains("setMeta('last_sync_error', msgPushSucio)"));
+      // 1.33 (coherencia de sync): la rama persiste el
+      // error de corrida por su helper — el CÓDIGO del
+      // error de subida (o 'subida_incompleta'), no el
+      // mensaje. El pin se actualiza a la forma nueva, con
+      // la misma intención: la rama conserva un error
+      // visible y no sella.
+      expect(rama, contains('_persistirErrorCorrida('));
       expect(rama, isNot(contains('_marcarOk()')),
           reason: 'la rama de subida sucia no puede sellar');
     });
@@ -362,11 +368,16 @@ void main() {
       // bajada muerta sin que nadie lo viera. Es la
       // condición de este pin, reforzada: el pin se
       // actualiza a la forma nueva.
+      // 1.33 (coherencia de sync): la limpieza pasa por el
+      // helper del registro completo (las cuatro metas del
+      // error de corrida juntas); el pin sigue a la forma
+      // nueva, con la condición intacta.
       final k = sync.indexOf("if (_ultimoPushLimpio && pullVerificado) {\n"
-          "        await _db.setMeta('last_sync_error', '');");
+          '        await _limpiarErrorCorrida();');
       expect(k, isNonNegative,
-          reason: 'push() volvió a limpiar last_sync_error '
-              'sin exigir push limpio Y pull verificado (F-6)');
+          reason: 'push() volvió a limpiar el error de '
+              'corrida sin exigir push limpio Y pull '
+              'verificado (F-6)');
     });
   });
 

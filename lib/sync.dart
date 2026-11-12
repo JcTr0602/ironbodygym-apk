@@ -237,6 +237,19 @@ class SyncStatus {
   /// `wm_sinverificar_<tabla>` del pull). null = ninguna.
   final String? tablaSinVerificar;
 
+  /// 1.33 (coherencia de sync, §7.4 de la investigación):
+  /// el error de corrida PERSISTIDO, en frase corta («La
+  /// bajada falló»), cuando lo hay. Hasta la 1.32 la foto
+  /// solo sabía de la fase en curso y de la cola de subida:
+  /// una bajada fallida cerraba en fase idle y la píldora
+  /// volvía a verde «Al día» al terminar la corrida — y
+  /// tras reiniciar la app nacía verde contra el error
+  /// persistido. [avisoSyncTs]: cuándo ocurrió el error,
+  /// para el «· hace…» de la píldora. null = sin error
+  /// vigente (ni registro ni tablas en rojo).
+  final String? avisoSyncCorto;
+  final DateTime? avisoSyncTs;
+
   const SyncStatus(
       {this.phase = SyncPhase.idle,
       this.pending = 0,
@@ -254,7 +267,9 @@ class SyncStatus {
       this.watermarkMinimo = 0,
       this.serverSeq = 0,
       this.tablaAtrasada,
-      this.tablaSinVerificar});
+      this.tablaSinVerificar,
+      this.avisoSyncCorto,
+      this.avisoSyncTs});
 
   /// v1.2.5 (D11): frase en lenguaje humano según las 3 dimensiones.
   String get frase {
@@ -397,6 +412,23 @@ class SyncDetalle {
   final int totalSubidos;
   final int totalBajados;
   final String? error;
+
+  /// 1.33 (coherencia de sync, §7.2/§7.3): el error de
+  /// corrida en DATOS — código estable, pierna, tablas
+  /// (nombres amigables) y hora ISO Habana — cuando viene
+  /// del registro persistido 1.33 o del semáforo de bajada.
+  /// [error] es entonces el texto compuesto UNA vez desde
+  /// estos datos; una superficie que conoce su
+  /// conectividad actual (el héroe de Sincronización)
+  /// puede recomponerlo con ella vía
+  /// textoErrorCorridaPersistido sin tocar otra fuente.
+  /// [errorCodigo] null = el error, si lo hay, es un texto
+  /// legado pre-1.33 o el detalle del Diario: se pinta tal
+  /// cual, sin re-traducir.
+  final String? errorCodigo;
+  final String? errorPierna;
+  final List<String> errorTablas;
+  final String? errorHoraIso;
   const SyncDetalle(
       {this.ultimaPull,
       this.ultimaPush,
@@ -405,7 +437,11 @@ class SyncDetalle {
       this.bajadosUltimo = 0,
       this.totalSubidos = 0,
       this.totalBajados = 0,
-      this.error});
+      this.error,
+      this.errorCodigo,
+      this.errorPierna,
+      this.errorTablas = const [],
+      this.errorHoraIso});
 
   /// Compatibilidad: subidos/bajados = último ciclo.
   int get subidos => subidosUltimo;
@@ -1638,7 +1674,11 @@ class SyncEngine {
           watermarkMinimo: _current.watermarkMinimo,
           serverSeq: _current.serverSeq,
           tablaAtrasada: _current.tablaAtrasada,
-          tablaSinVerificar: _current.tablaSinVerificar);
+          tablaSinVerificar: _current.tablaSinVerificar,
+          // 1.33: la emisión ligera tampoco recalcula el
+          // aviso del error persistido: lo hereda tal cual.
+          avisoSyncCorto: _current.avisoSyncCorto,
+          avisoSyncTs: _current.avisoSyncTs);
       _emitAplicada = seqEmision;
       _status.add(_current);
       return;
@@ -1762,6 +1802,33 @@ class SyncEngine {
       final s = await _db.getMeta('ultimo_sincronizado');
       if (s != null) sincronizado = DateTime.tryParse(s);
     } catch (_) {}
+    // 1.33 (coherencia de sync, §7.4): la foto incorpora el
+    // error de corrida PERSISTIDO (registro 1.33 o, en su
+    // defecto, el semáforo de bajada `wm_err_` vigente):
+    // la píldora deja de poder nacer verde sobre una última
+    // corrida fallida de verdad.
+    String? avisoCortoObs;
+    DateTime? avisoTsObs;
+    try {
+      final codPersistido = await _db.getMeta('last_sync_error');
+      if (codPersistido != null && codPersistido.isNotEmpty) {
+        if (esCodigoErrorSync(codPersistido)) {
+          final piernaPersistida =
+              await _db.getMeta('last_sync_error_pierna') ?? '';
+          avisoCortoObs = textoCortoErrorCorrida(
+              codigo: codPersistido, pierna: piernaPersistida);
+        } else {
+          // Legado pre-1.33: un mensaje humano sin código;
+          // hay error vigente aunque no se sepa su pierna.
+          avisoCortoObs = 'Falló la sincronización';
+        }
+        final tsIso = await _db.getMeta('last_sync_error_ts');
+        if (tsIso != null) avisoTsObs = DateTime.tryParse(tsIso);
+      } else {
+        final enRojo = await _db.metasConPrefijo('wm_err_');
+        if (enRojo.isNotEmpty) avisoCortoObs = 'La bajada falló';
+      }
+    } catch (_) {}
     // 1.28 (M1-A7/R2M1-F5): si mientras esta emisión esperaba
     // ya se aplicó una más nueva, esta llega tarde: se
     // descarta en vez de pintar su fase vieja sobre la actual.
@@ -1784,7 +1851,9 @@ class SyncEngine {
         watermarkMinimo: wmObs,
         serverSeq: ssObs,
         tablaAtrasada: atrasadaObs,
-        tablaSinVerificar: sinVerificarObs);
+        tablaSinVerificar: sinVerificarObs,
+        avisoSyncCorto: avisoCortoObs,
+        avisoSyncTs: avisoTsObs);
   }
 
   /// 1.28 (M1-B5): cálculo de foto en curso, compartido por
@@ -1900,6 +1969,78 @@ class SyncEngine {
 
   Future<void> _marcarOk() =>
       _db.setMeta('last_sync_ok', isoHabana(ahoraHabana()));
+
+  // ── 1.33: el error de corrida se persiste como CÓDIGO ──
+  // (coherencia de sync, §7.2/§7.3 de la investigación).
+  // Hasta la 1.32, `last_sync_error` guardaba el MENSAJE ya
+  // traducido y la pantalla lo re-traducía, degradándolo al
+  // genérico y perdiendo pierna, tablas y hora. Desde la
+  // 1.33 la meta guarda el código estable y tres compañeras
+  // los datos: `last_sync_error_pierna` ('subida' |
+  // 'bajada' | 'incidencias' | 'sesion' | 'ciclo'),
+  // `last_sync_error_tablas` (claves de tabla con la bajada
+  // en rojo, separadas por coma) y `last_sync_error_ts`
+  // (ISO Habana del desenlace). El texto visible lo compone
+  // UNA vez textoErrorCorridaPersistido al pintar. Los
+  // mensajes humanos de cada rama NO cambian: siguen
+  // viviendo en el Diario (motivo/error de la corrida) y en
+  // SyncResultado, que son forenses, no la foto pública.
+
+  /// Persiste el error de la corrida en su forma 1.33.
+  Future<void> _persistirErrorCorrida({
+    required String codigo,
+    required String pierna,
+    List<String> tablasClaves = const [],
+  }) async {
+    await _db.setMeta('last_sync_error', codigo);
+    await _db.setMeta('last_sync_error_pierna', pierna);
+    await _db.setMeta(
+        'last_sync_error_tablas', tablasClaves.join(','));
+    await _db.setMeta(
+        'last_sync_error_ts', isoHabana(ahoraHabana()));
+  }
+
+  /// Retira el error de corrida completo (las cuatro metas
+  /// juntas: un registro a medias sería otra incoherencia).
+  Future<void> _limpiarErrorCorrida() async {
+    await _db.setMeta('last_sync_error', '');
+    await _db.setMeta('last_sync_error_pierna', '');
+    await _db.setMeta('last_sync_error_tablas', '');
+    await _db.setMeta('last_sync_error_ts', '');
+  }
+
+  /// Limpieza CONDICIONADA a la pierna (simetría de pull(),
+  /// §7.5): una bajada limpia solo puede retirar el error
+  /// cuya pierna es la bajada — jamás el de una subida que
+  /// sigue rota. Un valor legado pre-1.33 (mensaje humano,
+  /// sin pierna conocida) sí se retira: es exactamente el
+  /// caso pegado que la simetría viene a curar.
+  Future<void> _limpiarErrorCorridaSiPierna(Set<String> piernas) async {
+    final actual = await _db.getMeta('last_sync_error');
+    if (actual == null || actual.isEmpty) return;
+    if (!esCodigoErrorSync(actual)) {
+      await _limpiarErrorCorrida();
+      return;
+    }
+    final pierna = await _db.getMeta('last_sync_error_pierna') ?? '';
+    if (piernas.contains(pierna)) await _limpiarErrorCorrida();
+  }
+
+  /// Claves de tabla con la bajada en rojo AHORA (el
+  /// semáforo `wm_err_` que la Salud pinta): la materia de
+  /// la pierna «bajada» del error compuesto.
+  Future<List<String>> _clavesTablasBajadaEnRojo() async {
+    try {
+      final claves = await _db.metasConPrefijo('wm_err_');
+      return [
+        for (final c in claves)
+          if (c.length > 'wm_err_'.length)
+            c.substring('wm_err_'.length),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
 
   // ── Diario M1: apertura/cierre dentro del candado ──────
 
@@ -2243,6 +2384,57 @@ class SyncEngine {
     var bajadosUltimo =
         int.tryParse(await _db.getMeta('last_downloaded') ?? '0') ?? 0;
     var error = await _db.getMeta('last_sync_error');
+    // 1.33 (coherencia de sync, §7.1/§7.2/§7.3): el error
+    // visible se compone desde UNA fuente, con prioridad:
+    // (1) el registro persistido 1.33 (código + pierna +
+    // tablas + hora), compuesto una sola vez aquí; (2) el
+    // semáforo de bajada vigente (`wm_err_`), el mismo con
+    // el que la Salud compone su estado — el héroe ya no
+    // puede decir «todo al día» con la bajada en rojo
+    // aunque ninguna corrida haya dejado registro; (3) el
+    // detalle de la última corrida del Diario posterior al
+    // último OK sellado (el relleno de la 1.32, Pieza 4e).
+    // Un valor legado pre-1.33 en la meta (un mensaje
+    // humano) se pinta TAL CUAL: ya es lenguaje llano y no
+    // se re-traduce — esa re-traducción era la doble
+    // traducción que degradaba todo al genérico.
+    String? errorCodigo;
+    String? errorPierna;
+    var errorTablas = <String>[];
+    String? errorHoraIso;
+    if (error != null && error.isNotEmpty && esCodigoErrorSync(error)) {
+      errorCodigo = error;
+      errorPierna = await _db.getMeta('last_sync_error_pierna');
+      final clavesTxt = await _db.getMeta('last_sync_error_tablas');
+      final claves = <String>[
+        if (clavesTxt != null)
+          for (final c in clavesTxt.split(','))
+            if (c.isNotEmpty) c,
+      ];
+      if (claves.isEmpty) {
+        claves.addAll(await _clavesTablasBajadaEnRojo());
+      }
+      errorTablas = [for (final c in claves) nombreAmigableTabla(c)];
+      errorHoraIso = await _db.getMeta('last_sync_error_ts');
+      error = textoErrorCorridaPersistido(
+          codigo: errorCodigo,
+          pierna: errorPierna ?? '',
+          tablas: errorTablas,
+          horaIso: errorHoraIso);
+    } else if (error == null || error.isEmpty) {
+      final clavesRojo = await _clavesTablasBajadaEnRojo();
+      if (clavesRojo.isNotEmpty) {
+        errorCodigo = 'bajada_incompleta';
+        errorPierna = 'bajada';
+        errorTablas = [
+          for (final c in clavesRojo) nombreAmigableTabla(c)
+        ];
+        error = textoErrorCorridaPersistido(
+            codigo: errorCodigo,
+            pierna: errorPierna,
+            tablas: errorTablas);
+      }
+    }
     // 1.32 (O2F2S, M1/M3): con el diario vivo, los conteos
     // «último» son los de la ÚLTIMA CORRIDA (etiquetados con
     // su hora y origen en la UI: M3-R1 cierra el engaño del
@@ -2284,6 +2476,10 @@ class SyncEngine {
       totalBajados:
           int.tryParse(await _db.getMeta('total_bajados') ?? '0') ?? 0,
       error: error,
+      errorCodigo: errorCodigo,
+      errorPierna: errorPierna,
+      errorTablas: errorTablas,
+      errorHoraIso: errorHoraIso,
     );
   }
 
@@ -2438,6 +2634,12 @@ class SyncEngine {
         // v1.2.9+47: errores de push y pull por separado (Gemini).
         String? errPush;
         String? errPull;
+        // 1.33: junto al mensaje (que sigue alimentando el
+        // Diario y el resultado) se conserva el ErrorSync
+        // clasificado: su CÓDIGO es lo que se persiste como
+        // error de corrida (ver _persistirErrorCorrida).
+        ErrorSync? errPushSync;
+        ErrorSync? errPullSync;
         var pushOk = false;
         try {
           _emitirProgreso(
@@ -2453,7 +2655,9 @@ class SyncEngine {
           // dejó ni una op golpeada en esta corrida.
           pushOk = _ultimoPushLimpio;
         } catch (e) {
-          errPush = (await _describeErrorVisible(e)).mensaje;
+          final descPush = await _describeErrorVisible(e);
+          errPush = descPush.mensaje;
+          errPushSync = descPush;
           AppLog.error('sync', 'push_fallo', d: '$e');
         }
         // v1.8.0 (Frente 5, punto E): si el push murió ANTES de su
@@ -2504,7 +2708,9 @@ class SyncEngine {
             // 1.28 (M1-A1): la pérdida del lock no es un fallo
             // de pull reintentable: aborta el ciclo entero.
             if (e is _CicloSinLock) rethrow;
-            errPull = (await _describeErrorVisible(e)).mensaje;
+            final descPull = await _describeErrorVisible(e);
+            errPull = descPull.mensaje;
+            errPullSync = descPull;
             AppLog.error(
                 'sync', 'pull_fallo', d: 'intento=$i error=$e');
             continue;
@@ -2583,7 +2789,8 @@ class SyncEngine {
           // error VISIBLE y persistido, jamás éxito vacío.
           // Es el desenlace que la incidencia Duany no tuvo:
           // su teléfono selló «al día» con la sesión muerta.
-          await _db.setMeta('last_sync_error', mensajeSesionInvalida);
+          await _persistirErrorCorrida(
+              codigo: 'sesion_invalida', pierna: 'sesion');
           errorCorrida = mensajeSesionInvalida;
           _diarioVeredicto(
               subidos > 0 || bajados > 0
@@ -2599,7 +2806,8 @@ class SyncEngine {
               'tiene datos: se forzará la re-descarga de clientes '
               'en el próximo ciclo.';
           await _db.setMeta('forzar_redescarga_clientes', '1');
-          await _db.setMeta('last_sync_error', msgEspejoVacio);
+          await _persistirErrorCorrida(
+              codigo: 'espejo_vacio', pierna: 'bajada');
           errorCorrida = msgEspejoVacio;
           _diarioVeredicto(EstadoCorrida.parcial,
               subidos: subidos,
@@ -2614,7 +2822,10 @@ class SyncEngine {
               'Una tabla que antes bajaba bien lleva varias '
               'pasadas sin aparecer en el servidor. Revisa la '
               'Salud de la sincronización.';
-          await _db.setMeta('last_sync_error', msgCaida);
+          await _persistirErrorCorrida(
+              codigo: 'tabla_caida',
+              pierna: 'bajada',
+              tablasClaves: await _clavesTablasBajadaEnRojo());
           errorCorrida = msgCaida;
           _diarioVeredicto(EstadoCorrida.parcial,
               subidos: subidos,
@@ -2623,7 +2834,7 @@ class SyncEngine {
               error: msgCaida);
         } else if (completo && pushOk) {
           await _marcarOk();
-          await _db.setMeta('last_sync_error', '');
+          await _limpiarErrorCorrida();
           // v1.3.4 (Ítem 6 Capa 1, Argón): reconciliación silenciosa
           // diaria por manifiesto: 1 vez/día, solo con la cola limpia;
           // nunca bloquea ni lanza.
@@ -2646,7 +2857,11 @@ class SyncEngine {
               'La descarga terminó, pero la subida dejó '
                   'operaciones sin enviar; se reintentarán en '
                   'el próximo ciclo.';
-          await _db.setMeta('last_sync_error', msgPushSucio);
+          // 1.33: sin excepción clasificada (ops golpeadas
+          // sin lanzar), el código es el del desenlace.
+          await _persistirErrorCorrida(
+              codigo: errPushSync?.codigo ?? 'subida_incompleta',
+              pierna: 'subida');
           errorCorrida = msgPushSucio;
           _diarioVeredicto(EstadoCorrida.parcial,
               subidos: subidos,
@@ -2654,7 +2869,9 @@ class SyncEngine {
               motivo: msgPushSucio,
               error: msgPushSucio);
         } else if (errPush != null) {
-          await _db.setMeta('last_sync_error', errPush);
+          await _persistirErrorCorrida(
+              codigo: errPushSync?.codigo ?? 'desconocido',
+              pierna: 'subida');
           // B-8: el fallo es de la SUBIDA de ops ya encoladas:
           // los datos están guardados en el teléfono por
           // construcción — se declara la persistencia real.
@@ -2669,7 +2886,10 @@ class SyncEngine {
               error: errPush);
           return;
         } else if (errPull != null) {
-          await _db.setMeta('last_sync_error', errPull);
+          await _persistirErrorCorrida(
+              codigo: errPullSync?.codigo ?? 'desconocido',
+              pierna: 'bajada',
+              tablasClaves: await _clavesTablasBajadaEnRojo());
           errorCorrida = errPull;
           _diarioVeredicto(
               subidos > 0 || bajados > 0
@@ -2692,7 +2912,8 @@ class SyncEngine {
               'falló; se reintentará en el próximo ciclo.';
           AppLog.error('sync', 'corrida_incidencias_fallo',
               d: _errorIncidenciasUltimaPasada ?? '');
-          await _db.setMeta('last_sync_error', msgIncidencias);
+          await _persistirErrorCorrida(
+              codigo: 'descarga_incidencias', pierna: 'incidencias');
           errorCorrida = msgIncidencias;
           _diarioVeredicto(EstadoCorrida.parcial,
               subidos: subidos,
@@ -2717,7 +2938,14 @@ class SyncEngine {
           final msgIncompleto = 'La descarga quedó incompleta; '
               'se reintentará en el próximo ciclo.'
               '${atasco.nombre != null ? ' Tabla atascada: ${atasco.nombre}.' : ''}';
-          await _db.setMeta('last_sync_error', msgIncompleto);
+          // 1.33: el registro persiste el código con las
+          // tablas de la bajada en rojo (la atascada sin
+          // verificar se sigue nombrando en el mensaje
+          // forense de aquí arriba y en el Diario).
+          await _persistirErrorCorrida(
+              codigo: 'bajada_incompleta',
+              pierna: 'bajada',
+              tablasClaves: await _clavesTablasBajadaEnRojo());
           errorCorrida = msgIncompleto;
           _diarioVeredicto(EstadoCorrida.parcial,
               subidos: subidos,
@@ -2773,7 +3001,8 @@ class SyncEngine {
             error: errorCorrida);
       } catch (e) {
         final errSync = await _describeErrorVisible(e);
-        await _db.setMeta('last_sync_error', errSync.mensaje);
+        await _persistirErrorCorrida(
+            codigo: errSync.codigo, pierna: 'ciclo');
         _emit(SyncPhase.error, error: errSync);
         errorCorrida = errSync.mensaje;
         _diarioVeredicto(EstadoCorrida.fallida,
@@ -3270,8 +3499,13 @@ class SyncEngine {
       } catch (e) {
         AppLog.error('sync', 'push_pull_silencioso_fallo', d: '$e');
         try {
-          await _db.setMeta('last_sync_error',
-              (await _describeErrorVisible(e)).mensaje);
+          // 1.33: también aquí se persiste el CÓDIGO con su
+          // pierna — el gesto F-6 (dejar el error visible)
+          // se conserva, en la forma nueva.
+          await _persistirErrorCorrida(
+              codigo: (await _describeErrorVisible(e)).codigo,
+              pierna: 'bajada',
+              tablasClaves: await _clavesTablasBajadaEnRojo());
         } catch (_) {}
       }
       // v1.0.14: limpiar error viejo si el push tuvo éxito.
@@ -3281,7 +3515,7 @@ class SyncEngine {
       // error NO se limpia y el gancho de éxito no suena.
       // 1.32 (F-6): y solo si el pull del ciclo se verificó.
       if (_ultimoPushLimpio && pullVerificado) {
-        await _db.setMeta('last_sync_error', '');
+        await _limpiarErrorCorrida();
       }
       // Cliente protegido (2026-10-26, A4): ídem que en pull().
       await _pullSiProtegidoPendiente();
@@ -3607,6 +3841,22 @@ class SyncEngine {
         cortadoPorLock = true;
         _diarioVeredicto(EstadoCorrida.cortada, bajados: bajados);
         return;
+      } catch (e) {
+        // 1.33 (coherencia de sync, §7.3): la bajada que
+        // lanza deja el error PERSISTIDO en su forma nueva
+        // (código + pierna + tablas), no solo la excepción
+        // volando — un pull lanzado era una vía por la que
+        // el error de bajada ni siquiera llegaba a la meta.
+        // El contrato de propagación NO cambia: se relanza
+        // tal cual (bajadaCompleta() y el cierre de la
+        // corrida en el Diario se apoyan en él).
+        try {
+          await _persistirErrorCorrida(
+              codigo: (await _describeErrorVisible(e)).codigo,
+              pierna: 'bajada',
+              tablasClaves: await _clavesTablasBajadaEnRojo());
+        } catch (_) {}
+        rethrow;
       }
       // 1.15 (caso c): verificación silenciosa si hay ops
       // 'enviada' cuya confirmación pudo perderse. Silenciosa de
@@ -3626,7 +3876,8 @@ class SyncEngine {
       // la pantalla y para el diario.
       if (_sinSesionEnCorrida) {
         sinSesionPull = true;
-        await _db.setMeta('last_sync_error', mensajeSesionInvalida);
+        await _persistirErrorCorrida(
+            codigo: 'sesion_invalida', pierna: 'sesion');
         _diarioVeredicto(EstadoCorrida.fallida,
             bajados: bajados,
             motivo: mensajeSesionInvalida,
@@ -3635,6 +3886,19 @@ class SyncEngine {
         // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
         // las ops) → gancho de fin de sync.
         _avisarSyncExitoso();
+        // 1.33 (coherencia de sync, §7.5): SIMETRÍA de
+        // limpieza — un pull con la bajada limpia limpia el
+        // error persistido igual que run()/push(); hasta la
+        // 1.32 pull() no lo limpiaba NUNCA y una bajada ya
+        // curada dejaba el error viejo pegado hasta el
+        // próximo ciclo completo. La limpieza es de SU
+        // pierna: la bajada, las incidencias y la sesión
+        // resuelta; un error de subida o de ciclo general
+        // sobrevive a un pull limpio (no es suyo).
+        if (_incidenciasOkUltimaPasada) {
+          await _limpiarErrorCorridaSiPierna(
+              const {'bajada', 'incidencias', 'sesion'});
+        }
         _diarioVeredicto(
             _incidenciasOkUltimaPasada
                 ? EstadoCorrida.completa

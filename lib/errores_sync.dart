@@ -582,6 +582,232 @@ String describirErrorCorrida(Object error, {bool? hayInternet}) {
   return describirError(error);
 }
 
+/// 1.33 (corrección de la coherencia de sync, §7.2/§7.3 de la
+/// investigación de la sincronización contradictoria): el
+/// error de la corrida se PERSISTE COMO CÓDIGO, no como
+/// mensaje. Hasta la 1.32 el motor guardaba en
+/// `last_sync_error` el `mensaje` ya traducido de
+/// [traducirErrorSync] y la pantalla lo volvía a traducir con
+/// [describirErrorCorrida]: los mensajes guardados más
+/// comunes no casan con ningún patrón en la segunda pasada y
+/// degradaban al genérico «Hubo un problema al sincronizar»,
+/// sin pierna, sin tablas y sin hora. Desde la 1.33 el motor
+/// guarda el código estable (meta `last_sync_error`) con su
+/// pierna, sus tablas y su hora en metas compañeras, y el
+/// texto visible se compone UNA sola vez al pintar, con
+/// [textoErrorCorridaPersistido]. Los códigos posibles: los
+/// de [traducirErrorSync] (clasificación de la excepción) y
+/// los de desenlace de corrida que fija el motor
+/// (`sesion_invalida`, `espejo_vacio`, `tabla_caida`,
+/// `descarga_incidencias`, `bajada_incompleta`,
+/// `subida_incompleta`).
+const Set<String> codigosErrorSyncConocidos = {
+  // De traducirErrorSync (excepciones clasificadas).
+  'permiso_camara',
+  'permiso_almacen',
+  'disco_lleno',
+  'bd_bloqueada',
+  'bd_corrupta',
+  'desfase_servidor',
+  'foto_subida_fallida',
+  'foto_muy_pesada',
+  'sesion_caducada',
+  'sin_permiso_rol',
+  'sin_conexion',
+  'tiempo_agotado',
+  'servidor_ocupado',
+  'servidor_caido',
+  'servidor_no_responde',
+  'conflicto_edicion',
+  'validacion_negocio',
+  'no_encontrado',
+  'desconocido',
+  // De desenlace de corrida (los fija el motor, no salen de
+  // una excepción suelta).
+  'sesion_invalida',
+  'espejo_vacio',
+  'tabla_caida',
+  'descarga_incidencias',
+  'bajada_incompleta',
+  'subida_incompleta',
+};
+
+/// ¿Es [v] un código estable de error de corrida (forma
+/// 1.33 de `last_sync_error`) y no un mensaje humano legado
+/// de una versión anterior?
+bool esCodigoErrorSync(String v) => codigosErrorSyncConocidos.contains(v);
+
+/// Frases completas por código: el desenlace ya trae su
+/// sentencia entera (son los textos que el motor fijaba
+/// hasta la 1.32 como mensaje de la rama; la pantalla los
+/// pinta tal cual, sin marco de pierna encima).
+const Map<String, String> _frasesCompletasErrorSync = {
+  // La misma sentencia que SyncEngine.mensajeSesionInvalida
+  // (allí vive la constante que comparten el sello de
+  // run(), el resultado de pull() y el Diario; aquí se
+  // repite porque este archivo no importa el motor).
+  'sesion_invalida':
+      'La sesión no es válida: cierra sesión y entra de nuevo.',
+  'espejo_vacio': 'El teléfono quedó sin clientes aunque el '
+      'servidor tiene datos: se forzará la re-descarga de '
+      'clientes en el próximo ciclo.',
+  'tabla_caida': 'Una tabla que antes bajaba bien lleva '
+      'varias pasadas sin aparecer en el servidor. Revisa '
+      'la Salud de la sincronización.',
+  'descarga_incidencias': 'La descarga de incidencias falló; '
+      'se reintentará en el próximo ciclo.',
+  'bajada_incompleta': 'La descarga quedó incompleta; se '
+      'reintentará en el próximo ciclo.',
+  'subida_incompleta': 'La subida dejó operaciones sin '
+      'enviar; se reintentarán en el próximo ciclo.',
+};
+
+/// Causa corta y llana por código de excepción clasificada,
+/// para componerla tras el marco de la pierna. El matiz
+/// A4-D2 se conserva: «sin conexión» con internet confirmado
+/// AHORA se dice como lo que es — no se pudo contactar el
+/// servidor.
+String _causaCortaErrorSync(String codigo, {bool? hayInternet}) {
+  switch (codigo) {
+    case 'sin_conexion':
+      return hayInternet == true
+          ? 'no se pudo contactar el servidor'
+          : 'no hay conexión a internet';
+    case 'servidor_no_responde':
+      return 'no se pudo contactar el servidor';
+    case 'tiempo_agotado':
+      return 'la conexión está muy lenta';
+    case 'servidor_caido':
+      return 'el servidor tiene un problema temporal';
+    case 'servidor_ocupado':
+      return 'el sistema está muy ocupado ahora mismo';
+    case 'sesion_caducada':
+      return 'tu sesión venció';
+    case 'bd_bloqueada':
+      return 'el teléfono está ocupado con otra tarea';
+    case 'bd_corrupta':
+      return 'hubo un problema con los datos guardados en el teléfono';
+    case 'disco_lleno':
+      return 'el teléfono no tiene espacio libre';
+    case 'sin_permiso_rol':
+      return 'tu cuenta no tiene permiso para esta acción';
+    case 'conflicto_edicion':
+      return 'esta información se cambió desde otro teléfono';
+    case 'no_encontrado':
+      return 'no se encontró esta información en el servidor';
+    case 'validacion_negocio':
+      return 'los datos no son válidos';
+    case 'desfase_servidor':
+      return 'hay información nueva del servidor por descargar';
+    case 'foto_subida_fallida':
+      return 'no se pudo subir una foto por la conexión';
+    case 'foto_muy_pesada':
+      return 'una foto es muy grande para esta conexión';
+    case 'bajada_incompleta':
+      return 'quedó incompleta';
+    case 'subida_incompleta':
+      return 'quedaron operaciones sin enviar';
+    case 'permiso_camara':
+      return 'la app no tiene permiso para usar la cámara';
+    case 'permiso_almacen':
+      return 'la app necesita permiso para guardar fotos';
+    default:
+      return 'hubo un problema al sincronizar';
+  }
+}
+
+/// Lista de tablas en lenguaje llano: «Clientes»,
+/// «Clientes y Pagos», «Clientes, Pagos y Sincronización»,
+/// «Clientes, Pagos y 3 más».
+String _listaTablasErrorSync(List<String> tablas) {
+  if (tablas.isEmpty) return '';
+  if (tablas.length == 1) return tablas.first;
+  if (tablas.length == 2) return '${tablas[0]} y ${tablas[1]}';
+  if (tablas.length == 3) {
+    return '${tablas[0]}, ${tablas[1]} y ${tablas[2]}';
+  }
+  return '${tablas[0]}, ${tablas[1]} y ${tablas.length - 2} más';
+}
+
+/// «HH:MM» tal como quedó escrito en el ISO de
+/// [isoHabana] (sus componentes de pared SON la hora de La
+/// Habana): inmune a la zona del proceso, a diferencia de
+/// parsear y reformatear.
+String? _hhmmDeIsoHabana(String? iso) {
+  if (iso == null || iso.length < 16) return null;
+  final t = iso.substring(11, 16);
+  final ok = t.length == 5 &&
+      t[2] == ':' &&
+      int.tryParse(t.substring(0, 2)) != null &&
+      int.tryParse(t.substring(3, 5)) != null;
+  return ok ? t : null;
+}
+
+/// 1.33: EL texto visible del error de corrida persistido,
+/// compuesto una sola vez al pintar desde los datos que el
+/// motor guardó (código + pierna + tablas + hora). Nunca
+/// devuelve una excepción cruda ni re-traduce un mensaje:
+/// del código sale siempre la misma frase, con su pierna
+/// nombrada («La bajada de Clientes y Pagos no se pudo
+/// completar: no hay conexión a internet. · 17:05»).
+String textoErrorCorridaPersistido({
+  required String codigo,
+  String pierna = '',
+  List<String> tablas = const [],
+  String? horaIso,
+  bool? hayInternet,
+}) {
+  final completa = _frasesCompletasErrorSync[codigo];
+  final String base;
+  // Con tablas conocidas, la bajada incompleta se compone
+  // con el marco de la pierna (las nombra); la frase
+  // completa queda para cuando no hay tablas que nombrar.
+  if (completa != null &&
+      !(codigo == 'bajada_incompleta' && tablas.isNotEmpty)) {
+    base = completa;
+  } else {
+    final causa = _causaCortaErrorSync(codigo, hayInternet: hayInternet);
+    switch (pierna) {
+      case 'subida':
+        base = 'La subida no se pudo completar: $causa.';
+      case 'bajada':
+        final lista = _listaTablasErrorSync(tablas);
+        base = lista.isEmpty
+            ? 'La bajada no se pudo completar: $causa.'
+            : 'La bajada de $lista no se pudo completar: $causa.';
+      case 'incidencias':
+        base = 'La descarga de incidencias no se pudo '
+            'completar: $causa.';
+      default:
+        base = 'La sincronización no se pudo completar: $causa.';
+    }
+  }
+  final hhmm = _hhmmDeIsoHabana(horaIso);
+  return hhmm == null ? base : '$base · $hhmm';
+}
+
+/// 1.33: la frase CORTA del error persistido, para la
+/// píldora de la cabecera (pieza 4 del §7: la píldora
+/// incorpora el error persistido y no pinta verde «Al día»
+/// sobre una última corrida fallida de verdad).
+String textoCortoErrorCorrida({
+  required String codigo,
+  String pierna = '',
+}) {
+  if (codigo == 'sesion_invalida' || codigo == 'sesion_caducada') {
+    return 'Sesión no válida';
+  }
+  switch (pierna) {
+    case 'subida':
+      return 'La subida falló';
+    case 'bajada':
+    case 'incidencias':
+      return 'La bajada falló';
+    default:
+      return 'Falló la sincronización';
+  }
+}
+
 /// 1.30 Oleada 8 (ítem añadido «Errores amables» + GEN-09):
 /// traduce CUALQUIER error a UN texto breve y en sencillo para
 /// enseñar en un snack o un campo de error de pantalla. Es el

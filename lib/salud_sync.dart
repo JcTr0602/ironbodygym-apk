@@ -12,6 +12,7 @@
 library;
 
 import 'copia_automatica.dart';
+import 'errores_sync.dart';
 import 'localdb.dart';
 import 'sync.dart';
 import 'ultimo_sync.dart';
@@ -238,13 +239,18 @@ String _notaTabla({
             : 'Tu rol lleva varias pasadas sin poder ver esta tabla que antes bajaba bien';
       }
       // Pieza añadida (incidencia de Jc): con el texto real
-      // del error, la nota lo trae (recortado: la meta puede
-      // guardar trazas largas) en vez del genérico solo.
+      // del error, la nota lo trae en vez del genérico solo.
+      // 1.33 (coherencia de sync, §7.6): la nota pasa por el
+      // traductor compartido (resumenErrorDiagnostico), que
+      // garantiza NUNCA devolver la excepción cruda — hasta
+      // la 1.32 esta rama interpolaba el `wm_err_` tal cual
+      // (recortado a 160): la `ClientException` con su URL
+      // interna ocupaba la pantalla entera de Salud. El
+      // crudo sigue vivo en InfoTablaSalud.errorBajada,
+      // para el Diagnóstico técnico.
       if (errorTexto.isNotEmpty) {
-        final corto = errorTexto.length > 160
-            ? '${errorTexto.substring(0, 160)}…'
-            : errorTexto;
-        return 'La última bajada de esta tabla falló: $corto';
+        return 'La última bajada de esta tabla falló: '
+            '${resumenErrorDiagnostico(errorTexto)}';
       }
       return 'La última bajada de esta tabla falló';
     case SemaforoTabla.ambar:

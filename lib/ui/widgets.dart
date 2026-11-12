@@ -670,6 +670,23 @@ class _SyncPillState extends State<SyncPill> {
           color = AppColores.alerta;
           icono = Icons.schedule_rounded;
           texto = '${s.pending} por subir';
+        } else if (s.avisoSyncCorto != null) {
+          // 1.33 (coherencia de sync, §7.4 de la
+          // investigación): el error de corrida PERSISTIDO
+          // manda sobre el verde. Hasta la 1.32 la píldora
+          // solo miraba la fase y la cola de SUBIDA: con la
+          // bajada rota la corrida cerraba en idle y volvía
+          // el «Al día» — y tras reiniciar la app nacía
+          // verde, con el error persistido intacto. La foto
+          // del motor trae el aviso desde el registro (y del
+          // semáforo de bajada), con la hora del desenlace.
+          color = AppColores.alerta;
+          icono = Icons.sync_problem_rounded;
+          final haceAviso =
+              s.avisoSyncTs == null ? '' : hace(s.avisoSyncTs!);
+          texto = haceAviso.isEmpty || haceAviso == 'nunca'
+              ? s.avisoSyncCorto!
+              : '${s.avisoSyncCorto} · $haceAviso';
         } else {
           color = AppColores.exito;
           icono = Icons.check_circle_outline_rounded;

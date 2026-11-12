@@ -465,6 +465,32 @@ class _ColaScreenState extends State<ColaScreen> {
   // conexión a internet» cuando quien no responde es el
   // servidor. null = aún no se sabe (traducción clásica).
   bool? _hayInternet;
+
+  /// 1.33 (coherencia de sync, §7.2/§7.3): EL texto visible
+  /// del error de corrida en esta pantalla, compuesto UNA
+  /// sola vez. Si detalle() lo trae en datos (el registro
+  /// 1.33: código + pierna + tablas + hora), se compone
+  /// desde el código con la conectividad de AHORA — el
+  /// matiz A4-D2 vive dentro del compositor —; si es un
+  /// texto legado o el detalle del Diario, se conserva el
+  /// camino anterior. Lo consumen el subtítulo del héroe y
+  /// la banda de error: hasta la 1.32 el héroe re-traducía
+  /// el mensaje persistido (y degradaba al genérico) y la
+  /// banda lo pintaba crudo.
+  String? get _textoErrorVisible {
+    final e = _det.error;
+    if (e == null || e.isEmpty) return null;
+    if (_det.errorCodigo != null) {
+      return textoErrorCorridaPersistido(
+          codigo: _det.errorCodigo!,
+          pierna: _det.errorPierna ?? '',
+          tablas: _det.errorTablas,
+          horaIso: _det.errorHoraIso,
+          hayInternet: _hayInternet);
+    }
+    return describirErrorCorrida(e, hayInternet: _hayInternet);
+  }
+
   List<Map<String, dynamic>> _ops = [];
   // v1.2.5 (D15): ops bloqueadas que necesitan revisión manual.
   List<Map<String, dynamic>> _bloqueadas = [];
@@ -1160,17 +1186,46 @@ class _ColaScreenState extends State<ColaScreen> {
   /// v1.12.0 (E1): resumen de la cola en palabras claras.
   Widget _tarjetaColaEnSencillo() {
     if (_totalPendientes == 0) {
+      // 1.33 (coherencia de sync, §7.1 de la investigación):
+      // esta tarjeta solo sabe de la SUBIDA — su condición
+      // es la cola de operaciones — y su frase se
+      // re-etiqueta a esa verdad parcial: el «Todo está al
+      // día» global desaparece de aquí (solo lo puede
+      // afirmar quien componga el estado entero, como el
+      // héroe o la Salud). Y si el detalle trae un error de
+      // corrida vigente — la bajada rota con la subida sana
+      // del caso de Jc — la tarjeta lo dice y pierde el
+      // verde triunfal.
+      final errorVigente = _textoErrorVisible;
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(AppEspacio.md),
         decoration: BoxDecoration(
-          color: AppColores.exito.withValues(alpha: 0.10),
+          color: errorVigente == null
+              ? AppColores.exito.withValues(alpha: 0.10)
+              : AppColores.avisoFondo,
           borderRadius: BorderRadius.circular(AppRadio.md),
         ),
-        child: const Text(
-          '✅ No tienes operaciones por subir. Todo está al día.',
-          style: AppTexto.cuerpo,
-        ),
+        child: errorVigente == null
+            ? const Text(
+                '✅ No tienes operaciones por subir.',
+                style: AppTexto.cuerpo,
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '✅ No tienes operaciones por subir.',
+                    style: AppTexto.cuerpo,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '⚠️ Ojo: la descarga no está al día. '
+                    '$errorVigente',
+                    style: AppTexto.cuerpo,
+                  ),
+                ],
+              ),
       );
     }
     // 1.15: desglose por tipo de LO PENDIENTE, contado en la BD
@@ -2239,14 +2294,12 @@ class _ColaScreenState extends State<ColaScreen> {
       iconoEstado = Icons.warning_amber_rounded;
       titulo = 'Falló la última sincronización';
       // v1.2.9+46: mensaje en lenguaje natural, no genérico.
-      // Pieza añadida (incidencia de Jc, 2026-11-09): con el
-      // contrafuerte A4-D2 de la corrida — si hay internet
-      // confirmado, un error de transporte se presenta como
-      // «No se pudo contactar el servidor», no como «No hay
-      // conexión a internet» (la misma corrección que el
-      // motivo de las ops ya aplicaba en esta pantalla).
-      subtitulo =
-          describirErrorCorrida(errorReciente, hayInternet: _hayInternet);
+      // 1.33: el texto sale de _textoErrorVisible (la
+      // composición única de la pantalla): con el registro
+      // 1.33 ya no se re-traduce un mensaje — se compone
+      // desde el código, con su pierna, sus tablas y su
+      // hora, y el matiz A4-D2 aplicado dentro.
+      subtitulo = _textoErrorVisible!;
     } else if (totalPendiente > 0) {
       estadoSync = 'pendiente';
       colorEstado = AppColores.alerta;
@@ -2537,7 +2590,11 @@ class _ColaScreenState extends State<ColaScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _det.error!,
+                        // 1.33: la banda pinta el MISMO
+                        // texto compuesto que el subtítulo
+                        // del héroe (_textoErrorVisible),
+                        // no el error crudo de detalle().
+                        _textoErrorVisible ?? _det.error!,
                         style: AppTexto.secundario.copyWith(color: AppColores.error),
                       ),
                     ),
