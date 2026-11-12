@@ -293,13 +293,66 @@ class FotoCache {
     }
   }
 
+  /// 1.33: la migración de nombres legados corre una sola
+  /// vez por proceso, en el primer acceso al directorio.
+  bool _migracionLegadoHecha = false;
+
   Future<Directory> _dir() async {
     final base = await getApplicationDocumentsDirectory();
     // NOTA: 'fotos_cache' es distinto de 'fotos/' (cola de subida).
     // El LRU nunca toca el directorio de la cola (Fix Luna 9).
     final d = Directory('${base.path}/fotos_cache');
     if (!await d.exists()) await d.create(recursive: true);
+    if (!_migracionLegadoHecha) {
+      _migracionLegadoHecha = true;
+      await _migrarNombresLegado(d);
+    }
     return d;
+  }
+
+  /// 1.33: el nombre canónico de un archivo legado, o null
+  /// si [nombre] no es un legado con extensión distinta.
+  /// Antes del 2026-10-15 (commit 7d4cc31) todo archivo de
+  /// la caché se guardaba como <saneado>.jpg; desde entonces
+  /// se busca <saneado>.<extensión real>. Para rutas .jpg
+  /// ambos nombres coinciden; para .webp/.png el archivo
+  /// viejo quedaba invisible para [enCache] pese a estar en
+  /// el teléfono.
+  String? _nombreCanonicoDesdeLegado(String nombre) {
+    if (!nombre.endsWith('.jpg')) return null;
+    final sinExt = nombre.substring(0, nombre.length - '.jpg'.length);
+    if (sinExt.endsWith('_webp')) return '$sinExt.webp';
+    if (sinExt.endsWith('_png')) return '$sinExt.png';
+    return null;
+  }
+
+  /// 1.33: el nombre legado (<saneado>.jpg) de una ruta, o
+  /// null si coincide con el canónico (rutas .jpg).
+  String? _nombreLegado(String storagePath) {
+    final legado = '${_nombreArchivo(storagePath)}.jpg';
+    final canonico =
+        '${_nombreArchivo(storagePath)}${_extDeStorage(storagePath)}';
+    return legado == canonico ? null : legado;
+  }
+
+  /// 1.33: barrido único que renombra los archivos legados
+  /// a su nombre canónico cuando el destino no existe. Lo
+  /// que el barrido no alcance lo cubre el rescate puntual
+  /// de [enCache].
+  Future<void> _migrarNombresLegado(Directory d) async {
+    try {
+      await for (final e in d.list()) {
+        if (e is! File) continue;
+        final nombre = e.path.split(Platform.pathSeparator).last;
+        final canonico = _nombreCanonicoDesdeLegado(nombre);
+        if (canonico == null) continue;
+        final destino = File('${d.path}/$canonico');
+        if (await destino.exists()) continue;
+        try {
+          await e.rename(destino.path);
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   String _nombreArchivo(String storagePath) =>
@@ -348,6 +401,31 @@ class FotoCache {
       try {
         await f.delete();
       } catch (_) {}
+    }
+    // 1.33: rescate del nombre legado (descargas anteriores
+    // al 2026-10-15, siempre .jpg): si el canónico no está
+    // pero el legado sí, se renombra al canónico y vale —
+    // la foto estaba en el teléfono y no se veía.
+    final legadoNombre = _nombreLegado(storagePath);
+    if (legadoNombre != null) {
+      final legado = File('${d.path}/$legadoNombre');
+      if (await legado.exists()) {
+        if (await legado.length() > 0) {
+          try {
+            await legado.rename(f.path);
+          } catch (_) {}
+          if (await f.exists()) {
+            _recordar(storagePath, f);
+            await _tocar(f);
+            return f;
+          }
+          _recordar(storagePath, legado);
+          return legado;
+        }
+        try {
+          await legado.delete();
+        } catch (_) {}
+      }
     }
     return null;
   }
