@@ -833,7 +833,27 @@ void main() {
       expect(find.text('App y Reglas'), findsNothing);
       expect(find.text('Panel clásico'), findsNothing);
       _sinExcepciones(tester);
-      await _cerrarCascara(tester);
+      // Cierre con sellado de tiempo (diagnóstico con zona
+      // instrumentada, 2026-11-12): montar la cáscara del
+      // entrenador deja trabajo de BD en vuelo cuyo envoltorio
+      // crea temporizadores de UNA VEZ de 10 s (timeout de
+      // transacción de sqflite) en la zona falsa durante los
+      // drenajes finales; si el test termina antes de que el
+      // reloj falso los alcance, el invariante
+      // '!timersPending' cae con las aserciones ya verdes
+      // (rojo intermitente: verde en la corrida conjunta,
+      // rojo en solitario y en la suite completa). No hay
+      // ningún temporizador periódico: basta agotar los de
+      // una vez intercalando giros reales (para que el
+      // trabajo aterrice) con saltos de reloj falso.
+      await tester.pumpWidget(const SizedBox());
+      for (var k = 0; k < 4; k++) {
+        await tester.runAsync(() async {
+          await Future<void>.delayed(
+              const Duration(milliseconds: 500));
+        });
+        await tester.pump(const Duration(seconds: 20));
+      }
     });
   });
 }
