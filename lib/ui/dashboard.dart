@@ -76,6 +76,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, Map<String, dynamic>> _mejorPeor = {};
   int _activos = 0;
   int _morosos = 0;
+  // 1.32 (Compuertas, fila X-1): desglose de morosos de
+  // +30 días, para que «vencidos» abra la pestaña que
+  // promete (ver _tabVencidos).
+  int _atras30 = 0;
   int _porVencer = 0;
   double _gastosMes = 0;
   int _nuevos = 0;
@@ -122,6 +126,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // Vista por rol (v1.2): el entrenador ve solo sus propios números.
   final _auth = AuthService();
   bool get _esDueno => _auth.isOwner;
+
+  /// 1.32 (Compuertas, fila X-1 — la D-3 del barrido de la
+  /// 1.31 seguía viva): la pestaña de Listas que promete la
+  /// cifra «vencidos». La cifra cuenta a TODOS los morosos
+  /// (morosos()); el destino lo dicta el oráculo compartido
+  /// urgenciaVencimientos (el mismo de Home): con atrasados
+  /// de +30 días se abre SU pestaña (3); solo leves, la de
+  /// −30 días (2). Antes ambos toques abrían siempre la 2 y
+  /// los peores quedaban fuera de la vista prometida.
+  int get _tabVencidos => urgenciaVencimientos(
+        atrasLeve: (_morosos - _atras30).clamp(0, _morosos),
+        atras30: _atras30,
+      ).tabInicial;
   // Campos de la vista del entrenador.
   double _miHoy = 0;
   double _miSemana = 0;
@@ -180,6 +197,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         rankingEntrenadores(),
         inactivosCount(),
         pendientePorEntrenador(),
+        // 1.32 (Compuertas, fila X-1): el desglose +30 días
+        // viaja en la MISMA foto paralela (sin lecturas en
+        // serie nuevas): es subconjunto exacto de morosos().
+        atrasados(masDe30: true),
       ]);
       final fNovedades = Future.wait([
         // Un fallo del pre-cálculo de nómina no puede tumbar todo
@@ -244,6 +265,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _ranking = cli[5] as List<Map<String, dynamic>>;
             _inactivos = cli[6] as int;
             _pend = cli[7] as List<Map<String, dynamic>>;
+            _atras30 = (cli[8] as List).length;
           }
           _cargando = false;
         });
@@ -1679,8 +1701,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   '$_morosos',
                                   'vencidos',
                                   AppColores.error,
-                                  () => _ir(const ListasScreen(
-                                      inicial: 2))),
+                                  () => _ir(ListasScreen(
+                                      inicial: _tabVencidos))),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -1698,7 +1720,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onPorVencer: () => _ir(
                                 const ListasScreen(inicial: 1)),
                             onVencidos: () => _ir(
-                                const ListasScreen(inicial: 2)),
+                                ListasScreen(inicial: _tabVencidos)),
                           ),
                           // v1.0.15: nuevos este mes + inactivos
                           if (_nuevos > 0 || _inactivos > 0) ...[

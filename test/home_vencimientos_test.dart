@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
-import 'package:ironbody_gym/ui/home.dart';
 
 void main() {
   group('urgenciaVencimientos (H2)', () {

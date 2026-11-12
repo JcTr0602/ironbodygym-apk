@@ -87,20 +87,6 @@ import '../errores_sync.dart';
 String claveDescarteSinReporte(String fechaIso, String turno) =>
     'sin_reporte:$fechaIso:$turno';
 
-/// H2 (estéticas 1.19): urgencia del badge de Vencimientos.
-/// Rojo solo si hay atrasados de más de 30 días; ámbar en el
-/// resto (vencen hoy, por vencer o atrasados leves). Devuelve el
-/// color del badge y la pestaña inicial de ListasScreen con el
-/// desglose (0 Hoy, 2 Atrasados -30d, 3 Atrasados +30d).
-({Color color, int tabInicial}) urgenciaVencimientos({
-  required int atrasLeve,
-  required int atras30,
-}) {
-  if (atras30 > 0) return (color: AppColores.error, tabInicial: 3);
-  if (atrasLeve > 0) return (color: AppColores.alerta, tabInicial: 2);
-  return (color: AppColores.alerta, tabInicial: 0);
-}
-
 /// v1.8.0 (pedido de Jc): señal de «personas esperando» del dueño
 /// en Home — (a) solicitudes de inscripción de invitados
 /// («Quiero inscribirme») y (b) reportes App Plus pendientes de

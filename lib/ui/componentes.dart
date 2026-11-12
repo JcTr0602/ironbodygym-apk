@@ -3723,3 +3723,26 @@ class GraficoBarrasDiarias extends StatelessWidget {
     );
   }
 }
+
+/// H2 (estéticas 1.19): urgencia del badge de Vencimientos.
+/// Rojo solo si hay atrasados de más de 30 días; ámbar en el
+/// resto (vencen hoy, por vencer o atrasados leves). Devuelve el
+/// color del badge y la pestaña inicial de ListasScreen con el
+/// desglose (0 Hoy, 2 Atrasados -30d, 3 Atrasados +30d).
+///
+/// 1.32 (Compuertas, fila X-1): el oráculo vive aquí, en la
+/// librería compartida, y no en home.dart — Dashboard lo
+/// consume para que su cifra «vencidos» abra la MISMA pestaña
+/// que promete (antes abría siempre la de −30 días y los de
+/// +30 días, contados en la cifra, quedaban fuera de la vista:
+/// era la D-3 del barrido de la 1.31, viva hasta esta
+/// compuerta). Un solo oráculo: dos copias de esta regla fue
+/// exactamente la clase del defecto.
+({Color color, int tabInicial}) urgenciaVencimientos({
+  required int atrasLeve,
+  required int atras30,
+}) {
+  if (atras30 > 0) return (color: AppColores.error, tabInicial: 3);
+  if (atrasLeve > 0) return (color: AppColores.alerta, tabInicial: 2);
+  return (color: AppColores.alerta, tabInicial: 0);
+}
