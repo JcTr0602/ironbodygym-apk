@@ -203,6 +203,12 @@ class _HomeScreenState extends State<HomeScreen>
   int _activosMes = 0;
   // 1.25 T45: cobrado por día de los últimos 7 días (dueño).
   List<Map<String, dynamic>> _serie7 = const [];
+  // 1.32 (Yunque exhaustivo, fila Y-1): conteo «al día» del
+  // Pulso = el conjunto EXACTO que su destino abre
+  // (Directorio con filtro 'aldia': diasRestantes > 7, la
+  // Casa cuenta). Antes la celda enseñaba _activosMes (el
+  // total de activos) bajo el rótulo «Al día».
+  int _alDiaPulso = 0;
   int _tarifaMes = 150; // v1.4.0: tarifa por cliente (base del entrenador)
   double _pagoEntrenadoresNeto =
       0; // post-1.15: neto a pagar (suma de la nómina, no bruto ×300)
@@ -837,6 +843,16 @@ class _HomeScreenState extends State<HomeScreen>
         _auth.isOwner
             ? ingresosUltimos7Dias()
             : Future.value(const <Map<String, dynamic>>[]), // 21
+        // 1.32 (Yunque, Y-1): «al día» del Pulso con la MISMA
+        // función pura y la MISMA base que el chip de su
+        // destino (conteosDeBuscar sobre los activos que ve
+        // el Directorio, con el filtro de protegidos de la
+        // vista aplicado igual que en el resto de contadores
+        // de la principal): la cifra promete lo que el
+        // destino muestra.
+        clientesActivos().then((rows) => conteosDeBuscar(rows
+            .where((c) => !esVistaProtegida(c))
+            .toList())['aldia'] ?? 0), // 22
       ]);
       // Cliente protegido (2026-10-26, Protegido 2 H6): los
       // contadores de la principal no cuentan protegidos para un
@@ -945,6 +961,7 @@ class _HomeScreenState extends State<HomeScreen>
           _pagaronMes = res[16] as int;
           _activosMes = res[20] as int;
           _serie7 = res[21] as List<Map<String, dynamic>>;
+          _alDiaPulso = res[22] as int;
           _tarifaMes = res[17] as int;
           final neto = res[18] as double?;
           if (neto != null) _pagoEntrenadoresNeto = neto;
@@ -1912,6 +1929,10 @@ class _HomeScreenState extends State<HomeScreen>
           // directorio filtrado (la pantalla recalcula
           // desde el espejo: el destino nunca miente aunque
           // la cifra envejezca en pantalla).
+          // (Yunque Y-1: la cifra «Al día» es el conteo del
+          // filtro 'aldia' — res[22] —, no el total de
+          // activos: prometer el total enseñaba un conjunto
+          // que el destino no muestra.)
           Row(
             children: [
               Expanded(
@@ -1927,7 +1948,7 @@ class _HomeScreenState extends State<HomeScreen>
               Expanded(
                   child: _datoFinancieroTappable(
                       'Al día',
-                      '$_activosMes',
+                      '$_alDiaPulso',
                       AppColores.exito,
                       () => MarcoNav.irAClientes(const DestinoClientes(
                           segmento: 'directorio', filtro: 'aldia')))),
