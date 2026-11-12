@@ -279,6 +279,64 @@ void main() {
       }
     });
 
+    test('AP-2: sin fila wm_<t> el cursor es 0 aunque el '
+        'global sea alto; la materialización copia el '
+        'global SOLO a las herederas', () async {
+      final db = LocalDb.instance;
+      final d = await db.db;
+      await db.setWatermark(999999);
+      // Sin fila: ni siquiera una heredera clásica hereda.
+      await d.delete('meta', where: 'k = ?', whereArgs: ['wm_pagos']);
+      expect(await db.getWatermarkTabla('pagos'), 0,
+          reason: 'AP-2: sin fila wm_pagos, el cursor leído '
+              'es 0 y la tabla re-baja (antes heredaba el '
+              'global y quedaba congelada)');
+      // Materialización (la de la migración v74): la
+      // heredera recibe el global; la no-heredera y la de
+      // secuencia propia reciben '0'.
+      await d
+          .delete('meta', where: 'k = ?', whereArgs: ['wm_clientes']);
+      await d
+          .delete('meta', where: 'k = ?', whereArgs: ['wm_reservas']);
+      await d.delete('meta',
+          where: 'k = ?', whereArgs: ['wm_gympedia_solicitudes']);
+      await db.materializarWatermarksParaTest();
+      expect(await db.getMeta('wm_clientes'), '999999',
+          reason: 'clientes es heredera: la materialización '
+              'copia el global una sola vez');
+      expect(await db.getMeta('wm_reservas'), '0',
+          reason: 'reservas es no-heredera: nace en 0');
+      expect(await db.getMeta('wm_gympedia_solicitudes'), '0',
+          reason: 'secuencia propia: jamás recibe el global');
+    });
+
+    test('AP-2: toda tabla del pull con tabla local nace '
+        'con su wm_<t> sembrado', () async {
+      final db = LocalDb.instance;
+      final d = await db.db;
+      final locales = await d.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table'");
+      final conSeq = <String>{};
+      for (final f in locales) {
+        final nombre = '${f['name']}';
+        final info = await d.rawQuery('PRAGMA table_info($nombre)');
+        if (info.any((c) => '${c['name']}' == 'sync_seq')) {
+          conSeq.add(nombre);
+        }
+      }
+      expect(conSeq, isNotEmpty);
+      for (final t in conSeq) {
+        expect(await db.getMeta('wm_$t'), isNotNull,
+            reason: 'el espejo $t nació sin su wm_ sembrado');
+      }
+      // Y las del pull sin excepción práctica: clientes y
+      // pagos siempre tienen tabla local.
+      for (final t in ['clientes', 'pagos']) {
+        expect(conSeq, contains(t));
+        expect(await db.getMeta('wm_$t'), '0');
+      }
+    });
+
     test('publicación a medias: la fila por encima de la '
         'foto NO se aplica; al avanzar la foto, sí', () async {
       final db = LocalDb.instance;

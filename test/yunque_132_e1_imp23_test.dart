@@ -1,13 +1,16 @@
 /// 1.32 · Escalón 1 — IMP-23 completo (sugerencias de
 /// arquitectura de la Auditoría Definitiva, destino 1.32):
 ///
-/// (1) CATÁLOGO ÚNICO DE ESPEJOS: la herencia del watermark
-/// global vive en CatalogoEspejos (localdb) y getWatermarkTabla
-/// lo consulta. Paridad CONDUCTUAL: con la meta `wm_<t>`
-/// ausente y el global alto, cada no-heredera devuelve 0 y
-/// cada heredera devuelve el global — es el fallo SB-02
-/// convertido en test. Más la foto exacta de las semillas de
-/// la instalación limpia (19 claves `wm_*`='0').
+/// (1) CATÁLOGO ÚNICO DE ESPEJOS: la clasificación de
+/// herencia vive en CatalogoEspejos (localdb). Paridad
+/// CONDUCTUAL original: con la meta `wm_<t>` ausente y el
+/// global alto, cada no-heredera devolvía 0 y cada heredera
+/// el global — el fallo SB-02 convertido en test.
+/// ACTUALIZADO por la síntesis AP-2 (1.32): la herencia
+/// viva quedó jubilada — sin meta, TODAS devuelven 0; la
+/// clasificación solo alimenta la materialización única
+/// (v74) y la foto de semillas cubre ahora todo espejo
+/// con columna sync_seq (49 claves `wm_*`).
 /// (2) PUSH LIMPIO DECLARATIVO: el veredicto se publica UNA
 /// vez al cierre de _doPush; un bump a mitad de corrida mueve
 /// el acumulador pero NO republica el veredicto que leen los
@@ -60,28 +63,53 @@ void main() {
       final rows = await db.query('meta',
           columns: ['k'], where: "k LIKE 'wm\\_%' ESCAPE '\\'");
       final semillas = {for (final r in rows) '${r['k']}'.substring(3)};
+      // 1.32 (O2F2S, síntesis AP-2): la siembra ya no es
+      // una lista corta de migraciones sueltas —
+      // _sembrarWatermarksAp2 siembra TODA tabla local
+      // con columna sync_seq al nacer (49 hoy: los 42
+      // espejos del pull con tabla local + espejos de
+      // incidencias, tumbas y ultimo_sync). La foto se
+      // actualiza a ese universo; una semilla nueva o
+      // retirada obliga a revisar el catálogo y esta
+      // foto a la vez.
       expect(semillas, {
-        // No-herederas sembradas al nacer (14).
-        'avisos_entrenadores', 'avisos_vistos',
-        'espejo_entregas_efectivo', 'espejo_recordatorio_config',
-        'espejo_tarifas_especiales', 'guia_borrados', 'guia_equipos',
-        'guia_fichas', 'gympedia_articulos', 'gympedia_borrados',
-        'nomina_bonos', 'reservas', 'solicitudes_adelanto',
-        'solicitudes_relleno',
-        // Cursor propio, fuera del eje de herencia (4).
-        'cliente_congelaciones', 'espejo_gympedia_borradores',
-        'gympedia_solicitudes', 'permisos_bandeja',
-        // Heredera sembrada: la semilla fija solo el arranque
-        // de la instalación limpia (1).
-        'cliente_mediciones',
+        'acceso_bloqueos', 'adelantos', 'avisos_entrenadores',
+        'avisos_vistos', 'categorias_suplemento',
+        'cliente_congelaciones', 'cliente_mediciones',
+        'clientes', 'diferencias_caja',
+        'espejo_entregas_efectivo', 'espejo_gympedia_borradores',
+        'espejo_recordatorio_config', 'espejo_tarifas_especiales',
+        'gastos', 'guia_borrados', 'guia_equipos', 'guia_fichas',
+        'gympedia_articulos', 'gympedia_borrados',
+        'gympedia_solicitudes', 'incidencia_eventos_mirror',
+        'incidencias_cuarentena', 'incidencias_mirror',
+        'incidencias_sync', 'incidencias_tipos_mirror',
+        'liquidaciones_caja', 'nomina_bonos',
+        'nomina_confirmaciones', 'nomina_liquidada',
+        'nomina_liquidada_snapshot', 'pagos', 'pagos_diarios',
+        'permisos_bandeja', 'reservas',
+        'servicio_agua_movimientos', 'servicio_botes',
+        'servicio_compras', 'servicio_lotes', 'servicio_pomos',
+        'servicio_salidas', 'servicio_ventas',
+        'solicitudes_adelanto', 'solicitudes_relleno',
+        'suplemento_ajustes', 'suplementos', 'turnos_apertura',
+        'turnos_cierre', 'ultimo_sync', 'ventas_suplementos',
       },
           reason: 'una semilla nueva o retirada obliga a '
               'actualizar el catálogo y esta foto a la vez');
       await db.close();
     });
 
-    test('sin meta wm_<t> y global alto: la herencia es la '
-        'del catálogo (paridad SB-02)', () async {
+    test('sin meta wm_<t> y global alto: NADIE hereda '
+        '(AP-2 supersede la herencia viva de IMP-23)', () async {
+      // IMP-23 fijó: meta ausente ⇒ las herederas leen el
+      // global. La síntesis AP-2 lo revirtió a propósito:
+      // si la fila se pierde (purga, restauración parcial,
+      // borrarMeta), la heredera quedaba congelada en el
+      // global alto para siempre y sin error. Desde v74
+      // la herencia vive solo como materialización única
+      // (la fila nace con el global copiado); la lectura
+      // sin fila es 0 para TODAS y la tabla re-baja.
       final db = await _abrirDbVacia();
       await LocalDb.instance.setWatermark(999999);
       Future<int> sinMeta(String t) async {
@@ -105,8 +133,7 @@ void main() {
             reason: '$t entra por la familia de prefijo del '
                 'catálogo');
       }
-      // Herederas: espejos originales y las sembradas cuya
-      // semilla no cambia la clasificación.
+      // Las antiguas herederas: tampoco heredan en vivo.
       for (final t in [
         'clientes',
         'pagos',
@@ -114,23 +141,36 @@ void main() {
         'turnos_cierre',
         'cliente_mediciones',
       ]) {
-        expect(await sinMeta(t), 999999,
-            reason: '$t hereda el global si su meta se pierde');
+        expect(await sinMeta(t), 0,
+            reason: 'AP-2: $t sin fila lee 0 y re-baja; su '
+                'posición heredada vive en la fila '
+                'materializada por la migración v74');
       }
       await db.close();
     });
 
-    test('getWatermarkTabla consulta el catálogo (guarda de '
-        'fuente)', () {
+    test('la clasificación sigue siendo del catálogo: la '
+        'consulta quien materializa, no quien lee (guarda '
+        'de fuente AP-2)', () {
       final fuente = File('lib/localdb.dart').readAsStringSync();
       final i = fuente.indexOf('Future<int> getWatermarkTabla');
       final j = fuente.indexOf('Future<void> setWatermarkTabla', i);
       expect(i, isNonNegative);
       expect(j, isNonNegative);
       expect(fuente.substring(i, j),
+          isNot(contains('CatalogoEspejos.heredaGlobal')),
+          reason: 'AP-2: la lectura ya no hereda; si vuelve '
+              'la consulta al catálogo aquí, la herencia '
+              'viva resucitó');
+      final k =
+          fuente.indexOf('static Future<void> _sembrarWatermarksAp2');
+      expect(k, isNonNegative);
+      expect(
+          fuente.substring(k, k + 2500),
           contains('CatalogoEspejos.heredaGlobal'),
-          reason: 'la función no puede volver a llevar su '
-              'propia lista: la clasificación es del catálogo');
+          reason: 'la clasificación es del catálogo y la '
+              'usa la materialización (única fuente, como '
+              'mandaba la guarda original de IMP-23)');
     });
   });
 

@@ -88,10 +88,16 @@ class _CondicionVentaSuplemento {
 ///    esta clasificación hasta que su primer pull escribe
 ///    `wm_<t>` al aplicar la primera página.
 /// 3. `test/yunque_132_e1_imp23_test.dart` verifica el
-///    catálogo contra el comportamiento real (meta ausente +
-///    global alto ⇒ 0 para cada no-heredera; global para las
-///    herederas) y contra las semillas de la instalación
+///    catálogo contra las semillas de la instalación
 ///    limpia: una divergencia nueva rompe la suite, no el gym.
+///
+/// 1.32 (O2F2S, síntesis AP-2): la herencia VIVA murió —
+/// `getWatermarkTabla` sin fila devuelve 0 para todas las
+/// tablas. Esta clasificación queda como oráculo de la
+/// materialización única (migración v74 + siembra en
+/// onCreate, `_sembrarWatermarksAp2`): heredera ⇒ su fila
+/// nace con el global vigente al materializar; el resto,
+/// con '0'.
 ///
 /// Fuera de este eje: los espejos con cursor PROPIO que no
 /// pasan por `getWatermarkTabla` (bandeja GymPedia:
@@ -153,10 +159,32 @@ class CatalogoEspejos {
     'servicio_',
   ];
 
+  /// Espejos de secuencia PROPIA (su sync_seq no es la
+  /// global): jamás reciben el global ni por herencia ni
+  /// por materialización — su cursor nace en 0 y avanza
+  /// solo con su propia secuencia. Las 4 de incidencias
+  /// quedan cubiertas por el prefijo `incidencias` de
+  /// [noHerederosPrefijos]; estas 4 son las de bandeja y
+  /// congelaciones de `SyncEngine.tablasConSecuenciaPropia`.
+  static const Set<String> secuenciaPropiaSinHerencia = {
+    'gympedia_solicitudes',
+    'permisos_bandeja',
+    'espejo_gympedia_borradores',
+    'cliente_congelaciones',
+  };
+
   /// ¿[tabla] hereda el watermark global si aún no tiene
   /// cursor propio (`wm_<tabla>` ausente)?
+  ///
+  /// 1.32 (O2F2S, síntesis AP-2): desde la migración v74
+  /// esta clasificación SOLO se consulta para materializar
+  /// la herencia una única vez en filas explícitas
+  /// (`_sembrarWatermarksAp2`). La lectura viva
+  /// (`getWatermarkTabla`) ya no hereda: sin fila, el
+  /// cursor es 0 para todas las tablas.
   static bool heredaGlobal(String tabla) {
     if (noHerederos.contains(tabla)) return false;
+    if (secuenciaPropiaSinHerencia.contains(tabla)) return false;
     for (final p in noHerederosPrefijos) {
       if (tabla.startsWith(p)) return false;
     }
@@ -225,7 +253,7 @@ class LocalDb {
   /// sync): el diario de sincronizaciones (sync_corridas,
   /// sync_corrida_tablas, sync_corrida_ops). El paso oldV<73
   /// llama al MISMO método que onCreate (idempotente).
-  static const int versionActual = 73;
+  static const int versionActual = 74;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -588,6 +616,12 @@ class LocalDb {
       },
       onCreate: (db, _) async {
         await _crearTablas(db);
+        // 1.32 (O2F2S, síntesis AP-2): todo espejo nace
+        // con su wm_<t> sembrado ('0' en instalación
+        // limpia): la fila existe desde el primer día y
+        // la regla «sin fila = 0» nunca depende de que
+        // nadie la pierda.
+        await _sembrarWatermarksAp2(db);
       },
       onUpgrade: (db, oldV, _) async {
         // v2: espejo de gastos (cierre de caja del admin).
@@ -1768,6 +1802,14 @@ class LocalDb {
           // corrida (fuente del Centro de Sincronización).
           // MISMO método que onCreate (paridad garantizada).
           await _crearTablasDiarioSync(db);
+        }
+        if (oldV < 74) {
+          // 1.32 (O2F2S, síntesis AP-2): la herencia del
+          // watermark global se MATERIALIZA una sola vez
+          // en filas wm_<t> explícitas y muere como regla
+          // viva (getWatermarkTabla ya no hereda: sin fila,
+          // 0). MISMO método que onCreate (que siembra '0').
+          await _sembrarWatermarksAp2(db);
         }
       },
     );
@@ -10107,17 +10149,59 @@ class LocalDb {
                 if (!tablasProhibidasEntrenador.contains(t)) t,
             ];
 
+  /// 1.32 (O2F2S, síntesis AP-2): siembra/materialización
+  /// de los cursores `wm_<t>` de TODOS los espejos (toda
+  /// tabla local con columna sync_seq), sin tocar las
+  /// filas que ya existen:
+  /// - heredera según [CatalogoEspejos] → recibe el
+  ///   watermark global vigente (la herencia, materializada
+  ///   UNA sola vez: en instalación limpia el global es 0);
+  /// - no heredera o de secuencia propia → '0'.
+  /// La llaman onCreate (siembra al nacer) y la migración
+  /// v74 (materializa en las instalaciones vivas). Sin
+  /// esta red, una fila `wm_<t>` perdida (purga,
+  /// restauración parcial, borrarMeta) dejaba a la tabla
+  /// heredando el global alto para siempre y sin error.
+  static Future<void> _sembrarWatermarksAp2(Database db) async {
+    var global = 0;
+    final g = await db.query('meta',
+        columns: ['v'], where: 'k = ?', whereArgs: ['sync_seq']);
+    if (g.isNotEmpty) global = int.tryParse('${g.first['v']}') ?? 0;
+    final tablas = await db.rawQuery("SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+    for (final fila in tablas) {
+      final nombre = '${fila['name']}';
+      final info = await db.rawQuery('PRAGMA table_info($nombre)');
+      if (!info.any((c) => '${c['name']}' == 'sync_seq')) continue;
+      final clave = 'wm_$nombre';
+      final ya = await db.query('meta',
+          columns: ['v'], where: 'k = ?', whereArgs: [clave]);
+      if (ya.isNotEmpty) continue;
+      await db.insert(
+          'meta',
+          {'k': clave, 'v': CatalogoEspejos.heredaGlobal(nombre) ? '$global' : '0'},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+
+  /// Gancho de test: corre la materialización AP-2 sobre
+  /// la BD abierta (la migración v74 la corre sola al
+  /// actualizar; esto la ejercita sin reabrir).
+  Future<void> materializarWatermarksParaTest() async {
+    await _sembrarWatermarksAp2(await db);
+  }
+
   Future<int> getWatermarkTabla(String tabla) async {
     final v = await getMeta('wm_$tabla');
     if (v != null) return int.tryParse(v) ?? 0;
-    // 1.32 (IMP-23): sin cursor propio, la herencia del global
-    // se decide en el Catálogo Único de Espejos
-    // (CatalogoEspejos, sobre la clase LocalDb): la cadena de
-    // ifs que vivía aquí era una de las dos listas manuales
-    // que debían crecer juntas (observación O-1 del Yunque
-    // de Sync).
-    if (!CatalogoEspejos.heredaGlobal(tabla)) return 0;
-    return getWatermark(); // hereda el global (migración)
+    // 1.32 (O2F2S, síntesis AP-2): sin fila, el cursor es
+    // 0 para TODAS las tablas — la herencia viva del
+    // global (IMP-23) queda jubilada: se materializó una
+    // sola vez en la migración v74 y todo espejo nace
+    // sembrado desde onCreate. Si aun así una fila se
+    // pierde, lo peor que ocurre es una re-descarga de
+    // esa tabla, nunca un espejo congelado en silencio.
+    return 0;
   }
 
   Future<void> setWatermarkTabla(String tabla, int seq,
