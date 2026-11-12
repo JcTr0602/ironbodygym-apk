@@ -229,7 +229,7 @@ void main() {
       databaseFactory = databaseFactoryFfiNoIsolate;
       SharedPreferences.setMockInitialValues({});
       await Supabase.initialize(
-          url: 'http://127.0.0.1:9', anonKey: 'dummy');
+          url: 'http://127.0.0.1:9', publishableKey: 'dummy');
     });
 
     Future<void> bdVacia(WidgetTester tester) async {

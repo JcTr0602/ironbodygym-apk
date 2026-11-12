@@ -1950,7 +1950,7 @@ class _DialogoRegistrarAdelantoState
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.warning_amber_rounded,
+                  const Icon(Icons.warning_amber_rounded,
                       size: 18, color: AppColores.alerta),
                   const SizedBox(width: 6),
                   Expanded(

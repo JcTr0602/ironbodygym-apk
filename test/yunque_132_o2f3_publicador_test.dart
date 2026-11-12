@@ -116,7 +116,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     try {
       await Supabase.initialize(
-          url: 'http://127.0.0.1:9', anonKey: 'dummy');
+          url: 'http://127.0.0.1:9', publishableKey: 'dummy');
     } catch (_) {}
   });
 
