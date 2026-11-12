@@ -10498,21 +10498,21 @@ class LocalDb {
     if (userId == null) {
       try {
         final mu = await ex.query('meta',
-            columns: ['valor'],
-            where: 'clave = ?',
+            columns: ['v'],
+            where: 'k = ?',
             whereArgs: ['ultimo_user_id_activo'],
             limit: 1);
         if (mu.isNotEmpty) {
-          final v = mu.first['valor'];
+          final v = mu.first['v'];
           if (v is String && v.isNotEmpty) userId = v;
         }
         final mt = await ex.query('meta',
-            columns: ['valor'],
-            where: 'clave = ?',
+            columns: ['v'],
+            where: 'k = ?',
             whereArgs: ['ultimo_telegram_id_activo'],
             limit: 1);
         if (mt.isNotEmpty) {
-          telegramId = int.tryParse('${mt.first['valor']}');
+          telegramId = int.tryParse('${mt.first['v']}');
         }
       } catch (_) {}
     }
