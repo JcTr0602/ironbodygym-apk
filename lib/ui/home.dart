@@ -34,6 +34,7 @@ import 'admin.dart';
 import 'buzon_dueno.dart';
 import 'horario_gym.dart';
 import 'reservas.dart';
+import 'servicios.dart';
 import 'servicios_admin.dart';
 import 'solicitudes_adelanto.dart';
 import 'incidencias/lista_incidencias.dart';
@@ -1357,7 +1358,17 @@ class _HomeScreenState extends State<HomeScreen>
                 context,
                 () => PermisosEntrenador().canVenderSuplementos,
                 'vender servicios')) {
-              MarcoNav.irAPilar(PilarGestion.tienda);
+              // 1.33 (decisión de Jc): el Dock es de
+              // ACCIONES — «Servicio» abre DIRECTO la
+              // pantalla de vender (Servicios nace en su
+              // zona Vender), como Cobrar abre el cobro y
+              // Pase el pase diario. Antes solo saltaba al
+              // Pilar Tienda: mismo icono y mismo destino
+              // que la pestaña Tienda (redundancia cazada
+              // por Jc en campo). El hub completo (Día ·
+              // Inventario · Análisis · Suplementos) sigue
+              // viviendo en la pestaña, intacto.
+              _ir(const ServiciosScreen());
             }
           },
           onPase: () => _ir(const PagoDiarioScreen()),
