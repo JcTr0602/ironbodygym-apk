@@ -20,7 +20,6 @@
 ///    migración/rescate de FotoCache los vuelve a ver.
 library;
 
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -216,7 +215,7 @@ void main() {
       // El usuario vuelve a la lista a los 30 s y a los 60 s:
       // la ruta está recién aterrizada y la sirve la caché;
       // la cola no la re-descarga.
-      for (final min in [0, 1]) {
+      for (var i = 0; i < 2; i++) {
         ahora = ahora.add(const Duration(seconds: 30));
         cola.encolar([ruta]);
         await Future<void>.delayed(const Duration(milliseconds: 30));
