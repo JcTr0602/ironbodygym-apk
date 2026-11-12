@@ -35,6 +35,7 @@ import 'package:ironbody_gym/premios_panel.dart';
 import 'package:ironbody_gym/ui/dialogo_gasto.dart';
 import 'package:ironbody_gym/ui/gastos.dart';
 import 'package:ironbody_gym/ui/panel_premios.dart';
+import 'package:ironbody_gym/ui/primitivas.dart';
 import 'package:ironbody_gym/ui/panel_premios_clientes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -295,10 +296,26 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Concepto (ej: pago de la luz)'),
         'Pago de la luz');
-    await tester.enterText(
-        find.widgetWithText(TextField, 'Monto (CUP)'), '1500');
+    // 1.32 (O2F2, pin E5): el monto ya no es un TextField —
+    // se teclea en la hoja del pad del mostrador
+    // (CampoMontoPad). La guarda que este test protege (un
+    // solo diálogo, una sola op) no cambió; cambió la captura.
+    await tester.tap(find.byType(CampoMontoPad));
+    await _esperarTexto(tester, 'Aceptar');
+    await tester.pumpAndSettle();
+    for (final d in ['1', '5', '0', '0']) {
+      await tester.tap(find.byKey(ValueKey('pad-$d')));
+      await tester.pump();
+    }
+    await tester.tap(find.text('Aceptar'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Guardar'));
     await _esperarTexto(tester, 'Pago de la luz');
+    // La aserción de abajo es sobre un segundo diálogo
+    // APILADO (que sobreviviría al asentamiento), no sobre
+    // la etiqueta del diálogo que se está cerrando: hay que
+    // dejar terminar la animación de salida y el recargo.
+    await tester.pumpAndSettle();
     // No queda un segundo diálogo apilado debajo.
     expect(find.text('Concepto (ej: pago de la luz)'),
         findsNothing);
@@ -477,8 +494,17 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'Concepto (ej: pago de la luz)'),
         'Pago de la luz');
-    await tester.enterText(
-        find.widgetWithText(TextField, 'Monto (CUP)'), '1500');
+    // 1.32 (O2F2, pin E5): el monto va por la hoja del pad
+    // (CampoMontoPad), como en el resto de la casa.
+    await tester.tap(find.byType(CampoMontoPad));
+    await _esperarTexto(tester, 'Aceptar');
+    await tester.pumpAndSettle();
+    for (final d in ['1', '5', '0', '0']) {
+      await tester.tap(find.byKey(ValueKey('pad-$d')));
+      await tester.pump();
+    }
+    await tester.tap(find.text('Aceptar'));
+    await tester.pumpAndSettle();
     final centro = tester.getCenter(find.text('Guardar'));
     final gesto = await tester.createGesture();
     await gesto.down(centro);
