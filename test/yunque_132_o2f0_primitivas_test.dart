@@ -112,6 +112,85 @@ void main() {
       await tester.pump();
       expect(confirmaciones, 0);
     });
+
+    testWidgets('si la hoja aborta tras confirmar y el '
+        'control se rehabilita, el carril vuelve al inicio '
+        '(Corte B H-CB-2)', (tester) async {
+      var confirmaciones = 0;
+      Widget arbol(bool hab) => MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 420,
+                child: DeslizarConfirmar(
+                  texto: 'Desliza para liquidar →',
+                  habilitado: hab,
+                  onConfirmar: () => confirmaciones++,
+                ),
+              ),
+            ),
+          );
+      await tester.pumpWidget(arbol(true));
+      await tester.drag(
+          find.byKey(const ValueKey('deslizar-pulgar')),
+          const Offset(600, 0));
+      await tester.pump();
+      expect(confirmaciones, 1);
+      expect(find.text('Liquidando…'), findsOneWidget);
+      // La hoja aborta (la guarda D2-04 pide revisar la
+      // cifra, o el intento lanzó): se deshabilita mientras
+      // resuelve y luego se REHABILITA sin cerrar la hoja.
+      await tester.pumpWidget(arbol(false));
+      await tester.pump();
+      await tester.pumpWidget(arbol(true));
+      await tester.pump();
+      expect(find.text('Desliza para liquidar →'),
+          findsOneWidget,
+          reason: 'el rótulo vuelve al inicial: el carril '
+              'ya no está confirmado ni clavado al final');
+      expect(find.text('Liquidando…'), findsNothing);
+      // Y un nuevo arrastre confirma de verdad otra vez.
+      await tester.drag(
+          find.byKey(const ValueKey('deslizar-pulgar')),
+          const Offset(600, 0));
+      await tester.pump();
+      expect(confirmaciones, 2);
+    });
+
+    testWidgets('si cambia el texto tras confirmar, el '
+        'carril también se reinicia (Corte B H-CB-2)',
+        (tester) async {
+      var confirmaciones = 0;
+      Widget arbol(String texto) => MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 420,
+                child: DeslizarConfirmar(
+                  texto: texto,
+                  habilitado: true,
+                  onConfirmar: () => confirmaciones++,
+                ),
+              ),
+            ),
+          );
+      await tester.pumpWidget(arbol('Desliza para liquidar →'));
+      await tester.drag(
+          find.byKey(const ValueKey('deslizar-pulgar')),
+          const Offset(600, 0));
+      await tester.pump();
+      expect(confirmaciones, 1);
+      // La hoja cambia de modo (cierre → entrega C1): el
+      // rótulo es otro y la confirmación anterior no vale.
+      await tester.pumpWidget(arbol('Desliza para entregar →'));
+      await tester.pump();
+      expect(find.text('Desliza para entregar →'),
+          findsOneWidget);
+      expect(find.text('Liquidando…'), findsNothing);
+      await tester.drag(
+          find.byKey(const ValueKey('deslizar-pulgar')),
+          const Offset(600, 0));
+      await tester.pump();
+      expect(confirmaciones, 2);
+    });
   });
 
   group('Tacto (motor háptico)', () {

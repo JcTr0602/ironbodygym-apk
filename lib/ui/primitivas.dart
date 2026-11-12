@@ -151,6 +151,26 @@ class _DeslizarConfirmarState extends State<DeslizarConfirmar> {
   double _progreso = 0; // 0..1
   bool _confirmado = false;
 
+  /// 1.32 (Corte B, H-CB-2 — Argón): si la hoja ABORTA tras
+  /// la confirmación (la guarda de reverificación D2-04 de
+  /// Liquidar Arqueo pide revisar la cifra, o el intento
+  /// lanzó) el padre deshabilita y luego REHABILITA el
+  /// control sin cerrar la hoja: el carril debe nacer de
+  /// nuevo. Sin esto quedaba clavado al final con el rótulo
+  /// de «confirmando» y ningún arrastre volvía a confirmar.
+  /// Cambiar el texto (p. ej. la hoja cambia de modo) tras
+  /// confirmar también reinicia: aquella confirmación era
+  /// para OTRO rótulo.
+  @override
+  void didUpdateWidget(DeslizarConfirmar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if ((!oldWidget.habilitado && widget.habilitado) ||
+        oldWidget.texto != widget.texto) {
+      _confirmado = false;
+      _progreso = 0;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     const alto = 56.0;
