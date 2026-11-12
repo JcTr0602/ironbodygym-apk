@@ -21,12 +21,12 @@
 /// - Mis Turnos (entrenador): su turno y el horario en solo
 ///   lectura efectiva (la misma guarda).
 /// - App y Reglas: el índice de destinos del Admin vigente.
-///   El Publicador Unificado de comunicados es Oleada 2:
-///   Anuncios y Avisos quedan como entradas separadas, como
-///   manda el veredicto. Las exportaciones y los montos que
-///   aún viven atados al estado del Panel quedan en la
-///   entrada «Panel clásico» al final (enlace hondo honesto,
-///   no una copia).
+///   Desde la Fase 3 de la Oleada 2, Anuncios y Avisos son
+///   UNA sola entrada «Comunicados» (el Publicador
+///   Unificado G-63+G-64: una pantalla, un selector). Las
+///   exportaciones y los montos que aún viven atados al
+///   estado del Panel quedan en la entrada «Panel clásico»
+///   al final (enlace hondo honesto, no una copia).
 library;
 
 import 'package:flutter/material.dart';
@@ -47,7 +47,6 @@ import 'conciliacion.dart';
 import 'dashboard.dart';
 import 'diferencias_caja.dart';
 import 'diseno.dart';
-import 'editor_avisos_clientes.dart';
 import 'estadisticas_adopcion.dart';
 import 'gastos.dart';
 import 'historial_caja.dart';
@@ -58,9 +57,9 @@ import 'invitados.dart';
 import 'marco.dart';
 import 'primitivas.dart';
 import 'mi_nomina.dart';
+import 'publicador.dart';
 import 'mi_turno.dart';
 import 'nomina.dart';
-import 'panel_anuncios.dart';
 import 'panel_candado.dart';
 import 'panel_comunidad.dart';
 import 'panel_permisos.dart';
@@ -172,12 +171,9 @@ class _PilarNegocioState extends State<PilarNegocio> {
         ]);
       case 'reglas':
         return _listaDestinos([
-          ('Anuncios de la app', 'El anuncio que ven los clientes',
+          ('Comunicados', 'Publicar a Clientes: anuncio de portada y avisos',
               Icons.campaign_rounded,
-              () => _ir(const PanelAnunciosScreen())),
-          ('Avisos a clientes', 'El editor de avisos de Gestión',
-              Icons.mark_chat_read_rounded,
-              () => _ir(const EditorAvisosClientesScreen())),
+              () => _ir(const PublicadorScreen())),
           ('Avisos a entrenadores', 'Mensajes al equipo',
               Icons.forum_rounded,
               () => _ir(const AvisosEntrenadorScreen())),

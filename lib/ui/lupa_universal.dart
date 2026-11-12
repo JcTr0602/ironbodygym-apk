@@ -35,7 +35,6 @@ import 'congelados.dart';
 import 'control_acceso.dart';
 import 'cumpleanos.dart';
 import 'diseno.dart';
-import 'editor_avisos_clientes.dart';
 import 'editor_rutinas_gym.dart';
 import 'ficha.dart';
 import 'gastos.dart';
@@ -55,6 +54,7 @@ import 'panel_bloque2.dart';
 import 'panel_resto_config.dart';
 import 'panel_resto_sistema.dart';
 import 'plantillas_mensaje.dart';
+import 'publicador.dart';
 import 'tarifas_especiales.dart';
 import 'panel_candado.dart';
 import 'panel_comunidad.dart';
@@ -168,7 +168,9 @@ Future<void> abrirFuncionLupa(BuildContext context, String id,
     case 'avisos_entrenadores':
       ir(const AvisosEntrenadorScreen());
     case 'avisos_clientes':
-      ir(const EditorAvisosClientesScreen());
+      // 1.32 (Fase 3): el destino es el Publicador
+      // Unificado con el segmento de Avisos abierto.
+      ir(const PublicadorScreen(segmentoInicial: 1));
     case 'recordatorios':
       ir(const RecordatoriosScreen());
     case 'info_publica':

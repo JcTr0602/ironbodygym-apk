@@ -21,8 +21,8 @@ import 'campana_wa.dart';
 import 'componentes.dart';
 import 'cumpleanos.dart';
 import 'diseno.dart';
-import 'editor_avisos_clientes.dart';
 import 'plantillas_mensaje.dart';
+import 'publicador.dart';
 import 'recordatorios.dart';
 
 /// Un destino del hub. La lista es el índice completo de
@@ -97,7 +97,10 @@ Widget? pantallaDestinoComunicacion(String id) {
     case 'campanas':
       return const CampanaWaScreen();
     case 'avisos_clientes':
-      return const EditorAvisosClientesScreen();
+      // 1.32 (Fase 3): los avisos viven en el Publicador
+      // Unificado; el hub aterriza con su segmento
+      // preseleccionado.
+      return const PublicadorScreen(segmentoInicial: 1);
     case 'avisos_entrenadores':
       return const AvisosEntrenadorScreen();
     case 'plantillas':
