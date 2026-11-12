@@ -2092,7 +2092,7 @@ class SyncEngine {
         wmMinCierre =
             await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
       } catch (_) {}
-      final quedoEnDiario = await DiarioSync.instance.cerrarCorrida(
+      await DiarioSync.instance.cerrarCorrida(
         id,
         estado: estado,
         duracionMs: _diarioCronometro?.elapsedMilliseconds ?? 0,
@@ -2107,24 +2107,35 @@ class SyncEngine {
         errorDetalle:
             _diarioErrorProv ?? (errorFn != null ? '$errorFn' : null),
       );
-      if (quedoEnDiario) {
-        // M5 (Escalón 5): la huella del dispositivo se emite
-        // FUERA del camino del cierre — red con timeout de
-        // 12 s que jamás retiene el candado, jamás desella la
-        // corrida y jamás se ve como op por subir. Los valores
-        // se capturan AHORA en parámetros: los campos prov. los
-        // reutiliza la siguiente corrida.
-        unawaited(_huellaTrasCierre(
-          corridaId: id,
-          tipo: _diarioTipoProv,
-          origen: _diarioOrigenProv,
-          estado: estado,
-          subidos: _diarioSubidosProv,
-          bajados: _diarioBajadosProv,
-          serverSeq: serverSeqCierre,
-          watermarkMin: wmMinCierre,
-        ));
-      }
+      // M5 (Escalón 5): la huella del dispositivo se emite
+      // FUERA del camino del cierre — red con timeout de
+      // 12 s que jamás retiene el candado, jamás desella la
+      // corrida y jamás se ve como op por subir. Los valores
+      // se capturan AHORA en parámetros: los campos prov. los
+      // reutiliza la siguiente corrida.
+      // 1.32 (Corte B, H-CB-1 — Argón): la emisión se
+      // intenta en TODA corrida que existió (esta, con
+      // id != null), ocupe plaza en el diario o no. Antes
+      // solo corría si cerrarCorrida la había guardado, y
+      // los chequeos automáticos vacíos (el ciclo de cada
+      // 2 min) no ocupan plaza: en un teléfono en reposo el
+      // latido de presencia de 30 min jamás disparaba, un
+      // 'fallida' ya recuperado no se refrescaba en el
+      // servidor y el reporte pendiente (M5-T) no se
+      // reintentaba hasta una corrida con movimiento.
+      // QUIÉN emite lo decide el freno de
+      // HuellaSync.registrarCierre: aquí solo se le da la
+      // oportunidad en cada cierre.
+      unawaited(_huellaTrasCierre(
+        corridaId: id,
+        tipo: _diarioTipoProv,
+        origen: _diarioOrigenProv,
+        estado: estado,
+        subidos: _diarioSubidosProv,
+        bajados: _diarioBajadosProv,
+        serverSeq: serverSeqCierre,
+        watermarkMin: wmMinCierre,
+      ));
     } catch (e) {
       AppLog.error('sync', 'diario_cerrar_fallo', d: '$e');
     }
@@ -2167,6 +2178,27 @@ class SyncEngine {
     } catch (e) {
       AppLog.error('sync', 'huella_tras_cierre_fallo', d: '$e');
     }
+  }
+
+  /// Costura de test (Corte B 1.32, H-CB-1): abre una
+  /// corrida del diario como la abre `_conLock`, le fija
+  /// el veredicto y la cierra con el cierre real, sin
+  /// correr un ciclo entero (sin harness de sesión, como
+  /// el resto del banco). Permite verificar qué dispara
+  /// el cierre — en particular la emisión de la huella
+  /// M5 — también en corridas que NO ocupan plaza.
+  @visibleForTesting
+  Future<void> cicloDiarioParaTest({
+    required String tipo,
+    String? origen,
+    required String estado,
+    int subidos = 0,
+    int bajados = 0,
+  }) async {
+    await _diarioAbrirEnLock(tipo: tipo, origen: origen);
+    if (_diarioCorridaId == null) return;
+    _diarioVeredicto(estado, subidos: subidos, bajados: bajados);
+    await _diarioCerrarEnLock();
   }
 
   /// 1.32 (O2F2S, adjudicación F-8): ¿alguna tabla del rol
