@@ -34,6 +34,43 @@ String emailToUsername(String email) {
   return base[0].toUpperCase() + base.substring(1);
 }
 
+/// 1.32 (O2F2S, AP-5 verificado contra gotrue 2.27.2):
+/// ¿la sesión PERSISTIDA (SharedPreferences, compartida
+/// por todos los isolates) ya caducó o está a ≤120 s de
+/// caducar? Se lee ANTES de inicializar Supabase en un
+/// isolate de fondo, a propósito:
+/// - gotrue refresca con el token EN MEMORIA y jamás relee
+///   el almacenamiento: si este isolate refrescara y
+///   rotara el token, el isolate principal presentaría
+///   luego su token viejo y, fuera del intervalo de
+///   reutilización del servidor, la familia entera de
+///   tokens se revoca (mueren todas las sesiones).
+/// - y con autoRefreshToken desactivado, inicializar sobre
+///   una sesión caducada la BORRA del almacenamiento
+///   compartido — peor todavía.
+/// Sin sesión persistida devuelve false (no hay nada que
+/// proteger: el flujo normal dirá «sin sesión»).
+/// Fuente única de los isolates de fondo (WorkManager en
+/// main.dart y el Foreground Service de fotos): la regla
+/// no puede divergir entre ellos.
+Future<bool> sesionPersistidaCaducadaParaFondo() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final ref = Uri.parse(AppConfig.supabaseUrl).host.split('.').first;
+    final jsonStr = prefs.getString('sb-$ref-auth-token');
+    if (jsonStr == null || jsonStr.isEmpty) return false;
+    final mapa = jsonDecode(jsonStr);
+    if (mapa is! Map) return false;
+    final exp = mapa['expires_at'];
+    if (exp is! num) return false;
+    final ahoraEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return exp.toInt() <= ahoraEpoch + 120;
+  } catch (_) {
+    return false;
+  }
+}
+
 class AuthService {
   SupabaseClient get _c => Supabase.instance.client;
 

@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/auth.dart';
 import 'package:ironbody_gym/config.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
@@ -446,6 +447,43 @@ void main() {
       expect(await estadoDe('incidencias_comentarios', 'com-1'),
           'pending',
           reason: 'AP-3: op archivada tampoco es evidencia');
+    });
+  });
+
+  group('AP-5 · pre-guardia de isolates de fondo', () {
+    test('sesión persistida caducada o al límite ⇒ true; '
+        'vigente o ausente ⇒ false', () async {
+      final ref =
+          Uri.parse(AppConfig.supabaseUrl).host.split('.').first;
+      final clave = 'sb-$ref-auth-token';
+      final ahora = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+      SharedPreferences.setMockInitialValues({});
+      expect(await sesionPersistidaCaducadaParaFondo(), isFalse,
+          reason: 'sin sesión persistida no hay nada que '
+              'proteger');
+
+      SharedPreferences.setMockInitialValues({
+        clave: jsonEncode({'expires_at': ahora - 10}),
+      });
+      expect(await sesionPersistidaCaducadaParaFondo(), isTrue,
+          reason: 'caducada: el isolate de fondo no debe '
+              'inicializar ni refrescar (rotaría el token '
+              'compartido)');
+
+      SharedPreferences.setMockInitialValues({
+        clave: jsonEncode({'expires_at': ahora + 60}),
+      });
+      expect(await sesionPersistidaCaducadaParaFondo(), isTrue,
+          reason: 'a ≤120 s del vencimiento también se '
+              'abstiene');
+
+      SharedPreferences.setMockInitialValues({
+        clave: jsonEncode({'expires_at': ahora + 3600}),
+      });
+      expect(await sesionPersistidaCaducadaParaFondo(), isFalse,
+          reason: 'vigente: el fondo inicializa sin '
+              'auto-refresco y adopta la sesión');
     });
   });
 

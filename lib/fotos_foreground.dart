@@ -254,9 +254,30 @@ class _SyncTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     WidgetsFlutterBinding.ensureInitialized();
     try {
+      // 1.32 (O2F2S, AP-5 — residual del Foreground
+      // Service): MISMA forma que el isolate de
+      // WorkManager (main.dart). Este isolate inicializaba
+      // Supabase con las opciones por defecto
+      // (autoRefreshToken: true): al recuperar la sesión
+      // persistida podía refrescar y ROTAR el refresh
+      // token compartido, dejando al isolate principal con
+      // el token viejo en memoria — fuera del intervalo de
+      // reutilización, el servidor revoca la familia
+      // entera y mueren todas las sesiones (AP-5,
+      // verificado contra gotrue 2.27.2).
+      // - Con la sesión persistida caducada (o a ≤120 s)
+      //   NO se inicializa ni se refresca: los ticks verán
+      //   «sin sesión» y el cortacircuitos C-6 detiene el
+      //   servicio; el refresco queda para el primer
+      //   plano, dueño del token.
+      // - Con sesión vigente, se inicializa SIN
+      //   auto-refresco y se adopta la sesión tal cual.
+      if (await sesionPersistidaCaducadaParaFondo()) return;
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.anonKey,
+        authOptions:
+            const FlutterAuthClientOptions(autoRefreshToken: false),
       );
     } catch (_) {
       // Si ya estaba inicializado, continuar.
