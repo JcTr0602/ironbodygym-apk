@@ -465,7 +465,12 @@ class _DialogoElegirClientePlantillaState
                     ListTile(
                       dense: true,
                       title: Text('${c['nombre'] ?? ''}'),
-                      subtitle: Text('${c['telefono'] ?? ''}'),
+                      // 1.32 (Yunque, Y-2): el subtítulo enseña
+                      // el teléfono EFECTIVO (al que saldrá el
+                      // mensaje), no el campo crudo — en los
+                      // migrados el crudo trae el carnet
+                      // (regla FB-01) y el selector mentía.
+                      subtitle: Text(telefonoEfectivoLocal(c)),
                       onTap: () => Navigator.pop(context, c),
                     ),
                 ],
