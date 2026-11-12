@@ -244,13 +244,30 @@ void main() {
     });
   });
 
-  group('Pieza 4d: clasificador del refresco', () {
-    test('AuthApiException = rechazo del servidor', () {
+  group('Pieza 4d ADJUDICADA (F-5): clasificador del '
+      'refresco', () {
+    test('AuthApiException 400/401/403 = rechazo del '
+        'servidor', () {
+      for (final sc in ['400', '401', '403']) {
+        expect(
+            AuthService.esRechazoDeAuth(AuthApiException(
+                'invalid refresh token', statusCode: sc)),
+            isTrue,
+            reason: 'statusCode $sc');
+      }
+    });
+    test('AuthApiException 5xx NO expulsa (el servidor de '
+        'auth falló, no rechazó)', () {
+      expect(
+          AuthService.esRechazoDeAuth(const AuthApiException(
+              'internal', statusCode: '500')),
+          isFalse);
+    });
+    test('AuthApiException sin statusCode NO expulsa', () {
       expect(
           AuthService.esRechazoDeAuth(
-              const AuthApiException('invalid refresh token',
-                  statusCode: '401')),
-          isTrue);
+              const AuthApiException('sin código')),
+          isFalse);
     });
     test('AuthRetryableFetchException = red, no rechazo',
         () {

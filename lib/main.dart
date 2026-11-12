@@ -2,9 +2,11 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -85,14 +87,60 @@ Future<void> _trasSyncExitosa() async {
 /// que enterraba los fallos. Y el push ESPERA las fotos de
 /// incidencias: en este isolate, el disparo sin esperar moría al
 /// retornar el callback.
+/// 1.32 (O2F2S, AP-5 verificado contra gotrue 2.27.2):
+/// ¿la sesión PERSISTIDA (SharedPreferences, compartida
+/// por todos los isolates) ya caducó o está a ≤120 s de
+/// caducar? Se lee ANTES de inicializar Supabase en el
+/// isolate de fondo, a propósito:
+/// - gotrue refresca con el token EN MEMORIA y jamás relee
+///   el almacenamiento: si este isolate refrescara y
+///   rotara el token, el isolate principal presentaría
+///   luego su token viejo y, fuera del intervalo de
+///   reutilización del servidor, la familia entera de
+///   tokens se revoca (mueren todas las sesiones).
+/// - y con autoRefreshToken desactivado, inicializar sobre
+///   una sesión caducada la BORRA del almacenamiento
+///   compartido — peor todavía.
+/// Sin sesión persistida devuelve false (no hay nada que
+/// proteger: el flujo normal dirá «sin sesión»).
+Future<bool> _sesionPersistidaCaducadaParaFondo() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final ref =
+        Uri.parse(AppConfig.supabaseUrl).host.split('.').first;
+    final jsonStr = prefs.getString('sb-$ref-auth-token');
+    if (jsonStr == null || jsonStr.isEmpty) return false;
+    final mapa = jsonDecode(jsonStr);
+    if (mapa is! Map) return false;
+    final exp = mapa['expires_at'];
+    if (exp is! num) return false;
+    final ahoraEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return exp.toInt() <= ahoraEpoch + 120;
+  } catch (_) {
+    return false;
+  }
+}
+
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     try {
       WidgetsFlutterBinding.ensureInitialized();
+      // AP-5 (forma condicionada de F-5): con la sesión
+      // persistida caducada, este isolate NO inicializa ni
+      // refresca — devuelve false (WorkManager reintenta)
+      // y el refresco queda para el primer plano, dueño del
+      // token. Ver _sesionPersistidaCaducadaParaFondo.
+      if (await _sesionPersistidaCaducadaParaFondo()) return false;
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
         publishableKey: AppConfig.anonKey,
+        // AP-5: sin auto-refresco en el isolate de fondo
+        // (con la pre-guardia de arriba, la sesión que aquí
+        // se recupera está vigente y se adopta tal cual).
+        authOptions:
+            const FlutterAuthClientOptions(autoRefreshToken: false),
       );
       SyncEngine.instance.onSyncExitoso = _trasSyncExitosa;
       final auth = AuthService();
@@ -347,6 +395,11 @@ class _IronBodyAppState extends State<IronBodyApp>
         unawaited(programarOneOffSyncSiPendientes());
       }
     } else if (state == AppLifecycleState.resumed) {
+      // 1.32 (O2F2S, AP-5): antes de rearmar nada, adoptar
+      // la sesión persistida si un isolate de fondo la
+      // refrescó y rotó el token (ver
+      // AuthService.releerSesionPersistida).
+      unawaited(AuthService().releerSesionPersistida());
       _iniciarTimers();
       // v1.5.0 (Bloque G): al volver a primer plano se verifican
       // las conversiones pendientes aunque el ciclo de sync aún
@@ -571,7 +624,8 @@ class _RaizSesionState extends State<RaizSesion> {
     // 1.32 (O2F2S, Pieza 4d): verificación de la sesión al
     // arranque, SIN await: la raíz pinta ya (offline-first) y
     // si la sesión guardada está muerta, el desenlace llega
-    // por el stream (signOut) + este aviso.
+    // por el stream (retirada local de la sesión) + este
+    // aviso.
     unawaited(_verificarSesionArranque());
   }
 

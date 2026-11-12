@@ -6,7 +6,9 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'acceso_app_cache.dart';
@@ -80,8 +82,9 @@ class AuthService {
   /// - el servidor RECHAZA el refresco (el caso de la
   ///   sesión resucitada por Auto Backup con el refresh ya
   ///   rotado en la instalación vieja) → la sesión está
-  ///   MUERTA: signOut + motivo persistido, y devuelve
-  ///   false para que la raíz mande a Login con el motivo.
+  ///   MUERTA: retirada local (SIN purga) + motivo
+  ///   persistido, y devuelve false para que la raíz mande
+  ///   a Login con el motivo.
   /// - la red no responde → GRACIA OFFLINE: devuelve true
   ///   y la sesión se conserva (el motor juzgará en su
   ///   corrida, como siempre).
@@ -122,7 +125,7 @@ class AuthService {
   }
 
   /// Sella la sesión muerta: motivo persistido (Login lo
-  /// lee una vez) y cierre local de la sesión para que
+  /// lee una vez) y retirada local de la sesión para que
   /// `loggedIn` deje de mentir «hay sesión».
   Future<void> _sellarSesionMuerta() async {
     try {
@@ -130,8 +133,66 @@ class AuthService {
           .setMeta(metaMotivoSesionMuerta, textoSesionMuerta);
     } catch (_) {}
     try {
-      await signOut();
+      await retirarSesionLocal();
     } catch (_) {}
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-5 + ampliación de la
+  /// síntesis total): retira SOLO la sesión local — ámbito
+  /// local de gotrue: quita la sesión de memoria y del
+  /// almacenamiento, sin pasar por [signOut]. La ruta de
+  /// signOut() de esta clase purga los datos sensibles
+  /// (purgaAlCerrarSesion) y destruiría las ops aún sin
+  /// subir de un entrenador cuya sesión murió sola; con la
+  /// retirada local, la BD queda intacta y al entrar de
+  /// nuevo esas ops se suben. Es la salida de TODOS los
+  /// caminos de vencimiento (arranque/reloj, motor vía
+  /// onSessionExpired, stream de auth). El cierre
+  /// DELIBERADO del usuario sigue yendo por [signOut] con
+  /// su purga, como siempre.
+  Future<void> retirarSesionLocal() async {
+    AccesoAppCache.instance.limpiar();
+    await _c.auth.signOut(scope: SignOutScope.local);
+  }
+
+  /// 1.32 (O2F2S, AP-5 verificado contra gotrue 2.27.2):
+  /// al volver a primer plano, relee la sesión PERSISTIDA
+  /// y la adopta si su refresh token difiere del que este
+  /// isolate guarda en memoria. Motivo: gotrue jamás relee
+  /// el almacenamiento antes de refrescar (refreshSession
+  /// usa el token EN MEMORIA); si un isolate de fondo
+  /// refrescó y rotó el token, presentar luego el token
+  /// viejo fuera del intervalo de reutilización del
+  /// servidor revoca la familia entera y mueren todas las
+  /// sesiones. Adoptar la persistida —la más fresca— antes
+  /// de cualquier refresco propio corta esa cadena.
+  /// Nunca lanza; ante cualquier duda conserva la sesión
+  /// en memoria. Devuelve true si adoptó la persistida.
+  Future<bool> releerSesionPersistida() async {
+    try {
+      final actual = session;
+      if (actual == null) return false;
+      final prefs = await SharedPreferences.getInstance();
+      // La caché de ESTE isolate puede estar vieja: el
+      // valor bueno es el del almacén de la plataforma.
+      await prefs.reload();
+      final ref =
+          Uri.parse(AppConfig.supabaseUrl).host.split('.').first;
+      final jsonStr = prefs.getString('sb-$ref-auth-token');
+      if (jsonStr == null || jsonStr.isEmpty) return false;
+      final mapa = jsonDecode(jsonStr);
+      if (mapa is! Map) return false;
+      final rtPersistido = mapa['refresh_token'];
+      if (rtPersistido is! String ||
+          rtPersistido.isEmpty ||
+          rtPersistido == actual.refreshToken) {
+        return false;
+      }
+      final res = await _c.auth.recoverSession(jsonStr);
+      return res.session != null;
+    } catch (_) {
+      return false;
+    }
   }
 
   String get displayName {
