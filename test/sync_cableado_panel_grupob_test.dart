@@ -42,6 +42,7 @@ const _hostReal = 'mjttljkfzntwnzgwjnkk.supabase.co';
 /// aplicada) o 'push' (1ª llamada [] para que corra el POST, las
 /// siguientes aplicada para el barrido del paso 3).
 String _modoRpc = 'siempreAplicada';
+bool _servidorConDatos = false;
 int _rpcLlamadas = 0;
 int _postsSyncOps = 0;
 
@@ -112,12 +113,47 @@ Future<HttpServer> _servidorFake() async {
         res.write(jsonEncode([
           {
             'id': 1,
-            'server_seq': 0,
+            'server_seq': _servidorConDatos ? 10 : 0,
             'ajustes': <String, dynamic>{},
             'usuarios': [],
             'actividad': [],
           }
         ]));
+      } else if (req.method == 'GET' &&
+          _servidorConDatos &&
+          !path.contains('borrados') &&
+          !path.contains('sync_incidencias')) {
+        // Servidor con datos (F-2): UNA fila por tabla. Sin
+        // filas en las troncales, su watermark queda en 0
+        // por la guarda anti-RLS (cursor 0 + 0 filas no
+        // salta) y el «completo» es inalcanzable — es el
+        // comportamiento adjudicado, no un servidor
+        // sellable. El jsonb viaja como OBJETO (la rama
+        // genérica de _prepararFilaMirror exige Map) y la
+        // fila trae todas las llaves candidatas de PK.
+        // Respeta el cursor gt como PostgREST: pasado el
+        // seq de la fila, la página va vacía (si no, el
+        // motor aborta la tabla como pasada estancada).
+        final gt = int.tryParse(RegExp(r'gt\.(\d+)')
+                .firstMatch(req.uri.query)
+                ?.group(1) ??
+            '0') ??
+            0;
+        res.headers.contentType = ContentType.json;
+        res.write(gt < 5
+            ? jsonEncode([
+                {
+                  'id': 1,
+                  'equipo_id': 1,
+                  'op_uuid': 'op-falsa',
+                  'bono_uuid': 'bono-falso',
+                  'aviso_id': 1,
+                  'telegram_id': 1,
+                  'data': {'id': 1, 'nombre': 'Cliente Uno'},
+                  'sync_seq': 5,
+                }
+              ])
+            : '[]');
       } else if (req.method == 'GET') {
         res.headers.contentType = ContentType.json;
         res.write('[]');
@@ -328,7 +364,14 @@ void main() {
 
     test('S1.4 ciclo completo marca sync, pull e incidencias', () async {
       await _bdVacia();
+      // 1.32 (O2F2S, adjudicación F-2): el sello completo
+      // exige server_seq confirmado > 0 y clientes legibles
+      // > 0 — un servidor virgen (seq 0, sin clientes) queda
+      // «sin confirmar», NUNCA sella. Este test modela el
+      // «primer pull correcto» de la propia F-2.
+      _servidorConDatos = true;
       final res = await SyncEngine.instance.run();
+      _servidorConDatos = false;
       expect(res.corrio, isTrue);
       expect(await LocalDb.instance.getMeta('last_sync_ok'),
           matches(RegExp(r'[-+]\d{2}:\d{2}$')),
