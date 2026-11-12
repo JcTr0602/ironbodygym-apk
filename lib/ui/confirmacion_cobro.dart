@@ -37,6 +37,7 @@ import 'package:share_plus/share_plus.dart';
 import '../localdb.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'tarjeta_imagen.dart';
 
 /// Acción extra opcional de la pantalla de confirmación (p. ej.
 /// «Enviar por WhatsApp» con el comprobante de la venta). Se
@@ -336,6 +337,39 @@ class _ConfirmacionOperacionScreenState
                               ],
                             ),
                           ),
+                        // 1.32 (Fase 3): cuando el ticket es
+                        // un comprobante compartible (hay
+                        // pie de recibo), la FOTO firma al
+                        // pie con la línea oficial y el
+                        // 58191577 (plano §6 y pieza
+                        // premium 7): el número viaja EN
+                        // la imagen, no solo en el texto
+                        // que la acompaña. Sin comprobante
+                        // (confirmaciones internas) el
+                        // ticket no se firma.
+                        if (widget.comprobantePie != null) ...[
+                          const SizedBox(height: 4),
+                          SizedBox(
+                            height: 1.2,
+                            width: double.infinity,
+                            child: CustomPaint(
+                              painter: _PunteadaPainter(
+                                  AppColores.borde(context)),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                                16, 8, 16, 12),
+                            child: PieTarjetaImagen(
+                              colorPrincipal:
+                                  AppColores.texto(context),
+                              colorSuave:
+                                  AppColores.textoSecundario(
+                                      context),
+                              conWordmark: true,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     ),

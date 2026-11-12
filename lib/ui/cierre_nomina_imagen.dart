@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../negocio.dart' show fmtMonto;
 import 'diseno.dart' show AppRadio;
+import 'tarjeta_imagen.dart';
 
 /// Una fila de la foto: el desglose de un entrenador.
 class FilaCierreNomina {
@@ -165,6 +166,16 @@ class ImagenCierreNomina extends StatelessWidget {
                   generadoEtiqueta,
                   style: const TextStyle(
                       color: Color(0xFF7A7A80), fontSize: 11),
+                ),
+                // 1.32 (Fase 3): el pie firmado único de
+                // las tarjetas en imagen (plano §6): la
+                // línea oficial y el 58191577 visibles
+                // en la propia foto. Sin wordmark: la
+                // cabecera ya lo lleva.
+                const Divider(color: Color(0xFF333338), height: 26),
+                const PieTarjetaImagen(
+                  colorPrincipal: Colors.white,
+                  colorSuave: _textoSuave,
                 ),
               ],
             ),
