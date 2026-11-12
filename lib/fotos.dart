@@ -14,6 +14,18 @@
 /// 30 s relanzado en cada reconstrucción: con 3G de 1–5 KB/s la
 /// foto moría a mitad de cuerpo y el avatar quedaba en iniciales
 /// toda la sesión, inundando además el enlace malo.
+///
+/// 1.33 (campo 2026-11-12, vaivén de fotos): la política de la
+/// cola se rehace a la altura del enlace real — el timeout por
+/// descarga pasa a ser el de la ficha (30 s: una foto de 36 KB
+/// a 2,5 KB/s necesita ~15 s y con 10 s NUNCA aterrizaba), el
+/// backoff por fallo baja de 3 min a 45 s y una ruta recién
+/// aterrizada no se re-descarga en una ventana de 3 min. Y dos
+/// defensas de la caché: la invalidación entre variantes de la
+/// MISMA foto (display→original) ya no borra la copia buena
+/// hasta que la nueva variante esté en disco, y al arrancar se
+/// migran los nombres de archivo anteriores al 2026-10-15
+/// (siempre .jpg) al nombre canónico con su extensión real.
 library;
 
 import 'dart:async';
@@ -69,14 +81,22 @@ Future<File?> resolverFotoSuplemento(
 /// directas desde la fila. Política:
 /// - concurrencia baja ([concurrencia], 3 por defecto): la
 ///   lista no inunda el enlace;
-/// - timeout corto por descarga ([timeoutDescarga], 10 s):
-///   en red «en negro» el intento muere rápido en vez de
-///   quemar 30 s a mitad de cuerpo;
+/// - timeout por descarga ([timeoutDescarga]): 10 s en la
+///   1.31; 1.33 lo sube a 30 s, el presupuesto de la ficha —
+///   a 2,5 KB/s (campo real) una foto de 36 KB tarda ~15 s
+///   y con 10 s la cola la mataba SIEMPRE, así que la lista
+///   jamás la mostraba aunque la ficha sí pudiera;
 /// - deduplicación en vuelo: la misma ruta no se descarga
 ///   dos veces a la vez ni se encola dos veces;
-/// - caché negativa con backoff ([backoffFallo], 3 min): una
-///   foto que falló no se reintenta hasta que el backoff
-///   pasa — el scroll dejaba de relanzar intentos condenados;
+/// - deduplicación por aterrizaje ([ventanaAterrizaje],
+///   3 min): una ruta que acaba de aterrizar no se vuelve
+///   a descargar si una fila la re-pide enseguida (la sirve
+///   la caché); pasada la ventana, la ruta se puede re-pedir
+///   con normalidad (p. ej. si el LRU expulsó el archivo);
+/// - caché negativa con backoff corto ([backoffFallo]):
+///   3 min en la 1.31; 1.33 lo baja a 45 s — una fila que
+///   sigue visible y re-pide no queda castigada minutos
+///   por un fallo de cuando el enlace estaba en negro;
 /// - aviso de aterrizaje ([aterrizajes]): cuando una foto
 ///   llega, las filas visibles repintan por escucha.
 /// La descarga real la inyecta FotoCache; la política se
@@ -86,8 +106,9 @@ class ColaPrecargaFotos {
     required Future<File?> Function(String ruta, Duration timeout)
         descargador,
     this.concurrencia = 3,
-    this.timeoutDescarga = const Duration(seconds: 10),
-    this.backoffFallo = const Duration(minutes: 3),
+    this.timeoutDescarga = const Duration(seconds: 30),
+    this.backoffFallo = const Duration(seconds: 45),
+    this.ventanaAterrizaje = const Duration(minutes: 3),
     DateTime Function()? ahora,
     bool Function(String ruta)? esFalloSinCastigo,
   })  : _descargador = descargador,
@@ -100,11 +121,13 @@ class ColaPrecargaFotos {
   final int concurrencia;
   final Duration timeoutDescarga;
   final Duration backoffFallo;
+  final Duration ventanaAterrizaje;
   final DateTime Function() _ahora;
 
   final _cola = <String>[];
   final _enCurso = <String, Future<File?>>{};
   final _falloEn = <String, DateTime>{};
+  final _aterrizadaEn = <String, DateTime>{};
   final _avisos = StreamController<String>.broadcast();
 
   /// Rutas cuya foto acaba de aterrizar en la caché.
@@ -129,9 +152,32 @@ class ColaPrecargaFotos {
   /// explícita): el próximo encolado puede reintentar ya.
   void olvidarFallo(String ruta) => _falloEn.remove(ruta);
 
+  /// ¿La ruta aterrizó hace menos que la ventana de
+  /// aterrizaje? Entonces re-pedirla no descarga nada: la
+  /// foto está en la caché y la fila debe resolver de disco.
+  bool recienAterrizada(String ruta) {
+    final a = _aterrizadaEn[ruta];
+    return a != null && _ahora().difference(a) < ventanaAterrizaje;
+  }
+
+  /// Registra que la ruta ya está en la caché (la bajó la
+  /// propia cola o la ficha con obtener): limpia su fallo
+  /// y abre la ventana de aterrizaje.
+  void registrarAterrizaje(String ruta) {
+    _falloEn.remove(ruta);
+    _aterrizadaEn[ruta] = _ahora();
+  }
+
+  /// Olvida el aterrizaje de una ruta (invalidación
+  /// explícita o expulsión del LRU): la próxima vez que una
+  /// fila la pida, la cola puede volver a descargarla.
+  void olvidarAterrizaje(String ruta) => _aterrizadaEn.remove(ruta);
+
   void encolar(Iterable<String> rutas) {
     for (final r in rutas) {
-      if (r.isEmpty || pendiente(r) || enBackoff(r)) continue;
+      if (r.isEmpty || pendiente(r) || enBackoff(r) || recienAterrizada(r)) {
+        continue;
+      }
       _cola.add(r);
     }
     _bombear();
@@ -157,7 +203,7 @@ class ColaPrecargaFotos {
       f = null;
     }
     if (f != null) {
-      _falloEn.remove(ruta);
+      registrarAterrizaje(ruta);
       if (!_avisos.isClosed) _avisos.add(ruta);
     } else if (!(_esFalloSinCastigo?.call(ruta) ?? false)) {
       _falloEn[ruta] = _ahora();
@@ -192,7 +238,7 @@ class FotoCache {
   /// 1.31: la cola de precarga de las listas (ver su doc). Su
   /// descargador mira primero la caché (la ruta pudo aterrizar
   /// por otra vía entre el encolado y el turno) y luego baja
-  /// con el timeout corto de la cola.
+  /// con el timeout de la cola (30 s desde la 1.33).
   late final ColaPrecargaFotos _colaPrecarga = ColaPrecargaFotos(
     descargador: (String ruta, Duration t) async {
       final File? c = await enCache(ruta);
@@ -303,7 +349,10 @@ class FotoCache {
     final f = await _descargaCompartida(storagePath,
         timeout: const Duration(seconds: 30));
     if (f != null) {
-      _colaPrecarga.olvidarFallo(storagePath);
+      // 1.33: la ficha deja la ruta marcada como aterrizada
+      // en la cola (limpia el fallo y abre la ventana de
+      // aterrizaje: las listas no la re-descargan).
+      _colaPrecarga.registrarAterrizaje(storagePath);
     } else if (!_fallo401.contains(storagePath)) {
       // IMP-18: un 401 no castiga la ruta.
       _colaPrecarga.registrarFallo(storagePath);
@@ -391,6 +440,9 @@ class FotoCache {
     // 1.31: una foto invalidada (nueva en la misma ruta) no
     // hereda el backoff de la anterior.
     _colaPrecarga.olvidarFallo(storagePath);
+    // 1.33: tampoco hereda la ventana de aterrizaje: si la
+    // ruta se invalida, la cola debe poder re-descargarla.
+    _colaPrecarga.olvidarAterrizaje(storagePath);
     try {
       final d = await _dir();
       final f = _archivoCache(d, storagePath);
@@ -467,7 +519,12 @@ class FotoCache {
           }
         } catch (_) {}
         final clave = clavePorRuta[item.file.path];
-        if (clave != null) _memoria.remove(clave);
+        if (clave != null) {
+          _memoria.remove(clave);
+          // 1.33: el archivo expulsado ya no está en disco;
+          // la cola olvida su aterrizaje para poder re-bajarlo.
+          _colaPrecarga.olvidarAterrizaje(clave);
+        }
       }
     } catch (_) {}
     finally {
