@@ -7487,6 +7487,15 @@ class SyncEngine {
             if (localesF7 > 0) {
               forzar = false;
               tablaConSinVerificar = true;
+              // La persistencia de la marca (bloque YB-SYNC-02
+              // de arriba) ya corrió en ESTA pasada: la rama
+              // F-7 nace en el bloque del salto, DESPUÉS de
+              // ella, así que escribe la meta aquí mismo — si
+              // no, la bandera solo viviría en el diario y la
+              // Salud jamás vería el atasco.
+              await _db.setMeta('wm_sinverificar_$tabla',
+                  'pasada completa vacía con $localesF7 '
+                  'filas locales (F-7)');
               AppLog.aviso('sync', 'pull_wm_salto_bloqueado_f7',
                   d: '$tabla locales=$localesF7 servidor=0');
             }
