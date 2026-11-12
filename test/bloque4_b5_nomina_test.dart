@@ -63,8 +63,14 @@ void main() {
     test('la cara del dueño usa la regla compartida y el error '
         'semántico para debe/adelantos/anulado', () {
       expect(nomina, contains('colorCifraNomina(total)'));
-      expect(nomina, contains('colorCifraNomina(bono)'));
-      expect(nomina, contains('colorCifraNomina(comision.total)'));
+      // 1.32 (pin E5): la tarjeta del dueño pinta la FOTO
+      // congelada de la liquidación — las cifras se llaman
+      // bonoF/comisionF (F de foto), no bono/comision.total.
+      // La regla que este pin protege (toda cifra con la
+      // regla compartida, error semántico en descuentos)
+      // sigue viva literal por literal.
+      expect(nomina, contains('colorCifraNomina(bonoF)'));
+      expect(nomina, contains('colorCifraNomina(comisionF)'));
       expect(nomina, contains('AppColores.error'));
     });
 
