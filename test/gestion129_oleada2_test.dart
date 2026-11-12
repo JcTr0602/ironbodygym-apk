@@ -751,8 +751,14 @@ void main() {
         ),
       ));
       await tester.pump();
-      await tester.enterText(find.byType(TextField), '100');
-      await tester.pump();
+      // 1.32 (O2F2, pin E5): la hoja ya no tiene TextField —
+      // el importe se compone con el PadNumerico EMPOTRADO
+      // (teclas pad-<t>); la garantía D-12 (el botón de
+      // confirmar cobro mide ≥48) no cambió.
+      for (final d in ['1', '0', '0']) {
+        await tester.tap(find.byKey(ValueKey('pad-$d')));
+        await tester.pump();
+      }
       final boton = find.byType(BotonPrimario);
       expect(boton, findsOneWidget);
       expect(tester.getSize(boton).height, greaterThanOrEqualTo(48));
