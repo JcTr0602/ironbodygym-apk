@@ -4206,29 +4206,49 @@ class LocalDb {
       String tabla, int id, Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
     final nuevoJson = jsonEncode(data);
+    // 1.32 (O2F2S, F-21 ampliación de la síntesis total,
+    // MWAPI B1#8): guarda anti-fantasmas de la primitiva.
+    // (a) Una escritura OPTIMISTA (syncSeq 0) sobre una
+    // fila ya confirmada NO la deja en sync_seq 0: quedaba
+    // invisible para la purga, para borrarEspejosConfirmados
+    // y para la re-descarga (fantasma: cambio local que el
+    // servidor ya superó y nadie repone). El seq efectivo
+    // nunca retrocede respecto al guardado.
+    // (b) El camino «sin cambio» (JSON idéntico) REPONE el
+    // sync_seq entrante si es mayor que el guardado; sin
+    // esto, una fila cuyo JSON ya coincidía conservaba un
+    // seq viejo/0 pese a estar confirmada en el servidor.
+    final previas = await d.query(tabla,
+        columns: ['data', 'sync_seq'],
+        where: 'id=?',
+        whereArgs: [id],
+        limit: 1);
+    final seqGuardado = previas.isEmpty
+        ? 0
+        : ((previas.first['sync_seq'] as num?)?.toInt() ?? 0);
+    final seqEfectivo = syncSeq > seqGuardado ? syncSeq : seqGuardado;
+    if (previas.isNotEmpty && previas.first['data'] == nuevoJson) {
+      if (syncSeq > seqGuardado) {
+        await d.update(tabla, {'sync_seq': syncSeq},
+            where: 'id=?', whereArgs: [id]);
+      }
+      return false;
+    }
     // v1.0.9.1: si cambia foto_storage, invalidar caché para forzar re-descarga.
     // v1.3.3: también para 'suplementos' (antes solo 'clientes').
-    if (tabla == 'clientes' || tabla == 'suplementos') {
-      final rows = await d.query(tabla,
-          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-      if (rows.isNotEmpty) {
-        if (rows.first['data'] == nuevoJson) return false;
-        try {
-          final old = jsonDecode(rows.first['data'] as String)
-              as Map<String, dynamic>;
-          final oldFoto = old['foto_storage'] as String?;
-          final newFoto = data['foto_storage'] as String?;
-          if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
-            // Importación diferida para evitar ciclo
-            // ignore: avoid_dynamic_calls
-            await FotoCache.instance.invalidar(oldFoto);
-          }
-        } catch (_) {}
-      }
-    } else {
-      final rows = await d.query(tabla,
-          columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-      if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
+    if ((tabla == 'clientes' || tabla == 'suplementos') &&
+        previas.isNotEmpty) {
+      try {
+        final old = jsonDecode(previas.first['data'] as String)
+            as Map<String, dynamic>;
+        final oldFoto = old['foto_storage'] as String?;
+        final newFoto = data['foto_storage'] as String?;
+        if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
+          // Importación diferida para evitar ciclo
+          // ignore: avoid_dynamic_calls
+          await FotoCache.instance.invalidar(oldFoto);
+        }
+      } catch (_) {}
     }
     if (tabla == 'suplementos') {
       // v1.3.1: preservar ultimo_precio (columna SQL, no JSON).
@@ -4236,12 +4256,12 @@ class LocalDb {
       await d.rawInsert(
           'INSERT INTO suplementos (id, data, sync_seq, moneda) VALUES (?, ?, ?, ?)'
           ' ON CONFLICT(id) DO UPDATE SET data=excluded.data, sync_seq=excluded.sync_seq, moneda=excluded.moneda',
-          [id, nuevoJson, syncSeq, monedaDe(data)]);
+          [id, nuevoJson, seqEfectivo, monedaDe(data)]);
     } else {
       final fila = <String, Object?>{
         'id': id,
         'data': nuevoJson,
-        'sync_seq': syncSeq,
+        'sync_seq': seqEfectivo,
       };
       // v1.3.4 (ítem 2): poblar las columnas indexadas del espejo pagos.
       // (El otro camino de escritura —batch del pull— lo hace vía
@@ -4475,13 +4495,29 @@ class LocalDb {
       Map<String, dynamic> data, int syncSeq) async {
     final d = await db;
     final nuevoJson = jsonEncode(data);
+    // 1.32 (F-21, ampliación): la misma guarda
+    // anti-fantasmas de upsertMirror — el seq efectivo
+    // nunca retrocede y el camino «sin cambio» repone el
+    // seq entrante si es mayor.
     final rows = await d.query(tabla,
-        columns: ['data'], where: 'id=?', whereArgs: [id], limit: 1);
-    if (rows.isNotEmpty && rows.first['data'] == nuevoJson) return false;
+        columns: ['data', 'sync_seq'],
+        where: 'id=?',
+        whereArgs: [id],
+        limit: 1);
+    final seqGuardado = rows.isEmpty
+        ? 0
+        : ((rows.first['sync_seq'] as num?)?.toInt() ?? 0);
+    if (rows.isNotEmpty && rows.first['data'] == nuevoJson) {
+      if (syncSeq > seqGuardado) {
+        await d.update(tabla, {'sync_seq': syncSeq},
+            where: 'id=?', whereArgs: [id]);
+      }
+      return false;
+    }
     final fila = <String, Object?>{
       'id': id,
       'data': nuevoJson,
-      'sync_seq': syncSeq,
+      'sync_seq': syncSeq > seqGuardado ? syncSeq : seqGuardado,
     };
     // v1.7.0 (v36): poblar la columna nivel del espejo GymPedia
     // (el otro camino de escritura —batch del pull— lo hace vía
@@ -4705,7 +4741,8 @@ class LocalDb {
   /// (seq 0: p. ej. un cliente recién creado cuyo op sigue en la
   /// cola) jamás se toca. Devuelve los ids borrados.
   Future<List<Object>> purgarMirrorAusentes(
-      String tabla, Set<Object> idsServidor) async {
+      String tabla, Set<Object> idsServidor,
+      {bool permitirMayoriaConfirmada = false}) async {
     final d = await db;
     final borrar = <Object>[];
     // Yunque de Sincronización (YS-7): la comparación va en
@@ -4763,6 +4800,32 @@ class LocalDb {
         borrar.clear();
         return;
       }
+      // 1.32 (O2F2S, F-22 ampliación de la síntesis total,
+      // Conflicto 1): umbral RELATIVO dentro de la propia
+      // primitiva, como defensa en profundidad para
+      // llamadores futuros — borrar más del 50 % de las
+      // filas confirmadas de una tabla en una sola pasada
+      // no es una poda, es un vaciado parcial: se aborta
+      // esta tabla y queda rastro propio en meta. La puerta
+      // del motor (purgaPermitida) ya exige confirmación de
+      // conteo para este caso; la primitiva no se fía de que
+      // todo llamador la consulte, y solo lo permite con el
+      // flag explícito [permitirMayoriaConfirmada] de quien
+      // ya confirmó el conteo contra el servidor.
+      if (!permitirMayoriaConfirmada &&
+          borrar.isNotEmpty &&
+          confirmadas > 0 &&
+          borrar.length * 2 > confirmadas) {
+        await setMetaEn(
+            txn,
+            'purga_umbral_relativo_$tabla',
+            'a_borrar=${borrar.length} '
+            'confirmadas=$confirmadas '
+            'ids_servidor=${idsServidor.length} '
+            'en=${isoHabana(ahoraHabana())}');
+        borrar.clear();
+        return;
+      }
       for (final id in borrar) {
         if (id is int) {
           await deleteMirror(tabla, id, txn: txn);
@@ -4811,6 +4874,21 @@ class LocalDb {
         } catch (e) {
           if (!'$e'.contains('no such table')) fallos.add(t);
         }
+        // 1.32 (O2F2S, F-19 ampliación de la síntesis total,
+        // Conflicto 2): el reseteo del watermark va DENTRO
+        // de esta misma transacción, no en los llamadores.
+        // Hasta hoy cada llamador compensaba por disciplina
+        // (resync por huella y transición H-08), pero la
+        // primitiva sola dejaba el espejo vacío con el
+        // cursor alto — un llamador futuro que lo olvide
+        // rompe la bajada para siempre y sin error. Con el
+        // reseteo aquí, borrar confirmado ⇒ cursor en 0,
+        // atómico. (Las filas exceptuadas por ops vivas
+        // conservan su fila; su cursor también vuelve a 0 y
+        // la re-bajada las fusiona con la guarda F-18.)
+        try {
+          await setWatermarkTablaEn(txn, t, 0);
+        } catch (_) {}
       }
     });
     return (borradas: borradas, fallos: fallos);
@@ -9854,6 +9932,18 @@ class LocalDb {
       {DatabaseExecutor? executor}) async {
     final d = executor ?? await db;
     await setWatermarkTablaEn(d, tabla, seq);
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-21): filas CONFIRMADAS
+  /// (sync_seq > 0) de un espejo — el conteo que la pasada
+  /// completa del manifiesto compara contra el total
+  /// esperado del servidor para detectar filas fantasma
+  /// (confirmadas localmente que el servidor no enumera).
+  Future<int> contarMirrorConfirmadas(String tabla) async {
+    final d = await db;
+    final r = await d.rawQuery(
+        'SELECT COUNT(*) AS n FROM "$tabla" WHERE sync_seq > 0');
+    return (r.first['n'] as num?)?.toInt() ?? 0;
   }
 
   /// Ajuste Argón 1.28 (hallazgo #1): núcleo con ejecutor

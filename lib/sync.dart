@@ -3723,9 +3723,11 @@ class SyncEngine {
             d: 'grupo2=${g2.fallos.join(',')}');
         return false;
       }
-      for (final t in grupo2FueraDePurga) {
-        await _db.setWatermarkTabla(t, 0);
-      }
+      // 1.32 (F-19, ampliación de síntesis): los watermarks
+      // de AMBOS grupos ya volvieron a 0 dentro de la
+      // transacción de borrarEspejosConfirmados (antes este
+      // llamador solo reseteaba el grupo 2 y el grupo 1 se
+      // fiaba de las banderas de re-descarga de abajo).
       await _db.setMeta('forzar_redescarga_clientes', '1');
       await _db.setMeta('forzar_redescarga_pagos', '1');
       await _limpiarMetasEstadoNoAdmin();
@@ -3866,9 +3868,9 @@ class SyncEngine {
             d: r.fallos.join(','));
         return (resyncHecho: false, pospuesto: true);
       }
-      for (final t in tablasEspejo) {
-        await _db.setWatermarkTabla(t, 0);
-      }
+      // 1.32 (F-19, ampliación de síntesis): los watermarks
+      // ya volvieron a 0 DENTRO de la transacción de
+      // borrarEspejosConfirmados — aquí ya no se compensan.
       if (!_esAdminSeguro) {
         await _limpiarMetasEstadoNoAdmin();
       }
@@ -7337,8 +7339,15 @@ class SyncEngine {
                 filasLocales: filasLocales,
               );
           if (purgaValidada) {
-            final borradas =
-                await _db.purgarMirrorAusentes(tabla, idsPurga);
+            // 1.32 (F-22, ampliación de síntesis): la puerta
+            // solo autoriza una purga mayoritaria con el
+            // conteo del servidor CONFIRMADO e igual a los
+            // ids vistos — ese es el flag explícito que la
+            // primitiva exige para pasar su umbral relativo.
+            final borradas = await _db.purgarMirrorAusentes(
+                tabla, idsPurga,
+                permitirMayoriaConfirmada: conteoConfirmado &&
+                    totalServidor == idsPurga.length);
             if (borradas.isNotEmpty) {
               AppLog.info('sync', 'purga_reconciliacion',
                   d: '$tabla borradas=${borradas.length}');
@@ -7354,6 +7363,15 @@ class SyncEngine {
                   d: '$tabla $sospechosa');
               await _db.setMeta(
                   'purga_interseccion_sospechosa_$tabla', '');
+            }
+            // F-22 (ampliación): mismo traslado para el
+            // aborto por umbral relativo de la primitiva.
+            final umbral = await _db
+                .getMeta('purga_umbral_relativo_$tabla');
+            if (umbral != null && umbral.isNotEmpty) {
+              AppLog.aviso('sync', 'purga_umbral_relativo',
+                  d: '$tabla $umbral');
+              await _db.setMeta('purga_umbral_relativo_$tabla', '');
             }
             await _db.setMeta('purga_v144_$tabla', '');
           } else {
@@ -8257,8 +8275,20 @@ class SyncEngine {
           haySeqPrevia: seqPrevia != null,
           completaVencida: completaVencida,
           completaDebida: debida);
+      // 1.32 (O2F2S, adjudicación F-21 pieza i): en las
+      // tablas de secuencia propia, una seqPrevia heredada
+      // en escala GLOBAL (mayor que el watermark propio)
+      // no sirve de corte para la rápida: la pasada va
+      // completa y el sello se reescribe en su escala.
+      var desdeSeqF21 =
+          modo == ModoChequeoManifiesto.rapido ? seqPrevia : null;
+      if (desdeSeqF21 != null &&
+          tablasConSecuenciaPropia.contains(local) &&
+          desdeSeqF21 > await _db.getWatermarkTabla(local)) {
+        desdeSeqF21 = null;
+      }
       final r = await _verificarTablaManifiesto(entry.key, local, nBuckets,
-          desdeSeq: modo == ModoChequeoManifiesto.rapido ? seqPrevia : null);
+          desdeSeq: desdeSeqF21);
       corte.registrarTransporte(r.huboRespuesta);
       if (!r.concluyente) {
         sinVerificar.add(local);
@@ -8271,7 +8301,16 @@ class SyncEngine {
       try {
         await _db.setMeta(
             'manifiesto_tabla_$local', r.divergente ? 'divergente' : 'ok');
-        await _db.setMeta('manifiesto_seq_$local', '$serverSeqActual');
+        // 1.32 (F-21 pieza i): las tablas de secuencia
+        // propia sellan contra SU escala (el máximo sseq
+        // visto en esta comprobación), no contra el
+        // server_seq global — con el sello global, su
+        // seqPrevia quedaba en una escala ajena y la
+        // pasada rápida filtraba sin criterio.
+        final seqSello = tablasConSecuenciaPropia.contains(local)
+            ? r.maxSseq
+            : serverSeqActual;
+        await _db.setMeta('manifiesto_seq_$local', '$seqSello');
         if (modo == ModoChequeoManifiesto.completo) {
           await _db.setMeta('manifiesto_debida_$local', '');
         }
@@ -8315,11 +8354,22 @@ class SyncEngine {
   /// comparan las filas del servidor con sseq mayor que
   /// [desdeSeq] (la última comprobación concluyente de la
   /// tabla); null = pasada completa.
-  Future<({bool concluyente, bool divergente, bool huboRespuesta})>
-      _verificarTablaManifiesto(
+  Future<
+      ({
+        bool concluyente,
+        bool divergente,
+        bool huboRespuesta,
+        int maxSseq
+      })> _verificarTablaManifiesto(
           String supTabla, String localTabla, int nBuckets,
           {bool reintentoSaturacion = false, int? desdeSeq}) async {
     var divergente = false;
+    // 1.32 (F-21): máximo sseq visto en la comprobación
+    // (sello en escala propia de las tablas con secuencia
+    // propia) y total esperado acumulado (detección de
+    // fantasmas en pasada completa).
+    var maxSseqVisto = 0;
+    var esperadosTotal = 0;
     for (var b = 0; b < nBuckets; b++) {
       try {
         final r =
@@ -8341,7 +8391,8 @@ class SyncEngine {
           return (
             concluyente: false,
             divergente: divergente,
-            huboRespuesta: huboRespuestaManifiesto(r.statusCode)
+            huboRespuesta: huboRespuestaManifiesto(r.statusCode),
+            maxSseq: maxSseqVisto
           );
         }
         if (r.statusCode != 200) {
@@ -8356,7 +8407,8 @@ class SyncEngine {
           return (
             concluyente: false,
             divergente: divergente,
-            huboRespuesta: huboRespuestaManifiesto(r.statusCode)
+            huboRespuesta: huboRespuestaManifiesto(r.statusCode),
+            maxSseq: maxSseqVisto
           );
         }
         final decoded = jsonDecode(r.body);
@@ -8364,7 +8416,8 @@ class SyncEngine {
           return (
             concluyente: false,
             divergente: divergente,
-            huboRespuesta: true
+            huboRespuesta: true,
+            maxSseq: maxSseqVisto
           );
         }
         final rows = decoded;
@@ -8406,6 +8459,13 @@ class SyncEngine {
         if (desdeSeq != null) {
           esperados = esperadosDesdeSeq(esperados, desdeSeq);
         }
+        // 1.32 (F-21): contabilidad de la pasada — máximo
+        // sseq visto (sello en escala propia) y total
+        // esperado (fantasmas, solo en completa).
+        for (final v in esperados.values) {
+          if (v > maxSseqVisto) maxSseqVisto = v;
+        }
+        if (desdeSeq == null) esperadosTotal += esperados.length;
         final locales =
             await _db.seqsFilasMirror(localTabla, esperados.keys.toList());
         var coincide = true;
@@ -8433,11 +8493,34 @@ class SyncEngine {
         return (
           concluyente: false,
           divergente: divergente,
-          huboRespuesta: false
+          huboRespuesta: false,
+          maxSseq: maxSseqVisto
         );
       }
     }
-    return (concluyente: true, divergente: divergente, huboRespuesta: true);
+    // 1.32 (O2F2S, adjudicación F-21 piezas ii y iii): en
+    // pasada COMPLETA, el conteo también juzga — filas
+    // confirmadas locales que el servidor NO enumera son
+    // fantasmas (la comparación por fila solo ve las que
+    // el servidor sí enumera), y un esperado VACÍO con
+    // espejo poblado no es «ok»: es divergente y fuerza
+    // re-descarga. (En pasada rápida un esperado vacío es
+    // el caso normal —nada nuevo— y no se juzga.)
+    if (desdeSeq == null) {
+      try {
+        final confLocal = await _db.contarMirrorConfirmadas(localTabla);
+        if (confLocal > esperadosTotal) {
+          divergente = true;
+          await _db.setMeta('forzar_redescarga_$localTabla', '1');
+        }
+      } catch (_) {}
+    }
+    return (
+      concluyente: true,
+      divergente: divergente,
+      huboRespuesta: true,
+      maxSseq: maxSseqVisto
+    );
   }
 
   /// v1.2.5 (D18): verifica que el reloj del dispositivo no esté muy
