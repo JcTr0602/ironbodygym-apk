@@ -462,6 +462,12 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
                   color: AppColores.ambarDe(context)),
               title: Text(
                   'Efectivo de ${e['nombre'] ?? ''} por recoger',
+                  // 1.32 (integración, RD-7): con nombres
+                  // largos a 360 dp el título sin tope
+                  // comprimía el botón «Liquidar Arqueo» o
+                  // desalineaba la bandeja a 3 líneas.
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: AppTexto.cuerpo),
               subtitle: Text(
                 [

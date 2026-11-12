@@ -486,3 +486,110 @@ Future<bool> confirmarDeslizando(
   return ok == true;
 }
 
+
+/// 1.32 (integración, RD-8): scroll horizontal CON PISTA —
+/// envuelve una fila desplazable (los segmentos de los
+/// Pilares 2 y 4) con un degradado en el borde hacia el
+/// que aún hay contenido. Sin la pista, con la fuente al
+/// 130–200 % el último segmento quedaba fuera de pantalla
+/// y la sección parecía no existir («¿dónde está Avisos
+/// WhatsApp?»). El degradado va del color de fondo de la
+/// cáscara a transparente, no tapa toques (IgnorePointer)
+/// y desaparece al llegar al final (y aparece a la
+/// izquierda al avanzar, si se pide con [pistaIzquierda]).
+class ScrollHorizontalConPista extends StatefulWidget {
+  final Widget child;
+  final Color colorFondo;
+  final bool pistaIzquierda;
+
+  const ScrollHorizontalConPista({
+    super.key,
+    required this.child,
+    required this.colorFondo,
+    this.pistaIzquierda = true,
+  });
+
+  @override
+  State<ScrollHorizontalConPista> createState() =>
+      _ScrollHorizontalConPistaState();
+}
+
+class _ScrollHorizontalConPistaState
+    extends State<ScrollHorizontalConPista> {
+  final ScrollController _ctrl = ScrollController();
+  bool _hayMasDerecha = false;
+  bool _hayMasIzquierda = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_recalcular);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.removeListener(_recalcular);
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _recalcular() {
+    if (!_ctrl.hasClients) return;
+    final pos = _ctrl.position;
+    final derecha = pos.extentAfter > 1;
+    final izquierda = pos.extentBefore > 1;
+    if (derecha != _hayMasDerecha || izquierda != _hayMasIzquierda) {
+      setState(() {
+        _hayMasDerecha = derecha;
+        _hayMasIzquierda = izquierda;
+      });
+    }
+  }
+
+  Widget _degradado(bool haciaDerecha) {
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      right: haciaDerecha ? 0 : null,
+      left: haciaDerecha ? null : 0,
+      width: 28,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: haciaDerecha
+                  ? Alignment.centerLeft
+                  : Alignment.centerRight,
+              end: haciaDerecha
+                  ? Alignment.centerRight
+                  : Alignment.centerLeft,
+              colors: [
+                widget.colorFondo.withValues(alpha: 0),
+                widget.colorFondo,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Tras el primer frame se sabe si el contenido desborda.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _recalcular());
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          controller: _ctrl,
+          scrollDirection: Axis.horizontal,
+          child: widget.child,
+        ),
+        if (_hayMasDerecha) _degradado(true),
+        if (widget.pistaIzquierda && _hayMasIzquierda)
+          _degradado(false),
+      ],
+    );
+  }
+}

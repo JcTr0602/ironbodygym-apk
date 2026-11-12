@@ -3,6 +3,8 @@
 /// Formas cercanas al contenido real, en carbón/naranja.
 /// Respetan "reducir movimiento" (sin animación si está activo).
 library;
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'componentes.dart';
@@ -20,17 +22,24 @@ class SkeletonLinea extends StatelessWidget {
     final reducir = MediaQuery.of(context).disableAnimations;
     final color = AppColores.textoSecundario(context)
         .withValues(alpha: 0.15);
-    final barra = Container(
-      width: ancho,
-      height: alto,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(alto / 2),
-      ),
-    );
-    if (reducir) return barra;
-    // Pulso sutil (no rotación) para no marear.
-    return _Pulso(child: barra);
+    // 1.32 (integración, RD-6): el ancho pedido se acota al
+    // disponible — una línea de 240 dp dentro de una tarjeta
+    // estrecha (360 dp con paddings dobles) desbordaba en
+    // horizontal en vez de encogerse.
+    return LayoutBuilder(builder: (context, c) {
+      final w = c.maxWidth.isFinite ? math.min(ancho, c.maxWidth) : ancho;
+      final barra = Container(
+        width: w,
+        height: alto,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(alto / 2),
+        ),
+      );
+      if (reducir) return barra;
+      // Pulso sutil (no rotación) para no marear.
+      return _Pulso(child: barra);
+    });
   }
 }
 
@@ -60,16 +69,36 @@ class SkeletonLista extends StatelessWidget {
   final int items;
   const SkeletonLista({super.key, this.items = 3});
 
+  /// Alto de una tarjeta del esqueleto con su separación:
+  /// 92 de tarjeta (60 de líneas + 2×16 de padding de
+  /// Tarjeta) + 8 de separación.
+  static const double altoRanura = 100;
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        for (var i = 0; i < items; i++) ...[
-          const SkeletonTarjeta(),
-          const SizedBox(height: 8),
+    // 1.32 (integración, RD-6): la columna NO era
+    // desplazable y con items: 5 desbordaba ≈30 px a
+    // 420×800 donde el padre acota el alto (confirmado en
+    // Actividad; la pieza se usa en ~18 pantallas). Un
+    // esqueleto no necesita enseñarlos todos: se pintan
+    // los que CABEN en el alto disponible (mínimo 1); con
+    // alto infinito (dentro de un scroll) salen todos,
+    // como antes.
+    return LayoutBuilder(builder: (context, c) {
+      var n = items;
+      if (c.maxHeight.isFinite) {
+        n = ((c.maxHeight + 8) / altoRanura).floor().clamp(1, items);
+      }
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < n; i++) ...[
+            const SkeletonTarjeta(),
+            const SizedBox(height: 8),
+          ],
         ],
-      ],
-    );
+      );
+    });
   }
 }
 

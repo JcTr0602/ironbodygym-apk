@@ -56,6 +56,7 @@ import 'hoja_liquidar_arqueo.dart';
 import 'horario_gym.dart';
 import 'invitados.dart';
 import 'marco.dart';
+import 'primitivas.dart';
 import 'mi_nomina.dart';
 import 'mi_turno.dart';
 import 'nomina.dart';
@@ -242,6 +243,11 @@ class _PilarNegocioState extends State<PilarNegocio> {
             ActionChip(
               avatar: Icon(icono, size: 18),
               label: Text(titulo),
+              // 1.32 (integración, RD-5): enlaces de uso
+              // diario del Pilar 4 («Cierre de mes»,
+              // «Registrar gasto»…): objetivo táctil
+              // acolchado de 48 en vez de los ≈36 visuales.
+              materialTapTargetSize: MaterialTapTargetSize.padded,
               onPressed: accion,
             ),
         ],
@@ -329,8 +335,11 @@ class _PilarNegocioState extends State<PilarNegocio> {
         Padding(
           padding: const EdgeInsets.fromLTRB(
               AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.sm),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          // 1.32 (integración, RD-8): con pista — al crecer
+          // la fuente, «App y Reglas» quedaba fuera sin
+          // señal de que hubiera más segmentos.
+          child: ScrollHorizontalConPista(
+            colorFondo: Theme.of(context).scaffoldBackgroundColor,
             child: SegmentedButton<String>(
               segments: [
                 for (final t in tabs)

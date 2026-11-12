@@ -32,6 +32,7 @@ import 'inscribir.dart';
 import 'invitados.dart';
 import 'listas.dart';
 import 'marco.dart';
+import 'primitivas.dart';
 import 'papelera.dart';
 import 'permisos_ui.dart';
 
@@ -173,8 +174,11 @@ class _PilarClientesState extends State<PilarClientes> {
         Padding(
           padding: const EdgeInsets.fromLTRB(
               AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.sm),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+          // 1.32 (integración, RD-8): con pista — al crecer
+          // la fuente, «Avisos WhatsApp» quedaba fuera sin
+          // señal de que hubiera más segmentos.
+          child: ScrollHorizontalConPista(
+            colorFondo: Theme.of(context).scaffoldBackgroundColor,
             child: SegmentedButton<String>(
               segments: [
                 const ButtonSegment(
