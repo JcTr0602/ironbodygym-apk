@@ -771,8 +771,23 @@ void main() {
               'los borrados viejos no se re-aplicarían nunca');
       await db.setWatermarkTabla('borrados', 123);
       expect(await db.getWatermarkTabla('borrados'), 123);
-      // Las demás tablas con herencia siguen heredando.
-      expect(await db.getWatermarkTabla('clientes'), 9999);
+      // 1.32 (integración, adjudicación B-25): la antigua
+      // expectativa «las herederas heredan EN VIVO el
+      // global» (9999) quedó derogada por AP-2 (síntesis
+      // total, forma adjudicada e implementada en la
+      // v74): la herencia viva murió — sin fila propia el
+      // cursor es 0 para TODAS las tablas y la herencia se
+      // materializa una única vez (migración/onCreate) en
+      // filas explícitas. En esta BD limpia, clientes nació
+      // sembrada con el global de su nacimiento (0): subir
+      // el global después NO mueve su cursor. Que la
+      // materialización sí copia el global vigente a las
+      // herederas al migrar lo fija oleada2_fase2_ap_test
+      // (AP-2); aquí manda la lectura viva sin herencia.
+      expect(await db.getWatermarkTabla('clientes'), 0,
+          reason: 'AP-2: la lectura viva ya no hereda el '
+              'global para ninguna tabla; clientes conserva '
+              'su fila sembrada al nacer (0)');
     });
 
     test('la migración v27 escribe 0 en vez de borrar '
