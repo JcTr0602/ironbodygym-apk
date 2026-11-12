@@ -18,6 +18,8 @@
 /// avisos_delta). Sin fecha = se retira a mano, como antes.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -27,6 +29,7 @@ import '../tiempo.dart' show ahoraHabana, fmtFechaHabana, hoyHabanaIso;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'publicador_cache.dart';
 
 class AvisoCliente {
   final int id;
@@ -61,6 +64,19 @@ class AvisoCliente {
       fechaFin: ff.isEmpty ? null : ff,
     );
   }
+
+  /// 1.32 (Fase 3): la fila tal como la entrega
+  /// admin_listar_avisos (la inversa de fromJson) — la
+  /// copia local del Publicador persiste la lista con
+  /// estas mismas claves.
+  Map<String, dynamic> aJson() => {
+        'id': id,
+        'titulo': titulo,
+        'cuerpo': cuerpo,
+        'nivel': nivel,
+        'creado_ts': creadoTs,
+        'fecha_fin': fechaFin,
+      };
 }
 
 /// FB-22: el día elegido → 'AAAA-MM-DD' (los componentes
@@ -250,11 +266,29 @@ class EditorAvisosClientesScreen extends StatefulWidget {
   final Future<List<AvisoCliente>> Function()? listarAvisosRpc;
   final Future<void> Function(int id)? retirarAvisoRpc;
 
+  /// 1.32 (Oleada 2, Fase 3 — Publicador Unificado):
+  /// se monta como el segmento «Aviso a clientes» del
+  /// Publicador (sin Scaffold ni FAB) y el arranque
+  /// pinta la COPIA LOCAL primero (Compuerta 3) con la
+  /// red revalidando detrás (Compuerta 4). El
+  /// comportamiento histórico queda intacto sin
+  /// embebida.
+  final bool embebida;
+
+  /// Costuras de la copia local (tests); null = las
+  /// reales de publicador_cache sobre preferencias.
+  final Future<CopiaAvisos?> Function()? leerCopia;
+  final Future<void> Function(List<AvisoCliente> avisos)?
+      guardarCopia;
+
   const EditorAvisosClientesScreen(
       {super.key,
       this.guardarAvisoRpc,
       this.listarAvisosRpc,
-      this.retirarAvisoRpc});
+      this.retirarAvisoRpc,
+      this.embebida = false,
+      this.leerCopia,
+      this.guardarCopia});
 
   @override
   State<EditorAvisosClientesScreen> createState() =>
@@ -267,10 +301,55 @@ class _EditorAvisosClientesScreenState
   bool _cargando = true;
   bool _error = false;
 
+  /// 1.32 (Fase 3, Compuerta 3): la copia local pintada
+  /// al abrir — mismo significado que en la pantalla
+  /// de Anuncios: [_horaCopia] != null = lo pintado
+  /// salió de la copia; [_copiaSinRevalidar] = la red
+  /// no lo ha confirmado (sello visible);
+  /// [_revalidando] = confirmación en curso.
+  DateTime? _horaCopia;
+  bool _copiaSinRevalidar = false;
+  bool _revalidando = false;
+
   @override
   void initState() {
     super.initState();
-    _cargar();
+    _arrancar();
+  }
+
+  /// Arranque en dos tiempos (Compuertas 3 y 4): la
+  /// copia pinta primero; la red revalida detrás. Sin
+  /// copia, el arranque histórico (spinner → lista o
+  /// error declarado; error ≠ vacío, jamás).
+  Future<void> _arrancar() async {
+    try {
+      final copia = await (widget.leerCopia ??
+          () => leerCopiaAvisos(AuthService().telegramId))();
+      if (copia != null && mounted) {
+        setState(() {
+          _avisos = [
+            for (final f in copia.filas) AvisoCliente.fromJson(f),
+          ];
+          _cargando = false;
+          _horaCopia = copia.hora;
+          _copiaSinRevalidar = true;
+          _revalidando = true;
+        });
+      }
+    } catch (_) {
+      // Sin copia se sigue con la carga de siempre.
+    }
+    await _cargar(desdeArranque: true);
+  }
+
+  /// Persiste la copia tras una carga verificada.
+  /// Nunca lanza: perder la copia no es un error.
+  Future<void> _persistirCopia(List<AvisoCliente> lista) async {
+    try {
+      await (widget.guardarCopia ??
+          (l) => guardarCopiaAvisos(AuthService().telegramId,
+              [for (final a in l) a.aJson()]))(lista);
+    } catch (_) {}
   }
 
   Future<List<AvisoCliente>> _listarReal() async {
@@ -311,24 +390,42 @@ class _EditorAvisosClientesScreenState
         .timeout(const Duration(seconds: 12));
   }
 
-  Future<void> _cargar() async {
-    if (mounted) setState(() {
-      _cargando = true;
-      _error = false;
-    });
+  /// [desdeArranque] con copia pintada: no hay vuelta
+  /// al spinner y un fallo NO se declara error — la
+  /// copia se queda con su sello «Sin conexión». En
+  /// cualquier otro caso, el comportamiento histórico.
+  Future<void> _cargar({bool desdeArranque = false}) async {
+    final conCopia = desdeArranque && _horaCopia != null;
+    if (conCopia) {
+      if (mounted) setState(() => _revalidando = true);
+    } else if (mounted) {
+      setState(() {
+        _cargando = true;
+        _error = false;
+      });
+    }
     try {
       final lista =
           await (widget.listarAvisosRpc ?? _listarReal)();
       if (!mounted) return;
+      unawaited(_persistirCopia(lista));
       setState(() {
         _avisos = lista;
         _cargando = false;
+        _revalidando = false;
+        _copiaSinRevalidar = false;
+        _horaCopia = null;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _cargando = false;
-        _error = true;
+        _revalidando = false;
+        if (conCopia) {
+          _copiaSinRevalidar = true;
+        } else {
+          _error = true;
+        }
       });
     }
   }
@@ -355,23 +452,18 @@ class _EditorAvisosClientesScreenState
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
+      const guardia = EstadoVacio(
+        icono: Icons.lock_rounded,
+        titulo: 'Solo el dueño',
+        subtitulo: 'Los avisos a clientes los publica el dueño.',
+      );
+      if (widget.embebida) return guardia;
       return Scaffold(
         appBar: appBarIron(context, 'Avisos a clientes'),
-        body: const EstadoVacio(
-          icono: Icons.lock_rounded,
-          titulo: 'Solo el dueño',
-          subtitulo: 'Los avisos a clientes los publica el dueño.',
-        ),
+        body: guardia,
       );
     }
-    return Scaffold(
-      appBar: appBarIron(context, 'Avisos a clientes'),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _abrirFormulario(),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Nuevo aviso'),
-      ),
-      body: _cargando
+    final cuerpo = _cargando
           ? const EstadoCargando(texto: 'Cargando avisos…')
           : _error
               ? EstadoError(
@@ -453,7 +545,56 @@ class _EditorAvisosClientesScreenState
                           ),
                         );
                       },
-                    ),
+                    );
+    // 1.32 (Fase 3): el sello de la copia va sobre el
+    // cuerpo mientras lo pintado no está revalidado;
+    // con el dato fresco desaparece.
+    final conSello = _copiaSinRevalidar && _horaCopia != null;
+    final cuerpoFinal = conSello
+        ? Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                    AppEspacio.md, AppEspacio.lg, 0),
+                child: SelloCopiaPublicador(
+                  hora: _horaCopia!,
+                  actualizando: _revalidando,
+                ),
+              ),
+              Expanded(child: cuerpo),
+            ],
+          )
+        : cuerpo;
+    if (widget.embebida) {
+      // Segmento del Publicador: la cabecera la pone la
+      // pantalla madre; el «Nuevo aviso» del FAB vive
+      // como botón de la fila superior.
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.md, AppEspacio.lg, 0),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: () => _abrirFormulario(),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Nuevo aviso'),
+              ),
+            ),
+          ),
+          Expanded(child: cuerpoFinal),
+        ],
+      );
+    }
+    return Scaffold(
+      appBar: appBarIron(context, 'Avisos a clientes'),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _abrirFormulario(),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Nuevo aviso'),
+      ),
+      body: cuerpoFinal,
     );
   }
 }

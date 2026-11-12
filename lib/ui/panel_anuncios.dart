@@ -11,6 +11,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'publicador_cache.dart';
 
 /// Corrección A2-D3 (auditorías 1.28): parseo tolerante
 /// de la ventana de un anuncio. El modelo ya entra
@@ -39,6 +40,18 @@ DateTime? _habanaDeIso(String? iso) {
 /// La tarjeta de cada anuncio pinta el cuerpo con el
 /// mismo MarkdownBody que verán los clientes.
 /// Cargadores inyectables para los tests.
+///
+/// 1.32 (Oleada 2, Fase 3 — Publicador Unificado): con
+/// [embebida] la pantalla es el segmento «Anuncio de
+/// portada» del Publicador (sin Scaffold ni FAB: la
+/// cabecera y el selector los pone la pantalla madre) y
+/// el arranque pinta primero la COPIA LOCAL guardada
+/// (Compuerta 3: 0 ms con sello de copia) mientras la
+/// red revalida detrás con su timeout de 12 s
+/// (Compuerta 4). La copia jamás se disfraza de fresca:
+/// si la revalidación falla, la lista queda con el
+/// sello «Sin conexión · copia de las HH:MM»; sin
+/// copia, el fallo se declara como error, como siempre.
 class PanelAnunciosScreen extends StatefulWidget {
   final Future<Map<String, dynamic>> Function()? cargarAnuncios;
   final Future<Map<String, dynamic>> Function(DatosAnuncio datos)?
@@ -47,12 +60,24 @@ class PanelAnunciosScreen extends StatefulWidget {
   final Future<List<({int id, String nombre})>> Function()?
       buscarClientes;
 
+  /// Se monta dentro del Publicador Unificado.
+  final bool embebida;
+
+  /// Costuras de la copia local (tests); null = las
+  /// reales de publicador_cache sobre preferencias.
+  final Future<CopiaAnuncios?> Function()? leerCopia;
+  final Future<void> Function(Map<String, dynamic> json)?
+      guardarCopia;
+
   const PanelAnunciosScreen({
     super.key,
     this.cargarAnuncios,
     this.guardarAnuncio,
     this.borrarAnuncio,
     this.buscarClientes,
+    this.embebida = false,
+    this.leerCopia,
+    this.guardarCopia,
   });
 
   @override
@@ -67,10 +92,56 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
   bool _editando = false;
   List<AnuncioAdmin> _anuncios = const [];
 
+  /// 1.32 (Fase 3, Compuerta 3): la copia local pintada
+  /// al abrir. [_horaCopia] != null = lo pintado salió
+  /// de la copia; [_copiaSinRevalidar] = la red aún no
+  /// ha confirmado esos datos (el sello se enseña);
+  /// [_revalidando] = la confirmación está en curso
+  /// (el sello dice «actualizando…»; si la red falla,
+  /// pasa a «Sin conexión · copia de las HH:MM»).
+  DateTime? _horaCopia;
+  bool _copiaSinRevalidar = false;
+  bool _revalidando = false;
+
   @override
   void initState() {
     super.initState();
-    if (AuthService().isOwner) _cargar();
+    if (AuthService().isOwner) _arrancar();
+  }
+
+  /// Arranque en dos tiempos (Compuertas 3 y 4): la
+  /// copia local pinta primero, sin esperar red; la
+  /// red revalida detrás. Sin copia, el arranque es el
+  /// de siempre (spinner → lista o error declarado).
+  Future<void> _arrancar() async {
+    try {
+      final copia = await (widget.leerCopia ??
+          () => leerCopiaAnuncios(AuthService().telegramId))();
+      if (copia != null && mounted) {
+        setState(() {
+          _anuncios = parseAnunciosAdmin(copia.json);
+          _cargando = false;
+          _horaCopia = copia.hora;
+          _copiaSinRevalidar = true;
+          _revalidando = true;
+        });
+      }
+    } catch (_) {
+      // La copia nunca es un punto de fallo: sin ella,
+      // la carga de red de siempre.
+    }
+    await _cargar(desdeArranque: true);
+  }
+
+  /// Persiste la copia tras una carga verificada. Sin
+  /// await en el llamador y sin lanzar jamás: perder
+  /// la copia no es un error de la pantalla.
+  Future<void> _persistirCopia(Map<String, dynamic> json) async {
+    try {
+      await (widget.guardarCopia ??
+          (j) => guardarCopiaAnuncios(
+              AuthService().telegramId, j))(json);
+    } catch (_) {}
   }
 
   Future<Map<String, dynamic>> _cargarReal() async {
@@ -134,32 +205,49 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
     return out;
   }
 
-  Future<void> _cargar() async {
-    setState(() {
-      _cargando = true;
-      _falloCarga = false;
-    });
+  /// [desdeArranque] con copia pintada: la revalidación
+  /// NO vuelve al spinner (la copia ya está en pantalla)
+  /// y un fallo NO se declara error — la copia se queda
+  /// con su sello «Sin conexión». En cualquier otro
+  /// caso, el comportamiento es el histórico: spinner y
+  /// error declarado (error ≠ vacío, jamás).
+  Future<void> _cargar({bool desdeArranque = false}) async {
+    final conCopia = desdeArranque && _horaCopia != null;
+    if (conCopia) {
+      setState(() => _revalidando = true);
+    } else {
+      setState(() {
+        _cargando = true;
+        _falloCarga = false;
+      });
+    }
+    void fallo() {
+      _cargando = false;
+      _revalidando = false;
+      if (conCopia) {
+        _copiaSinRevalidar = true;
+      } else {
+        _falloCarga = true;
+      }
+    }
+
     try {
       final json = await (widget.cargarAnuncios ?? _cargarReal)();
       if (!mounted) return;
       if (json['ok'] != true) {
-        setState(() {
-          _cargando = false;
-          _falloCarga = true;
-        });
+        setState(fallo);
         return;
       }
+      unawaited(_persistirCopia(json));
       setState(() {
         _anuncios = parseAnunciosAdmin(json);
         _cargando = false;
+        _revalidando = false;
+        _copiaSinRevalidar = false;
+        _horaCopia = null;
       });
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _cargando = false;
-          _falloCarga = true;
-        });
-      }
+      if (mounted) setState(fallo);
     }
   }
 
@@ -365,11 +453,39 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
     // Premios): la tarjeta solo vive en el Panel y la
     // RPC exige es_dueno() en el servidor.
     if (!AuthService().isOwner) {
+      if (widget.embebida) {
+        return const Center(
+            child: Text('Solo el dueño publica anuncios.'));
+      }
       return Scaffold(
         appBar: appBarIron(context, 'Anuncio a clientes'),
         body: const Center(
             child:
                 Text('Solo el dueño publica anuncios.')),
+      );
+    }
+    if (widget.embebida) {
+      // Segmento del Publicador: la cabecera la pone la
+      // pantalla madre; el «Nuevo anuncio» del FAB vive
+      // aquí como botón de la fila superior.
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.md, AppEspacio.lg, 0),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed:
+                    _resolviendo ? null : () => _editar(null),
+                icon: const Icon(Icons.campaign_rounded,
+                    size: 18),
+                label: const Text('Nuevo anuncio'),
+              ),
+            ),
+          ),
+          Expanded(child: _cuerpo()),
+        ],
       );
     }
     return Scaffold(
@@ -402,6 +518,16 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
+          // 1.32 (Fase 3): el sello de la copia — solo
+          // mientras lo pintado es la copia sin
+          // revalidar; con el dato fresco desaparece.
+          if (_copiaSinRevalidar && _horaCopia != null) ...[
+            SelloCopiaPublicador(
+              hora: _horaCopia!,
+              actualizando: _revalidando,
+            ),
+            const SizedBox(height: 12),
+          ],
           const Text(
             'El anuncio aparece en la pantalla principal '
             'de la app de Clientes, tal como se ve en cada '
