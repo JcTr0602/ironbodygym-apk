@@ -240,12 +240,17 @@ void main() {
       // del Pulso a 10 px, de la Oleada 1): la excepción no
       // se declaró entonces y el test ya venía rojo en la
       // base fb34e6f — se declara ahora, verificado.
+      // 1.32 (integración, RD-10): la excepción de
+      // marco.dart se RETIRA — las dos cifras a 10 px (las
+      // insignias de urgencias) pasaron al token
+      // AppTexto.minuscula (11, el mínimo de la escala) y
+      // el archivo ya no tiene literales fontSize: cumple
+      // sin excepción, que es lo que este pin protege.
       expect(conteo, {
         'lib/ui/panel_comunidad.dart': 1,
         'lib/ui/fotos_progreso_nube_ficha.dart': 2,
         'lib/ui/capa_candado.dart': 1,
         'lib/ui/cierre_mes.dart': 1,
-        'lib/ui/marco.dart': 2,
         'lib/ui/vista_previa_cliente.dart': 1,
       });
     });
