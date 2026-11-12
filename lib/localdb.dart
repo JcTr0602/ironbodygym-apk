@@ -4331,7 +4331,10 @@ class LocalDb {
         if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
           // Importación diferida para evitar ciclo
           // ignore: avoid_dynamic_calls
-          await FotoCache.instance.invalidar(oldFoto);
+          // 1.33: invalidación SEGURA — entre variantes de la
+          // misma foto la copia vieja no se borra hasta que
+          // la nueva esté en disco (vaivén display→original).
+          await FotoCache.instance.invalidarCambioFoto(oldFoto, newFoto);
         }
       } catch (_) {}
     }
@@ -4497,7 +4500,8 @@ class LocalDb {
       try {
         final newFoto = data['foto_storage'] as String?;
         if (oldFoto != newFoto && oldFoto != null && oldFoto.isNotEmpty) {
-          await FotoCache.instance.invalidar(oldFoto);
+          // 1.33: invalidación segura entre variantes.
+          await FotoCache.instance.invalidarCambioFoto(oldFoto, newFoto);
         }
       } catch (_) {}
       final nn = _normTexto('${data['nombre'] ?? ''}');
@@ -4541,7 +4545,9 @@ class LocalDb {
           if (f.oldFoto != newFoto &&
               f.oldFoto != null &&
               f.oldFoto!.isNotEmpty) {
-            await FotoCache.instance.invalidar(f.oldFoto!);
+            // 1.33: invalidación segura entre variantes.
+            await FotoCache.instance
+                .invalidarCambioFoto(f.oldFoto!, newFoto);
           }
         } catch (_) {
           // Fila indescifrable: se salta en silencio, como la

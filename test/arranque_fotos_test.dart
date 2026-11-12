@@ -111,8 +111,8 @@ void main() {
       expect(llamadas, 1);
     });
 
-    test('el timeout que recibe el descargador es el corto de la cola',
-        () async {
+    test('el timeout que recibe el descargador es el de la cola '
+        '(30 s, el de la ficha, desde la 1.33)', () async {
       Duration? visto;
       final cola = colaCon((ruta, t) async {
         visto = t;
@@ -120,7 +120,10 @@ void main() {
       });
       cola.encolar(['x']);
       await Future<void>.delayed(Duration.zero);
-      expect(visto, const Duration(seconds: 10));
+      // 1.31 fijó 10 s y el campo demostró que a 2,5 KB/s una
+      // foto de 36 KB (~15 s) NUNCA aterrizaba por la cola;
+      // la 1.33 sube el presupuesto al de la ficha (30 s).
+      expect(visto, const Duration(seconds: 30));
     });
 
     test('caché negativa: el fallo bloquea reintentos hasta el backoff',
