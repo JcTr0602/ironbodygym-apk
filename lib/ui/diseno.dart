@@ -785,6 +785,15 @@ class AppTema {
   /// interruptores, formularios y demás fundación; solo cambian
   /// las superficies y el primario. Los temas claro()/oscuro()
   /// anteriores no se tocan (tests de contraste los fijan).
+  ///
+  /// 1.33 (pasada de diseño, veredicto de Jc en campo): el
+  /// cobalto como acento VISIBLE de navegación queda
+  /// retirado — segmentos, indicador de pilares, chips y
+  /// filas de lista van en marca (naranja/grafito/blanco)
+  /// desde [_tema] y los sitios sueltos. El primario del
+  /// esquema se conserva SOLO como fondo de los controles
+  /// Material sin tema propio; ya no pinta ninguna
+  /// superficie de navegación ni de lista.
   static ThemeData tacticoOscuro() {
     final base = _tema(Brightness.dark);
     final esquema = base.colorScheme.copyWith(
@@ -809,7 +818,10 @@ class AppTema {
       ),
       navigationBarTheme: base.navigationBarTheme.copyWith(
         backgroundColor: AppColores.grafitoTactico,
-        indicatorColor: AppColores.cobalto.withValues(alpha: 0.35),
+        // 1.33 (diseño): el indicador del pilar activo va
+        // en tinte de marca, no en cobalto (era la pastilla
+        // azul al pie de cada pantalla).
+        indicatorColor: AppColores.naranja.withValues(alpha: 0.35),
       ),
     );
   }
@@ -851,7 +863,9 @@ class AppTema {
           base.bottomSheetTheme.copyWith(backgroundColor: Colors.white),
       navigationBarTheme: base.navigationBarTheme.copyWith(
         backgroundColor: AppColores.papelFrio,
-        indicatorColor: AppColores.cobaltoOscuro.withValues(alpha: 0.25),
+        // 1.33 (diseño): indicador en tinte de marca,
+        // como en el táctico oscuro.
+        indicatorColor: AppColores.naranja.withValues(alpha: 0.25),
       ),
     );
   }
@@ -1078,11 +1092,31 @@ class AppTema {
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadio.circular)),
         labelStyle: AppTexto.etiqueta.copyWith(color: texto),
+        // 1.33 (diseño): el icono-avatar de un chip sin
+        // color propio caía al primario del esquema —
+        // cobalto en los temas tácticos (así salían azules
+        // los chips de «Qué le falta» de la ficha y los
+        // enlaces en chip del Pilar Negocio). La familia
+        // de chips lleva el naranja de texto de la marca;
+        // un icono con color explícito manda sobre esto.
+        iconTheme: IconThemeData(
+            color: oscuro
+                ? AppColores.naranjaTextoOscuro
+                : AppColores.naranjaTexto),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: SegmentedButton.styleFrom(
           selectedBackgroundColor: AppColores.naranja.withValues(alpha: 0.2),
           selectedForegroundColor: texto,
+          // 1.33 (diseño, cazado en captura): sin
+          // foregroundColor, el segmento SIN seleccionar
+          // resolvía a null y el botón caía al primario
+          // del esquema — cobalto en los temas tácticos:
+          // icono y texto de los segmentos inactivos se
+          // pintaban de azul plano en los tres pilares.
+          // Gris legible de la casa, explícito; el activo
+          // sigue blanco sobre el tinte de marca.
+          foregroundColor: secundario,
           // 1.32 (integración, RD-1 del inventario): el
           // SegmentedButton es la navegación principal de
           // los Pilares 2/3/4 y de Servicios: su objetivo
