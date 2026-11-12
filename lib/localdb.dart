@@ -5316,21 +5316,32 @@ class LocalDb {
   /// 1.22 GY-04 (panel Pieza 7): ¿sigue en cola el upsert de
   /// biblioteca de [slug]? La marca «en cola de publicación»
   /// (meta *_en_cola_<slug>) vive solo mientras su op no se
-  /// resolvió: aplicada o rechazada la apagan. El payload es
-  /// el jsonEncode compacto del documento, cuyo primer par
-  /// es "id":"<slug>" (los related_ids/sinónimos son cadenas
-  /// sueltas en listas, no pares "id":).
+  /// resolvió: los estados terminales la apagan.
+  ///
+  /// 1.32 (integración, síntesis AP-4): el matching ya no es
+  /// un LIKE sobre el payload como JSON compacto
+  /// (`%"id":"<slug>"%`): un payload con espacios tras los
+  /// dos puntos daba «no en cola» siendo mentira. Ahora se
+  /// decodifica el payload y se compara el `id` exacto (los
+  /// related_ids/sinónimos son cadenas sueltas en listas,
+  /// no el par "id" del documento), y el estado usa la
+  /// noción única de terminales — la 'archivada' también
+  /// apaga la marca, como en todos los lectores.
   Future<bool> upsertBibliotecaEnCola(String slug) async {
     final d = await db;
     final rows = await d.query('ops_queue',
-        columns: ['op_uuid'],
+        columns: ['payload'],
         where: "tipo IN ('gympedia_upsert_publicado', "
             "'guia_upsert_publicado') "
-            "AND estado NOT IN ('aplicada', 'rechazada') "
-            'AND payload LIKE ?',
-        whereArgs: ['%"id":"$slug"%'],
-        limit: 1);
-    return rows.isNotEmpty;
+            "AND estado NOT IN ($estadosOpsTerminalesSql)");
+    for (final r in rows) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        if ('${p['id']}' == slug) return true;
+      } catch (_) {}
+    }
+    return false;
   }
 
   /// Actividad reciente de la Biblioteca: ops ya aplicadas DE ESTE
@@ -5642,8 +5653,9 @@ class LocalDb {
 
   /// 1.23 (auditoría extra #6, delta panel A1): revierte la marca
   /// optimista `anulado` del espejo SOLO si ya no queda ninguna
-  /// anulación VIVA (≠ 'rechazada': la misma definición de
-  /// [pagosAnuladosEnCola]) para el mismo pago. Con doble
+  /// anulación VIVA (fuera de [estadosOpsTerminales]: la misma
+  /// definición de [pagosAnuladosEnCola], unificada por AP-4)
+  /// para el mismo pago. Con doble
   /// anulación, si una se rechaza pero otra sigue en cola, el
   /// pago debe seguir excluido. La llama [markOp] dentro de la
   /// transacción que marca el rechazo, sobre el mismo executor:
@@ -5661,7 +5673,8 @@ class LocalDb {
       {String? excluirOpUuid}) async {
     final vivas = await ex.query('ops_queue',
         columns: ['op_uuid', 'payload'],
-        where: "tipo='anular_pago' AND estado != 'rechazada'");
+        where: "tipo='anular_pago' AND estado NOT IN "
+            "($estadosOpsTerminalesSql)");
     for (final r in vivas) {
       if (excluirOpUuid != null &&
           '${r['op_uuid']}' == excluirOpUuid) {
@@ -5689,17 +5702,29 @@ class LocalDb {
 
   /// 1.23 (auditoría extra #6): ids de pagos con una anulación
   /// VIVA en la cola de este teléfono: ops `anular_pago` en
-  /// cualquier estado menos 'rechazada' (pendiente, enviada,
-  /// error, necesita_revision y aplicada — la aplicada se incluye
-  /// para cubrir la ventana entre la aplicación en el servidor,
-  /// que BORRA la fila, y el pull que la retira del espejo).
+  /// cualquier estado NO terminal (pendiente, enviada, error,
+  /// necesita_revision).
+  ///
+  /// 1.32 (integración, síntesis AP-4): hasta hoy esto era
+  /// «cualquiera menos rechazada» — la 'aplicada' se incluía
+  /// para cubrir la ventana entre la aplicación en el
+  /// servidor, que BORRA la fila, y el pull que la retira del
+  /// espejo; pero la 'archivada' quedaba viva PARA SIEMPRE y
+  /// un anular_pago archivado excluía el pago de los totales
+  /// en silencio y sin salida. La noción ahora es la única
+  /// de la casa ([estadosOpsTerminales], la misma de
+  /// tieneOpsPendientesParaCliente/refrescarMirrorCliente):
+  /// la ventana de la aplicada la cubre la marca optimista
+  /// del espejo ([marcarPagoAnuladoEnEspejo]), que solo la
+  /// pisa el pull que trae el borrado de la fila.
   /// Es el overlay que hace sobrevivir la exclusión a los pulls
   /// (mismo patrón que el overlay de adelantos en adelantos.dart).
   Future<Set<int>> pagosAnuladosEnCola() async {
     final d = await db;
     final rows = await d.query('ops_queue',
         columns: ['payload'],
-        where: "tipo='anular_pago' AND estado != 'rechazada'");
+        where: "tipo='anular_pago' AND estado NOT IN "
+            "($estadosOpsTerminalesSql)");
     final ids = <int>{};
     for (final r in rows) {
       try {
@@ -6005,7 +6030,7 @@ class LocalDb {
     // p. ej. dentro de una nota).
     final rows = await d.query('ops_queue',
         columns: ['payload'],
-        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada') "
+        where: "estado NOT IN ($estadosOpsTerminalesSql) "
             "AND (payload LIKE ? OR payload LIKE ?)",
         // H12-sub (revisión de Argón al Yunque de Sync): el
         // id puede venir en el payload como String
@@ -6055,7 +6080,7 @@ class LocalDb {
     return d.transaction((txn) async {
       final rows = await txn.query('ops_queue',
           columns: ['payload'],
-          where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+          where: "estado NOT IN ($estadosOpsTerminalesSql)");
       for (final r in rows) {
         try {
           final p =
@@ -6107,7 +6132,7 @@ class LocalDb {
     final d = await db;
     final rows = await d.query('ops_queue',
         columns: ['payload'],
-        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+        where: "estado NOT IN ($estadosOpsTerminalesSql)");
     final ids = <int>{};
     for (final r in rows) {
       try {
@@ -6127,7 +6152,7 @@ class LocalDb {
     final d = await db;
     final rows = await d.query('ops_queue',
         columns: ['payload'],
-        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+        where: "estado NOT IN ($estadosOpsTerminalesSql)");
     final ids = <int>{};
     for (final r in rows) {
       try {
@@ -8239,7 +8264,7 @@ class LocalDb {
         final opsVivas = await d.query('ops_queue',
             columns: ['payload'],
             where:
-                "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+                "estado NOT IN ($estadosOpsTerminalesSql)");
         for (final op in opsVivas) {
           try {
             final p = jsonDecode(op['payload'] as String)
@@ -10969,7 +10994,7 @@ class LocalDb {
         'ops_queue',
         columns: ['payload', 'creada_ts'],
         where: "tipo = 'eliminar_foto' AND estado NOT IN "
-            "('aplicada', 'rechazada', 'archivada')",
+            "($estadosOpsTerminalesSql)",
       );
       for (final op in ops) {
         try {
@@ -11011,12 +11036,12 @@ class LocalDb {
     });
   }
 
-  /// Todas las no aplicadas ni rechazadas (para re-chequear `aplicada`
-  /// en el servidor).
+  /// Todas las NO terminales (para re-chequear `aplicada`
+  /// en el servidor): la noción única de [estadosOpsTerminales].
   Future<List<Map<String, dynamic>>> unappliedOps() async {
     final d = await db;
     return d.query('ops_queue',
-        where: 'estado NOT IN (\'aplicada\', \'rechazada\', \'archivada\')',
+        where: "estado NOT IN ($estadosOpsTerminalesSql)",
         orderBy: 'creada_ts ASC');
   }
 
@@ -12224,6 +12249,37 @@ class LocalDb {
       return 0;
     }
   }
+
+  /// 1.32 (integración, síntesis AP-4): LA noción única de
+  /// estados TERMINALES de `ops_queue` para todos los
+  /// lectores de esta clase: una op en uno de estos estados
+  /// ya no está «viva» para ningún lector (overlay de pagos
+  /// anulados, refresco de espejo, ops vivas por cliente o
+  /// pago, «en cola» de biblioteca, no-aplicadas). Vivas:
+  /// pendiente, enviada, error y necesita_revision.
+  ///
+  /// Antes cada lector escribía su propia lista y divergían:
+  /// [pagosAnuladosEnCola] y su desmarcado trataban SOLO
+  /// 'rechazada' como terminal — un `anular_pago` ARCHIVADO
+  /// excluía el pago de los totales para siempre y en
+  /// silencio, mientras el resto de lectores ya excluía
+  /// aplicada/rechazada/archivada. Si nace un estado
+  /// terminal nuevo, se añade AQUÍ y solo aquí.
+  static const Set<String> estadosOpsTerminales = {
+    'aplicada',
+    'rechazada',
+    'archivada',
+  };
+
+  /// La misma lista, lista para interpolar en un
+  /// `estado NOT IN (...)` de SQL.
+  static const String estadosOpsTerminalesSql =
+      "'aplicada', 'rechazada', 'archivada'";
+
+  /// ¿[estado] de `ops_queue` es terminal? (La misma
+  /// noción de [estadosOpsTerminales] para código Dart.)
+  static bool esEstadoOpTerminal(String estado) =>
+      estadosOpsTerminales.contains(estado);
 
   /// Estados terminales de una reserva. CONTRATO de retención
   /// compartido con el puente (ironbody/reservas.py TERMINALES,
