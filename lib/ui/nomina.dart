@@ -1752,6 +1752,20 @@ class _NominaScreenState extends State<NominaScreen> {
       if (!gavetas.any((g) => g.username == ent)) {
         gavetas.add((username: ent, nombre: persona.nombre));
       }
+      // 1.32 (Fase 3 — Momento 3B): el neto vivo del
+      // mes en curso de ESTE entrenador, con la misma
+      // fórmula de la foto del cierre (totalVivo contra
+      // G-40): base del mes + su bono + su comisión −
+      // sus adelantos ya dados − su deuda entrante. Es
+      // el techo blando del aviso del diálogo.
+      final libroEnt = _libroMes[ent];
+      final nominaAcumuladaEnt = NominaCalc.totalVivo(
+        base: _clientesPagados * _tarifa,
+        bono: _bonoPara(ent),
+        comision: _comisionDosis[ent]?.total ?? 0,
+        adelantos: libroEnt?.adelantos ?? 0,
+        deudaEntrante: libroEnt?.deudaEntrante ?? 0,
+      );
       final datos = await showDialog<
           ({
             int monto,
@@ -1766,6 +1780,7 @@ class _NominaScreenState extends State<NominaScreen> {
           nombreEntrenador: persona.nombre,
           gavetaInicial: ent,
           gavetas: gavetas,
+          nominaAcumulada: nominaAcumuladaEnt,
         ),
       );
       if (datos == null) return;
@@ -1811,6 +1826,34 @@ class _NominaScreenState extends State<NominaScreen> {
 /// entrenador vive en MiNominaScreen, su destino de
 /// siempre, y en la pestaña «Mi Nómina» del Pilar 4.
 
+/// 1.32 (Oleada 2, Fase 3 — Momento 3B del plano, G-42):
+/// el aviso EN VIVO del diálogo de adelantos cuando el
+/// monto supera la nómina acumulada del mes: «Este
+/// adelanto supera la nómina acumulada de [Nombre] en
+/// X CUP; el excedente pasará como deuda arrastrada al
+/// próximo mes». [nominaAcumulada] es el neto vivo del
+/// mes en curso (NominaCalc.totalVivo con los
+/// adelantos ya dados y la deuda entrante: lo que aún
+/// puede adelantarse sin arrastrar). Solo aplica con
+/// la fecha dentro del mes en curso — las cifras son
+/// de este mes; con otra fecha el aviso se apaga en
+/// vez de comparar contra el mes equivocado. El
+/// aviso NO bloquea: arrastrar deuda es un resultado
+/// legítimo y diseñado; solo se advierte antes de
+/// guardar. null = sin aviso.
+String? avisoAdelantoQueExcedeNomina({
+  required String nombreEntrenador,
+  required int monto,
+  required double nominaAcumulada,
+  required bool enMesActual,
+}) {
+  if (!enMesActual || monto <= nominaAcumulada) return null;
+  return 'Este adelanto supera la nómina acumulada de '
+      '$nombreEntrenador en ${fmtMonto(monto - nominaAcumulada)} '
+      'CUP; el excedente pasará como deuda arrastrada al '
+      'próximo mes';
+}
+
 /// 1.25 T118 (F2-23): diálogo «Registrar adelanto» como
 /// StatefulWidget propio con DialogoApp: posee y dispone sus
 /// controladores, la validación del monto va inline (B6) y la
@@ -1820,10 +1863,17 @@ class _DialogoRegistrarAdelanto extends StatefulWidget {
   final String nombreEntrenador;
   final String gavetaInicial;
   final List<({String username, String nombre})> gavetas;
+
+  /// 1.32 (Fase 3 — Momento 3B): el neto vivo del mes
+  /// en curso del entrenador (contra G-40), para el
+  /// aviso en vivo de exceso.
+  final double nominaAcumulada;
+
   const _DialogoRegistrarAdelanto({
     required this.nombreEntrenador,
     required this.gavetaInicial,
     required this.gavetas,
+    required this.nominaAcumulada,
   });
 
   @override
@@ -1850,6 +1900,18 @@ class _DialogoRegistrarAdelantoState
 
   @override
   Widget build(BuildContext context) {
+    // 1.32 (Fase 3 — Momento 3B): el aviso de exceso se
+    // calcula en CADA repintado (el pad y el selector
+    // de fecha hacen setState al cambiar): es el
+    // «calcula en vivo» del plano.
+    final hoyAviso = ahoraHabana();
+    final avisoExceso = avisoAdelantoQueExcedeNomina(
+      nombreEntrenador: widget.nombreEntrenador,
+      monto: int.tryParse(_montoCtrl.text.trim()) ?? 0,
+      nominaAcumulada: widget.nominaAcumulada,
+      enMesActual: _fecha.year == hoyAviso.year &&
+          _fecha.month == hoyAviso.month,
+    );
     return DialogoApp(
       titulo: 'Adelanto a ${widget.nombreEntrenador}',
       iconoTitulo: Icons.payments_rounded,
@@ -1882,6 +1944,24 @@ class _DialogoRegistrarAdelantoState
             if (_errorMonto != null) ...[
               const SizedBox(height: 8),
               ErrorInline(_errorMonto!),
+            ],
+            if (avisoExceso != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      size: 18, color: AppColores.alerta),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      avisoExceso,
+                      style: AppTexto.metadato
+                          .copyWith(color: AppColores.alerta),
+                    ),
+                  ),
+                ],
+              ),
             ],
             const SizedBox(height: 12),
             Row(
