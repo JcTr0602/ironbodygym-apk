@@ -800,6 +800,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                             }
                             final elegido =
                                 await showMenu<String>(
+                              popUpAnimationStyle: estiloAparicionMenu,
                               context: context,
                               position: position,
                               items: [

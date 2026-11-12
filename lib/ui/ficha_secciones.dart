@@ -1032,6 +1032,7 @@ class FilaTimelineFicha extends StatelessWidget {
                                   'transferencia' &&
                               esOwner))
                         PopupMenuButton<String>(
+                          popUpAnimationStyle: estiloAparicionMenu,
                           tooltip: 'Más acciones',
                           icon: const Icon(
                               Icons.more_vert_rounded, size: 20),

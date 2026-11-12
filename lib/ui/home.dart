@@ -34,6 +34,7 @@ import 'admin.dart';
 import 'buzon_dueno.dart';
 import 'horario_gym.dart';
 import 'reservas.dart';
+import 'servicios.dart';
 import 'servicios_admin.dart';
 import 'solicitudes_adelanto.dart';
 import 'incidencias/lista_incidencias.dart';
@@ -145,15 +146,12 @@ int urgenciasHome({
 
 /// 1.25 Panel 19: la estación diaria personalizable — los
 /// bloques del nivel «Hoy» que cada quien puede mostrar u
-/// ocultar. Buscar y el selector de nivel NO son bloques:
-/// son la puerta y quedan siempre.
+/// ocultar. (El bloque 'mostrador' de las acciones rápidas
+/// se jubiló en la 1.32 — viven en el Dock del marco — y
+/// su id guardado se descarta solo al leer, ver
+/// bloquesVisiblesEstacion.)
 const bloquesEstacionDiaria =
     <({String id, String titulo, String ayuda})>[
-  (
-    id: 'mostrador',
-    titulo: 'Acciones rápidas del mostrador',
-    ayuda: 'Cobrar, pago diario, inscribir y turno en 1 toque',
-  ),
   (
     id: 'finanzas',
     titulo: 'Tarjeta financiera',
@@ -1357,7 +1355,17 @@ class _HomeScreenState extends State<HomeScreen>
                 context,
                 () => PermisosEntrenador().canVenderSuplementos,
                 'vender servicios')) {
-              MarcoNav.irAPilar(PilarGestion.tienda);
+              // 1.33 (decisión de Jc): el Dock es de
+              // ACCIONES — «Servicio» abre DIRECTO la
+              // pantalla de vender (Servicios nace en su
+              // zona Vender), como Cobrar abre el cobro y
+              // Pase el pase diario. Antes solo saltaba al
+              // Pilar Tienda: mismo icono y mismo destino
+              // que la pestaña Tienda (redundancia cazada
+              // por Jc en campo). El hub completo (Día ·
+              // Inventario · Análisis · Suplementos) sigue
+              // viviendo en la pestaña, intacto.
+              _ir(const ServiciosScreen());
             }
           },
           onPase: () => _ir(const PagoDiarioScreen()),
@@ -1488,18 +1496,20 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// 1.32: las secciones del Mostrador (antes «Nivel 1
   /// Hoy»): la vista se parte por rol y cada vista recibe
-  /// SOLO las secciones que pinta, ya construidas. El
-  /// mostrador rápido vive ahora en el Dock al pie (a las
-  /// vistas llega retirado) y la búsqueda en la lupa de la
-  /// cabecera; el botón grande de buscar se conserva como
-  /// primer elemento, como siempre. El dueño estrena la
-  /// bandeja «Por Decidir» sobre el Pulso (Compuerta 1).
+  /// SOLO las secciones que pinta, ya construidas. 1.33:
+  /// la barra «Buscar cliente» SALE de Hoy (decisión de
+  /// Jc: era un resto de la Home anterior a los pilares y
+  /// el tercer camino a lo mismo — la búsqueda vive en el
+  /// buscador del Pilar Clientes y en la lupa universal de
+  /// la cabecera, que no se tocan). El Mostrador abre
+  /// directo en las Estadísticas Rápidas del dueño (orden
+  /// de Jc en la 1.33; en la 1.32 la bandeja «Por Decidir»
+  /// iba sobre el Pulso por la Compuerta 1) y justo
+  /// debajo va «Por Decidir» con su conteo visible.
   List<Widget> _seccionesMostrador(bool esDueno) {
     if (esDueno) {
       return _VistaHoyDueno(
         bloquesHoy: _bloquesHoy,
-        buscar: _botonBuscarCliente(),
-        mostrador: const SizedBox.shrink(),
         porDecidir: BandejaPorDecidir(
           incidencias: _incidenciasAbiertas,
           rellenos: _buzon.rellenos,
@@ -1516,8 +1526,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
     return _VistaHoyEntrenador(
       bloquesHoy: _bloquesHoy,
-      buscar: _botonBuscarCliente(),
-      mostrador: const SizedBox.shrink(),
       finanzas: _tarjetaFinanciera(false),
       alertas: _tiraAlertas(),
       onPersonalizar: _personalizarEstacion,
@@ -2710,32 +2718,6 @@ class _HomeScreenState extends State<HomeScreen>
 
 
   
-  /// v1.3.6 (Jc): botón horizontal de ancho completo para Buscar cliente
-  /// en el Mostrador Rápido (rediseño Argón, zona 2). v1.3.6 (Argón,
-  /// diseño): badge squircle de acción + chevron_rounded al extremo.
-  Widget _botonBuscarCliente() {
-    return Tarjeta(
-      onTap: () => _ir(const BuscarScreen()),
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.md, vertical: AppEspacio.md),
-      child: Row(
-        children: [
-          IconoModuloBadge.naranja(Icons.person_search_rounded,
-              tamanoIcono: 22),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Text('Buscar cliente',
-                style: AppTexto.secundario
-                    .copyWith(fontWeight: FontWeight.w600)),
-          ),
-          Icon(Icons.chevron_right_rounded,
-              size: 20,
-              color: AppColores.textoSecundario(context)),
-        ],
-      ),
-    );
-  }
-
   /// v1.3.6 (ítem 1A): botón horizontal de ancho completo para la bandeja
   /// de avisos de WhatsApp del día. v1.3.6 (Argón, diseño): badge squircle
   /// verde semántico + contador si hay pendientes. Solo visible para el
@@ -2788,18 +2770,18 @@ class _HomeScreenState extends State<HomeScreen>
 }
 
 /// La vista del Mostrador del DUEÑO (1.30 D2 la ordenó;
-/// la 1.32 la reordena con el veredicto g132). Recibe las
-/// secciones ya construidas y solo las ordena:
-/// mostrador → Por Decidir → Estadísticas Rápidas
-/// (Pulso) → bandeja → buzón → alertas. La tarjeta de
-/// Administración de la 1.30 se jubiló: sus contadores
-/// viven en Por Decidir y sus destinos en el Pilar
-/// Negocio. Las secciones entran en cascada (fundación
-/// de D1) con sus ValueKey estables.
+/// la 1.32 la reordena con el veredicto g132; la 1.33 la
+/// reordena por orden de Jc en campo y jubila la zona
+/// del mostrador rápido con su barra de buscar). Recibe
+/// las secciones ya construidas y solo las ordena:
+/// Estadísticas Rápidas (Pulso) → Por Decidir → bandeja
+/// → buzón → alertas. La tarjeta de Administración de
+/// la 1.30 se jubiló: sus contadores viven en Por
+/// Decidir y sus destinos en el Pilar Negocio. Las
+/// secciones entran en cascada (fundación de D1) con
+/// sus ValueKey estables.
 class _VistaHoyDueno extends StatelessWidget {
   final Set<String> bloquesHoy;
-  final Widget buscar;
-  final Widget mostrador;
   final Widget porDecidir;
   final Widget finanzas;
   final Widget bandeja;
@@ -2810,8 +2792,6 @@ class _VistaHoyDueno extends StatelessWidget {
 
   const _VistaHoyDueno({
     required this.bloquesHoy,
-    required this.buscar,
-    required this.mostrador,
     required this.porDecidir,
     required this.finanzas,
     required this.bandeja,
@@ -2823,30 +2803,29 @@ class _VistaHoyDueno extends StatelessWidget {
 
   List<Widget> secciones() {
     return [
-      // Zona 2 — Mostrador rápido: buscar + 4 acciones a
-      // 1 toque, antes de la tarjeta financiera.
-      KeyedSubtree(
-        key: const ValueKey('hoy-mostrador'),
-        child: ItemCascada(
-          indice: 0,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: Column(
-              children: [
-                buscar,
-                if (bloquesHoy.contains('mostrador')) ...[
-                  const SizedBox(height: AppEspacio.sm),
-                  mostrador,
-                ],
-              ],
+      // v1.3.3: tarjeta financiera por rol («Estadísticas
+      // Rápidas»). 1.33 (orden de Jc en campo, 2026-11-12):
+      // las Estadísticas abren el Mostrador — es lo que
+      // mira cada vez que entra en la app — y «Por Decidir»
+      // baja justo debajo (siguiente bloque), sin perder
+      // su conteo visible de pendientes.
+      if (bloquesHoy.contains('finanzas'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-finanzas'),
+          child: ItemCascada(
+            indice: 0,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: finanzas,
             ),
           ),
         ),
-      ),
-      // 1.32: la bandeja «Por Decidir» manda sobre el
-      // Pulso: primero lo que espera una decisión del
-      // dueño (Compuerta 1 del veredicto g132). La vieja
+      // La bandeja «Por Decidir» (Compuerta 1 del
+      // veredicto g132 en la 1.32; reordenada por Jc en
+      // la 1.33): inmediatamente tras las Estadísticas,
+      // siempre visible para el dueño con su titular de
+      // pendientes — nada urgente se esconde. La vieja
       // tarjeta de Administración se funde aquí (sus
       // contadores de atención) y en el Pilar 4 (sus
       // destinos).
@@ -2861,19 +2840,6 @@ class _VistaHoyDueno extends StatelessWidget {
           ),
         ),
       ),
-      // v1.3.3: tarjeta financiera por rol.
-      if (bloquesHoy.contains('finanzas'))
-        KeyedSubtree(
-          key: const ValueKey('hoy-finanzas'),
-          child: ItemCascada(
-            indice: 2,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-              child: finanzas,
-            ),
-          ),
-        ),
       // Zona 4 — Atención hoy: la bandeja del dueño,
       // sobre la tira de alertas. SOLO del dueño (abre
       // su WhatsApp y el check vive en su teléfono).
@@ -2881,7 +2847,7 @@ class _VistaHoyDueno extends StatelessWidget {
         KeyedSubtree(
           key: const ValueKey('hoy-bandeja'),
           child: ItemCascada(
-            indice: 3,
+            indice: 2,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
@@ -2897,7 +2863,7 @@ class _VistaHoyDueno extends StatelessWidget {
         KeyedSubtree(
           key: const ValueKey('hoy-buzon'),
           child: ItemCascada(
-            indice: 4,
+            indice: 3,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
@@ -2909,7 +2875,7 @@ class _VistaHoyDueno extends StatelessWidget {
       if (bloquesHoy.contains('alertas'))
         KeyedSubtree(
           key: const ValueKey('hoy-alertas'),
-          child: ItemCascada(indice: 5, child: alertas),
+          child: ItemCascada(indice: 4, child: alertas),
         ),
       // Panel 19: si la estación quedó vacía por
       // elección, se dice y se ofrece reabrir el editor.
@@ -2957,16 +2923,12 @@ class _VistaHoyDueno extends StatelessWidget {
 /// construye en HomeScreen con lo de siempre.
 class _VistaHoyEntrenador extends StatelessWidget {
   final Set<String> bloquesHoy;
-  final Widget buscar;
-  final Widget mostrador;
   final Widget finanzas;
   final Widget alertas;
   final VoidCallback onPersonalizar;
 
   const _VistaHoyEntrenador({
     required this.bloquesHoy,
-    required this.buscar,
-    required this.mostrador,
     required this.finanzas,
     required this.alertas,
     required this.onPersonalizar,
@@ -2974,33 +2936,17 @@ class _VistaHoyEntrenador extends StatelessWidget {
 
   List<Widget> secciones() {
     return [
-      // Zona 2 — Mostrador rápido: buscar + 4 acciones.
-      KeyedSubtree(
-        key: const ValueKey('hoy-mostrador'),
-        child: ItemCascada(
-          indice: 0,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: Column(
-              children: [
-                buscar,
-                if (bloquesHoy.contains('mostrador')) ...[
-                  const SizedBox(height: AppEspacio.sm),
-                  mostrador,
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
       // Primero lo suyo de hoy: la tira de alertas con
       // sus vencimientos por delante (la propia tira ya
       // ordena por rol al construirse en HomeScreen).
+      // (La zona del mostrador rápido con la barra de
+      // buscar se jubiló en la 1.33, como en la vista del
+      // dueño: las acciones viven en el Dock del marco y
+      // la búsqueda en el Pilar Clientes y la lupa.)
       if (bloquesHoy.contains('alertas'))
         KeyedSubtree(
           key: const ValueKey('hoy-alertas'),
-          child: ItemCascada(indice: 1, child: alertas),
+          child: ItemCascada(indice: 0, child: alertas),
         ),
       // Su tarjeta de turno y dinero (cobrado hoy, su
       // pendiente a entregar, pagaron el mes, su base).
@@ -3008,7 +2954,7 @@ class _VistaHoyEntrenador extends StatelessWidget {
         KeyedSubtree(
           key: const ValueKey('hoy-finanzas'),
           child: ItemCascada(
-            indice: 2,
+            indice: 1,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),

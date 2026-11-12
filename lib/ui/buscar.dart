@@ -633,6 +633,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 // compacta/normal y seleccionar varios.
                 // Todo se conserva; cambia dónde vive.
                 PopupMenuButton<String>(
+                  popUpAnimationStyle: estiloAparicionMenu,
                   tooltip: 'Más acciones',
                   icon: const Icon(Icons.more_vert_rounded),
                   onSelected: (sel) {

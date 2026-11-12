@@ -545,9 +545,15 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       children: [
         Row(
           children: [
+            // 1.33 (diseño): este azul SE QUEDA — es el
+            // azul semántico del AGUA de la casa (el del
+            // gradiente dosis+agua y los tokens azulAgua),
+            // contenido en su chip; solo se tokeniza el
+            // tinte (era Colors.blue crudo) al token
+            // exacto de la familia.
             const IconoModuloBadge(
               icono: Icons.water_drop_rounded,
-              tinte: Colors.blue,
+              tinte: AppColores.azulAgua,
               iconoOscuro: AppColores.azulAguaOscuro,
               iconoClaro: AppColores.azulAguaClaro,
             ),

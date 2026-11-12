@@ -214,8 +214,16 @@ void main() {
 
     test('Ayuda y Tema viven en el menú del perfil', () {
       expect(marco.contains('PopupMenuButton<String>'), isTrue);
-      expect(marco.contains("Text('Ayuda')"), isTrue);
-      expect(marco.contains("Text('Tema claro/oscuro')"), isTrue);
+      // 1.33 (diseño): los ítems ya no son Text pelados:
+      // los construye _filaMenu (icono en chip + Text con
+      // su parámetro «texto»); el contrato es el destino
+      // con su etiqueta legible, no la forma vieja.
+      expect(RegExp(r'Text\(\s+texto,').hasMatch(marco), isTrue,
+          reason: '_filaMenu pinta su etiqueta con Text');
+      expect(marco.contains("value: 'ayuda'"), isTrue);
+      expect(marco.contains("'Ayuda'"), isTrue);
+      expect(marco.contains("value: 'tema'"), isTrue);
+      expect(marco.contains("'Tema claro/oscuro'"), isTrue);
       // El despacho vive en Home (_accionPerfilMarco).
       final menu = home.substring(
           home.indexOf('void _accionPerfilMarco'),
@@ -228,8 +236,9 @@ void main() {
     test('el destino Ajustes se dice en palabras en el menú', () {
       // La insignia de engranaje sobre el logo (1.30) se
       // funde en la etiqueta del ítem: el destino se LEE.
-      expect(marco.contains("Text('Mi perfil y ajustes')"),
-          isTrue);
+      // 1.33 (diseño): la etiqueta llega vía _filaMenu.
+      expect(marco.contains("value: 'perfil'"), isTrue);
+      expect(marco.contains("'Mi perfil y ajustes'"), isTrue);
       final menu = home.substring(
           home.indexOf('void _accionPerfilMarco'),
           home.indexOf('/// Compuerta 5'));
@@ -311,23 +320,30 @@ void main() {
           reason: 'primero sus vencimientos de hoy');
     });
 
-    test('el orden del dueño conserva finanzas tras el '
-        'mostrador y la bandeja sobre las alertas', () {
+    test('el orden del dueño: finanzas abre (la zona del '
+        'mostrador se jubiló) y la bandeja va sobre las '
+        'alertas', () {
       final ini = home.indexOf('class _VistaHoyDueno');
       final fin = home.indexOf('class _VistaHoyEntrenador', ini);
       final vista = home.substring(ini, fin);
       expect(
-          vista.indexOf("ValueKey('hoy-mostrador')") <
-              vista.indexOf("ValueKey('hoy-pordecidir')"),
-          isTrue);
+          vista.contains("ValueKey('hoy-mostrador')"),
+          isFalse,
+          reason: 'la 1.33 retira la zona del mostrador '
+              'rápido de Hoy: la barra «Buscar cliente» era '
+              'un resto pre-pilares (la búsqueda vive en el '
+              'Pilar Clientes y en la lupa de la cabecera) y '
+              'las acciones rápidas viven en el Dock');
       expect(
-          vista.indexOf("ValueKey('hoy-pordecidir')") <
-              vista.indexOf("ValueKey('hoy-finanzas')"),
+          vista.indexOf("ValueKey('hoy-finanzas')") <
+              vista.indexOf("ValueKey('hoy-pordecidir')"),
           isTrue,
-          reason: 'la 1.32 pone Por Decidir entre el '
-              'mostrador y Estadísticas Rápidas, en el '
-              'lugar que UI130-23 daba a Administración '
-              '(sus contadores viven ahí ahora)');
+          reason: 'la 1.33 (orden de Jc en campo, '
+              '2026-11-12) pone las Estadísticas Rápidas '
+              'PRIMERO — es lo que mira al abrir la app — '
+              'y «Por Decidir» justo debajo con su conteo '
+              'visible; en la 1.32 el orden era el inverso '
+              '(Compuerta 1 del veredicto g132)');
       expect(
           vista.indexOf("ValueKey('hoy-bandeja')") <
               vista.indexOf("ValueKey('hoy-alertas')"),
@@ -336,7 +352,6 @@ void main() {
 
     test('las claves de sección se conservan', () {
       for (final k in [
-        'hoy-mostrador',
         'hoy-finanzas',
         'hoy-bandeja',
         'hoy-buzon',

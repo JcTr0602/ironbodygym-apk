@@ -377,7 +377,14 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
       return ListTile(
         dense: true,
         contentPadding: EdgeInsets.zero,
-        leading: Icon(icono, color: AppColores.cobaltoDe(context)),
+        // 1.33 (pasada de diseño, veredicto de Jc en campo):
+        // el icono va DENTRO del chip de marca con tinte —
+        // el mismo IconoModuloBadge.naranja de «Buscar
+        // cliente» — en vez del glifo cobalto plano y sin
+        // contenedor que se leía «MSDOS del 95». El cobalto
+        // desaparece de la bandeja; el ámbar de «sin
+        // verificar» se queda: significa alerta, no adorno.
+        leading: IconoModuloBadge.naranja(icono),
         title: Text(titulo, style: AppTexto.cuerpo),
         trailing: valor == null
             ? Text('sin verificar',
@@ -400,14 +407,14 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
         children: [
           Row(
             children: [
-              Icon(
-                t.todoAlDia
-                    ? Icons.check_circle_rounded
-                    : Icons.inbox_rounded,
-                color: t.todoAlDia
-                    ? AppColores.verdeDe(context)
-                    : AppColores.cobaltoDe(context),
-              ),
+              // 1.33 (diseño): la cabecera de la tarjeta
+              // lleva el mismo chip con tinte que las filas
+              // (verde cuando todo está al día, marca en
+              // cuanto algo espera decisión).
+              if (t.todoAlDia)
+                IconoModuloBadge.verde(Icons.check_circle_rounded)
+              else
+                IconoModuloBadge.naranja(Icons.inbox_rounded),
               const SizedBox(width: AppEspacio.sm),
               const Expanded(
                 child: Text('Por Decidir', style: AppTexto.titulo),
@@ -507,8 +514,17 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
             ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.account_balance_wallet_rounded,
-                  color: AppColores.ambarDe(context)),
+              // 1.33 (diseño): la fila de arqueo también va
+              // en chip con tinte, pero ÁMBAR: aquí el color
+              // significa «efectivo esperando» (alerta), no
+              // es adorno — se conserva el significado y se
+              // le da el contenedor de la familia.
+              leading: const IconoModuloBadge(
+                icono: Icons.account_balance_wallet_rounded,
+                tinte: AppColores.alerta,
+                iconoOscuro: AppColores.ambarTactico,
+                iconoClaro: AppColores.ambarTierra,
+              ),
               title: Text(
                   'Efectivo de ${e['nombre'] ?? ''} por recoger',
                   // 1.32 (integración, RD-7): con nombres
@@ -533,16 +549,30 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
               ),
             ),
           if (algunaSinVerificar)
+            // 1.33 (diseño): el aviso de «sin conexión» va
+            // integrado en la tarjeta como línea con su
+            // icono, no como texto suelto al pie: mismo
+            // mensaje, mismo ámbar de alerta.
             Padding(
-              padding: const EdgeInsets.only(top: AppEspacio.xs),
-              child: Text(
-                _foto == null
-                    ? 'bandejas remotas sin verificar (sin conexión)'
-                    : 'Sin conexión: se enseña la última foto de '
-                        'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
-                        '${_foto!.hora.minute.toString().padLeft(2, '0')}.',
-                style: AppTexto.metadato
-                    .copyWith(color: AppColores.alerta),
+              padding: const EdgeInsets.only(top: AppEspacio.sm),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.cloud_off_rounded,
+                      size: 14, color: AppColores.alerta),
+                  const SizedBox(width: AppEspacio.xs),
+                  Expanded(
+                    child: Text(
+                      _foto == null
+                          ? 'bandejas remotas sin verificar (sin conexión)'
+                          : 'Sin conexión: se enseña la última foto de '
+                              'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
+                              '${_foto!.hora.minute.toString().padLeft(2, '0')}.',
+                      style: AppTexto.metadato
+                          .copyWith(color: AppColores.alerta),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],

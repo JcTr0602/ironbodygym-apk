@@ -349,6 +349,7 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                             icon: const Icon(Icons.arrow_downward_rounded),
                           ),
                           PopupMenuButton<String>(
+                            popUpAnimationStyle: estiloAparicionMenu,
                             onSelected: (v) {
                               if (v == 'renombrar') {
                                 _renombrar(_equipos[i]);

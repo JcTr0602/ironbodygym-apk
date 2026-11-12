@@ -726,6 +726,21 @@ class AppMovimiento {
   static const curvaPop = Curves.easeOutBack;
 }
 
+/// 1.33 (diseño): el estilo de aparición de los menús
+/// desplegables de la casa — fundido de la duración media
+/// con la curva suave de la casa (la ruta además escalona
+/// la entrada de los ítems). En esta versión de Flutter el
+/// estilo NO es tematizable (PopupMenuThemeData no lo
+/// expone): se aplica con esta constante en cada
+/// PopupMenuButton y showMenu de la app. Sin ella, la ruta
+/// usa los 300 ms lineales del framework y el menú se lee
+/// como aparición de golpe.
+const estiloAparicionMenu = AnimationStyle(
+  duration: AppMovimiento.media,
+  curve: AppMovimiento.curvaSuave,
+  reverseCurve: AppMovimiento.curvaReversa,
+);
+
 /// Sombras sutiles (gama media: permitidas, sin exagerar).
 ///
 /// 1.29 OG-0 (D-18): queda UN solo lenguaje de elevación —
@@ -785,6 +800,15 @@ class AppTema {
   /// interruptores, formularios y demás fundación; solo cambian
   /// las superficies y el primario. Los temas claro()/oscuro()
   /// anteriores no se tocan (tests de contraste los fijan).
+  ///
+  /// 1.33 (pasada de diseño, veredicto de Jc en campo): el
+  /// cobalto como acento VISIBLE de navegación queda
+  /// retirado — segmentos, indicador de pilares, chips y
+  /// filas de lista van en marca (naranja/grafito/blanco)
+  /// desde [_tema] y los sitios sueltos. El primario del
+  /// esquema se conserva SOLO como fondo de los controles
+  /// Material sin tema propio; ya no pinta ninguna
+  /// superficie de navegación ni de lista.
   static ThemeData tacticoOscuro() {
     final base = _tema(Brightness.dark);
     final esquema = base.colorScheme.copyWith(
@@ -801,6 +825,11 @@ class AppTema {
         backgroundColor: AppColores.grafitoTactico,
       ),
       cardTheme: base.cardTheme.copyWith(color: AppColores.grafitoTactico),
+      // 1.33 (diseño): los menús flotan sobre la superficie
+      // táctica, como las tarjetas y los diálogos.
+      popupMenuTheme: base.popupMenuTheme.copyWith(
+        color: AppColores.grafitoTactico,
+      ),
       dialogTheme: base.dialogTheme.copyWith(
         backgroundColor: AppColores.grafitoTactico,
       ),
@@ -809,7 +838,10 @@ class AppTema {
       ),
       navigationBarTheme: base.navigationBarTheme.copyWith(
         backgroundColor: AppColores.grafitoTactico,
-        indicatorColor: AppColores.cobalto.withValues(alpha: 0.35),
+        // 1.33 (diseño): el indicador del pilar activo va
+        // en tinte de marca, no en cobalto (era la pastilla
+        // azul al pie de cada pantalla).
+        indicatorColor: AppColores.naranja.withValues(alpha: 0.35),
       ),
     );
   }
@@ -847,11 +879,16 @@ class AppTema {
         ),
       ),
       dialogTheme: base.dialogTheme.copyWith(backgroundColor: Colors.white),
+      // 1.33 (diseño): menús sobre blanco en el Modo Sol,
+      // como el resto de superficies emergentes.
+      popupMenuTheme: base.popupMenuTheme.copyWith(color: Colors.white),
       bottomSheetTheme:
           base.bottomSheetTheme.copyWith(backgroundColor: Colors.white),
       navigationBarTheme: base.navigationBarTheme.copyWith(
         backgroundColor: AppColores.papelFrio,
-        indicatorColor: AppColores.cobaltoOscuro.withValues(alpha: 0.25),
+        // 1.33 (diseño): indicador en tinte de marca,
+        // como en el táctico oscuro.
+        indicatorColor: AppColores.naranja.withValues(alpha: 0.25),
       ),
     );
   }
@@ -1078,11 +1115,31 @@ class AppTema {
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadio.circular)),
         labelStyle: AppTexto.etiqueta.copyWith(color: texto),
+        // 1.33 (diseño): el icono-avatar de un chip sin
+        // color propio caía al primario del esquema —
+        // cobalto en los temas tácticos (así salían azules
+        // los chips de «Qué le falta» de la ficha y los
+        // enlaces en chip del Pilar Negocio). La familia
+        // de chips lleva el naranja de texto de la marca;
+        // un icono con color explícito manda sobre esto.
+        iconTheme: IconThemeData(
+            color: oscuro
+                ? AppColores.naranjaTextoOscuro
+                : AppColores.naranjaTexto),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: SegmentedButton.styleFrom(
           selectedBackgroundColor: AppColores.naranja.withValues(alpha: 0.2),
           selectedForegroundColor: texto,
+          // 1.33 (diseño, cazado en captura): sin
+          // foregroundColor, el segmento SIN seleccionar
+          // resolvía a null y el botón caía al primario
+          // del esquema — cobalto en los temas tácticos:
+          // icono y texto de los segmentos inactivos se
+          // pintaban de azul plano en los tres pilares.
+          // Gris legible de la casa, explícito; el activo
+          // sigue blanco sobre el tinte de marca.
+          foregroundColor: secundario,
           // 1.32 (integración, RD-1 del inventario): el
           // SegmentedButton es la navegación principal de
           // los Pilares 2/3/4 y de Servicios: su objetivo
@@ -1092,6 +1149,33 @@ class AppTema {
           // probable del rediseño.
           minimumSize: const Size(48, 48),
         ),
+      ),
+      // 1.33 (diseño): los menús desplegables no tenían
+      // tema y heredaban los defectos del framework: el
+      // color por defecto es el surfaceContainer del
+      // esquema — sembrado en naranja, sale el rectángulo
+      // MARRÓN/carmelita que Jc vio en el menú del avatar —
+      // con esquinas casi rectas y la animación lineal de
+      // 300 ms de serie, que se lee como aparición de
+      // golpe. Aquí quedan la superficie de la casa, el
+      // radio grande con borde y la sombra propia; el
+      // ESTILO de aparición no es tematizable en esta
+      // versión de Flutter (PopupMenuThemeData no lo
+      // expone) y va en la constante compartida
+      // [estiloAparicionMenu], aplicada en cada
+      // PopupMenuButton/showMenu de la app. Lo demás lo
+      // heredan los 12 PopupMenuButton y el showMenu;
+      // los DropdownButton no pasan por esta ruta (su
+      // menú es del propio control).
+      popupMenuTheme: PopupMenuThemeData(
+        color: superficie,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.4),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          side: BorderSide(color: borde),
+        ),
+        textStyle: AppTexto.cuerpo.copyWith(color: texto),
       ),
       progressIndicatorTheme:
           const ProgressIndicatorThemeData(color: AppColores.naranja),

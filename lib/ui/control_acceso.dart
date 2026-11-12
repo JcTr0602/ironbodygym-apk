@@ -536,6 +536,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 ),
               ),
               PopupMenuButton<String>(
+                popUpAnimationStyle: estiloAparicionMenu,
                 icon: const Icon(Icons.sort_rounded),
                 tooltip: 'Ordenar',
                 onSelected: (v) => setState(() => _orden = v),

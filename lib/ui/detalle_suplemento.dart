@@ -873,6 +873,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
           // menú ⋮ (solo dueño); Compartir queda visible.
           if (AuthService().isOwner)
             PopupMenuButton<String>(
+              popUpAnimationStyle: estiloAparicionMenu,
               icon: const Icon(Icons.more_vert_rounded),
               tooltip: 'Más opciones',
               onSelected: (v) async {

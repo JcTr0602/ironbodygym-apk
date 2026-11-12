@@ -1821,12 +1821,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             ).then((_) => _cargar()),
             child: Row(
               children: [
-                const IconoModuloBadge(
-                  icono: Icons.bar_chart_rounded,
-                  tinte: Colors.blue,
-                  iconoOscuro: AppColores.azulAguaOscuro,
-                  iconoClaro: AppColores.azulAguaClaro,
-                ),
+                // 1.33 (diseño): «Estadísticas» no es agua:
+                // su badge azul prestado pasa al de marca,
+                // como el resto de filas de módulo.
+                IconoModuloBadge.naranja(Icons.bar_chart_rounded),
                 const SizedBox(width: AppEspacio.sm),
                 Expanded(
                   child: Column(

@@ -498,6 +498,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         ),
         trailing: puedeEditar
             ? PopupMenuButton<String>(
+                popUpAnimationStyle: estiloAparicionMenu,
                 onSelected: (v) {
                   if (v == 'editar') {
                     _mostrarFormulario(context, m);

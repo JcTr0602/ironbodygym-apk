@@ -42,7 +42,6 @@ import 'package:ironbody_gym/ui/pago_diario.dart';
 import 'package:ironbody_gym/ui/pendiente.dart';
 import 'package:ironbody_gym/ui/pilar_clientes.dart';
 import 'package:ironbody_gym/ui/pilar_negocio.dart';
-import 'package:ironbody_gym/ui/pilar_tienda.dart';
 import 'package:ironbody_gym/ui/publicador.dart';
 import 'package:ironbody_gym/ui/salud_sync_screen.dart';
 import 'package:ironbody_gym/ui/servicios.dart';
@@ -572,11 +571,13 @@ void main() {
       await probarDock('dock-inscribir', InscribirScreen);
       await probarDock('dock-gasto', GastosScreen);
       await probarDock('dock-suplemento', SuplementosScreen);
-      // Servicio: salta al Pilar 3 (Tienda con Servicios).
-      await tester.tap(find.byKey(const ValueKey('dock-servicio')));
-      await _drenar(tester, vueltas: 6, ms: 80);
-      expect(find.byType(PilarTienda), findsOneWidget);
-      expect(find.byType(ServiciosScreen), findsOneWidget);
+      // Servicio (1.33, decisión de Jc): el Dock es de
+      // acciones — abre DIRECTO la pantalla de vender
+      // (ServiciosScreen como ruta, en su zona Vender),
+      // como los demás botones del Dock. En la 1.32 solo
+      // saltaba al Pilar Tienda (mismo destino que la
+      // pestaña: la redundancia que Jc cazó en campo).
+      await probarDock('dock-servicio', ServiciosScreen);
       _sinExcepciones(tester);
       await _cerrarCascara(tester);
     });
