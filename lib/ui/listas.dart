@@ -809,6 +809,7 @@ class _ListasScreenState extends State<ListasScreen>
                     },
                   ),
                 PopupMenuButton<String>(
+                  popUpAnimationStyle: estiloAparicionMenu,
                   tooltip: 'Ordenar la lista',
                   icon: const Icon(Icons.sort_rounded),
                   onSelected: (v) => setState(() {

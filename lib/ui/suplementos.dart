@@ -460,6 +460,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           // todo lo demás por bloques (Vender / Consultar /
           // Administrar).
           PopupMenuButton<String>(
+            popUpAnimationStyle: estiloAparicionMenu,
             icon: const Icon(Icons.more_vert_rounded),
             tooltip: 'Más opciones',
             onSelected: (v) async {

@@ -121,6 +121,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                             onTap: () => _vistaPrevia(p),
                             trailing: AuthService().isOwner
                                 ? PopupMenuButton<String>(
+                                    popUpAnimationStyle: estiloAparicionMenu,
                                     onSelected: (v) async {
                                       if (v == 'editar') {
                                         await _editarPlantilla(

@@ -209,6 +209,7 @@ class _DetalleIncidenciaScreenState
               (!inc.estaResuelta ||
                   AuthService().isOwner))
             PopupMenuButton<String>(
+              popUpAnimationStyle: estiloAparicionMenu,
               icon: const Icon(Icons.more_vert_rounded),
               onSelected: _cambiarEstado,
               itemBuilder: (ctx) {

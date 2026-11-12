@@ -726,6 +726,21 @@ class AppMovimiento {
   static const curvaPop = Curves.easeOutBack;
 }
 
+/// 1.33 (diseño): el estilo de aparición de los menús
+/// desplegables de la casa — fundido de la duración media
+/// con la curva suave de la casa (la ruta además escalona
+/// la entrada de los ítems). En esta versión de Flutter el
+/// estilo NO es tematizable (PopupMenuThemeData no lo
+/// expone): se aplica con esta constante en cada
+/// PopupMenuButton y showMenu de la app. Sin ella, la ruta
+/// usa los 300 ms lineales del framework y el menú se lee
+/// como aparición de golpe.
+const estiloAparicionMenu = AnimationStyle(
+  duration: AppMovimiento.media,
+  curve: AppMovimiento.curvaSuave,
+  reverseCurve: AppMovimiento.curvaReversa,
+);
+
 /// Sombras sutiles (gama media: permitidas, sin exagerar).
 ///
 /// 1.29 OG-0 (D-18): queda UN solo lenguaje de elevación —
@@ -810,6 +825,11 @@ class AppTema {
         backgroundColor: AppColores.grafitoTactico,
       ),
       cardTheme: base.cardTheme.copyWith(color: AppColores.grafitoTactico),
+      // 1.33 (diseño): los menús flotan sobre la superficie
+      // táctica, como las tarjetas y los diálogos.
+      popupMenuTheme: base.popupMenuTheme.copyWith(
+        color: AppColores.grafitoTactico,
+      ),
       dialogTheme: base.dialogTheme.copyWith(
         backgroundColor: AppColores.grafitoTactico,
       ),
@@ -859,6 +879,9 @@ class AppTema {
         ),
       ),
       dialogTheme: base.dialogTheme.copyWith(backgroundColor: Colors.white),
+      // 1.33 (diseño): menús sobre blanco en el Modo Sol,
+      // como el resto de superficies emergentes.
+      popupMenuTheme: base.popupMenuTheme.copyWith(color: Colors.white),
       bottomSheetTheme:
           base.bottomSheetTheme.copyWith(backgroundColor: Colors.white),
       navigationBarTheme: base.navigationBarTheme.copyWith(
@@ -1126,6 +1149,33 @@ class AppTema {
           // probable del rediseño.
           minimumSize: const Size(48, 48),
         ),
+      ),
+      // 1.33 (diseño): los menús desplegables no tenían
+      // tema y heredaban los defectos del framework: el
+      // color por defecto es el surfaceContainer del
+      // esquema — sembrado en naranja, sale el rectángulo
+      // MARRÓN/carmelita que Jc vio en el menú del avatar —
+      // con esquinas casi rectas y la animación lineal de
+      // 300 ms de serie, que se lee como aparición de
+      // golpe. Aquí quedan la superficie de la casa, el
+      // radio grande con borde y la sombra propia; el
+      // ESTILO de aparición no es tematizable en esta
+      // versión de Flutter (PopupMenuThemeData no lo
+      // expone) y va en la constante compartida
+      // [estiloAparicionMenu], aplicada en cada
+      // PopupMenuButton/showMenu de la app. Lo demás lo
+      // heredan los 12 PopupMenuButton y el showMenu;
+      // los DropdownButton no pasan por esta ruta (su
+      // menú es del propio control).
+      popupMenuTheme: PopupMenuThemeData(
+        color: superficie,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.4),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+          side: BorderSide(color: borde),
+        ),
+        textStyle: AppTexto.cuerpo.copyWith(color: texto),
       ),
       progressIndicatorTheme:
           const ProgressIndicatorThemeData(color: AppColores.naranja),

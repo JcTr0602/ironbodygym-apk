@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 
 import '../sync.dart';
 import '../theme.dart';
+import 'componentes.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 
@@ -198,22 +199,80 @@ class CabeceraMarco extends StatelessWidget {
     );
   }
 
+  /// 1.33 (diseño): la fila de un destino del menú del
+  /// avatar: icono en chip con tinte (marca; rojo de error
+  /// al cerrar sesión) y la etiqueta al lado.
+  Widget _filaMenu(BuildContext context, IconData icono, String texto,
+      {bool salir = false}) {
+    return Row(
+      children: [
+        if (salir)
+          IconoModuloBadge(
+            icono: icono,
+            tinte: AppColores.error,
+            iconoOscuro: AppColores.coral,
+            iconoClaro: AppColores.carmesi,
+            tamanoIcono: 19,
+          )
+        else
+          IconoModuloBadge.naranja(icono, tamanoIcono: 19),
+        const SizedBox(width: AppEspacio.md),
+        Text(
+          texto,
+          style: salir
+              ? AppTexto.cuerpo.copyWith(
+                  color: AppColores.rojoDe(context),
+                  fontWeight: FontWeight.w600)
+              : AppTexto.cuerpo,
+        ),
+      ],
+    );
+  }
+
   Widget _avatar(BuildContext context) {
     final inicial =
         nombre.trim().isEmpty ? '?' : nombre.trim()[0].toUpperCase();
     return PopupMenuButton<String>(
+      popUpAnimationStyle: estiloAparicionMenu,
       key: const ValueKey('marco-perfil'),
       tooltip: 'Mi perfil',
       onSelected: onAccionPerfil,
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'perfil', child: Text('Mi perfil y ajustes')),
-        PopupMenuItem(value: 'auditoria', child: Text('Auditoría')),
-        PopupMenuItem(value: 'respaldo', child: Text('Respaldo')),
-        PopupMenuItem(value: 'diagnostico', child: Text('Diagnóstico')),
-        PopupMenuItem(value: 'ayuda', child: Text('Ayuda')),
-        PopupMenuItem(value: 'tema', child: Text('Tema claro/oscuro')),
-        PopupMenuDivider(),
-        PopupMenuItem(value: 'salir', child: Text('Cerrar sesión')),
+      // 1.33 (diseño): cada destino del menú lleva su
+      // icono en el chip de marca de la casa, como el
+      // resto de filas de la app — antes era texto pelado
+      // sobre el rectángulo marrón sin tema («parece HTML
+      // de hace 20 años»). La superficie, las esquinas y
+      // la transición salen del popupMenuTheme de la casa;
+      // «Cerrar sesión» se diferencia en rojo de error.
+      itemBuilder: (ctx) => [
+        PopupMenuItem(
+            value: 'perfil',
+            child: _filaMenu(ctx, Icons.person_rounded,
+                'Mi perfil y ajustes')),
+        PopupMenuItem(
+            value: 'auditoria',
+            child:
+                _filaMenu(ctx, Icons.fact_check_rounded, 'Auditoría')),
+        PopupMenuItem(
+            value: 'respaldo',
+            child: _filaMenu(ctx, Icons.backup_rounded, 'Respaldo')),
+        PopupMenuItem(
+            value: 'diagnostico',
+            child: _filaMenu(
+                ctx, Icons.monitor_heart_rounded, 'Diagnóstico')),
+        PopupMenuItem(
+            value: 'ayuda',
+            child: _filaMenu(ctx, Icons.help_rounded, 'Ayuda')),
+        PopupMenuItem(
+            value: 'tema',
+            child: _filaMenu(
+                ctx, Icons.brightness_6_rounded, 'Tema claro/oscuro')),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+            value: 'salir',
+            child:
+                _filaMenu(ctx, Icons.logout_rounded, 'Cerrar sesión',
+                    salir: true)),
       ],
       // 1.32 (integración, RD-3): el avatar es la ÚNICA
       // puerta a Respaldo, Auditoría, Diagnóstico y Ayuda

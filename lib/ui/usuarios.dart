@@ -652,6 +652,7 @@ Hola $username, estas son tus credenciales para la app del gym:
                         trailing: esDueno
                             ? null
                             : PopupMenuButton<String>(
+                                popUpAnimationStyle: estiloAparicionMenu,
                                 onSelected: (v) {
                                   if (v == 'cambiar_rol') {
                                     _cambiarRol(username, rol);
