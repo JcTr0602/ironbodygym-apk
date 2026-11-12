@@ -151,30 +151,39 @@ void main() {
     });
 
     test('Home lo usa en sus dos sitios (fuente)', () {
+      // 1.32 (pin E5): los dos sitios se jubilaron con la
+      // Home clásica — el contador del segmento de niveles
+      // (la navegación es hoy la BarraPilares) y la insignia
+      // de la campana sobre la cabecera carbón (la cabecera
+      // es la del marco: los pendientes los canta el pulso
+      // de la píldora de sync, sin campana). El componente
+      // ContadorUrgente queda sin consumidores en lib/ (su
+      // garantía de forma la sigue fijando el widget test
+      // de este grupo); el pin pasa a fijar la jubilación
+      // para que nadie lo reenganche a la Home sin querer.
       final f = File('lib/ui/home.dart').readAsStringSync();
-      expect(f, contains('ContadorUrgente(numero: contador)'),
-          reason: 'el contador del segmento');
-      expect(f, contains('numero: insignia!, conBorde: true'),
-          reason: 'la insignia de la campana, con borde sobre '
-              'la cabecera carbón');
+      expect(f, isNot(contains('ContadorUrgente(')),
+          reason: 'la Home del Mostrador no usa el contador');
+      expect(f, isNot(contains('conBorde: true')),
+          reason: 'la campana de la cabecera carbón se jubiló');
     });
   });
 
   group('D1 · UI130-01 frentes sobre gradientes (fuente)', () {
     test('el glifo del dial va en sobreMarca', () {
+      // 1.32 (pin E5): el FAB del dial se jubiló con la
+      // Home clásica (como en los pines T8 de bloque5 y el
+      // cabo FAB de la oleada9): home.dart ya no pinta
+      // ningún frente sobre gradienteDial. La garantía de
+      // fondo (todo glifo sobre la marca va en sobreMarca)
+      // la hereda la acción primaria del Dock del marco
+      // («Cobrar» sobre naranja pleno, icono en sobreMarca).
       final f = File('lib/ui/home.dart').readAsStringSync();
-      // El FAB del dial es el bloque que sigue al gradiente
-      // tokenizado (otros bolt_rounded de la pantalla son
-      // segmentos/acciones y no pintan sobre el gradiente).
-      final i = f.indexOf('gradient: AppColores.gradienteDial');
-      expect(i, isNonNegative);
-      // 1.30 (D2, UI130-06): la ventana crece a 2000 — el
-      // bloque del FAB ganó los comentarios de la oleada
-      // (el frasco de dosis) y el color del glifo quedaba
-      // fuera de los 1200 originales; la garantía es la
-      // misma: el glifo del FAB va en sobreMarca.
-      expect(f.substring(i, i + 2000),
-          contains('color: AppColores.sobreMarca'));
+      expect(f, isNot(contains('gradient: AppColores.gradienteDial')),
+          reason: 'el dial y su FAB salieron de la Home');
+      final marco = File('lib/ui/marco.dart').readAsStringSync();
+      expect(marco, contains('AppColores.sobreMarca'),
+          reason: 'el glifo sobre la marca vive en el Dock');
     });
 
     test('«Lo Nuevo» de Ayuda: cabecera carbón, chip carbonProfundo, '
@@ -207,9 +216,16 @@ void main() {
       expect(gym, contains('AppColores.textoNaranja(context)'));
       expect(gym, isNot(contains('color: AppColores.naranja')),
           reason: 'en GymPedia la marca ya no colorea ningún texto');
-      final home = File('lib/ui/home.dart').readAsStringSync();
-      expect(home, contains('color: AppColores.textoNaranja(context)'),
-          reason: 'el chip de rol');
+      // 1.32 (pin E5): el chip de rol salió de home.dart
+      // con la cabecera clásica — el del marco
+      // (CabeceraMarco, key marco-rol) se pinta en COBALTO
+      // por decisión del rediseño, no con la marca como
+      // texto; el pin re-ancla ahí su rastro.
+      final marco = File('lib/ui/marco.dart').readAsStringSync();
+      expect(marco, contains("ValueKey('marco-rol')"),
+          reason: 'el chip de rol vive en la cabecera del marco');
+      expect(marco, contains('color: AppColores.cobaltoDe(context)'),
+          reason: 'el chip de rol del marco va en cobalto');
       final ins = File('lib/ui/inscribir.dart').readAsStringSync();
       expect(ins, contains('AppColores.textoNaranja(context)'),
           reason: 'la etiqueta del paso activo');
