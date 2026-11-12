@@ -6782,10 +6782,25 @@ class SyncEngine {
           final t0 = DateTime.now();
           http.Response? rTmp;
           try {
+            // 1.32 (O2F2S, síntesis AP-1): la aplicación de
+            // filas se ACOTA a la foto confirmada leída al
+            // inicio de la corrida (serverSeq de sync_estado).
+            // El downlink publica las tablas en llamadas
+            // separadas y el server_seq global solo al final:
+            // sin cota, durante la ventana de publicación un
+            // teléfono aplicaba filas a medio publicar (un
+            // cliente nuevo visible SIN su pago: parecía
+            // vencido). Lo que quede por encima de la foto
+            // baja en la corrida siguiente, cuando la foto
+            // lo cubra. Sin foto (la lectura de sync_estado
+            // falló) no hay cota — y la corrida no sella
+            // (F-1/F-2).
             rTmp = await _getAuth(
                 Uri.parse(
                     '$_base/rest/v1/$supTabla?select=$select'
-                    '&sync_seq=gt.$pageWm&order=sync_seq.asc'
+                    '&sync_seq=gt.$pageWm'
+                    '${serverSeq != null ? '&sync_seq=lte.$serverSeq' : ''}'
+                    '&order=sync_seq.asc'
                     '&limit=${escalera.limite}'),
                 // H-03: solo las tablas que purgan piden el conteo
                 // exacto (cuesta un COUNT(*) por página en el
@@ -7576,9 +7591,18 @@ class SyncEngine {
         // de borrados tampoco toca la red (la bajada ya se
         // declaró incompleta en el bucle de tablas).
         if (corte != null && corte.agotado) break;
+        // AP-1: los tombstones comparten la secuencia
+        // global y la misma ventana de publicación — la
+        // misma cota de la foto confirmada que en el bucle
+        // de tablas (una tumba por encima de la foto
+        // borraría algo que la foto aún declara vivo; el
+        // cursor solo avanza al máximo aplicado, como
+        // siempre).
         final r = await _getAuth(Uri.parse('$_base/rest/v1/sync_borrados'
             '?select=entidad,entidad_id,sync_seq'
-            '&sync_seq=gt.$pageWm&order=sync_seq.asc&limit=100'));
+            '&sync_seq=gt.$pageWm'
+            '${serverSeq != null ? '&sync_seq=lte.$serverSeq' : ''}'
+            '&order=sync_seq.asc&limit=100'));
         // v1.3.1 (Argón pull): mismo tratamiento que las tablas de datos.
         // SB-04: 400 = error de contrato, no «ausente»: queda
         // registrado y la pasada de borrados se marca fallida
