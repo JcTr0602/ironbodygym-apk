@@ -4789,15 +4789,25 @@ class LocalDb {
   /// — no había nada que borrar —; cualquier otro error sí se
   /// reporta para que el llamador no dé la purga por completa.
   Future<({int borradas, List<String> fallos})> borrarEspejosConfirmados(
-      List<String> tablas) async {
+      List<String> tablas,
+      {Map<String, Set<int>> excluirIds = const {}}) async {
     final d = await db;
     var borradas = 0;
     final fallos = <String>[];
     await d.transaction((txn) async {
       for (final t in tablas) {
         try {
-          borradas +=
-              await txn.rawDelete('DELETE FROM "$t" WHERE sync_seq > 0');
+          // 1.32 (O2F2S, adjudicación F-19): subconjunto
+          // exceptuado por tabla — las filas tocadas por
+          // ops VIVAS no se borran ni en el resync por
+          // cambio de huella (la re-bajada las fusiona con
+          // la guarda F-18 en vez de destruirlas).
+          final excl = excluirIds[t];
+          final clausula = (excl != null && excl.isNotEmpty)
+              ? ' AND id NOT IN (${excl.join(',')})'
+              : '';
+          borradas += await txn.rawDelete(
+              'DELETE FROM "$t" WHERE sync_seq > 0$clausula');
         } catch (e) {
           if (!'$e'.contains('no such table')) fallos.add(t);
         }
@@ -5883,6 +5893,49 @@ class LocalDb {
       }
       return true;
     });
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-18): ids de clientes
+  /// referenciados por alguna op VIVA (el payload trae
+  /// cliente_id) — el criterio de [refrescarMirrorCliente]
+  /// en forma de conjunto, para la guarda del commit por
+  /// página del pull: mientras la op viva, la bajada no
+  /// pisa las llaves optimistas de ese cliente.
+  Future<Set<int>> clientesConOpViva() async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['payload'],
+        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+    final ids = <int>{};
+    for (final r in rows) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        final id = int.tryParse('${p['cliente_id']}');
+        if (id != null) ids.add(id);
+      } catch (_) {}
+    }
+    return ids;
+  }
+
+  /// 1.32 (O2F2S, F-18): ids de pagos referenciados por
+  /// alguna op VIVA (el payload trae pago_id: anular_pago,
+  /// editar_pago y afines).
+  Future<Set<int>> pagosConOpViva() async {
+    final d = await db;
+    final rows = await d.query('ops_queue',
+        columns: ['payload'],
+        where: "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+    final ids = <int>{};
+    for (final r in rows) {
+      try {
+        final p =
+            jsonDecode(r['payload'] as String) as Map<String, dynamic>;
+        final id = int.tryParse('${p['pago_id']}');
+        if (id != null) ids.add(id);
+      } catch (_) {}
+    }
+    return ids;
   }
 
   /// Actualización optimista de la tarifa especial por transferencia
