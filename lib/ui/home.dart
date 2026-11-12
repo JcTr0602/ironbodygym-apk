@@ -1492,8 +1492,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// mostrador rápido vive ahora en el Dock al pie (a las
   /// vistas llega retirado) y la búsqueda en la lupa de la
   /// cabecera; el botón grande de buscar se conserva como
-  /// primer elemento, como siempre. El dueño estrena la
-  /// bandeja «Por Decidir» sobre el Pulso (Compuerta 1).
+  /// primer elemento, como siempre. El dueño ve primero
+  /// las Estadísticas Rápidas y justo debajo la bandeja
+  /// «Por Decidir» (orden de Jc en la 1.33; en la 1.32 la
+  /// bandeja iba sobre el Pulso por la Compuerta 1).
   List<Widget> _seccionesMostrador(bool esDueno) {
     if (esDueno) {
       return _VistaHoyDueno(
@@ -2788,10 +2790,11 @@ class _HomeScreenState extends State<HomeScreen>
 }
 
 /// La vista del Mostrador del DUEÑO (1.30 D2 la ordenó;
-/// la 1.32 la reordena con el veredicto g132). Recibe las
+/// la 1.32 la reordena con el veredicto g132; la 1.33 la
+/// reordena por orden de Jc en campo). Recibe las
 /// secciones ya construidas y solo las ordena:
-/// mostrador → Por Decidir → Estadísticas Rápidas
-/// (Pulso) → bandeja → buzón → alertas. La tarjeta de
+/// mostrador → Estadísticas Rápidas (Pulso) → Por
+/// Decidir → bandeja → buzón → alertas. La tarjeta de
 /// Administración de la 1.30 se jubiló: sus contadores
 /// viven en Por Decidir y sus destinos en el Pilar
 /// Negocio. Las secciones entran en cascada (fundación
@@ -2844,29 +2847,17 @@ class _VistaHoyDueno extends StatelessWidget {
           ),
         ),
       ),
-      // 1.32: la bandeja «Por Decidir» manda sobre el
-      // Pulso: primero lo que espera una decisión del
-      // dueño (Compuerta 1 del veredicto g132). La vieja
-      // tarjeta de Administración se funde aquí (sus
-      // contadores de atención) y en el Pilar 4 (sus
-      // destinos).
-      KeyedSubtree(
-        key: const ValueKey('hoy-pordecidir'),
-        child: ItemCascada(
-          indice: 1,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: porDecidir,
-          ),
-        ),
-      ),
-      // v1.3.3: tarjeta financiera por rol.
+      // v1.3.3: tarjeta financiera por rol («Estadísticas
+      // Rápidas»). 1.33 (orden de Jc en campo, 2026-11-12):
+      // las Estadísticas abren el Mostrador — es lo que
+      // mira cada vez que entra en la app — y «Por Decidir»
+      // baja justo debajo (siguiente bloque), sin perder
+      // su conteo visible de pendientes.
       if (bloquesHoy.contains('finanzas'))
         KeyedSubtree(
           key: const ValueKey('hoy-finanzas'),
           child: ItemCascada(
-            indice: 2,
+            indice: 1,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
@@ -2874,6 +2865,25 @@ class _VistaHoyDueno extends StatelessWidget {
             ),
           ),
         ),
+      // La bandeja «Por Decidir» (Compuerta 1 del
+      // veredicto g132 en la 1.32; reordenada por Jc en
+      // la 1.33): inmediatamente tras las Estadísticas,
+      // siempre visible para el dueño con su titular de
+      // pendientes — nada urgente se esconde. La vieja
+      // tarjeta de Administración se funde aquí (sus
+      // contadores de atención) y en el Pilar 4 (sus
+      // destinos).
+      KeyedSubtree(
+        key: const ValueKey('hoy-pordecidir'),
+        child: ItemCascada(
+          indice: 2,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: porDecidir,
+          ),
+        ),
+      ),
       // Zona 4 — Atención hoy: la bandeja del dueño,
       // sobre la tira de alertas. SOLO del dueño (abre
       // su WhatsApp y el check vive en su teléfono).

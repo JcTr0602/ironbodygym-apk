@@ -318,16 +318,18 @@ void main() {
       final vista = home.substring(ini, fin);
       expect(
           vista.indexOf("ValueKey('hoy-mostrador')") <
-              vista.indexOf("ValueKey('hoy-pordecidir')"),
+              vista.indexOf("ValueKey('hoy-finanzas')"),
           isTrue);
       expect(
-          vista.indexOf("ValueKey('hoy-pordecidir')") <
-              vista.indexOf("ValueKey('hoy-finanzas')"),
+          vista.indexOf("ValueKey('hoy-finanzas')") <
+              vista.indexOf("ValueKey('hoy-pordecidir')"),
           isTrue,
-          reason: 'la 1.32 pone Por Decidir entre el '
-              'mostrador y Estadísticas Rápidas, en el '
-              'lugar que UI130-23 daba a Administración '
-              '(sus contadores viven ahí ahora)');
+          reason: 'la 1.33 (orden de Jc en campo, '
+              '2026-11-12) pone las Estadísticas Rápidas '
+              'PRIMERO — es lo que mira al abrir la app — '
+              'y «Por Decidir» justo debajo con su conteo '
+              'visible; en la 1.32 el orden era el inverso '
+              '(Compuerta 1 del veredicto g132)');
       expect(
           vista.indexOf("ValueKey('hoy-bandeja')") <
               vista.indexOf("ValueKey('hoy-alertas')"),
