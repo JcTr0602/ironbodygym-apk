@@ -77,7 +77,7 @@ Future<Map<String, dynamic>> _esquemaCanonico(Database db) async {
       final iname = i['name'] as String;
       final colsIdx = await db.rawQuery('PRAGMA index_info($iname)');
       mapaIdx[iname] =
-          colsIdx.map((r) => r['name']).join(',') + '|u=${i['unique']}';
+          '${colsIdx.map((r) => r['name']).join(',')}|u=${i['unique']}';
     }
     salida[nombre] = {'cols': mapaCols, 'idx': mapaIdx};
   }

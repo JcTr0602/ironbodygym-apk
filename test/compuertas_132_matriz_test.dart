@@ -15,7 +15,6 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -277,7 +276,8 @@ void main() {
     databaseFactory = databaseFactoryFfiNoIsolate;
     await _cargarRobotoReal();
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(
+        url: 'http://127.0.0.1:9', publishableKey: 'dummy');
     final docs = await Directory.systemTemp.createTemp('comp132_docs');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
