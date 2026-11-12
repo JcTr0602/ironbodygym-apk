@@ -263,7 +263,11 @@ class _PilarNegocioState extends State<PilarNegocio> {
               onTap: accion,
               child: Row(
                 children: [
-                  Icon(icono, color: AppColores.cobaltoDe(context)),
+                  // 1.33 (diseño): fila-destino del pilar en
+                  // chip de marca — este constructor compartido
+                  // pinta Equipo, App y Reglas y Mis Turnos:
+                  // la corrección cascada a sus 19 destinos.
+                  IconoModuloBadge.naranja(icono),
                   const SizedBox(width: AppEspacio.md),
                   Expanded(
                     child: Column(
@@ -548,7 +552,11 @@ class _TabCajaState extends State<_TabCaja> {
         onTap: accion,
         child: Row(
           children: [
-            Icon(icono, color: AppColores.cobaltoDe(context)),
+            // 1.33 (diseño): los enlaces de «Caja y Arqueo»
+            // (Arqueo, Historial, Diferencias, Conciliación,
+            // Gastos) en el mismo chip de marca que el resto
+            // de filas-destino del pilar.
+            IconoModuloBadge.naranja(icono),
             const SizedBox(width: AppEspacio.md),
             Expanded(
               child: Column(
