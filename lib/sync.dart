@@ -43,6 +43,7 @@ import 'config.dart';
 import 'errores_sync.dart';
 import 'fotos.dart';
 import 'fotos_cola.dart';
+import 'huella_sync.dart';
 import 'localdb.dart';
 import 'perfil.dart';
 import 'tiempo.dart';
@@ -1402,6 +1403,8 @@ class SyncEngine {
   // sigue y el hueco se declara, jamás se inventa.
   String? _diarioCorridaId;
   Stopwatch? _diarioCronometro;
+  String? _diarioTipoProv;
+  String? _diarioOrigenProv;
   String? _diarioEstadoProv;
   String? _diarioMotivoProv;
   String? _diarioErrorProv;
@@ -1412,6 +1415,22 @@ class SyncEngine {
   int _diarioFotosSubidas = 0;
   int _diarioFotosFallidas = 0;
   int _diarioComprobantes = 0;
+
+  /// 1.32 (Escalón 5, M5 lado app): emisor de la huella del
+  /// dispositivo en `public.sync_dispositivos`. Su transporte
+  /// es el `_postAuth` del motor con el timeout duro de 12 s de
+  /// la pieza; el emisor traga TODO error (la tabla puede no
+  /// existir aún: la crea la fase de servidor) y jamás bloquea
+  /// el cierre de la corrida — se invoca con `unawaited`.
+  late final HuellaSync _huella = HuellaSync(
+    transporte: (url, headers, cuerpo) async {
+      final r = await _postAuth(url,
+          headers: headers,
+          body: cuerpo,
+          timeout: const Duration(seconds: 12));
+      return r.statusCode;
+    },
+  );
 
   /// 1.32 (O2F2S, Pieza 4 — cierre del agujero del sello
   /// falso de la incidencia Duany; forma adjudicada por
@@ -1916,6 +1935,8 @@ class SyncEngine {
     String? disparador,
   }) async {
     _diarioCorridaId = null;
+    _diarioTipoProv = null;
+    _diarioOrigenProv = null;
     _diarioEstadoProv = null;
     _diarioMotivoProv = null;
     _diarioErrorProv = null;
@@ -1939,6 +1960,8 @@ class SyncEngine {
           }
         } catch (_) {}
       }
+      _diarioTipoProv = tipo;
+      _diarioOrigenProv = org;
       _diarioCorridaId = await DiarioSync.instance.abrirCorrida(
         tipo: tipo,
         origen: org,
@@ -2069,7 +2092,7 @@ class SyncEngine {
         wmMinCierre =
             await _db.getWatermarkMinimo(esAdmin: _esAdminSeguro);
       } catch (_) {}
-      await DiarioSync.instance.cerrarCorrida(
+      final quedoEnDiario = await DiarioSync.instance.cerrarCorrida(
         id,
         estado: estado,
         duracionMs: _diarioCronometro?.elapsedMilliseconds ?? 0,
@@ -2084,8 +2107,65 @@ class SyncEngine {
         errorDetalle:
             _diarioErrorProv ?? (errorFn != null ? '$errorFn' : null),
       );
+      if (quedoEnDiario) {
+        // M5 (Escalón 5): la huella del dispositivo se emite
+        // FUERA del camino del cierre — red con timeout de
+        // 12 s que jamás retiene el candado, jamás desella la
+        // corrida y jamás se ve como op por subir. Los valores
+        // se capturan AHORA en parámetros: los campos prov. los
+        // reutiliza la siguiente corrida.
+        unawaited(_huellaTrasCierre(
+          corridaId: id,
+          tipo: _diarioTipoProv,
+          origen: _diarioOrigenProv,
+          estado: estado,
+          subidos: _diarioSubidosProv,
+          bajados: _diarioBajadosProv,
+          serverSeq: serverSeqCierre,
+          watermarkMin: wmMinCierre,
+        ));
+      }
     } catch (e) {
       AppLog.error('sync', 'diario_cerrar_fallo', d: '$e');
+    }
+  }
+
+  /// 1.32 (Escalón 5, M5 lado app): reúne lo que la huella
+  /// necesita (sesión, device_tag, conteos locales perezosos) y
+  /// delega en [HuellaSync.registrarCierre], que nunca lanza.
+  /// Si la propia recolección falla, se anota y se sigue: la
+  /// huella es secundaria — registrar nunca frena la sync
+  /// (principio del sistema de detalle).
+  Future<void> _huellaTrasCierre({
+    required String corridaId,
+    required String? tipo,
+    required String? origen,
+    required String estado,
+    required int subidos,
+    required int bajados,
+    required int? serverSeq,
+    required int? watermarkMin,
+  }) async {
+    try {
+      await _huella.registrarCierre(
+        userId: _auth.userId,
+        deviceTag: await deviceTag(),
+        corridaId: corridaId,
+        tipo: tipo ?? TipoCorrida.completa,
+        origen: origen ?? OrigenCorrida.automatica,
+        estado: estado,
+        subidos: subidos,
+        bajados: bajados,
+        serverSeq: serverSeq,
+        watermarkMin: watermarkMin,
+        rol: _esAdminSeguro ? 'dueno' : 'entrenador',
+        versionApp: AppConfig.appVersion,
+        ahoraEpoch: ahoraUtcReal().millisecondsSinceEpoch ~/ 1000,
+        obtenerConteos: () => DiarioSync.instance
+            .conteosLocales(tablasEspejoActivasParaRol(_esAdminSeguro)),
+      );
+    } catch (e) {
+      AppLog.error('sync', 'huella_tras_cierre_fallo', d: '$e');
     }
   }
 
