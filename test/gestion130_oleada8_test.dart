@@ -216,8 +216,15 @@ void main() {
       // real fijada por el test de contraste.
       final conteo = contar(RegExp(r'Color\(0x'),
           excluir: {'lib/ui/diseno.dart'});
+      // 1.32 (E5): cierre_nomina_imagen pasa a 11 — la
+      // Pieza 2 de la Fase 3 (pie único de tarjetas-imagen,
+      // 9b0d955) añadió un Divider con el MISMO literal de
+      // divisor que el archivo ya usaba dos veces
+      // (0xFF333338, lienzo oscuro fijo de la imagen que se
+      // comparte): es la excepción declarada de siempre,
+      // un uso más, no un literal de tema nuevo.
       expect(conteo, {
-        'lib/ui/cierre_nomina_imagen.dart': 10,
+        'lib/ui/cierre_nomina_imagen.dart': 11,
         'lib/ui/componentes.dart': 6,
         'lib/ui/vista_previa_cliente.dart': 9,
         'lib/ui/suplementos.dart': 2,
@@ -252,6 +259,13 @@ void main() {
         'lib/ui/capa_candado.dart': 1,
         'lib/ui/cierre_mes.dart': 1,
         'lib/ui/vista_previa_cliente.dart': 1,
+        // 1.32 (E5): entra tarjeta_imagen con 3 — el pie
+        // compartido de las tarjetas-imagen (Fase 3,
+        // Pieza 2, 9b0d955) pinta su microtexto (11/10.5/11)
+        // sobre el lienzo fijo de la imagen que se comparte,
+        // la misma naturaleza que la excepción de
+        // vista_previa_cliente; no es texto de la UI temática.
+        'lib/ui/tarjeta_imagen.dart': 3,
       });
     });
 
