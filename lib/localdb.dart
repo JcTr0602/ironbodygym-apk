@@ -7935,39 +7935,33 @@ class LocalDb {
     // v1.12.0 (G1): 'rechazada' bloquea marcar synced — un comentario
     // rechazado por el servidor NO se marca como sincronizado (antes
     // se perdía en silencio como si hubiera subido).
-    const estadosPend =
-        "'pendiente','enviada','error','necesita_revision','rechazada'";
-    // v1.3.1 (Argón): dos ramas — con op_uuid se cruza por op_uuid; sin
-    // op_uuid (filas previas a la migración v22) se verifica que no haya
-    // ninguna op del TIPO correspondiente pendiente en la cola.
-    // Cada tabla usa solo sus tipos: un comentario atascado no bloquea
-    // las incidencias ni los tipos.
-    Future<void> marcarSelectivo(String tabla, String tiposTabla) async {
+    // 1.32 (O2F2S, síntesis AP-3): la forma anterior marcaba
+    // por AUSENCIA de op viva (NOT EXISTS en estados
+    // pendientes): una op cancelada, archivada o purgada de
+    // la cola dejaba la fila 'synced' como si el servidor la
+    // hubiera visto — un sello sin confirmación. Y las filas
+    // sin op_uuid se marcaban por inferencia de tipo. Ahora
+    // solo marca la EVIDENCIA POSITIVA: existe la op con el
+    // op_uuid de la fila y está 'aplicada'. Las filas sin
+    // op_uuid no se tocan: las resuelve el pull, no una
+    // inferencia.
+    Future<void> marcarSelectivo(String tabla) async {
       await d.rawUpdate('''
         UPDATE $tabla SET sync_estado='synced'
           ${tabla == 'incidencias_local' ? ', sincronizada=1' : ''}
-        WHERE sync_estado='pending' AND (
-          (op_uuid IS NOT NULL AND NOT EXISTS (
+        WHERE sync_estado='pending'
+          AND op_uuid IS NOT NULL
+          AND EXISTS (
             SELECT 1 FROM ops_queue
             WHERE ops_queue.op_uuid = $tabla.op_uuid
-              AND ops_queue.estado IN ($estadosPend)
-          ))
-          OR
-          (op_uuid IS NULL AND NOT EXISTS (
-            SELECT 1 FROM ops_queue
-            WHERE ops_queue.tipo IN ($tiposTabla)
-              AND ops_queue.estado IN ($estadosPend)
-          ))
-        )
+              AND ops_queue.estado = 'aplicada'
+          )
       ''');
     }
 
-    await marcarSelectivo('incidencias_local',
-        "'crear_incidencia','editar_incidencia','cambiar_estado_incidencia'");
-    await marcarSelectivo('incidencias_tipos',
-        "'upsert_tipo_incidencia','reordenar_tipos_incidencia'");
-    await marcarSelectivo(
-        'incidencias_comentarios', "'agregar_comentario_incidencia'");
+    await marcarSelectivo('incidencias_local');
+    await marcarSelectivo('incidencias_tipos');
+    await marcarSelectivo('incidencias_comentarios');
   }
 
   Future<void> upsertIncidenciaMirror(Map<String, dynamic> inc) async {

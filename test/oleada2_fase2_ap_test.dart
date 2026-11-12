@@ -339,6 +339,7 @@ void main() {
 
     test('publicación a medias: la fila por encima de la '
         'foto NO se aplica; al avanzar la foto, sí', () async {
+
       final db = LocalDb.instance;
       // Foto en 5: el servidor YA tiene al cliente 2
       // (seq 9) pero la foto confirmada no lo cubre.
@@ -358,6 +359,93 @@ void main() {
       filas = await (await db.db).query('clientes', columns: ['id']);
       expect(filas.map((f) => f['id']).toSet(), {1, 2},
           reason: 'con la foto completa, la fila se aplica');
+    });
+  });
+
+  group('AP-3 · synced solo con evidencia (BD)', () {
+    setUp(() async {
+      await _bdNuevaAp();
+    });
+
+    Future<void> opConEstado(
+        LocalDb db, String uuid, String tipo, String estado) async {
+      await db.queueOp(opUuid: uuid, tipo: tipo, payload: {'id': 'x'});
+      final d = await db.db;
+      await d.update('ops_queue', {'estado': estado},
+          where: 'op_uuid = ?', whereArgs: [uuid]);
+    }
+
+    test('op aplicada marca; cancelada/archivada/pendiente '
+        'y la fila sin op_uuid, no', () async {
+      final db = LocalDb.instance;
+      final d = await db.db;
+
+      // Tipos: las cuatro ramas.
+      await d.insert('incidencias_tipos', {
+        'id': 'tipo-ok', 'nombre': 'OK', 'sync_estado': 'pending',
+        'op_uuid': 'op-tipo-ok',
+      });
+      await d.insert('incidencias_tipos', {
+        'id': 'tipo-cx', 'nombre': 'CX', 'sync_estado': 'pending',
+        'op_uuid': 'op-tipo-cx',
+      });
+      await d.insert('incidencias_tipos', {
+        'id': 'tipo-pd', 'nombre': 'PD', 'sync_estado': 'pending',
+        'op_uuid': 'op-tipo-pd',
+      });
+      await d.insert('incidencias_tipos', {
+        'id': 'tipo-sin', 'nombre': 'SIN', 'sync_estado': 'pending',
+      });
+      await opConEstado(
+          db, 'op-tipo-ok', 'upsert_tipo_incidencia', 'aplicada');
+      await opConEstado(
+          db, 'op-tipo-cx', 'upsert_tipo_incidencia', 'cancelada');
+      await opConEstado(
+          db, 'op-tipo-pd', 'upsert_tipo_incidencia', 'pendiente');
+
+      // Incidencia local con op aplicada + comentario con
+      // op archivada.
+      await d.insert('incidencias_local', {
+        'id': 'inc-1', 'tipo': 'sync', 'descripcion': 'x',
+        'estado': 'pendiente', 'creada_por': 'Jc',
+        'creada_en': '2026-11-01T10:00:00-04:00',
+        'visibilidad': 'compartida', 'sync_estado': 'pending',
+        'op_uuid': 'op-inc-ok',
+      });
+      await opConEstado(db, 'op-inc-ok', 'crear_incidencia', 'aplicada');
+      await d.insert('incidencias_comentarios', {
+        'id': 'com-1', 'incidencia_id': 'inc-1', 'texto': 'hola',
+        'creado_por': 'Jc', 'creado_en': '2026-11-01T11:00:00-04:00',
+        'sync_estado': 'pending', 'op_uuid': 'op-com-ar',
+      });
+      await opConEstado(db, 'op-com-ar',
+          'agregar_comentario_incidencia', 'archivada');
+
+      await db.marcarTiposComentariosSincronizados();
+
+      Future<String?> estadoDe(String tabla, String id) async {
+        final r = await d.query(tabla,
+            columns: ['sync_estado'], where: 'id = ?', whereArgs: [id]);
+        return r.isEmpty ? null : '${r.first['sync_estado']}';
+      }
+
+      expect(await estadoDe('incidencias_tipos', 'tipo-ok'), 'synced',
+          reason: 'AP-3: la op aplicada ES evidencia positiva');
+      expect(await estadoDe('incidencias_tipos', 'tipo-cx'), 'pending',
+          reason: 'AP-3: la op cancelada no prueba que el '
+              'servidor viera la fila (antes se marcaba por '
+              'ausencia de op viva)');
+      expect(await estadoDe('incidencias_tipos', 'tipo-pd'), 'pending');
+      expect(await estadoDe('incidencias_tipos', 'tipo-sin'), 'pending',
+          reason: 'AP-3: sin op_uuid no se infiere por tipo: '
+              'la resuelve el pull');
+      expect(await estadoDe('incidencias_local', 'inc-1'), 'synced');
+      final inc = await d.query('incidencias_local',
+          columns: ['sincronizada'], where: 'id = ?', whereArgs: ['inc-1']);
+      expect(inc.first['sincronizada'], 1);
+      expect(await estadoDe('incidencias_comentarios', 'com-1'),
+          'pending',
+          reason: 'AP-3: op archivada tampoco es evidencia');
     });
   });
 }
