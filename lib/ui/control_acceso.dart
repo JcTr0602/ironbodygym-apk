@@ -1153,7 +1153,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       return ListTile(
                         dense: true,
                         leading: const Icon(
-                            Icons.info_outline_rounded,
+                            Icons.info_rounded,
                             color: AppColores.naranja,
                             size: 18),
                         title: Text(

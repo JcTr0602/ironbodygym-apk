@@ -199,26 +199,41 @@ void main() {
       // icono en naranja y la etiqueta en su color
       // normal. El naranja pleno se reserva a una acción
       // primaria por pantalla.
+      // 1.32 (pin E5): `_mostradorRapido()` se jubiló con
+      // la Home clásica — el dock vive ahora en el marco
+      // (DockMostrador, marco.dart) y la regla se conserva
+      // así: las acciones van sobre superficie elevada
+      // (surfaceContainerHighest) y el naranja pleno lo
+      // lleva SOLO la primaria («Cobrar», esCobrar), con
+      // su icono en sobreMarca.
       final home = File('lib/ui/home.dart').readAsStringSync();
-      final ini = home.indexOf('Widget _mostradorRapido()');
-      final fin = home.indexOf('Widget _cabecera()', ini);
+      expect(home.contains('DockMostrador('), isTrue,
+          reason: 'el Mostrador monta el dock del marco');
+      final marco = File('lib/ui/marco.dart').readAsStringSync();
+      final ini = marco.indexOf('class DockMostrador');
       expect(ini, greaterThanOrEqualTo(0));
-      expect(fin, greaterThan(ini));
-      final dock = home.substring(ini, fin);
-      expect(dock.contains('backgroundColor: AppColores.naranja'),
-          isFalse,
-          reason: 'UI130-06: fuera el naranja pleno del dock');
+      final dock = marco.substring(ini);
       expect(dock.contains('ElevatedButton'), isFalse,
           reason: 'el dock ya no es un botón de marca');
-      expect(dock.contains('color: AppColores.naranja'), isTrue,
-          reason: 'el acento vive en el icono');
+      expect(
+          dock.contains('surfaceContainerHighest'), isTrue,
+          reason: 'las acciones viven en superficie elevada');
+      expect(dock.contains('? AppColores.naranja'), isTrue,
+          reason: 'el naranja pleno es solo de la primaria');
+      expect(dock.contains('AppColores.sobreMarca'), isTrue,
+          reason: 'el acento de la primaria va en su icono');
     });
 
     test('el FAB del dial usa el token propio gradienteDial', () {
+      // 1.32 (pin E5): el speed dial y su FAB se jubilaron
+      // con la Home clásica (ver el pin T8 de bloque5): el
+      // token gradienteDial queda RESERVADO en diseno.dart
+      // con sus extremos de siempre — lo que este pin sigue
+      // fijando es que el literal no reaparece suelto en
+      // home.dart y que el token no cambió de valores.
       final home = File('lib/ui/home.dart').readAsStringSync();
-      expect(home.contains('AppColores.gradienteDial'), isTrue);
       expect(home.contains('Color(0xFFFF8A00)'), isFalse,
-          reason: 'el extremo del dial ya no es un literal '
+          reason: 'el extremo del dial no es un literal '
               'en home.dart: vive en diseno.dart');
       expect(AppColores.gradienteDial.colors,
           const [Color(0xFFFF8A00), Color(0xFFEA580C)],
