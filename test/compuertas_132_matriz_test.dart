@@ -42,7 +42,6 @@ import 'package:ironbody_gym/ui/pago_diario.dart';
 import 'package:ironbody_gym/ui/pendiente.dart';
 import 'package:ironbody_gym/ui/pilar_clientes.dart';
 import 'package:ironbody_gym/ui/pilar_negocio.dart';
-import 'package:ironbody_gym/ui/pilar_tienda.dart';
 import 'package:ironbody_gym/ui/publicador.dart';
 import 'package:ironbody_gym/ui/salud_sync_screen.dart';
 import 'package:ironbody_gym/ui/servicios.dart';
