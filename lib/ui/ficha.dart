@@ -2800,24 +2800,63 @@ class _FichaScreenState extends State<FichaScreen> {
                     ? _clienteNoEncontrado()
                     : Column(
                         children: [
-                          // 1.32: cabecera FIJA de la ficha
-                          // (foto, nombre, estado y la fila
-                          // Editar/Vender): no se desplaza ni
-                          // cambia con la pestaña.
+                          // Cabecera de la ficha (foto, nombre,
+                          // estado y la fila Editar/Vender): no
+                          // cambia con la pestaña. 1.33
+                          // (diseño, hallazgo de campo nº 1 de
+                          // Jc): la cabecera se PLIEGA en flujo
+                          // al bajar — la tarjeta grande se
+                          // sustituye por la barra compacta con
+                          // AnimatedSize + fundido, y al volver
+                          // arriba se despliega. La cabecera
+                          // vive FUERA de las listas: plegar no
+                          // mueve el offset de scroll (no hay
+                          // bucle) y la lista solo gana el
+                          // alto liberado. El umbral y el
+                          // estado son los de siempre
+                          // (_alMoverScrollFicha).
                           Padding(
                             padding: const EdgeInsets.fromLTRB(
                                 AppEspacio.lg,
                                 AppEspacio.lg,
                                 AppEspacio.lg,
                                 0),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (var i = 0;
-                                    i < itemsCabecera.length;
-                                    i++)
-                                  itemFicha(itemsCabecera[i], i),
-                              ],
+                            child: AnimatedSize(
+                              duration: AppMovimiento.media,
+                              curve: AppMovimiento.curvaSuave,
+                              alignment: Alignment.topCenter,
+                              child: AnimatedSwitcher(
+                                duration: AppMovimiento.media,
+                                switchInCurve:
+                                    AppMovimiento.curvaSuave,
+                                switchOutCurve:
+                                    AppMovimiento.curvaSuave,
+                                child: _cabeceraCompacta
+                                    ? KeyedSubtree(
+                                        key: const ValueKey(
+                                            'ficha-cabecera-compacta'),
+                                        child: _barraCompactaFicha(
+                                          nombre: nombre,
+                                          esCasa: esCasa,
+                                          congelado: pausado,
+                                          dias: dias,
+                                          colorMarco: colorMarco,
+                                        ),
+                                      )
+                                    : Column(
+                                        key: const ValueKey(
+                                            'ficha-cabecera-completa'),
+                                        mainAxisSize:
+                                            MainAxisSize.min,
+                                        children: [
+                                          for (var i = 0;
+                                              i < itemsCabecera.length;
+                                              i++)
+                                            itemFicha(
+                                                itemsCabecera[i], i),
+                                        ],
+                                      ),
+                              ),
                             ),
                           ),
                           _barraPestanasFicha(),
@@ -2853,21 +2892,15 @@ class _FichaScreenState extends State<FichaScreen> {
                                       ),
                                   ],
                                 ),
-                                // 1.28 (M4-C3): cabecera
-                                // compacta al bajar, sobre la
-                                // pestaña activa.
-                                Positioned(
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  child: _barraCompactaFicha(
-                                    nombre: nombre,
-                                    esCasa: esCasa,
-                                    congelado: pausado,
-                                    dias: dias,
-                                    colorMarco: colorMarco,
-                                  ),
-                                ),
+                                // 1.33: la barra compacta ya
+                                // NO se superpone aquí — vive
+                                // en flujo en el hueco de la
+                                // cabecera (ver el AnimatedSize
+                                // del build): al bajar, la
+                                // cabecera se pliega y la lista
+                                // gana el alto liberado en vez
+                                // de quedar tapada por un
+                                // overlay (1.28 M4-C3, retirado).
                               ],
                             ),
                           ),
@@ -2954,6 +2987,15 @@ class _FichaScreenState extends State<FichaScreen> {
     );
   }
 
+  /// La barra compacta de la ficha: foto mini, nombre, el
+  /// estado con el punto del color de marco y la acción
+  /// principal del momento (ver accionDelMomentoFicha).
+  /// 1.33: es la forma PLEGADA de la única cabecera —
+  /// sustituye a la tarjeta grande EN FLUJO al cruzar el
+  /// umbral de scroll (ver [_alMoverScrollFicha] y el
+  /// AnimatedSize del build) y queda anclada arriba; hasta
+  /// la 1.32 flotaba como overlay sobre la lista (1.28
+  /// M4-C3) y en campo se veía a mitad de pantalla.
   Widget _barraCompactaFicha({
     required String nombre,
     required bool esCasa,
@@ -2961,7 +3003,6 @@ class _FichaScreenState extends State<FichaScreen> {
     required int? dias,
     required Color colorMarco,
   }) {
-    final mostrar = _cabeceraCompacta;
     final puedeAcceso = AuthService().isOwner ||
         PermisosEntrenador().canGeneratePin;
     final sinAcceso = puedeAcceso &&
@@ -3024,24 +3065,22 @@ class _FichaScreenState extends State<FichaScreen> {
                         : dias <= 7
                             ? 'Vence en $dias días'
                             : 'Al día';
-    return IgnorePointer(
-      ignoring: !mostrar,
-      child: AnimatedSlide(
-        offset: mostrar ? Offset.zero : const Offset(0, -1),
-        duration: AppMovimiento.media,
-        curve: AppMovimiento.curvaSuave,
-        child: AnimatedOpacity(
-          opacity: mostrar ? 1 : 0,
-          duration: AppMovimiento.media,
-          curve: AppMovimiento.curvaSuave,
-          child: Material(
-            elevation: 6,
-            color: Theme.of(context).cardColor,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppEspacio.md,
-                  vertical: AppEspacio.sm),
-              child: Row(
+    // 1.33: la barra se monta EN FLUJO en el hueco de la
+    // cabecera plegada (el AnimatedSize del build la anima
+    // al entrar y al salir). Hasta la 1.32 era un overlay
+    // Positioned + AnimatedSlide flotando SOBRE la lista:
+    // en campo se veía a mitad de pantalla, encima del
+    // contenido (innavegable entre cabecera, barra y botón
+    // de pago). Ya no flota nada sobre el contenido.
+    return Material(
+      elevation: 2,
+      color: Theme.of(context).cardColor,
+      borderRadius: BorderRadius.circular(AppRadio.lg),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        child: Row(
                 children: [
                   AvatarCliente(
                     nombre: nombre,
@@ -3088,9 +3127,6 @@ class _FichaScreenState extends State<FichaScreen> {
                     ),
                   if (botonPrincipal != null) botonPrincipal,
                 ],
-              ),
-            ),
-          ),
         ),
       ),
     );
