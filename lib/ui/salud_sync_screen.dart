@@ -285,22 +285,47 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                       Padding(
                         padding: const EdgeInsets.only(
                             bottom: AppEspacio.sm),
-                        child: Row(
+                        // 1.33 (coherencia de sync, §7.6): la
+                        // fila pasa a DOS PISOS — el nombre a
+                        // ancho completo en su línea y la nota
+                        // debajo, a ancho completo. El Row
+                        // anterior (nombre en Expanded + nota
+                        // sin Flexible al lado) dejaba el
+                        // nombre a 0,0 px en cuanto la nota
+                        // era larga (el wm_err crudo): un
+                        // carácter por línea, como en la
+                        // captura de Jc. Solo cambia la
+                        // estructura: punto, estilos y colores
+                        // son los mismos.
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: 12,
-                              height: 12,
-                              decoration: BoxDecoration(
-                                color: _colorSemaforo(t.estado),
-                                shape: BoxShape.circle,
-                              ),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: _colorSemaforo(t.estado),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(
+                                    width: AppEspacio.sm),
+                                Expanded(
+                                  child: Text(t.nombre,
+                                      style: AppTexto.cuerpo),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: AppEspacio.sm),
-                            Expanded(
-                              child: Text(t.nombre,
-                                  style: AppTexto.cuerpo),
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 12 + AppEspacio.sm,
+                                  top: 2),
+                              child: Text(t.nota,
+                                  style: AppTexto.metadato),
                             ),
-                            Text(t.nota, style: AppTexto.metadato),
                           ],
                         ),
                       ),
