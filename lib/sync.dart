@@ -2999,6 +2999,14 @@ class SyncEngine {
     if (await _db.mantenimientoActivo()) {
       return SyncMotivoNoCorrio.enCurso;
     }
+    // 1.32 (O2F2S, adjudicación F-24): barrera de purga —
+    // con una purga de datos sensibles en curso (señal
+    // persistida de LocalDb.purgarDatosSensibles), ningún
+    // ciclo arranca: escribiría sobre filas a mitad de
+    // borrar.
+    if (await _db.purgaEnCursoActiva()) {
+      return SyncMotivoNoCorrio.enCurso;
+    }
     // Lock persistente: protege contra Workmanager en otro isolate.
     final owner = await _db.adquirirSyncLock();
     if (owner == null) return SyncMotivoNoCorrio.enCurso;
@@ -3014,6 +3022,18 @@ class SyncEngine {
     final latido = Timer.periodic(const Duration(seconds: 60),
         (_) async {
       if (_lockPerdido) return;
+      // 1.32 (F-24): si una purga de datos sensibles
+      // arrancó con este ciclo en vuelo, el ciclo se
+      // detiene en su próximo punto de control
+      // (_exigirLockVivo) en vez de seguir escribiendo
+      // sobre lo que la purga está borrando.
+      if (await _db.purgaEnCursoActiva()) {
+        _lockPerdido = true;
+        AppLog.error('sync', 'sync_ciclo_abortado_purga',
+            d: 'purga de datos sensibles en curso: '
+                'el ciclo se detiene');
+        return;
+      }
       if (!await _db.renovarSyncLock(owner)) {
         _lockPerdido = true;
         AppLog.error('sync', 'sync_lock_perdido',
@@ -3310,8 +3330,10 @@ class SyncEngine {
         // 1.32 (F-9): con el push abortado por auth, tampoco.
         if (!abortadoPorAuth && (!fgCorriendo || desdeForeground)) {
           try {
-            fotosSubidas =
-                await FotosColaService.instance.procesarCola();
+            // 1.32 (F-25): la cola recibe el punto de
+            // control del ciclo (lock vivo) por iteración.
+            fotosSubidas = await FotosColaService.instance
+                .procesarCola(lockVivo: () => !_lockPerdido);
           } catch (e) {
             debugPrint('ERROR procesarCola falló: $e');
             AppLog.error('sync', 'cola_fotos_fallo', d: '$e');
@@ -3333,9 +3355,11 @@ class SyncEngine {
       // pendientes de subida (servicio propio, tras las fotos).
       try {
         // 1.32 (F-9): abortado por auth ⇒ ni se intentan.
+        // 1.32 (F-25): con el punto de control del ciclo.
         final compSubidos = abortadoPorAuth
             ? 0
-            : await ComprobantesService.instance.procesar();
+            : await ComprobantesService.instance
+                .procesar(lockVivo: () => !_lockPerdido);
         // 1.32 (O2F2S, M1): conteo para la corrida del diario.
         _diarioComprobantes = compSubidos;
         if (compSubidos > 0) {
@@ -4430,6 +4454,11 @@ class SyncEngine {
     // repetiría el mismo fallo de sesión contra cada lote).
     var abortarPush = false;
     while (i < porEnviar.length) {
+      // 1.32 (O2F2S, adjudicación F-25): punto de control
+      // por lote — si el ciclo perdió el lock (o arrancó
+      // una purga, F-24), se detiene aquí en vez de seguir
+      // enviando como zombi junto al dueño nuevo.
+      _exigirLockVivo();
       final tam = _loteAdaptativo.tam;
       final fin =
           (i + tam < porEnviar.length) ? i + tam : porEnviar.length;
@@ -4551,6 +4580,10 @@ class SyncEngine {
       resultadoAmbiguo: resultadoAmbiguo,
       falloInequivoco: falloInequivoco,
     )) {
+      // 1.32 (F-25): también antes del barrido de
+      // confirmación — es el tramo largo que quedaba sin
+      // punto de control tras los lotes.
+      _exigirLockVivo();
       final barrido = await barridoConfirmacion();
       aplicadas += barrido.confirmadas;
       uuids.addAll(barrido.uuids);
@@ -6643,6 +6676,10 @@ class SyncEngine {
       var paginasTabla = 0;
       try {
         while (true) {
+          // 1.32 (F-25): punto de control por página — un
+          // ciclo que perdió el lock (o con una purga en
+          // curso, F-24) no sigue comiteando páginas.
+          _exigirLockVivo();
           // gastos y turnos_cierre tienen esquema plano en Supabase
           // (sin columna 'data' JSON).
           final select = switch (tabla) {
@@ -8872,8 +8909,13 @@ class SyncEngine {
     } on _TusPermanente catch (e) {
       // Luna #1: 403/permisos es PERMANENTE, no reintentable.
       // Limpiar estado TUS para no dejar basura.
+      // 1.32 (F-27): también la clave _path, como ya hacen
+      // las ramas de éxito y de fallback PUT — sin esto el
+      // _path viejo sobrevivía y el próximo intento creía
+      // reanudar un upload ya descartado.
       await _db.setMeta(claveTusLoc, '');
       await _db.setMeta(claveTusOffset, '0');
+      await _db.setMeta('${claveTusLoc}_path', '');
       return ResultadoSubidaFoto(
         estado: EstadoSubida.permanente,
         error: e.message,
@@ -8909,7 +8951,13 @@ class SyncEngine {
     Future<bool> Function()? debePausarPorCobro,
   }) async {
     // Luna #11: atar las claves al objectPath.
+    // 1.32 (O2F2S, adjudicación F-27): la clave guarda
+    // 'ruta|tamaño' — una foto re-tomada en la misma ruta
+    // con otro tamaño NO puede reanudar el upload TUS de
+    // la anterior (offset y location serían de otros
+    // bytes): el guardado debe coincidir en ambas cosas.
     final claveTusPath = '${claveTusLoc}_path';
+    final pathEsperado = '$objectPath|${bytes.length}';
     final pathGuardado = await _db.getMeta(claveTusPath);
 
     String? location = await _db.getMeta(claveTusLoc);
@@ -8920,7 +8968,7 @@ class SyncEngine {
     if (offset > bytes.length) offset = bytes.length;
 
     // Si el path guardado no coincide, descartar estado TUS viejo.
-    if (location != null && pathGuardado != objectPath) {
+    if (location != null && pathGuardado != pathEsperado) {
       location = null;
       offset = 0;
     }
@@ -8929,7 +8977,7 @@ class SyncEngine {
       location = await _tusCrear(objectPath, bytes.length);
       if (location == null) return null; // TUS no disponible
       await _db.setMeta(claveTusLoc, location);
-      await _db.setMeta(claveTusPath, objectPath);
+      await _db.setMeta(claveTusPath, pathEsperado);
       await _db.setMeta(claveTusOffset, '0');
       offset = 0;
     } else {
@@ -8946,7 +8994,7 @@ class SyncEngine {
         location = await _tusCrear(objectPath, bytes.length);
         if (location == null) return null;
         await _db.setMeta(claveTusLoc, location);
-        await _db.setMeta(claveTusPath, objectPath);
+        await _db.setMeta(claveTusPath, pathEsperado);
         await _db.setMeta(claveTusOffset, '0');
         offset = 0;
       } else if (remoto >= 0) {
@@ -8959,7 +9007,7 @@ class SyncEngine {
           location = await _tusCrear(objectPath, bytes.length);
           if (location == null) return null;
           await _db.setMeta(claveTusLoc, location);
-          await _db.setMeta(claveTusPath, objectPath);
+          await _db.setMeta(claveTusPath, pathEsperado);
           offset = 0;
         } else {
           offset = remoto;

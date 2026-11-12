@@ -4837,6 +4837,45 @@ class LocalDb {
     return borrar;
   }
 
+  /// 1.32 (O2F2S, adjudicación F-24 ampliación iv): borra
+  /// de meta los sellos de sincronización (último OK de
+  /// sync/pull/push, el server_seq confirmado y la
+  /// calibración de hora contra el servidor). Lo usan la
+  /// purga de datos sensibles y —como puerta única— debe
+  /// usarlo la importación de respaldo al terminar: tras
+  /// vaciar o reemplazar el espejo, ningún sello viejo
+  /// puede seguir pintando «al día».
+  Future<void> limpiarSellosSyncEnMeta(
+      [DatabaseExecutor? ejecutor]) async {
+    final ex = ejecutor ?? await db;
+    await ex.delete('meta',
+        where: "k IN ('last_sync_ok', 'last_pull_ok', "
+            "'last_push_ok', 'server_seq', "
+            "'server_timestamp_ultimo_sync', "
+            "'server_timestamp_recibido_en')");
+  }
+
+  /// 1.32 (O2F2S, adjudicación F-24): ¿hay una purga de
+  /// datos sensibles en curso AHORA? La señal es la meta
+  /// `purga_en_curso` (ISO Habana) que escribe
+  /// [purgarDatosSensibles] al empezar y limpia al
+  /// terminar; una señal con más de 15 minutos se trata
+  /// como rezago de un proceso muerto a mitad de purga y
+  /// NO bloquea (la purga es rápida; 15 min es holgura, no
+  /// una duración plausible).
+  Future<bool> purgaEnCursoActiva() async {
+    try {
+      final txt = await getMeta('purga_en_curso');
+      if (txt == null || txt.isEmpty) return false;
+      final desde = DateTime.tryParse(txt);
+      if (desde == null) return false;
+      return ahoraHabana().difference(desde) <
+          const Duration(minutes: 15);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// H-08 (1.23): borra las filas CONFIRMADAS por el servidor
   /// (sync_seq > 0) de los espejos [tablas], en UNA transacción.
   /// Es la primitiva de la purga de transición por rol y del
@@ -8055,14 +8094,35 @@ class LocalDb {
   /// Borra incidencias privadas y datos sensibles locales. Retorna conteo.
   Future<int> purgarDatosSensibles(
       {bool conservarComprobantesPendientes = false}) async {
-    final d = await db;
-    var n = 0;
+    final dbReal = await db;
+    // 1.32 (O2F2S, adjudicación F-24): SEÑAL persistida de
+    // purga en curso, escrita ANTES de tocar nada y
+    // limpiada al terminar. Los ciclos que arrancan la ven
+    // en _conLock y no corren; los que están en vuelo la
+    // ven en el latido y se detienen en su próximo punto de
+    // control (_exigirLockVivo). Sin la señal, un ciclo a
+    // mitad de bajada re-escribía filas que la purga acababa
+    // de borrar (o la purga borraba filas a medio bajar).
+    await setMeta('purga_en_curso', isoHabana(ahoraHabana()));
+    // Archivos físicos a borrar DESPUÉS del commit (el
+    // sistema de archivos no es transaccional: borrarlos
+    // dentro y abortar la transacción dejaría filas que
+    // apuntan a archivos ya ido).
+    final archivosTrasCommit = <String>[];
+    var borrarDirectorioComprobantes = false;
+    try {
+      return await dbReal.transaction((txn) async {
+        final d = txn;
+        var n = 0;
     // Argón 1.21 AR-C04: recoger ANTES de borrar las filas los
     // ids de las incidencias privadas y las rutas de sus fotos:
     // los archivos físicos en disco y las ops encoladas que las
     // referencian también son datos sensibles y sobrevivían a
     // la purga (la fila se iba, la foto y la op se quedaban).
     final idsPrivadas = <String>{};
+    // 1.32 (F-24 ampliación ii): mínimo sync_seq de las
+    // privadas que SÍ se purgan (rebobinado del cursor).
+    int? minSeqPrivadasPurgadas;
     try {
       for (final t in ['incidencias_local', 'incidencias_mirror']) {
         final filas = await d.query(t,
@@ -8073,10 +8133,68 @@ class LocalDb {
         }
       }
     } catch (_) {}
+    // 1.32 (O2F2S, adjudicación F-23): CONSERVACIÓN — una
+    // incidencia privada cuyo trabajo local aún no se
+    // confirmó (sync_estado != 'synced' en su fila local)
+    // o que tiene una op VIVA referenciándola NO se purga:
+    // su fila, sus ops y los archivos de sus fotos
+    // sobreviven a la purga (automática o manual). Purgarla
+    // destruía trabajo real aún no subido disfrazado de
+    // limpieza de privacidad; la ya sincronizada sí se
+    // purga como siempre. Las protegidas se excluyen de
+    // TODOS los borrados de esta purga.
+    final idsProtegidas = <String>{};
     if (idsPrivadas.isNotEmpty) {
+      try {
+        final locales = await d.query('incidencias_local',
+            columns: ['id', 'sync_estado'],
+            where: "visibilidad='privada'");
+        for (final f in locales) {
+          if ('${f['sync_estado']}' != 'synced') {
+            final id = '${f['id']}';
+            if (id.isNotEmpty && id != 'null') {
+              idsProtegidas.add(id);
+            }
+          }
+        }
+        final opsVivas = await d.query('ops_queue',
+            columns: ['payload'],
+            where:
+                "estado NOT IN ('aplicada', 'rechazada', 'archivada')");
+        for (final op in opsVivas) {
+          try {
+            final p = jsonDecode(op['payload'] as String)
+                as Map<String, dynamic>;
+            for (final clave in const ['id', 'incidencia_id']) {
+              final ref = '${p[clave]}';
+              if (idsPrivadas.contains(ref)) {
+                idsProtegidas.add(ref);
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    final idsPurgables = idsPrivadas.difference(idsProtegidas);
+    if (idsPurgables.isNotEmpty) {
+      try {
+        final filasSeq = await d.query('incidencias_mirror',
+            columns: ['sync_seq'],
+            where:
+                'id IN (${List.filled(idsPurgables.length, '?').join(',')})',
+            whereArgs: idsPurgables.toList());
+        for (final f in filasSeq) {
+          final sq = (f['sync_seq'] as num?)?.toInt();
+          if (sq != null &&
+              (minSeqPrivadasPurgadas == null ||
+                  sq < minSeqPrivadasPurgadas)) {
+            minSeqPrivadasPurgadas = sq;
+          }
+        }
+      } catch (_) {}
       final marcas =
-          List.filled(idsPrivadas.length, '?').join(',');
-      final argsIds = idsPrivadas.toList();
+          List.filled(idsPurgables.length, '?').join(',');
+      final argsIds = idsPurgables.toList();
       try {
         final fotos = await d.query('incidencias_fotos',
             columns: ['local_path'],
@@ -8085,9 +8203,8 @@ class LocalDb {
         for (final f in fotos) {
           final ruta = (f['local_path'] as String?) ?? '';
           if (ruta.isEmpty) continue;
-          try {
-            await File(ruta).delete();
-          } catch (_) {}
+          // F-24: el archivo se borra tras el commit.
+          archivosTrasCommit.add(ruta);
         }
       } catch (_) {}
       try {
@@ -8097,10 +8214,50 @@ class LocalDb {
             where: 'incidencia_id IN ($marcas)', whereArgs: argsIds);
       } catch (_) {}
     }
+    // F-23: las protegidas quedan fuera también aquí.
+    final marcasProt =
+        List.filled(idsProtegidas.length, '?').join(',');
+    final wherePrivadas = idsProtegidas.isEmpty
+        ? "visibilidad='privada'"
+        : "visibilidad='privada' AND id NOT IN ($marcasProt)";
+    final argsPrivadas =
+        idsProtegidas.isEmpty ? null : idsProtegidas.toList();
     n += await d.delete('incidencias_mirror',
-        where: "visibilidad='privada'");
+        where: wherePrivadas, whereArgs: argsPrivadas);
     n += await d.delete('incidencias_local',
-        where: "visibilidad='privada'");
+        where: wherePrivadas, whereArgs: argsPrivadas);
+    // 1.32 (F-24 ampliación ii): rebobinar los cursores de
+    // incidencias — sin esto, al volver a entrar el dueño,
+    // el pull (sync_seq > wm) jamás re-baja las privadas
+    // purgadas y su historial se pierde en este teléfono.
+    // La principal rebobina justo bajo la más antigua
+    // purgada; comentarios y fotos no guardan sync_seq por
+    // fila, así que su cursor vuelve a 0 (re-bajada
+    // completa de dos tablas acotadas, solo si se borraron
+    // filas hijas de privadas purgadas).
+    if (minSeqPrivadasPurgadas != null) {
+      try {
+        final wmRows = await d.query('meta',
+            columns: ['v'],
+            where: "k = 'wm_incidencias'",
+            limit: 1);
+        final wmAct = wmRows.isEmpty
+            ? 0
+            : int.tryParse('${wmRows.first['v']}') ?? 0;
+        final destino = minSeqPrivadasPurgadas - 1;
+        if (destino < wmAct) {
+          await d.insert(
+              'meta', {'k': 'wm_incidencias', 'v': '$destino'},
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+        await d.insert(
+            'meta', {'k': 'wm_incidencias_comentarios', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        await d.insert(
+            'meta', {'k': 'wm_incidencias_fotos', 'v': '0'},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      } catch (_) {}
+    }
     n += await d.delete('incidencia_eventos_mirror',
         where: 'incidencia_id NOT IN (SELECT id FROM incidencias_mirror)');
     // v1.2.5-rev5 (Gemini): las ops de incidencias privadas
@@ -8110,16 +8267,22 @@ class LocalDb {
     // los tipos vivos son crear/editar (su payload lleva la
     // visibilidad) y cambiar_estado/agregar_comentario/
     // registrar_foto (referencian la incidencia por id).
+    // F-23: una op de crear/editar cuya incidencia está
+    // protegida NO se borra (su payload trae el id; un id
+    // ausente da NULL en el NOT IN y la op también se
+    // conserva: dirección segura).
     n += await d.delete('ops_queue',
-        where:
-            "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada'");
-    if (idsPrivadas.isNotEmpty) {
+        where: idsProtegidas.isEmpty
+            ? "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada'"
+            : "tipo IN ('crear_incidencia','editar_incidencia') AND json_extract(payload,'\$.visibilidad')='privada' AND json_extract(payload,'\$.id') NOT IN ($marcasProt)",
+        whereArgs: argsPrivadas);
+    if (idsPurgables.isNotEmpty) {
       final marcas =
-          List.filled(idsPrivadas.length, '?').join(',');
+          List.filled(idsPurgables.length, '?').join(',');
       n += await d.delete('ops_queue',
           where:
               "tipo IN ('cambiar_estado_incidencia','agregar_comentario_incidencia','registrar_foto_incidencia') AND (json_extract(payload,'\$.id') IN ($marcas) OR json_extract(payload,'\$.incidencia_id') IN ($marcas))",
-          whereArgs: [...idsPrivadas, ...idsPrivadas]);
+          whereArgs: [...idsPurgables, ...idsPurgables]);
     }
     // v1.3.2 (Argón #19): al cerrar sesión, limpiar también gastos,
     // auditoría local y la caché de usuarios APK (un entrenador no debe
@@ -8261,9 +8424,8 @@ class LocalDb {
         for (final f in subidos) {
           final ruta = (f['ruta_local'] as String?) ?? '';
           if (ruta.isEmpty) continue;
-          try {
-            await File(ruta).delete();
-          } catch (_) {}
+          // F-24: el archivo se borra tras el commit.
+          archivosTrasCommit.add(ruta);
         }
         n += await d.delete('comprobantes_pago',
             where: "estado = 'subido'");
@@ -8275,17 +8437,47 @@ class LocalDb {
       // A-02: los ARCHIVOS de comprobantes (documents/comprobantes/)
       // son fotos de transferencias: tampoco pueden quedar en un
       // teléfono compartido tras cerrar sesión.
-      try {
-        final docs = await getApplicationDocumentsDirectory();
-        final dirComp = Directory(p.join(docs.path, 'comprobantes'));
-        if (await dirComp.exists()) {
-          await dirComp.delete(recursive: true);
-        }
-      } catch (_) {}
+      // F-24: el borrado del directorio va tras el commit
+      // (marca para el finally de la envoltura).
+      borrarDirectorioComprobantes = true;
     }
+    // 1.32 (F-24 ampliación iv): la purga borra también
+    // los SELLOS de sincronización en meta — último OK
+    // (sync/pull/push), el server_seq y la calibración de
+    // hora contra el servidor: sobre un espejo recién
+    // vaciado, la UI no puede seguir pintando «al día»
+    // con la foto del usuario anterior. (La misma limpieza
+    // debe hacerla la importación de respaldo al terminar:
+    // LocalDb.limpiarSellosSyncEnMeta queda como puerta
+    // única para ambos caminos.)
+    await limpiarSellosSyncEnMeta(d);
     // borradores y plantillas viven en SharedPreferences (perfil.dart);
     // se purgan desde AuthService.signOut.
-    return n;
+        return n;
+      });
+    } finally {
+      // Archivos físicos fuera de la transacción ya
+      // comiteada (fotos de privadas purgadas y
+      // comprobantes 'subido'; en la manual, el directorio
+      // entero de comprobantes).
+      for (final ruta in archivosTrasCommit) {
+        try {
+          await File(ruta).delete();
+        } catch (_) {}
+      }
+      if (borrarDirectorioComprobantes) {
+        try {
+          final docs = await getApplicationDocumentsDirectory();
+          final dirComp = Directory(p.join(docs.path, 'comprobantes'));
+          if (await dirComp.exists()) {
+            await dirComp.delete(recursive: true);
+          }
+        } catch (_) {}
+      }
+      try {
+        await setMeta('purga_en_curso', '');
+      } catch (_) {}
+    }
   }
 
   /// v1.2.5 (#10): incidencias relacionadas con una entidad.
@@ -11961,6 +12153,23 @@ class LocalDb {
       // json_valid no lanza sobre texto mal formado (devuelve
       // 0), así que este paso no puede reventar por la misma
       // causa.
+      // 1.32 (O2F2S, F-24 ampliación de la síntesis): ANTES
+      // de borrarlas, rebobinar wm_reservas justo bajo la
+      // ilegible más antigua — sin esto la frase «el espejo
+      // las re-baja» era falsa: el pull solo trae
+      // sync_seq > wm y las borradas quedaban por debajo
+      // del cursor para siempre.
+      final minIleg = await d.rawQuery(
+          'SELECT MIN(sync_seq) AS m FROM reservas '
+          'WHERE sync_seq > 0 AND NOT json_valid(data)');
+      final minSeqIleg = (minIleg.first['m'] as num?)?.toInt();
+      if (minSeqIleg != null) {
+        final wmRes = await getWatermarkTabla('reservas');
+        final destinoRes = minSeqIleg - 1;
+        if (destinoRes < wmRes) {
+          await setWatermarkTabla('reservas', destinoRes);
+        }
+      }
       final ilegibles = await d.rawDelete(
         'DELETE FROM reservas '
         'WHERE sync_seq > 0 AND NOT json_valid(data)',

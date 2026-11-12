@@ -449,7 +449,7 @@ class FotosColaService {
   /// - worker_id para reclamo exclusivo (verifica filas afectadas).
   /// - Crash recovery con lease (no reset incondicional).
   /// - Backoff exponencial con proximo_intento_en.
-  Future<int> procesarCola() async {
+  Future<int> procesarCola({bool Function()? lockVivo}) async {
     int subidas = 0;
     final db = await LocalDb.instance.db;
     // YS-2 (H1-residual de la revisión de Argón): la
@@ -540,6 +540,12 @@ class FotosColaService {
     var redVerificada = false;
     try {
       while (true) {
+        // 1.32 (O2F2S, adjudicación F-25): punto de control
+        // por iteración — si el ciclo del motor que nos
+        // llamó perdió el lock (o arrancó una purga), la
+        // cola se detiene en vez de seguir subiendo como
+        // zombi. Sin llamador del motor (UI/FGS), sin control.
+        if (lockVivo != null && !lockVivo()) break;
         // Refrescar el lease global cada iteración; si ya no somos
         // dueños, salir (el finally libera solo si aún lo somos).
         // 1.24.2 (auditoría sync M5-A1): la propiedad se comprueba

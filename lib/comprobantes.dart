@@ -397,11 +397,11 @@ class ComprobantesService {
   /// Reutiliza la subida TUS de las fotos (con su pausa QoS:
   /// si entra un cobro, el comprobante espera al próximo
   /// ciclo). Devuelve cuántos quedaron subidos.
-  Future<int> procesar() async {
+  Future<int> procesar({bool Function()? lockVivo}) async {
     if (_procesando) return 0;
     _procesando = true;
     try {
-      return await _procesarInterno();
+      return await _procesarInterno(lockVivo: lockVivo);
     } finally {
       // Auditoría Definitiva (A-4): la bandera se libera en TODA
       // salida, sin excepción. Antes solo la soltaban el catch
@@ -417,7 +417,7 @@ class ComprobantesService {
     }
   }
 
-  Future<int> _procesarInterno() async {
+  Future<int> _procesarInterno({bool Function()? lockVivo}) async {
     var subidos = 0;
     // Caza Fotos L4-CRÍTICA (Argón): el booleano en RAM solo
     // protege DENTRO de un isolate, pero procesar() corre en tres
@@ -486,6 +486,10 @@ class ComprobantesService {
         limit: 10,
       );
       for (final f in filas) {
+        // 1.32 (O2F2S, adjudicación F-25): punto de control
+        // por iteración — si el ciclo del motor perdió el
+        // lock (o arrancó una purga), la cola se detiene.
+        if (lockVivo != null && !lockVivo()) break;
         // Refrescar el lease en cada iteración (una subida larga
         // no debe dejarlo caducar a mitad del ciclo).
         final leaseNuevo =
