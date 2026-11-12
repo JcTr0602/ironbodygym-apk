@@ -41,6 +41,7 @@ import 'preview_cobro.dart';
 import 'tarifas_especiales.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
+import 'reservas.dart';
 import 'ficha_acceso_app.dart';
 import 'ficha_congelacion.dart';
 import 'ficha_marcas.dart';
@@ -337,6 +338,10 @@ class _FichaScreenState extends State<FichaScreen> {
   // v1.3.3 (Argón spec 2): regalo de cumpleaños del año en curso, si ya
   // se otorgó. Candado anual + botón "Reenviar WhatsApp".
   Map<String, dynamic>? _regaloAnio;
+  // 1.32 (Oleada 2, Fase 3 — Momento 2C): la reserva
+  // viva del cliente en el espejo local, para el aviso
+  // de cabecera; null = ninguna (o aún no cargada).
+  ReservaVista? _reservaViva;
   // Argón Clientes #6: deuda de fiado del cliente (la ficha no
   // la mostraba en ningún lado; el Estado de cuenta sí).
   Map<String, double> _fiadoPendiente = const {};
@@ -596,6 +601,28 @@ class _FichaScreenState extends State<FichaScreen> {
             ahoraHabana());
       } catch (_) {}
     }
+    // 1.32 (Oleada 2, Fase 3 — Momento 2C): la reserva
+    // viva del cliente, de los espejos LOCALES (la
+    // ficha pinta offline-first: nada de red aquí).
+    // Tolerante: sin espejo o con espejo ilegible, la
+    // ficha abre como siempre, sin aviso. La guarda de
+    // vista protegida de la bandeja manda: la reserva
+    // de un cliente protegido no se revela a un
+    // no-dueño ni en su propia ficha.
+    ReservaVista? reservaViva;
+    if (c != null) {
+      try {
+        reservaViva = reservaVivaDeCliente(
+          reservas: await LocalDb.instance.allMirror('reservas'),
+          clientes: [c],
+          suplementos:
+              await LocalDb.instance.allMirror('suplementos'),
+          clienteId: widget.clienteId,
+          ahora: ahoraUtcReal(),
+          esDueno: AuthService().isOwner,
+        );
+      } catch (_) {}
+    }
     // v1.3.9 (F1): el caché de accesos también se carga en
     // _enriquecerDesdeServidor (era el segundo await de red
     // sin timeout antes de pintar; misma causa del cuelgue).
@@ -615,6 +642,7 @@ class _FichaScreenState extends State<FichaScreen> {
         // pasan por aquí.
         _datosVersion++;
         _c = c;
+        _reservaViva = reservaViva;
         _enPausaCongelacion = enPausaCongelacion;
         _pagos = pagos;
         _ultimoPagoReal = ultimoReal;
@@ -3162,6 +3190,79 @@ class _FichaScreenState extends State<FichaScreen> {
                                       style: AppTexto.etiqueta.copyWith(color: AppColores
                                               .naranja, fontWeight: FontWeight.w700)),
                                 ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      // 1.32 (Oleada 2, Fase 3 — Momento
+                      // 2C): el cliente tiene una reserva
+                      // viva — aviso en cabecera con el
+                      // vencimiento y atajo a la bandeja
+                      // para entregarla. Se calcula en
+                      // _cargar desde el espejo local, con
+                      // la guarda de vista protegida.
+                      if (_reservaViva != null)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                              bottom: AppEspacio.sm),
+                          child: Material(
+                            color: AppColores.naranja
+                                .withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(
+                                AppRadio.md),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.md),
+                              onTap: () async {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const ReservasScreen(),
+                                  ),
+                                );
+                                if (mounted) _cargar();
+                              },
+                              child: Container(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                        horizontal: AppEspacio.md,
+                                        vertical: 10),
+                                decoration: BoxDecoration(
+                                  borderRadius:
+                                      BorderRadius.circular(
+                                          AppRadio.md),
+                                  border: Border.all(
+                                      color: AppColores.naranja
+                                          .withValues(
+                                              alpha: 0.55)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                        Icons.bookmark_rounded,
+                                        size: 20,
+                                        color:
+                                            AppColores.naranja),
+                                    const SizedBox(
+                                        width: AppEspacio.sm),
+                                    Expanded(
+                                      child: Text(
+                                        textoAvisoReservaViva(
+                                            _reservaViva!,
+                                            ahoraUtcReal()),
+                                        style: AppTexto.cuerpo
+                                            .copyWith(
+                                                fontWeight:
+                                                    FontWeight
+                                                        .w600),
+                                      ),
+                                    ),
+                                    const Icon(
+                                        Icons
+                                            .chevron_right_rounded,
+                                        size: 20),
+                                  ],
+                                ),
                               ),
                             ),
                           ),

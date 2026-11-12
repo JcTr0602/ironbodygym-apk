@@ -275,6 +275,56 @@ Set<int> reservasConOpPendiente(List<Map<String, dynamic>> ops) {
 }
 
 /// Texto de vencimiento de un apartado/solicitud.
+/// 1.32 (Oleada 2, Fase 3 — Momento 2C del plano): la
+/// reserva VIVA de un cliente para el aviso de su
+/// ficha: «Si el cliente tiene una reserva activa,
+/// aparece un aviso directo en cabecera». Reutiliza la
+/// bandeja entera —mismos estados vivos, misma guarda
+/// de vista protegida para no-dueños y mismas defensas
+/// de vencimiento (una solicitada o reservada ya
+/// vencida en el espejo NO es viva: el servidor la
+/// libera sola)— y devuelve la que antes vence. El
+/// llamador pasa en [clientes] la fila del cliente (la
+/// ficha ya la tiene): la guarda se evalúa con su fila
+/// real, como en la bandeja.
+ReservaVista? reservaVivaDeCliente({
+  required List<Map<String, dynamic>> reservas,
+  required List<Map<String, dynamic>> clientes,
+  required List<Map<String, dynamic>> suplementos,
+  required int clienteId,
+  required DateTime ahora,
+  bool esDueno = true,
+}) {
+  final bandeja =
+      construirBandeja(reservas, clientes, suplementos, esDueno: esDueno);
+  final vivas = [
+    for (final v in [...bandeja.solicitadas, ...bandeja.reservadas])
+      if (v.clienteId == clienteId &&
+          !v.apartadoVencido(ahora) &&
+          !v.solicitudVencida(ahora))
+        v,
+  ];
+  if (vivas.isEmpty) return null;
+  vivas.sort(
+      (a, b) => (a.expiraEn ?? '9999').compareTo(b.expiraEn ?? '9999'));
+  return vivas.first;
+}
+
+/// El texto del aviso de la ficha (la forma del
+/// plano): «Tiene reservado [Producto] (vence en
+/// X h) · Entregar ahora». Sin vencimiento legible,
+/// el paréntesis se omite.
+String textoAvisoReservaViva(ReservaVista v, DateTime ahora) {
+  final producto = v.cantidad > 1
+      ? '${v.cantidad} × ${v.suplementoNombre}'
+      : v.suplementoNombre;
+  final vence = textoVenceEn(v.expiraEn, ahora);
+  return vence.isEmpty
+      ? 'Tiene reservado $producto · Entregar ahora'
+      : 'Tiene reservado $producto (${vence.toLowerCase()}) · '
+          'Entregar ahora';
+}
+
 String textoVenceEn(String? expiraEnIso, DateTime ahora) {
   if (expiraEnIso == null || expiraEnIso.isEmpty) return '';
   final vence = DateTime.tryParse(expiraEnIso);
