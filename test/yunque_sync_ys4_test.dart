@@ -246,23 +246,31 @@ void main() {
       final j = cuerpo.indexOf('esCuarentena');
       expect(j, isNonNegative,
           reason: '$nombre ya no consulta la caducidad');
-      final rama = cuerpo.substring(j, j + 1200);
+      final rama = cuerpo.substring(j, j + 2600);
       expect(rama, contains('if ($guarda && seq > maxSeq)'),
           reason: '$nombre: la rama de cuarentena avanza el '
               'cursor sin mirar la bandera pegajosa y saltaría '
               'la fila retenida de la misma página');
     }
 
+    // 1.32 (O2F2S, adjudicación F-20): en los pulls con
+    // cursor de corrida, la bandera pegajosa es DE CORRIDA
+    // (huboConflictoCorrida / huboHuerfanoCorrida), no de
+    // página: una retenida en la página 1 sigue frenando el
+    // avance del cursor persistido en la página 2. Es la
+    // semántica de este pin, reforzada — el pin se
+    // actualiza a los nombres nuevos. El historial conserva
+    // su bandera local (su pin no cambia).
     test('_pullIncidencias guarda con !huboConflicto', () {
-      pinCuarentena('_pullIncidencias()', '!huboConflicto');
+      pinCuarentena('_pullIncidencias()', '!huboConflictoCorrida');
     });
     test('_pullIncidenciasComentarios guarda con !huboHuerfano',
         () {
       pinCuarentena(
-          '_pullIncidenciasComentarios()', '!huboHuerfano');
+          '_pullIncidenciasComentarios()', '!huboHuerfanoCorrida');
     });
     test('_pullIncidenciasFotos guarda con !huboHuerfano', () {
-      pinCuarentena('_pullIncidenciasFotos()', '!huboHuerfano');
+      pinCuarentena('_pullIncidenciasFotos()', '!huboHuerfanoCorrida');
     });
     test('_pullIncidenciasHistorial guarda con !huboHuerfano',
         () {

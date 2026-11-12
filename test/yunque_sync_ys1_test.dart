@@ -111,7 +111,14 @@ void main() {
     });
 
     test('el lote NO deriva un 401/403 al una-por-una', () {
-      final i = sync.indexOf('Future<({int aplicadas, List<String> uuids})> _uploadOps');
+      // 1.32 (O2F2S, F-9): _uploadOps devuelve además
+      // `abortadoPorAuth` en su record — el localizador del
+      // pin se actualiza a la firma nueva; la semántica
+      // pineada (auth ANTES del una-por-una y aborto del
+      // push) se conserva y se refuerza: el resultado
+      // expone el aborto para que _doPush salte fotos,
+      // comprobantes y el segundo intento.
+      final i = sync.indexOf('_uploadOps({bool forzar = false})');
       expect(i, isNonNegative);
       final cuerpo = sync.substring(i, i + 16000);
       final iAuth = cuerpo.indexOf('Decision4xxPush.bumpAuth');
@@ -125,6 +132,11 @@ void main() {
               'repetiría op a op');
       expect(cuerpo, contains('abortarPush'),
           reason: 'el lote ya no aborta el push tras el auth');
+      expect(cuerpo, contains('abortadoPorAuth: abortarPush'),
+          reason: 'F-9: el aborto por auth ya no sale en el '
+              'resultado de _uploadOps: _doPush volvería a '
+              'intentar fotos/comprobantes y el segundo '
+              '_uploadOps con la sesión muerta');
     });
 
     test('el bump auth del lote usa httpStatus (clasifica auth)',
@@ -133,8 +145,7 @@ void main() {
       // bump podría caer en transitorio/permanente: la op
       // quedaría con backoff o en revisión en vez de en el
       // carril de sesión.
-      final i = sync.indexOf(
-          'Future<({int aplicadas, List<String> uuids})> _uploadOps');
+      final i = sync.indexOf('_uploadOps({bool forzar = false})');
       expect(i, isNonNegative);
       final cuerpo = sync.substring(i, i + 16000);
       final iAuth = cuerpo.indexOf('Decision4xxPush.bumpAuth');

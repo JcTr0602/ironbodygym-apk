@@ -2,9 +2,10 @@
 ///
 /// - AR-01: detallePendiente excluye lo ya absorbido por una
 ///   liquidación de caja (mismo cruce que pendienteEntrega).
-/// - AR-C04: la purga al cerrar sesión borra también los
-///   archivos de fotos de incidencias privadas y las ops
-///   encoladas que las referencian (tipos vivos de la familia).
+/// - AR-C04: la purga al cerrar sesión borra las fotos y
+///   ops de las incidencias privadas SIN ops vivas; desde
+///   la adjudicación F-23 (1.32), las privadas con op viva
+///   (o sin sincronizar) se conservan enteras.
 /// - Pregunta 6: Incidencia.fromMap lee 'en_revision' del
 ///   servidor como 'en_proceso'.
 library;
@@ -95,8 +96,18 @@ void main() {
         reason: 'la venta 20 ya liquidada no debe listarse');
   });
 
-  test('AR-C04: la purga borra fotos y ops de incidencias '
-      'privadas, y conserva lo compartido', () async {
+  test('AR-C04: la purga borra las privadas sincronizadas '
+      'sin ops vivas, y CONSERVA las que tienen ops vivas '
+      '(adjudicación F-23) y lo compartido', () async {
+    // Pin original: la purga borraba TODA privada con sus
+    // fotos y ops. La adjudicación F-23 (1.32) lo supersede:
+    // una privada con op viva (o sin sincronizar) NO se
+    // purga — borrarla destruiría trabajo sin subir, la
+    // misma clase de pérdida que F-5/F-23 cazan en la
+    // sesión. Este test fija las dos ramas: con op viva se
+    // conserva entera (fila, foto, archivo y ops); la
+    // privada ya sincronizada y sin ops vivas sí se purga
+    // entera.
     await _preparar();
     final db = LocalDb.instance;
     final d = await db.db;
@@ -109,6 +120,17 @@ void main() {
       'creada_por': 'Jc',
       'creada_en': '2026-11-01T10:00:00-04:00',
       'visibilidad': 'privada',
+      'sync_estado': 'synced',
+    });
+    await d.insert('incidencias_local', {
+      'id': 'inc-priv-2',
+      'tipo': 'sync',
+      'descripcion': 'Privada ya sincronizada, sin ops vivas',
+      'estado': 'pendiente',
+      'creada_por': 'Jc',
+      'creada_en': '2026-11-01T10:00:00-04:00',
+      'visibilidad': 'privada',
+      'sync_estado': 'synced',
     });
     await d.insert('incidencias_local', {
       'id': 'inc-pub-1',
@@ -118,9 +140,10 @@ void main() {
       'creada_por': 'Gabriel',
       'creada_en': '2026-11-01T10:00:00-04:00',
       'visibilidad': 'compartida',
+      'sync_estado': 'synced',
     });
 
-    // Archivo físico real de la foto privada.
+    // Archivos físicos reales de las fotos privadas.
     final tmp = await Directory.systemTemp.createTemp('argon121');
     final foto = File(p.join(tmp.path, 'foto_privada.jpg'));
     await foto.writeAsBytes([1, 2, 3]);
@@ -133,9 +156,21 @@ void main() {
       'sync_estado': 'synced',
       'tipo': 'evidencia',
     });
+    final foto2 = File(p.join(tmp.path, 'foto_privada2.jpg'));
+    await foto2.writeAsBytes([4, 5, 6]);
+    await d.insert('incidencias_fotos', {
+      'id': 'foto-2',
+      'incidencia_id': 'inc-priv-2',
+      'local_path': foto2.path,
+      'storage_path': 'incidencias/inc-priv-2/foto-2.jpg',
+      'creado_en': '2026-11-01T10:05:00-04:00',
+      'sync_estado': 'synced',
+      'tipo': 'evidencia',
+    });
 
-    // Ops encoladas: una privada (crear), una que referencia la
-    // privada por id (cambiar_estado) y una compartida.
+    // Ops encoladas: inc-priv-1 tiene DOS vivas (crear y
+    // cambiar_estado que la referencia por id); inc-priv-2
+    // ninguna; inc-pub-1 su crear.
     await db.queueOp(opUuid: 'op-priv-crear', tipo: 'crear_incidencia',
         payload: {
           'id': 'inc-priv-1',
@@ -155,16 +190,24 @@ void main() {
 
     await db.purgarDatosSensibles();
 
-    expect(await foto.exists(), isFalse,
-        reason: 'el archivo de la foto privada debe borrarse');
+    // F-23: la privada con ops vivas sobrevive ENTERA.
+    expect(await foto.exists(), isTrue,
+        reason: 'F-23: el archivo de la privada con ops '
+            'vivas NO se borra');
+    // La privada sincronizada sin ops vivas sí se purga.
+    expect(await foto2.exists(), isFalse,
+        reason: 'el archivo de la privada purgable debe '
+            'borrarse');
     final fotos = await d.query('incidencias_fotos');
-    expect(fotos, isEmpty,
-        reason: 'la fila de la foto privada debe borrarse');
+    expect(fotos.map((e) => e['id']), ['foto-1'],
+        reason: 'solo queda la foto de la privada protegida');
     final locales = await d.query('incidencias_local');
-    expect(locales.map((e) => e['id']), ['inc-pub-1']);
+    expect(locales.map((e) => e['id']).toSet(),
+        {'inc-priv-1', 'inc-pub-1'});
     final ops = await d.query('ops_queue');
-    expect(ops.map((e) => e['op_uuid']), ['op-pub-crear'],
-        reason: 'solo sobrevive la op de la incidencia compartida');
+    expect(ops.map((e) => e['op_uuid']).toSet(),
+        {'op-priv-crear', 'op-priv-estado', 'op-pub-crear'},
+        reason: 'ninguna op viva se pierde en la purga');
     await tmp.delete(recursive: true);
   });
 

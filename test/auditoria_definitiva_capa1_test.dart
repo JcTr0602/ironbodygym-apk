@@ -356,11 +356,17 @@ void main() {
               'en error');
       expect(sync, contains('if (_ultimoPushLimpio) _avisarSyncExitoso();'),
           reason: 'push() volvió a avisar éxito sin push limpio');
-      final k = sync.indexOf("if (_ultimoPushLimpio) {\n"
+      // 1.32 (O2F2S, adjudicación F-6): la limpieza exige
+      // ADEMÁS el pull del mismo ciclo verificado — antes
+      // un push horario limpio borraba el error de una
+      // bajada muerta sin que nadie lo viera. Es la
+      // condición de este pin, reforzada: el pin se
+      // actualiza a la forma nueva.
+      final k = sync.indexOf("if (_ultimoPushLimpio && pullVerificado) {\n"
           "        await _db.setMeta('last_sync_error', '');");
       expect(k, isNonNegative,
           reason: 'push() volvió a limpiar last_sync_error '
-              'incondicionalmente');
+              'sin exigir push limpio Y pull verificado (F-6)');
     });
   });
 
