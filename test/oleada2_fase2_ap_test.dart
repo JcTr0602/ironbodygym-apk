@@ -450,6 +450,26 @@ void main() {
     });
   });
 
+  group('F-24 · cableado de importación (pin de fuente)', () {
+    test('al final de _importarRespaldo se limpian los '
+        'sellos de sync de la base importada', () {
+      final src = File('lib/ui/ajustes.dart').readAsStringSync();
+      final i = src.indexOf('Future<void> _importarRespaldo()');
+      expect(i, greaterThanOrEqualTo(0));
+      final cuerpo = src.substring(i);
+      expect(cuerpo, contains('limpiarSellosSyncEnMeta()'),
+          reason: 'la base importada trae los sellos del '
+              'teléfono que hizo el respaldo: sin limpiarlos, '
+              'este teléfono pintaría «al día» sin haber '
+              'bajado nada (sello falso, F-24 iv)');
+      // Y va DESPUÉS de reabrir la base nueva (la limpieza
+      // actúa sobre la meta importada, no sobre la vieja).
+      final iReapertura = cuerpo.indexOf('await LocalDb.instance.db;');
+      final iLimpieza = cuerpo.indexOf('limpiarSellosSyncEnMeta()');
+      expect(iLimpieza, greaterThan(iReapertura));
+    });
+  });
+
   group('AP-5 · pre-guardia de isolates de fondo', () {
     test('sesión persistida caducada o al límite ⇒ true; '
         'vigente o ausente ⇒ false', () async {
