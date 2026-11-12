@@ -448,4 +448,77 @@ void main() {
           reason: 'AP-3: op archivada tampoco es evidencia');
     });
   });
+
+  group('AP-6 · migraciones que relanzan (BD)', () {
+    test('fallo transitorio inyectado en un paso: el '
+        'upgrade revierte entero, la versión no sube a '
+        'medias y al siguiente arranque se reintenta '
+        'completo', () async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      SharedPreferences.setMockInitialValues({});
+      LocalDb.nombreArchivoDbForzado = 'test_o2f2s_ap6.db';
+      final dir = await getDatabasesPath();
+      final dbPath = p.join(dir, 'test_o2f2s_ap6.db');
+      await LocalDb.resetParaTest();
+      for (final s in ['', '-wal', '-shm']) {
+        try {
+          await File('$dbPath$s').delete();
+        } catch (_) {}
+      }
+      await LocalDb.resetParaTest();
+      // BD completa y sana en v74.
+      await LocalDb.instance.db;
+      await LocalDb.resetParaTest(borrarArchivo: false);
+
+      // Sabotaje: la BD «venía» de v51 y recordatorio_config
+      // es una VISTA — el ALTER del paso v52 revienta con
+      // un error NO benigno (ni «no such table» ni
+      // «duplicate column»).
+      final cruda = await databaseFactoryFfi.openDatabase(dbPath);
+      await cruda.execute('PRAGMA user_version = 51');
+      await cruda.execute('DROP TABLE recordatorio_config');
+      await cruda
+          .execute('CREATE VIEW recordatorio_config AS SELECT 1 AS id');
+      await cruda.close();
+
+      // El upgrade debe REVENTAR (antes de AP-6 el catch
+      // mudo lo tragaba y la app subía a v74 sin la
+      // columna, para siempre).
+      await LocalDb.resetParaTest(borrarArchivo: false);
+      var lanzo = false;
+      try {
+        await LocalDb.instance.db;
+      } catch (_) {
+        lanzo = true;
+      }
+      expect(lanzo, isTrue,
+          reason: 'AP-6: el error transitorio del paso v52 '
+              'debió relanzarse, no tragarse');
+      await LocalDb.resetParaTest(borrarArchivo: false);
+      final cruda2 = await databaseFactoryFfi.openDatabase(dbPath);
+      final v = await cruda2.rawQuery('PRAGMA user_version');
+      expect(v.first['user_version'], 51,
+          reason: 'AP-6: sin versión a medias — el upgrade '
+              'revirtió entero');
+
+      // Se retira el sabotaje (tabla real sin la columna):
+      // el siguiente arranque reintenta el upgrade
+      // COMPLETO y el paso v52 aplica su columna.
+      await cruda2.execute('DROP VIEW recordatorio_config');
+      await cruda2.execute(
+          'CREATE TABLE recordatorio_config (id INTEGER PRIMARY KEY)');
+      await cruda2.close();
+      await LocalDb.resetParaTest(borrarArchivo: false);
+      final db = await LocalDb.instance.db;
+      final v2 = await db.rawQuery('PRAGMA user_version');
+      expect(v2.first['user_version'], LocalDb.versionActual);
+      final cols =
+          await db.rawQuery('PRAGMA table_info(recordatorio_config)');
+      expect(cols.map((c) => '${c['name']}'), contains('frecuencia'),
+          reason: 'AP-6: el reintento aplicó el paso que '
+              'había fallado');
+      await LocalDb.resetParaTest();
+    });
+  });
 }

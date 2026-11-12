@@ -1206,9 +1206,12 @@ class LocalDb {
             await db.insert(
                 'meta', {'k': 'wm_borrados', 'v': '0'},
                 conflictAlgorithm: ConflictAlgorithm.replace);
-          } catch (_) {
+          } catch (e) {
             // La tabla meta puede no existir en BDs revertidas a v24
-            // en tests; el reseteo es best-effort.
+            // en tests; ese desenlace se traga. AP-6: un error
+            // transitorio NO — relanza y el upgrade revierte
+            // entero en vez de perder el reseteo para siempre.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         // v28 (v1.3.6, ítems 1B+1C): espejos de arqueo de caja e
@@ -1243,7 +1246,11 @@ class LocalDb {
                 'meta',
                 {'k': 'wm_incidencias_sync', 'v': '0'},
                 conflictAlgorithm: ConflictAlgorithm.replace);
-          } catch (_) {}
+          } catch (e) {
+            // AP-6: solo se traga «meta aún no existe»; un
+            // transitorio relanza y el upgrade revierte.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
+          }
         }
         // v29 (v1.3.7, Fase B §6.2): campos nuevos de suplementos en el
         // JSON del espejo (best-effort; el código tolera su ausencia con
@@ -1283,8 +1290,11 @@ class LocalDb {
           try {
             await db.execute(
                 'ALTER TABLE fotos_cola ADD COLUMN forzar_qos INTEGER NOT NULL DEFAULT 0');
-          } catch (_) {
-            // Columna ya existe o tabla no existe; tolerante.
+          } catch (e) {
+            // Columna ya existe o tabla no existe; tolerante
+            // SOLO en esos desenlaces (AP-6): un transitorio
+            // relanza y el upgrade revierte entero.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         // v31 (v1.4.0): tabla nomina_precalc (caché del conteo de
@@ -1296,8 +1306,11 @@ class LocalDb {
                 'clientes_pagados INTEGER NOT NULL, '
                 'huella TEXT NOT NULL, '
                 'calculado_en TEXT NOT NULL)');
-          } catch (_) {
-            // Tabla ya existe; tolerante.
+          } catch (e) {
+            // AP-6: con IF NOT EXISTS, un fallo aquí es
+            // transitorio, no «ya existe»: relanza y el
+            // upgrade revierte entero.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         // v32 (v1.5): limpieza del camino legado de fotos. La
@@ -1553,10 +1566,13 @@ class LocalDb {
           try {
             await db.execute(
                 "ALTER TABLE recordatorio_config ADD COLUMN frecuencia TEXT NOT NULL DEFAULT 'ninguna'");
-          } catch (_) {
+          } catch (e) {
             // Tabla aún no creada en esta ruta de upgrade:
             // _crearTablasBloque2Resto la crea ya con la
-            // columna cuando toque.
+            // columna cuando toque. AP-6: solo ese
+            // desenlace (y columna duplicada) se traga; un
+            // transitorio relanza y el upgrade revierte.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         if (oldV < 53) {
@@ -1564,8 +1580,11 @@ class LocalDb {
           try {
             await db.execute(
                 'ALTER TABLE turnos ADD COLUMN cubre_a TEXT');
-          } catch (_) {
+          } catch (e) {
             // La tabla se crea con la columna cuando toque.
+            // AP-6: solo «no such table»/duplicada se
+            // tragan; un transitorio relanza.
+            if (!_esErrorBenignoMigracion(e)) rethrow;
           }
         }
         if (oldV < 54) {
@@ -1819,9 +1838,31 @@ class LocalDb {
     return _db!;
   }
 
+  /// 1.32 (O2F2S, síntesis AP-6): ¿es un error de migración
+  /// BENIGNO? Solo estos tres desenlaces se tragan en los
+  /// pasos de migración: la tabla aún no existe en esta
+  /// ruta, la columna ya estaba, el objeto ya existía.
+  /// Cualquier otro error (SQLITE_BUSY, I/O, constraint)
+  /// debe RELANZARSE: sqflite envuelve el onUpgrade en una
+  /// transacción, así que el upgrade revierte entero y se
+  /// reintenta al siguiente arranque. Tragarlo dejaba la
+  /// columna sin crear o el cursor sin resetear con
+  /// user_version ya subida — y el paso no se reintentaba
+  /// nunca.
+  static bool _esErrorBenignoMigracion(Object e) {
+    if (e is! DatabaseException) return false;
+    final msg = '$e'.toLowerCase();
+    return msg.contains('no such table') ||
+        msg.contains('duplicate column') ||
+        msg.contains('already exists');
+  }
+
   /// ALTER TABLE ADD COLUMN solo si la columna no existe (SQLite no
   /// tiene IF NOT EXISTS para ADD COLUMN). Tolerante: si la tabla no
   /// existe, no hace nada (no debe reventar el onUpgrade).
+  /// AP-6: la tolerancia es SOLO para los desenlaces
+  /// benignos; un error transitorio relanza y el upgrade
+  /// entero revierte (ver _esErrorBenignoMigracion).
   static Future<void> _addColumnIfMissing(
       Database db, String tabla, String columna, String tipo) async {
     try {
@@ -1834,7 +1875,9 @@ class LocalDb {
       if (!existe) {
         await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
       }
-    } catch (_) {}
+    } catch (e) {
+      if (!_esErrorBenignoMigracion(e)) rethrow;
+    }
   }
 
   /// v37: vuelca las marcas de info pública pendiente que la
