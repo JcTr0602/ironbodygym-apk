@@ -85,6 +85,11 @@ abstract final class EstadoCorrida {
 /// diario? Solo los chequeos automáticos (o tras push) que
 /// terminaron completos sin mover una sola fila: los que el
 /// temporizador de 2 minutos produce ~30 veces por hora.
+/// 1.32 (Corte B, H-CB-6 — Hydrogen B-3): los comprobantes
+/// de pago subidos también son trabajo — una corrida cuyo
+/// único fruto fue subir comprobantes NO es un chequeo
+/// vacío y conserva su plaza (antes se borraba del diario
+/// y ese trabajo quedaba invisible).
 bool corridaSinPlaza({
   required String origen,
   required String estado,
@@ -92,6 +97,7 @@ bool corridaSinPlaza({
   required int bajados,
   required int fotosSubidas,
   required int fotosFallidas,
+  required int comprobantesSubidos,
 }) {
   if (estado != EstadoCorrida.completa) return false;
   if (origen != OrigenCorrida.automatica &&
@@ -101,7 +107,8 @@ bool corridaSinPlaza({
   return subidos == 0 &&
       bajados == 0 &&
       fotosSubidas == 0 &&
-      fotosFallidas == 0;
+      fotosFallidas == 0 &&
+      comprobantesSubidos == 0;
 }
 
 /// Retención (PURA): dada la lista de corridas (cualquier
@@ -614,6 +621,7 @@ class DiarioSync {
       bajados: bajados,
       fotosSubidas: fotosSubidas,
       fotosFallidas: fotosFallidas,
+      comprobantesSubidos: comprobantesSubidos,
     )) {
       await d.transaction((txn) async {
         await txn.delete('sync_corrida_tablas',

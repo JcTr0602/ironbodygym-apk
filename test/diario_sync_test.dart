@@ -45,7 +45,8 @@ void main() {
               subidos: 0,
               bajados: 0,
               fotosSubidas: 0,
-              fotosFallidas: 0),
+              fotosFallidas: 0,
+              comprobantesSubidos: 0),
           isTrue);
     });
     test('automática con bajados: con plaza', () {
@@ -56,7 +57,8 @@ void main() {
               subidos: 0,
               bajados: 3,
               fotosSubidas: 0,
-              fotosFallidas: 0),
+              fotosFallidas: 0,
+              comprobantesSubidos: 0),
           isFalse);
     });
     test('manual vacía: con plaza (la pidió una persona)', () {
@@ -67,7 +69,8 @@ void main() {
               subidos: 0,
               bajados: 0,
               fotosSubidas: 0,
-              fotosFallidas: 0),
+              fotosFallidas: 0,
+              comprobantesSubidos: 0),
           isFalse);
     });
     test('automática fallida vacía: con plaza (forense)', () {
@@ -78,7 +81,8 @@ void main() {
               subidos: 0,
               bajados: 0,
               fotosSubidas: 0,
-              fotosFallidas: 0),
+              fotosFallidas: 0,
+              comprobantesSubidos: 0),
           isFalse);
     });
     test('automática completa con una foto fallida: con plaza', () {
@@ -89,7 +93,21 @@ void main() {
               subidos: 0,
               bajados: 0,
               fotosSubidas: 0,
-              fotosFallidas: 1),
+              fotosFallidas: 1,
+              comprobantesSubidos: 0),
+          isFalse);
+    });
+    test('automática completa con SOLO comprobantes subidos: '
+        'con plaza (Corte B H-CB-6, Hydrogen B-3)', () {
+      expect(
+          corridaSinPlaza(
+              origen: 'automatica',
+              estado: 'completa',
+              subidos: 0,
+              bajados: 0,
+              fotosSubidas: 0,
+              fotosFallidas: 0,
+              comprobantesSubidos: 2),
           isFalse);
     });
   });
@@ -227,6 +245,27 @@ void main() {
               .getMeta('chequeos_vacios_desde_ultima_corrida'),
           '0');
       expect(await d.historial(), hasLength(1));
+    });
+
+    test('corrida automática de SOLO comprobantes: ocupa '
+        'plaza y queda en el historial (Corte B H-CB-6, '
+        'Hydrogen B-3)', () async {
+      await _init();
+      final d = DiarioSync.instance;
+      final id = await d.abrirCorrida(
+          tipo: 'solo_pull', origen: 'automatica', ahoraEpoch: 4000);
+      final quedo = await d.cerrarCorrida(id,
+          estado: 'completa',
+          duracionMs: 60,
+          comprobantesSubidos: 2,
+          ahoraEpoch: 4001);
+      expect(quedo, isTrue,
+          reason: 'subir comprobantes de pago ES trabajo: '
+              'la corrida no es un chequeo vacío y no debe '
+              'borrarse del diario');
+      final h = await d.historial();
+      expect(h, hasLength(1));
+      expect(h.first.comprobantesSubidos, 2);
     });
 
     test('huérfana: la siguiente corrida la cierra cortada '
