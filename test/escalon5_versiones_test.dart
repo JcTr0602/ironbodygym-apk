@@ -8,6 +8,8 @@
 /// entrada de `novedades` no coincide con la versión de la app
 /// en pubspec.yaml y en AppConfig, o si AppConfig y pubspec se
 /// desafasan entre sí (literal completo, con build).
+library;
+
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
