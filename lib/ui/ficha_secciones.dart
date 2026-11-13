@@ -7,6 +7,7 @@
 /// FichaScreen; el layout nuevo llega en el Paso 2.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -1390,6 +1391,12 @@ class EntradaSeccionFicha extends StatefulWidget {
 class _EntradaSeccionFichaState extends State<EntradaSeccionFicha> {
   bool _animar = false;
   bool _visible = false;
+  // El retardo de la escalera de entrada vive en un Timer
+  // con dueño (este State): antes era un Future.delayed
+  // sin handle — si la sección salía del árbol antes de
+  // vencer (scroll rápido, cerrar la ficha), el temporizador
+  // quedaba huérfano y sobrevivía a su pantalla.
+  Timer? _temporizadorEntrada;
 
   @override
   void initState() {
@@ -1404,11 +1411,19 @@ class _EntradaSeccionFichaState extends State<EntradaSeccionFicha> {
           if (mounted) setState(() => _visible = true);
         });
       } else {
-        Future.delayed(Duration(milliseconds: ms), () {
+        _temporizadorEntrada = Timer(Duration(milliseconds: ms), () {
+          _temporizadorEntrada = null;
           if (mounted) setState(() => _visible = true);
         });
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _temporizadorEntrada?.cancel();
+    _temporizadorEntrada = null;
+    super.dispose();
   }
 
   @override
