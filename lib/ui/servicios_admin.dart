@@ -500,12 +500,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       },
       child: Row(
         children: [
-          const IconoModuloBadge(
-            icono: Icons.payments_rounded,
-            tinte: Colors.green,
-            iconoOscuro: Colors.green,
-            iconoClaro: Colors.lightGreen,
-          ),
+          // Pasada (Argón): el atajo verde de la casa, no
+          // Colors.green/lightGreen crudos.
+          IconoModuloBadge.verde(Icons.payments_rounded),
           const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Column(

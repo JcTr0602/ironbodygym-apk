@@ -544,6 +544,15 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
                 style: AppTexto.conTabulares(AppTexto.secundario),
               ),
               trailing: FilledButton.tonal(
+                // Pasada (Argón): trailing más compacto —
+                // el título (2 líneas con elipsis) gana el
+                // aire que el botón ancho le quitaba con
+                // nombres compuestos a 360 dp.
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppEspacio.sm),
+                  visualDensity: VisualDensity.compact,
+                ),
                 onPressed: () => _liquidarRapido(e),
                 child: const Text('Liquidar Arqueo'),
               ),

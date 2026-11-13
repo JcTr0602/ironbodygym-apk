@@ -78,9 +78,8 @@ class ControlAccesoScreen extends StatelessWidget {
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Usuarios'),
-          actions: [
+        appBar: appBarIron(context, 'Usuarios',
+          acciones: [
             // v1.6.0 (Jc): una sola puerta «Turnos» (hub con el
             // plan semanal, los ajustes por fecha y la línea de
             // precedencia). Antes esto abría solo «Turnos manuales».
@@ -753,7 +752,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
 
   Widget _filaAcceso(AccesoCliente a) {
     final (chipTexto, chipColor) = switch (a.estado) {
-      'bloqueado' => ('Bloqueado', AppColores.alertaOscuro),
+      // Norma 3 (Argón): el chip de bloqueado va en
+      // avisoFondo, el token de aviso de la casa.
+      'bloqueado' => ('Bloqueado', AppColores.avisoFondo),
       'revocado' => ('Revocado', Colors.grey.shade600),
       _ => ('Activo', AppColores.exitoOscuro),
     };

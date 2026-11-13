@@ -544,6 +544,11 @@ class _ColaScreenState extends State<ColaScreen> {
   // v1.2.9+46: detalle de fotos pendientes/error para gestión.
   List<Map<String, dynamic>> _fotosDetalle = [];
   bool _fotosExpandido = false;
+  // Pasada (Argón): la expansión pinta una VENTANA de
+  // filas (12); sin ella, expandir decodificaba hasta 50
+  // miniaturas en un solo frame. «Ver las restantes» la
+  // abre entera, a petición.
+  bool _fotosMostrarTodas = false;
   // H-12 (1.20): fotos de incidencias en 'error' (tabla propia),
   // con su marca de recuperable calculada por LocalDb.
   List<Map<String, dynamic>> _fotosIncError = [];
@@ -1812,7 +1817,20 @@ class _ColaScreenState extends State<ColaScreen> {
           if (_fotosExpandido && _fotosDetalle.isNotEmpty) ...[
             const SizedBox(height: 8),
             const Divider(height: 1),
-            for (final f in _fotosDetalle) _filaFoto(context, f),
+            for (final f in (_fotosMostrarTodas
+                ? _fotosDetalle
+                : _fotosDetalle.take(12).toList()))
+              _filaFoto(context, f),
+            if (!_fotosMostrarTodas && _fotosDetalle.length > 12)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () =>
+                      setState(() => _fotosMostrarTodas = true),
+                  child: Text(
+                      'Ver las ${_fotosDetalle.length - 12} restantes'),
+                ),
+              ),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
@@ -1917,6 +1935,14 @@ class _ColaScreenState extends State<ColaScreen> {
         : estado == 'subiendo'
             ? AppColores.info
             : AppColores.alerta;
+    // Pasada (Argón): el TEXTO del chip (metadato, ~11 px)
+    // va en el token resuelto por tema — infoTexto y sus
+    // pares — no en el color de relleno.
+    final textoEstado = estado == 'error'
+        ? AppColores.errorTexto(context)
+        : estado == 'subiendo'
+            ? AppColores.infoTexto(context)
+            : AppColores.alertaTexto(context);
     // v1.4.0 (Argón): estado VISUAL calculado en lectura, sin tocar
     // la columna estado de la BD. Una 'original' pesada retenida por
     // el QoS (pendiente, sin forzar, sin error) no está fallando:
@@ -1978,7 +2004,8 @@ class _ColaScreenState extends State<ColaScreen> {
                         style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
-                    Container(
+                    Flexible(
+                      child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: AppEspacio.sm, vertical: 2),
                       decoration: BoxDecoration(
@@ -1993,7 +2020,14 @@ class _ColaScreenState extends State<ColaScreen> {
                                 : esperandoConexion
                                     ? 'Esperando buena conexión'
                                     : 'Pendiente',
-                        style: AppTexto.metadato.copyWith(color: colorEstado, fontWeight: FontWeight.w600),
+                        style: AppTexto.metadato.copyWith(color: textoEstado, fontWeight: FontWeight.w600),
+                        // La pastilla larga («Esperando buena
+                        // conexión») va en Flexible (ver el
+                        // Row): si no cabe, elide ella, no
+                        // empuja la fila fuera.
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       ),
                     ),
                   ],
@@ -2516,8 +2550,10 @@ class _ColaScreenState extends State<ColaScreen> {
                   builder: (_) => const CentroSyncScreen())),
               child: Row(
                 children: [
-                  const Icon(Icons.radar_rounded,
-                      color: AppColores.info),
+                  // Pasada (Argón): la puerta al Centro va
+                  // con el badge de módulo de la casa
+                  // (naranja), como las demás puertas.
+                  IconoModuloBadge.naranja(Icons.radar_rounded),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

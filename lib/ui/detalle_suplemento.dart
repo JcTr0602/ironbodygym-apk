@@ -372,7 +372,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
                 '⚠️ Precio distinto al oficial '
                 '(${_precioOficial.toStringAsFixed(2)} $_monedaSup).',
                 style: AppTexto.cuerpo
-                    .copyWith(color: AppColores.error),
+                    .copyWith(color: AppColores.errorTexto(context)),
               ),
             ],
           ],
@@ -950,8 +950,8 @@ class DetalleSuplementoScreen extends StatelessWidget {
                           size: 20, color: AppColores.error),
                       const SizedBox(width: 12),
                       Text('Eliminar suplemento',
-                          style: AppTexto.cuerpo
-                              .copyWith(color: AppColores.error)),
+                          style: AppTexto.cuerpo.copyWith(
+                              color: AppColores.errorTexto(context))),
                     ],
                   ),
                 ),

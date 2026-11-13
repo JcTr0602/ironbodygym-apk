@@ -1,6 +1,7 @@
 /// Listas: vencen hoy, atrasados, por vencer. Con mini foto y pago rápido.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import '../cliente_protegido.dart';
 import '../precio_cobro.dart';
 import '../tarifa_especial.dart';
 import 'acciones_acceso.dart';
+import 'app_bar.dart';
 import 'buscar.dart';
 import 'skeleton.dart';
 import 'componentes.dart';
@@ -708,8 +710,8 @@ class _ListasScreenState extends State<ListasScreen>
               child: _NumeroAnimado(
                 valor: _visHoy.length.toDouble(),
                 builder: (_, v) => Text('Hoy (${v.round()})',
-                    style: const TextStyle(
-                        color: AppColores.alerta,
+                    style: TextStyle(
+                        color: AppColores.alertaTexto(context),
                         fontWeight: FontWeight.w600)),
               ),
             ),
@@ -722,8 +724,8 @@ class _ListasScreenState extends State<ListasScreen>
                 valor: _visPorVencer.length.toDouble(),
                 builder: (_, v) =>
                     Text('Por vencer · 3 días (${v.round()})',
-                        style: const TextStyle(
-                            color: AppColores.alerta,
+                        style: TextStyle(
+                            color: AppColores.alertaTexto(context),
                             fontWeight: FontWeight.w600)),
               ),
             ),
@@ -733,8 +735,8 @@ class _ListasScreenState extends State<ListasScreen>
                     .toDouble(),
                 builder: (_, v) =>
                     Text('Atrasados -30d (${v.round()})',
-                        style: const TextStyle(
-                            color: AppColores.error,
+                        style: TextStyle(
+                            color: AppColores.errorTexto(context),
                             fontWeight: FontWeight.w600)),
               ),
             ),
@@ -743,8 +745,8 @@ class _ListasScreenState extends State<ListasScreen>
                 valor: _visMas30.length.toDouble(),
                 builder: (_, v) =>
                     Text('Atrasados +30d (${v.round()})',
-                        style: const TextStyle(
-                            color: AppColores.error,
+                        style: TextStyle(
+                            color: AppColores.errorTexto(context),
                             fontWeight: FontWeight.w600)),
               ),
             ),
@@ -752,8 +754,8 @@ class _ListasScreenState extends State<ListasScreen>
               child: _NumeroAnimado(
                 valor: _visAlDia.length.toDouble(),
                 builder: (_, v) => Text('Al día (${v.round()})',
-                    style: const TextStyle(
-                        color: AppColores.exito,
+                    style: TextStyle(
+                        color: AppColores.exitoTexto(context),
                         fontWeight: FontWeight.w600)),
               ),
             ), // v1.2.1
@@ -765,10 +767,8 @@ class _ListasScreenState extends State<ListasScreen>
     return Scaffold(
             appBar: widget.embebida
           ? null
-          : AppBar(
-              title: const Text('Vencimientos'), // v1.3.6: renombrado (era 'Listas')
-              bottom: _barraPestanas(),
-            ),
+          : appBarIron(context, 'Vencimientos',
+              bottom: _barraPestanas()),
       body: Column(
         children: [
           if (widget.embebida) _barraPestanas(),
@@ -1231,7 +1231,10 @@ class _ListasScreenState extends State<ListasScreen>
                       onTap: () => _pagoRapido(c),
                       child: const Icon(
                           Icons.payments_rounded,
-                          color: Colors.white,
+                          // Norma 2 (Argón): sobre la marca
+                          // manda sobreMarca (6,32:1); el
+                          // blanco daba 2,75:1.
+                          color: AppColores.sobreMarca,
                           size: 22),
                     ),
                   ),
@@ -1405,6 +1408,10 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
   late final Animation<double> _tamano;
   bool _sello = false;
   bool _avisado = false;
+  // Higiene (Argón): el retardo de 520 ms es un Timer con
+  // dueño, cancelable en dispose — no un Future.delayed
+  // huérfano.
+  Timer? _temporizadorSalida;
 
   @override
   void initState() {
@@ -1416,7 +1423,8 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() => _sello = true);
-      Future.delayed(const Duration(milliseconds: 520), () {
+      _temporizadorSalida =
+          Timer(const Duration(milliseconds: 520), () {
         if (!mounted) return;
         if (MediaQuery.of(context).disableAnimations) {
           _completar();
@@ -1435,6 +1443,7 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
 
   @override
   void dispose() {
+    _temporizadorSalida?.cancel();
     _ctrl.dispose();
     super.dispose();
   }

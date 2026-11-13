@@ -813,8 +813,15 @@ class _BuscarScreenState extends State<BuscarScreen> {
                   horizontal: AppEspacio.md, vertical: AppEspacio.xs),
               child: Row(
                 children: [
-                  Text('${_seleccionados.length} seleccionado(s)',
-                      style: AppTexto.etiqueta),
+                  // Pasada (Argón): el contador va en
+                  // Flexible: con la fuente escalada es él
+                  // quien cede, no el botón de avisar.
+                  Flexible(
+                    child: Text(
+                        '${_seleccionados.length} seleccionado(s)',
+                        style: AppTexto.etiqueta,
+                        overflow: TextOverflow.ellipsis),
+                  ),
                   const Spacer(),
                   TextButton.icon(
                     icon: const Icon(Icons.chat_rounded, size: 18),
@@ -894,7 +901,11 @@ class _BuscarScreenState extends State<BuscarScreen> {
               SliverList.builder(
                 itemCount: _res.length,
                 itemBuilder: (context, i) =>
-                    FadeEntrada(child: _filaResultado(context, i)),
+                    // Higiene (Argón): el escalonado se acota
+                    // a la ventana inicial pasándole el índice
+                    // (sin él, TODAS las filas animaban).
+                    FadeEntrada(
+                        indice: i, child: _filaResultado(context, i)),
               ),
             ],
           ],

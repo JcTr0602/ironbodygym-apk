@@ -70,17 +70,27 @@ Widget filaAdmin(BuildContext context, IconData? icono, String etiqueta,
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(
-          children: [
-            if (icono != null) ...[
-              Icon(icono,
-                  size: 16,
-                  color: AppColores.textoSecundario(context)),
-              const SizedBox(width: 8),
+        // Pasada de Argón: la etiqueta va en Flexible — en
+        // Salud la fila desbordaba 48 px porque etiqueta y
+        // valor se empujaban sin que ninguno cediera; cede
+        // la etiqueta (con elipsis), el valor manda.
+        Flexible(
+          child: Row(
+            children: [
+              if (icono != null) ...[
+                Icon(icono,
+                    size: 16,
+                    color: AppColores.textoSecundario(context)),
+                const SizedBox(width: 8),
+              ],
+              Flexible(
+                child: Text(etiqueta,
+                    overflow: TextOverflow.ellipsis),
+              ),
             ],
-            Text(etiqueta),
-          ],
+          ),
         ),
+        const SizedBox(width: AppEspacio.sm),
         Text(valor,
             style: TextStyle(
                 fontWeight:

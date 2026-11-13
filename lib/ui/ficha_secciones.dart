@@ -1099,8 +1099,8 @@ class FilaTimelineFicha extends StatelessWidget {
                             top: AppEspacio.xs),
                         child: Text(
                           'Nota: $notaConcil',
-                          style: AppTexto.metadato
-                              .copyWith(color: AppColores.error),
+                          style: AppTexto.metadato.copyWith(
+                              color: AppColores.errorTexto(context)),
                         ),
                       ),
                   ],

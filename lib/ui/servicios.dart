@@ -1865,9 +1865,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               children: [
                 const IconoModuloBadge(
                   icono: Icons.emoji_events_rounded,
-                  tinte: Colors.amber,
-                  iconoOscuro: Colors.amber,
-                  iconoClaro: Colors.amberAccent,
+                  // Pasada (Argón): tokens de la familia
+                  // ámbar de la casa, no Colors.amber crudo
+                  // (el mismo trío del badge de arqueo).
+                  tinte: AppColores.alerta,
+                  iconoOscuro: AppColores.ambarTactico,
+                  iconoClaro: AppColores.ambarTierra,
                 ),
                 const SizedBox(width: AppEspacio.sm),
                 Expanded(
@@ -2186,13 +2189,17 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 padding: const EdgeInsets.all(AppEspacio.sm),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(AppRadio.sm),
-                  color: AppColores.alertaOscuro
+                  color: AppColores.alerta
                       .withValues(alpha: 0.15),
                 ),
                 child: Text(
                   '⚠ Quedan pocas dosis en este pomo (menos de 5).',
+                  // Pasada (Argón): el texto va en el token
+                  // RESUELTO por tema, no en alertaOscuro
+                  // fijo (en oscuro era ilegible sobre su
+                  // propio tinte).
                   style: AppTexto.cuerpo.copyWith(
-                      color: AppColores.alertaOscuro,
+                      color: AppColores.alertaTexto(context),
                       fontWeight: FontWeight.w600),
                 ),
               ),
@@ -2488,7 +2495,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         ? 'Comisiones: ${fmtMonto(comision)} CUP'
                         : 'Tu comisión: ${fmtMonto(comision)} CUP',
                     style: AppTexto.cuerpo.copyWith(
-                        color: AppColores.exito,
+                        color: AppColores.exitoTexto(context),
                         fontWeight: FontWeight.w600),
                   ),
                 ),

@@ -267,7 +267,6 @@ Hola $username, estas son tus credenciales para la app del gym:
             label: const Text('Copiar'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadio.md),
               ),
@@ -770,7 +769,6 @@ class _DialogoNuevaContrasenaState
             onPressed: () => Navigator.pop(context, _ctrl.text),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),
@@ -833,7 +831,6 @@ class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
                 (nombre: _nombreCtrl.text, pass: _passCtrl.text)),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),

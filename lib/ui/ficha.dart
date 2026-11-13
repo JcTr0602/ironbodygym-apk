@@ -1940,7 +1940,6 @@ class _FichaScreenState extends State<FichaScreen> {
                 onPressed: () => Navigator.pop(ctx, true),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColores.naranja,
-                  foregroundColor: Colors.white,
                 ),
                 child: const Text('Guardar')),
           ],
@@ -2342,7 +2341,6 @@ class _FichaScreenState extends State<FichaScreen> {
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
               ),
               child: const Text('Enviar')),
         ],
@@ -2389,7 +2387,6 @@ class _FichaScreenState extends State<FichaScreen> {
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
               ),
               child: Text(esCongelado ? 'Descongelar' : 'Congelar')),
         ],
@@ -2522,7 +2519,6 @@ class _FichaScreenState extends State<FichaScreen> {
               onPressed: () => Navigator.pop(ctx, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColores.naranja,
-                foregroundColor: Colors.white,
               ),
               child: const Text('Confirmar')),
         ],
@@ -3470,7 +3466,9 @@ class _FichaScreenState extends State<FichaScreen> {
                                             .copyWith(
                                                 fontWeight:
                                                     FontWeight.w600,
-                                                color: AppColores.exito),
+                                                color: AppColores
+                                                    .exitoTexto(
+                                                        context)),
                                         textAlign:
                                             TextAlign.right,
                                       ),
@@ -4725,7 +4723,6 @@ class _DialogoEditarClienteState extends State<_DialogoEditarCliente> {
                 )),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
             ),
             child: const Text('Guardar')),
       ],
@@ -5015,7 +5012,6 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
                 }),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
             ),
             child: const Text('Continuar')),
       ],
@@ -5159,7 +5155,6 @@ class _DialogoNotasClienteState extends State<_DialogoNotasCliente> {
             onPressed: () => Navigator.pop(context, _ctrl.text),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
             ),
             child: const Text('Guardar')),
       ],
