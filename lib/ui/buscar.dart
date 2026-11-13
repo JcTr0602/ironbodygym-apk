@@ -2123,12 +2123,17 @@ class _FilaClienteState extends State<_FilaCliente> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.check_rounded,
-                              size: 13, color: AppColores.exito),
+                          Icon(Icons.check_rounded,
+                              size: 13,
+                              color: AppColores.exitoTexto(context)),
                           const SizedBox(width: 3),
                           Text(widget.avisoChip!,
                               style: AppTexto.etiqueta.copyWith(
-                                  color: AppColores.exito,
+                                  // Pasada (Argón): el texto
+                                  // del chip (12 px) va en el
+                                  // token resuelto, no en el
+                                  // exito de relleno.
+                                  color: AppColores.exitoTexto(context),
                                   fontWeight: FontWeight.w700)),
                         ],
                       ),
