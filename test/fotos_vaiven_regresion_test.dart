@@ -20,11 +20,14 @@
 ///    migración/rescate de FotoCache los vuelve a ver.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/fotos.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 
 /// Réplica del nombre de archivo vigente (lib/fotos.dart,
 /// _nombreArchivo + _extDeStorage + _archivoCache).
@@ -110,8 +113,18 @@ void main() {
               'la nueva esté en disco');
       expect(await FotoCache.instance.enCache(display), isNotNull,
           reason: 'la fila sigue pintando la foto vieja');
-      expect(await FotoCache.instance.enCache(original), isNull,
-          reason: 'la nueva aún no ha aterrizado');
+      // Fase 1 (FOTOS-01): la resolución por la ruta VIGENTE
+      // (la nueva, la que trae la fila) cae a la copia
+      // preservada — es lo que la superficie pinta. En la
+      // base esto devolvía null: el archivo se conservaba
+      // pero ninguna superficie lo encontraba, y el vaivén
+      // seguía visible pese a la invalidación diferida.
+      final resuelta = await FotoCache.instance.enCache(original);
+      expect(resuelta, isNotNull,
+          reason: 'la ruta nueva sin aterrizar resuelve a la '
+              'variante preservada');
+      expect(resuelta!.path, sembrada.path,
+          reason: 'y es el archivo de la variante vieja');
 
       // La variante nueva aterriza (la descarga la dejó en
       // disco y enCache la registra): ahora sí sobra la vieja.
@@ -135,6 +148,54 @@ void main() {
       expect(await sembrada.exists(), isFalse,
           reason: 'un cambio de foto de verdad no difiere '
               'nada: la vieja sobra desde ya');
+    });
+  });
+
+  group('A2 · la SUPERFICIE pinta la variante preservada '
+      '(FOTOS-01)', () {
+    // Un PNG 1×1 válido: el avatar debe llegar a construir
+    // su Image con él (con bytes inválidos la decodificación
+    // fallaría y el test mediría otra cosa).
+    final png1x1 = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4'
+        '2mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+
+    testWidgets('tras el flip display→original sin aterrizar, '
+        'el avatar pinta la foto vieja (Image), no las '
+        'iniciales', (tester) async {
+      const display = 'clientes/9007/uuid-w_display.png';
+      const original = 'clientes/9007/uuid-w_original.png';
+      final f = File('${cacheDir.path}/${nombreVigente(display)}');
+      // La siembra es E/S REAL (dart:io): en la zona falsa
+      // de testWidgets esos await nunca completan — va en
+      // runAsync, como en el resto de arneses de la casa.
+      await tester.runAsync(() async {
+        await f.writeAsBytes(png1x1, flush: true);
+        // El pull aplica el flip de variante (la fila ya
+        // trae la ruta nueva; la nueva aún no bajó).
+        await FotoCache.instance
+            .invalidarCambioFoto(display, original);
+      });
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: AvatarClienteConFoto(
+            nombre: 'Ada Aragon',
+            fotoStorage: original,
+          ),
+        ),
+      ));
+      // _resolverFoto resuelve en disco (async real).
+      for (var i = 0; i < 12; i++) {
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(find.byType(Image), findsOneWidget,
+          reason: 'la superficie pinta la variante preservada '
+              'mientras la nueva baja');
+      expect(find.text('AA'), findsNothing,
+          reason: 'sin iniciales: hay foto que pintar');
+      await tester.pumpWidget(const SizedBox());
     });
   });
 

@@ -87,6 +87,7 @@ Future<int> _sembrarOriginal(
   required int clienteId,
   required int bytes,
   required String creadoEn,
+  bool conStoragePath = true,
 }) async {
   final archivo = File('${dir.path}/$opUuid-original.jpg');
   await archivo.writeAsBytes(List.filled(bytes, 7));
@@ -101,7 +102,13 @@ Future<int> _sembrarOriginal(
     'actualizado_en': creadoEn,
     // Bytes ya en Storage; solo falta vincular (vía sin red de
     // _subirUna). La DECISIÓN de reclamarla es lo que se prueba.
-    'storage_path': 'clientes/$clienteId/${opUuid}_original.jpg',
+    // Fase 1 (FOTOS-02): la «grande» de este test es una
+    // subida REAL pendiente (sin storage_path): con los
+    // bytes ya en Storage no hay red que proteger y la vía
+    // inmediata la completa — ese caso vive en
+    // fase1_correcciones_fotos_test.dart.
+    if (conStoragePath)
+      'storage_path': 'clientes/$clienteId/${opUuid}_original.jpg',
   });
 }
 
@@ -145,11 +152,13 @@ void main() {
     final hace5 = isoHabana(
         ahoraHabana().subtract(const Duration(minutes: 5)));
     // La grande se creó ANTES: la selección la elige primero.
+    // Es una subida real pendiente (sin storage_path).
     await _sembrarOriginal(db, docs,
         opUuid: 'op-grande',
         clienteId: 902,
         bytes: 600 * 1024,
-        creadoEn: hace5);
+        creadoEn: hace5,
+        conStoragePath: false);
     await _sembrarOriginal(db, docs,
         opUuid: 'op-peq',
         clienteId: 901,
@@ -179,8 +188,9 @@ void main() {
         reason: 'diferir no quema intentos');
     expect(grande['worker_id'], isNull,
         reason: 'diferir no la reclama');
-    expect(grande['storage_path'], 'clientes/902/op-grande_original.jpg',
-        reason: 'su fila queda intacta');
+    expect(grande['storage_path'], isNull,
+        reason: 'su fila queda intacta (sigue siendo una '
+            'subida real pendiente)');
   });
 
   test('solo una original grande: el ciclo termina sin reclamarla '
@@ -195,7 +205,8 @@ void main() {
         opUuid: 'op-grande',
         clienteId: 902,
         bytes: 600 * 1024,
-        creadoEn: isoHabana(ahoraHabana()));
+        creadoEn: isoHabana(ahoraHabana()),
+        conStoragePath: false);
 
     final n = await FotosColaService.instance
         .procesarCola()
