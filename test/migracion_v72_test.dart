@@ -105,8 +105,8 @@ void main() {
       'cuarentena', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 74);
-    expect(await db.getVersion(), 74);
+    expect(LocalDb.versionActual, 75);
+    expect(await db.getVersion(), 75);
     final info = await _infoIncidencias(db);
     expect(info['sync_error'], 'TEXT|nn=0|dflt=null|pk=0',
         reason: 'sin la columna, YS-3 no puede guardar el '
@@ -121,7 +121,7 @@ void main() {
       () async {
     await _init();
     final db = await _reabrirTrasDegradar();
-    expect(await db.getVersion(), 74);
+    expect(await db.getVersion(), 75);
     final filas = await db.query('incidencias_local');
     expect(filas, hasLength(1),
         reason: 'la migración no puede perder incidencias '

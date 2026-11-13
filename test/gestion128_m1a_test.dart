@@ -573,7 +573,7 @@ void main() {
       // a 74 (materialización de watermarks). La columna de
       // v65 sigue naciendo en el esquema limpio, que es lo
       // que aquí se fija.
-      expect(LocalDb.versionActual, 74);
+      expect(LocalDb.versionActual, 75);
     });
   });
 

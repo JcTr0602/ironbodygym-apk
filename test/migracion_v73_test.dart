@@ -104,8 +104,8 @@ void main() {
       'el diario completo', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 74);
-    expect(await db.getVersion(), 74);
+    expect(LocalDb.versionActual, 75);
+    expect(await db.getVersion(), 75);
     final info = await _infoDiario(db);
     for (final t in _tablasDiario) {
       expect(info[t], isNotEmpty,
@@ -127,7 +127,7 @@ void main() {
       'diario nace vacío', () async {
     await _init();
     final db = await _reabrirTrasDegradar();
-    expect(await db.getVersion(), 74);
+    expect(await db.getVersion(), 75);
     final filas = await db.query('clientes',
         where: 'id = ?', whereArgs: [9001]);
     expect(filas, hasLength(1),

@@ -72,8 +72,8 @@ void main() {
       'id/data/sync_seq/op_uuid', () async {
     await _init();
     final db = await LocalDb.instance.db;
-    expect(LocalDb.versionActual, 74);
-    expect(await db.getVersion(), 74);
+    expect(LocalDb.versionActual, 75);
+    expect(await db.getVersion(), 75);
     final info = await _infoAvisosVistos(db);
     expect(info.keys,
         containsAll(['id', 'data', 'sync_seq', 'op_uuid']),
@@ -90,7 +90,7 @@ void main() {
     await LocalDb.resetParaTest(borrarArchivo: false);
 
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 74);
+    expect(await db.getVersion(), 75);
     final info = await _infoAvisosVistos(db);
     expect(info.keys,
         containsAll(['id', 'data', 'sync_seq', 'op_uuid']),
