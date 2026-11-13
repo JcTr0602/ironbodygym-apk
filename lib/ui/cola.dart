@@ -488,7 +488,14 @@ class _ColaScreenState extends State<ColaScreen> {
           horaIso: _det.errorHoraIso,
           hayInternet: _hayInternet);
     }
-    return describirErrorCorrida(e, hayInternet: _hayInternet);
+    // Fase 1 (INT-01): sin código, el texto de detalle() ya
+    // viene compuesto (el Diario, con su crudo traducido en
+    // la fuente desde SYNC-04) o es el mensaje humano legado
+    // de la 1.32: se pinta TAL CUAL. Re-clasificarlo aquí
+    // degradaba los legados más comunes («No hay conexión a
+    // internet.») al genérico mudo «Hubo un problema al
+    // sincronizar», sin pierna ni causa.
+    return e;
   }
 
   List<Map<String, dynamic>> _ops = [];
@@ -1197,6 +1204,17 @@ class _ColaScreenState extends State<ColaScreen> {
       // del caso de Jc — la tarjeta lo dice y pierde el
       // verde triunfal.
       final errorVigente = _textoErrorVisible;
+      // Fase 1 (SYNC-08): el aviso nombra la pierna REAL del
+      // error vigente (la trae detalle()): con un error de
+      // subida o de sesión, acusar a «la descarga» era decir
+      // lo contrario de lo que pasó. Sin pierna conocida
+      // (legado), la frase neutra no acusa a nadie.
+      final avisoPierna = switch (_det.errorPierna) {
+        'subida' => 'la subida no está al día',
+        'bajada' || 'incidencias' => 'la descarga no está al día',
+        'sesion' => 'la sesión no está al día',
+        _ => 'la sincronización no está al día',
+      };
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(AppEspacio.md),
@@ -1220,7 +1238,7 @@ class _ColaScreenState extends State<ColaScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '⚠️ Ojo: la descarga no está al día. '
+                    '⚠️ Ojo: $avisoPierna. '
                     '$errorVigente',
                     style: AppTexto.cuerpo,
                   ),

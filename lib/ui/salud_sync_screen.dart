@@ -17,6 +17,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../salud_sync.dart';
 import '../sync.dart';
 import '../tiempo.dart';
@@ -251,8 +252,13 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                         _fmtFechaHora(d.copiaUltima)),
                     if (d.copiaError.isNotEmpty)
                       Text(
+                        // Fase 1 (SYNC-10): el error guardado
+                        // de la copia es la excepción cruda;
+                        // pasa por el traductor de diagnóstico
+                        // de la casa, como las notas de tabla
+                        // de esta misma pantalla.
                         'La última copia automática falló: '
-                        '${d.copiaError}',
+                        '${resumenErrorDiagnostico(d.copiaError)}',
                         style: AppTexto.secundario
                             .copyWith(color: AppColores.error),
                       )

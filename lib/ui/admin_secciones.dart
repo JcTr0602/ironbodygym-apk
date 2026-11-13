@@ -795,9 +795,32 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       } catch (_) {
         eventosCarga = [];
       }
+      // Fase 1 (INT-02): desde la 1.33 la meta guarda el
+      // CÓDIGO del error, no el mensaje: el Diagnóstico lo
+      // compone con sus compañeras (pierna, tablas, hora)
+      // como las demás superficies, en vez de pintar el
+      // código crudo («Último error: sin_conexion»). El
+      // legado humano pre-1.33 se muestra tal cual.
+      var ultimoErrorDiag =
+          (lastErr?.isNotEmpty ?? false) ? lastErr : null;
+      if (ultimoErrorDiag != null &&
+          esCodigoErrorSync(ultimoErrorDiag)) {
+        final piernaErr =
+            await db.getMeta('last_sync_error_pierna') ?? '';
+        final tablasErr =
+            (await db.getMeta('last_sync_error_tablas') ?? '')
+                .split(',')
+                .where((t) => t.isNotEmpty)
+                .toList();
+        ultimoErrorDiag = textoErrorCorridaPersistido(
+            codigo: ultimoErrorDiag,
+            pierna: piernaErr,
+            tablas: tablasErr,
+            horaIso: await db.getMeta('last_sync_error_ts'));
+      }
       setState(() {
         _datos = datos;
-        _ultimoError = (lastErr?.isNotEmpty ?? false) ? lastErr : null;
+        _ultimoError = ultimoErrorDiag;
         _ultimoSync = ultimoSync;
         _enTurnoHoy = enTurnoHoy;
         _ahoraServidor = ahoraServidor;
