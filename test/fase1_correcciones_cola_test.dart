@@ -25,6 +25,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/ui/admin_secciones.dart';
 import 'package:ironbody_gym/ui/cola.dart';
+import 'package:ironbody_gym/ui/diseno.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -150,6 +151,44 @@ void main() {
             'INT-01');
     await tester.pumpWidget(const SizedBox());
     await _pumps(tester, 4);
+  });
+
+  testWidgets('B-1 · la tarjeta en sencillo con error '
+      'vigente NO va en avisoFondo sólido: superficie de '
+      'alerta resuelta (temas claro y Sol)', (tester) async {
+    tester.view.physicalSize = const Size(420, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(() async {
+      await LocalDb.instance.setMeta(
+          'last_sync_error', 'No hay conexión a internet.');
+    });
+    await _sesionDueno(tester);
+    for (final tema in [AppTema.claro(), AppTema.sol()]) {
+      await tester.pumpWidget(
+          MaterialApp(theme: tema, home: const ColaScreen()));
+      await _pumps(tester);
+      final texto = find.text('✅ No tienes operaciones por subir.');
+      expect(texto, findsOneWidget);
+      final tarjeta = find.ancestor(
+          of: texto, matching: find.byType(Container));
+      final contenedor = tester.widgetList<Container>(tarjeta).firstWhere(
+          (c) =>
+              c.decoration is BoxDecoration &&
+              (c.decoration as BoxDecoration).color != null);
+      final deco = contenedor.decoration as BoxDecoration;
+      final ctx = tester.element(texto);
+      expect(deco.color, AppColores.alertaSuperficie(ctx),
+          reason: 'la superficie de alerta resuelta por tema '
+              'sustituye al marrón sólido');
+      expect(deco.color, isNot(AppColores.avisoFondo),
+          reason: 'avisoFondo con el texto de cuerpo de los '
+              'temas claros daba 2,18:1 (B-1 de Argón)');
+      expect(deco.border, isNotNull,
+          reason: 'la superficie de alerta lleva su borde');
+      await tester.pumpWidget(const SizedBox());
+      await _pumps(tester, 4);
+    }
   });
 
   testWidgets('SYNC-08 · la tarjeta en sencillo acusa a la '
