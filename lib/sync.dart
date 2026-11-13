@@ -1987,26 +1987,76 @@ class SyncEngine {
   // SyncResultado, que son forenses, no la foto pública.
 
   /// Persiste el error de la corrida en su forma 1.33.
+  /// Fase 1 (SYNC-09): las cuatro metas se escriben en UNA
+  /// transacción — secuenciales, un corte a mitad dejaba un
+  /// registro híbrido (código nuevo con la pierna o la hora
+  /// de la corrida anterior) que las superficies componían
+  /// como si fuera un solo desenlace.
   Future<void> _persistirErrorCorrida({
     required String codigo,
     required String pierna,
     List<String> tablasClaves = const [],
   }) async {
-    await _db.setMeta('last_sync_error', codigo);
-    await _db.setMeta('last_sync_error_pierna', pierna);
-    await _db.setMeta(
-        'last_sync_error_tablas', tablasClaves.join(','));
-    await _db.setMeta(
-        'last_sync_error_ts', isoHabana(ahoraHabana()));
+    final d = await _db.db;
+    await d.transaction((txn) async {
+      await _db.setMeta('last_sync_error', codigo, executor: txn);
+      await _db.setMeta('last_sync_error_pierna', pierna,
+          executor: txn);
+      await _db.setMeta('last_sync_error_tablas',
+          tablasClaves.join(','),
+          executor: txn);
+      await _db.setMeta('last_sync_error_ts',
+          isoHabana(ahoraHabana()),
+          executor: txn);
+    });
   }
 
   /// Retira el error de corrida completo (las cuatro metas
   /// juntas: un registro a medias sería otra incoherencia).
+  /// Fase 1 (SYNC-09): también en UNA transacción.
   Future<void> _limpiarErrorCorrida() async {
-    await _db.setMeta('last_sync_error', '');
-    await _db.setMeta('last_sync_error_pierna', '');
-    await _db.setMeta('last_sync_error_tablas', '');
-    await _db.setMeta('last_sync_error_ts', '');
+    final d = await _db.db;
+    await d.transaction((txn) async {
+      await _db.setMeta('last_sync_error', '', executor: txn);
+      await _db.setMeta('last_sync_error_pierna', '', executor: txn);
+      await _db.setMeta('last_sync_error_tablas', '', executor: txn);
+      await _db.setMeta('last_sync_error_ts', '', executor: txn);
+    });
+  }
+
+  /// Fase 1 (SYNC-07): limpieza CONDICIONADA al alcance —
+  /// una sync por alcance que baja bien SOLO puede retirar
+  /// el error persistido si es de su pierna (bajada o
+  /// incidencias) y TODAS las tablas que nombra están
+  /// dentro del alcance que acaba de bajar limpio. Un
+  /// alcance parcial jamás limpia a ciegas el registro
+  /// global (el error de una subida rota o el de una tabla
+  /// fuera del alcance sobreviven a un alcance limpio).
+  /// El legado pre-1.33 (mensaje humano sin estructura) sí
+  /// se retira: es el caso pegado que la simetría cura.
+  Future<void> _limpiarErrorCorridaSiTablasDentroDe(
+      List<String> alcance) async {
+    try {
+      final codigo = await _db.getMeta('last_sync_error');
+      if (codigo == null || codigo.isEmpty) return;
+      final pierna = await _db.getMeta('last_sync_error_pierna') ?? '';
+      final tablasTxt =
+          await _db.getMeta('last_sync_error_tablas') ?? '';
+      final tablasError = tablasTxt
+          .split(',')
+          .where((t) => t.isNotEmpty)
+          .toSet();
+      if (!esCodigoErrorSync(codigo)) {
+        // Legado humano sin pierna ni tablas fiables.
+        await _limpiarErrorCorrida();
+        return;
+      }
+      if (pierna != 'bajada' && pierna != 'incidencias') return;
+      if (tablasError.isEmpty) return;
+      if (tablasError.difference(alcance.toSet()).isEmpty) {
+        await _limpiarErrorCorrida();
+      }
+    } catch (_) {}
   }
 
   /// Limpieza CONDICIONADA a la pierna (simetría de pull(),
@@ -2460,7 +2510,22 @@ class SyncEngine {
           final finEpoch = ultima.finEpoch ?? ultima.inicioEpoch;
           if (ultimoOk == null ||
               finEpoch * 1000 > ultimoOk.millisecondsSinceEpoch) {
-            error = ultima.errorDetalle ?? ultima.motivoNoSello;
+            // Fase 1 (SYNC-04): el errorDetalle del Diario
+            // es FORENSE — las corridas que mueren sin
+            // veredicto guardan ahí la excepción cruda, y
+            // Centro de sincronización y el panel la
+            // pintaban verbatim. Si el texto parece técnico
+            // crudo, se compone AQUÍ con el traductor de la
+            // casa; el motivoNoSello (texto que el motor ya
+            // compuso en lenguaje llano) se conserva tal
+            // cual.
+            final detalleDiario = ultima.errorDetalle;
+            if (detalleDiario != null &&
+                pareceTextoTecnicoCrudo(detalleDiario)) {
+              error = describirErrorCorrida(detalleDiario);
+            } else {
+              error = detalleDiario ?? ultima.motivoNoSello;
+            }
           }
         }
       }
@@ -2992,6 +3057,15 @@ class SyncEngine {
             motivo: errorCorrida);
       } on SessionExpired {
         _sesionVencida();
+        // Fase 1 (SYNC-06): la sesión expirada EN VUELO
+        // también persiste su código en el registro — esta
+        // rama cerraba la corrida solo en el Diario y el
+        // error de sesión no existía para píldora ni héroe
+        // (el sello de _doPull cubre la expiración detectada
+        // en la bajada; la que vuela en la subida o entre
+        // fases solo pasaba por aquí).
+        await _persistirErrorCorrida(
+            codigo: 'sesion_invalida', pierna: 'sesion');
         _emit(SyncPhase.idle);
         errorCorrida = 'La sesión venció. Entra de nuevo.';
         _diarioVeredicto(EstadoCorrida.fallida,
@@ -3244,9 +3318,26 @@ class SyncEngine {
         // todas las tablas; el pull extra garantiza que el espejo
         // del cliente quede pisado aunque el alcance no lo cubra.
         await _pullSiProtegidoPendiente();
-        // v1.5.0 (Bloque G): el push del alcance es global → el
-        // gancho de fin de sync también corre aquí.
-        _avisarSyncExitoso();
+        // Fase 1 (SYNC-07): el alcance entra en el registro
+        // único, como los demás puntos de entrada. Con filas
+        // fallidas persiste su bajada_incompleta y el gancho
+        // de éxito NO suena (sonaba incondicional: las
+        // conversiones y la republicación corrían sobre una
+        // bajada del alcance a medias); limpio, el gancho
+        // corre y la limpieza es la condicionada al alcance
+        // (un alcance parcial no limpia a ciegas el registro
+        // global).
+        if (fallidasScope > 0) {
+          await _persistirErrorCorrida(
+              codigo: 'bajada_incompleta',
+              pierna: 'bajada',
+              tablasClaves: tablasNormales);
+        } else {
+          await _limpiarErrorCorridaSiTablasDentroDe(tablas);
+          // v1.5.0 (Bloque G): el push del alcance es global → el
+          // gancho de fin de sync también corre aquí.
+          _avisarSyncExitoso();
+        }
         // 1.32 (O2F2S, M1): veredicto del alcance en el diario.
         _diarioVeredicto(
             fallidasScope == 0
@@ -3270,6 +3361,11 @@ class SyncEngine {
       } catch (e) {
         errorEnCiclo = true;
         final errSync = await _describeErrorVisible(e);
+        // Fase 1 (SYNC-07): el alcance que lanza también
+        // deja su código en el registro (antes solo vivía
+        // en el Diario y en la emisión fugaz de la fase).
+        await _persistirErrorCorrida(
+            codigo: errSync.codigo, pierna: 'ciclo');
         _emit(SyncPhase.error, error: errSync);
         _diarioVeredicto(EstadoCorrida.fallida,
             bajados: bajadosScope,
@@ -3516,6 +3612,17 @@ class SyncEngine {
       // 1.32 (F-6): y solo si el pull del ciclo se verificó.
       if (_ultimoPushLimpio && pullVerificado) {
         await _limpiarErrorCorrida();
+      } else if (!_ultimoPushLimpio && pullVerificado) {
+        // Fase 1 (SYNC-03): el push SUCIO QUE NO LANZA (ops
+        // golpeadas, o la cola de fotos/comprobantes fallando
+        // vía _fallosUltimoPush) también persiste su código:
+        // hasta ahora solo el push que lanzaba dejaba rastro,
+        // y la píldora podía nacer verde «Al día» con la cola
+        // de fotos rota y la de ops ya a cero. Solo con el
+        // pull verificado: si el pull lanzó, el error de
+        // bajada que su catch persistió manda y no se pisa.
+        await _persistirErrorCorrida(
+            codigo: 'subida_incompleta', pierna: 'subida');
       }
       // Cliente protegido (2026-10-26, A4): ídem que en pull().
       await _pullSiProtegidoPendiente();
@@ -3828,6 +3935,11 @@ class SyncEngine {
     // DENTRO del candado (fuera, la siguiente corrida del
     // mismo isolate podría ya haberla reiniciado).
     var sinSesionPull = false;
+    // Fase 1 (SYNC-02/SYNC-05): el error de ESTE pull cuando
+    // la bajada llegó sin lanzar pero incompleta (incidencias
+    // rotas o tabla atascada): viaja en el SyncResultado,
+    // capturado dentro del candado como sinSesionPull.
+    String? errorPull;
     // Auditoría Definitiva (B-6): marca de corte por lock.
     var cortadoPorLock = false;
     final noCorrio = await _conLock(() async {
@@ -3883,30 +3995,63 @@ class SyncEngine {
             motivo: mensajeSesionInvalida,
             error: mensajeSesionInvalida);
       } else {
-        // v1.5.0 (Bloque G): pull exitoso (trae los resultados de
-        // las ops) → gancho de fin de sync.
-        _avisarSyncExitoso();
-        // 1.33 (coherencia de sync, §7.5): SIMETRÍA de
-        // limpieza — un pull con la bajada limpia limpia el
-        // error persistido igual que run()/push(); hasta la
-        // 1.32 pull() no lo limpiaba NUNCA y una bajada ya
-        // curada dejaba el error viejo pegado hasta el
-        // próximo ciclo completo. La limpieza es de SU
-        // pierna: la bajada, las incidencias y la sesión
-        // resuelta; un error de subida o de ciclo general
-        // sobrevive a un pull limpio (no es suyo).
-        if (_incidenciasOkUltimaPasada) {
-          await _limpiarErrorCorridaSiPierna(
-              const {'bajada', 'incidencias', 'sesion'});
+        // Fase 1 (SYNC-02 + SYNC-05): el veredicto de pull()
+        // mira la bajada ENTERA, como run() — la pasada de
+        // incidencias Y el atasco sin verificar de la bajada
+        // principal. Hasta ahora las incidencias solo
+        // alimentaban el Diario: con ellas rotas pull()
+        // devolvía éxito, sonaba el gancho (conversiones,
+        // republicación, copia semanal sobre una bajada a
+        // medias) y el registro quedaba intacto; y con la
+        // principal atascada sellaba «completa» igual,
+        // porque _doPull devuelve bajados sin lanzar aunque
+        // resDownload.fallidas > 0 (el atasco persistido es
+        // la señal que run() sí consulta).
+        if (!_incidenciasOkUltimaPasada) {
+          const msgIncidencias = 'La descarga de incidencias '
+              'falló; se reintentará en el próximo ciclo.';
+          errorPull = msgIncidencias;
+          await _persistirErrorCorrida(
+              codigo: 'descarga_incidencias', pierna: 'incidencias');
+          _diarioVeredicto(EstadoCorrida.parcial,
+              bajados: bajados,
+              motivo: msgIncidencias,
+              error: msgIncidencias);
+        } else {
+          final atascoPull = await atascoSinVerificar();
+          if (atascoPull.tabla != null) {
+            final msgAtasco = 'La descarga quedó incompleta; '
+                'se reintentará en el próximo ciclo.'
+                '${atascoPull.nombre != null ? ' Tabla atascada: ${atascoPull.nombre}.' : ''}';
+            errorPull = msgAtasco;
+            await _persistirErrorCorrida(
+                codigo: 'bajada_incompleta',
+                pierna: 'bajada',
+                tablasClaves: await _clavesTablasBajadaEnRojo());
+            _diarioVeredicto(EstadoCorrida.parcial,
+                bajados: bajados,
+                motivo: msgAtasco,
+                error: msgAtasco);
+          } else {
+            // v1.5.0 (Bloque G): pull exitoso (trae los
+            // resultados de las ops) → gancho de fin de sync.
+            _avisarSyncExitoso();
+            // 1.33 (coherencia de sync, §7.5): SIMETRÍA de
+            // limpieza — un pull con la bajada limpia limpia
+            // el error persistido igual que run()/push();
+            // hasta la 1.32 pull() no lo limpiaba NUNCA y una
+            // bajada ya curada dejaba el error viejo pegado
+            // hasta el próximo ciclo completo. La limpieza
+            // es de SU pierna: la bajada, las incidencias y
+            // la sesión resuelta; un error de subida o de
+            // ciclo general sobrevive a un pull limpio (no
+            // es suyo).
+            await _limpiarErrorCorridaSiPierna(
+                const {'bajada', 'incidencias', 'sesion'});
+            _diarioVeredicto(EstadoCorrida.completa,
+                bajados: bajados);
+          }
         }
-        _diarioVeredicto(
-            _incidenciasOkUltimaPasada
-                ? EstadoCorrida.completa
-                : EstadoCorrida.parcial,
-            bajados: bajados,
-            motivo: _incidenciasOkUltimaPasada
-                ? null
-                : 'La descarga de incidencias falló');
       }
     },
         tipoCorrida: tipoCorrida,
@@ -3917,7 +4062,7 @@ class SyncEngine {
     return SyncResultado(
       corrio: true,
       bajados: bajados,
-      error: sinSesionPull ? mensajeSesionInvalida : null,
+      error: sinSesionPull ? mensajeSesionInvalida : errorPull,
       pendientesRestantes: conteo.total,
       esperandoConfirmacion: conteo.esperandoConfirmacion,
       porSubir: conteo.porSubir,
@@ -6504,6 +6649,21 @@ class SyncEngine {
     'incidencias',
     'incidencias_comentarios',
     'incidencias_fotos',
+  ];
+
+  /// Fase 1 (SYNC-01): las claves de las pasadas de BORRADOS
+  /// (tumbas del espejo, GymPedia y Guía). No son tablas
+  /// espejo — no tienen filas locales que contar — pero sí
+  /// persisten su error en `wm_err_<clave>`, y el escaneo de
+  /// detalle() las cuenta como bajada en rojo. Esta es la
+  /// lista canónica que Salud consume para mirar el MISMO
+  /// conjunto: sin ella, un fallo solo en borrados dejaba a
+  /// Salud diciendo «al día» mientras píldora y héroe
+  /// decían «la bajada falló».
+  static const List<String> clavesBorrados = [
+    'borrados',
+    'gympedia_borrados',
+    'guia_borrados',
   ];
 
   /// Yunque B (YB-SYNC-03): el sello «completo» de una

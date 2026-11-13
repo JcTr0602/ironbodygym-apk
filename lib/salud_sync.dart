@@ -389,6 +389,35 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     ));
   }
 
+  // Fase 1 (SYNC-01): las pasadas de borrados entran en la
+  // lista con su semáforo propio — no son espejos (sin filas
+  // ni watermark comparable), su salud es su wm_err_: en
+  // rojo si la última pasada falló, verde si no. Es el
+  // mismo conjunto que escanea detalle() (wm_err_*), para
+  // que el estado general de Salud no pueda decir «al día»
+  // con una pasada de borrados rota.
+  for (final t in SyncEngine.clavesBorrados) {
+    var errorBajada = '';
+    try {
+      errorBajada = await db.getMeta('wm_err_$t') ?? '';
+    } catch (_) {}
+    final hayError = errorBajada.isNotEmpty;
+    final s = hayError ? SemaforoTabla.rojo : SemaforoTabla.verde;
+    tablas.add(EstadoTablaSalud(
+      tablaLocal: t,
+      nombre: SyncEngine.nombreAmigableTabla(t),
+      filas: 0,
+      corruptas: 0,
+      watermark: 0,
+      estado: s,
+      errorBajada: errorBajada,
+      nota: hayError
+          ? 'La última bajada de esta tabla falló: '
+              '${resumenErrorDiagnostico(errorBajada)}'
+          : 'Al día',
+    ));
+  }
+
   DateTime? chequeoEn;
   DateTime? completaEn;
   DateTime? copiaUltima;
