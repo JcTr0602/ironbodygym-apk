@@ -232,6 +232,11 @@ ErrorSync _clasificarErrorSync(Object error,
       raw.contains('jwt') ||
       raw.contains('sessionexpired') ||
       raw.contains('sesion vencida') ||
+      // Fase 1 (SYNC-06): el toString de SessionExpired es
+      // «sesión vencida, entra de nuevo» — CON acento — y sin
+      // este patrón la sesión expirada EN VUELO caía en
+      // «desconocido» y ninguna superficie la nombraba.
+      raw.contains('sesión vencida') ||
       raw.contains('unauthorized')) {
     return ErrorSync(
       codigo: 'sesion_caducada',
@@ -580,6 +585,29 @@ String describirErrorCorrida(Object error, {bool? hayInternet}) {
     }
   } catch (_) {}
   return describirError(error);
+}
+
+/// Fase 1 (SYNC-04): ¿este texto parece una excepción CRUDA
+/// (forense) y no un mensaje ya compuesto en lenguaje llano?
+/// Lo usa detalle() para decidir si el errorDetalle del
+/// Diario se traduce antes de llegar a la UI: el Diario
+/// guarda en la misma columna el mensaje curado del motor
+/// («La descarga de incidencias falló…», que se conserva
+/// verbatim) y la excepción cruda de las corridas que
+/// murieron sin veredicto (que jamás se pinta tal cual).
+bool pareceTextoTecnicoCrudo(String t) {
+  final b = t.toLowerCase();
+  return b.contains('exception') ||
+      b.contains('postgrest') ||
+      b.contains('socket') ||
+      b.contains('errno') ||
+      b.contains('os error') ||
+      b.contains('stack trace') ||
+      b.contains('bad state') ||
+      b.contains('null check') ||
+      b.contains('sqflite') ||
+      b.contains('databaseexception') ||
+      b.contains('://');
 }
 
 /// 1.33 (corrección de la coherencia de sync, §7.2/§7.3 de la
