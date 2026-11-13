@@ -1219,9 +1219,17 @@ class _ColaScreenState extends State<ColaScreen> {
         width: double.infinity,
         padding: const EdgeInsets.all(AppEspacio.md),
         decoration: BoxDecoration(
+          // Corte B de Argón (B-1): con error vigente la
+          // tarjeta va en la superficie de ALERTA resuelta
+          // por tema (con su borde), no en avisoFondo
+          // sólido: sobre #92400E el texto de cuerpo en los
+          // temas claros (claro/Sol) caía a 2,18:1, ilegible.
           color: errorVigente == null
               ? AppColores.exito.withValues(alpha: 0.10)
-              : AppColores.avisoFondo,
+              : AppColores.alertaSuperficie(context),
+          border: errorVigente == null
+              ? null
+              : Border.all(color: AppColores.alertaBorde(context)),
           borderRadius: BorderRadius.circular(AppRadio.md),
         ),
         child: errorVigente == null

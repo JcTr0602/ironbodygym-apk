@@ -1304,25 +1304,33 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     children: [
                       const Text('A nombre de:'),
                       const SizedBox(width: 8),
-                      DropdownButton<int>(
-                        value: vendedorSel,
-                        items: [
-                          if (titularPomoTid != null &&
-                              titularPomoTid != _miTid)
-                            DropdownMenuItem(
-                                value: titularPomoTid,
-                                child: Text(
-                                    _personas[titularPomoTid] ??
-                                        'Entrenador')),
-                          if (_miTid != null)
-                            DropdownMenuItem(
-                                value: _miTid,
-                                child: const Text('Yo (dueño)')),
-                        ],
-                        onChanged: (v) => setD(() {
-                          vendedorSel = v ?? vendedorSel;
-                          responsableSel = vendedorSel;
-                        }),
+                      // Corte B de Argón (B-4): el desplegable
+                      // va en Expanded con isExpanded — sin
+                      // eso, un nombre compuesto largo a
+                      // 360-420 dp (o con la fuente escalada)
+                      // desbordaba la fila.
+                      Expanded(
+                        child: DropdownButton<int>(
+                          value: vendedorSel,
+                          isExpanded: true,
+                          items: [
+                            if (titularPomoTid != null &&
+                                titularPomoTid != _miTid)
+                              DropdownMenuItem(
+                                  value: titularPomoTid,
+                                  child: Text(
+                                      _personas[titularPomoTid] ??
+                                          'Entrenador')),
+                            if (_miTid != null)
+                              DropdownMenuItem(
+                                  value: _miTid,
+                                  child: const Text('Yo (dueño)')),
+                          ],
+                          onChanged: (v) => setD(() {
+                            vendedorSel = v ?? vendedorSel;
+                            responsableSel = vendedorSel;
+                          }),
+                        ),
                       ),
                     ],
                   ),
@@ -1332,22 +1340,27 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       children: [
                         const Text('Efectivo lo entrega:'),
                         const SizedBox(width: 8),
-                        DropdownButton<int>(
-                          value: responsableSel,
-                          items: [
-                            DropdownMenuItem(
-                                value: vendedorSel,
-                                child: Text(
-                                    _personas[vendedorSel] ??
-                                        'El vendedor')),
-                            if (_miTid != null)
+                        // B-4: Expanded + isExpanded (ver la
+                        // fila «A nombre de»).
+                        Expanded(
+                          child: DropdownButton<int>(
+                            value: responsableSel,
+                            isExpanded: true,
+                            items: [
                               DropdownMenuItem(
-                                  value: _miTid,
-                                  child: const Text('Yo (dueño)')),
-                          ],
-                          onChanged: (v) => setD(() =>
-                              responsableSel =
-                                  v ?? responsableSel),
+                                  value: vendedorSel,
+                                  child: Text(
+                                      _personas[vendedorSel] ??
+                                          'El vendedor')),
+                              if (_miTid != null)
+                                DropdownMenuItem(
+                                    value: _miTid,
+                                    child: const Text('Yo (dueño)')),
+                            ],
+                            onChanged: (v) => setD(() =>
+                                responsableSel =
+                                    v ?? responsableSel),
+                          ),
                         ),
                       ],
                     ),
@@ -3218,31 +3231,37 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
                 children: [
                   const Text('A nombre de:'),
                   const SizedBox(width: 8),
-                  DropdownButton<int>(
-                    value: vendedorSel,
-                    items: [
-                      if (pomoTitularTid != null &&
-                          pomoTitularTid != _miTid)
-                        DropdownMenuItem(
-                            value: pomoTitularTid,
-                            child: Text(_personas[pomoTitularTid] ??
-                                'Entrenador')),
-                      if (_miTid != null)
-                        DropdownMenuItem(
-                            value: _miTid,
-                            child: const Text('Yo (dueño)')),
-                      if (tipo == 'agua_suelta')
-                        for (final e in _personas.entries)
-                          if (e.key != _miTid &&
-                              e.key != pomoTitularTid)
-                            DropdownMenuItem(
-                                value: e.key,
-                                child: Text(e.value)),
-                    ],
-                    onChanged: (v) => setState(() {
-                      vendedorSel = v ?? vendedorSel;
-                      responsableSel = vendedorSel;
-                    }),
+                  // Corte B de Argón (B-4): Expanded +
+                  // isExpanded — un nombre compuesto largo
+                  // desbordaba la fila a 360-420 dp.
+                  Expanded(
+                    child: DropdownButton<int>(
+                      value: vendedorSel,
+                      isExpanded: true,
+                      items: [
+                        if (pomoTitularTid != null &&
+                            pomoTitularTid != _miTid)
+                          DropdownMenuItem(
+                              value: pomoTitularTid,
+                              child: Text(_personas[pomoTitularTid] ??
+                                  'Entrenador')),
+                        if (_miTid != null)
+                          DropdownMenuItem(
+                              value: _miTid,
+                              child: const Text('Yo (dueño)')),
+                        if (tipo == 'agua_suelta')
+                          for (final e in _personas.entries)
+                            if (e.key != _miTid &&
+                                e.key != pomoTitularTid)
+                              DropdownMenuItem(
+                                  value: e.key,
+                                  child: Text(e.value)),
+                      ],
+                      onChanged: (v) => setState(() {
+                        vendedorSel = v ?? vendedorSel;
+                        responsableSel = vendedorSel;
+                      }),
+                    ),
                   ),
                 ],
               ),
@@ -3269,21 +3288,26 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
                   children: [
                     const Text('Efectivo lo entrega:'),
                     const SizedBox(width: 8),
-                    DropdownButton<int>(
-                      value: responsableSel,
-                      items: [
-                        DropdownMenuItem(
-                            value: vendedorSel,
-                            child: Text(_personas[vendedorSel] ??
-                                'El vendedor')),
-                        if (_miTid != null)
+                    // B-4: Expanded + isExpanded (ver la
+                    // fila «A nombre de»).
+                    Expanded(
+                      child: DropdownButton<int>(
+                        value: responsableSel,
+                        isExpanded: true,
+                        items: [
                           DropdownMenuItem(
-                              value: _miTid,
-                              child: const Text('Yo (dueño)')),
-                      ],
-                      onChanged: (v) => setState(
-                          () => responsableSel =
-                              v ?? responsableSel),
+                              value: vendedorSel,
+                              child: Text(_personas[vendedorSel] ??
+                                  'El vendedor')),
+                          if (_miTid != null)
+                            DropdownMenuItem(
+                                value: _miTid,
+                                child: const Text('Yo (dueño)')),
+                        ],
+                        onChanged: (v) => setState(
+                            () => responsableSel =
+                                v ?? responsableSel),
+                      ),
                     ),
                   ],
                 ),
