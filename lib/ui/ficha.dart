@@ -421,6 +421,24 @@ class _FichaScreenState extends State<FichaScreen> {
     }
   }
 
+  /// Fase 1 (DIS-01) = Corte B de Argón (B-2): ÚNICA puerta
+  /// de cambio de pestaña de la ficha. La cabecera plegable
+  /// se alimenta del listener de scroll, que solo corre al
+  /// mover la lista ACTIVA: al cambiar de pestaña hay que
+  /// reevaluarla contra el offset de la pestaña nueva — si
+  /// no, la compacta de la pestaña anterior sobrevivía con
+  /// la nueva arriba del todo (y con la física de Android
+  /// ningún gesto la desplegaba sin bajar y volver a subir).
+  /// El postFrame cubre el caso de que el ListView de la
+  /// pestaña nueva aún no tenga clientes en este frame.
+  void _alCambiarPestanaFicha(int i) {
+    if (i == _pestanaFicha) return;
+    setState(() => _pestanaFicha = i);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _alMoverScrollFicha();
+    });
+  }
+
   /// 1.28 (M4-B1/B4/C3): desplaza la ficha hasta la sección
   /// «Acceso App». Si la sección aún no se ha construido
   /// (lista perezosa: está muy abajo), primero se va al
@@ -441,7 +459,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // 1.32: si la sección vive en OTRA pestaña, primero se
     // cambia de pestaña y se espera a que monte.
     if (pestana != null && pestana != _pestanaFicha && mounted) {
-      setState(() => _pestanaFicha = pestana);
+      _alCambiarPestanaFicha(pestana);
       await WidgetsBinding.instance.endOfFrame;
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
@@ -2930,7 +2948,7 @@ class _FichaScreenState extends State<FichaScreen> {
       return Expanded(
         child: InkWell(
           key: ValueKey(clave),
-          onTap: () => setState(() => _pestanaFicha = i),
+          onTap: () => _alCambiarPestanaFicha(i),
           child: Container(
             // 1.32 (integración, RD-2): objetivo táctil de
             // 48 dp — antes la pestaña medía ≈31 dp a escala
