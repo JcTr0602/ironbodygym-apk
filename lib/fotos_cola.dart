@@ -694,25 +694,67 @@ class FotosColaService {
       // si no (la grande típica), se difiere dentro del ciclo —
       // su id queda excluido de las próximas selecciones y el
       // bucle continúa con la siguiente foto.
+      // Fase 1 (FOTOS-03): si esta fila entra por la vía
+      // inmediata, su guarda «sin ops» se re-evalúa AL
+      // RECLAMAR (más abajo, tras la sonda de red), no con
+      // la foto del inicio de la iteración.
+      var viaInmediata = false;
       if (f['tipo'] == 'original' &&
           !puedeOriginal &&
           (f['forzar_qos'] as int? ?? 0) != 1) {
-        var tamano = 0;
-        final rutaOriginal = f['ruta_local'] as String?;
-        if (rutaOriginal != null && rutaOriginal.isNotEmpty) {
-          try {
-            tamano = await File(rutaOriginal).length();
-          } catch (_) {
-            tamano = 0; // ilegible: la vía inmediata no aplica
+        // Fase 1 (FOTOS-02): la vía inmediata mide el trabajo
+        // de RED que queda, no el archivo entero. Con
+        // storage_path persistido los bytes YA están en
+        // Storage y solo falta vincular (red ~0: _subirUna
+        // lo resuelve sin subir nada); con una subida TUS
+        // reanudada, solo queda el tramo tras el offset.
+        final yaEnStorage =
+            (f['storage_path'] as String?)?.isNotEmpty ?? false;
+        if (yaEnStorage) {
+          viaInmediata = true;
+        } else {
+          // Corte B de Argón (B-3a): la columna tamano_bytes
+          // persistida al encolar MANDA; File.length() es
+          // solo el recurso si la columna viene nula (filas
+          // legadas) — la ruta local puede haber rotado y
+          // medir otro archivo.
+          var tamano = (f['tamano_bytes'] as num?)?.toInt() ?? -1;
+          if (tamano < 0) {
+            tamano = 0;
+            final rutaOriginal = f['ruta_local'] as String?;
+            if (rutaOriginal != null && rutaOriginal.isNotEmpty) {
+              try {
+                tamano = await File(rutaOriginal).length();
+              } catch (_) {
+                tamano = 0; // ilegible: la vía inmediata no aplica
+              }
+            }
           }
-        }
-        if (!originalInmediataPermitida(
-            tamanoBytes: tamano, opsPendientesNoFoto: opsPendientes)) {
-          originalesDiferidasEsteCiclo.add(f['id'] as int);
-          AppLog.aviso('fotos', 'original_diferida_qos',
-              d: 'id=${f['id']} bytes=$tamano: ni puerta QoS ni vía '
-                  'inmediata; diferida este ciclo');
-          continue;
+          var restantes = tamano;
+          final opUuidFila = f['op_uuid'] as String?;
+          if (opUuidFila != null &&
+              opUuidFila.isNotEmpty &&
+              tamano > 0) {
+            final offsetTus = int.tryParse(
+                    await LocalDb.instance.getMeta(
+                            'tus_offset_${opUuidFila}_original') ??
+                        '') ??
+                0;
+            if (offsetTus > 0) {
+              restantes = tamano - offsetTus;
+              if (restantes < 0) restantes = 0;
+            }
+          }
+          if (!originalInmediataPermitida(
+              tamanoBytes: restantes,
+              opsPendientesNoFoto: opsPendientes)) {
+            originalesDiferidasEsteCiclo.add(f['id'] as int);
+            AppLog.aviso('fotos', 'original_diferida_qos',
+                d: 'id=${f['id']} bytes=$restantes: ni puerta QoS '
+                    'ni vía inmediata; diferida este ciclo');
+            continue;
+          }
+          viaInmediata = true;
         }
       }
       final fotoOpUuid = f['op_uuid'] as String?;
@@ -851,6 +893,25 @@ class FotosColaService {
         }
       } // fin if (fotoOpUuid != null)
       final id = f['id'] as int;
+
+      // Fase 1 (FOTOS-03): la guarda «sin ops» de la vía
+      // inmediata se re-evalúa AHORA, al reclamar: entre la
+      // selección de la fila y este punto pasaron la sonda
+      // de red (hasta 5 s) y las lecturas de la op padre —
+      // un cobro encolado en ese intervalo difiere la
+      // original dentro del ciclo, sin tocar su fila (la
+      // Regla de Hierro manda sobre la rapidez).
+      if (viaInmediata) {
+        final opsAhora =
+            await LocalDb.instance.countPendingOpsNoFoto();
+        if (opsAhora > 0) {
+          originalesDiferidasEsteCiclo.add(id);
+          AppLog.aviso('fotos', 'original_diferida_qos',
+              d: 'id=$id: entraron $opsAhora ops entre la '
+                  'selección y el reclamo; diferida este ciclo');
+          continue;
+        }
+      }
 
       // Fix Luna 1: reclamo exclusivo con worker_id. Verifica filas
       // afectadas — si es 0, otro worker la reclamó primero.
@@ -1856,12 +1917,23 @@ class FotosColaService {
     // selecciones de procesarCola). [ahora] se conserva solo para
     // la QoS de 'original', que sí razona en hora de pared.
     final ahoraEpoch = ahoraUtcReal().millisecondsSinceEpoch ~/ 1000;
+    // Corte B de Argón (B-3c): la 'original' PEQUEÑA
+    // (0 < tamano_bytes <= 512 KB) con la cola de ops vacía
+    // SÍ es reclamable — procesarCola la subiría por la vía
+    // inmediata — y debe contar aquí: si no, el Foreground
+    // Service se apaga tras la 'display' y la original
+    // pequeña espera dormida al siguiente ciclo.
+    final opsPendientesNoFoto =
+        await LocalDb.instance.countPendingOpsNoFoto();
+    final excepcionPequena = !puedeOriginal && opsPendientesNoFoto == 0
+        ? " OR (tamano_bytes > 0 AND tamano_bytes <= 524288)"
+        : '';
     final r = await db.rawQuery(
         "SELECT COUNT(*) as n FROM fotos_cola WHERE estado = 'pendiente' "
         "AND intentos < 5 "
         "AND (proximo_intento_en IS NULL OR "
             "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)"
-        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
+        "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1$excepcionPequena)"}",
         [ahoraEpoch]);
     return (r.first['n'] as int? ?? 0);
   }

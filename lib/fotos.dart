@@ -248,7 +248,12 @@ class FotoCache {
   /// con el timeout de la cola (30 s desde la 1.33).
   late final ColaPrecargaFotos _colaPrecarga = ColaPrecargaFotos(
     descargador: (String ruta, Duration t) async {
-      final File? c = await enCache(ruta);
+      // Fase 1 (FOTOS-01): el chequeo de la cola es DIRECTO:
+      // con la caída de enCache, la variante vieja preservada
+      // haría las veces de «ya está» y la nueva no bajaría
+      // nunca por esta vía (la caída es para PINTAR, no para
+      // dar por descargada la ruta vigente).
+      final File? c = await _enCacheDirecto(ruta);
       if (c != null) return c;
       return _descargaCompartida(ruta, timeout: t);
     },
@@ -374,7 +379,39 @@ class FotoCache {
 
   /// Foto ya descargada (sin red). Null si no está en caché.
   /// v1.2.8: hace touch para LRU real.
+  ///
+  /// Fase 1 (FOTOS-01): si la ruta pedida es la variante
+  /// NUEVA de un cambio de foto_storage aún no aterrizado
+  /// (hay una invalidación diferida que la espera), la
+  /// resolución cae a la copia VIEJA preservada: la
+  /// superficie pinta la foto que el teléfono SÍ tiene en
+  /// vez de las iniciales mientras la nueva baja. Sin esta
+  /// caída, la diferida conservaba el archivo pero ninguna
+  /// superficie lo pintaba (todas resuelven por la ruta
+  /// vigente) y el vaivén seguía visible.
   Future<File?> enCache(String? storagePath) async {
+    final directo = await _enCacheDirecto(storagePath);
+    if (directo != null ||
+        storagePath == null ||
+        storagePath.isEmpty) {
+      return directo;
+    }
+    for (final e in _invalidacionesDiferidas.entries) {
+      if (e.value == storagePath) {
+        final vieja = await _enCacheDirecto(e.key);
+        if (vieja != null) return vieja;
+      }
+    }
+    return null;
+  }
+
+  /// La resolución directa de una ruta (memoria → nombre
+  /// canónico → rescate legado), SIN la caída a la variante
+  /// preservada de [enCache]. La usa invalidarCambioFoto
+  /// para saber si la variante nueva está en disco DE
+  /// VERDAD (con la caída, la vieja haría las veces de
+  /// nueva y la diferida se cancelaría antes de tiempo).
+  Future<File?> _enCacheDirecto(String? storagePath) async {
     if (storagePath == null || storagePath.isEmpty) return null;
     final mem = _memoria[storagePath];
     if (mem != null && await mem.exists()) {
@@ -534,7 +571,13 @@ class FotoCache {
     if (storagePath == null || storagePath.isEmpty) return;
     // 1.33: una invalidación directa cancela la diferida
     // que hubiera pendiente sobre esta misma ruta.
-    _invalidacionesDiferidas.remove(storagePath);
+    // Fase 1 (FOTOS-06c): también las diferidas donde esta
+    // ruta es la variante ESPERADA (el valor): si la nueva
+    // se invalida, la vieja deja de estar «preservada para
+    // ella» y su borrado ya no espera a un aterrizaje que
+    // nadie quiere.
+    _invalidacionesDiferidas
+        .removeWhere((k, v) => k == storagePath || v == storagePath);
     _memoria.remove(storagePath);
     // 1.31: una foto invalidada (nueva en la misma ruta) no
     // hereda el backoff de la anterior.
@@ -590,7 +633,11 @@ class FotoCache {
       // La ruta que manda ahora nunca puede quedar como
       // víctima de una invalidación diferida anterior.
       _invalidacionesDiferidas.remove(nueva);
-      if (await enCache(nueva) != null) {
+      // Fase 1 (FOTOS-01): la comprobación es DIRECTA — con
+      // la caída de enCache, la copia vieja de OTRA diferida
+      // haría las veces de «la nueva ya está» y esta se
+      // invalidaría sin estar en disco.
+      if (await _enCacheDirecto(nueva) != null) {
         await invalidar(vieja);
         return;
       }
