@@ -86,10 +86,19 @@ double _offsetHome(WidgetTester tester) {
 }
 
 Future<void> _bajarMostrador(WidgetTester tester) async {
+  // Baja hasta el final real: se detiene cuando el offset
+  // deja de crecer (la lista pegó con su máximo). El alto
+  // anterior («hasta pasar 200») quedó jubilado con el
+  // rediseño 1.33: sin la barra «Buscar cliente» (hallazgo
+  // nº 12 de Jc) y con Estadísticas primero, el contenido
+  // del Mostrador en este arnés mide 152,4 de recorrido
+  // (medido; en la base medía 236,4) y un umbral de 200
+  // ya no es alcanzable por ningún gesto.
   for (var i = 0; i < 14; i++) {
-    if (_offsetHome(tester) > 200) break;
+    final antes = _offsetHome(tester);
     await tester.drag(_listaMostrador(), const Offset(0, -320));
     await tester.pump(const Duration(milliseconds: 300));
+    if ((_offsetHome(tester) - antes).abs() < 0.5) break;
   }
 }
 
@@ -128,9 +137,10 @@ void main() {
     // 2. Al abrir, el offset es 0: la lista nace arriba.
     expect(_offsetHome(tester), 0);
     // 3. El gesto recorre hasta el final: el offset crece
-    // y termina pegado al máximo de la lista.
+    // (un recorrido sustancial, >100: el contenido supera
+    // la ventana) y termina pegado al máximo de la lista.
     await _bajarMostrador(tester);
-    expect(_offsetHome(tester), greaterThan(200));
+    expect(_offsetHome(tester), greaterThan(100));
     final lv = tester.widget<ListView>(_listaMostrador());
     final maximo = lv.controller!.position.maxScrollExtent;
     for (var i = 0; i < 14; i++) {
@@ -150,7 +160,9 @@ void main() {
     await _abrirHome(tester);
     await _bajarMostrador(tester);
     final offset = _offsetHome(tester);
-    expect(offset, greaterThan(200));
+    // Recorrido sustancial (>100; ver _bajarMostrador: el
+    // máximo de este arnés tras el rediseño 1.33 es 152,4).
+    expect(offset, greaterThan(100));
     // Rebuild del mismo árbol (análogo al setState de un
     // _cargar por sync): la posición se conserva.
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
