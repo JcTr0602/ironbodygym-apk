@@ -3111,8 +3111,19 @@ class _FichaScreenState extends State<FichaScreen> {
                               ),
                             ),
                             const SizedBox(width: 6),
-                            Text(textoEstadoBarra,
-                                style: AppTexto.secundario),
+                            // Flexible + elipsis, como el nombre
+                            // de encima: un estado largo («En
+                            // pausa ❄ · el vencimiento no
+                            // corre», «Vencido hace N días»)
+                            // recorta en vez de desbordar la
+                            // barra cuando compite con el
+                            // botón de acción.
+                            Flexible(
+                              child: Text(textoEstadoBarra,
+                                  style: AppTexto.secundario,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                            ),
                           ],
                         ),
                       ],

@@ -217,13 +217,21 @@ class CabeceraMarco extends StatelessWidget {
         else
           IconoModuloBadge.naranja(icono, tamanoIcono: 19),
         const SizedBox(width: AppEspacio.md),
-        Text(
-          texto,
-          style: salir
-              ? AppTexto.cuerpo.copyWith(
-                  color: AppColores.rojoDe(context),
-                  fontWeight: FontWeight.w600)
-              : AppTexto.cuerpo,
+        // Flexible + elipsis: la etiqueta se adapta al
+        // ancho que el menú le dé (con la escala de fuente
+        // de accesibilidad crecida, una etiqueta larga
+        // desbordaba la fila en vez de recortarse).
+        Flexible(
+          child: Text(
+            texto,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: salir
+                ? AppTexto.cuerpo.copyWith(
+                    color: AppColores.rojoDe(context),
+                    fontWeight: FontWeight.w600)
+                : AppTexto.cuerpo,
+          ),
         ),
       ],
     );
