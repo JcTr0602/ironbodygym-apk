@@ -36,6 +36,11 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   sqflite_common_ffi: ^2.3.6
   flutter_launcher_icons: ^0.14.3
+  # 1.34 (fotos-variantes): los tests de generación usan la
+  # implementación REAL del canal del plugin (con su validador de
+  # extensión) sobre un canal nativo simulado; sin esta dependencia
+  # el paquete es solo transitivo y no se puede importar en tests.
+  flutter_image_compress_common: 1.1.1
 
 flutter_launcher_icons:
   android: true

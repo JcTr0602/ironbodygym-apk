@@ -247,7 +247,7 @@ packages:
     source: hosted
     version: "2.5.1"
   flutter_image_compress_common:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: flutter_image_compress_common
       sha256: "76869e4d5f3d65f3431e7edff0b2d8ad1eea68b49c6a37772fdb1ae6016da9ed"

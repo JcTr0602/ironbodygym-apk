@@ -26,13 +26,23 @@ import 'sync.dart' show SyncEngine, EstadoSubida;
 /// Genera thumb + display WebP. Corre directo (sin compute): el plugin
 /// ya delega a hilos nativos y compute() no tiene MethodChannels.
 /// v1.2.9+43 (Gemini R3): escritura temporal + rename atómico.
-/// Escribe a .tmp y renombra al final. En Android (ext4/f2fs), el rename
-/// es atómico a nivel de inodo. Evita que limpiarHuerfanos borre archivos
-/// a medio escribir.
+/// Escribe a temporal y renombra al final. En Android (ext4/f2fs), el
+/// rename es atómico a nivel de inodo. Evita que limpiarHuerfanos borre
+/// archivos a medio escribir.
+///
+/// 1.34 (fotos-variantes): el temporal se llama `<base>-<tipo>.tmp.webp`
+/// — con el `.tmp` en el MEDIO, nunca al final. Causa raíz del
+/// monovariante en campo (adjudicación 2026-11-13 + informe 134): el
+/// validador de flutter_image_compress exige que el nombre destino
+/// TERMINE con la extensión del formato (`.webp`); con el nombre
+/// viejo (`...webp.tmp`) lanzaba ArgumentError en Dart ANTES de
+/// comprimir, el catch de encolarFoto lo tragaba con un debugPrint
+/// y solo sobrevivía la copia JPG de la original (variantes=1 el
+/// 100 % de las veces, sin un solo WebP en Storage jamás).
 Future<Map<String, String>> _generarVariantes(
     String rutaOriginal, String base) async {
   // Caza Fotos L1 (Argón): si la compresión lanza a mitad, las
-  // variantes ya renombradas y los .tmp de esta base quedan
+  // variantes ya renombradas y los temporales de esta base quedan
   // huérfanos en disco (ninguna fila los referencia y el barrido
   // por antigüedad tarda días). El catch los borra TODOS antes de
   // relanzar; el llamador cae entonces a su fallback limpio.
@@ -40,10 +50,12 @@ Future<Map<String, String>> _generarVariantes(
     return await _generarVariantesInterno(rutaOriginal, base);
   } catch (_) {
     for (final sufijo in const [
-      '-thumb.webp', '-thumb.webp.tmp',
-      '-display.webp', '-display.webp.tmp',
-      '-original.webp', '-original.webp.tmp',
+      '-thumb.webp', '-thumb.tmp.webp',
+      '-display.webp', '-display.tmp.webp',
+      '-original.webp', '-original.tmp.webp',
       '-original.jpg', '-original.jpg.tmp',
+      // Nombres pre-1.34 (por si un parcial viejo comparte base).
+      '-thumb.webp.tmp', '-display.webp.tmp', '-original.webp.tmp',
     ]) {
       try {
         final f = File('$base$sufijo');
@@ -54,17 +66,55 @@ Future<Map<String, String>> _generarVariantes(
   }
 }
 
+/// 1.34 (fotos-variantes): comprime UNA variante dejando asiento del
+/// fallo. Antes, un null del plugin se tragaba sin else ni log, y una
+/// excepción en la primera variante abortaba las tres y solo dejaba
+/// debugPrint: así el monovariante vivió meses sin bitácora. Ahora
+/// cada variante se intenta por separado y TODO fallo (null o
+/// excepción) queda en AppLog con tipo, causa y parámetros. Devuelve
+/// el resultado del plugin, o null si la variante no nació (el
+/// llamador decide el fallback; la foto original siempre se encola
+/// por su propio camino).
+Future<XFile?> _comprimirVariante({
+  required String tipo,
+  required String rutaOriginal,
+  required String rutaTmp,
+  required int minAncho,
+  required int minAlto,
+  required int calidad,
+}) async {
+  try {
+    final res = await FlutterImageCompress.compressAndGetFile(
+      rutaOriginal, rutaTmp,
+      minWidth: minAncho, minHeight: minAlto,
+      quality: calidad, format: CompressFormat.webp,
+    );
+    if (res == null) {
+      AppLog.error('fotos', 'variante_fallo',
+          d: 'tipo=$tipo causa=null formato=webp '
+              'objetivo=${minAncho}x$minAlto q=$calidad');
+    }
+    return res;
+  } catch (e) {
+    AppLog.error('fotos', 'variante_fallo',
+        d: 'tipo=$tipo causa=excepcion formato=webp '
+            'objetivo=${minAncho}x$minAlto q=$calidad detalle=$e');
+    return null;
+  }
+}
+
 Future<Map<String, String>> _generarVariantesInterno(
     String rutaOriginal, String base) async {
   final variantes = <String, String>{};
 
   // Thumb
-  final thumbTmp = '$base-thumb.webp.tmp';
+  final thumbTmp = '$base-thumb.tmp.webp';
   final thumbFinal = '$base-thumb.webp';
-  final thumbRes = await FlutterImageCompress.compressAndGetFile(
-    rutaOriginal, thumbTmp,
-    minWidth: 200, minHeight: 200,
-    quality: 65, format: CompressFormat.webp,
+  final thumbRes = await _comprimirVariante(
+    tipo: 'thumb',
+    rutaOriginal: rutaOriginal,
+    rutaTmp: thumbTmp,
+    minAncho: 200, minAlto: 200, calidad: 65,
   );
   if (thumbRes != null) {
     await File(thumbTmp).rename(thumbFinal);
@@ -72,12 +122,13 @@ Future<Map<String, String>> _generarVariantesInterno(
   }
 
   // Display
-  final displayTmp = '$base-display.webp.tmp';
+  final displayTmp = '$base-display.tmp.webp';
   final displayFinal = '$base-display.webp';
-  final displayRes = await FlutterImageCompress.compressAndGetFile(
-    rutaOriginal, displayTmp,
-    minWidth: 800, minHeight: 800,
-    quality: 75, format: CompressFormat.webp,
+  final displayRes = await _comprimirVariante(
+    tipo: 'display',
+    rutaOriginal: rutaOriginal,
+    rutaTmp: displayTmp,
+    minAncho: 800, minAlto: 800, calidad: 75,
   );
   if (displayRes != null) {
     await File(displayTmp).rename(displayFinal);
@@ -88,12 +139,13 @@ Future<Map<String, String>> _generarVariantesInterno(
   // (máx 1600px, WebP q80): una foto de cámara de 4-8 MB baja a
   // ~180-350 KB sin pérdida visual apreciable. Si la compresión
   // falla, fallback a la copia sin comprimir (JPG de cámara).
-  final origWebpTmp = '$base-original.webp.tmp';
+  final origWebpTmp = '$base-original.tmp.webp';
   final origWebpFinal = '$base-original.webp';
-  final origRes = await FlutterImageCompress.compressAndGetFile(
-    rutaOriginal, origWebpTmp,
-    minWidth: 1600, minHeight: 1600,
-    quality: 80, format: CompressFormat.webp,
+  final origRes = await _comprimirVariante(
+    tipo: 'original',
+    rutaOriginal: rutaOriginal,
+    rutaTmp: origWebpTmp,
+    minAncho: 1600, minAlto: 1600, calidad: 80,
   );
   if (origRes != null) {
     await File(origWebpTmp).rename(origWebpFinal);
@@ -212,6 +264,13 @@ class FotosColaService {
     } catch (e, st) {
       // v1.2.9+40 (Gemini): NO tragar la causa raíz, loguearla.
       debugPrint('ERROR _generarVariantes falló: $e\n$st');
+      // 1.34 (fotos-variantes): la causa también a la bitácora —
+      // el debugPrint no sale del teléfono y este catch fue la
+      // tumba silenciosa de las variantes durante meses (con la
+      // instrumentación por variante, lo normal es que el fallo
+      // ya conste como 'variante_fallo'; esto cubre lo que lance
+      // fuera del compresor: renombres, disco lleno…).
+      AppLog.error('fotos', 'generacion_fallo', d: '$e');
       // Fallback: solo el original.
       final copia = await File(rutaOriginal).copy('$base-original.jpg');
       variantes = {'original': copia.path};
