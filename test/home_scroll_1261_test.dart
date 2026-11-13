@@ -137,12 +137,19 @@ void main() {
     // 2. Al abrir, el offset es 0: la lista nace arriba.
     expect(_offsetHome(tester), 0);
     // 3. El gesto recorre hasta el final: el offset crece
-    // (un recorrido sustancial, >100: el contenido supera
-    // la ventana) y termina pegado al máximo de la lista.
+    // (un recorrido sustancial frente a la extensión REAL
+    // de ESTE arnés) y termina pegado al máximo de la
+    // lista. Fase 1 (INT-04): el suelo es RELATIVO a la
+    // extensión medida (>50 %), no el absoluto 100 — con
+    // la extensión de hoy (152,4) el 100 era el 66 % y
+    // cualquier recorte de contenido lo volvía falso
+    // negativo o imposible.
     await _bajarMostrador(tester);
-    expect(_offsetHome(tester), greaterThan(100));
     final lv = tester.widget<ListView>(_listaMostrador());
     final maximo = lv.controller!.position.maxScrollExtent;
+    expect(_offsetHome(tester), greaterThan(maximo * 0.5),
+        reason: 'recorrido sustancial: más de la mitad de '
+            'la extensión medida ($maximo)');
     for (var i = 0; i < 14; i++) {
       if ((maximo - _offsetHome(tester)).abs() < 1) break;
       await tester.drag(_listaMostrador(), const Offset(0, -320));
@@ -160,9 +167,15 @@ void main() {
     await _abrirHome(tester);
     await _bajarMostrador(tester);
     final offset = _offsetHome(tester);
-    // Recorrido sustancial (>100; ver _bajarMostrador: el
-    // máximo de este arnés tras el rediseño 1.33 es 152,4).
-    expect(offset, greaterThan(100));
+    // Recorrido sustancial RELATIVO (INT-04): más de la
+    // mitad de la extensión medida en este mismo arnés
+    // (152,4 tras el rediseño 1.33), no el absoluto 100.
+    final maximo2 = tester
+        .widget<ListView>(_listaMostrador())
+        .controller!
+        .position
+        .maxScrollExtent;
+    expect(offset, greaterThan(maximo2 * 0.5));
     // Rebuild del mismo árbol (análogo al setState de un
     // _cargar por sync): la posición se conserva.
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));

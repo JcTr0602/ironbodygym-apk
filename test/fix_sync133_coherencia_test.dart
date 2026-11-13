@@ -544,23 +544,17 @@ void main() {
       // Layout: en la base 67b9091, con esta misma
       // siembra, la fila de tabla desbordaba 535 px (y
       // otras filas rojas 57 px) con el nombre a 0,0 px de
-      // ancho. Tras el arreglo se drenan TODAS las
-      // excepciones y se exige que ninguna sea de esa
-      // clase (≥100 px). Queda un único desborde de 48 px
-      // en OTRA sección de la pantalla: preexistente —
-      // aparece igual en la base y hasta sin siembra — y
-      // fuera del alcance de esta pieza (adjudicado en el
-      // informe para la pasada de diseño, dueña de esta
-      // pantalla).
+      // ancho. Corte B de Argón (higiene): el desborde de
+      // 48 px de filaAdmin que aquí se toleraba con un
+      // filtro (lessThan(100)) quedó corregido en la
+      // fuente (la etiqueta va en Flexible) y el filtro se
+      // RETIRA: se drenan TODAS las excepciones y ninguna
+      // puede ser un desborde, de ningún tamaño.
       Object? pendiente;
       while ((pendiente = tester.takeException()) != null) {
-        final m = RegExp(r'overflowed by (\d+) pixels')
-            .firstMatch('$pendiente');
-        if (m != null) {
-          expect(int.parse(m.group(1)!), lessThan(100),
-              reason: 'desborde de la clase del defecto de '
-                  'la fila de tabla: $pendiente');
-        }
+        expect('$pendiente', isNot(contains('overflowed by')),
+            reason: 'ningún desborde tras el arreglo de '
+                'filaAdmin: $pendiente');
       }
       final tam = tester.getSize(find.text('clientes'));
       expect(tam.width, greaterThan(100),
