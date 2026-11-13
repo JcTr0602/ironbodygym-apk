@@ -4,6 +4,16 @@
 /// las imágenes antes de cualquier build).
 ///
 /// Fase por --dart-define=FASE=antes|despues (defecto: antes).
+///
+/// Fase 1 (DIS-02): ESCRIBIR las capturas exige la bandera
+/// explícita --dart-define=DISENO133_CAPTURAS=true. Sin ella
+/// los tests corren como humo (montan las pantallas) pero
+/// _capturar no toca el disco: una corrida ordinaria de la
+/// suite JAMÁS pisa la carpeta de evidencia de la compuerta
+/// visual (el incidente del §5.1: renders del código del
+/// momento volcados sobre los «antes» genuinos). La
+/// regeneración deliberada sigue siendo el mismo comando
+/// de siempre + la bandera.
 /// Superficies: la bandeja «Por Decidir» con conteos inyectados,
 /// el Pilar Negocio en su pestaña Caja, el Mostrador completo
 /// del dueño (orden de secciones) y la ficha del cliente
@@ -39,6 +49,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const _fase = String.fromEnvironment('FASE', defaultValue: 'antes');
+
+/// Fase 1 (DIS-02): sin esta bandera, [_capturar] no
+/// escribe NADA (ver la nota del encabezado).
+const _capturasHabilitadas =
+    bool.fromEnvironment('DISENO133_CAPTURAS');
 const _dirCapturas =
     '/home/hatch/workspace/cola-123/gestion/diseno_133_capturas';
 
@@ -205,6 +220,9 @@ ThemeData _temaCaptura() {
 
 Future<void> _capturar(
     WidgetTester tester, GlobalKey key, String nombre) async {
+  // Fase 1 (DIS-02): la guarda vive AQUÍ, en el único
+  // punto de escritura del arnés.
+  if (!_capturasHabilitadas) return;
   await tester.pump(const Duration(milliseconds: 120));
   final boundary =
       key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
@@ -405,7 +423,7 @@ void main() {
     ));
     await _drenar(tester, vueltas: 10);
     expect(find.byType(ServiciosScreen), findsOneWidget);
-    await _capturar(tester, k, 'servicio_directo_despues.png');
+    await _capturar(tester, k, 'servicio_directo_$_fase.png');
     expect(tester.takeException(), isNull);
     await _cerrarCascara(tester);
     await _avanzarTiempo(tester);
