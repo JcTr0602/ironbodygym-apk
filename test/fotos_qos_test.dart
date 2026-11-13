@@ -56,6 +56,53 @@ void main() {
     });
   });
 
+  group('originalInmediataPermitida', () {
+    test('pequeña (70 KB, la real de campo) + sin ops → inmediata', () {
+      expect(
+          originalInmediataPermitida(
+              tamanoBytes: 70 * 1024, opsPendientesNoFoto: 0),
+          isTrue);
+    });
+
+    test('pequeña + CON ops pendientes → no (la diferencia con G5)',
+        () {
+      expect(
+          originalInmediataPermitida(
+              tamanoBytes: 70 * 1024, opsPendientesNoFoto: 1),
+          isFalse);
+    });
+
+    test('grande (>512 KB) + sin ops → no: sigue la puerta QoS', () {
+      expect(
+          originalInmediataPermitida(
+              tamanoBytes: 600 * 1024, opsPendientesNoFoto: 0),
+          isFalse);
+    });
+
+    test('tamaño 0 (archivo ilegible/ausente) → no', () {
+      expect(
+          originalInmediataPermitida(
+              tamanoBytes: 0, opsPendientesNoFoto: 0),
+          isFalse);
+    });
+
+    test('borde exacto 512 KB + sin ops → inmediata', () {
+      expect(
+          originalInmediataPermitida(
+              tamanoBytes: kTamanoMaxOriginalInmediato,
+              opsPendientesNoFoto: 0),
+          isTrue);
+    });
+
+    test('borde exacto 512 KB + con ops → no', () {
+      expect(
+          originalInmediataPermitida(
+              tamanoBytes: kTamanoMaxOriginalInmediato,
+              opsPendientesNoFoto: 3),
+          isFalse);
+    });
+  });
+
   group('chunkDisplayRapido', () {
     final i = DateTime(2026, 1, 1);
 

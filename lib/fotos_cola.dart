@@ -538,6 +538,14 @@ class FotosColaService {
     } catch (_) {}
 
     var redVerificada = false;
+    // 1.33 (rapidez de fotos): 'original' elegidas en ESTE ciclo que
+    // no pasan ni la puerta QoS ni la vía inmediata (las grandes):
+    // se excluyen de las selecciones siguientes del ciclo para no
+    // girar en vacío ni bloquear a las fotos de detrás. Es solo
+    // memoria del ciclo: la fila no se toca en BD (ni intentos ni
+    // backoff) y su turno sigue siendo la puerta QoS en un ciclo
+    // posterior, como hasta ahora.
+    final originalesDiferidasEsteCiclo = <int>{};
     try {
       while (true) {
         // 1.32 (O2F2S, adjudicación F-25): punto de control
@@ -656,16 +664,19 @@ class FotosColaService {
         where: "estado = 'pendiente' AND intentos < 5 "
             "AND (proximo_intento_en IS NULL OR "
             "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)"
-            // v1.3.10: el reintento manual (forzar_qos=1) salta el filtro QoS.
-            // v1.13.0 (G5): ELIMINADO el bypass de 'original' ligera
-            // (<=512 KB) de la v1.4.0: una original liviana ya NO
-            // salta la puerta QoS. Razón: el Foreground Service
-            // podía cerrarse antes de reclamarla, pero el bypass
-            // dejaba subir originales con ops en cola en red lenta.
-            // Ahora toda 'original' espera a originalPermitidoFallback
-            // (5 min de holgura + display rápido, o 15 min de holgura
-            // extendida sin medición).
-            "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1)"}",
+            // 1.33 (rapidez de fotos): la 'original' ya NO se
+            // excluye en SQL. La selección la puede traer (el
+            // ORDER BY la deja última, tras thumb y display) y la
+            // decisión se toma en Dart tras elegir la fila: puerta
+            // QoS (puedeOriginal), reintento manual (forzar_qos=1),
+            // vía inmediata si es pequeña y no hay ops pendientes
+            // (originalInmediataPermitida), o diferimiento dentro
+            // del ciclo. Historia: el filtro SQL anterior (v1.13.0,
+            // G5) retiró el bypass de 'original' ligera de la
+            // v1.4.0 porque dejaba subir originales CON ops en
+            // cola en red lenta; la vía inmediata no lo revive
+            // porque exige ops vacía al reclamar (ver fotos_qos).
+            "${originalesDiferidasEsteCiclo.isEmpty ? '' : ' AND id NOT IN (${originalesDiferidasEsteCiclo.join(',')})'}",
         whereArgs: [ahoraCorteEpoch],
         orderBy: "CASE tipo WHEN 'thumb' THEN 0 "
             "WHEN 'display' THEN 1 ELSE 2 END, creado_en ASC",
@@ -673,6 +684,37 @@ class FotosColaService {
       );
       if (fotos.isEmpty) break;
       final f = fotos.first;
+
+      // 1.33 (rapidez de fotos): decisión sobre la 'original'
+      // elegida. Con la puerta QoS abierta o con reintento manual
+      // (forzar_qos = 1) pasa como hasta ahora, sin tocar el
+      // archivo. Sin ninguna de las dos: si la función pura admite
+      // la vía inmediata (pequeña y sin ops pendientes al reclamar,
+      // con el conteo fresco de ESTA iteración), sigue al reclamo;
+      // si no (la grande típica), se difiere dentro del ciclo —
+      // su id queda excluido de las próximas selecciones y el
+      // bucle continúa con la siguiente foto.
+      if (f['tipo'] == 'original' &&
+          !puedeOriginal &&
+          (f['forzar_qos'] as int? ?? 0) != 1) {
+        var tamano = 0;
+        final rutaOriginal = f['ruta_local'] as String?;
+        if (rutaOriginal != null && rutaOriginal.isNotEmpty) {
+          try {
+            tamano = await File(rutaOriginal).length();
+          } catch (_) {
+            tamano = 0; // ilegible: la vía inmediata no aplica
+          }
+        }
+        if (!originalInmediataPermitida(
+            tamanoBytes: tamano, opsPendientesNoFoto: opsPendientes)) {
+          originalesDiferidasEsteCiclo.add(f['id'] as int);
+          AppLog.aviso('fotos', 'original_diferida_qos',
+              d: 'id=${f['id']} bytes=$tamano: ni puerta QoS ni vía '
+                  'inmediata; diferida este ciclo');
+          continue;
+        }
+      }
       final fotoOpUuid = f['op_uuid'] as String?;
 
       // v1.3.2 (Argón): verificar red UNA vez por lote, y solo después

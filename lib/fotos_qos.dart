@@ -35,6 +35,11 @@ const double kVelocidadMinBytesPorSeg = 128 * 1024 / 5;
 /// v1.13.0 (G5): BYPASS RETIRADO. La constante queda solo como
 /// referencia histórica: procesarCola ya no la usa para saltar la
 /// puerta QoS (toda 'original' espera a originalPermitidoFallback).
+///
+/// 1.33 (rapidez de fotos): la constante vuelve a tener uso, pero
+/// SOLO como umbral de tamaño de [originalInmediataPermitida], que
+/// añade la guarda que el bypass de la v1.4.0 no tenía (sin ops
+/// pendientes al reclamar). El bypass histórico sigue retirado.
 const int kTamanoMaxOriginalInmediato = 512 * 1024;
 
 /// ¿Puede reclamarse la variante 'original'?
@@ -89,4 +94,37 @@ bool originalPermitidoFallback({
   if (opsVaciaDesde == null) return false;
   return ahora.difference(opsVaciaDesde) >
       const Duration(minutes: kHolguraOpsMinutosSinDisplay);
+}
+
+/// 1.33 (rapidez de fotos): vía INMEDIATA para la variante 'original'
+/// pequeña. ¿Puede subirse YA, en este mismo ciclo, sin esperar a la
+/// puerta QoS de [originalPermitidoFallback]?
+///
+/// Permitida si se cumplen LAS DOS:
+/// - el archivo pesa más de 0 y como máximo
+///   [kTamanoMaxOriginalInmediato] (512 KB): la 'original' típica de
+///   cliente tras comprimir pesa ~70-350 KB, comparable a un chunk
+///   de 'display' (que sube sin puerta); su demora era la puerta,
+///   no el tamaño ni el enlace;
+/// - en el momento de reclamar NO hay operaciones pendientes que no
+///   sean de foto ([opsPendientesNoFoto] == 0): la foto sube detrás
+///   de los datos, nunca contra ellos.
+///
+/// Por qué esto NO revive el defecto que retiró el bypass en G5: el
+/// bypass de la v1.4.0 saltaba la puerta QoS mirando SOLO el tamaño —
+/// dejaba subir originales CON ops en cola en red lenta, compitiendo
+/// con los cobros. La diferencia es la segunda condición: con CUALQUIER
+/// op transaccional pendiente al reclamar, la vía inmediata se cierra
+/// y manda la puerta de siempre. Y si una op entra a mitad de la
+/// subida, la protege la pausa ya existente (debePausarPorCobro).
+///
+/// Las originales de más de 512 KB no usan esta vía: siguen con la
+/// puerta actual (5 min + display rápido, o 15 min sin medición).
+bool originalInmediataPermitida({
+  required int tamanoBytes,
+  required int opsPendientesNoFoto,
+}) {
+  return tamanoBytes > 0 &&
+      tamanoBytes <= kTamanoMaxOriginalInmediato &&
+      opsPendientesNoFoto == 0;
 }
