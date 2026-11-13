@@ -16,6 +16,14 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.33.0', [
+    'Diseño rehecho donde la 1.32 se veía plana: los menús tienen superficie y transición al abrirse, la ficha del cliente lleva una sola barra compacta fija arriba —ya no flota sobre la ficha al bajar— y Estadísticas abre primero en el Mostrador',
+    'Las fotos de los clientes aparecen en la lista a la primera: se acabó que la foto existiera y la lista enseñara las iniciales; y las fotos nuevas se suben en el mismo ciclo —las pequeñas suben enteras tras su miniatura, sin esperar minutos—',
+    'Sincronización con una sola voz: la píldora, la cabecera y la tarjeta de estado leen el mismo registro, así que lo que dice una lo dicen todas; si la bajada falla, la app lo dice en claro —qué parte falló, en qué tablas y a qué hora— y el aviso se queda hasta que una bajada buena lo resuelva, aunque reinicies la app',
+    'La cabecera de la ficha ya no se queda trabada al cambiar de pestaña: se reevalúa en cada cambio y muestra lo que toca',
+    'Los desplegables de «A nombre de» y «Efectivo lo entrega» ya no se salen de la pantalla en teléfonos estrechos ni con la letra grande',
+    'La tarjeta de estado de la cola se lee bien también en el caso feo —subida al día con la bajada rota—, que es justo cuando más falta hace leerla',
+  ]),
   Novedad('1.32.0', [
     'Diseño nuevo «Mostrador Táctico»: la app se organiza en pilares con todo a un toque de distancia, los botones principales tienen el tamaño que pide un teléfono de verdad y el Modo Sol se enciende a mano cuando trabajas a pleno sol',
     'Centro de Sincronización: toca la píldora de sincronizar y ves en vivo por qué tabla va la bajada y cuánto lleva; y queda el historial completo de cada sincronización —qué subió y qué bajó, operación a operación—; si una se cortó a mitad, la app te dice en qué tabla quedó y continúa desde ahí, sin repetir lo ya bajado',
