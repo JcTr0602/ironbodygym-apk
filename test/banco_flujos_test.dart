@@ -195,6 +195,13 @@ Future<void> _prepararSuplemento(WidgetTester tester) async {
       await File(p.join(dir, 'ironbody.db')).delete();
     } catch (_) {}
     await LocalDb.resetParaTest();
+    // Yunque 3 (banco_flujos, modo B): este preparador era el
+    // único que NO sembraba la foto de permisos, contra la
+    // doctrina de la cabecera del archivo. Sin la foto caliente
+    // en el singleton, la guarda fail-closed de _confirmar
+    // denegaba y la vista previa nunca aparecía (el fallo se
+    // disfrazaba de defecto del flujo según la corrida).
+    await _sembrarPermisosBanco();
     await LocalDb.instance.db;
     await LocalDb.instance.upsertMirror('suplementos', 5, {
       'id': 5,
