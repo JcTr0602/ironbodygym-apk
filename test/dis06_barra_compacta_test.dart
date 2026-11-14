@@ -6,6 +6,12 @@
 /// AccesoAppCache cargado y SIN acceso (los dos botones
 /// conviven) → sin excepción de desborde y el nombre
 /// conserva ≥80 dp de ancho.
+///
+/// Campo 2 · B-1 (2026-11-14): «Dar acceso» salió de la barra
+/// por orden de campo de Jc. Los dos casos de abajo conservan
+/// la propiedad DIS-06 (sin desborde a 1.0 y 1.3, nombre
+/// ≥80 dp) sobre la composición nueva y afirman la ausencia
+/// del botón retirado.
 library;
 
 import 'dart:convert';
@@ -116,8 +122,10 @@ void main() {
         'fecha_inscripcion': '2026-01-01',
       }, 11);
       // AccesoAppCache CARGADO (foto persistida válida) y
-      // SIN acceso para el 501: la barra debe ofrecer
-      // «Dar acceso» como secundaria.
+      // SIN acceso para el 501: era la precondición para que
+      // la barra ofreciera «Dar acceso» como secundaria;
+      // desde Campo 2 · B-1 ese botón ya no vive en la barra
+      // y la precondición sirve para afirmar su ausencia.
       await LocalDb.instance.setMeta(
           'acceso_app_cache_v1',
           jsonEncode({
@@ -172,29 +180,36 @@ void main() {
         reason: 'la cabecera se pliega a la barra compacta');
   }
 
-  testWidgets('DIS-06 · control a escala 1.0: dos botones '
-      'conviven sin desborde', (tester) async {
+  // Campo 2 · B-1 (2026-11-14): «Dar acceso» salió de la barra
+  // compacta por orden de campo de Jc; el acceso vive en su
+  // sección de «App Clientes». La propiedad DIS-06 se conserva
+  // con la composición nueva: la barra (vencido y sin acceso:
+  // solo «Renovar») no desborda y el nombre conserva su sitio.
+  testWidgets('DIS-06 · control a escala 1.0: la barra '
+      'compacta sin «Dar acceso» no desborda', (tester) async {
     await abrirFicha(tester, escala: 1.0);
     final barra = find.byKey(const ValueKey('ficha-cabecera-compacta'));
     expect(
         find.descendant(of: barra, matching: find.text('Dar acceso')),
-        findsOneWidget);
+        findsNothing,
+        reason: 'Campo 2 · B-1: «Dar acceso» ya no vive en '
+            'la barra compacta');
     expect(find.descendant(of: barra, matching: find.text('Renovar')),
         findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('DIS-06 · a escala 1.3 la barra con dos '
-      'botones no desborda y el nombre conserva ≥80 dp',
-      (tester) async {
+  testWidgets('DIS-06 · a escala 1.3 la barra compacta no '
+      'desborda y el nombre conserva ≥80 dp', (tester) async {
     await abrirFicha(tester, escala: 1.3);
     final barra = find.byKey(const ValueKey('ficha-cabecera-compacta'));
     expect(
         find.descendant(of: barra, matching: find.text('Dar acceso')),
-        findsOneWidget,
-        reason: 'vencido y sin acceso: la acción del '
-            'momento es Renovar y «Dar acceso» queda de '
-            'secundaria — los dos botones del hallazgo');
+        findsNothing,
+        reason: 'Campo 2 · B-1: vencido y sin acceso, la '
+            'acción del momento es Renovar y «Dar acceso» '
+            'ya no es secundaria de la barra — vive en su '
+            'sección de «App Clientes»');
     expect(find.descendant(of: barra, matching: find.text('Renovar')),
         findsOneWidget);
     expect(tester.takeException(), isNull,
