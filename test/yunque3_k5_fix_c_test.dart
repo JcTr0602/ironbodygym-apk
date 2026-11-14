@@ -26,6 +26,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/mediciones_cliente.dart';
+import 'package:ironbody_gym/negocio.dart' show sanitizarTelefono;
 import 'package:ironbody_gym/plus_reportes.dart';
 import 'package:ironbody_gym/ui/buscar.dart';
 import 'package:ironbody_gym/ui/mi_turno.dart';
@@ -204,6 +205,44 @@ void main() {
       lista = await medicionesClienteLocal(55);
       expect(lista, hasLength(1));
       expect(lista.single['espejado'], isTrue);
+    });
+  });
+
+  group('K5-5 · «Cambiar teléfono del acceso» no trunca el '
+      'pegado internacional', () {
+    // El diálogo es privado de acciones_acceso.dart y su flujo
+    // público termina en la RPC cambiar_telefono_acceso: un
+    // widget test suyo exigiría sesión Supabase y servidor —
+    // andamiaje desproporcionado. Contrato por pin de fuente
+    // (estilo yunque2_cambiar_estado_test) + la conducta de la
+    // sanitización que juzga al guardar.
+    test('el TextField del diálogo no lleva maxLength y el '
+        'guardado sanitiza el texto devuelto', () {
+      final f = File('lib/ui/acciones_acceso.dart').readAsStringSync();
+      final i = f.indexOf('class _DialogoCambiarTelefonoAcceso');
+      expect(i, greaterThan(0));
+      final dialogo = f.substring(i);
+      expect(dialogo, isNot(contains('maxLength:')),
+          reason: 'con maxLength: 8, pegar «5358191577» se '
+              'truncaba a «53581915» ANTES de sanitizar y ese '
+              'número equivocado quedaba como teléfono de '
+              'acceso (la clase exacta de D-6)');
+      final j = f.indexOf('Future<void> _cambiarTelefonoAccesoInterna');
+      final k = f.indexOf("rpc(", j);
+      expect(f.substring(j, k), contains('sanitizarTelefono(texto)'),
+          reason: 'quien juzga es sanitizarTelefono al guardar, '
+              'como en el diálogo compartido tras D-6');
+    });
+
+    test('sanitizarTelefono acepta el internacional pegado y '
+        'el truncado también «valía»: por eso el tope era el '
+        'defecto', () {
+      expect(sanitizarTelefono('5358191577'), '58191577');
+      expect(sanitizarTelefono('+53 5819 1577'), '58191577');
+      // El número truncado por el maxLength es en sí mismo
+      // «válido» (8 dígitos empezando en 5): ningún paso
+      // posterior detectaba el error.
+      expect(sanitizarTelefono('53581915'), '53581915');
     });
   });
 }
