@@ -191,11 +191,12 @@ void main() {
       await _escena(
         tester,
         oscuro: oscuro,
-        // pomo queda en JPG en las dos fases (cabo del
-        // carril: escena con mueble sin separación limpia).
-        activos: const ['assets/vacio_pomo.jpg'],
+        // pomo: en la base era JPG (escena con mueble);
+        // desde la regeneración 1.34 es spot WebP con alfa
+        // y _vacio() resuelve la ruta por existencia.
+        activos: [_vacio('pomo')],
         nombre: 'vacio_sinmarco_pomo_$tema',
-        hijo: const Scaffold(
+        hijo: Scaffold(
           body: Padding(
             padding: EdgeInsets.all(16),
             child: Card(
@@ -203,7 +204,7 @@ void main() {
                 padding: EdgeInsets.all(16),
                 child: EstadoVacio(
                   sinMarco: true,
-                  ilustracion: 'assets/vacio_pomo.jpg',
+                  ilustracion: _vacio('pomo'),
                   icono: Icons.inventory_2_rounded,
                   titulo: 'Sin suplementos',
                   subtitulo: 'Registra el primer producto del catálogo.',
