@@ -16,6 +16,15 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.34.0', [
+    'Las listas se desplazan suaves: las fotos bajan en su tamaño ligero, la sincronización ya no interrumpe el desplazamiento y el trabajo pesado salió de la pantalla —bajar por Clientes, Suplementos o cualquier lista ya no da tirones—',
+    'La ficha del cliente respira: fuera la tarjeta flotante de «Dar acceso» que estorbaba encima de la ficha y fuera «Repetir último cobro»; lo importante —el estado del cliente, su pago y su historial— manda en la pantalla',
+    '«Por decidir» solo enseña lo que hay que atender: cada reporte aparece únicamente si tiene algo pendiente; lo que está en cero ya no satura la pantalla',
+    'Suplementos con el catálogo protagonista: al bajar por la lista, el listado ocupa la pantalla y las secciones de arriba se pliegan en vez de comerse media vista',
+    'Bajar para actualizar, más honesto y más rápido: si los datos están frescos, la pantalla relee al instante lo que ya tienes en el teléfono; si llevan más de diez minutos sin actualizarse, baja datos frescos primero; y si una bajada quedó a medias, la app lo dice en claro en vez de anunciar que está «al día»',
+    'Las fotos nuevas generan por fin sus tres tamaños —miniatura, mediana y original—: las listas cargan la ligera y se ven antes, y los comprobantes de pago se comprimen como toca',
+    'La sincronización manual tiene un límite de tiempo: contra una conexión colgada ya no puede quedarse dando vueltas indefinidamente, y la app lo corta y lo explica',
+  ]),
   Novedad('1.33.0', [
     'Diseño rehecho donde la 1.32 se veía plana: los menús tienen superficie y transición al abrirse, la ficha del cliente lleva una sola barra compacta fija arriba —ya no flota sobre la ficha al bajar— y Estadísticas abre primero en el Mostrador',
     'Las fotos de los clientes aparecen en la lista a la primera: se acabó que la foto existiera y la lista enseñara las iniciales; y las fotos nuevas se suben en el mismo ciclo —las pequeñas suben enteras tras su miniatura, sin esperar minutos—',
