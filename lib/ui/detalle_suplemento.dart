@@ -31,6 +31,7 @@ import '../tiempo.dart';
 import 'aviso_duplicado.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'suplementos.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
@@ -81,6 +82,8 @@ Future<bool> ventaRapidaSuplemento(
         clienteInicialId: clienteId,
         clienteInicialNombre: clienteNombre),
   );
+  // 1.35 (UI-02): la venta rápida guardada se siente.
+  if (res == true) Tacto.confirmacion();
   return res == true;
 }
 

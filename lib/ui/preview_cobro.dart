@@ -34,6 +34,7 @@ import 'permisos_ui.dart';
 import 'confirmacion_cobro.dart';
 import 'dialogo_telefono.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 
 /// Paso A: preview obligatorio antes de guardar el cobro.
 /// Devuelve true solo si el usuario tocó «Confirmar cobro».
@@ -534,12 +535,16 @@ Future<ResultadoCobro> cobrarConPreviewYRecibo({
   if (_cobroEnCurso) return ResultadoCobro.cancelado;
   _cobroEnCurso = true;
   try {
-    return await _cobrarConPreviewYReciboFlujo(
+    final r = await _cobrarConPreviewYReciboFlujo(
       context: context,
       nombreCliente: nombreCliente,
       payload: payload,
       permiteCambiar: permiteCambiar,
     );
+    // 1.35 (UI-02): el cobro guardado se siente — un solo
+    // punto para todos los llamadores (ficha, pago, listas).
+    if (r == ResultadoCobro.guardado) Tacto.confirmacion();
+    return r;
   } finally {
     _cobroEnCurso = false;
   }

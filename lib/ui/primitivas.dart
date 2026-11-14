@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'diseno.dart';
+import '../perfil.dart';
 
 /// El LENGUAJE HÁPTICO del mostrador: un solo punto de
 /// verdad para que toda la app responda al tacto con el
@@ -28,11 +29,43 @@ import 'diseno.dart';
 /// - [exito]: el golpe firme de «operación terminada».
 /// - [error]: la vibración de sistema de «eso no vale».
 abstract final class Tacto {
-  static void seleccion() => HapticFeedback.selectionClick();
-  static void ligero() => HapticFeedback.lightImpact();
-  static void confirmacion() => HapticFeedback.mediumImpact();
-  static void exito() => HapticFeedback.heavyImpact();
-  static void error() => HapticFeedback.vibrate();
+  /// 1.35 (UI-02): el ajuste «Vibración» de Ajustes manda
+  /// sobre TODA la capa háptica. La preferencia se lee una
+  /// vez (perezosa) y queda en caché; el interruptor de
+  /// Ajustes la fija al momento con [fijarHabilitado].
+  static bool? _habilitado;
+
+  static bool get _on {
+    final h = _habilitado;
+    if (h != null) return h;
+    _habilitado = true; // provisional hasta que lea el ajuste
+    PerfilService.instance
+        .getVibracion()
+        .then((v) => _habilitado = v, onError: (_) {});
+    return true;
+  }
+
+  static void fijarHabilitado(bool v) => _habilitado = v;
+
+  static void seleccion() {
+    if (_on) HapticFeedback.selectionClick();
+  }
+
+  static void ligero() {
+    if (_on) HapticFeedback.lightImpact();
+  }
+
+  static void confirmacion() {
+    if (_on) HapticFeedback.mediumImpact();
+  }
+
+  static void exito() {
+    if (_on) HapticFeedback.heavyImpact();
+  }
+
+  static void error() {
+    if (_on) HapticFeedback.vibrate();
+  }
 }
 
 /// 1.35 (UI-01): fundido corto con desplazamiento mínimo al

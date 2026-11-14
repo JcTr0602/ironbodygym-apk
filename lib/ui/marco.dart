@@ -28,6 +28,7 @@ import '../sync.dart';
 import '../theme.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'widgets.dart';
 
 /// Los 4 pilares del marco, en su orden fijo de barra.
@@ -404,7 +405,11 @@ class BarraPilares extends StatelessWidget {
     return NavigationBar(
       key: const ValueKey('marco-pilares'),
       selectedIndex: activo,
-      onDestinationSelected: onTap,
+      // 1.35 (UI-02): cambiar de pilar se siente (selección).
+      onDestinationSelected: (i) {
+        Tacto.seleccion();
+        onTap(i);
+      },
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: [
         NavigationDestination(
@@ -496,7 +501,14 @@ class DockMostrador extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadio.md),
           child: InkWell(
             borderRadius: BorderRadius.circular(AppRadio.md),
-            onTap: onTap,
+            // 1.35 (UI-02): cada acción del Dock responde
+            // con un toque ligero.
+            onTap: onTap == null
+                ? null
+                : () {
+                    Tacto.ligero();
+                    onTap();
+                  },
             child: Padding(
               padding: const EdgeInsets.symmetric(
                   vertical: AppEspacio.sm, horizontal: AppEspacio.xs),

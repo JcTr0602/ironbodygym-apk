@@ -22,6 +22,7 @@ import 'iconos_propios.dart';
 import 'aviso_duplicado.dart';
 import 'diseno.dart';
 import 'hoja_accion.dart';
+import 'primitivas.dart';
 import 'servicios_detalle.dart';
 import 'skeleton.dart';
 import 'ranking_servicios.dart';
@@ -965,6 +966,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           );
         } catch (_) {}
       }
+      // 1.35 (UI-02): la venta de servicio guardada se siente.
+      Tacto.confirmacion();
       final cobradoEn = ahoraHabana();
       await _cargar();
       // v1.13.0 (E3): Deshacer 15 s exactos desde el cobro (solo
@@ -1574,6 +1577,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           );
         } catch (_) {}
       }
+      // 1.35 (UI-02): la venta múltiple guardada se siente.
+      Tacto.confirmacion();
       final cobradoEn = ahoraHabana();
       await _cargar();
       _mostrarDeshacer(opUuids, cobradoEn);

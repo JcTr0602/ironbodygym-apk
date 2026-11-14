@@ -36,6 +36,7 @@ import 'componentes.dart';
 import 'foto_elegir.dart';
 import 'panel_buscador.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 import 'importar_respaldo.dart';
 import 'widgets.dart';
 
@@ -1876,6 +1877,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   valor: _vibracion,
                   onChanged: (v) async {
                     await _perfil.setVibracion(v);
+                    // 1.35 (UI-02): la capa háptica Tacto
+                    // obedece el ajuste al momento.
+                    Tacto.fijarHabilitado(v);
                     if (mounted) {
                       setState(() => _vibracion = v);
                     }

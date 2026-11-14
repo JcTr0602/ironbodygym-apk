@@ -200,10 +200,14 @@ class _PilarClientesState extends State<PilarClientes> {
                       label: Text('Avisos WhatsApp')),
               ],
               selected: {_segmento},
-              onSelectionChanged: (s) => setState(() {
-                _segmento = s.first;
-                _visitados.add(s.first);
-              }),
+              onSelectionChanged: (s) {
+                // 1.35 (UI-02): cambiar de segmento se siente.
+                Tacto.seleccion();
+                setState(() {
+                  _segmento = s.first;
+                  _visitados.add(s.first);
+                });
+              },
             ),
           ),
         ),

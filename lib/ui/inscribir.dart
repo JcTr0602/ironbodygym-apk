@@ -25,6 +25,7 @@ import 'componentes.dart';
 import 'dialogo_confirmar_inscripcion.dart';
 import 'diseno.dart';
 import 'permisos_ui.dart';
+import 'primitivas.dart';
 import 'foto_elegir.dart';
 import 'invitados.dart';
 import 'widgets.dart';
@@ -589,6 +590,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
           );
         }
         if (!mounted) return;
+        // 1.35 (UI-02): la inscripción guardada se siente.
+        Tacto.confirmacion();
         mostrarSnack(context, 'Cuenta a la Casa guardada (se sincronizará)', significado: SignificadoChip.exito);
         Navigator.of(context).pop();
         SyncEngine.instance.push();
@@ -705,6 +708,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
         );
       }
       if (!mounted) return;
+      // 1.35 (UI-02): la inscripción guardada se siente.
+      Tacto.confirmacion();
       mostrarSnack(context, 'Guardado (se sincronizará)', significado: SignificadoChip.exito);
       Navigator.of(context).pop();
       SyncEngine.instance.push();
