@@ -57,6 +57,22 @@ void main() {
     });
   });
 
+  group('K7-4 · esPinValido', () {
+    test('solo acepta exactamente 4 dígitos', () {
+      expect(PerfilService.esPinValido('1234'), isTrue);
+      expect(PerfilService.esPinValido('0000'), isTrue);
+      // Los que int.tryParse dejaba pasar y el teclado de
+      // desbloqueo no puede teclear:
+      expect(PerfilService.esPinValido('+123'), isFalse);
+      expect(PerfilService.esPinValido('-123'), isFalse);
+      expect(PerfilService.esPinValido('0x12'), isFalse);
+      expect(PerfilService.esPinValido('123'), isFalse);
+      expect(PerfilService.esPinValido('12345'), isFalse);
+      expect(PerfilService.esPinValido('12 4'), isFalse);
+      expect(PerfilService.esPinValido(''), isFalse);
+    });
+  });
+
   group('getDeviceId', () {
     test('sin id guardado genera UUID v4 y lo conserva', () async {
       final p = await SharedPreferences.getInstance();
@@ -92,5 +108,60 @@ void main() {
       expect(p.getString('buscar_swipe_izq'), isNull);
       expect(p.getString('nombre_visible'), isNull);
     });
+
+    // Yunque 3 (K7-3): el reset no borraba el bloqueo por
+    // inactividad (la escritura vive en la clave POR USUARIO
+    // y la lista borraba solo la global legada) ni el Modo
+    // Sol. El test viejo sembraba solo claves sin sufijo —
+    // sin sesión, _key devuelve la base y el defecto era
+    // invisible: aquí se siembra CON sesión (JWT falso, la
+    // costura del arnés de plegados).
+    test('K7-3: borra el bloqueo por usuario y el Modo Sol',
+        () async {
+      await _sesionFalsa('jc@ironbody.local');
+      final p = await SharedPreferences.getInstance();
+      await p.setInt('bloqueo_minutos_jc', 5);
+      await p.setInt('bloqueo_minutos', 5);
+      await p.setBool('modo_sol_v1', true);
+      // La vía de lectura real ve el valor por usuario.
+      expect(await PerfilService.instance.getBloqueoMinutos(), 5);
+      await PerfilService.instance.resetAjustes();
+      expect(await PerfilService.instance.getBloqueoMinutos(), 0);
+      expect(p.getInt('bloqueo_minutos_jc'), isNull);
+      expect(p.getBool('modo_sol_v1'), isNull);
+    });
   });
+}
+
+/// Sesión falsa de Supabase (JWT de mentira) para que
+/// AuthService().username devuelva «jc» y las claves por
+/// usuario de PerfilService lleven el sufijo `_jc`.
+Future<void> _sesionFalsa(String email) async {
+  String b64(Map<String, dynamic> m) =>
+      base64Url.encode(utf8.encode(jsonEncode(m))).replaceAll('=', '');
+  final header = b64({'alg': 'HS256', 'typ': 'JWT'});
+  final payload = b64({
+    'sub': '00000000-0000-0000-0000-0000000000e6',
+    'aud': 'authenticated',
+    'exp': 4102444800,
+    'iat': 1700000000,
+    'email': email,
+    'role': 'authenticated',
+    'app_metadata': {'provider': 'email'},
+  });
+  final sesion = jsonEncode({
+    'access_token': '$header.$payload.firma-de-mentira',
+    'token_type': 'bearer',
+    'expires_in': 3600,
+    'refresh_token': 'refresh-de-mentira',
+    'user': {
+      'id': '00000000-0000-0000-0000-0000000000e6',
+      'aud': 'authenticated',
+      'email': email,
+      'app_metadata': {'provider': 'email'},
+      'user_metadata': <String, dynamic>{},
+      'created_at': '2024-01-01T00:00:00.000Z',
+    },
+  });
+  await Supabase.instance.client.auth.setInitialSession(sesion);
 }

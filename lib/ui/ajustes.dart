@@ -137,6 +137,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
   bool _tienePin = false;
   String _tema = 'sistema';
   double _tamanoLetra = 1.0;
+  // Yunque 3 (K3-4): la escala del SISTEMA (la de
+  // accesibilidad del teléfono), para anunciar la escala
+  // EFECTIVA en el deslizador de letra. Ojo: la de
+  // MediaQuery en esta app ya es la efectiva (main.dart la
+  // compone), así que la del sistema se lee del dispatcher.
+  double get _escalaSistema =>
+      WidgetsBinding.instance.platformDispatcher.textScaleFactor;
   int _bloqueoMinutos = 0;
   String _swipeDer = 'cobrar'; // Bloque 1: deslizar en Buscar
   String _swipeIzq = 'ninguna';
@@ -620,7 +627,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (res.accion != 'guardar') return;
     final p1 = res.pin1.trim();
     final p2 = res.pin2.trim();
-    if (p1.length != 4 || int.tryParse(p1) == null) {
+    // Yunque 3 (K7-4): exactamente 4 dígitos (esPinValido);
+    // int.tryParse dejaba pasar «+123»/«0x12», intecleables
+    // en la pantalla de bloqueo.
+    if (!PerfilService.esPinValido(p1)) {
       _msg('El PIN debe tener 4 dígitos');
       return;
     }
@@ -1551,6 +1561,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     await ThemeController.setFontScale(1.0);
     // v1.3.1: resetear alto contraste.
     await ThemeController.setAltoContraste(false);
+    // Yunque 3 (K7-3): el Modo Sol también vuelve a su
+    // defecto (apagado), por su vía propia — resetAjustes
+    // borra la clave, pero el notificador manda en sesión.
+    await ThemeController.setModoSol(false);
     _cargar();
     _msg('Ajustes restablecidos');
   }
@@ -1818,8 +1832,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                             min: 0.85,
                             max: 1.3,
                             divisions: 9,
+                            // Yunque 3 (K3-4): la burbuja
+                            // anuncia el % EFECTIVO (F-9),
+                            // no el de la app: en la zona de
+                            // clamp la etiqueta ya no promete
+                            // un cambio que no ocurre.
                             label:
-                                '${(_tamanoLetra * 100).round()}%',
+                                '${anuncioEscalaLetra(_tamanoLetra, _escalaSistema).porcentaje}%',
                             onChanged: (v) =>
                                 setState(() => _tamanoLetra = v),
                             onChangeEnd: (v) =>
@@ -1830,6 +1849,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     ),
                   ),
                 ),
+                // Yunque 3 (K3-4): aviso de la zona muerta —
+                // cuando app × sistema entra en el techo o el
+                // suelo de F-9, mover el deslizador ya no
+                // cambia la letra; se dice, no se esconde.
+                if (coincideBusquedaAjuste(
+                        'Tamaño de letra', _busquedaAjustes) &&
+                    anuncioEscalaLetra(_tamanoLetra, _escalaSistema)
+                        .limitado)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                        left: 4, top: AppEspacio.xs),
+                    child: Text(
+                        'Limitado por la escala del sistema',
+                        style: AppTexto.metadato.copyWith(
+                            color: AppColores.textoSecundario(
+                                context))),
+                  ),
 
                 // v1.2.5 (3.2): vibración háptica tras confirmaciones.
                 _switch(
@@ -2440,6 +2476,12 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
               controller: _c0,
               keyboardType: TextInputType.number,
               maxLength: 4,
+              // Yunque 3 (K7-4): ni pegando entran signos —
+              // el PIN son solo dígitos, como el teclado de
+              // desbloqueo.
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly
+              ],
               obscureText: true,
               decoration: const InputDecoration(
                 labelText: 'PIN actual',
@@ -2451,6 +2493,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
             controller: _c1,
             keyboardType: TextInputType.number,
             maxLength: 4,
+            // Yunque 3 (K7-4): solo dígitos, como _c0.
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly
+            ],
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'PIN (4 dígitos)',
@@ -2462,6 +2508,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
             controller: _c2,
             keyboardType: TextInputType.number,
             maxLength: 4,
+            // Yunque 3 (K7-4): solo dígitos, como _c0.
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly
+            ],
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'Repite el PIN',

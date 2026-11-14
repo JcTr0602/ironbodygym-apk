@@ -33,4 +33,40 @@ void main() {
     expect(find.text('contenido'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  // Yunque 3 (K3-1): el default de triggerMode debe ser el
+  // del SDK (onEdge), no anywhere — el contrato del
+  // envoltorio es «sin cambiar ningún comportamiento».
+  testWidgets('RefrescoIron sin triggerMode usa onEdge '
+      '(default del SDK)', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTema.sol(),
+      home: Scaffold(
+        body: RefrescoIron(
+          onRefresh: () async {},
+          child: ListView(children: const [Text('contenido')]),
+        ),
+      ),
+    ));
+    final ri = tester.widget<RefreshIndicator>(
+        find.byType(RefreshIndicator));
+    expect(ri.triggerMode, RefreshIndicatorTriggerMode.onEdge);
+  });
+
+  testWidgets('RefrescoIron respeta un triggerMode explícito',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTema.sol(),
+      home: Scaffold(
+        body: RefrescoIron(
+          triggerMode: RefreshIndicatorTriggerMode.anywhere,
+          onRefresh: () async {},
+          child: ListView(children: const [Text('contenido')]),
+        ),
+      ),
+    ));
+    final ri = tester.widget<RefreshIndicator>(
+        find.byType(RefreshIndicator));
+    expect(ri.triggerMode, RefreshIndicatorTriggerMode.anywhere);
+  });
 }

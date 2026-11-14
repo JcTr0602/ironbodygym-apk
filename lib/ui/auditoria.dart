@@ -1355,8 +1355,21 @@ class _HojaFiltrosAuditoriaState extends State<_HojaFiltrosAuditoria> {
             const Text('Alcance', style: AppTexto.etiqueta),
             RadioGroup<FiltroAuditoria>(
               groupValue: _alcance,
-              onChanged: (v) =>
-                  setState(() => _alcance = v ?? _alcance),
+              // Yunque 3 (K3-3): la regla de F-8 también al
+              // revés — si con un actor ajeno elegido se toca
+              // el radio «Solo mías», el actor se limpia A LA
+              // VISTA (el chip «Todos» se marca en el acto);
+              // antes la contradicción quedaba visible y el
+              // padre la corregía en silencio al Aplicar.
+              onChanged: (v) => setState(() {
+                if (v == null) return;
+                final r = alcanceAlElegirAlcance(
+                    nuevoAlcance: v,
+                    actorElegido: _actor,
+                    miActor: widget.miActor);
+                _alcance = r.alcance;
+                _actor = r.actor;
+              }),
               child: Column(
                 children: [
                   if (widget.esDueno) ...[
@@ -1467,9 +1480,23 @@ String resumenFiltrosAuditoriaTxt({
   required bool soloHoy,
   required String? actor,
 }) {
-  final partes = <String>['Filtrar', alcance];
+  // Yunque 3 (K3-5): con actor en el resumen, «Otros y
+  // alertas» se acorta a «Otros» — con la categoría larga el
+  // actor caía a una 3ª línea y se elidía. Sin actor, la
+  // categoría va entera.
+  final alcanceTxt =
+      (actor != null && alcance == 'Otros y alertas') ? 'Otros' : alcance;
+  final partes = <String>['Filtrar', alcanceTxt];
   if (soloHoy) partes.add('Hoy');
-  if (actor != null) partes.add(primeraPalabraResumen(actor));
+  if (actor != null) {
+    // Yunque 3 (K3-6): los actores sintéticos de actorDeOp
+    // («Este dispositivo» / «Otro usuario») van ENTEROS —
+    // su primera palabra («Este» / «Otro») se lee como el
+    // nombre de una persona y no nombra el estado real.
+    partes.add(actor == 'Este dispositivo' || actor == 'Otro usuario'
+        ? actor
+        : primeraPalabraResumen(actor));
+  }
   return partes.join(' · ');
 }
 
@@ -1489,4 +1516,24 @@ FiltroAuditoria alcanceAlElegirActor({
     return FiltroAuditoria.todo;
   }
   return alcance;
+}
+
+/// Yunque 3 (K3-3): la dirección inversa de
+/// [alcanceAlElegirActor] — al elegir el ALCANCE por el
+/// radio, si el nuevo alcance es «Solo mías» y hay un actor
+/// AJENO elegido, el actor se limpia (null = chip «Todos»);
+/// con el actor propio o sin actor, la elección se respeta
+/// tal cual. PURO.
+({FiltroAuditoria alcance, String? actor}) alcanceAlElegirAlcance({
+  required FiltroAuditoria nuevoAlcance,
+  required String? actorElegido,
+  required String? miActor,
+}) {
+  if (nuevoAlcance == FiltroAuditoria.soloMias &&
+      actorElegido != null &&
+      actorElegido.isNotEmpty &&
+      actorElegido != miActor) {
+    return (alcance: nuevoAlcance, actor: null);
+  }
+  return (alcance: nuevoAlcance, actor: actorElegido);
 }

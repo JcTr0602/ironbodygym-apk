@@ -457,6 +457,15 @@ class PerfilService {
     return actual.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
+  /// Yunque 3 (K7-4): un PIN válido son EXACTAMENTE 4
+  /// dígitos. La validación anterior (`int.tryParse`)
+  /// aceptaba «+123», «-123» y «0x12» (= 18): se hasheaban
+  /// tal cual y quedaban indesbloqueables, porque el
+  /// teclado de la pantalla de bloqueo solo teclea dígitos.
+  /// PURO.
+  static bool esPinValido(String pin) =>
+      RegExp(r'^\d{4}$').hasMatch(pin);
+
   /// Genera el valor a guardar con `setPinHash` para un PIN nuevo
   /// (siempre esquema v2).
   Future<String> hashPinNuevo(String pin) async {
@@ -645,6 +654,16 @@ class PerfilService {
       'tema',
       'tamano_letra',
       'bloqueo_minutos',
+      // Yunque 3 (K7-3): la escritura del bloqueo vive en
+      // la clave POR USUARIO desde Argón Acceso #7; la
+      // lista de borrado se quedó con la global legada y el
+      // ajuste sobrevivía a «Restablecer ajustes».
+      _key('bloqueo_minutos'),
+      // Yunque 3 (K7-3): el Modo Sol (theme.dart) también
+      // se restablece; _restablecer lo apaga además por su
+      // vía propia (ThemeController.setModoSol) para que el
+      // notificador en memoria quede coherente.
+      'modo_sol_v1',
       _key('ultima_actividad'),
       'pref_recordatorio_sync',
       'metricas_home',
