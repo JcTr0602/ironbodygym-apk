@@ -17,6 +17,34 @@ import 'diseno.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 
+/// Yunque 4 (L5-3): agregación «cobrado del mes por
+/// entrenador» de esta pantalla, pura para poder fijarla
+/// con test. Aplica los dos saltos del detalle
+/// (detalle_entrenador): pago anulado (marca en el JSON u
+/// anulación viva en cola) y Cuenta a la Casa fuera — la
+/// lista y el detalle deben ser la misma cifra.
+({Map<String, double> cobrado, Map<String, int> numPagos})
+    agregarCobradoPorEntrenador(
+  List<Map<String, dynamic>> pagos,
+  Set<int> anuladosEnCola,
+  Set<int> cuentasCasa,
+) {
+  final cobrado = <String, double>{};
+  final numPagos = <String, int>{};
+  for (final p in pagos) {
+    if (esPagoAnulado(p, anuladosEnCola)) continue;
+    final cidCasa = (p['cliente_id'] as num?)?.toInt();
+    if (cidCasa != null && cuentasCasa.contains(cidCasa)) continue;
+    final nombre = ('${p['registrado_por_nombre'] ?? ''}'.trim().isEmpty)
+        ? '${p['registrado_por'] ?? 'Desconocido'}'
+        : '${p['registrado_por_nombre']}'.trim();
+    cobrado[nombre] = (cobrado[nombre] ?? 0) +
+        ((p['monto'] as num?)?.toDouble() ?? 0);
+    numPagos[nombre] = (numPagos[nombre] ?? 0) + 1;
+  }
+  return (cobrado: cobrado, numPagos: numPagos);
+}
+
 class HistorialEntrenadorScreen extends StatefulWidget {
   const HistorialEntrenadorScreen({super.key});
   @override
@@ -83,18 +111,16 @@ class _HistorialEntrenadorScreenState
   Future<void> _cargarDatos() async {
     final pref = _prefSel;
 
-    // Pagos del mes agrupados por entrenador (por nombre).
-    final cobrado = <String, double>{};
-    final numPagos = <String, int>{};
+    // Pagos del mes agrupados por entrenador (por nombre),
+    // con los saltos del detalle (L5-3, ver el helper).
+    final anuladosCola =
+        await LocalDb.instance.pagosAnuladosEnCola();
+    final casas = await LocalDb.instance.idsCuentasCasa();
     // v1.3.4 (ítem 2): columna `fecha` indexada en vez de allMirror.
-    for (final p in await LocalDb.instance.pagosDelMes(pref)) {
-      final nombre = ('${p['registrado_por_nombre'] ?? ''}'.trim().isEmpty)
-          ? '${p['registrado_por'] ?? 'Desconocido'}'
-          : '${p['registrado_por_nombre']}'.trim();
-      cobrado[nombre] = (cobrado[nombre] ?? 0) +
-          ((p['monto'] as num?)?.toDouble() ?? 0);
-      numPagos[nombre] = (numPagos[nombre] ?? 0) + 1;
-    }
+    final agg = agregarCobradoPorEntrenador(
+        await LocalDb.instance.pagosDelMes(pref), anuladosCola, casas);
+    final cobrado = agg.cobrado;
+    final numPagos = agg.numPagos;
 
     // Inscripciones del mes por entrenador.
     final insc = await inscripcionesPorEntrenador(prefMes: pref);

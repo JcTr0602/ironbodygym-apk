@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../negocio.dart';
+import 'exportar_excel.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../sync.dart';
@@ -35,10 +36,21 @@ import '../app_log.dart';
     List<Map<String, dynamic>> ventas,
     Map<int, Map<String, dynamic>> clientesPorId, {
     bool esDueno = false,
+    Set<int> anuladasPendientes = const {},
   }) {
   var cup = 0.0;
   var usd = 0.0;
   for (final v in ventas) {
+    // Yunque 4 (L5-4): lo anulado no suma — la fila con la
+    // marca en su JSON (esVentaAnulada, la regla del Excel)
+    // y la venta cuya anulación sigue viva en cola (la
+    // pantalla ya calcula el conjunto para el chip; el
+    // total decía lo contrario que la fila).
+    final idVenta = (v['id'] as num?)?.toInt();
+    if (idVenta != null && anuladasPendientes.contains(idVenta)) {
+      continue;
+    }
+    if (esVentaAnulada(v)) continue;
     final cidVenta = (v['cliente_id'] as num?)?.toInt() ??
         (v['fiado_cliente_id'] as num?)?.toInt();
     final clienteVenta =
@@ -457,9 +469,20 @@ class _HistorialVentasScreenState
     // Argón #9 (ALTO): los totales excluían nada y revelaban el
     // monto de ventas protegidas que la tarjeta oculta con candado.
     final t = totalesHistorialVentas(_ventasFiltradas, _clientes,
-        esDueno: AuthService().isOwner);
+        esDueno: AuthService().isOwner,
+        anuladasPendientes: _anuladasPendientes);
     final cup = t.cup;
     final usd = t.usd;
+    // L5-4: el conteo «Ventas» sigue la misma regla que los
+    // totales (lo anulado no cuenta; lo protegido sí cuenta:
+    // el número no revela montos).
+    final nVentas = _ventasFiltradas.where((v) {
+      final idV = (v['id'] as num?)?.toInt();
+      if (idV != null && _anuladasPendientes.contains(idV)) {
+        return false;
+      }
+      return !esVentaAnulada(v);
+    }).length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
@@ -472,7 +495,7 @@ class _HistorialVentasScreenState
             _totalCol('Total CUP', '${cup.toStringAsFixed(0)} CUP'),
             _totalCol('Total USD',
                 '${usd.toStringAsFixed(2)} USD'),
-            _totalCol('Ventas', '${_ventasFiltradas.length}'),
+            _totalCol('Ventas', '$nVentas'),
           ],
         ),
       ),
