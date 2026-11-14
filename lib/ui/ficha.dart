@@ -3101,7 +3101,10 @@ class _FichaScreenState extends State<FichaScreen> {
             VoidCallback alTocar) =>
         FilledButton.icon(
           icon: Icon(icono, size: 18),
-          label: Text(texto),
+          // 1.34 (DIS-06): la etiqueta puede recortarse
+          // cuando la barra la aprieta en Flexible.
+          label: Text(texto,
+              overflow: TextOverflow.ellipsis, softWrap: false),
           onPressed: alTocar,
           style: FilledButton.styleFrom(
             padding: const EdgeInsets.symmetric(
@@ -3203,14 +3206,26 @@ class _FichaScreenState extends State<FichaScreen> {
                       ],
                     ),
                   ),
+                  // 1.34 (DIS-06): los dos botones ceden
+                  // espacio (Flexible + etiqueta recortable)
+                  // en vez de desbordar la barra: con la
+                  // escala de fuente a 1.3 sus anchos
+                  // intrínsecos sumaban 17 px de más a
+                  // 420 dp y el RenderFlex reventaba. A
+                  // escala normal sobra sitio y nada cambia.
                   if (sinAcceso && accion != 'acceso')
-                    TextButton.icon(
-                      icon: const Icon(Icons.key_rounded,
-                          size: 18),
-                      label: const Text('Dar acceso'),
-                      onPressed: () => _irASeccionAcceso(),
+                    Flexible(
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.key_rounded,
+                            size: 18),
+                        label: const Text('Dar acceso',
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false),
+                        onPressed: () => _irASeccionAcceso(),
+                      ),
                     ),
-                  if (botonPrincipal != null) botonPrincipal,
+                  if (botonPrincipal != null)
+                    Flexible(child: botonPrincipal),
                 ],
         ),
       ),
