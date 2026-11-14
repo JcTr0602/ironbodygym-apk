@@ -413,9 +413,9 @@ void main() {
   });
 
   group('G-02 Historial de ventas', () {
-    testWidgets('el botón resume «Todos los productos»; la '
-        'hoja filtra por moneda y el resumen lo nombra',
-        (tester) async {
+    testWidgets('el botón resume «Todos» (Yunque 2.34, F-7: '
+        'gramática corta); la hoja filtra por moneda y el '
+        'resumen lo nombra', (tester) async {
       _telefono(tester);
       await sembrarBase(tester);
       await tester.runAsync(() async {
@@ -453,18 +453,17 @@ void main() {
         }, 1);
       });
       await montar(tester, const HistorialVentasScreen());
-      expect(find.text('Filtrar · Todos los productos'), findsOneWidget);
+      expect(find.text('Filtrar · Todos'), findsOneWidget);
       expect(find.text('Proteína Suero X'), findsWidgets);
       expect(find.text('Creatina Monohidrato'), findsWidgets);
-      await tester.tap(find.text('Filtrar · Todos los productos'));
+      await tester.tap(find.text('Filtrar · Todos'));
       await _drenar(tester, vueltas: 6);
       expect(find.text('Moneda'), findsOneWidget);
       await tester.tap(find.widgetWithText(ChoiceChip, 'USD'));
       await tester.pump(const Duration(milliseconds: 100));
       await tester.tap(find.text('Aplicar'));
       await _drenar(tester, vueltas: 6);
-      expect(find.text('Filtrar · Todos los productos · USD'),
-          findsOneWidget);
+      expect(find.text('Filtrar · Todos · USD'), findsOneWidget);
       expect(find.text('Creatina Monohidrato'), findsWidgets);
       expect(find.text('Proteína Suero X'), findsNothing,
           reason: 'con moneda USD la venta en CUP sale de la lista');
