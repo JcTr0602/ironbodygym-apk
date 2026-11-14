@@ -403,22 +403,14 @@ class _ListasScreenState extends State<ListasScreen>
   }
 
   Future<void> _quitarVista(VistaLista v) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Quitar vista'),
-        content: Text('¿Quitar la vista «${v.nombre}» (${v.alcance})?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Quitar')),
-        ],
-      ),
+    // 1.35 (UI-12, oleada 1): confirmación de la casa.
+    final ok = await DialogoApp.confirmar(
+      context,
+      titulo: 'Quitar vista',
+      mensaje: '¿Quitar la vista «${v.nombre}» (${v.alcance})?',
+      aceptar: 'Quitar',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     setState(() => _vistas = _vistas.where((x) => x != v).toList());
     await _persistirVistas();
   }
@@ -1003,12 +995,15 @@ class _ListasScreenState extends State<ListasScreen>
     if (!mounted) return false;
     final r = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('¿Se envió el aviso?'),
-        content: Text('WhatsApp se abrió con el mensaje listo '
+      // 1.35 (UI-12, oleada 1): con el diálogo de la casa;
+      // los botones conservan su peso (el «Sí, enviado»
+      // sigue siendo el principal).
+      builder: (ctx) => DialogoApp(
+        titulo: '¿Se envió el aviso?',
+        contenido: Text('WhatsApp se abrió con el mensaje listo '
             'para $nombre. Solo se marca «Avisado» si '
             'confirmas que lo enviaste.'),
-        actions: [
+        acciones: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('No lo envié')),
@@ -1617,9 +1612,10 @@ class _DialogoNombreVistaState extends State<_DialogoNombreVista> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Guardar vista'),
-      content: TextField(
+    // 1.35 (UI-12, oleada 1): con el diálogo de la casa.
+    return DialogoApp(
+      titulo: 'Guardar vista',
+      contenido: TextField(
         controller: _ctrl,
         autofocus: true,
         maxLength: 30,
@@ -1633,7 +1629,7 @@ class _DialogoNombreVistaState extends State<_DialogoNombreVista> {
         },
         onSubmitted: (_) => _guardar(),
       ),
-      actions: [
+      acciones: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),

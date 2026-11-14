@@ -357,16 +357,17 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _verificarCierresAutoReal() async {
     final ejecuto = await verificarCierresAutomaticos();
     if (ejecuto && mounted) {
-      // Mostrar diálogo informativo
+      // Mostrar diálogo informativo.
+      // 1.35 (UI-12, oleada 1): con el diálogo de la casa.
       showDialog(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Cierre automático'),
-          content: const Text(
+        builder: (ctx) => DialogoApp(
+          titulo: 'Cierre automático',
+          contenido: const Text(
             'El turno anterior había quedado abierto y se cerró '
             'automáticamente por horario.',
           ),
-          actions: [
+          acciones: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Todo en orden'),
@@ -407,18 +408,19 @@ class _HomeScreenState extends State<HomeScreen>
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: Text(suspendido
+      // 1.35 (UI-12, oleada 1): con el diálogo de la casa.
+      builder: (ctx) => DialogoApp(
+        titulo: suspendido
             ? 'Acceso suspendido'
-            : 'Cuenta no habilitada'),
-        content: Text((suspendido
+            : 'Cuenta no habilitada',
+        contenido: Text((suspendido
                 ? 'Tu acceso fue suspendido por el administrador. '
                     'Contacta a Julio Cesar.'
                 : 'Tu cuenta todavía no fue habilitada por el '
                     'administrador. Avisa a Julio César para que la '
                     'active.') +
             (aviso == null ? '' : '\n\n$aviso')),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
