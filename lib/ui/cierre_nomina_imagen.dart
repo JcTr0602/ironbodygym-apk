@@ -11,7 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../negocio.dart' show fmtMonto;
-import 'diseno.dart' show AppRadio;
+import 'diseno.dart' show AppColores, AppRadio;
 import 'tarjeta_imagen.dart';
 
 /// Una fila de la foto: el desglose de un entrenador.
@@ -58,7 +58,9 @@ class ImagenCierreNomina extends StatelessWidget {
   final String generadoEtiqueta;
 
   static const _fondo = Color(0xFF1C1C1F);
-  static const _naranja = Color(0xFFFF6B00);
+  // 1.35 (UI-18): el naranja de marca, desde el token
+  // (antes #FF6B00, un naranja viejo).
+  static const _naranja = AppColores.naranja;
   static const _textoSuave = Color(0xFFB9B9BE);
 
   @override
@@ -82,7 +84,9 @@ class ImagenCierreNomina extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFFFF6B00), Color(0xFF9A3E00)],
+                // 1.35 (UI-18): el gradiente de marca
+                // (naranja → naranja intenso de los tokens).
+                colors: [AppColores.naranja, AppColores.naranjaOscuro],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),

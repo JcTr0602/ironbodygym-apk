@@ -1,7 +1,9 @@
 /// Vista previa de la App de Clientes (v1.3.9, F6; rediseño por
 /// pestañas en v1.4.4). Solo dueño. Muestra lo mismo que ve el cliente
 /// en su app, vía el RPC `preview_datos_cliente` (cero efectos
-/// secundarios). Estética cliente: naranja #FF6B00 / grafito #121214.
+/// secundarios). Estética cliente: naranja de marca
+/// #E8821A / grafito #121214 (1.35, UI-18: antes un
+/// naranja viejo #FF6B00 que no era el de la marca).
 /// Solo lectura: las acciones (comprar por WhatsApp) se muestran
 /// deshabilitadas (condición 5 del veredicto de Argón, 2026-10-21).
 library;
@@ -188,7 +190,8 @@ class _VistaPreviaClienteScreenState
   late final TabController _tabs;
 
   // Colores de la app de clientes.
-  static const _naranja = Color(0xFFFF6B00);
+  // 1.35 (UI-18): el naranja de marca, desde el token.
+  static const _naranja = AppColores.naranja;
   static const _grafito = Color(0xFF121214);
   static const _colorTarjeta = Color(0xFF1E1E20);
 
@@ -1257,7 +1260,7 @@ class _SparkPainter extends CustomPainter {
               (serie[i] - min) / rango * (size.height - 8),
         );
     final trazo = Paint()
-      ..color = const Color(0xFFFF7A1A)
+      ..color = AppColores.naranja
       ..strokeWidth = 1.6
       ..style = PaintingStyle.stroke;
     final camino = Path()..moveTo(punto(0).dx, punto(0).dy);
@@ -1269,7 +1272,7 @@ class _SparkPainter extends CustomPainter {
     for (var i = 0; i < serie.length; i++) {
       canvas.drawCircle(punto(i), i == serie.length - 1 ? 3 : 1.8,
           i == serie.length - 1
-              ? (Paint()..color = const Color(0xFFFF7A1A))
+              ? (Paint()..color = AppColores.naranja)
               : puntoPint);
     }
   }
