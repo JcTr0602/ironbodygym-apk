@@ -155,7 +155,19 @@ void main() {
     expect(mensaje, contains('Te hemos regalado 1 mensualidad'));
     expect(mensaje, contains('Vencía el:'));
     expect(mensaje, contains('Nuevo vencimiento:'));
-    expect(mensaje.endsWith(_cierre), isTrue);
+    // Yunque 1.34 (C6-3): el REGALO no cierra con la línea
+    // común 🤖 — usa el formato de excepción de Jc
+    // (2026-11-01): abre con 📩 y cierra con 📲, como el
+    // mensaje de regalo de la ficha. Este test fijaba el
+    // cierre común para la bandeja: era la mitad equivocada
+    // de la contradicción que C6-3 resolvió.
+    expect(
+        mensaje,
+        startsWith(
+            '📩 Mensaje enviado por el sistema de gestión de Iron Body Gym:'));
+    expect(mensaje.endsWith('📲 _Si vas a responder, escríbenos al 58191577._'),
+        isTrue);
+    expect(mensaje, isNot(contains('🤖')));
     expect('${cumple['detalle']}', contains('Mes regalado'));
     // Y el lector compartido devuelve el regalo guardado.
     final regalo = await regaloCumpleDelAnio(31);
