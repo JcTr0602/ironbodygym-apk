@@ -501,15 +501,16 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
           body: DialogoNovedades(
-              lista: novedadesDeMiVersion('1.32.0')),
+              lista: novedadesDeMiVersion('1.34.0')),
         ),
       ));
-      expect(find.text('Versión 1.32.0'), findsOneWidget);
-      expect(find.text('Versión 1.31.0'), findsOneWidget);
-      // La instalada (1.32.0+93 en AppConfig) lleva «Nuevo».
+      expect(find.text('Versión 1.34.0'), findsOneWidget);
+      expect(find.text('Versión 1.33.0'), findsOneWidget);
+      // La instalada (1.34.0+95 en AppConfig) lleva «Nuevo».
       // (1.32 E5: el bump de la Pieza 3 movió la instalada
-      // de la 1.30.0 a la 1.32.0; la vitrina enseña la
-      // instalada y su anterior inmediata, como siempre.)
+      // de la 1.30.0 a la 1.32.0; la 1.34 la movió a la
+      // 1.34.0. La vitrina enseña la instalada y su
+      // anterior inmediata, como siempre.)
       expect(find.text('Nuevo'), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_rounded),
           findsWidgets);
