@@ -627,7 +627,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (res.accion != 'guardar') return;
     final p1 = res.pin1.trim();
     final p2 = res.pin2.trim();
-    if (p1.length != 4 || int.tryParse(p1) == null) {
+    // Yunque 3 (K7-4): exactamente 4 dígitos (esPinValido);
+    // int.tryParse dejaba pasar «+123»/«0x12», intecleables
+    // en la pantalla de bloqueo.
+    if (!PerfilService.esPinValido(p1)) {
       _msg('El PIN debe tener 4 dígitos');
       return;
     }
@@ -2473,6 +2476,12 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
               controller: _c0,
               keyboardType: TextInputType.number,
               maxLength: 4,
+              // Yunque 3 (K7-4): ni pegando entran signos —
+              // el PIN son solo dígitos, como el teclado de
+              // desbloqueo.
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly
+              ],
               obscureText: true,
               decoration: const InputDecoration(
                 labelText: 'PIN actual',
@@ -2484,6 +2493,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
             controller: _c1,
             keyboardType: TextInputType.number,
             maxLength: 4,
+            // Yunque 3 (K7-4): solo dígitos, como _c0.
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly
+            ],
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'PIN (4 dígitos)',
@@ -2495,6 +2508,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
             controller: _c2,
             keyboardType: TextInputType.number,
             maxLength: 4,
+            // Yunque 3 (K7-4): solo dígitos, como _c0.
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly
+            ],
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'Repite el PIN',

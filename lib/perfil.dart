@@ -457,6 +457,15 @@ class PerfilService {
     return actual.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
+  /// Yunque 3 (K7-4): un PIN válido son EXACTAMENTE 4
+  /// dígitos. La validación anterior (`int.tryParse`)
+  /// aceptaba «+123», «-123» y «0x12» (= 18): se hasheaban
+  /// tal cual y quedaban indesbloqueables, porque el
+  /// teclado de la pantalla de bloqueo solo teclea dígitos.
+  /// PURO.
+  static bool esPinValido(String pin) =>
+      RegExp(r'^\d{4}$').hasMatch(pin);
+
   /// Genera el valor a guardar con `setPinHash` para un PIN nuevo
   /// (siempre esquema v2).
   Future<String> hashPinNuevo(String pin) async {

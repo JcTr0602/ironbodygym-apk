@@ -57,6 +57,22 @@ void main() {
     });
   });
 
+  group('K7-4 · esPinValido', () {
+    test('solo acepta exactamente 4 dígitos', () {
+      expect(PerfilService.esPinValido('1234'), isTrue);
+      expect(PerfilService.esPinValido('0000'), isTrue);
+      // Los que int.tryParse dejaba pasar y el teclado de
+      // desbloqueo no puede teclear:
+      expect(PerfilService.esPinValido('+123'), isFalse);
+      expect(PerfilService.esPinValido('-123'), isFalse);
+      expect(PerfilService.esPinValido('0x12'), isFalse);
+      expect(PerfilService.esPinValido('123'), isFalse);
+      expect(PerfilService.esPinValido('12345'), isFalse);
+      expect(PerfilService.esPinValido('12 4'), isFalse);
+      expect(PerfilService.esPinValido(''), isFalse);
+    });
+  });
+
   group('getDeviceId', () {
     test('sin id guardado genera UUID v4 y lo conserva', () async {
       final p = await SharedPreferences.getInstance();
