@@ -294,6 +294,21 @@ void main() {
     });
 
     test(
+        'Yunque 1.34 (C5-1): el pausado en curso tampoco cuenta '
+        'como POR VENCER (M1 solo había cerrado vencidos)', () async {
+      await _fijarSesion('duany@ironbody.local', 969869611);
+      final base = <Map<String, dynamic>>[
+        {'id': 8, 'nombre': 'Pausado Por Vencer', 'pagado_hasta': isoEn(3)},
+        {'id': 9, 'nombre': 'Por Vencer Real', 'pagado_hasta': isoEn(5)},
+      ];
+      final conPausa = conteosDeBuscar(base, congelados: {8});
+      expect(conPausa['porvencer'], 1,
+          reason: 'solo el por vencer real; la pausa en curso fuera');
+      final sinPausa = conteosDeBuscar(base);
+      expect(sinPausa['porvencer'], 2);
+    });
+
+    test(
         'Yunque de cambios 1.31 (M1): chipEstadoFila en pausa '
         'dice EN PAUSA y no vencido', () {
       final chip = chipEstadoFila(

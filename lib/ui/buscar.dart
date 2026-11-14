@@ -260,7 +260,14 @@ class _BuscarScreenState extends State<BuscarScreen> {
             return (dias == null || dias < 0) &&
                 !pausados.contains((c['id'] as num?)?.toInt());
           case 'porvencer':
-            return dias != null && dias >= 0 && dias <= 7;
+            // Yunque 1.34 (C5-1): la pausa en curso TAMBIÉN
+            // sale de «por vencer» (la rama de vencidos ya la
+            // excluía desde M1; esta quedó atrás y la pantalla
+            // se contradecía con la ficha y con Listas).
+            return dias != null &&
+                dias >= 0 &&
+                dias <= 7 &&
+                !pausados.contains((c['id'] as num?)?.toInt());
           default:
             return true;
         }
@@ -1006,6 +1013,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
         accionWhatsapp: (!_modoSeleccion &&
                 !protegidoFila &&
                 !esCuentaCasa(c) &&
+                // Yunque 1.34 (C5-1): sin aviso de vencimiento
+                // a quien está en pausa aprobada en curso.
+                !_pausados.contains(cidFila) &&
                 telWaFila &&
                 (diasFila == null ||
                     diasFila <= 7))
@@ -2341,7 +2351,12 @@ Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base,
             congelados.contains((c['id'] as num?)?.toInt());
         if (dias != null && dias > 7) {
           conteos['aldia'] = conteos['aldia']! + 1;
-        } else if (dias != null && dias >= 0 && dias <= 7) {
+        } else if (dias != null &&
+            dias >= 0 &&
+            dias <= 7 &&
+            !enPausa) {
+          // Yunque 1.34 (C5-1): el contador de «por vencer»
+          // tampoco suma pausas en curso (como el de vencidos).
           conteos['porvencer'] = conteos['porvencer']! + 1;
         } else if ((dias == null || dias < 0) && !enPausa) {
           conteos['vencidos'] = conteos['vencidos']! + 1;
