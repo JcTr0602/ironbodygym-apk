@@ -74,7 +74,10 @@ void main() {
       'titular_telegram_id': 111,
       'es_principal': 0,
       'activo': 1,
-      'saldo_cache': 12,
+      // Yunque 3.34 (K4-6): fuera 'saldo_cache': 12 — el
+      // saldo del pomo se DERIVA (asignadas − repartidas −
+      // ventas − salidas, lib/servicios.dart:484-564) y
+      // esa clave no la lee nadie.
     }, 1);
     // Dos ventas del mismo día pasado: 900 + 600 = 1500.
     await _venta(21, '2026-11-08 10:30:00', 'dosis_con_agua', 900,

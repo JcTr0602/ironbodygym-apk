@@ -754,7 +754,14 @@ void main() {
       });
       await d.insert('servicio_lotes', {
         'id': 7,
-        'data': '{"dosis":30}',
+        // Yunque 3.34 (K4-6): forma REAL del lote
+        // (bote_id/dosis_iniciales/dosis_repuestas,
+        // lib/servicios.dart:427-434); '{"dosis":30}' era
+        // clave de servicio_salidas. La purga bajo test
+        // decide por sync_seq, no por el JSON: la
+        // aserción no cambia.
+        'data': '{"bote_id":61,"dosis_iniciales":30,'
+            '"dosis_repuestas":0}',
         'sync_seq': 9,
       });
       await db.setMeta('wm_cliente_congelaciones', '42');

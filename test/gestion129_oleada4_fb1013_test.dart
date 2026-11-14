@@ -252,7 +252,11 @@ void main() {
             'nombre': 'Luis Díaz',
             'telefono': '52001122',
             'carnet': '90$mm$dd',
-            'nacimiento': '1990-$mm-$dd',
+            // Yunque 3.34 (K4-6): fuera 'nacimiento' — el
+            // cumpleaños se deriva del carnet (AAMMDD,
+            // lib/negocio.dart:4058), que es la clave que
+            // manda en esta semilla; 'nacimiento' no la
+            // lee nadie.
             'pagado_hasta': '2027-06-01',
             'estado': 'activo',
           }),

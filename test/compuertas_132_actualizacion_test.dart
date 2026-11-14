@@ -121,8 +121,12 @@ void main() {
       'telefono': '58112233',
       'estado': 'activo',
       'pagado_hasta': '2026-12-01',
-      'foto': 'cliente_501.jpg',
-      'foto_url': 'https://example.invalid/cliente_501.jpg',
+      // Yunque 3.34 (K4-5): la referencia de foto REAL del
+      // cliente es foto_storage (lib/negocio.dart:3162;
+      // misma forma que g1_foto_dialogo_test.dart:105).
+      // foto/foto_url no las lee ningún lector de la fila:
+      // el escenario «con foto» no tenía foto visible.
+      'foto_storage': 'clientes/501/cliente_501.jpg',
     }, 900);
     await LocalDb.instance.upsertMirror('clientes', 502, {
       'id': 502,

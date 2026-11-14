@@ -267,17 +267,28 @@ void main() {
               'rol': 'entrenador'
             },
           ]));
+      // Yunque 3.34 (K4-4): el cliente se juzga por
+      // estado == 'activo' y su pagado_hasta
+      // (lib/negocio.dart:238, 252, 272, 287); 'activo': 1
+      // es clave de otra fila (acceso-app) y ningún
+      // consumidor de clientes la lee. Cobertura vigente
+      // (+30 días) coherente con clientes al día.
+      final pagadoHastaPlegados =
+          isoHabana(sumarDiasCalendario(ahoraHabana(), 30))
+              .substring(0, 10);
       await LocalDb.instance.upsertMirror('clientes', 5, {
         'id': 5,
         'nombre': 'Ana Prueba',
         'telefono': '53000005',
-        'activo': 1,
+        'estado': 'activo',
+        'pagado_hasta': pagadoHastaPlegados,
       }, 1);
       await LocalDb.instance.upsertMirror('clientes', 7, {
         'id': 7,
         'nombre': 'Beto Ejemplo',
         'telefono': '53000007',
-        'activo': 1,
+        'estado': 'activo',
+        'pagado_hasta': pagadoHastaPlegados,
       }, 1);
     });
   }
@@ -422,13 +433,19 @@ void main() {
         await LocalDb.instance.upsertMirror('suplementos', 1, {
           'id': 1,
           'nombre': 'Proteína Suero X',
-          'precio_cup': 4500,
+          // Yunque 3.34 (K4-3): forma REAL — precio de
+          // precio_oficial y stock de stock
+          // (lib/ui/suplementos.dart:368, 213); precio_cup
+          // no lo lee la fila de suplemento.
+          'precio_oficial': 4500,
+          'stock': 40,
           'activo': 1,
         }, 1);
         await LocalDb.instance.upsertMirror('suplementos', 2, {
           'id': 2,
           'nombre': 'Creatina Monohidrato',
-          'precio_cup': 3200,
+          'precio_oficial': 3200,
+          'stock': 3,
           'activo': 1,
         }, 1);
         await LocalDb.instance.upsertMirror('ventas_suplementos', 1, {
@@ -436,7 +453,12 @@ void main() {
           'suplemento_id': 1,
           'cliente_id': 5,
           'cantidad': 1,
-          'precio_total': 4500,
+          // Yunque 3.34 (K4-2): forma REAL del importe —
+          // total ?? precio × cantidad (lib/negocio.dart:
+          // 997-1002). precio_total no lo lee nadie: la
+          // venta valía 0 en la pantalla montada.
+          'precio': 4500,
+          'total': 4500,
           'moneda': 'CUP',
           'fecha': hoyHabanaIso(),
           'vendedor_id': 735772141,
@@ -446,7 +468,8 @@ void main() {
           'suplemento_id': 2,
           'cliente_id': 7,
           'cantidad': 2,
-          'precio_total': 6400,
+          'precio': 3200,
+          'total': 6400,
           'moneda': 'USD',
           'fecha': hoyHabanaIso(),
           'vendedor_id': 969869611,
@@ -456,6 +479,19 @@ void main() {
       expect(find.text('Filtrar · Todos'), findsOneWidget);
       expect(find.text('Proteína Suero X'), findsWidgets);
       expect(find.text('Creatina Monohidrato'), findsWidgets);
+      // Yunque 3.34 (K4-2, refuerzo): el historial muestra
+      // importes REALES ≠ 0 — el encabezado de totales pinta
+      // «4500 CUP» y «6400.00 USD» (lib/ui/historial_ventas
+      // .dart:472-475 sobre total ?? precio × cantidad).
+      // Con precio_total ambas ventas valían 0 y este test,
+      // titulado «Historial de ventas», jamás veía un
+      // importe: un defecto de valoración pasaba verde.
+      expect(find.text('4500 CUP'), findsWidgets,
+          reason: 'el total CUP del día es el importe real '
+              'de la venta sembrada, no 0');
+      expect(find.text('6400.00 USD'), findsWidgets,
+          reason: 'el total USD del día es el importe real '
+              'de la venta sembrada, no 0');
       await tester.tap(find.text('Filtrar · Todos'));
       await _drenar(tester, vueltas: 6);
       expect(find.text('Moneda'), findsOneWidget);
@@ -467,6 +503,11 @@ void main() {
       expect(find.text('Creatina Monohidrato'), findsWidgets);
       expect(find.text('Proteína Suero X'), findsNothing,
           reason: 'con moneda USD la venta en CUP sale de la lista');
+      // K4-2 (refuerzo): filtrada por USD, el total CUP de
+      // la venta que salió ya no se pinta y el USD queda.
+      expect(find.text('4500 CUP'), findsNothing,
+          reason: 'el total CUP era de la venta filtrada');
+      expect(find.text('6400.00 USD'), findsWidgets);
       await _descartarDialogos(tester);
       await _cerrarCascara(tester);
     });
@@ -485,8 +526,15 @@ void main() {
         }, 1);
         await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
           'id': 10,
-          'producto_id': 1,
-          'responsable_id': null,
+          // Yunque 3.34 (K4-1): forma REAL del espejo
+          // servicio_pomos (corrección E-2 de Y2): el nombre
+          // del pomo sale de suplemento_id y el responsable
+          // de es_principal/titular_telegram_id
+          // (lib/servicios.dart:243-250). producto_id /
+          // responsable_id no los trae la fila: sin
+          // suplemento_id el pomo se resolvía como
+          // «Suplemento» genérico.
+          'suplemento_id': 1,
           'titular_telegram_id': 735772141,
           'es_principal': 1,
           'dosis_asignadas': 60,
@@ -542,6 +590,19 @@ void main() {
       expect(find.textContaining('Beto Ejemplo'), findsWidgets);
       expect(find.textContaining('Ana Prueba'), findsNothing,
           reason: 'con tipo Agua la dosis con agua sale de la lista');
+      // Yunque 3.34 (K4-1): el detalle de la venta nombra el
+      // pomo por su producto REAL: la fila «Pomo» sale de
+      // nombrePomoVenta → producto_nombre, resuelto por
+      // suplemento_id (lib/servicios.dart:243-250, 382-391).
+      // Con la forma falsa de E-2 (producto_id) el pomo se
+      // resolvía como «Suplemento» genérico y esta aserción
+      // habría nacido muerta.
+      await tester.tap(find.text('Beto Ejemplo'));
+      await _drenar(tester, vueltas: 6);
+      expect(find.text('Pomo'), findsOneWidget);
+      expect(find.text('Proteína Suero X'), findsOneWidget,
+          reason: 'el pomo del detalle se resuelve por '
+              'suplemento_id al suplemento sembrado');
       await _descartarDialogos(tester);
       await _cerrarCascara(tester);
     });
@@ -671,24 +732,31 @@ void main() {
         await LocalDb.instance.upsertMirror('suplementos', 1, {
           'id': 1,
           'nombre': 'Proteína Suero X',
-          'precio_cup': 4500,
+          // Yunque 3.34 (K4-3): precio_oficial real; el
+          // stock ya venía en su clave real (stock) y se
+          // queda; fuera stock_dosis, que nadie lee.
+          'precio_oficial': 4500,
           'stock': 40,
-          'stock_dosis': 40,
           'categoria_id': 1,
           'activo': 1,
         }, 1);
         await LocalDb.instance.upsertMirror('suplementos', 3, {
           'id': 3,
           'nombre': 'Omega Agotado',
-          'precio_cup': 2000,
+          'precio_oficial': 2000,
           'stock': 0,
-          'stock_dosis': 0,
           'categoria_id': 1,
           'activo': 1,
         }, 1);
       });
       await montar(tester, const SuplementosScreen());
       expect(find.text('Stock · Todos'), findsOneWidget);
+      // Yunque 3.34 (K4-3, refuerzo): la tarjeta pinta el
+      // precio REAL del suplemento (4500.00 desde
+      // precio_oficial, lib/ui/suplementos.dart:1175);
+      // con precio_cup pintaba 0.00.
+      expect(find.textContaining('4500.00'), findsWidgets,
+          reason: 'el precio visible sale de precio_oficial');
       // La categoría SIGUE en su fila (plegado parcial).
       expect(find.widgetWithText(ChoiceChip, 'Todas'), findsOneWidget);
       expect(find.widgetWithText(ChoiceChip, 'Agotados'), findsNothing);
@@ -721,8 +789,11 @@ void main() {
         await LocalDb.instance.upsertMirror('suplementos', 1, {
           'id': 1,
           'nombre': 'Proteína Suero X',
-          'precio_cup': 4500,
-          'dosis_precio': 600,
+          // Yunque 3.34 (K4-3): precio_oficial real.
+          // (K4-6: fuera 'dosis_precio' — el precio de la
+          // dosis sale de los ajustes servicio_precio_*,
+          // lib/servicios.dart:134-135; nadie lo leía aquí.)
+          'precio_oficial': 4500,
         }, 1);
         await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
           'id': 10,

@@ -295,30 +295,46 @@ void main() {
               'rol': 'entrenador'
             },
           ]));
+      // Yunque 3.34 (K4-4): el cliente se juzga por
+      // estado == 'activo' y su pagado_hasta
+      // (lib/negocio.dart:238, 252, 272, 287); 'activo': 1
+      // es clave de otra fila (acceso-app) y ningún
+      // consumidor de clientes la lee. Cobertura vigente
+      // (+30 días) coherente con clientes al día.
+      final pagadoHastaCapturas =
+          isoHabana(sumarDiasCalendario(ahoraHabana(), 30))
+              .substring(0, 10);
       await LocalDb.instance.upsertMirror('clientes', 5, {
         'id': 5,
         'nombre': 'Ana Prueba',
         'telefono': '53000005',
-        'activo': 1,
+        'estado': 'activo',
+        'pagado_hasta': pagadoHastaCapturas,
       }, 1);
       await LocalDb.instance.upsertMirror('clientes', 7, {
         'id': 7,
         'nombre': 'Beto Ejemplo',
         'telefono': '53000007',
-        'activo': 1,
+        'estado': 'activo',
+        'pagado_hasta': pagadoHastaCapturas,
       }, 1);
       await LocalDb.instance.upsertMirror('suplementos', 1, {
         'id': 1,
         'nombre': 'Proteína Suero X',
-        'precio_cup': 4500,
-        'stock_dosis': 40,
+        // Yunque 3.34 (K4-3): forma REAL del suplemento —
+        // precio de precio_oficial y stock de stock
+        // (lib/ui/suplementos.dart:368, 213). precio_cup /
+        // stock_dosis no los lee la pantalla: la captura
+        // pintaba precio 0 y todo agotado.
+        'precio_oficial': 4500,
+        'stock': 40,
         'activo': 1,
       }, 1);
       await LocalDb.instance.upsertMirror('suplementos', 2, {
         'id': 2,
         'nombre': 'Creatina Monohidrato',
-        'precio_cup': 3200,
-        'stock_dosis': 3,
+        'precio_oficial': 3200,
+        'stock': 3,
         'activo': 1,
       }, 1);
       final filasAcceso = <Map<String, dynamic>>[
@@ -410,7 +426,12 @@ void main() {
         'suplemento_id': 1,
         'cliente_id': 5,
         'cantidad': 1,
-        'precio_total': 4500,
+        // Yunque 3.34 (K4-2): forma REAL del importe —
+        // total ?? precio × cantidad (lib/negocio.dart:
+        // 997-1002). precio_total no lo lee nadie: la
+        // venta valía 0 en la captura.
+        'precio': 4500,
+        'total': 4500,
         'moneda': 'CUP',
         'fecha': hoyHabanaIso(),
         'vendedor_id': 735772141,
@@ -420,7 +441,8 @@ void main() {
         'suplemento_id': 2,
         'cliente_id': 7,
         'cantidad': 2,
-        'precio_total': 6400,
+        'precio': 3200,
+        'total': 6400,
         'moneda': 'USD',
         'fecha': hoyHabanaIso(),
         'vendedor_id': 969869611,
@@ -436,8 +458,15 @@ void main() {
     await tester.runAsync(() async {
       await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
         'id': 10,
-        'producto_id': 1,
-        'responsable_id': null,
+        // Yunque 3.34 (K4-1): forma REAL del espejo
+        // servicio_pomos (corrección E-2 de Y2): el nombre
+        // del pomo sale de suplemento_id y el responsable de
+        // es_principal/titular_telegram_id
+        // (lib/servicios.dart:243-250). producto_id /
+        // responsable_id no los trae la fila: sin
+        // suplemento_id el pomo se resolvía como
+        // «Suplemento» genérico en la captura.
+        'suplemento_id': 1,
         'titular_telegram_id': 735772141,
         'es_principal': 1,
         'dosis_asignadas': 60,
@@ -553,16 +582,18 @@ void main() {
       await LocalDb.instance.upsertMirror('suplementos', 1, {
         'id': 1,
         'nombre': 'Proteína Suero X',
-        'precio_cup': 4500,
-        'stock_dosis': 40,
+        // Yunque 3.34 (K4-3): precio_oficial + stock reales
+        // (ver la semilla base).
+        'precio_oficial': 4500,
+        'stock': 40,
         'categoria_id': 1,
         'activo': 1,
       }, 1);
       await LocalDb.instance.upsertMirror('suplementos', 2, {
         'id': 2,
         'nombre': 'Creatina Monohidrato',
-        'precio_cup': 3200,
-        'stock_dosis': 3,
+        'precio_oficial': 3200,
+        'stock': 3,
         'categoria_id': 2,
         'activo': 1,
       }, 1);
@@ -577,8 +608,11 @@ void main() {
       await LocalDb.instance.upsertMirror('suplementos', 1, {
         'id': 1,
         'nombre': 'Proteína Suero X',
-        'precio_cup': 4500,
-        'dosis_precio': 600,
+        // Yunque 3.34 (K4-3): precio_oficial real.
+        // (K4-6: fuera 'dosis_precio' — el precio de la
+        // dosis sale de los ajustes servicio_precio_*,
+        // lib/servicios.dart:134-135; nadie lo leía aquí.)
+        'precio_oficial': 4500,
       }, 1);
       await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
         'id': 10,
