@@ -208,6 +208,8 @@ class BadgeModuloPanel extends StatelessWidget {
     }
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
+      // 1.35 (UI-13): período del pulso de énfasis, no una
+      // transición: fuera de los tokens a propósito.
       duration: const Duration(milliseconds: 1350),
       builder: (context, t, child) {
         final escala = 1 + 0.18 * math.sin(t * math.pi * 3).abs();

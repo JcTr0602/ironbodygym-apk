@@ -412,7 +412,8 @@ class _HistorialVentasScreenState
     }
     setState(() => _resaltado = id);
     Scrollable.ensureVisible(ctx,
-        duration: const Duration(milliseconds: 400), alignment: 0.5);
+        // 1.35 (UI-13): duración por el token.
+        duration: AppMovimiento.larga, alignment: 0.5);
   }
 
   Future<void> _anular(Map<String, dynamic> v) async {

@@ -484,7 +484,8 @@ class _FichaScreenState extends State<FichaScreen> {
     if (ctxSeccion != null) {
       await Scrollable.ensureVisible(
         ctxSeccion,
-        duration: const Duration(milliseconds: 350),
+        // 1.35 (UI-13): duración por el token.
+        duration: AppMovimiento.larga,
         curve: Curves.easeOut,
         alignment: 0.05,
       );
@@ -493,7 +494,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!_scrollActivo.hasClients) return;
     await _scrollActivo.animateTo(
       _scrollActivo.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 400),
+      duration: AppMovimiento.larga,
       curve: Curves.easeOut,
     );
     if (!mounted) return;
@@ -501,7 +502,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (ctx2 != null) {
       await Scrollable.ensureVisible(
         ctx2,
-        duration: const Duration(milliseconds: 250),
+        duration: AppMovimiento.media,
         curve: Curves.easeOut,
         alignment: 0.05,
       );

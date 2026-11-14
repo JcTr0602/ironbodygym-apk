@@ -189,6 +189,8 @@ class _SyncBannerState extends State<SyncBanner>
   void initState() {
     super.initState();
     _giro = AnimationController(
+        // 1.35 (UI-13): período del giro en bucle, no una
+        // transición: fuera de los tokens a propósito.
         vsync: this, duration: const Duration(seconds: 2));
   }
 

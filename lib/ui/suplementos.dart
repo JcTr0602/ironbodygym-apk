@@ -1832,6 +1832,8 @@ class _ShimmerFotoState extends State<_ShimmerFoto>
     super.initState();
     _c = AnimationController(
       vsync: this,
+      // 1.35 (UI-13): período del pulso en bucle, no una
+      // transición: fuera de los tokens a propósito.
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
   }

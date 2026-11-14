@@ -62,10 +62,12 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _error = widget.aviso;
-    // Animación de entrada: fade + deslizamiento suave
+    // Animación de entrada: fade + deslizamiento suave.
+    // 1.35 (UI-13): la duración pasa al token largo
+    // (antes 600 ms escritos a mano).
     _anim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: AppMovimiento.larga,
     );
     _fade = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
     _slide = Tween<Offset>(

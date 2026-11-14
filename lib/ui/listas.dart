@@ -1509,7 +1509,8 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 380));
+        // 1.35 (UI-13): duración por el token.
+        vsync: this, duration: AppMovimiento.larga);
     _tamano = Tween<double>(begin: 1, end: 0).animate(
         CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
     WidgetsBinding.instance.addPostFrameCallback((_) {

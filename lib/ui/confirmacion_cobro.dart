@@ -479,6 +479,9 @@ class _ConfirmacionOperacionScreenState
                       child: TweenAnimationBuilder<double>(
                         tween: Tween<double>(
                             end: (_segundos / 15).clamp(0.0, 1.0)),
+                        // 1.35 (UI-13): NO es un token a
+                        // propósito: la barra sigue a la
+                        // cuenta atrás real de 15 s.
                         duration: const Duration(milliseconds: 950),
                         builder: (_, v, __) =>
                             LinearProgressIndicator(

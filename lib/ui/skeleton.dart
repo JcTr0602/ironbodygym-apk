@@ -296,6 +296,8 @@ class _PulsoState extends State<_Pulso>
   void initState() {
     super.initState();
     _c = AnimationController(
+        // 1.35 (UI-13): período del pulso del esqueleto,
+        // no una transición: fuera de los tokens.
         vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
   }

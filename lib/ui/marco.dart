@@ -117,7 +117,8 @@ class _PildoraSyncPulsoState extends State<PildoraSyncPulso>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulso = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 450),
+    // 1.35 (UI-13): duración por el token.
+    duration: AppMovimiento.larga,
   );
   late final Animation<double> _escala = TweenSequence<double>([
     TweenSequenceItem(

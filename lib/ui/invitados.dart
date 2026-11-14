@@ -1264,7 +1264,8 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     final max = _scroll.position.maxScrollExtent;
     _scroll.animateTo(
       (idx * _altoTarjeta).clamp(0.0, max),
-      duration: const Duration(milliseconds: 250),
+      // 1.35 (UI-13): duración por el token.
+      duration: AppMovimiento.media,
       curve: Curves.easeOut,
     );
   }
