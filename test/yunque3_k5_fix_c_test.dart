@@ -23,8 +23,11 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/ui/listas.dart';
 import 'package:ironbody_gym/mediciones_cliente.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
@@ -433,6 +436,120 @@ void main() {
       expect(ids.every((i) => i < 0), isTrue,
           reason: 'el provisional es negativo: no colisiona con '
               'ningún id real del servidor');
+    });
+  });
+
+  group('K5-4 · Listas solo marca «avisado» tras confirmar el '
+      'envío por WhatsApp', () {
+    Future<bool> esperar(WidgetTester tester, bool Function() ok,
+        {int vueltas = 60}) async {
+      for (var i = 0; i < vueltas; i++) {
+        if (ok()) return true;
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 100)));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      return ok();
+    }
+
+    testWidgets('abrir WhatsApp y responder «No lo envié» NO '
+        'marca; responder «Sí, enviado» sí', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final lanzadas = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('plugins.flutter.io/url_launcher'),
+        (call) async {
+          if (call.method == 'launch') {
+            lanzadas.add('${call.arguments['url']}');
+            return true;
+          }
+          return null;
+        },
+      );
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+              const MethodChannel('plugins.flutter.io/url_launcher'),
+              null));
+
+      await tester.runAsync(() async {
+        await _abrirDbVacia();
+        final hace5 = sumarDiasIso(hoyHabanaIso(), -5);
+        await LocalDb.instance.upsertMirror('clientes', 41, {
+          'nombre': 'Atrasado Aviso',
+          'telefono': '58112233',
+          'estado': 'activo',
+          'pagado_hasta': hace5,
+        }, 1);
+      });
+      await tester.pumpWidget(
+          const MaterialApp(home: ListasScreen(inicial: 2)));
+      expect(
+          await esperar(
+              tester, () => find.text('Atrasado Aviso').evaluate().isNotEmpty),
+          isTrue,
+          reason: 'la fila del atrasado no se pintó');
+
+      Future<void> avisarPorWhatsApp() async {
+        await tester.tap(find.byTooltip('Marcar como avisado').first);
+        expect(
+            await esperar(tester,
+                () => find.text('Avisar por WhatsApp').evaluate().isNotEmpty),
+            isTrue,
+            reason: 'la hoja de vías de aviso no se abrió');
+        // La hoja entra animada y el tap sintético cae fuera
+        // (patrón de la oleada 7: se dispara el callback).
+        tester
+            .widget<ListTile>(
+                find.widgetWithText(ListTile, 'Avisar por WhatsApp'))
+            .onTap!();
+        expect(
+            await esperar(tester,
+                () => find.text('¿Se envió el aviso?').evaluate().isNotEmpty),
+            isTrue,
+            reason: 'tras abrir WhatsApp debe preguntarse si el '
+                'mensaje se envió (patrón Cumpleaños/Bandeja); '
+                'sin pregunta, la marca se ponía al abrir');
+      }
+
+      // Vía WhatsApp con confirmación NEGATIVA: sin marca.
+      await avisarPorWhatsApp();
+      expect(lanzadas, isNotEmpty,
+          reason: 'WhatsApp sí se abrió (launchUrl simulado)');
+      tester
+          .widget<TextButton>(
+              find.widgetWithText(TextButton, 'No lo envié'))
+          .onPressed!();
+      await tester.pump(const Duration(milliseconds: 300));
+      final marcados1 = await tester.runAsync(
+          () => LocalDb.instance.avisadosVigentesConFecha());
+      expect(marcados1!.containsKey(41), isFalse,
+          reason: 'abrir WhatsApp no prueba el envío: sin '
+              'confirmación el cliente NO puede quedar avisado '
+              'para todo su ciclo de vencimiento');
+      expect(find.byTooltip('Marcar como avisado'), findsWidgets,
+          reason: 'la fila sigue ofreciendo avisar');
+
+      // Vía WhatsApp con confirmación POSITIVA: marca.
+      await avisarPorWhatsApp();
+      tester
+          .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Sí, enviado'))
+          .onPressed!();
+      var marcados2 = <int, DateTime>{};
+      for (var i = 0; i < 40 && !marcados2.containsKey(41); i++) {
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 100)));
+        await tester.pump(const Duration(milliseconds: 100));
+        marcados2 = await tester.runAsync(
+                () => LocalDb.instance.avisadosVigentesConFecha()) ??
+            {};
+      }
+      expect(marcados2.containsKey(41), isTrue,
+          reason: 'confirmado el envío, la marca sí se asienta');
+      // Drenar el snack de la cadena para no dejar timers.
+      await tester.pump(const Duration(seconds: 6));
     });
   });
 }
