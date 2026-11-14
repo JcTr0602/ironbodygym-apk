@@ -357,7 +357,7 @@ class RefrescoIron extends StatelessWidget {
       semanticsValue: semanticsValue,
       notificationPredicate:
           notificationPredicate ?? defaultScrollNotificationPredicate,
-      triggerMode: triggerMode ?? RefreshIndicatorTriggerMode.anywhere,
+      triggerMode: triggerMode ?? RefreshIndicatorTriggerMode.onEdge,
       onRefresh: onRefresh,
       child: child,
     );
