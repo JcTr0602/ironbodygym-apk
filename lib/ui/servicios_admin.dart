@@ -667,9 +667,17 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         ),
         const SizedBox(height: AppEspacio.sm),
         if (_botes.isEmpty)
-          Text('Sin botes abiertos todavía.',
-              style: AppTexto.cuerpo
-                  .copyWith(color: AppColores.textoSecundario(context)))
+          // 1.35 (UI-10): vacío de la casa en su forma de
+          // sección; la acción («Abrir bote») ya vive en la
+          // cabecera de la sección.
+          const EstadoVacio(
+            sinMarco: true,
+            icono: Icons.science_rounded,
+            titulo: 'Sin botes abiertos todavía',
+            subtitulo:
+                'Abre el primer bote con el botón de arriba para '
+                'empezar a vender dosis de él.',
+          )
         else
           for (var i = 0; i < _botes.length; i++) ...[
             _filaBote(_botes[i]),

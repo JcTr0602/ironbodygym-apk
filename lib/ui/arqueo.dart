@@ -959,10 +959,16 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                           );
                         }),
                       if (_historial.isEmpty)
-                        Text('Sin liquidaciones registradas.',
-                            style: TextStyle(
-                                color:
-                                    AppColores.textoSecundario(context))),
+                        // 1.35 (UI-10): vacío de la casa en
+                        // su forma de sección (sin marco).
+                        const EstadoVacio(
+                          sinMarco: true,
+                          icono: Icons.handshake_rounded,
+                          titulo: 'Sin liquidaciones registradas',
+                          subtitulo:
+                              'Cuando liquides un arqueo, quedará '
+                              'en este historial.',
+                        ),
                       for (final h in _historial)
                         Padding(
                           padding: const EdgeInsets.only(

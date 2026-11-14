@@ -402,14 +402,14 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
                           ),
                       ],
                       if (clientesRes.isEmpty && funcionesRes.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(AppEspacio.lg),
-                          child: Text(
-                            'Sin resultados en este teléfono. '
-                            'Si el cliente aún no sincronizó, '
-                            'no aparece aquí.',
-                            style: AppTexto.secundario,
-                          ),
+                        // 1.35 (UI-10): el «sin resultados»
+                        // con el vacío de la casa.
+                        const EstadoVacio(
+                          icono: Icons.search_off_rounded,
+                          titulo: 'Sin resultados en este teléfono',
+                          subtitulo:
+                              'Si el cliente aún no sincronizó, '
+                              'no aparece aquí.',
                         ),
                     ],
                   ),

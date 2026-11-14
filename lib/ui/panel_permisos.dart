@@ -707,8 +707,15 @@ class _PanelPermisosState extends State<PanelPermisos> {
         : _errorCarga != null && _entrenadores.isEmpty
             ? _estadoErrorCarga()
             : _entrenadores.isEmpty
-                ? const Center(
-                    child: Text('No hay entrenadores registrados.'))
+                // 1.35 (UI-10): vacío de la casa, no una
+                // frase suelta centrada.
+                ? const EstadoVacio(
+                    icono: Icons.badge_rounded,
+                    titulo: 'No hay entrenadores registrados',
+                    subtitulo:
+                        'Los entrenadores se dan de alta desde '
+                        'Control de Acceso.',
+                  )
                 : ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: _entrenadores.length,
