@@ -23,6 +23,7 @@ import '../fotos_cola.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../sync.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import '../errores_sync.dart';
@@ -219,8 +220,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               (c['activa'] as int?) != 0 || _esDueno)
           .toList()
         ..sort(compararPorNombre);
-      _promoActiva = (aj['promo_suplementos'] as num?)?.toInt() != 0;
-      _tasaUsd = (aj['tasa_usd'] as num?)?.toDouble();
+      // Yunque 3 (K6-3): lectores tolerantes A2-D2 (promo y
+      // tasa llegaban con cast duro: un bool/texto del
+      // servidor tumbaba la carga del catálogo).
+      _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
+      _tasaUsd = montoAjusteTolerante(aj['tasa_usd']);
       _topIds = topIds;
       _topTotales = topTotales;
       _cargando = false;

@@ -13,6 +13,7 @@ import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
+import '../tipos_pago.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
@@ -83,8 +84,12 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     _turno = ahoraHabana().hour >= 12 ? 'tarde' : 'mañana';
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
-        setState(() =>
-            _precio = (aj['pago_diario'] as num?)?.toDouble() ?? 200);
+        // Yunque 3 (K6-3): lector tolerante A2-D2 — con el
+        // ajuste en texto («250») el cast duro tumbaba la
+        // carga y la pantalla cobraba con el 200 inicial en
+        // silencio.
+        setState(
+            () => _precio = montoAjusteTolerante(aj['pago_diario']) ?? 200);
       }
     });
     _cargarHoy();

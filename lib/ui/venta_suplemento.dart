@@ -31,6 +31,7 @@ import '../permisos.dart';
 import '../permisos_entrenador.dart';
 import 'permisos_ui.dart';
 import '../tiempo.dart';
+import '../tipos_pago.dart';
 import '../cliente_protegido.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -247,10 +248,13 @@ class _VentaSuplementoScreenState
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() {
-          _promoActiva =
-              (aj['promo_suplementos'] as num?)?.toInt() != 0;
+          // Yunque 3 (K6-3): lectores tolerantes A2-D2 — con
+          // la promo en bool o la tasa en texto, el cast duro
+          // tumbaba el cierre entero y la tasa nunca se
+          // precargaba (toda venta USD bloqueada).
+          _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
           // v1.2.4: tasa del día (Admin) como valor inicial editable.
-          final t = (aj['tasa_usd'] as num?)?.toDouble();
+          final t = montoAjusteTolerante(aj['tasa_usd']);
           if (t != null && t > 0 && _tasa.text.trim().isEmpty) {
             _tasa.text = t.toStringAsFixed(0);
           }
