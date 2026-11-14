@@ -212,6 +212,24 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                     filaAdmin(context, null, 'Sin verificar',
                         '${d.sinVerificar.length}',
                         negrita: d.sinVerificar.isNotEmpty),
+                    // Yunque 3 (K1-4): el modo de diario
+                    // efectivo de la BD (meta que LocalDb deja
+                    // en cada apertura) por fin tiene lector:
+                    // se pinta como dato de la foto y, si no es
+                    // 'wal', como aviso con su consecuencia.
+                    filaAdmin(context, null, 'Modo de diario (BD)',
+                        d.modoDiarioEfectivo.isEmpty
+                            ? '—'
+                            : d.modoDiarioEfectivo,
+                        negrita:
+                            modoDiarioAnomalo(d.modoDiarioEfectivo)),
+                    if (avisoModoDiario(d.modoDiarioEfectivo)
+                        case final avisoDiario?)
+                      Text(
+                        avisoDiario,
+                        style: AppTexto.secundario
+                            .copyWith(color: AppColores.error),
+                      ),
                     const SizedBox(height: AppEspacio.xs),
                     Wrap(
                       spacing: AppEspacio.sm,

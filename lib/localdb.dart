@@ -1926,6 +1926,14 @@ class LocalDb {
         debugPrint('LocalDb: PRAGMA no efectivo en este teléfono '
             '(journal_mode=$modo, busy_timeout=$espera); '
             'queda constancia en meta journal_mode_efectivo.');
+        // Yunque 3 (K1-4): aquí NO se deja asiento en AppLog a
+        // propósito — app_log.dart importa localdb.dart, así
+        // que importar AppLog en este archivo cerraría un ciclo
+        // de imports (y AppLog vuelca su buffer SOBRE esta BD:
+        // anotar un fallo de apertura desde la propia apertura
+        // sería además reentrante). La superficie leíble es la
+        // meta: Salud del sync la lee y la pinta si no es 'wal'
+        // (ver cargarSaludSync / modoDiarioAnomalo).
       }
     } catch (_) {
       // La constancia jamás tumba la apertura.
@@ -11780,6 +11788,94 @@ class LocalDb {
       out[t] = (f['c'] as int?) ?? 0;
     }
     return out;
+  }
+
+  /// Yunque 3 (K7-1): conteos del HÉROE de La Cola, leídos de la
+  /// BD SIN la ventana de 30 de [recentOps]. El héroe sumaba
+  /// error/rechazada iterando la lista visible truncada: una op
+  /// fallida empujada fuera de la ventana por 30 ops más
+  /// recientes (las aplicadas cuentan) desaparecía y el héroe
+  /// decía «Todo subió» con la op viva en la BD.
+  ///
+  /// - [error]: filas en 'error' + 'rechazada' +
+  ///   'necesita_revision' — exactamente el conjunto que el
+  ///   héroe sumaba (lista en error/rechazada ∪ bloqueadas).
+  ///   Los estados son excluyentes por fila, así que la suma
+  ///   equivale a la antigua deduplicación por op_uuid.
+  /// - [enviada]: filas en 'enviada' (el «en limbo»).
+  ///
+  /// Con [esMia] (vista del entrenador) el conteo se filtra por
+  /// autor con el MISMO predicado que filtra la lista visible
+  /// (`esOpMia` de la Auditoría, que la pantalla pasa aquí):
+  /// la firma de autor vive en el payload y no es expresable
+  /// en SQL, así que el filtrado lee las filas de los estados
+  /// relevantes (nunca 'aplicada') y aplica el predicado en
+  /// Dart. Sin [esMia], el conteo es SQL puro por estado.
+  Future<({int error, int enviada})> conteosHeroeCola({
+    bool Function(Map<String, dynamic> op)? esMia,
+  }) async {
+    final d = await db;
+    if (esMia == null) {
+      final filas = await d.rawQuery(
+          'SELECT estado, COUNT(*) c FROM ops_queue '
+          "WHERE estado IN ('error', 'rechazada', "
+          "'necesita_revision', 'enviada') "
+          'GROUP BY estado');
+      var error = 0;
+      var enviada = 0;
+      for (final f in filas) {
+        final c = (f['c'] as int?) ?? 0;
+        if (f['estado'] == 'enviada') {
+          enviada = c;
+        } else {
+          error += c;
+        }
+      }
+      return (error: error, enviada: enviada);
+    }
+    final filas = await d.query('ops_queue',
+        columns: ['op_uuid', 'tipo', 'estado', 'payload', 'telegram_id'],
+        where: "estado IN ('error', 'rechazada', "
+            "'necesita_revision', 'enviada')");
+    var error = 0;
+    var enviada = 0;
+    for (final f in filas) {
+      if (!esMia(f)) continue;
+      if (f['estado'] == 'enviada') {
+        enviada++;
+      } else {
+        error++;
+      }
+    }
+    return (error: error, enviada: enviada);
+  }
+
+  /// Yunque 3 (K7-2): total y desglose por tipo de las ops en
+  /// 'pendiente' de UN autor, sin la ventana de 30. La tarjeta
+  /// del entrenador contaba `opsVisibles.where(pendiente)`
+  /// sobre [recentOps] truncado: con 35 pendientes propias y
+  /// aplicadas ajenas intercaladas decía 30. [esMia] es el
+  /// mismo predicado que filtra la lista visible (ver
+  /// [conteosHeroeCola]); el conjunto contado es el de la
+  /// rama entrenador histórica: solo 'pendiente' (la 'enviada'
+  /// y el 'error' los nombra el héroe, no esta tarjeta).
+  Future<({int total, Map<String, int> porTipo})>
+      conteoPendientesPropias({
+    required bool Function(Map<String, dynamic> op) esMia,
+  }) async {
+    final d = await db;
+    final filas = await d.query('ops_queue',
+        columns: ['op_uuid', 'tipo', 'estado', 'payload', 'telegram_id'],
+        where: "estado = 'pendiente'");
+    var total = 0;
+    final porTipo = <String, int>{};
+    for (final f in filas) {
+      if (!esMia(f)) continue;
+      total++;
+      final t = '${f['tipo']}';
+      porTipo[t] = (porTipo[t] ?? 0) + 1;
+    }
+    return (total: total, porTipo: porTipo);
   }
 
   /// v1.8.0 (Frente 5): conteo de pendientes por categoría, para que

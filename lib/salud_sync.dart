@@ -175,6 +175,14 @@ class SaludSyncDatos {
   final int pendientes;
   final int fallidas;
 
+  /// Yunque 3 (K1-4): modo de diario EFECTIVO de la BD local
+  /// (meta `journal_mode_efectivo`, la constancia que deja
+  /// LocalDb en cada apertura). '' = sin constancia leída.
+  /// Hasta hoy la meta se escribía y NADA la leía: ante un
+  /// «database is locked» en un teléfono concreto nadie podía
+  /// ver el modo sin extraer la BD y consultar meta a mano.
+  final String modoDiarioEfectivo;
+
   const SaludSyncDatos({
     required this.tablas,
     required this.chequeoEn,
@@ -186,7 +194,26 @@ class SaludSyncDatos {
     required this.telefonos,
     this.pendientes = 0,
     this.fallidas = 0,
+    this.modoDiarioEfectivo = '',
   });
+}
+
+/// Yunque 3 (K1-4, pura): ¿el modo de diario efectivo es
+/// anómalo? El esperado es 'wal'; sin constancia ('') o sin
+/// dato (null) no se afirma nada (la foto no miente por
+/// omisión: simplemente no hay dato que juzgar).
+bool modoDiarioAnomalo(String? modo) =>
+    modo != null &&
+    modo.isNotEmpty &&
+    modo.toLowerCase() != 'wal';
+
+/// Yunque 3 (K1-4, pura): el aviso que pinta Salud cuando el
+/// modo de diario no es 'wal'; null cuando no hay aviso.
+String? avisoModoDiario(String? modo) {
+  if (!modoDiarioAnomalo(modo)) return null;
+  return 'La base local no quedó en modo WAL (quedó en '
+      '«$modo»): en este teléfono las escrituras de la app '
+      'pueden chocar entre sí («database is locked»).';
 }
 
 /// 1.29 (Oleada 6, D-16): el estado general de la
@@ -422,8 +449,13 @@ Future<SaludSyncDatos> cargarSaludSync() async {
   DateTime? completaEn;
   DateTime? copiaUltima;
   var copiaError = '';
+  var modoDiarioEfectivo = '';
   var sinVerificarLista = <String>[];
   try {
+    // Yunque 3 (K1-4): la constancia del modo de diario que
+    // LocalDb deja en meta en cada apertura entra en la foto.
+    modoDiarioEfectivo =
+        await db.getMeta('journal_mode_efectivo') ?? '';
     final c = await db.getMeta('manifiesto_chequeo_en');
     if (c != null) chequeoEn = DateTime.tryParse(c);
     final f = await db.getMeta('manifiesto_completa_en');
@@ -468,5 +500,6 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     telefonos: telefonos,
     pendientes: pendientes,
     fallidas: fallidas,
+    modoDiarioEfectivo: modoDiarioEfectivo,
   );
 }
