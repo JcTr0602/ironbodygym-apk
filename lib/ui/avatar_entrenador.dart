@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 
 import '../fotos.dart';
 import '../localdb.dart';
+import 'componentes.dart';
 import '../turnos_resolucion.dart';
 import 'diseno.dart';
 import 'turnos_calendario.dart' show colorChipEntrenador;
@@ -86,7 +87,13 @@ class AvatarEntrenador extends StatelessWidget {
               ),
               child: CircleAvatar(
                 radius: tamano / 2 - 1.6,
-                backgroundImage: FileImage(f),
+                // 1.34 Campo 2 (P-1): decodificación acotada
+                // al tamaño del avatar.
+                backgroundImage: providerFotoAcotada(FileImage(f),
+                    ancho: (tamano *
+                            MediaQuery.devicePixelRatioOf(ctx) *
+                            2)
+                        .round()),
                 backgroundColor: AppColores.borde(ctx),
               ),
             );

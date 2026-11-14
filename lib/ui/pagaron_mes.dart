@@ -430,8 +430,11 @@ class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
   @override
   Widget build(BuildContext context) {
     if (_archivo != null) {
+      // 1.34 Campo 2 (P-1): avatar de 40 dp — la foto se
+      // decodifica acotada (providerFotoAcotada), no entera.
       return CircleAvatar(
-        backgroundImage: FileImage(_archivo!),
+        backgroundImage: providerFotoAcotada(FileImage(_archivo!),
+            ancho: (80 * MediaQuery.devicePixelRatioOf(context)).round()),
         backgroundColor: Colors.transparent,
       );
     }

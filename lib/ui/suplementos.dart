@@ -1594,32 +1594,46 @@ class _FotoSuplementoState extends State<_FotoSuplemento> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<File?>(
-      future: _futura,
-      builder: (ctx, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const _ShimmerFoto();
-        }
-        final f = snap.data;
-        if (f != null) {
-          return Image.file(
-            f,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
-          );
-        }
-        // 1.30 D5 (UI130-18, ALTA-02): sin foto propia, la
-        // genérica de su clase (la tarjeta la marca como
-        // genérica); si ni eso, el placeholder de siempre.
-        final generica = widget.assetGenerica;
-        if (generica != null) {
-          return Image.asset(
-            generica,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
-          );
-        }
-        return const _PlaceholderFoto();
+    // 1.34 Campo 2 (P-1): la decodificación va ACOTADA al
+    // ancho físico real del hueco (56 dp en fila; la tarjeta
+    // de rejilla a su ancho de layout). Antes la foto del
+    // producto se decodificaba a resolución completa en cada
+    // tarjeta: culpable directo de los tirones del catálogo.
+    return LayoutBuilder(
+      builder: (ctx, cons) {
+        final ancho = (cons.maxWidth *
+                MediaQuery.devicePixelRatioOf(ctx))
+            .ceil()
+            .clamp(56, 1440);
+        return FutureBuilder<File?>(
+          future: _futura,
+          builder: (ctx2, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const _ShimmerFoto();
+            }
+            final f = snap.data;
+            if (f != null) {
+              return Image(
+                image: providerFotoAcotada(FileImage(f), ancho: ancho),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
+              );
+            }
+            // 1.30 D5 (UI130-18, ALTA-02): sin foto propia, la
+            // genérica de su clase (la tarjeta la marca como
+            // genérica); si ni eso, el placeholder de siempre.
+            final generica = widget.assetGenerica;
+            if (generica != null) {
+              return Image(
+                image:
+                    providerFotoAcotada(AssetImage(generica), ancho: ancho),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
+              );
+            }
+            return const _PlaceholderFoto();
+          },
+        );
       },
     );
   }

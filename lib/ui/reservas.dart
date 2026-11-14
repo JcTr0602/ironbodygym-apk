@@ -891,9 +891,13 @@ class _MiniFotoReservaState extends State<_MiniFotoReserva> {
       builder: (ctx, snap) {
         final f = snap.data;
         if (f != null) {
+          // 1.34 Campo 2 (P-1): hueco de 48 dp — decodificar
+          // acotado al ancho físico, no la foto entera.
           return Image.file(
             f,
             fit: BoxFit.cover,
+            cacheWidth:
+                (48 * MediaQuery.devicePixelRatioOf(ctx)).round(),
             errorBuilder: (_, __, ___) => const _SinFotoReserva(),
           );
         }

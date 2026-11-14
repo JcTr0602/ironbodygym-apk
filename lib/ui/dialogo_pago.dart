@@ -1283,6 +1283,11 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                         width: 40,
                         height: 40,
                         fit: BoxFit.cover,
+                        // 1.34 Campo 2 (P-1): miniatura de
+                        // 40 dp con la decodificación acotada.
+                        cacheWidth: (80 *
+                                MediaQuery.devicePixelRatioOf(context))
+                            .round(),
                         errorBuilder:
                             (context, error, stackTrace) =>
                                 const Icon(

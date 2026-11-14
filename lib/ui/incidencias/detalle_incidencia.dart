@@ -454,6 +454,11 @@ class _DetalleIncidenciaScreenState
                       width: 100,
                       height: 100,
                       fit: BoxFit.cover,
+                      // 1.34 Campo 2 (P-1): acotada a su
+                      // hueco de 100 dp.
+                      cacheWidth: (100 *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .round(),
                     )
                   : (f.storagePath != null && f.storagePath!.isNotEmpty)
                       ? FutureBuilder<File?>(
@@ -465,6 +470,10 @@ class _DetalleIncidenciaScreenState
                                 width: 100,
                                 height: 100,
                                 fit: BoxFit.cover,
+                                cacheWidth: (100 *
+                                        MediaQuery.devicePixelRatioOf(
+                                            ctx))
+                                    .round(),
                               );
                             }
                             return Container(

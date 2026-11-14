@@ -1046,6 +1046,10 @@ class _FotoMiniState extends State<_FotoMini> {
         width: 40,
         height: 40,
         fit: BoxFit.cover,
+        // 1.34 Campo 2 (P-1): width/height de layout no
+        // acotan la decodificación; cacheWidth sí.
+        cacheWidth:
+            (80 * MediaQuery.devicePixelRatioOf(context)).round(),
       ),
     );
   }

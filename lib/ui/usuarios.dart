@@ -321,8 +321,12 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       builder: (ctx, snap) {
         final file = snap.data;
         if (file != null) {
+          // 1.34 Campo 2 (P-1): avatar de 40 dp con la
+          // decodificación acotada.
           return CircleAvatar(
-            backgroundImage: FileImage(file),
+            backgroundImage: providerFotoAcotada(FileImage(file),
+                ancho:
+                    (80 * MediaQuery.devicePixelRatioOf(ctx)).round()),
             backgroundColor: AppColores.borde(ctx),
           );
         }

@@ -1086,13 +1086,22 @@ class _VentaSuplementoScreenState
                 File(fotoLocal).existsSync())
             ? Image.file(File(fotoLocal),
                 fit: BoxFit.cover,
+                // 1.34 Campo 2 (P-1): miniatura de 56 dp
+                // con la decodificación acotada.
+                cacheWidth:
+                    (56 * MediaQuery.devicePixelRatioOf(context))
+                        .round(),
                 errorBuilder: (_, __, ___) => placeholder())
             : FutureBuilder(
                 future: FotoCache.instance.obtener(fotoStorage),
                 builder: (ctx, snap) {
                   final f = snap.data;
                   if (f == null) return placeholder();
-                  return Image.file(f, fit: BoxFit.cover);
+                  return Image.file(f,
+                      fit: BoxFit.cover,
+                      cacheWidth:
+                          (56 * MediaQuery.devicePixelRatioOf(ctx))
+                              .round());
                 },
               ),
       ),
