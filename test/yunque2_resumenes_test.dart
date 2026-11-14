@@ -1,12 +1,31 @@
 /// Yunque 2.34 (F-7) — gramática corta de los resúmenes de
 /// filtros plegados: el PEOR CASO real de cada pantalla
 /// (todos los filtros a la vez, nombres largos) debe nombrar
-/// el estado COMPLETO dentro del presupuesto de caracteres
-/// que cabe en las 2 líneas de C2-5 a 360 dp con texto 1.3.
-/// (La prueba visual en widget a 360×1.3 de cada pantalla
-/// queda para la compuerta visual previa a compilar.)
+/// el estado COMPLETO dentro del presupuesto que cabe en
+/// las 2 líneas de C2-5.
+///
+/// Yunque 3 (K3-5) — el pin pasa a ANCHO PINTADO: el de
+/// caracteres quedó mal calibrado (48 caracteres de esta
+/// gramática son ~310 px, muy por encima de los 232 px que
+/// caben en 2 líneas de 116 dp). Medición con TextPainter y
+/// la Roboto REAL del SDK (la carga del arnés de
+/// diseno_134_plegados_test), estilo AppTexto.metadato
+/// (12 sp), presupuesto 116 dp × 2 líneas:
+/// - Auditoría (categoría larga + Hoy + Gabriel): cabe a
+///   1,3 («Filtrar · Otros · Hoy · Gabriel» = 190 px).
+/// - Ventas (producto largo + USD + rango entre años):
+///   cabe a 1,0 («… · dic 25 – ene 26» = 215 px). A 1,3 NO
+///   cabe NINGUNA gramática que nombre producto + moneda +
+///   rango: la más corta posible mide 272 px > 232 px
+///   (medido en esta pasada; a 1,3 el botón elide la cola
+///   del rango y el estado exacto queda en la hoja, como
+///   ya aceptó la calibración BAJA de F-7/K3-5).
 library;
 
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/auditoria.dart';
@@ -16,7 +35,34 @@ import 'package:ironbody_gym/ui/historial_ventas.dart';
 import 'package:ironbody_gym/ui/liquidaciones_historial.dart';
 import 'package:ironbody_gym/ui/servicios_historial.dart';
 
+/// ¿El resumen excede 2 líneas pintadas a [maxWidth] dp con
+/// la Roboto real y la escala dada? (K3-5)
+bool _excede2Lineas(String s, double escala, {double maxWidth = 116}) {
+  final tp = TextPainter(
+    text: TextSpan(
+        text: s,
+        style: const TextStyle(fontFamily: 'Roboto', fontSize: 12)),
+    maxLines: 2,
+    textDirection: TextDirection.ltr,
+    textScaler: TextScaler.linear(escala),
+  )..layout(maxWidth: maxWidth);
+  return tp.didExceedMaxLines;
+}
+
 void main() {
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    // La Roboto real del SDK, como en el arnés de plegados.
+    const dir =
+        '/home/hatch/flutter-sdk/flutter/bin/cache/artifacts/material_fonts';
+    final loader = FontLoader('Roboto');
+    for (final f in ['Roboto-Regular.ttf']) {
+      final bytes = await File('$dir/$f').readAsBytes();
+      loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+    }
+    await loader.load();
+  });
+
   test('ayudantes: primera palabra y truncado', () {
     expect(primeraPalabraResumen('Gabriel Pérez'), 'Gabriel');
     expect(primeraPalabraResumen('  Duany  '), 'Duany');
@@ -35,10 +81,25 @@ void main() {
       desde: '$y-09-01',
       hasta: '$y-11-30',
     );
-    expect(s, contains('Proteína whey…'));
+    // K3-5: el producto se trunca a 10 (antes 14).
+    expect(s, contains('Proteína…'));
     expect(s, contains('USD'));
     expect(s, contains('1 sep – 30 nov'));
     expect(s, isNot(contains('$y')));
+    expect(s.length, lessThanOrEqualTo(48));
+  });
+
+  test('Ventas · peor caso COMPLETO (el que faltaba): '
+      'producto largo + USD + rango ENTRE años', () {
+    final s = resumenFiltrosVentasTxt(
+      producto: 'Creatina Optimun Nutrition',
+      moneda: 'USD',
+      desde: '2025-12-01',
+      hasta: '2026-01-31',
+    );
+    // K3-5: entre años, meses con año de 2 dígitos y sin
+    // días (la forma sugerida por el auditor de K3).
+    expect(s, 'Filtrar · Creatina… · USD · dic 25 – ene 26');
     expect(s.length, lessThanOrEqualTo(48));
   });
 
@@ -68,8 +129,46 @@ void main() {
       soloHoy: true,
       actor: 'Gabriel Pérez',
     );
-    expect(s, 'Filtrar · Otros y alertas · Hoy · Gabriel');
+    // K3-5: con actor, la categoría se acorta a «Otros»
+    // (sin actor va entera, verificado abajo).
+    expect(s, 'Filtrar · Otros · Hoy · Gabriel');
     expect(s.length, lessThanOrEqualTo(44));
+    expect(
+        resumenFiltrosAuditoriaTxt(
+            alcance: 'Otros y alertas', soloHoy: true, actor: null),
+        'Filtrar · Otros y alertas · Hoy');
+  });
+
+  group('K3-5 · ancho pintado (Roboto real, 116 dp × 2)', () {
+    test('Auditoría peor caso cabe a 1,3 y a 1,0', () {
+      final s = resumenFiltrosAuditoriaTxt(
+        alcance: 'Otros y alertas',
+        soloHoy: true,
+        actor: 'Gabriel',
+      );
+      expect(_excede2Lineas(s, 1.3), isFalse, reason: s);
+      expect(_excede2Lineas(s, 1.0), isFalse, reason: s);
+    });
+
+    test('Ventas peor caso completo cabe a 1,0', () {
+      final entreAnos = resumenFiltrosVentasTxt(
+        producto: 'Creatina Optimun Nutrition',
+        moneda: 'USD',
+        desde: '2025-12-01',
+        hasta: '2026-01-31',
+      );
+      expect(_excede2Lineas(entreAnos, 1.0), isFalse,
+          reason: entreAnos);
+      final y = ahoraHabana().year;
+      final mismoAno = resumenFiltrosVentasTxt(
+        producto: 'Creatina Optimun Nutrition',
+        moneda: 'USD',
+        desde: '$y-09-01',
+        hasta: '$y-11-30',
+      );
+      expect(_excede2Lineas(mismoAno, 1.0), isFalse,
+          reason: mismoAno);
+    });
   });
 
   test('K3-6: los actores sintéticos van enteros en el '

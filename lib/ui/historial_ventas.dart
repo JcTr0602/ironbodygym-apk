@@ -1067,11 +1067,13 @@ class _DialogoReciboWaState extends State<_DialogoReciboWa> {
 /// ambas fechas caen en el mismo mes; si no, las fechas
 /// sueltas con fmtFecha. null si no hay rango.
 /// Yunque 2.34 (F-7): resumen del botón de filtros de
-/// Ventas con gramática corta — producto truncado a 14,
+/// Ventas con gramática corta — producto truncado,
 /// «Todos» en vez de «Todos los productos» y rango sin el
 /// año cuando es el año en curso. El peor caso real (los 5
 /// botones a la vez) medía ~4 líneas a 360 dp × 1.3 y la
-/// cola se elidía pese a las 2 líneas de C2-5. PURO.
+/// cola se elidía pese a las 2 líneas de C2-5.
+/// Yunque 3 (K3-5): un grado más — producto a 10 y rango
+/// entre años como «dic 25 – ene 26». PURO.
 String resumenFiltrosVentasTxt({
   required String? producto,
   required String? moneda,
@@ -1080,7 +1082,11 @@ String resumenFiltrosVentasTxt({
 }) {
   final partes = <String>[
     'Filtrar',
-    producto == null ? 'Todos' : truncarResumen(producto, 14),
+    // Yunque 3 (K3-5): el producto se trunca a 10 (antes
+    // 14): con el rango entre años ni a escala 1,0 cabía el
+    // peor caso en las 2 líneas de 116 dp (medido con
+    // TextPainter/Roboto en test/yunque2_resumenes_test).
+    producto == null ? 'Todos' : truncarResumen(producto, 10),
   ];
   if (moneda != null) partes.add(moneda);
   final rango = _resumenRangoVentas(desde, hasta);
@@ -1112,7 +1118,16 @@ String? _resumenRangoVentas(String? desde, String? hasta) {
       return '${corta(d, conAno: false)} – '
           '${corta(h, conAno: d.year != actual)}';
     }
-    return '${corta(d, conAno: true)} – ${corta(h, conAno: true)}';
+    // Yunque 3 (K3-5): entre años, la forma más corta —
+    // meses con años de 2 dígitos y SIN días («dic 25 –
+    // ene 26», la forma que sugirió el auditor de K3): con
+    // años completos el peor caso (producto largo + USD)
+    // medía 4 líneas a 116 dp. Los días exactos quedan en
+    // la hoja de filtros; el botón nombra meses y años.
+    String corta2(DateTime f) =>
+        '${meses[f.month - 1]} '
+        '${(f.year % 100).toString().padLeft(2, '0')}';
+    return '${corta2(d)} – ${corta2(h)}';
   }
   if (desde != null) {
     final d = DateTime.tryParse(desde);

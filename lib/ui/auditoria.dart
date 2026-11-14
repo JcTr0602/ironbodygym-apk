@@ -1480,7 +1480,13 @@ String resumenFiltrosAuditoriaTxt({
   required bool soloHoy,
   required String? actor,
 }) {
-  final partes = <String>['Filtrar', alcance];
+  // Yunque 3 (K3-5): con actor en el resumen, «Otros y
+  // alertas» se acorta a «Otros» — con la categoría larga el
+  // actor caía a una 3ª línea y se elidía. Sin actor, la
+  // categoría va entera.
+  final alcanceTxt =
+      (actor != null && alcance == 'Otros y alertas') ? 'Otros' : alcance;
+  final partes = <String>['Filtrar', alcanceTxt];
   if (soloHoy) partes.add('Hoy');
   if (actor != null) {
     // Yunque 3 (K3-6): los actores sintéticos de actorDeOp
