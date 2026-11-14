@@ -450,15 +450,32 @@ void main() {
       expect(find.text('Historial'), findsNothing,
           reason: 'la sección de pagos está fuera de pantalla: '
               'con ListView.builder aún no se construye');
-      // Al hacer scroll, las secciones intermedias y la de
-      // pagos se construyen bajo demanda.
-      await tester.scrollUntilVisible(
-          find.text('Información personal'), 250,
-          scrollable: find.byType(Scrollable).first);
+      // Al hacer scroll, las secciones se construyen bajo
+      // demanda. Campo 2 · B-1 (2026-11-14): la jerarquía
+      // nueva de la pestaña pone Membresía/Historial arriba e
+      // «Información personal» abajo, y las secciones fuera
+      // de la ventana de caché se descartan al seguir
+      // bajando: scrollUntilVisible perdía la sección entre
+      // pasos (construida y descartada) y moría en «No
+      // element». Se arrastra a mano de 250 en 250 hasta que
+      // la sección EXISTE en el árbol — que es lo que este
+      // test afirma: construcción perezosa, no visibilidad.
+      Future<void> arrastrarHasta(String texto, double paso) async {
+        for (var i = 0; i < 40; i++) {
+          if (find.text(texto).evaluate().isNotEmpty) return;
+          await tester.drag(
+              find.byType(Scrollable).first, Offset(0, paso));
+          await tester.pump(const Duration(milliseconds: 60));
+        }
+      }
+
+      await arrastrarHasta('Información personal', -250);
       await tester.pump();
       expect(find.text('Información personal'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Historial'), 250,
-          scrollable: find.byType(Scrollable).first);
+      // «Historial» quedó ARRIBA en la jerarquía nueva: al
+      // bajar hasta «Información personal» salió de la
+      // ventana y se descartó; se reconstruye al subir.
+      await arrastrarHasta('Historial', 250);
       await tester.pump();
       expect(find.text('Historial'), findsOneWidget);
       // Drenaje final: (1) la sección «Acceso App» se
