@@ -13,6 +13,7 @@ import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import '../permisos_visibilidad.dart';
 import '../tiempo.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'auditoria.dart';
 import 'arqueo.dart';
@@ -739,7 +740,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
     // v1.3.7 (Fase 2, B2): tasa del día para el filtro por monto.
     try {
       final aj = await LocalDb.instance.getAjustes();
-      final t = (aj['tasa_usd'] as num?)?.toDouble() ?? 0;
+      // Yunque 3 (K6-3, clase completa): lector tolerante —
+      // con la tasa en texto el cast duro dejaba _tasaUsd en
+      // null en silencio y el filtro por monto quedaba ciego.
+      final t = montoAjusteTolerante(aj['tasa_usd']) ?? 0;
       if (mounted && t > 0) setState(() => _tasaUsd = t);
     } catch (_) {}
     // Marcar como leídas al abrir

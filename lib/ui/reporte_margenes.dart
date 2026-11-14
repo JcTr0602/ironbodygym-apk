@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -92,7 +93,10 @@ class _ReporteMargenesScreenState
     // conversión CUP→USD por tasa (nunca mezclando monedas).
     final espejo = await LocalDb.instance.allMirror('suplementos');
     final aj = await LocalDb.instance.getAjustes();
-    final tasa = (aj['tasa_usd'] as num?)?.toDouble();
+    // Yunque 3 (K6-3, clase completa): lector tolerante — con
+    // la tasa en texto el cast duro la dejaba en null y el
+    // reporte perdía la conversión a USD en silencio.
+    final tasa = montoAjusteTolerante(aj['tasa_usd']);
     final datos = <Map<String, dynamic>>[];
     for (final s in espejo) {
       final activo = s['activo'];
