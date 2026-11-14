@@ -503,19 +503,21 @@ class _HistorialVentasScreenState
     );
   }
 
-  /// Controles de filtro (3/25): buscador, producto, moneda y rango
-  /// de fechas. Los totales de arriba ya reflejan lo filtrado.
+  /// Controles de filtro. 3/25: buscador, producto, moneda y
+  /// rango en tres filas permanentes. 1.34 (C-48 · G-02):
+  /// PLEGADO — el buscador queda y lo demás vive en la hoja
+  /// tras el botón «Filtrar · …» que nombra lo activo (molde
+  /// de Actividad). Los totales de arriba ya reflejan lo
+  /// filtrado.
   Widget _filtros() {
-    final productos = _productos.values.toList()
-      ..sort((a, b) =>
-          '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          TextField(
+          Expanded(
+            child: TextField(
             controller: _textoCtrl,
             onChanged: (v) => setState(() {
                           _texto = v;
@@ -542,109 +544,81 @@ class _HistorialVentasScreenState
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: AppEspacio.md),
             ),
+            ),
           ),
-          const SizedBox(height: AppEspacio.sm),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButton<int?>(
-                  value: _productoId,
-                  isExpanded: true,
-                  hint: const Text('Todos los productos'),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Todos los productos'),
-                    ),
-                    for (final p in productos)
-                      DropdownMenuItem<int?>(
-                        value: (p['id'] as num?)?.toInt(),
-                        child: Text('${p['nombre'] ?? 'Producto'}'),
-                      ),
-                  ],
-                  onChanged: (v) => setState(() {
-                        _productoId = v;
-                        _refiltrar();
-                      }),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              ChoiceChip(
-                label: const Text('CUP'),
-                selected: _moneda == 'CUP',
-                onSelected: (_) => setState(() {
-                      _moneda = _moneda == 'CUP' ? null : 'CUP';
-                      _refiltrar();
-                    }),
-              ),
-              const SizedBox(width: 4),
-              ChoiceChip(
-                label: const Text('USD'),
-                selected: _moneda == 'USD',
-                onSelected: (_) => setState(() {
-                      _moneda = _moneda == 'USD' ? null : 'USD';
-                      _refiltrar();
-                    }),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today_rounded, size: 16),
-                  label: Text(_desde == null
-                      ? 'Desde…'
-                      : 'Desde $_desde'),
-                  onPressed: () => _elegirFecha(esDesde: true),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today_rounded, size: 16),
-                  label: Text(
-                      _hasta == null ? 'Hasta…' : 'Hasta $_hasta'),
-                  onPressed: () => _elegirFecha(esDesde: false),
-                ),
-              ),
-              if (_hayFiltros)
-                TextButton(
-                  onPressed: _limpiarFiltros,
-                  child: const Text('Limpiar'),
-                ),
-            ],
-          ),
+          const SizedBox(width: AppEspacio.sm),
+          Flexible(child: _botonFiltrosVentas()),
         ],
       ),
     );
   }
 
-  Future<void> _elegirFecha({required bool esDesde}) async {
-    final ahora = ahoraHabana();
-    final inicial = esDesde ? _desde : _hasta;
-    final elegida = await showDatePicker(
-      context: context,
-      initialDate: inicial != null
-          ? DateTime.tryParse(inicial) ?? ahora
-          : ahora,
-      firstDate: DateTime(2020),
-      lastDate: ahora,
+  String _resumenFiltrosVentas() {
+    final partes = <String>['Filtrar'];
+    if (_productoId != null) {
+      partes.add('${_productos[_productoId]?['nombre'] ?? 'Producto'}');
+    } else {
+      partes.add('Todos los productos');
+    }
+    if (_moneda != null) partes.add(_moneda!);
+    final rango = _resumenRangoVentas(_desde, _hasta);
+    if (rango != null) partes.add(rango);
+    return partes.join(' · ');
+  }
+
+  Widget _botonFiltrosVentas() {
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.filter_list_rounded, size: 16),
+      label: Text(_resumenFiltrosVentas(),
+          style: AppTexto.metadato,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: _abrirFiltrosVentas,
     );
-    if (elegida == null) return;
-    final iso = '${elegida.year.toString().padLeft(4, '0')}-'
-        '${elegida.month.toString().padLeft(2, '0')}-'
-        '${elegida.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _abrirFiltrosVentas() async {
+    final productos = _productos.values.toList()
+      ..sort((a, b) =>
+          '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
+    final r = await showModalBottomSheet<
+        ({
+          int? productoId,
+          String? moneda,
+          String? desde,
+          String? hasta
+        })>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => _HojaFiltrosVentas(
+        productos: productos,
+        productoId: _productoId,
+        moneda: _moneda,
+        desde: _desde,
+        hasta: _hasta,
+      ),
+    );
+    if (r == null || !mounted) return;
     setState(() {
-      if (esDesde) {
-        _desde = iso;
-      } else {
-        _hasta = iso;
-      }
+      _productoId = r.productoId;
+      _moneda = r.moneda;
+      _desde = r.desde;
+      _hasta = r.hasta;
       _refiltrar();
     });
   }
+
 
   Widget _fila(Map<String, dynamic> v) {    final prodId = (v['suplemento_id'] as num?)?.toInt();
     final prod = prodId != null ? _productos[prodId] : null;
@@ -1051,6 +1025,212 @@ class _DialogoReciboWaState extends State<_DialogoReciboWa> {
           onPressed: _enviar,
         ),
       ],
+    );
+  }
+}
+
+/// 1.34 (C-48 · G-02): resumen compacto del rango de fechas
+/// para la etiqueta del botón «Filtrar · …»: «1-30 nov» si
+/// ambas fechas caen en el mismo mes; si no, las fechas
+/// sueltas con fmtFecha. null si no hay rango.
+String? _resumenRangoVentas(String? desde, String? hasta) {
+  if (desde == null && hasta == null) return null;
+  const meses = [
+    'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+  ];
+  if (desde != null && hasta != null) {
+    final d = DateTime.tryParse(desde);
+    final h = DateTime.tryParse(hasta);
+    if (d != null && h != null && d.year == h.year && d.month == h.month) {
+      return '${d.day}-${h.day} ${meses[d.month - 1]}';
+    }
+    return '${fmtFecha(desde)} – ${fmtFecha(hasta)}';
+  }
+  if (desde != null) return 'Desde ${fmtFecha(desde)}';
+  return 'Hasta ${fmtFecha(hasta!)}';
+}
+
+/// 1.34 (C-48 · G-02): hoja de filtros del Historial de
+/// ventas. Copia temporal: «Aplicar» devuelve el resultado
+/// por el Navigator; «Limpiar» restaura la copia a «todo».
+class _HojaFiltrosVentas extends StatefulWidget {
+  final List<Map<String, dynamic>> productos;
+  final int? productoId;
+  final String? moneda;
+  final String? desde;
+  final String? hasta;
+
+  const _HojaFiltrosVentas({
+    required this.productos,
+    required this.productoId,
+    required this.moneda,
+    required this.desde,
+    required this.hasta,
+  });
+
+  @override
+  State<_HojaFiltrosVentas> createState() => _HojaFiltrosVentasState();
+}
+
+class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
+  late int? _productoId = widget.productoId;
+  late String? _moneda = widget.moneda;
+  late String? _desde = widget.desde;
+  late String? _hasta = widget.hasta;
+
+  Future<void> _elegirFecha({required bool esDesde}) async {
+    final ahora = ahoraHabana();
+    final inicial = esDesde ? _desde : _hasta;
+    final elegida = await showDatePicker(
+      context: context,
+      initialDate: inicial != null
+          ? DateTime.tryParse(inicial) ?? ahora
+          : ahora,
+      firstDate: DateTime(2020),
+      lastDate: ahora,
+    );
+    if (elegida == null) return;
+    final iso = '${elegida.year.toString().padLeft(4, '0')}-'
+        '${elegida.month.toString().padLeft(2, '0')}-'
+        '${elegida.day.toString().padLeft(2, '0')}';
+    setState(() {
+      if (esDesde) {
+        _desde = iso;
+      } else {
+        _hasta = iso;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Filtros', style: AppTexto.subtitulo),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Cerrar',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            const Text('Producto', style: AppTexto.etiqueta),
+            DropdownButton<int?>(
+              value: _productoId,
+              isExpanded: true,
+              hint: const Text('Todos los productos'),
+              items: [
+                const DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text('Todos los productos'),
+                ),
+                for (final p in widget.productos)
+                  DropdownMenuItem<int?>(
+                    value: (p['id'] as num?)?.toInt(),
+                    child: Text('${p['nombre'] ?? 'Producto'}'),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _productoId = v),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            const Text('Moneda', style: AppTexto.etiqueta),
+            const SizedBox(height: AppEspacio.sm),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Ambas'),
+                  selected: _moneda == null,
+                  onSelected: (_) => setState(() => _moneda = null),
+                ),
+                ChoiceChip(
+                  label: const Text('CUP'),
+                  selected: _moneda == 'CUP',
+                  onSelected: (_) => setState(() => _moneda = 'CUP'),
+                ),
+                ChoiceChip(
+                  label: const Text('USD'),
+                  selected: _moneda == 'USD',
+                  onSelected: (_) => setState(() => _moneda = 'USD'),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.md),
+            const Text('Fechas', style: AppTexto.etiqueta),
+            const SizedBox(height: AppEspacio.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon:
+                        const Icon(Icons.calendar_today_rounded, size: 16),
+                    label: Text(
+                        _desde == null ? 'Desde…' : 'Desde $_desde'),
+                    onPressed: () => _elegirFecha(esDesde: true),
+                  ),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon:
+                        const Icon(Icons.calendar_today_rounded, size: 16),
+                    label: Text(
+                        _hasta == null ? 'Hasta…' : 'Hasta $_hasta'),
+                    onPressed: () => _elegirFecha(esDesde: false),
+                  ),
+                ),
+              ],
+            ),
+            if (_desde != null || _hasta != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => setState(() {
+                    _desde = null;
+                    _hasta = null;
+                  }),
+                  child: const Text('Limpiar fechas'),
+                ),
+              ),
+            const SizedBox(height: AppEspacio.md),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => setState(() {
+                    _productoId = null;
+                    _moneda = null;
+                    _desde = null;
+                    _hasta = null;
+                  }),
+                  child: const Text('Limpiar'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop((
+                    productoId: _productoId,
+                    moneda: _moneda,
+                    desde: _desde,
+                    hasta: _hasta,
+                  )),
+                  child: const Text('Aplicar'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
