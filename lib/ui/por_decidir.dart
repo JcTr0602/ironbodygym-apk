@@ -371,7 +371,20 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
       bool localOk = true,
       required VoidCallback onTap,
     }) {
-      if (localOk && (valor == null || valor == 0)) {
+      // 1.34 Campo 2 (B-2, regla de Jc 2026-11-14): una
+      // fila con CERO verificado NO aparece — ni local ni
+      // remota (antes las remotas pasaban localOk: false
+      // para poder enseñar su «sin verificar» y el cero
+      // verificado se les colaba visible, saturando la
+      // bandeja con entradas sin nada que atender). El
+      // null es otra cosa: «sin verificar» no es un cero,
+      // es un estado por atender, y la Compuerta 1 de la
+      // 1.32 prohíbe disfrazarlo de vacío — esa fila se
+      // queda. El titular ya contaba solo lo accionable
+      // (sumaVerificada trata el null como no-cero
+      // verificable y el cero no suma): filas y cabecera
+      // dicen ahora lo mismo.
+      if (valor == 0 || (localOk && valor == null)) {
         return const SizedBox.shrink();
       }
       return ListTile(
