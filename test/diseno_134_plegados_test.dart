@@ -436,7 +436,12 @@ void main() {
           'suplemento_id': 1,
           'cliente_id': 5,
           'cantidad': 1,
-          'precio_total': 4500,
+          // Yunque 3.34 (K4-2): forma REAL del importe —
+          // total ?? precio × cantidad (lib/negocio.dart:
+          // 997-1002). precio_total no lo lee nadie: la
+          // venta valía 0 en la pantalla montada.
+          'precio': 4500,
+          'total': 4500,
           'moneda': 'CUP',
           'fecha': hoyHabanaIso(),
           'vendedor_id': 735772141,
@@ -446,7 +451,8 @@ void main() {
           'suplemento_id': 2,
           'cliente_id': 7,
           'cantidad': 2,
-          'precio_total': 6400,
+          'precio': 3200,
+          'total': 6400,
           'moneda': 'USD',
           'fecha': hoyHabanaIso(),
           'vendedor_id': 969869611,
@@ -456,6 +462,19 @@ void main() {
       expect(find.text('Filtrar · Todos'), findsOneWidget);
       expect(find.text('Proteína Suero X'), findsWidgets);
       expect(find.text('Creatina Monohidrato'), findsWidgets);
+      // Yunque 3.34 (K4-2, refuerzo): el historial muestra
+      // importes REALES ≠ 0 — el encabezado de totales pinta
+      // «4500 CUP» y «6400.00 USD» (lib/ui/historial_ventas
+      // .dart:472-475 sobre total ?? precio × cantidad).
+      // Con precio_total ambas ventas valían 0 y este test,
+      // titulado «Historial de ventas», jamás veía un
+      // importe: un defecto de valoración pasaba verde.
+      expect(find.text('4500 CUP'), findsWidgets,
+          reason: 'el total CUP del día es el importe real '
+              'de la venta sembrada, no 0');
+      expect(find.text('6400.00 USD'), findsWidgets,
+          reason: 'el total USD del día es el importe real '
+              'de la venta sembrada, no 0');
       await tester.tap(find.text('Filtrar · Todos'));
       await _drenar(tester, vueltas: 6);
       expect(find.text('Moneda'), findsOneWidget);
@@ -467,6 +486,11 @@ void main() {
       expect(find.text('Creatina Monohidrato'), findsWidgets);
       expect(find.text('Proteína Suero X'), findsNothing,
           reason: 'con moneda USD la venta en CUP sale de la lista');
+      // K4-2 (refuerzo): filtrada por USD, el total CUP de
+      // la venta que salió ya no se pinta y el USD queda.
+      expect(find.text('4500 CUP'), findsNothing,
+          reason: 'el total CUP era de la venta filtrada');
+      expect(find.text('6400.00 USD'), findsWidgets);
       await _descartarDialogos(tester);
       await _cerrarCascara(tester);
     });

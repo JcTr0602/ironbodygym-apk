@@ -410,7 +410,12 @@ void main() {
         'suplemento_id': 1,
         'cliente_id': 5,
         'cantidad': 1,
-        'precio_total': 4500,
+        // Yunque 3.34 (K4-2): forma REAL del importe —
+        // total ?? precio × cantidad (lib/negocio.dart:
+        // 997-1002). precio_total no lo lee nadie: la
+        // venta valía 0 en la captura.
+        'precio': 4500,
+        'total': 4500,
         'moneda': 'CUP',
         'fecha': hoyHabanaIso(),
         'vendedor_id': 735772141,
@@ -420,7 +425,8 @@ void main() {
         'suplemento_id': 2,
         'cliente_id': 7,
         'cantidad': 2,
-        'precio_total': 6400,
+        'precio': 3200,
+        'total': 6400,
         'moneda': 'USD',
         'fecha': hoyHabanaIso(),
         'vendedor_id': 969869611,
