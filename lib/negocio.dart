@@ -3301,6 +3301,26 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   // pago_mensual/inscribir de hoy que el espejo aún no refleja
   // (descarte por op_uuid, B-03), con las mismas reglas de
   // privacidad que los recibos del espejo.
+  //
+  // Yunque 3 (K5-6): el «Cobrado por» de esta rama se resuelve
+  // a NOMBRE desde el directorio canónico (usuarios_apk →
+  // nombresCanonEntrenadores), como los demás lectores de la
+  // cola; antes salía el telegram_id numérico crudo en el
+  // recibo que se envía al cliente. Si el id no resuelve y la
+  // op es del propio teléfono, vale el nombre de la sesión; si
+  // ninguna fuente da nombre, la línea se OMITE — nunca el id.
+  final nombresCola = await nombresCanonEntrenadores();
+  String cobradoPorDe(Map<String, dynamic> op) {
+    final opTid = LocalDb.normalizarTelegramId(op['telegram_id']);
+    final delDirectorio =
+        opTid != null ? (nombresCola[opTid] ?? '') : '';
+    if (delDirectorio.isNotEmpty) return delDirectorio;
+    if (opTid != null && opTid == tid) {
+      return AuthService().displayName.trim();
+    }
+    return '';
+  }
+
   for (final op in await LocalDb.instance.pendingOpsLectura()) {
     final tipo = '${op['tipo']}';
     if (tipo != 'pago_mensual' && tipo != 'inscribir') continue;
@@ -3323,13 +3343,16 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
           fechaNegocioHabana(fechaOp) != hoy) {
         continue;
       }
+      final monto = await montoCobradoCupOp(op);
+      if (monto <= 0) continue;
+      final cobradoPor = cobradoPorDe(op);
+      final lineaCobrado =
+          cobradoPor.isEmpty ? '' : '\nCobrado por: $cobradoPor';
       final cid = (payload['cliente_id'] as num?)?.toInt() ?? 0;
       if (cid <= 0) continue;
       final c = await clienteDeRecibo(cid);
       if (!esDueno && c == null) continue;
       if (c != null && esVistaProtegida(c, esDueno: esDueno)) continue;
-      final monto = await montoCobradoCupOp(op);
-      if (monto <= 0) continue;
       final nombre = c != null ? nombreDe(c) : 'Cliente $cid';
       avisos.add({
         'tipo': 'recibo',
@@ -3341,8 +3364,8 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
         'mensaje': '*Iron Body Gym* — Recibo\n'
             'Cliente: $nombre\n'
             'Monto: ${fmtMonto(monto)} CUP\n'
-            'Fecha: $hoy\n'
-            'Cobrado por: ${op['telegram_id'] ?? ''}$lineaMensajeAutomatico'
+            'Fecha: $hoy'
+            '$lineaCobrado$lineaMensajeAutomatico'
                 .trim(),
       });
     } catch (_) {}

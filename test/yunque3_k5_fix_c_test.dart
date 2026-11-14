@@ -26,13 +26,42 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/mediciones_cliente.dart';
-import 'package:ironbody_gym/negocio.dart' show sanitizarTelefono;
+import 'package:ironbody_gym/negocio.dart';
+import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/plus_reportes.dart';
 import 'package:ironbody_gym/ui/buscar.dart';
 import 'package:ironbody_gym/ui/mi_turno.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+int _seq = 3300;
+
+Future<void> _espejo(
+    Database db, String tabla, int id, Map<String, dynamic> data) async {
+  await db.insert(tabla, {
+    'id': id,
+    'data': jsonEncode(data),
+    'sync_seq': _seq++,
+  });
+}
+
+Future<void> _opCola(Database db,
+    {required String uuid,
+    required String tipo,
+    required Map<String, dynamic> payload,
+    int? telegramId,
+    String estado = 'pendiente'}) async {
+  await db.insert('ops_queue', {
+    'op_uuid': uuid,
+    'tipo': tipo,
+    'payload': jsonEncode(payload),
+    'estado': estado,
+    'creada_ts': isoHabana(ahoraHabana()),
+    'telegram_id': telegramId,
+  });
+}
 
 Future<Database> _abrirDbVacia() async {
   sqfliteFfiInit();
@@ -50,6 +79,13 @@ Future<Database> _abrirDbVacia() async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    SharedPreferences.setMockInitialValues({});
+    try {
+      await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    } catch (_) {}
+  });
   group('K5-1 · Mis vencimientos sin Casa ni protegidos', () {
     const hoy = '2026-11-14';
     const limite = '2026-11-21';
@@ -293,4 +329,56 @@ void main() {
               'predicado (K5-8)');
     });
   });
+
+  group('K5-6 · el recibo desde la cola nombra al cobrador, '
+      'no su id numérico', () {
+    test('pago_mensual en cola: «Cobrado por: <nombre>» desde '
+        'usuarios_apk; sin nombre resoluble, la línea se omite',
+        () async {
+      final db = await _abrirDbVacia();
+      final hoy = hoyHabanaIso();
+      final futuro = DateTime.parse(hoy)
+          .add(const Duration(days: 10))
+          .toIso8601String()
+          .substring(0, 10);
+      await LocalDb.instance.setMeta(
+          'usuarios_apk',
+          jsonEncode([
+            {'telegram_id': 222222, 'nombre': 'Gabriel'},
+          ]));
+      for (final id in [31, 32]) {
+        await _espejo(db, 'clientes', id, {
+          'id': id,
+          'nombre': 'Cliente $id',
+          'telefono': '581900$id',
+          'estado': 'activo',
+          'pagado_hasta': futuro,
+        });
+        await _opCola(db,
+            uuid: 'op-recibo-k56-$id',
+            tipo: 'pago_mensual',
+            payload: {
+              'cliente_id': id,
+              'monto': 2000,
+              'metodo': 'efectivo',
+              'fecha': hoy,
+            },
+            telegramId: id == 31 ? 222222 : 999999);
+      }
+      final avisos = await avisosWhatsappHoy();
+      final r31 = avisos.singleWhere(
+          (a) => a['tipo'] == 'recibo' && a['cliente_id'] == 31);
+      expect('${r31['mensaje']}', contains('Cobrado por: Gabriel'),
+          reason: 'el recibo que sale al cliente lleva el NOMBRE '
+              'del cobrador, como el de la rama del espejo');
+      expect('${r31['mensaje']}', isNot(contains('222222')));
+      final r32 = avisos.singleWhere(
+          (a) => a['tipo'] == 'recibo' && a['cliente_id'] == 32);
+      expect('${r32['mensaje']}', isNot(contains('999999')),
+          reason: 'sin fuente de nombre, jamás el id crudo');
+      expect('${r32['mensaje']}', isNot(contains('Cobrado por')),
+          reason: 'sin nombre resoluble la línea se omite');
+    });
+  });
+
 }
