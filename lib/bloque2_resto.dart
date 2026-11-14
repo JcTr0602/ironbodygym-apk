@@ -57,6 +57,7 @@ import 'negocio.dart'
         esPagoDiarioEfectivo,
         fechaNacDeCarnet,
         ventasSuplementosCup,
+        esFiadoPendienteVenta,
         totalVentaCup;
 import 'invitados.dart' as invitados_svc;
 import 'sync.dart' show SyncEngine;
@@ -539,8 +540,10 @@ FilaIngreso? filaIngresoDesdeEspejo(
       // D2-09: moneda normalizada — 'usd' antes entraba como CUP.
       if (LocalDb.monedaDe(r) == 'USD') return null;
       // 1.15 (Panel A3): una venta fiada no es ingreso hasta saldarse.
-      if ((r['es_fiado'] as num?)?.toInt() == 1 &&
-          (r['fiado_saldado'] as num?)?.toInt() != 1) return null;
+      // Yunque 3 (K2-1): con el predicado tolerante de la
+      // casa — el cast estricto explotaba con es_fiado en
+      // bool (la forma que E-1 legitimó) y moría el reporte.
+      if (esFiadoPendienteVenta(r)) return null;
       final monto = (r['total'] as num?)?.toDouble() ??
           ((r['precio'] as num?)?.toDouble() ?? 0) *
               ((r['cantidad'] as num?)?.toDouble() ?? 0);
