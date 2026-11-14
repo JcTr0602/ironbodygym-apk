@@ -253,7 +253,14 @@ class LocalDb {
   /// sync): el diario de sincronizaciones (sync_corridas,
   /// sync_corrida_tablas, sync_corrida_ops). El paso oldV<73
   /// llama al MISMO método que onCreate (idempotente).
-  static const int versionActual = 74;
+  /// v75 (1.34, carril datos): sin tablas ni columnas nuevas —
+  /// el paso oldV<75 es la GARANTÍA de los 4 índices del espejo
+  /// `pagos` vía [_crearIndicesPagosSiExiste] (que desde v75
+  /// también crea `idx_pagos_metodo`): la garantía nació
+  /// repartida (v26 creó tres; el de metodo llegó por
+  /// _crearTablasBloque3 en v43/v70) y ningún paso la aseguraba
+  /// entera a una BD que hubiera perdido un índice.
+  static const int versionActual = 75;
 
   /// v37: marcas de información pública pendiente de republicar,
   /// UNA FILA POR CLAVE (compartido entre onCreate y la migración
@@ -1830,6 +1837,16 @@ class LocalDb {
           // 0). MISMO método que onCreate (que siembra '0').
           await _sembrarWatermarksAp2(db);
         }
+        // v75 (1.34, carril datos): garantía de los índices del
+        // espejo `pagos`. Sin tablas ni columnas nuevas: el paso
+        // llama al método compartido que crea los CUATRO índices
+        // (IF NOT EXISTS) para que cualquier BD que aterrice en
+        // v75 los tenga todos, venga de donde venga — hasta hoy
+        // la garantía estaba repartida entre el paso v26 (tres
+        // índices) y _crearTablasBloque3 vía v70 (el de metodo).
+        if (oldV < 75) {
+          await _crearIndicesPagosSiExiste(db);
+        }
       },
     );
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
@@ -2667,6 +2684,14 @@ class LocalDb {
   /// tabla existe. Tolerante como [_addColumnIfMissing]: el onUpgrade
   /// no debe reventar en BDs mínimas (tests) donde el espejo nunca se
   /// creó.
+  ///
+  /// 1.34 (v75, carril datos): desde v75 este es el ÚNICO punto que
+  /// garantiza los CUATRO índices (fecha, cliente, telegram y
+  /// metodo). El de `metodo` nació en _crearTablasBloque3 (v43) y
+  /// llegaba a las BD viejas solo por el paso que llama a ese
+  /// bloque (v70); incluirlo aquí no cambia el esquema resultante
+  /// (CREATE INDEX IF NOT EXISTS, mismo SQL) pero deja la garantía
+  /// entera en un solo método, que llaman el paso v26 y el paso v75.
   static Future<void> _crearIndicesPagosSiExiste(Database db) async {
     try {
       final t = await db.rawQuery(
@@ -2678,6 +2703,8 @@ class LocalDb {
           'CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id, fecha)');
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_pagos_metodo ON pagos(metodo)');
     } catch (_) {}
   }
 

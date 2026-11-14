@@ -107,12 +107,12 @@ void main() {
     await _borrar(_dbB);
   });
 
-  test('v72 sembrada → v74: sin pérdida, watermarks AP-2 y '
+  test('v72 sembrada → v75: sin pérdida, watermarks AP-2 y '
       'paridad total de esquema', () async {
     // ---------- Fase 1: semilla con forma de producción ----------
     var db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 74,
-        reason: 'el candidato abre en v74 antes de degradar');
+    expect(await db.getVersion(), 75,
+        reason: 'el candidato abre en v75 antes de degradar');
 
     // Espejos con datos (uno con foto referenciada).
     await LocalDb.instance.upsertMirror('clientes', 501, {
@@ -200,7 +200,7 @@ void main() {
 
     // ---------- Fase 3: reapertura con el candidato ----------
     db = await LocalDb.instance.db;
-    expect(await db.getVersion(), 74,
+    expect(await db.getVersion(), 75,
         reason: 'la migración deja la BD en la versión del '
             'candidato');
 
@@ -276,7 +276,7 @@ void main() {
     LocalDb.nombreArchivoDbForzado = _dbB;
     await LocalDb.resetParaTest();
     final dbFresca = await LocalDb.instance.db;
-    expect(await dbFresca.getVersion(), 74);
+    expect(await dbFresca.getVersion(), 75);
     final esquemaFresca = await _esquemaCanonico(dbFresca);
     expect(esquemaUpgradeda.keys.toSet(), esquemaFresca.keys.toSet(),
         reason: 'mismas tablas por ambos caminos');

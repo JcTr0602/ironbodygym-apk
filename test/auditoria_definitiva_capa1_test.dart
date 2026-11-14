@@ -454,7 +454,7 @@ void main() {
       // 1.32 (integración): la columna de v71 sigue naciendo
       // en el esquema limpio; la versión vigente es 74
       // (v72 sync_error/cuarentena, v73 diario, v74 AP-2).
-      expect(LocalDb.versionActual, 74);
+      expect(LocalDb.versionActual, 75);
     });
   });
 
