@@ -1571,7 +1571,14 @@ class SyncEngine {
     var r = await hacer(_auth.session?.accessToken ?? '');
     if (r.statusCode != 401) return r;
     try {
-      final res = await Supabase.instance.client.auth.refreshSession();
+      // Yunque 1.34 (C3-1): timeout — era la ÚNICA llamada de
+      // red del motor sin él; un refresco colgado (red hostil
+      // que acepta y no responde) dejaba la corrida pegada
+      // para siempre con el candado renovándose. El catch de
+      // abajo ya devuelve la respuesta original ante el fallo.
+      final res = await Supabase.instance.client.auth
+          .refreshSession()
+          .timeout(const Duration(seconds: 20));
       final nuevo = res.session?.accessToken ?? '';
       if (nuevo.isEmpty) return r;
       r = await hacer(nuevo);
@@ -2461,7 +2468,17 @@ class SyncEngine {
           for (final c in clavesTxt.split(','))
             if (c.isNotEmpty) c,
       ];
-      if (claves.isEmpty) {
+      if (claves.isEmpty &&
+          errorPierna == 'bajada' &&
+          (errorCodigo == 'bajada_incompleta' ||
+              !codigoErrorSyncConFraseCompleta(errorCodigo))) {
+        // Yunque 1.34 (SYNC-11): la sustitución por el rojo
+        // vigente SOLO vale para errores de bajada cuya
+        // composición puede nombrar tablas. Antes corría para
+        // cualquier código/pierna y le colgaba a un error de
+        // sesión o de espejo las tablas rojas de OTRA corrida
+        // (dato mentiroso en SyncDetalle, aunque la frase
+        // completa blindara el texto visible).
         claves.addAll(await _clavesTablasBajadaEnRojo());
       }
       errorTablas = [for (final c in claves) nombreAmigableTabla(c)];
@@ -6739,7 +6756,12 @@ class SyncEngine {
     if (ses == null) return false;
     if (!ses.isExpired) return true;
     try {
-      final res = await Supabase.instance.client.auth.refreshSession();
+      // Yunque 1.34 (C3-1): timeout como en _reqAuth — el
+      // TimeoutException cae en el catch genérico y queda
+      // marcado como transporte, jamás como sesión muerta.
+      final res = await Supabase.instance.client.auth
+          .refreshSession()
+          .timeout(const Duration(seconds: 20));
       // El servidor respondió: si concedió sesión, el token
       // vale (su juicio manda sobre el reloj del teléfono).
       return res.session != null;
@@ -8964,7 +8986,13 @@ class SyncEngine {
       if (concluyentes > 0) {
         await _db.setMeta(
             'manifiesto_chequeo_en', isoHabana(ahoraHabana()));
-        if (corridaCompleta) {
+        // Yunque 1.34 (C3-2): la pasada solo sella COMPLETA
+        // si TODAS las tablas concluyeron; con alguna
+        // sin_verificar (corte de presupuesto/transporte) la
+        // fecha de completa NO avanza — Salud no la presenta
+        // como completa ni la política semanal se da por
+        // servida durante 7 días con tablas sin comprobar.
+        if (corridaCompleta && sinVerificar.isEmpty) {
           await _db.setMeta(
               'manifiesto_completa_en', isoHabana(ahoraHabana()));
         }

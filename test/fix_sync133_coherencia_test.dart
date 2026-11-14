@@ -438,6 +438,63 @@ void main() {
     });
   });
 
+  group('2b · SYNC-11 (Yunque 1.34): la sustitución de '
+      'tablas solo vale para bajada que puede nombrarlas', () {
+    test('error de SESIÓN con rojo ajeno vigente: detalle() '
+        'NO le cuelga las tablas de otra corrida', () async {
+      final db = LocalDb.instance;
+      await db.setMeta('last_sync_error', 'sesion_invalida');
+      await db.setMeta('last_sync_error_pierna', 'sesion');
+      await db.setMeta(
+          'last_sync_error_ts', '2026-11-12T17:05:00.000Z');
+      // El rojo de una corrida de bajada ANTERIOR sigue
+      // vigente al leer: es el escenario «ajeno» de SYNC-11.
+      await db.setMeta('wm_err_pagos', _wmErrClientes);
+      final det = await SyncEngine.instance.detalle();
+      expect(det.errorCodigo, 'sesion_invalida');
+      expect(det.errorTablas, isEmpty);
+      expect(det.error, contains('La sesión no es válida'));
+      expect(det.error, isNot(contains('pagos')));
+    });
+
+    test('espejo_vacio (frase completa, pierna bajada): '
+        'tampoco sustituye', () async {
+      final db = LocalDb.instance;
+      await db.setMeta('last_sync_error', 'espejo_vacio');
+      await db.setMeta('last_sync_error_pierna', 'bajada');
+      await db.setMeta('wm_err_pagos', _wmErrClientes);
+      final det = await SyncEngine.instance.detalle();
+      expect(det.errorCodigo, 'espejo_vacio');
+      expect(det.errorTablas, isEmpty);
+    });
+
+    test('bajada_incompleta SIN tablas guardadas: la '
+        'sustitución legítima se conserva (recupera el rojo '
+        'de su propia corrida)', () async {
+      final db = LocalDb.instance;
+      await db.setMeta('last_sync_error', 'bajada_incompleta');
+      await db.setMeta('last_sync_error_pierna', 'bajada');
+      await db.setMeta('wm_err_pagos', _wmErrClientes);
+      final det = await SyncEngine.instance.detalle();
+      expect(det.errorCodigo, 'bajada_incompleta');
+      expect(det.errorTablas, contains('pagos'));
+      expect(det.error, contains('pagos'));
+    });
+
+    test('código clasificado de bajada sin tablas: la '
+        'sustitución se conserva', () async {
+      final db = LocalDb.instance;
+      await db.setMeta('last_sync_error', 'sin_conexion');
+      await db.setMeta('last_sync_error_pierna', 'bajada');
+      // Sin last_sync_error_tablas: el escritor no dejó
+      // tablas y el rojo vigente es el de esta corrida.
+      await db.setMeta('wm_err_clientes', _wmErrClientes);
+      final det = await SyncEngine.instance.detalle();
+      expect(det.errorCodigo, 'sin_conexion');
+      expect(det.errorTablas, contains('clientes'));
+    });
+  });
+
   group('3 · la foto del motor incorpora el error '
       'persistido (píldora)', () {
     test('con la bajada rota persistida, la foto NO nace '

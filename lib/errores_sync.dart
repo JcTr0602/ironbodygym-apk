@@ -669,6 +669,15 @@ bool esCodigoErrorSync(String v) => codigosErrorSyncConocidos.contains(v);
 /// sentencia entera (son los textos que el motor fijaba
 /// hasta la 1.32 como mensaje de la rama; la pantalla los
 /// pinta tal cual, sin marco de pierna encima).
+/// ¿El código tiene frase completa propia en
+/// [textoErrorCorridaPersistido]? Esos desenlaces ignoran la
+/// lista de tablas al componerse (la única excepción es
+/// `bajada_incompleta` CON tablas, que sí las nombra). Lo usa
+/// `detalle()` del motor (Yunque 1.34, SYNC-11) para no
+/// sustituir tablas ajenas en códigos que jamás las nombran.
+bool codigoErrorSyncConFraseCompleta(String codigo) =>
+    _frasesCompletasErrorSync.containsKey(codigo);
+
 const Map<String, String> _frasesCompletasErrorSync = {
   // La misma sentencia que SyncEngine.mensajeSesionInvalida
   // (allí vive la constante que comparten el sello de

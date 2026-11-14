@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../diario_sync.dart';
+import '../errores_sync.dart';
 import '../sync.dart';
 import '../tiempo.dart';
 import '../vigilancia_sync.dart';
@@ -551,7 +552,14 @@ class _DetalleCorridaSyncScreenState
                       if (c.errorDetalle != null) ...[
                         const SizedBox(height: 6),
                         Text(
-                          c.errorDetalle!,
+                          // Yunque 1.34 (C3-3): el errorDetalle
+                          // del Diario es FORENSE (SYNC-04): si
+                          // parece excepción cruda se traduce
+                          // con el traductor de la casa, como ya
+                          // hace detalle(); jamás verbatim.
+                          pareceTextoTecnicoCrudo(c.errorDetalle!)
+                              ? describirErrorCorrida(c.errorDetalle!)
+                              : c.errorDetalle!,
                           style: AppTexto.minuscula.copyWith(
                               color: AppColores.textoSecundario(
                                   context)),
