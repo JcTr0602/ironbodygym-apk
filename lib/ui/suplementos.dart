@@ -232,8 +232,39 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     await _cargarReservasPendientes();
   }
 
+  // 1.34 Campo 2 (P-5, disciplina D-08): derivados
+  // memoizados. Antes _filtrados y _topProductos eran
+  // getters que filtraban/ordenaban/construían el mapa
+  // del catálogo EN CADA BUILD (varias veces por build:
+  // cuerpo, conteos y «Más vendidos»). Ahora se calculan
+  // solo cuando cambia una entrada (la lista cargada, la
+  // búsqueda o los filtros, por identidad/valor).
+  List<Map<String, dynamic>>? _filtradosMemo;
+  int? _filtradosClave;
+  List<Map<String, dynamic>>? _topMemo;
+  int? _topClave;
+
+  int get _claveDerivados => Object.hash(
+      identityHashCode(_items),
+      identityHashCode(_categorias),
+      identityHashCode(_topIds),
+      _busqueda,
+      _filtroCategoria,
+      _filtroStock,
+      _esDueno);
+
   /// v1.2.1: productos del top visibles (sin búsqueda ni filtro).
   List<Map<String, dynamic>> get _topProductos {
+    final clave = _claveDerivados;
+    final memo = _topMemo;
+    if (memo != null && _topClave == clave) return memo;
+    final res = _topProductosCalculado();
+    _topMemo = res;
+    _topClave = clave;
+    return res;
+  }
+
+  List<Map<String, dynamic>> _topProductosCalculado() {
     if (_busqueda.isNotEmpty ||
         _filtroCategoria != null ||
         _filtroStock != 'todos' ||
@@ -263,6 +294,16 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   }
 
   List<Map<String, dynamic>> get _filtrados {
+    final clave = _claveDerivados;
+    final memo = _filtradosMemo;
+    if (memo != null && _filtradosClave == clave) return memo;
+    final res = _filtradosCalculado();
+    _filtradosMemo = res;
+    _filtradosClave = clave;
+    return res;
+  }
+
+  List<Map<String, dynamic>> _filtradosCalculado() {
     var res = _items;
     // v1.2.1: filtro por categoría
     if (_filtroCategoria != null) {

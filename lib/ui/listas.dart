@@ -187,6 +187,30 @@ class _ListasScreenState extends State<ListasScreen>
   // 1.25 T116 (F1-26): cuándo se avisó a cada vigente,
   // para el chip de texto de la fila.
   Map<int, DateTime> _avisadoEl = {};
+  // 1.34 Campo 2 (P-5): conteos de avisados por pestaña
+  // MEMOIZADOS. Antes cada _lista() del build copiaba su
+  // lista ([...rows, ...?cola]) y la escaneaba O(n) contra
+  // _avisados — ×5 pestañas en cada reconstrucción. Ahora
+  // se calculan al recalcular los visibles y al marcar/
+  // desmarcar un aviso (las dos únicas mutaciones).
+  int _avisHoy = 0;
+  int _avisPorVencer = 0;
+  int _avisMenos30 = 0;
+  int _avisMas30 = 0;
+  int _avisAlDia = 0;
+
+  int _contarAvisados(List<Map<String, dynamic>> l) => l
+      .where((c) => _avisados.contains((c['id'] as num?)?.toInt() ?? 0))
+      .length;
+
+  void _refrescarConteosAvisados() {
+    _avisHoy = _contarAvisados(_visHoy);
+    _avisPorVencer = _contarAvisados(_visPorVencer);
+    _avisMenos30 =
+        _contarAvisados(_visMenos30) + _contarAvisados(_visSinFecha);
+    _avisMas30 = _contarAvisados(_visMas30);
+    _avisAlDia = _contarAvisados(_visAlDia);
+  }
   // 1.25 T116 (F1-24): hasta que el usuario elija orden a
   // mano, cada pestaña usa SU defecto (urgencia en las de
   // trabajo, nombre en «Al día»).
@@ -263,6 +287,9 @@ class _ListasScreenState extends State<ListasScreen>
     // peso al «≈ por cobrar» de su propia pestaña.
     _estimadoMenos30 = _estimadoDe([..._visMenos30, ..._visSinFecha]);
     _estimadoMas30 = _estimadoDe(_visMas30);
+    // P-5: los conteos de avisados se fijan aquí, no en
+    // cada build de _lista().
+    _refrescarConteosAvisados();
   }
 
   @override
@@ -859,6 +886,7 @@ class _ListasScreenState extends State<ListasScreen>
               children: [
                 _lista(_visHoy, Icons.celebration_rounded,
                     'Nadie vence hoy', 'Todo al día.',
+                    avisadosPre: _avisHoy,
                     ilustracionVacio: 'assets/vacio_reloj.webp'),
                 // 1.25 T116 (F1-25): fuera la celebración
                 // en pestañas de deuda y en «Por vencer»:
@@ -866,13 +894,15 @@ class _ListasScreenState extends State<ListasScreen>
                 // siguiente (ir a «Al día»).
                 _lista(_visPorVencer,
                     Icons.check_circle_rounded, 'Nadie por vencer',
-                    'Nada en los próximos 3 días.'),
+                    'Nada en los próximos 3 días.',
+                    avisadosPre: _avisPorVencer),
                 _lista(_visMenos30,
                     Icons.check_circle_rounded, 'Sin atrasados',
                     'Nada de menos de un mes.',
                     esColaCobro: true,
                     estimado: _estimadoMenos30,
                     cola: _visSinFecha,
+                    avisadosPre: _avisMenos30,
                     tituloCola: 'Sin fecha de vencimiento',
                     textoAccionVacio: 'Ver «Al día»',
                     onAccionVacio: () => _tab.animateTo(4)),
@@ -881,11 +911,13 @@ class _ListasScreenState extends State<ListasScreen>
                     'Nada de más de un mes.',
                     esColaCobro: true,
                     estimado: _estimadoMas30,
+                    avisadosPre: _avisMas30,
                     textoAccionVacio: 'Ver «Al día»',
                     onAccionVacio: () => _tab.animateTo(4)),
                 _lista(_visAlDia, // v1.2.1
                     Icons.check_circle_rounded, 'Nadie al día',
-                    'Todos los activos están vencidos.'),
+                    'Todos los activos están vencidos.',
+                    avisadosPre: _avisAlDia),
               ],
             ),
           ),
@@ -1019,6 +1051,7 @@ class _ListasScreenState extends State<ListasScreen>
     setState(() {
       _avisados.add(id);
       _avisadoEl[id] = ahoraHabana();
+      _refrescarConteosAvisados();
     });
     Map<String, dynamic>? siguiente;
     var idxSiguiente = -1;
@@ -1062,6 +1095,10 @@ class _ListasScreenState extends State<ListasScreen>
       String? ilustracionVacio,
       double estimado = 0,
       List<Map<String, dynamic>>? cola,
+      // 1.34 Campo 2 (P-5): conteo de avisados memoizado
+      // por la pantalla (ver _refrescarConteosAvisados);
+      // sin él se cae al escaneo de siempre.
+      int? avisadosPre,
       String? tituloCola,
       // 1.25 T116 (F1-25): acción del vacío (p. ej. ir a
       // «Al día» desde un «Sin atrasados»).
@@ -1120,9 +1157,12 @@ class _ListasScreenState extends State<ListasScreen>
     // cuando ya hay alguien avisado (la sesión empezó);
     // sin avisos, la lista queda como siempre.
     final totalLista = rows.length + (cola?.length ?? 0);
-    final avisadosLista = [...rows, ...?cola]
-        .where((c) => _avisados.contains((c['id'] as int?) ?? 0))
-        .length;
+    // P-5: el conteo llega memoizado; el escaneo queda
+    // solo como respaldo si un llamador no lo pasa.
+    final avisadosLista = avisadosPre ??
+        [...rows, ...?cola]
+            .where((c) => _avisados.contains((c['id'] as int?) ?? 0))
+            .length;
     final lista = RefrescoIron(
       onRefresh: _cargar,
       child: ListView.separated(
@@ -1234,7 +1274,10 @@ class _ListasScreenState extends State<ListasScreen>
                               .desmarcarAvisado(id);
                           if (mounted) {
                             mostrarSnack(context, 'Marca de avisado quitada para ${c['nombre']}', significado: SignificadoChip.exito);
-                            setState(() => _avisados.remove(id));
+                            setState(() {
+                              _avisados.remove(id);
+                              _refrescarConteosAvisados();
+                            });
                           }
                         } else {
                           await _avisarEnCadena(listaCadena, iCadena);

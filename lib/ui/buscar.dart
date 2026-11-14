@@ -961,6 +961,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       ),
       child: FilaCliente(
         cliente: c,
+        diasRestantesPre: diasFila,
         enPausa: cidFila != null &&
             _pausados.contains(cidFila),
         origenHero: 'buscar',
@@ -1741,9 +1742,15 @@ class FilaCliente extends StatelessWidget {
   /// conjunto): la fila dice pausa, no vencido.
   final bool enPausa;
 
+  /// 1.34 Campo 2 (P-5): días restantes ya calculados
+  /// por el llamador (el directorio los calcula para el
+  /// deslizamiento): la fila no los recalcula en su build.
+  final int? diasRestantesPre;
+
   const FilaCliente(
       {super.key,
       required this.cliente,
+      this.diasRestantesPre,
       this.enPausa = false,
       this.onTap,
       this.onLongPress,
@@ -1763,6 +1770,7 @@ class FilaCliente extends StatelessWidget {
   Widget build(BuildContext context) => _FilaCliente(
       key: ValueKey(cliente['id']),
       cliente: cliente,
+      diasRestantesPre: diasRestantesPre,
       enPausa: enPausa,
       onTap: onTap,
       onLongPress: onLongPress,
@@ -1784,6 +1792,7 @@ class _FilaCliente extends StatefulWidget {
   /// aprobada en curso (conjunto del directorio): su chip y
   /// su anillo dicen pausa, no vencido.
   final bool enPausa;
+  final int? diasRestantesPre;
   final Map<String, dynamic> cliente;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -1802,6 +1811,7 @@ class _FilaCliente extends StatefulWidget {
   const _FilaCliente(
       {super.key,
       required this.cliente,
+      this.diasRestantesPre,
       this.enPausa = false,
       this.onTap,
       this.onLongPress,
@@ -1913,7 +1923,9 @@ class _FilaClienteState extends State<_FilaCliente> {
   Widget build(BuildContext context) {
     final c = widget.cliente;
     final ph = c['pagado_hasta'] as String?;
-    final d = diasRestantes(ph);
+    // P-5: una sola vez por fila — si el directorio ya lo
+    // calculó para el deslizamiento, se reutiliza.
+    final d = widget.diasRestantesPre ?? diasRestantes(ph);
     // Iniciales para el placeholder (ej: "Juan Pérez" -> "JP")
     // 1.28 (M4-A9/R3M4-H10): nombre visible de la casa — una
     // fila sin nombre se pinta «Sin nombre», no «null».
