@@ -17,13 +17,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import 'ajustes.dart';
+import 'app_bar.dart';
 import 'auditoria.dart';
 import 'auditoria_persona.dart';
 import 'auditoria_silenciosa.dart';
 import 'avisos_entrenador.dart';
 import 'bandeja.dart';
+import 'buscar.dart';
 import 'categorias_suplemento.dart';
 import 'centro_compras.dart';
 import 'centro_control.dart';
@@ -333,10 +336,18 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
 
   Widget _filaCliente(Map<String, dynamic> c) {
     final id = (c['id'] as num?)?.toInt() ?? 0;
-    return ListTile(
-      leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
-      title: Text('${c['nombre'] ?? ''}'),
-      subtitle: Text('${c['telefono'] ?? ''}'),
+    // 1.35 (UI-05): la fila del directorio (foto, chip de
+    // estado) en vez del ListTile pelado: el estado del
+    // cliente se decide en el propio resultado. La línea
+    // de contacto solo desambigua cuando la vista no es
+    // protegida (la regla de FilaCliente: un protegido
+    // nunca filtra su contacto a un no-dueño). La acción
+    // directa de WhatsApp NO se duplica aquí: su regla
+    // entera (pausa, Casa, mensaje) vive en Buscar y la
+    // fila abre la ficha, donde la acción existe.
+    return FilaCliente(
+      cliente: c,
+      desambiguar: !esVistaProtegida(c, esDueno: _auth.isOwner),
       onTap: id > 0 ? () => _abrirCliente(id) : null,
     );
   }
@@ -351,7 +362,9 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
         ? buscarFuncionesPanel(_consulta)
         : const <FuncionPanel>[];
     return Scaffold(
-      appBar: AppBar(title: const Text('Buscar en el gym')),
+      // 1.35 (UI-05): la cabecera de la casa, no un AppBar
+      // crudo.
+      appBar: appBarIron(context, 'Buscar en el gym'),
       body: Column(
         children: [
           Padding(
