@@ -26,6 +26,7 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'comparativa_entrenadores.dart';
 import 'ficha.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 
@@ -320,8 +321,8 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
           ),
           Expanded(
             child: _cargando
-                ? const Center(
-                    child: CircularProgressIndicator())
+                // 1.35 (UI-09): esqueleto de ficha.
+                ? const SkeletonFicha()
                 : RefrescoIron(
                     onRefresh: _cargar,
                     child: ListView(

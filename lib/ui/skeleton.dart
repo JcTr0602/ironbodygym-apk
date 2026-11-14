@@ -2,6 +2,11 @@
 ///
 /// Formas cercanas al contenido real, en carbón/naranja.
 /// Respetan "reducir movimiento" (sin animación si está activo).
+///
+/// REGLA DE LA CASA (1.35, UI-09): una pantalla COMPLETA
+/// carga con el esqueleto de su forma (lista, ficha,
+/// panel…); el spinner queda solo dentro de botones y
+/// acciones puntuales, nunca como cuerpo de una pantalla.
 library;
 import 'dart:math' as math;
 

@@ -13,6 +13,7 @@ import '../sync.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 
@@ -190,8 +191,8 @@ class _CategoriasSuplementoScreenState
           const SyncBanner(compact: true),
           Expanded(
             child: _cargando
-                ? const Center(
-                    child: CircularProgressIndicator())
+                // 1.35 (UI-09): esqueleto de lista.
+                ? const SkeletonLista(items: 4)
                 : _items.isEmpty
                     ? const EstadoVacio(
                         icono: Icons.category_rounded,

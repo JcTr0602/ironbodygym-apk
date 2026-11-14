@@ -15,6 +15,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 
@@ -171,8 +172,8 @@ class _AvisosEntrenadorScreenState
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColores.naranja));
+      // 1.35 (UI-09): esqueleto de lista.
+      return const SkeletonLista(items: 4);
     }
     if (_avisos.isEmpty) {
       // 1.23 B7: vacío compartido del sistema.

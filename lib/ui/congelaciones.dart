@@ -25,6 +25,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 
 String _fmtF(DateTime? d) {
   if (d == null) return '—';
@@ -303,7 +304,9 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Congelaciones'),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator())
+          // 1.35 (UI-09): esqueleto con la forma de la
+          // pantalla, no spinner en pantalla vacía.
+          ? const SkeletonLista(items: 4)
           : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
