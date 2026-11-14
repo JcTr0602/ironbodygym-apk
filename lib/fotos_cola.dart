@@ -1994,7 +1994,47 @@ class FotosColaService {
             "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)"
         "${puedeOriginal ? '' : " AND (tipo != 'original' OR forzar_qos = 1$excepcionPequena)"}",
         [ahoraEpoch]);
-    return (r.first['n'] as int? ?? 0);
+    var n = r.first['n'] as int? ?? 0;
+    if (!puedeOriginal && opsPendientesNoFoto == 0) {
+      // Yunque 4 (L4-3): procesarCola reclama por vía
+      // inmediata DOS casos que la excepción SQL no ve —
+      // la 'original' ya en Storage (storage_path
+      // persistido: solo falta vincular, sin importar el
+      // tamaño) y la TUS reanudada cuyo tramo RESTANTE
+      // cabe en el umbral (la meta tus_offset_<op>_original
+      // que el propio procesarCola lee). Sin contarlas, el
+      // FGS no arrancaba o se detenía por «terminado» con
+      // trabajo completable en ese mismo ciclo.
+      final cand = await db.rawQuery(
+          "SELECT op_uuid, tamano_bytes, storage_path FROM fotos_cola "
+          "WHERE estado = 'pendiente' AND intentos < 5 "
+          "AND tipo = 'original' AND COALESCE(forzar_qos, 0) != 1 "
+          "AND (tamano_bytes IS NULL OR tamano_bytes > 524288) "
+          "AND (proximo_intento_en IS NULL OR "
+          "COALESCE(CAST(strftime('%s', proximo_intento_en) AS INTEGER), 0) <= ?)",
+          [ahoraEpoch]);
+      for (final f in cand) {
+        final sp = f['storage_path'] as String?;
+        if (sp != null && sp.isNotEmpty) {
+          n++;
+          continue;
+        }
+        final opUuid = f['op_uuid'] as String?;
+        final tamano = (f['tamano_bytes'] as num?)?.toInt() ?? 0;
+        if (opUuid == null || opUuid.isEmpty || tamano <= 0) {
+          continue;
+        }
+        final offset = int.tryParse(await LocalDb.instance
+                .getMeta('tus_offset_${opUuid}_original') ?? '') ??
+            0;
+        if (offset > 0) {
+          var restantes = tamano - offset;
+          if (restantes < 0) restantes = 0;
+          if (restantes > 0 && restantes <= 524288) n++;
+        }
+      }
+    }
+    return n;
   }
 
   /// Auditoría Definitiva (B-11): filas que YA llegaron al

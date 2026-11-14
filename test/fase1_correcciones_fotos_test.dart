@@ -317,4 +317,40 @@ void main() {
             'está cerrada (Regla de Hierro) y la original '
             'pequeña vuelve a no contar');
   });
+
+  test('L4-3 (Yunque 4) · contarPendientesReclamables cuenta '
+      'la original grande ya en Storage y la TUS con el '
+      'resto dentro del umbral; la grande intacta no cuenta',
+      () async {
+    final db = await _preparar();
+    await _sembrarCliente(db, 907);
+    // (a) Grande pero ya en Storage: solo falta vincular.
+    await _sembrarOriginal(db, docs,
+        opUuid: 'op-en-storage',
+        clienteId: 907,
+        bytes: 2 * 1024 * 1024,
+        conStoragePath: true,
+        tamanoBytes: 2 * 1024 * 1024);
+    // (b) Grande con TUS reanudada: restan 100 KB.
+    await _sembrarOriginal(db, docs,
+        opUuid: 'op-tus-casi',
+        clienteId: 907,
+        bytes: 2 * 1024 * 1024,
+        tamanoBytes: 2 * 1024 * 1024);
+    await LocalDb.instance.setMeta('tus_offset_op-tus-casi_original',
+        '${2 * 1024 * 1024 - 100 * 1024}');
+    // (c) Grande intacta: la puerta QoS manda, no cuenta.
+    await _sembrarOriginal(db, docs,
+        opUuid: 'op-grande-intacta',
+        clienteId: 907,
+        bytes: 2 * 1024 * 1024,
+        tamanoBytes: 2 * 1024 * 1024);
+    expect(
+        await FotosColaService.instance
+            .contarPendientesReclamables(),
+        2,
+        reason: 'procesarCola reclamaría (a) y (b) por la '
+            'vía inmediata en este ciclo: el contador que '
+            'gobierna el FGS debe verlas');
+  });
 }

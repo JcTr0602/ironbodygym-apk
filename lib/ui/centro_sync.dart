@@ -98,6 +98,9 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   List<CorridaSync> _corridas = [];
   List<AvisoSync> _avisos = [];
   Map<String, int> _locales = {};
+  // Yunque 4 (L4-1): lecturas de _cargar que fallaron;
+  // >0 obliga a declarar la foto parcial (ver _cargar).
+  int _lecturasFallidas = 0;
   Map<String, int>? _publicados;
   List<String> _tablasRol = [];
 
@@ -123,18 +126,31 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
     var locales = <String, int>{};
     Map<String, int>? publicados;
     var avisos = <AvisoSync>[];
+    // Yunque 4 (L4-1, espejo de R4-M3-1 de Reparar): una
+    // lectura fallida NO es un vacío — se cuenta y la
+    // pantalla lo declara en vez de afirmar «no hay
+    // corridas» o «0 en el teléfono» sobre un fallo de BD.
+    var fallidas = 0;
     try {
       corridas = await DiarioSync.instance.historial(limite: 30);
-    } catch (_) {}
+    } catch (_) {
+      fallidas++;
+    }
     try {
       locales = await DiarioSync.instance.conteosLocales(tablas);
-    } catch (_) {}
+    } catch (_) {
+      fallidas++;
+    }
     try {
       publicados = await DiarioSync.instance.conteosPublicados();
-    } catch (_) {}
+    } catch (_) {
+      fallidas++;
+    }
     try {
       avisos = await evaluarVigilanciaSync();
-    } catch (_) {}
+    } catch (_) {
+      fallidas++;
+    }
     if (!mounted) return;
     setState(() {
       _corridas = corridas;
@@ -142,8 +158,34 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
       _publicados = publicados;
       _avisos = avisos;
       _tablasRol = tablas;
+      _lecturasFallidas = fallidas;
       _cargando = false;
     });
+  }
+
+  Widget _avisoLecturasFallidas() {
+    return const Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: EdgeInsets.all(AppEspacio.md),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: AppColores.alerta),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No se pudo leer el diario completo: lo que '
+                'falta puede existir. Las cifras de abajo '
+                'son parciales.',
+                style: AppTexto.cuerpo,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _sincronizarAhora() {
@@ -187,6 +229,10 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   _tarjetaEnVivo(),
+                  if (_lecturasFallidas > 0) ...[
+                    const SizedBox(height: 16),
+                    _avisoLecturasFallidas(),
+                  ],
                   if (_avisos.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     _seccionAvisos(),
@@ -388,7 +434,11 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
         const SizedBox(height: 8),
         if (_corridas.isEmpty)
           Text(
-            'Todavía no hay corridas registradas en el diario.',
+            // L4-1: con lecturas fallidas el vacío no se
+            // afirma: puede haber corridas y no leerse.
+            _lecturasFallidas > 0
+                ? 'No se pudo leer el historial del diario.'
+                : 'Todavía no hay corridas registradas en el diario.',
             style: AppTexto.cuerpo.copyWith(
                 color: AppColores.textoSecundario(context)),
           )
@@ -481,6 +531,9 @@ class _DetalleCorridaSyncScreenState
   bool _cargando = true;
   List<CorridaTablaSync> _tablas = [];
   List<CorridaOpSync> _ops = [];
+  // Yunque 4 (L4-1): lecturas fallidas de este detalle;
+  // con alguna, el vacío no se atribuye a la corrida.
+  int _lecturasFallidas = 0;
 
   @override
   void initState() {
@@ -491,16 +544,22 @@ class _DetalleCorridaSyncScreenState
   Future<void> _cargar() async {
     var tablas = <CorridaTablaSync>[];
     var ops = <CorridaOpSync>[];
+    var fallidas = 0;
     try {
       tablas = await DiarioSync.instance.tablasDe(widget.corrida.id);
-    } catch (_) {}
+    } catch (_) {
+      fallidas++;
+    }
     try {
       ops = await DiarioSync.instance.opsDe(widget.corrida.id);
-    } catch (_) {}
+    } catch (_) {
+      fallidas++;
+    }
     if (!mounted) return;
     setState(() {
       _tablas = tablas;
       _ops = ops;
+      _lecturasFallidas = fallidas;
       _cargando = false;
     });
   }
@@ -632,7 +691,15 @@ class _DetalleCorridaSyncScreenState
                         ),
                       )),
                 ],
-                if (_tablas.isEmpty && _ops.isEmpty)
+                if (_lecturasFallidas > 0)
+                  Text(
+                    'No se pudo leer el desglose completo de '
+                    'esta corrida: lo que falta puede existir.',
+                    style: AppTexto.cuerpo.copyWith(
+                        color: AppColores.alerta),
+                  ),
+                if (_tablas.isEmpty && _ops.isEmpty &&
+                    _lecturasFallidas == 0)
                   Text(
                     'Esta corrida no dejó desglose (chequeo sin '
                     'movimientos).',

@@ -438,14 +438,20 @@ class _SyncBannerState extends State<SyncBanner>
                       color: Colors.white, size: 18),
                   label: const Text('Ver qué quedó'),
                 ),
-                TextButton(
-                  onPressed: () =>
-                      setState(() => _expandido = !_expandido),
-                  style: TextButton.styleFrom(
-                      foregroundColor: Colors.white),
-                  child: Text(
-                      _expandido ? 'Ocultar detalle' : 'Ver detalle'),
-                ),
+                // Yunque 4 (L4-2): el pie desplegable ES el
+                // lastError en memoria; con el error solo
+                // persistido (tras reiniciar la app,
+                // lastError == null) el botón alternaba un
+                // pie inexistente: no se ofrece.
+                if (s.lastError != null)
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _expandido = !_expandido),
+                    style: TextButton.styleFrom(
+                        foregroundColor: Colors.white),
+                    child: Text(
+                        _expandido ? 'Ocultar detalle' : 'Ver detalle'),
+                  ),
               ],
               pie: _expandido && s.lastError != null
                   ? Column(

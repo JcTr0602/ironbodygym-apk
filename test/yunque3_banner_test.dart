@@ -127,6 +127,19 @@ void main() {
               'hora del aviso en formato hace(...)');
     });
 
+    testWidgets('L4-2 (Yunque 4): sin lastError en memoria '
+        '(error solo persistido, el estado tras reiniciar '
+        'la app) el botón «Ver detalle» no se ofrece — su '
+        'pie no existe y alternarlo era un toque inerte',
+        (tester) async {
+      await tester.runAsync(_sembrarFotoConAviso);
+      await _montar(tester, compact: false);
+      expect(find.text('Reintentar ahora'), findsOneWidget);
+      expect(find.text('Ver detalle'), findsNothing,
+          reason: 'el pie desplegable ES el lastError; sin '
+              'él, el botón no debe existir');
+    });
+
     testWidgets('modo COMPACTO: una línea con el aviso y '
         'el icono de problema, no el check de éxito',
         (tester) async {
