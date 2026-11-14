@@ -236,7 +236,11 @@ void main() {
         'data': jsonEncode({
           'id': medicionId,
           'cliente_id': 55,
-          'fecha_medicion': '2026-11-14',
+          // Yunque 4 (L8-4): la fila espejo real trae
+          // `fecha`, no `fecha_medicion` (esa es la clave
+          // del payload de la op); el lector la expone como
+          // fecha_medicion de salida.
+          'fecha': '2026-11-14',
           'peso_kg': 90.0,
         }),
         'sync_seq': 1,
@@ -244,6 +248,9 @@ void main() {
       lista = await medicionesClienteLocal(55);
       expect(lista, hasLength(1));
       expect(lista.single['espejado'], isTrue);
+      expect(lista.single['fecha_medicion'], '2026-11-14',
+          reason: 'la forma real del espejo (fecha) debe '
+              'llegar a la lista como fecha_medicion');
     });
   });
 
@@ -386,7 +393,7 @@ void main() {
 
   group('K5-7 · el recibo de una inscripción nueva entra en la '
       'bandeja por la vía de cola', () {
-    test('op inscribir de hoy con precio_aplicado > 0: aparece '
+    test('op inscribir de hoy (mensual estándar): aparece '
         'el recibo con el nombre del payload, y dos '
         'inscripciones no comparten clave de atendido', () async {
       final db = await _abrirDbVacia();
@@ -426,6 +433,13 @@ void main() {
       for (final r in recibos) {
         expect('${r['mensaje']}', contains('Cliente: ${r['nombre']}'));
         expect('${r['mensaje']}', contains('Cobrado por: Gabriel'));
+        // Yunque 4 (L8-3): el importe también se afirma —
+        // lo calcula montoCobradoCupOp recomputando la
+        // tarifa (mensualidad), NO leyendo precio_aplicado
+        // (que el productor sí envía pero ningún consumidor
+        // de la bandeja lee).
+        expect('${r['mensaje']}',
+            contains('Monto: ${fmtMonto(2000)} CUP'));
         expect(r['telefono'], '5358112233');
       }
       final ids =
@@ -436,6 +450,60 @@ void main() {
       expect(ids.every((i) => i < 0), isTrue,
           reason: 'el provisional es negativo: no colisiona con '
               'ningún id real del servidor');
+    });
+
+    test('L8-3 (Yunque 4) · inscripción con periodo «tipo:» '
+        'entra por su `monto` (la clave que el productor '
+        'envía en ese periodo); sin `monto` vale 0 y no hay '
+        'recibo', () async {
+      final db = await _abrirDbVacia();
+      final hoy = hoyHabanaIso();
+      await LocalDb.instance.setMeta(
+          'usuarios_apk',
+          jsonEncode([
+            {'telegram_id': 222222, 'nombre': 'Gabriel'},
+          ]));
+      await _opCola(db,
+          uuid: 'op-insc-tipo-con-monto',
+          tipo: 'inscribir',
+          payload: {
+            'nombre': 'Tipo Con Monto',
+            'telefono': '58112233',
+            'periodo': 'tipo:oferta',
+            'metodo_pago': 'efectivo',
+            'monto': 1000,
+            'precio_aplicado': 1000,
+            'fecha': hoy,
+          },
+          telegramId: 222222);
+      await _opCola(db,
+          uuid: 'op-insc-tipo-sin-monto',
+          tipo: 'inscribir',
+          payload: {
+            'nombre': 'Tipo Sin Monto',
+            'telefono': '58112233',
+            'periodo': 'tipo:oferta',
+            'metodo_pago': 'efectivo',
+            'precio_aplicado': 1000,
+            'fecha': hoy,
+          },
+          telegramId: 222222);
+      final avisos = await avisosWhatsappHoy();
+      final conMonto = avisos
+          .where((a) =>
+              a['tipo'] == 'recibo' && a['nombre'] == 'Tipo Con Monto')
+          .toList();
+      expect(conMonto, hasLength(1),
+          reason: 'con `monto`, la op «tipo:» se valora y el '
+              'recibo entra en la bandeja');
+      expect('${conMonto.single['mensaje']}',
+          contains('Monto: ${fmtMonto(1000)} CUP'));
+      final sinMonto = avisos.where((a) =>
+          a['tipo'] == 'recibo' && a['nombre'] == 'Tipo Sin Monto');
+      expect(sinMonto, isEmpty,
+          reason: 'sin `monto` la op «tipo:» vale 0 aunque '
+              'traiga precio_aplicado: esa clave no la lee '
+              'ningún consumidor de la bandeja');
     });
   });
 

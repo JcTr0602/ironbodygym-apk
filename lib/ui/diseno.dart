@@ -1075,6 +1075,16 @@ class AppTema {
         labelColor:
             oscuro ? AppColores.naranja : AppColores.naranjaTexto,
       ),
+      // Yunque 4 (L8-1): sin expansionTileTheme, el chevron
+      // de los ExpansionTile EXPANDIDOS salía cobalto (el
+      // iconColor por defecto de M3 es el primary del
+      // esquema de producción) en los 12 plegables de la
+      // app. Colapsado sigue el tono secundario del texto;
+      // expandido, el naranja de marca.
+      expansionTileTheme: ExpansionTileThemeData(
+        iconColor: AppColores.naranja,
+        collapsedIconColor: secundario,
+      ),
       // Yunque 2.34 (F-3): cursor, selección y manijas de los
       // campos de texto en la marca (salían cobalto por el
       // primary de producción, como los controles de DIS-04).

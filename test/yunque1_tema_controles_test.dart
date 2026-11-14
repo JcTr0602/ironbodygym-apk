@@ -104,6 +104,16 @@ void main() {
                 : AppColores.naranjaTexto);
       });
 
+      test('L8-1 (Yunque 4): plegables — chevron expandido '
+          'en naranja, no en cobalto', () {
+        expect(t.expansionTileTheme.iconColor, AppColores.naranja);
+        expect(t.expansionTileTheme.iconColor,
+            isNot(AppColores.cobalto));
+        expect(t.expansionTileTheme.collapsedIconColor, isNotNull);
+        expect(t.expansionTileTheme.collapsedIconColor,
+            isNot(AppColores.cobalto));
+      });
+
       test('F-3: selección de texto en la marca', () {
         expect(t.textSelectionTheme.cursorColor, AppColores.naranja);
         expect(t.textSelectionTheme.selectionHandleColor,
