@@ -1908,8 +1908,11 @@ class _FilaClienteState extends State<_FilaCliente> {
     }
     if (sp == null || sp.isEmpty) return;
     // FASE DISCO 2: la caché descargada.
+    // 1.34 Campo 2 (P-3): resolución de lista — si la
+    // original no está pero su hermana ligera sí, se
+    // pinta la ligera.
     final enCache =
-        await FotoCache.instance.enCache(sp);
+        await FotoCache.instance.enCacheParaLista(sp);
     if (!mounted || _resueltoPara != sp) return;
     if (enCache != null) {
       setState(() => _foto = enCache);

@@ -120,6 +120,27 @@ DateTime Function() relojMonotonico() {
       isUtc: true);
 }
 
+/// 1.34 Campo 2 (P-3): la ruta de [ruta] con la variante
+/// [variante] (`original`, `display` o `thumb`), o null si
+/// [ruta] no es una ruta de variante reconocible. Las
+/// variantes de una foto cuelgan del mismo raíz:
+/// `clientes/<id>/<uuid>_original.jpg` ↔ `..._display.jpg`
+/// ↔ `..._thumb.jpg` (la extensión se conserva: las
+/// hermanas con otra extensión no se adivinan).
+String? rutaConVariante(String ruta, String variante) {
+  final m = RegExp(r'_(original|display|thumb)(\.[a-z0-9]+)$')
+      .firstMatch(ruta.toLowerCase());
+  if (m == null || m.group(1) == variante) return null;
+  final corte = ruta.length - m.group(0)!.length;
+  return '${ruta.substring(0, corte)}_$variante${m.group(2)}';
+}
+
+/// ¿[ruta] es una variante LIGERA (display o thumb)?
+bool esRutaVarianteLigera(String ruta) {
+  final p = ruta.toLowerCase();
+  return p.contains('_display.') || p.contains('_thumb.');
+}
+
 class ColaPrecargaFotos {
   ColaPrecargaFotos({
     required Future<File?> Function(String ruta, Duration timeout)
@@ -130,13 +151,23 @@ class ColaPrecargaFotos {
     this.ventanaAterrizaje = const Duration(minutes: 3),
     DateTime Function()? ahora,
     bool Function(String ruta)? esFalloSinCastigo,
+    String? Function(String ruta)? respaldoDe,
   })  : _descargador = descargador,
         _ahora = ahora ?? DateTime.now,
-        _esFalloSinCastigo = esFalloSinCastigo;
+        _esFalloSinCastigo = esFalloSinCastigo,
+        _respaldoDe = respaldoDe;
 
   final Future<File?> Function(String ruta, Duration timeout)
       _descargador;
   final bool Function(String ruta)? _esFalloSinCastigo;
+
+  /// 1.34 Campo 2 (P-3): ruta de RESPALDO de una ruta que
+  /// acaba de fallar (la ligera → su original). Si la hay,
+  /// la cola la encola tras registrar el fallo de la
+  /// primera: la fila acaba recibiendo la foto que exista,
+  /// y el castigo (caché negativa) queda solo sobre la
+  /// ruta que falló, nunca sobre el respaldo.
+  final String? Function(String ruta)? _respaldoDe;
   final int concurrencia;
   final Duration timeoutDescarga;
   final Duration backoffFallo;
@@ -224,8 +255,17 @@ class ColaPrecargaFotos {
     if (f != null) {
       registrarAterrizaje(ruta);
       if (!_avisos.isClosed) _avisos.add(ruta);
-    } else if (!(_esFalloSinCastigo?.call(ruta) ?? false)) {
-      _falloEn[ruta] = _ahora();
+    } else {
+      if (!(_esFalloSinCastigo?.call(ruta) ?? false)) {
+        _falloEn[ruta] = _ahora();
+      }
+      // P-3: caída al respaldo (la original de una ligera
+      // que no existe o no bajó): se encola con las reglas
+      // de siempre (deduplicación y su PROPIO backoff).
+      final respaldo = _respaldoDe?.call(ruta);
+      if (respaldo != null && respaldo != ruta) {
+        encolar([respaldo]);
+      }
     }
     return f;
   }
@@ -279,6 +319,13 @@ class FotoCache {
     // IMP-18: un fallo por 401 (JWT vencido) no entra en
     // la caché negativa de la cola.
     esFalloSinCastigo: (String ruta) => _fallo401.contains(ruta),
+    // 1.34 Campo 2 (P-3): la ligera que no existe o no
+    // baja cae a su ORIGINAL (las fotos viejas no tienen
+    // variantes: la fila no se queda sin foto por pedir
+    // primero la ligera).
+    respaldoDe: (String ruta) => esRutaVarianteLigera(ruta)
+        ? rutaConVariante(ruta, 'original')
+        : null,
     // 1.34 (FOTOS-07): la instancia de producción mide
     // sus duraciones (backoff, ventana de aterrizaje)
     // con el reloj monotónico, inmune a los saltos
@@ -286,15 +333,75 @@ class FotoCache {
     ahora: relojMonotonico(),
   );
 
+  final _avisosLista = StreamController<String>.broadcast();
+  bool _avisosConectados = false;
+
   /// Rutas cuya foto acaba de aterrizar (las filas repintan
-  /// por escucha al llegar la suya).
-  Stream<String> get aterrizajes => _colaPrecarga.aterrizajes;
+  /// por escucha al llegar la suya). 1.34 Campo 2 (P-3):
+  /// cuando aterriza una variante LIGERA pedida por una
+  /// lista, se avisa TAMBIÉN la ruta original: la fila que
+  /// pidió la original repinta y resuelve la ligera de
+  /// disco con [enCacheParaLista].
+  Stream<String> get aterrizajes {
+    if (!_avisosConectados) {
+      _avisosConectados = true;
+      _colaPrecarga.aterrizajes.listen((r) {
+        if (_avisosLista.isClosed) return;
+        _avisosLista.add(r);
+        if (esRutaVarianteLigera(r)) {
+          final orig = rutaConVariante(r, 'original');
+          if (orig != null) _avisosLista.add(orig);
+        }
+      });
+    }
+    return _avisosLista.stream;
+  }
 
   /// 1.31: pide la descarga de fondo de [rutas] para las
   /// listas (sin esperar nada: el resultado llega por
   /// [aterrizajes] y por la caché). Respeta la caché
   /// negativa y la deduplicación de la cola.
-  void precargar(Iterable<String> rutas) => _colaPrecarga.encolar(rutas);
+  /// 1.34 Campo 2 (P-3): si la ruta es la ORIGINAL de una
+  /// foto con variantes, la lista pide primero la hermana
+  /// DISPLAY (lo que un avatar de 40–56 dp necesita); si
+  /// la ligera no existe o no baja, la cola cae a la
+  /// original por su respaldo, y si la ligera está en
+  /// backoff se pide la original directamente.
+  void precargar(Iterable<String> rutas) {
+    for (final r in rutas) {
+      final ligera = r.toLowerCase().contains('_original.')
+          ? rutaConVariante(r, 'display')
+          : null;
+      if (ligera == null || _colaPrecarga.enBackoff(ligera)) {
+        _colaPrecarga.encolar([r]);
+      } else {
+        _colaPrecarga.encolar([ligera]);
+      }
+    }
+  }
+
+  /// 1.34 Campo 2 (P-3): resolución de DISCO para listas.
+  /// Como [enCache], pero si la ruta pedida es la original
+  /// y no está, sirve la hermana ligera (display, luego
+  /// thumb) que SÍ esté en el teléfono: la fila pinta la
+  /// copia ligera en vez de las iniciales. La descarga
+  /// deliberada (la ficha, [obtener]) NO pasa por aquí:
+  /// sigue trayendo la ruta pedida tal cual.
+  Future<File?> enCacheParaLista(String? storagePath) async {
+    final directo = await enCache(storagePath);
+    if (directo != null ||
+        storagePath == null ||
+        storagePath.isEmpty) {
+      return directo;
+    }
+    for (final v in const ['display', 'thumb']) {
+      final sib = rutaConVariante(storagePath, v);
+      if (sib == null) continue;
+      final f = await _enCacheDirecto(sib);
+      if (f != null) return f;
+    }
+    return null;
+  }
 
   /// 1.23 (Delta Argón 3ª#7): tope de entradas del índice en
   /// memoria. El Map conserva el orden de inserción y

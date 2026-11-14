@@ -423,7 +423,8 @@ class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
       final lf = File(widget.fotoLocal!);
       if (await lf.exists()) f = lf;
     }
-    f ??= await FotoCache.instance.enCache(widget.fotoStorage);
+    // P-3: resolución de lista (la hermana ligera vale).
+    f ??= await FotoCache.instance.enCacheParaLista(widget.fotoStorage);
     if (mounted) setState(() => _archivo = f);
   }
 
