@@ -139,4 +139,33 @@ void main() {
             miActor: 'Jc'),
         FiltroAuditoria.otrosYAlertas);
   });
+
+  test('K3-3: radio «Solo mías» con actor ajeno elegido '
+      'limpia el actor en la propia hoja', () {
+    final r = alcanceAlElegirAlcance(
+        nuevoAlcance: FiltroAuditoria.soloMias,
+        actorElegido: 'Gabriel',
+        miActor: 'Jc');
+    expect(r.alcance, FiltroAuditoria.soloMias);
+    expect(r.actor, isNull);
+    // Mi propio actor: se conserva.
+    final propio = alcanceAlElegirAlcance(
+        nuevoAlcance: FiltroAuditoria.soloMias,
+        actorElegido: 'Jc',
+        miActor: 'Jc');
+    expect(propio.actor, 'Jc');
+    // Sin actor: nada que limpiar.
+    final sinActor = alcanceAlElegirAlcance(
+        nuevoAlcance: FiltroAuditoria.soloMias,
+        actorElegido: null,
+        miActor: 'Jc');
+    expect(sinActor.actor, isNull);
+    // Otro alcance con actor ajeno: se respeta tal cual.
+    final todo = alcanceAlElegirAlcance(
+        nuevoAlcance: FiltroAuditoria.todo,
+        actorElegido: 'Gabriel',
+        miActor: 'Jc');
+    expect(todo.alcance, FiltroAuditoria.todo);
+    expect(todo.actor, 'Gabriel');
+  });
 }
