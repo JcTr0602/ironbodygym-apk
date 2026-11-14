@@ -245,4 +245,52 @@ void main() {
       expect(sanitizarTelefono('53581915'), '53581915');
     });
   });
+
+  group('K5-8 · «Sin foto» de Buscar cuenta también la foto '
+      'local', () {
+    Map<String, dynamic> cli(
+            {String? fotoStorage, String? fotoLocal}) =>
+        {
+          'id': 1,
+          'nombre': 'Fixture',
+          'estado': 'activo',
+          'pagado_hasta': '2027-01-01',
+          'foto_storage': fotoStorage,
+          'foto_local': fotoLocal,
+        };
+
+    test('conteosDeBuscar: con foto local recién tomada (aún '
+        'sin subir) NO cuenta como sin foto; sin ninguna, sí',
+        () {
+      expect(
+          conteosDeBuscar([cli(fotoLocal: 'x.jpg')])['sinfoto'],
+          0,
+          reason: 'la foto local de este teléfono manda: su '
+              'fila la muestra y no puede salir «sin foto»');
+      expect(conteosDeBuscar([cli(fotoStorage: 'srv.jpg')])['sinfoto'],
+          0);
+      expect(conteosDeBuscar([cli()])['sinfoto'], 1,
+          reason: 'sin foto en servidor ni local: sin foto de '
+              'verdad');
+      expect(
+          conteosDeBuscar(
+              [cli(fotoStorage: '', fotoLocal: '')])['sinfoto'],
+          1);
+    });
+
+    test('el predicado compartido juzga ambas señales y el '
+        'filtro de la pantalla lo usa', () {
+      expect(clienteSinFotoBuscar(cli(fotoLocal: 'x.jpg')), isFalse);
+      expect(clienteSinFotoBuscar(cli(fotoStorage: 'srv.jpg')),
+          isFalse);
+      expect(clienteSinFotoBuscar(cli()), isTrue);
+      final f = File('lib/ui/buscar.dart').readAsStringSync();
+      // Dos usos reales además de la declaración: el filtro
+      // «sinfoto» y el contador de conteosDeBuscar.
+      expect('clienteSinFotoBuscar('.allMatches(f).length,
+          greaterThanOrEqualTo(3),
+          reason: 'filtro y contador deben juzgar con el mismo '
+              'predicado (K5-8)');
+    });
+  });
 }

@@ -300,16 +300,19 @@ class _BuscarScreenState extends State<BuscarScreen> {
         }
       }).toList();
     }
-    // v1.1 fix: solo clientes sin foto asignada (sin referencia
-    // foto_storage). Antes verificaba el caché local, así que clientes
-    // CON foto pero sin descargar aparecían erróneamente aquí.
+    // v1.1 fix: solo clientes sin foto asignada. Antes verificaba
+    // el caché local, así que clientes CON foto pero sin descargar
+    // aparecían erróneamente aquí. Yunque 3 (K5-8): el criterio es
+    // el predicado compartido clienteSinFotoBuscar — sin foto en el
+    // servidor Y sin foto local de este teléfono.
     if (_filtro == 'sinfoto') {
       r = r.where((c) {
         // Ronda 17 M7-H2: el filtro sinfoto tampoco deja
         // pasar protegidos.
         if (esVistaProtegida(c)) return false;
-        final ref = c['foto_storage'] as String?;
-        return ref == null || ref.isEmpty;
+        // Yunque 3 (K5-8): «sin foto» con el predicado
+        // compartido (también foto_local).
+        return clienteSinFotoBuscar(c);
       }).toList();
     }
     // 1.24.2: orden a elegir (antes del rescate por id exacto,
@@ -2333,6 +2336,23 @@ String? accionPrincipalBuscar({
 /// no alimenta ningún contador (su estado no se revela); la
 /// Cuenta a la Casa cuenta como al día y también alimenta
 /// «sin foto»; sin fecha = vencido.
+
+/// Yunque 3 (K5-8): «sin foto» para Buscar = `foto_storage`
+/// vacío Y `foto_local` vacío. El criterio v1.1 (solo
+/// foto_storage) dejaba fuera la señal simétrica: la foto
+/// tomada EN este teléfono aún no subida vive en foto_local,
+/// y ese cliente entraba en el filtro y en el contador «Sin
+/// foto» mientras su propia fila — que resuelve primero la
+/// local, como la ficha (FB-04) — mostraba su foto. Lo usan
+/// el filtro `sinfoto` y el contador de [conteosDeBuscar]
+/// para que ambos juzguen igual.
+bool clienteSinFotoBuscar(Map<String, dynamic> c) {
+  final ref = c['foto_storage'] as String?;
+  final local = c['foto_local'] as String?;
+  return (ref == null || ref.isEmpty) &&
+      (local == null || local.isEmpty);
+}
+
 Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base,
     {Set<int> congelados = const {}}) {
   final conteos = <String, int>{
@@ -2374,10 +2394,10 @@ Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base,
         }
       }
     }
-    final ref = c['foto_storage'] as String?;
     // Ronda 17 M7-H2: el contador sinfoto tampoco se alimenta
     // con protegidos (igual que aldia/porvencer/vencidos).
-    if ((ref == null || ref.isEmpty) && !esVistaProtegida(c)) {
+    // Yunque 3 (K5-8): el predicado compartido con el filtro.
+    if (clienteSinFotoBuscar(c) && !esVistaProtegida(c)) {
       conteos['sinfoto'] = conteos['sinfoto']! + 1;
     }
   }
