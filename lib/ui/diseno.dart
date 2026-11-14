@@ -1046,9 +1046,15 @@ class AppTema {
       // seleccionada no se fija aquí: depende de la
       // superficie (barra oscura o tarjeta clara) y el valor
       // del SDK la resuelve por contexto.
-      tabBarTheme: const TabBarThemeData(
+      // Yunque 3 (K3-2): la etiqueta activa se resuelve por
+      // brillo — el naranja gráfico como TEXTO sobre el
+      // AppBar claro queda a 2,5:1; en claro manda el rol de
+      // texto (naranjaTexto, 4,57:1). El indicador (raya,
+      // gráfico) sigue naranja en ambos.
+      tabBarTheme: TabBarThemeData(
         indicatorColor: AppColores.naranja,
-        labelColor: AppColores.naranja,
+        labelColor:
+            oscuro ? AppColores.naranja : AppColores.naranjaTexto,
       ),
       // Yunque 2.34 (F-3): cursor, selección y manijas de los
       // campos de texto en la marca (salían cobalto por el
