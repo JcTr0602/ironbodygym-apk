@@ -875,35 +875,17 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
           children: [
             Text(
                 'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
-            // v1.0.14: aviso de precio reducido para menores
+            // v1.0.14: aviso de precio reducido para menores.
+            // 1.35 (UI-11): con el aviso de la casa.
             if (menor)
-              Container(
-                margin:
-                    const EdgeInsets.only(top: AppEspacio.sm, bottom: AppEspacio.xs),
-                padding: const EdgeInsets.all(AppEspacio.md),
-                decoration: BoxDecoration(
-                  color: AppColores.info
-                      .withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(
-                      AppRadio.md),
-                  border: Border.all(
-                      color: AppColores.info
-                          .withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.child_care_rounded,
-                        color: AppColores.info),
-                    const SizedBox(
-                        width: AppEspacio.sm),
-                    Expanded(
-                      child: Text(
-                        'Menor de 18: precio especial '
-                        '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
-                        style: AppTexto.secundario,
-                      ),
-                    ),
-                  ],
+              Padding(
+                padding: const EdgeInsets.only(
+                    top: AppEspacio.sm, bottom: AppEspacio.xs),
+                child: AvisoEstado(
+                  tipo: TipoAviso.info,
+                  icono: Icons.child_care_rounded,
+                  texto: 'Menor de 18: precio especial '
+                      '${fmtMonto(tipos.firstWhere((t) => t.id == 'menores', orElse: () => tipos.first).monto)} CUP/mes.',
                 ),
               ),
             // v1.0.14: aviso claro si paga por adelantado
@@ -921,37 +903,16 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                 final diasRest = (phD != null && fpD != null)
                     ? phD.difference(fpD).inDays
                     : 0;
-                return Container(
-                  margin: const EdgeInsets.only(
+                // 1.35 (UI-11): con el aviso de la casa.
+                return Padding(
+                  padding: const EdgeInsets.only(
                       top: AppEspacio.sm, bottom: AppEspacio.xs),
-                  padding: const EdgeInsets.all(AppEspacio.md),
-                  decoration: BoxDecoration(
-                    color: AppColores.exito
-                        .withValues(alpha: 0.08),
-                    borderRadius:
-                        BorderRadius.circular(
-                            AppRadio.md),
-                    border: Border.all(
-                        color: AppColores.exito
-                            .withValues(alpha: 0.4)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                          Icons.check_circle_rounded,
-                          color:
-                              AppColores.exito),
-                      const SizedBox(
-                          width: AppEspacio.sm),
-                      Expanded(
-                        child: Text(
-                          'Tiene $diasRest día(s) vigentes. '
-                          'No se pierden: el nuevo período '
-                          'empieza al vencer.',
-                          style: AppTexto.secundario,
-                        ),
-                      ),
-                    ],
+                  child: AvisoEstado(
+                    tipo: TipoAviso.exito,
+                    icono: Icons.check_circle_rounded,
+                    texto: 'Tiene $diasRest día(s) vigentes. '
+                        'No se pierden: el nuevo período '
+                        'empieza al vencer.',
                   ),
                 );
               }
