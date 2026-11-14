@@ -97,8 +97,36 @@ class GraficoMetricaGestion extends StatefulWidget {
   State<GraficoMetricaGestion> createState() => _GraficoMetricaGestionState();
 }
 
-class _GraficoMetricaGestionState extends State<GraficoMetricaGestion> {
+class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
+    with SingleTickerProviderStateMixin {
   int? _sel;
+
+  /// 1.35 (UI-03): trazado de entrada de la línea (una
+  /// sola vez, al primer pintado; un cambio de datos no
+  /// re-anima). Con «reducir movimiento» nace puesta.
+  late final AnimationController _trazo = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.larga,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (MediaQuery.of(context).disableAnimations) {
+        _trazo.value = 1;
+      } else {
+        _trazo.forward();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _trazo.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(GraficoMetricaGestion oldWidget) {
@@ -161,15 +189,20 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion> {
                 child: SizedBox(
                   height: 180,
                   width: double.infinity,
-                  child: CustomPaint(
-                    painter: _GraficoMetricaGestionPainter(
-                      valores: valores,
-                      xs: xs,
-                      max: max,
-                      min: min,
-                      prom: prom,
-                      color: widget.color,
-                      seleccion: selValido ? _sel : null,
+                  child: AnimatedBuilder(
+                    animation: _trazo,
+                    builder: (context, _) => CustomPaint(
+                      painter: _GraficoMetricaGestionPainter(
+                        valores: valores,
+                        xs: xs,
+                        max: max,
+                        min: min,
+                        prom: prom,
+                        color: widget.color,
+                        seleccion: selValido ? _sel : null,
+                        progreso:
+                            AppMovimiento.curvaSuave.transform(_trazo.value),
+                      ),
                     ),
                   ),
                 ),
@@ -218,6 +251,12 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
   final Color color;
   final int? seleccion;
 
+  /// 1.35 (UI-03): fracción 0..1 del trazado de entrada —
+  /// la línea, el área y los puntos solo existen hasta
+  /// ese corte horizontal (las guías rotuladas nacen
+  /// puestas: son el fondo, no el dato).
+  final double progreso;
+
   _GraficoMetricaGestionPainter({
     required this.valores,
     required this.xs,
@@ -226,6 +265,7 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
     required this.prom,
     required this.color,
     this.seleccion,
+    this.progreso = 1,
   });
 
   @override
@@ -259,6 +299,10 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
     }
 
     // 2. Área con gradiente.
+    canvas.save();
+    canvas.clipRect(
+        Rect.fromLTWH(0, 0, size.width * progreso.clamp(0.0, 1.0),
+            size.height));
     final puntos = List.generate(valores.length, punto);
     final areaPath = Path()
       ..moveTo(puntos.first.dx, size.height)
@@ -328,6 +372,7 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
         puntos.first.translate(0, -16), size);
     _etiqueta(canvas, valores.last.toStringAsFixed(1),
         puntos.last.translate(0, -16), size);
+    canvas.restore();
   }
 
   void _rotuloGuia(Canvas canvas, String texto, Offset pos, Size size) {
@@ -377,5 +422,6 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
       old.min != min ||
       old.prom != prom ||
       old.color != color ||
-      old.seleccion != seleccion;
+      old.seleccion != seleccion ||
+      old.progreso != progreso;
 }

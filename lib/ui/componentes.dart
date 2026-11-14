@@ -3829,36 +3829,49 @@ class GraficoBarrasDiarias extends StatelessWidget {
         ),
       );
     }
+    final reducir = MediaQuery.of(context).disableAnimations;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          height: altura,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (final d in datos)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 1),
-                    child: FractionallySizedBox(
-                      // Cero = sin barra (panel T4).
-                      heightFactor:
-                          ((d['total'] as num?)?.toInt() ?? 0) <= 0
-                              ? 0.0
-                              : (((d['total'] as num).toDouble()) / maximo)
-                                  .clamp(0.03, 1.0),
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: AppColores.naranja,
-                          borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(2)),
+        // 1.35 (UI-03): las barras crecen al primer pintado
+        // (AppMovimiento.larga / curvaSuave, como las cifras
+        // de MontoAnimado); con «reducir movimiento» nacen
+        // puestas. Solo anima la entrada: el tween es 0→1 y
+        // los datos llegan ya calculados.
+        TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0, end: 1),
+          duration: reducir ? Duration.zero : AppMovimiento.larga,
+          curve: AppMovimiento.curvaSuave,
+          builder: (context, t, _) => SizedBox(
+            height: altura,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (final d in datos)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1),
+                      child: FractionallySizedBox(
+                        // Cero = sin barra (panel T4).
+                        heightFactor:
+                            ((d['total'] as num?)?.toInt() ?? 0) <= 0
+                                ? 0.0
+                                : ((((d['total'] as num).toDouble()) /
+                                            maximo)
+                                        .clamp(0.03, 1.0) *
+                                    t),
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: AppColores.naranja,
+                            borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(2)),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 4),
