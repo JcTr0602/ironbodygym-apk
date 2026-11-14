@@ -462,6 +462,24 @@ class _ServiciosEstadisticasScreenState
           (v['registrado_por'] as num).toInt():
               '${v['registrado_por_nombre']}'.trim(),
     };
+    // Yunque 4 (L7-2): el corte agrupa por VENDEDOR (C5:
+    // vendedor_id ?? registrado_por) pero los nombres solo
+    // salían de registrado_por: la venta «a nombre de» un
+    // entrenador registrada por el dueño salía rotulada
+    // «Entrenador» genérico y Duany/Gabriel quedaban
+    // indistinguibles. Se resuelven los nombres de los tid
+    // del corte contra el directorio, como las demás
+    // superficies C5; el mapa de arriba queda de respaldo
+    // para filas viejas sin vendedor_id.
+    try {
+      final tidsCorte = <int>{
+        for (final c in corteVendedor)
+          if (c.tid != null) c.tid!,
+      };
+      final delDirectorio =
+          await LocalDb.instance.nombresPorTelegramIds(tidsCorte);
+      nombreVendedor.addAll(delDirectorio);
+    } catch (_) {}
     final miTidEst = AuthService().telegramId;
     if (miTidEst != null) {
       nombreVendedor.putIfAbsent(miTidEst, () => 'Yo (dueño)');
