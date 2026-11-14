@@ -128,6 +128,26 @@ class _VentaSuplementoScreenState
   // v1.3.7 (Fase B §6.2): venta a fiado (solo con cliente).
   bool _esFiado = false;
 
+  // 1.34 Campo 2 (P-4): la miniatura de la cabecera se
+  // resuelve en el State al abrir (existencia en disco +
+  // caché), no dentro del build con existsSync + un
+  // FutureBuilder nuevo por reconstrucción.
+  File? _fotoMini;
+
+  Future<void> _resolverFotoMini() async {
+    final sup = widget.suplemento;
+    final fotoLocal = sup['foto_local'] as String?;
+    File? f;
+    if (fotoLocal != null && fotoLocal.isNotEmpty) {
+      final lf = File(fotoLocal);
+      if (await lf.exists()) f = lf;
+    }
+    f ??= await FotoCache.instance
+        .obtener(sup['foto_storage'] as String?);
+    if (!mounted) return;
+    setState(() => _fotoMini = f);
+  }
+
   double get _precioOficial =>
       (widget.suplemento['precio_oficial'] as num?)?.toDouble() ?? 0;
 
@@ -245,6 +265,7 @@ class _VentaSuplementoScreenState
       _clienteId = widget.clienteIdInicial;
       _clienteNombre = widget.clienteNombreInicial ?? '';
     }
+    _resolverFotoMini();
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() {
@@ -1064,11 +1085,11 @@ class _VentaSuplementoScreenState
 
   /// Rediseño 1.20: miniatura del producto en la cabecera —
   /// mismo triestado que la lista (local → caché →
-  /// placeholder), a 56 px.
+  /// placeholder), a 56 px. 1.34 Campo 2 (P-4): la foto la
+  /// resuelve _resolverFotoMini en el State al abrir; el
+  /// build solo pinta _fotoMini o el placeholder (P-1: la
+  /// decodificación va acotada).
   Widget _miniFotoVenta() {
-    final sup = widget.suplemento;
-    final fotoLocal = sup['foto_local'] as String?;
-    final fotoStorage = sup['foto_storage'] as String?;
     Widget placeholder() => Container(
           width: 56,
           height: 56,
@@ -1081,29 +1102,14 @@ class _VentaSuplementoScreenState
       height: 56,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadio.sm),
-        child: (fotoLocal != null &&
-                fotoLocal.isNotEmpty &&
-                File(fotoLocal).existsSync())
-            ? Image.file(File(fotoLocal),
+        child: _fotoMini != null
+            ? Image.file(_fotoMini!,
                 fit: BoxFit.cover,
-                // 1.34 Campo 2 (P-1): miniatura de 56 dp
-                // con la decodificación acotada.
                 cacheWidth:
                     (56 * MediaQuery.devicePixelRatioOf(context))
                         .round(),
                 errorBuilder: (_, __, ___) => placeholder())
-            : FutureBuilder(
-                future: FotoCache.instance.obtener(fotoStorage),
-                builder: (ctx, snap) {
-                  final f = snap.data;
-                  if (f == null) return placeholder();
-                  return Image.file(f,
-                      fit: BoxFit.cover,
-                      cacheWidth:
-                          (56 * MediaQuery.devicePixelRatioOf(ctx))
-                              .round());
-                },
-              ),
+            : placeholder(),
       ),
     );
   }

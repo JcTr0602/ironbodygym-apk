@@ -257,78 +257,11 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
 
   /// En vivo: la fase del motor (stream) y, si el diario
   /// tiene una corrida abierta, su tabla/página en curso.
-  Widget _tarjetaEnVivo() {
-    return StreamBuilder<SyncStatus>(
-      stream: SyncEngine.instance.statusStream,
-      initialData: SyncEngine.instance.currentStatus,
-      builder: (context, snap) {
-        final st = snap.data ?? SyncEngine.instance.currentStatus;
-        final corriendo = st.phase != SyncPhase.idle;
-        return Tarjeta(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    corriendo
-                        ? Icons.sync_rounded
-                        : Icons.check_circle_rounded,
-                    color: corriendo
-                        ? AppColores.info
-                        : AppColores.exito,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      corriendo
-                          ? 'Sincronizando ahora'
-                          : 'Sin sincronización en curso',
-                      style: AppTexto.subtitulo,
-                    ),
-                  ),
-                ],
-              ),
-              if (st.detalle != null && st.detalle!.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(st.detalle!,
-                    style: AppTexto.cuerpo.copyWith(
-                        color:
-                            AppColores.textoSecundario(context))),
-              ],
-              if (st.pending > 0) ...[
-                const SizedBox(height: 6),
-                Text(
-                  '${st.pending} por subir',
-                  style: AppTexto.cuerpo,
-                ),
-              ],
-              FutureBuilder<CorridaSync?>(
-                future: DiarioSync.instance.corridaEnCurso(),
-                builder: (context, s2) {
-                  final c = s2.data;
-                  if (c == null) return const SizedBox.shrink();
-                  final donde = c.tablaActual == null
-                      ? ''
-                      : ' · ${SyncEngine.nombreAmigableTabla(c.tablaActual!)}'
-                          '${c.paginaActual != null ? ' (página ${c.paginaActual})' : ''}';
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      'Corrida en curso: ${etiquetaTipoCorrida(c.tipo)}$donde',
-                      style: AppTexto.minuscula.copyWith(
-                          color:
-                              AppColores.textoSecundario(context)),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  /// 1.34 Campo 2 (P-4): vive en un widget con State propio
+  /// (_TarjetaEnVivoSync): el futuro de la corrida en curso
+  /// se crea en su State al cambiar la fase/el detalle, no
+  /// dentro del builder en cada emisión del motor.
+  Widget _tarjetaEnVivo() => const _TarjetaEnVivoSync();
 
   Widget _seccionAvisos() {
     return Column(
@@ -709,6 +642,112 @@ class _DetalleCorridaSyncScreenState
                   ),
               ],
             ),
+    );
+  }
+}
+
+/// 1.34 Campo 2 (P-4): tarjeta «en vivo» del Centro de
+/// Sincronización con State propio. Antes era un método de
+/// la pantalla cuyo StreamBuilder creaba el futuro de la
+/// corrida en curso DENTRO del builder: cada una de las
+/// ~45 emisiones de una corrida relanzaba la consulta al
+/// diario. Ahora el futuro vive en este State y solo se
+/// renueva cuando cambian la fase o el detalle del motor
+/// (que es cuando la tabla/página en curso puede cambiar).
+class _TarjetaEnVivoSync extends StatefulWidget {
+  const _TarjetaEnVivoSync();
+
+  @override
+  State<_TarjetaEnVivoSync> createState() => _TarjetaEnVivoSyncState();
+}
+
+class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
+  late SyncStatus _st;
+  late Future<CorridaSync?> _futuraCorrida;
+  StreamSubscription<SyncStatus>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _st = SyncEngine.instance.currentStatus;
+    _futuraCorrida = DiarioSync.instance.corridaEnCurso();
+    _sub = SyncEngine.instance.statusStream.listen((s) {
+      if (!mounted) return;
+      final cambia = s.phase != _st.phase || s.detalle != _st.detalle;
+      setState(() => _st = s);
+      if (cambia) {
+        _futuraCorrida = DiarioSync.instance.corridaEnCurso();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = _st;
+    final corriendo = st.phase != SyncPhase.idle;
+    return Tarjeta(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                corriendo
+                    ? Icons.sync_rounded
+                    : Icons.check_circle_rounded,
+                color: corriendo ? AppColores.info : AppColores.exito,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  corriendo
+                      ? 'Sincronizando ahora'
+                      : 'Sin sincronización en curso',
+                  style: AppTexto.subtitulo,
+                ),
+              ),
+            ],
+          ),
+          if (st.detalle != null && st.detalle!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(st.detalle!,
+                style: AppTexto.cuerpo.copyWith(
+                    color: AppColores.textoSecundario(context))),
+          ],
+          if (st.pending > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              '${st.pending} por subir',
+              style: AppTexto.cuerpo,
+            ),
+          ],
+          FutureBuilder<CorridaSync?>(
+            future: _futuraCorrida,
+            builder: (context, s2) {
+              final c = s2.data;
+              if (c == null) return const SizedBox.shrink();
+              final donde = c.tablaActual == null
+                  ? ''
+                  : ' · ${SyncEngine.nombreAmigableTabla(c.tablaActual!)}'
+                      '${c.paginaActual != null ? ' (página ${c.paginaActual})' : ''}';
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Corrida en curso: ${etiquetaTipoCorrida(c.tipo)}$donde',
+                  style: AppTexto.minuscula.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }

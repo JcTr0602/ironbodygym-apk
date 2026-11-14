@@ -2683,10 +2683,15 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
   @override
   void didUpdateWidget(AvatarClienteConFoto old) {
     super.didUpdateWidget(old);
-    // Como la fila: re-resolver siempre — si la foto se
-    // descargó en la ficha, la miniatura aparece al
-    // volver sin recrear la pantalla.
-    _resolverFoto();
+    // 1.34 Campo 2 (P-4): como la fila de Buscar, solo se
+    // re-resuelve si cambió la ruta; los aterrizajes de la
+    // cola avisan por su stream cuando la foto llega a la
+    // caché (la miniatura aparece al volver de la ficha
+    // sin re-chequear disco en cada rebuild).
+    if (old.fotoStorage != widget.fotoStorage ||
+        old.fotoLocal != widget.fotoLocal) {
+      _resolverFoto();
+    }
   }
 
   /// Dos fases (1.31, campo 2026-11-09), como la fila de

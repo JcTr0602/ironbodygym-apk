@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1627,40 +1628,18 @@ class _ActividadScreenState extends State<ActividadScreen> {
         icono = _iconoAccion(accion);
     }
     if (fotoPath != null && fotoPath.isNotEmpty) {
-      return FutureBuilder(
-        future: FotoCache.instance.obtener(fotoPath),
-        builder: (ctx, snap) {
-          final f = snap.data;
-          if (f != null) {
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadio.circular),
-              child: Image.file(f,
-                  width: 40,
-                  height: 40,
-                  fit: BoxFit.cover,
-                  cacheWidth: 120,
-                  errorBuilder: (_, __, ___) =>
-                      _iconoAvatar(color, icono)),
-            );
-          }
-          return _iconoAvatar(color, icono);
-        },
-      );
+      // 1.34 Campo 2 (P-4): el futuro de la foto vive en el
+      // State de un widget dedicado, no creado en el build
+      // de cada fila (antes cada rebuild reiniciaba el
+      // FutureBuilder: parpadeo y re-trabajo por fila).
+      return _AvatarActividadFoto(
+          fotoPath: fotoPath, color: color, icono: icono);
     }
     return _iconoAvatar(color, icono);
   }
 
-  Widget _iconoAvatar(Color color, IconData icono) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        shape: BoxShape.circle,
-      ),
-      child: Icon(icono, color: color, size: 20),
-    );
-  }
+  Widget _iconoAvatar(Color color, IconData icono) =>
+      _iconoAvatarActividad(color, icono);
 
   /// v1.3.5 (Fase 1, C4): micro-indicador de sync, 14px.
   Widget _indicadorSync(bool pendiente) {
@@ -3123,3 +3102,76 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
   }
 }
 
+
+/// 1.34 Campo 2 (P-4): círculo semántico del avatar de
+/// Actividad, compartido por la fila y por el avatar con
+/// foto (antes era método del State de la pantalla).
+Widget _iconoAvatarActividad(Color color, IconData icono) {
+  return Container(
+    width: 40,
+    height: 40,
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.14),
+      shape: BoxShape.circle,
+    ),
+    child: Icon(icono, color: color, size: 20),
+  );
+}
+
+/// 1.34 Campo 2 (P-4): avatar con foto de una fila de
+/// Actividad. El futuro de `FotoCache.obtener` vive en el
+/// State (patrón de `ClienteAvatarThumb` de Pagaron el mes):
+/// se crea al montar y solo se recrea si cambia la ruta —
+/// nunca dentro del build de la fila.
+class _AvatarActividadFoto extends StatefulWidget {
+  final String fotoPath;
+  final Color color;
+  final IconData icono;
+  const _AvatarActividadFoto(
+      {required this.fotoPath, required this.color, required this.icono});
+
+  @override
+  State<_AvatarActividadFoto> createState() =>
+      _AvatarActividadFotoState();
+}
+
+class _AvatarActividadFotoState extends State<_AvatarActividadFoto> {
+  late Future<File?> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = FotoCache.instance.obtener(widget.fotoPath);
+  }
+
+  @override
+  void didUpdateWidget(_AvatarActividadFoto old) {
+    super.didUpdateWidget(old);
+    if (old.fotoPath != widget.fotoPath) {
+      _futura = FotoCache.instance.obtener(widget.fotoPath);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final f = snap.data;
+        if (f != null) {
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadio.circular),
+            child: Image.file(f,
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
+                cacheWidth: 120,
+                errorBuilder: (_, __, ___) =>
+                    _iconoAvatarActividad(widget.color, widget.icono)),
+          );
+        }
+        return _iconoAvatarActividad(widget.color, widget.icono);
+      },
+    );
+  }
+}

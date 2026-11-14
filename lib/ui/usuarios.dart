@@ -314,43 +314,11 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
   }
 
   /// v1.0.14: avatar con foto del usuario si existe.
-  Widget _avatar(String username, bool bloqueado, bool esAdmin) {
-    final path = 'usuarios/${username.toLowerCase()}.jpg';
-    return FutureBuilder<File?>(
-      future: FotoCache.instance.enCache(path),
-      builder: (ctx, snap) {
-        final file = snap.data;
-        if (file != null) {
-          // 1.34 Campo 2 (P-1): avatar de 40 dp con la
-          // decodificación acotada.
-          return CircleAvatar(
-            backgroundImage: providerFotoAcotada(FileImage(file),
-                ancho:
-                    (80 * MediaQuery.devicePixelRatioOf(ctx)).round()),
-            backgroundColor: AppColores.borde(ctx),
-          );
-        }
-        return CircleAvatar(
-          backgroundColor: bloqueado
-              ? AppColores.error.withValues(alpha: 0.15)
-              : esAdmin
-                  ? AppColores.info.withValues(alpha: 0.15)
-                  : AppColores.exito.withValues(alpha: 0.15),
-          child: Text(
-            username.isNotEmpty ? username[0].toUpperCase() : '?',
-            style: TextStyle(
-              color: bloqueado
-                  ? AppColores.error
-                  : esAdmin
-                      ? AppColores.info
-                      : AppColores.exito,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        );
-      },
-    );
-  }
+  /// 1.34 Campo 2 (P-4): la resolución vive en el State de
+  /// _AvatarUsuario, no en un futuro creado en el build.
+  Widget _avatar(String username, bool bloqueado, bool esAdmin) =>
+      _AvatarUsuario(
+          username: username, bloqueado: bloqueado, esAdmin: esAdmin);
 
   /// v1.0.14: foto del entrenador (1.15 P2: ya NO sube directa
   /// a Storage). Se encola la op `admin_usuario` con
@@ -853,3 +821,76 @@ Hola $username, estas son tus credenciales para la app del gym:
 
 📲 Descarga la APK e inicia sesión con estos datos.
 ⚠️ No compartas tu contraseña con nadie.$lineaMensajeAutomatico''';
+
+/// 1.34 Campo 2 (P-4): avatar de la lista de usuarios con
+/// su foto si existe. El futuro de caché se crea en el
+/// State (una vez por username), no dentro del build de
+/// la fila; la decodificación va acotada (P-1).
+class _AvatarUsuario extends StatefulWidget {
+  final String username;
+  final bool bloqueado;
+  final bool esAdmin;
+  const _AvatarUsuario(
+      {required this.username,
+      required this.bloqueado,
+      required this.esAdmin});
+
+  @override
+  State<_AvatarUsuario> createState() => _AvatarUsuarioState();
+}
+
+class _AvatarUsuarioState extends State<_AvatarUsuario> {
+  late Future<File?> _futura;
+
+  Future<File?> _resolver() => FotoCache.instance
+      .enCache('usuarios/${widget.username.toLowerCase()}.jpg');
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = _resolver();
+  }
+
+  @override
+  void didUpdateWidget(_AvatarUsuario old) {
+    super.didUpdateWidget(old);
+    if (old.username != widget.username) _futura = _resolver();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _futura,
+      builder: (ctx, snap) {
+        final file = snap.data;
+        if (file != null) {
+          return CircleAvatar(
+            backgroundImage: providerFotoAcotada(FileImage(file),
+                ancho:
+                    (80 * MediaQuery.devicePixelRatioOf(ctx)).round()),
+            backgroundColor: AppColores.borde(ctx),
+          );
+        }
+        final username = widget.username;
+        return CircleAvatar(
+          backgroundColor: widget.bloqueado
+              ? AppColores.error.withValues(alpha: 0.15)
+              : widget.esAdmin
+                  ? AppColores.info.withValues(alpha: 0.15)
+                  : AppColores.exito.withValues(alpha: 0.15),
+          child: Text(
+            username.isNotEmpty ? username[0].toUpperCase() : '?',
+            style: TextStyle(
+              color: widget.bloqueado
+                  ? AppColores.error
+                  : widget.esAdmin
+                      ? AppColores.info
+                      : AppColores.exito,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

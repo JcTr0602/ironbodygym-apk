@@ -1849,10 +1849,17 @@ class _FilaClienteState extends State<_FilaCliente> {
   @override
   void didUpdateWidget(_FilaCliente old) {
     super.didUpdateWidget(old);
-    // v1.1: re-resuelve siempre (no solo si cambió foto_storage).
-    // Así, si la foto se descargó en la ficha y ahora está en caché,
-    // la miniatura aparece al volver a la lista.
-    _resolverFoto();
+    // 1.34 Campo 2 (P-4): solo se re-resuelve si cambió la
+    // ruta (foto_storage o foto_local). Antes se re-chequeaba
+    // disco en CADA reconstrucción del padre para las filas
+    // aún sin foto. La intención original de v1.1 (la foto
+    // descargada en la ficha aparece al volver) la cubre la
+    // escucha de aterrizajes de la cola: FotoCache.obtener
+    // registra el aterrizaje y esta fila re-resuelve sola.
+    if (old.cliente['foto_storage'] != widget.cliente['foto_storage'] ||
+        old.cliente['foto_local'] != widget.cliente['foto_local']) {
+      _resolverFoto();
+    }
   }
 
   /// Resuelve la foto en DOS FASES (1.31, campo 2026-11-09):
