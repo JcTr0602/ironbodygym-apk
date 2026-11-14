@@ -244,13 +244,23 @@ void main() {
     }
 
     Future<void> drenar(WidgetTester tester) async {
+      // Campo 2 · B-1 (2026-11-14): «Membresía» era el
+      // centinela de «la ficha terminó de cargar» porque
+      // vivía al fondo de la pestaña y solo se construía
+      // tarde; con la jerarquía nueva abre la pestaña y se
+      // construye en el primer fotograma — el drenaje se
+      // cortaba a la primera vuelta y la navegación del
+      // toque no llegaba a montar la ruta. Se conserva el
+      // centinela con un suelo de 8 vueltas: el tiempo que
+      // la cadena de carga y las transiciones necesitan.
       for (var i = 0; i < 16; i++) {
         await tester.runAsync(() async {
           await Future<void>.delayed(
               const Duration(milliseconds: 150));
         });
         await tester.pump(const Duration(milliseconds: 60));
-        if (find.text('Membresía').evaluate().isNotEmpty) break;
+        if (i >= 7 &&
+            find.text('Membresía').evaluate().isNotEmpty) break;
       }
     }
 
