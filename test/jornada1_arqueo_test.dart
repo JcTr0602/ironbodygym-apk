@@ -17,7 +17,6 @@ import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/arqueo.dart';
 import 'package:ironbody_gym/ui/detalle_pendiente.dart';
-import 'package:ironbody_gym/ui/primitivas.dart';
 
 import 'jornada_ayudas.dart';
 

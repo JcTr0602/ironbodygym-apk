@@ -39,7 +39,7 @@ Future<void> jornadaSetUpAll() async {
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(canalMensajes, (_) async => null);
   SharedPreferences.setMockInitialValues({});
-  await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+  await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
 }
 
 /// Siembra la foto de permisos en la caché DEL USUARIO

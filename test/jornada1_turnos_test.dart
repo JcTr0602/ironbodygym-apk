@@ -11,7 +11,6 @@
 /// cerrado no se puede cerrar dos veces.
 library;
 
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,7 +18,6 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/turno_service.dart';
 import 'package:ironbody_gym/ui/dialogo_pago.dart';
-import 'package:ironbody_gym/ui/home.dart';
 import 'package:ironbody_gym/ui/preview_cobro.dart';
 
 import 'jornada_ayudas.dart';
