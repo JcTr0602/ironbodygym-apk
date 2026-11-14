@@ -485,8 +485,15 @@ void main() {
         }, 1);
         await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
           'id': 10,
-          'producto_id': 1,
-          'responsable_id': null,
+          // Yunque 3.34 (K4-1): forma REAL del espejo
+          // servicio_pomos (corrección E-2 de Y2): el nombre
+          // del pomo sale de suplemento_id y el responsable
+          // de es_principal/titular_telegram_id
+          // (lib/servicios.dart:243-250). producto_id /
+          // responsable_id no los trae la fila: sin
+          // suplemento_id el pomo se resolvía como
+          // «Suplemento» genérico.
+          'suplemento_id': 1,
           'titular_telegram_id': 735772141,
           'es_principal': 1,
           'dosis_asignadas': 60,
@@ -542,6 +549,19 @@ void main() {
       expect(find.textContaining('Beto Ejemplo'), findsWidgets);
       expect(find.textContaining('Ana Prueba'), findsNothing,
           reason: 'con tipo Agua la dosis con agua sale de la lista');
+      // Yunque 3.34 (K4-1): el detalle de la venta nombra el
+      // pomo por su producto REAL: la fila «Pomo» sale de
+      // nombrePomoVenta → producto_nombre, resuelto por
+      // suplemento_id (lib/servicios.dart:243-250, 382-391).
+      // Con la forma falsa de E-2 (producto_id) el pomo se
+      // resolvía como «Suplemento» genérico y esta aserción
+      // habría nacido muerta.
+      await tester.tap(find.text('Beto Ejemplo'));
+      await _drenar(tester, vueltas: 6);
+      expect(find.text('Pomo'), findsOneWidget);
+      expect(find.text('Proteína Suero X'), findsOneWidget,
+          reason: 'el pomo del detalle se resuelve por '
+              'suplemento_id al suplemento sembrado');
       await _descartarDialogos(tester);
       await _cerrarCascara(tester);
     });

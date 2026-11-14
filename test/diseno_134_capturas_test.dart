@@ -436,8 +436,15 @@ void main() {
     await tester.runAsync(() async {
       await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
         'id': 10,
-        'producto_id': 1,
-        'responsable_id': null,
+        // Yunque 3.34 (K4-1): forma REAL del espejo
+        // servicio_pomos (corrección E-2 de Y2): el nombre
+        // del pomo sale de suplemento_id y el responsable de
+        // es_principal/titular_telegram_id
+        // (lib/servicios.dart:243-250). producto_id /
+        // responsable_id no los trae la fila: sin
+        // suplemento_id el pomo se resolvía como
+        // «Suplemento» genérico en la captura.
+        'suplemento_id': 1,
         'titular_telegram_id': 735772141,
         'es_principal': 1,
         'dosis_asignadas': 60,
