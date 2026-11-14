@@ -598,24 +598,54 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                           // (cambiar_estado es SOLO_ADMIN en
                           // el servidor).
                           trailing: esDueno
-                              ? Row(
+                              ? Column(
                                   mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.end,
                                   children: [
                                     // F5-25: la acción de
                                     // recuperar era el único
                                     // botón de la fila sin
                                     // texto ni tooltip: ahora
                                     // se lee «Recuperar».
+                                    // Jornada 2 de la 1.34: las
+                                    // dos acciones van APILADAS
+                                    // y compactas — en fila, a
+                                    // 360 dp con texto 1.3,
+                                    // sumaban ~217 dp junto al
+                                    // checkbox y la foto y la
+                                    // fila desbordaba 16 px por
+                                    // la derecha.
                                     TextButton.icon(
                                       icon: const Icon(
                                           Icons
                                               .restore_from_trash_rounded,
                                           size: 18),
                                       label: const Text('Recuperar'),
+                                      style: TextButton.styleFrom(
+                                        padding: const EdgeInsets
+                                            .symmetric(
+                                                horizontal: 8,
+                                                vertical: 2),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize
+                                                .shrinkWrap,
+                                      ),
                                       onPressed: () =>
                                           _recuperar(c),
                                     ),
                                     TextButton(
+                                      style: TextButton.styleFrom(
+                                        padding: const EdgeInsets
+                                            .symmetric(
+                                                horizontal: 8,
+                                                vertical: 2),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize
+                                                .shrinkWrap,
+                                      ),
                                       child: const Text('Renovar'),
                                       onPressed: () =>
                                           _recuperarYRenovar(c),
