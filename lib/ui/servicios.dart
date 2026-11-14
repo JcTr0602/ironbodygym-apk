@@ -1686,7 +1686,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       ),
                     ),
                     Expanded(
-                      child: RefreshIndicator(
+                      child: RefrescoIron(
                         onRefresh: _actualizar,
                         child: switch (zonaEfectiva) {
                           1 => _zonaDia(),

@@ -179,7 +179,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
             ),
           ),
           Expanded(
-            child: RefreshIndicator(
+            child: RefrescoIron(
               onRefresh: _cargar,
               child: CruceEstados(
                 // Corrección A1-D4: fundido esqueleto→contenido

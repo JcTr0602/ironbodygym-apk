@@ -182,7 +182,7 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                     ),
                   ),
                 )
-              : RefreshIndicator(
+              : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

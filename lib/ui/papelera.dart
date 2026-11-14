@@ -536,7 +536,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                         titulo:
                             'No se encontraron clientes inactivos para «$_filtro».',
                       )
-                    : RefreshIndicator(
+                    : RefrescoIron(
                         onRefresh: _cargar,
                         child: ListView.builder(
                           itemCount: listaFiltrada.length,

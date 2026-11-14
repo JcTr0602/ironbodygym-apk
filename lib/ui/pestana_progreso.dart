@@ -290,7 +290,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       );
     }
 
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),

@@ -563,7 +563,7 @@ Hola $username, estas son tus credenciales para la app del gym:
                           setState(() => _filtro = '');
                         },
                       )
-              : RefreshIndicator(
+              : RefrescoIron(
                   onRefresh: _cargar,
                   child: ListView.separated(
                     itemCount: _visibles.length,

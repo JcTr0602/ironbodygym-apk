@@ -795,7 +795,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
                   // pantalla (total + tarjetas) en vez del
                   // spinner genérico.
                   ? const SkeletonPendiente()
-                  : RefreshIndicator(
+                  : RefrescoIron(
                       onRefresh: _cargar,
                       child: _esDueno
                           ? _listaDueno()

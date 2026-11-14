@@ -777,7 +777,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
                   textoAccion: 'Actualizar',
                   onAccion: _refrescar,
                 )
-              : RefreshIndicator(
+              : RefrescoIron(
                   onRefresh: _refrescar,
                   child: ListView(
                     padding: const EdgeInsets.all(AppEspacio.md),

@@ -127,7 +127,7 @@ class _CuentasCobrarScreenState
   Widget build(BuildContext context) {
     final cuerpo = _cargando
           ? const EstadoCargando(texto: 'Cargando cuentas por cobrar…')
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding:

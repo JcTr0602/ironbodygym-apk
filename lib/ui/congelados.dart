@@ -91,7 +91,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                               'congelar su membresía para pausar el '
                               'vencimiento.',
                         )
-                      : RefreshIndicator(
+                      : RefrescoIron(
                           onRefresh: _cargar,
                           child: ListView.builder(
                             padding: const EdgeInsets.symmetric(

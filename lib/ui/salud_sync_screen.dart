@@ -187,7 +187,7 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
       appBar: appBarIron(context, 'Salud de la sincronización'),
       body: _cargando || d == null
           ? const EstadoCargando(texto: 'Leyendo la salud del sync…')
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

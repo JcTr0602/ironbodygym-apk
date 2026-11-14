@@ -692,7 +692,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 SkeletonLista(items: 3),
               ],
             )
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -1614,7 +1614,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // (M2-BC C5) esqueleto estructural en vez del
             // spinner genérico.
             ? const SkeletonDashboard()
-            : RefreshIndicator(
+            : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

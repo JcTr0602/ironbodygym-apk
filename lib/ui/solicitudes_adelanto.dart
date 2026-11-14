@@ -226,7 +226,7 @@ class _SolicitudesAdelantoScreenState
               ),
             ),
           Expanded(
-            child: RefreshIndicator(
+            child: RefrescoIron(
         onRefresh: _cargar,
         child: ListView.builder(
           padding: const EdgeInsets.all(AppEspacio.lg),

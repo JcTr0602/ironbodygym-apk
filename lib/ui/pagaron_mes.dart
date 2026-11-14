@@ -301,7 +301,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                             titulo: 'Sin resultados',
                             subtitulo:
                                 'Nadie de la lista coincide con «${_q.trim()}»')
-                        : RefreshIndicator(
+                        : RefrescoIron(
                         onRefresh: _actualizar,
                         child: ListView.builder(
                           // H-04: si hay protegidos ocultos, la

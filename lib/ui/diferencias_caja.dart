@@ -364,7 +364,7 @@ class _DiferenciasCajaScreenState
         estado: _cargando ? 'cargando' : 'contenido',
         child: _cargando
             ? const EstadoCargando(texto: 'Cargando diferencias…')
-            : RefreshIndicator(
+            : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

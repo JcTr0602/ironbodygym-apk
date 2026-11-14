@@ -650,7 +650,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
           child: CircularProgressIndicator(color: AppColores.naranja));
     }
     return FadeEntrada(
-      child: RefreshIndicator(
+      child: RefrescoIron(
         onRefresh: _cargar,
         child: ListView(
           padding: const EdgeInsets.all(AppEspacio.lg),

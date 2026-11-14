@@ -232,7 +232,7 @@ class _HistorialEntrenadorScreenState
                             'Nadie cobró ni inscribió en este mes.')
                     : _datos.isEmpty
                         ? _notaSinIdentificar(context)
-                        : RefreshIndicator(
+                        : RefrescoIron(
                         onRefresh: _cargar,
                         child: ListView.builder(
                           itemCount: _datos.length +

@@ -334,7 +334,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                   subtitulo:
                       'Los cierres de turno aparecerán aquí.',
                 )
-              : RefreshIndicator(
+              : RefrescoIron(
                   onRefresh: _cargar,
                   child: ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),

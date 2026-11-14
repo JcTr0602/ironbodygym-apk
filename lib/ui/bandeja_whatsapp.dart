@@ -679,7 +679,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                           ),
                         ),
                       )
-                    : RefreshIndicator(
+                    : RefrescoIron(
                         onRefresh: _cargar,
                         child: ListView(
                           padding: const EdgeInsets.all(AppEspacio.lg),

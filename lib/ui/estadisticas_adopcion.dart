@@ -163,7 +163,7 @@ class _EstadisticasAdopcionScreenState
                 )
               // Argón Estadísticas #9: pull-to-refresh como
               // el resto de pantallas de estadísticas.
-              : RefreshIndicator(
+              : RefrescoIron(
                   onRefresh: _cargar,
                   child: _contenido(),
                 ),

@@ -85,7 +85,7 @@ class _TarifasScreenState extends State<TarifasScreen> {
       appBar: appBarIron(context, 'Tarifas'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando tarifas…')
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

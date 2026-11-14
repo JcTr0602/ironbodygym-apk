@@ -513,7 +513,7 @@ class _PanelAnunciosScreenState extends State<PanelAnunciosScreen> {
         onAccion: _cargar,
       );
     }
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),

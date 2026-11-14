@@ -387,7 +387,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           : null,
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando compras…')
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: Column(
                 children: [

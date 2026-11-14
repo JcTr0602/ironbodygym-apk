@@ -873,7 +873,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           ),
         ),
         Expanded(
-          child: RefreshIndicator(
+          child: RefrescoIron(
             onRefresh: _actualizar,
             child: _vistaLista
                 ? ListView.builder(

@@ -2006,7 +2006,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 // ni siquiera se llega aquí: se pinta la
                 // foto al instante).
                 ? const SkeletonPanel()
-                : RefreshIndicator(
+                : RefrescoIron(
                     // 1.24 Bloque 5 (B-01): el gesto de actualizar
                     // del Panel ahora sincroniza DE VERDAD antes
                     // de releer (antes solo releía espejos

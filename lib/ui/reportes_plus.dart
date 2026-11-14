@@ -220,7 +220,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
         ),
       );
     }
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),

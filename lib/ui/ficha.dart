@@ -2980,7 +2980,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                       // ficha (ver
                                       // _refrescarFicha), ahora
                                       // en cada pestaña.
-                                      RefreshIndicator(
+                                      RefrescoIron(
                                         onRefresh: _refrescarFicha,
                                         child: ListView.builder(
                                           key: PageStorageKey<String>(

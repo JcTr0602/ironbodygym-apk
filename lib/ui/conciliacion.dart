@@ -426,7 +426,7 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
               : Column(
               children: [
                 Expanded(
-                  child: RefreshIndicator(
+                  child: RefrescoIron(
                     onRefresh: _cargar,
                     child: ListView(
                       padding: const EdgeInsets.all(AppEspacio.lg),

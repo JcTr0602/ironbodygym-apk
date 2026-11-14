@@ -516,7 +516,7 @@ class _HistorialVentasScreenState
     // posición del resaltado vienen de la caché de _refiltrar()
     // (D-10: nada de computar ni escribir estado en build).
     final items = _itemsCache;
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView.builder(
         controller: _scrollCtrl,

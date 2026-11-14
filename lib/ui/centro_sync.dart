@@ -181,7 +181,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
           ? const Padding(
               padding: EdgeInsets.all(AppEspacio.lg),
               child: SkeletonLista(items: 5))
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

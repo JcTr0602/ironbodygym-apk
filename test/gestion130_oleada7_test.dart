@@ -276,7 +276,10 @@ void main() {
 
     test('FICHA-02/07/10 quedan fijadas en la ficha', () {
       final ficha = File('lib/ui/ficha.dart').readAsStringSync();
-      expect(ficha.contains('RefreshIndicator'), isTrue);
+      // Yunque 2.34 (F-2): el tirón de la ficha va por el
+      // envoltorio de marca RefrescoIron (el RefreshIndicator
+      // del SDK no es temable y salía cobalto).
+      expect(ficha.contains('RefrescoIron'), isTrue);
       expect(ficha.contains('_refrescarFicha'), isTrue);
       expect(ficha.contains('Avisar por WhatsApp'), isTrue);
       // El mensaje sale de la fuente única de la bandeja.

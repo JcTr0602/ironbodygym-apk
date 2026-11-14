@@ -322,7 +322,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
             child: _cargando
                 ? const Center(
                     child: CircularProgressIndicator())
-                : RefreshIndicator(
+                : RefrescoIron(
                     onRefresh: _cargar,
                     child: ListView(
                       padding: const EdgeInsets.all(AppEspacio.lg),

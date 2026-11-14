@@ -525,7 +525,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
         .where((c) => _felicitados
             .contains(_claveFelicitado((c['id'] as num?)?.toInt() ?? 0)))
         .length;
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView.builder(
         itemCount: items.length + 1,

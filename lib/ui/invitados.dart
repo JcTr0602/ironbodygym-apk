@@ -1005,7 +1005,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: RefreshIndicator(
+                child: RefrescoIron(
                   onRefresh: _cargar,
                   child: ListView.builder(
                     controller: _scroll,
@@ -2068,7 +2068,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       );
     }
     final d = _d!;
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),

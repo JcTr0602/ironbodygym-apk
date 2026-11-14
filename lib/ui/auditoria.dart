@@ -871,7 +871,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                 : () => setState(
                                     () => _filtro = FiltroAuditoria.todo),
                           )
-                        : RefreshIndicator(
+                        : RefrescoIron(
                         onRefresh: _cargar,
                         child: ListView.builder(
                           // FB-16: los primeros ítems son los

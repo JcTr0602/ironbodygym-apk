@@ -340,7 +340,7 @@ class _LiquidacionesHistorialScreenState
                         detalle: _falloCarga,
                         onReintentar: _cargar,
                       )
-                    : RefreshIndicator(
+                    : RefrescoIron(
                     onRefresh: _cargar,
                     child: visibles.isEmpty
                         ? ListView(

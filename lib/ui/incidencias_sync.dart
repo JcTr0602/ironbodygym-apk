@@ -295,7 +295,7 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                           ),
                         ),
                       )
-                    : RefreshIndicator(
+                    : RefrescoIron(
                         onRefresh: _cargar,
                         child: ListView.builder(
                           padding: const EdgeInsets.all(AppEspacio.lg),

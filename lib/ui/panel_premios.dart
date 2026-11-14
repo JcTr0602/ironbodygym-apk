@@ -532,7 +532,7 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
         (enCurso > 0 ? 1 : 0) +
         nVales +
         (recientes.isNotEmpty ? 1 + recientes.length : 0);
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView.builder(
         padding: const EdgeInsets.all(AppEspacio.lg),

@@ -292,6 +292,60 @@ class TarjetaAccionesCliente extends StatelessWidget {
   }
 }
 
+/// Yunque 2.34 (F-2): RefreshIndicator en la marca.
+/// RefreshIndicator NO es temable en este SDK (lee
+/// `colorScheme.primary` directo, sin pasar por ningún tema
+/// de componente) y el primary de producción es cobalto:
+/// los 57 «tirar para refrescar» de la app salían azules,
+/// fuera del alcance de DIS-04. Este envoltorio es el
+/// RefreshIndicator de siempre con el color fijado a la
+/// marca; el resto de parámetros se pasan tal cual (null =
+/// el defecto del SDK, sin cambiar ningún comportamiento).
+class RefrescoIron extends StatelessWidget {
+  final Future<void> Function() onRefresh;
+  final Widget child;
+  final double? displacement;
+  final double? edgeOffset;
+  final Color? backgroundColor;
+  final double? strokeWidth;
+  final String? semanticsLabel;
+  final String? semanticsValue;
+  final ScrollNotificationPredicate? notificationPredicate;
+  final RefreshIndicatorTriggerMode? triggerMode;
+
+  const RefrescoIron({
+    super.key,
+    required this.onRefresh,
+    required this.child,
+    this.displacement,
+    this.edgeOffset,
+    this.backgroundColor,
+    this.strokeWidth,
+    this.semanticsLabel,
+    this.semanticsValue,
+    this.notificationPredicate,
+    this.triggerMode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      color: AppColores.naranja,
+      backgroundColor: backgroundColor,
+      displacement: displacement ?? 40.0,
+      edgeOffset: edgeOffset ?? 0.0,
+      strokeWidth: strokeWidth ?? RefreshProgressIndicator.defaultStrokeWidth,
+      semanticsLabel: semanticsLabel,
+      semanticsValue: semanticsValue,
+      notificationPredicate:
+          notificationPredicate ?? defaultScrollNotificationPredicate,
+      triggerMode: triggerMode ?? RefreshIndicatorTriggerMode.anywhere,
+      onRefresh: onRefresh,
+      child: child,
+    );
+  }
+}
+
 /// Botón secundario: contorno neutro, fondo transparente
 /// (cancelar, volver, acciones complementarias).
 class BotonSecundario extends StatelessWidget {

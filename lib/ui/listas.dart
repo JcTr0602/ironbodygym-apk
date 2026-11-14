@@ -1082,7 +1082,7 @@ class _ListasScreenState extends State<ListasScreen>
     final avisadosLista = [...rows, ...?cola]
         .where((c) => _avisados.contains((c['id'] as int?) ?? 0))
         .length;
-    final lista = RefreshIndicator(
+    final lista = RefrescoIron(
       onRefresh: _cargar,
       child: ListView.separated(
         itemCount:

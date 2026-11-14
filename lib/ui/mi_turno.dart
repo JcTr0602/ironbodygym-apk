@@ -1047,7 +1047,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             child: _cargando
                 ? const EstadoCargando(
                     texto: 'Cargando tu turno…')
-                : RefreshIndicator(
+                : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

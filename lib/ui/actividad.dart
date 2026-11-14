@@ -2049,7 +2049,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                             textoAccion: 'Limpiar filtros',
                             onAccion: _limpiarFiltros,
                           ))
-                    : RefreshIndicator(
+                    : RefrescoIron(
                         onRefresh: _cargar,
                         // v1.3.7 (Fase 2, A2): CustomScrollView con
                         // SliverPersistentHeader por grupo — el encabezado

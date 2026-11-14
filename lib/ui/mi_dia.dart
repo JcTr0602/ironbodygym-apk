@@ -454,7 +454,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
 
   /// v1.3.3: vista mensual — selector de mes + lista de días con totales.
   Widget _vistaMes() {
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargarMes,
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -604,7 +604,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
           t,
     ];
     const nombres = {'mañana': 'Mañana', 'tarde': 'Tarde', 'noche': 'Noche'};
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: () => _cargarDiaDetalle(_diaDetalle!),
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -715,7 +715,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
 
   /// Vista original del día actual (Hoy).
   Widget _vistaHoy() {
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: _contenidoHoy(),
     );

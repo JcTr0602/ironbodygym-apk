@@ -2395,7 +2395,7 @@ class _ColaScreenState extends State<ColaScreen> {
     }
     return Scaffold(
       appBar: appBarIron(context, 'Sincronización'),
-      body: RefreshIndicator(
+      body: RefrescoIron(
         onRefresh: _cargar,
         child: ListView(
           padding: const EdgeInsets.all(AppEspacio.lg),

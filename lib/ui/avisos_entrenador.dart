@@ -183,7 +183,7 @@ class _AvisosEntrenadorScreenState
             'aparecerá en el Home de los entrenadores.',
       );
     }
-    return RefreshIndicator(
+    return RefrescoIron(
       onRefresh: _cargar,
       child: ListView.builder(
         padding: const EdgeInsets.all(AppEspacio.lg),

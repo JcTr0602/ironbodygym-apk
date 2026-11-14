@@ -93,7 +93,7 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                     icono: Icons.message_rounded,
                     titulo: 'Sin plantillas.',
                     subtitulo: 'Crea la primera con el botón +.')
-                : RefreshIndicator(
+                : RefrescoIron(
                   onRefresh: _cargar,
                   child: ListView(
                     padding: const EdgeInsets.all(AppEspacio.lg),

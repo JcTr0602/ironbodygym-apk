@@ -596,7 +596,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       // conserva foco y texto) y el RefreshIndicator, que
       // antes solo envolvía la lista, ahora cubre la vista
       // entera, también en vacío.
-      body: RefreshIndicator(
+      body: RefrescoIron(
         onRefresh: _actualizar,
         child: CustomScrollView(
           controller: _scroll,

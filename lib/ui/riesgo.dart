@@ -151,7 +151,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                               'con 3+ pagos cuyo último pago fue hace '
                               'más de 60 días.',
                         )
-                      : RefreshIndicator(
+                      : RefrescoIron(
                           onRefresh: _cargar,
                           child: ListView.builder(
                             padding: const EdgeInsets.symmetric(

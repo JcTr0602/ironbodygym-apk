@@ -304,7 +304,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
       appBar: appBarIron(context, 'Congelaciones'),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(12),
