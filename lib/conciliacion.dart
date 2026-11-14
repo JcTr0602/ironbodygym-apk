@@ -18,6 +18,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import 'localdb.dart';
+import 'negocio.dart';
 import 'sync.dart';
 
 /// Estado de conciliación de una fila de pagos (espejo).
@@ -66,6 +67,12 @@ bool conciliacionAccionable(String estado) =>
 Map<String, dynamic>? ultimaTransferenciaPorConciliar(
     List<Map<String, dynamic>> pagos) {
   for (final p in pagos) {
+    // Yunque 4 (L5-2): un pago anulado no se ofrece para
+    // conciliar — el servidor borra la fila al aplicar la
+    // anulación. La función es pura (no lee la cola): la
+    // marca del JSON cubre el camino de este teléfono,
+    // que es el de la ficha.
+    if (p['anulado'] == 1 || p['anulado'] == true) continue;
     if ('${p['metodo'] ?? ''}' == 'transferencia' &&
         conciliacionAccionable(estadoConciliacion(p))) {
       return p;
@@ -191,9 +198,19 @@ class ConciliacionService {
   Future<List<Map<String, dynamic>>> transferencias() async {
     final rows = await _db.mirrorFiltrado(
         'pagos', {'metodo': 'transferencia'});
+    // Yunque 4 (L5-2): fuera las transferencias anuladas
+    // (marca + anulación viva en cola, el par de la casa):
+    // la bandeja, el badge y el lote no deben ofrecer
+    // conciliar un pago que el servidor borra al aplicar
+    // la anulación (la op nacería muerta).
+    final anuladosCola = await _db.pagosAnuladosEnCola();
+    final vigentes = [
+      for (final r in rows)
+        if (!esPagoAnulado(r, anuladosCola)) r,
+    ];
     final enCola = await _marcasEnCola();
     final res = [
-      for (final r in rows)
+      for (final r in vigentes)
         {
           ...r,
           '_conciliacion': enCola[(r['id'] as num?)?.toInt()] ??
