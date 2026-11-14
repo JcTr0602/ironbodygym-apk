@@ -15,7 +15,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtFecha;
+import '../negocio.dart' show fmtFecha, totalVentaRegistrado;
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
@@ -49,9 +49,9 @@ bool esFiadoPendienteVenta(Map<String, dynamic> v) {
   var cup = 0.0;
   var usd = 0.0;
   for (final v in fiados) {
-    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-    final precio = (v['precio'] as num?)?.toDouble() ?? 0;
-    final total = cant * precio;
+    // Yunque 1.34 (C4-3): el total REGISTRADO manda
+    // (totalVentaRegistrado), no cantidad×precio.
+    final total = totalVentaRegistrado(v);
     // D2-09: moneda normalizada (LocalDb.monedaDe) — 'usd' en
     // minúsculas antes caía en el cubo CUP.
     if (LocalDb.monedaDe(v) == 'USD') {
@@ -263,8 +263,8 @@ class _CuentasPorCobrarScreenState
     final nombreCli =
         cliId != null ? (_clientes[cliId] ?? 'Cliente $cliId') : '—';
     final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-    final precio = (v['precio'] as num?)?.toDouble() ?? 0;
-    final total = cant * precio;
+    // Yunque 1.34 (C4-3): se salda por el total REGISTRADO.
+    final total = totalVentaRegistrado(v);
     final moneda = '${v['moneda'] ?? 'CUP'}';
     // Argón #9 (MEDIO): el cast directo v['id'] as int reventaba
     // con TypeError DESPUÉS de encolar la op si el id no era int.
@@ -470,7 +470,6 @@ class _CuentasPorCobrarScreenState
             ? (_clientes[cliId] ?? 'Cliente $cliId')
             : '—';
         final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-        final precio = (v['precio'] as num?)?.toDouble() ?? 0;
         final moneda = '${v['moneda'] ?? 'CUP'}';
         final fecha = '${v['fecha'] ?? ''}';
         return Tarjeta(
@@ -497,7 +496,7 @@ class _CuentasPorCobrarScreenState
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                    '${(cant * precio).toStringAsFixed(2)} $moneda',
+                    '${totalVentaRegistrado(v).toStringAsFixed(2)} $moneda',
                     style: AppTexto.cuerpo.copyWith(
                         fontWeight: FontWeight.bold,
                         color: AppColores.naranja)),

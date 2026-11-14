@@ -973,6 +973,22 @@ double totalVentaCup(Map<String, dynamic> v) {
   return precio * cant;
 }
 
+/// Total REGISTRADO de una venta de suplemento, en su propia
+/// moneda: prefiere la columna `total` si la fila la trae y
+/// solo cae a precio×cantidad si falta. Es la regla de
+/// [totalVentaCup]/[totalVentaUsd] sin el filtro de moneda.
+/// La usa Cuentas por cobrar (Yunque 1.34, C4-3), que antes
+/// recalculaba cantidad×precio en sus totales, en el cobro y
+/// en la fila: una venta creada fuera de la app con el total
+/// ajustado se mostraba y se SALDABA por otro monto.
+double totalVentaRegistrado(Map<String, dynamic> v) {
+  final total = (v['total'] as num?)?.toDouble();
+  if (total != null) return total;
+  final precio = (v['precio'] as num?)?.toDouble() ?? 0;
+  final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+  return precio * cant;
+}
+
 /// Ventas de suplementos en CUP del espejo local.
 /// Argón P3#2 (parte fiados, REAL): una venta al fiado sin saldar no es
 /// ingreso ni pendiente a entregar hasta saldarse, así que queda fuera
