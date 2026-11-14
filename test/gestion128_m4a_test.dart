@@ -415,7 +415,10 @@ void main() {
           'nombre': 'Cliente Perezoso',
           'telefono': '58112233',
           'sexo': 'M',
-          'fecha_nacimiento': '1990-05-01',
+          // Yunque 3.34 (K4-6): fuera 'fecha_nacimiento' —
+          // la fila no la trae; el nacimiento se deriva del
+          // carnet (lib/negocio.dart:4058). Inerte aquí:
+          // las aserciones son de construcción perezosa.
           'pagado_hasta': '2027-01-01',
           'estado': 'activo',
         }, 1);

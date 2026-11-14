@@ -151,15 +151,17 @@ Future<void> _sembrarGrafo() async {
     'lote_id': 93,
     'dosis': 2,
   }, 116);
+  // Yunque 3.34 (K4-6): fuera 'cantidad_botes' de las
+  // compras — ningún consumidor la lee; la cascada de
+  // borrado filtra por suplemento_id
+  // (lib/localdb.dart:4925-4927), presente y real.
   await db.upsertMirror('servicio_compras', 87, {
     'id': 87,
     'suplemento_id': 5,
-    'cantidad_botes': 2,
   }, 117);
   await db.upsertMirror('servicio_compras', 88, {
     'id': 88,
     'suplemento_id': 9,
-    'cantidad_botes': 1,
   }, 118);
   // Reservas vivas del 5: se borran con la cascada.
   await db.upsertMirror('reservas', 120, {

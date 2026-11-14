@@ -609,8 +609,10 @@ void main() {
         'id': 1,
         'nombre': 'Proteína Suero X',
         // Yunque 3.34 (K4-3): precio_oficial real.
+        // (K4-6: fuera 'dosis_precio' — el precio de la
+        // dosis sale de los ajustes servicio_precio_*,
+        // lib/servicios.dart:134-135; nadie lo leía aquí.)
         'precio_oficial': 4500,
-        'dosis_precio': 600,
       }, 1);
       await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
         'id': 10,
