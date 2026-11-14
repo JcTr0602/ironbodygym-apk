@@ -268,6 +268,32 @@ class _HomeScreenState extends State<HomeScreen>
   int _pilarActivo = 0;
   final Set<int> _pilaresVisitados = {0};
 
+  /// 1.34 Campo 2 (P-2): cuerpos de pilar memoizados y
+  /// marcas de suciedad. Antes, cada fin de sync (idle)
+  /// recargaba Home y su build reconstruía los CUATRO
+  /// pilares del IndexedStack, aunque tres no se veían.
+  /// Ahora el build reutiliza la MISMA instancia de widget
+  /// para cada pilar inactivo (Flutter ni entra en su
+  /// build) y solo el visible se construye fresco; los
+  /// inactivos quedan marcados sucios al idle y se
+  /// reconstruyen al activarse, con los datos ya cargados.
+  final Map<int, Widget> _cuerpoPilarCache = {};
+  final Set<int> _pilaresSucios = {};
+
+  Widget _pilarParaMostrar(int i, bool esDueno) {
+    if (i == _pilarActivo) {
+      final w = _cuerpoPilar(i, esDueno);
+      _cuerpoPilarCache[i] = w;
+      _pilaresSucios.remove(i);
+      return w;
+    }
+    final cache = _cuerpoPilarCache[i];
+    if (cache != null) return cache;
+    final w = _cuerpoPilar(i, esDueno);
+    _cuerpoPilarCache[i] = w;
+    return w;
+  }
+
   /// 1.26.1 (scroll, veredicto de Argón): el controlador de
   /// scroll vive en el State — nunca se recrea en build — y
   /// cada nivel recuerda su propio offset. Antes la Home era
@@ -543,6 +569,12 @@ class _HomeScreenState extends State<HomeScreen>
     _sub = SyncEngine.instance.statusStream.listen((s) async {
       if (s.phase == SyncPhase.idle) {
         if (mounted) setState(() => _falloSync = null);
+        // 1.34 Campo 2 (P-2): los pilares NO visibles
+        // quedan marcados sucios — su cuerpo no se
+        // reconstruye con esta recarga; se reconstruirá
+        // al activarse, con los datos ya frescos.
+        _pilaresSucios
+            .addAll(_pilaresVisitados.where((p) => p != _pilarActivo));
         // H-01 (Argón): una sync que termina ES un cambio de
         // datos, no un evento pasivo: salta la caché de 30 s.
         _cargar(forceRefresh: true);
@@ -1297,7 +1329,7 @@ class _HomeScreenState extends State<HomeScreen>
                     if (_pilaresVisitados.contains(i))
                       KeyedSubtree(
                         key: ValueKey('pilar-$i'),
-                        child: _cuerpoPilar(i, esDueno),
+                        child: _pilarParaMostrar(i, esDueno),
                       )
                     else
                       SizedBox.shrink(key: ValueKey('pilar-vacio-$i')),

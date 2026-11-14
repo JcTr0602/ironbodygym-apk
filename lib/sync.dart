@@ -1283,6 +1283,37 @@ Uri uriSyncOpsBatch(List<String> uuids, String base) {
   });
 }
 
+/// 1.34 Campo 2 (P-2): política de coalescencia de las
+/// emisiones LIGERAS del motor. Un pull emite una por
+/// tabla (~42) y un push una por lote; cada emisión cruza
+/// el stream y reconstruye banner, píldora y Centro de
+/// Sync en el isolate de UI — el tirón que Jc siente al
+/// hacer scroll mientras la sync automática corre. La
+/// política: dentro de una ventana de 250 ms solo se
+/// aplica la ÚLTIMA ligera (su detalle es el vigente);
+/// un cambio de fase siempre se aplica al momento. Clase
+/// pura (el llamador pasa su reloj en ms): se prueba sin
+/// motor ni BD.
+class VentanaEmisionLigera {
+  VentanaEmisionLigera([this.ventanaMs = 250]);
+
+  static const Duration ventana = Duration(milliseconds: 250);
+  final int ventanaMs;
+  int _ultimaMs = -1 << 30;
+  SyncPhase? _fase;
+
+  /// ¿Toca aplicar una ligera de [fase] en [ahoraMs]?
+  bool toca(int ahoraMs, SyncPhase fase) =>
+      fase != _fase || ahoraMs - _ultimaMs >= ventanaMs;
+
+  /// Registra que una ligera de [fase] se aplicó en
+  /// [ahoraMs] (abre su ventana).
+  void registrar(int ahoraMs, SyncPhase fase) {
+    _ultimaMs = ahoraMs;
+    _fase = fase;
+  }
+}
+
 class SyncEngine {
   SyncEngine._();
   static final SyncEngine instance = SyncEngine._();
@@ -1669,11 +1700,104 @@ class SyncEngine {
   int _emitSeq = 0;
   int _emitAplicada = 0;
 
+  /// 1.34 Campo 2 (P-2): ventana de coalescencia de las
+  /// emisiones ligeras (ver [VentanaEmisionLigera]).
+  final _ventanaLigera = VentanaEmisionLigera();
+  final Stopwatch _relojEmision = Stopwatch()..start();
+  Timer? _timerLigera;
+  ({
+    SyncPhase phase,
+    ErrorSync? error,
+    double? progreso,
+    String? detalle,
+    String? resumen,
+    int seq
+  })? _ligeraRetenida;
+
+  /// ¿Toca aplicar una emisión ligera ya, o se retiene
+  /// dentro de la ventana de coalescencia?
+  bool _tocaAplicarLigera(SyncPhase phase) =>
+      _ventanaLigera.toca(_relojEmision.elapsedMilliseconds, phase);
+
+  /// Descarta la ligera retenida (una emisión más nueva —
+  /// completa o ligera inmediata — la supersede).
+  void _descartarLigeraRetenida() {
+    _ligeraRetenida = null;
+    _timerLigera?.cancel();
+    _timerLigera = null;
+  }
+
+  /// Suelta la ligera retenida al cerrar su ventana. Si
+  /// una emisión completa más nueva ya se aplicó, la
+  /// retenida nace vieja y se descarta (guarda de orden).
+  void _soltarLigeraRetenida() {
+    _timerLigera = null;
+    final r = _ligeraRetenida;
+    _ligeraRetenida = null;
+    if (r == null || r.seq < _emitAplicada) return;
+    _aplicarLigera(r.phase,
+        error: r.error,
+        progreso: r.progreso,
+        detalle: r.detalle,
+        resumen: r.resumen,
+        seqEmision: r.seq);
+  }
+
+  /// El cuerpo de la emisión ligera (antes inline en
+  /// [_emit]): aplica la foto heredada y la publica.
+  void _aplicarLigera(SyncPhase phase,
+    {ErrorSync? error,
+    double? progreso,
+    String? detalle,
+    String? resumen,
+    required int seqEmision}) {
+    _ventanaLigera.registrar(
+      _relojEmision.elapsedMilliseconds, phase);
+    final resL = resumen ?? _current.ultimoResumen;
+    final resHoraL =
+        resumen != null ? ahoraHabana() : _current.ultimoResumenHora;
+    _current = SyncStatus(
+        phase: phase,
+        pending: _current.pending,
+        lastOk: _current.lastOk,
+        lastError: error,
+        progreso: progreso,
+        detalle: detalle,
+        hayNovedades: _current.hayNovedades,
+        ultimoResumen: resL,
+        ultimoResumenHora: resHoraL,
+        enLinea: _current.enLinea,
+        ultimoGuardado: _current.ultimoGuardado,
+        ultimoSincronizado: _current.ultimoSincronizado,
+        // 1.28 (M1-B5): la emisión ligera no recalcula la
+        // foto: hereda su sello y sus valores tal cual.
+        calculadoEn: _current.calculadoEn,
+        watermarkMinimo: _current.watermarkMinimo,
+        serverSeq: _current.serverSeq,
+        tablaAtrasada: _current.tablaAtrasada,
+        tablaSinVerificar: _current.tablaSinVerificar,
+        // 1.33: la emisión ligera tampoco recalcula el
+        // aviso del error persistido: lo hereda tal cual.
+        avisoSyncCorto: _current.avisoSyncCorto,
+        avisoSyncTs: _current.avisoSyncTs);
+    _emitAplicada = seqEmision;
+    _status.add(_current);
+  }
+
   /// [ligero] (auditoría 1.21 A-10): emisión de solo progreso —
   /// reutiliza los valores ya calculados de [_current] sin
   /// rehacer el conteo de pendientes, el mínimo de watermarks
   /// (~100 lecturas de meta) ni la resolución DNS. El recálculo
   /// completo queda para el inicio/fin de ciclo y reemitirEstado.
+  ///
+  /// 1.34 Campo 2 (P-2): las ligeras pasan por la VENTANA de
+  /// coalescencia — un pull emite ~42 (una por tabla) y cada
+  /// una reconstruía banner, píldora y Centro de Sync en el
+  /// isolate de UI, compitiendo con el scroll. Dentro de la
+  /// ventana solo se conserva la ÚLTIMA (su detalle es el
+  /// vigente) y se aplica al cerrarse; un cambio de fase se
+  /// aplica al momento. Las completas nunca se retienen y
+  /// descartan la ligera retenida.
   void _emit(SyncPhase phase,
       {ErrorSync? error,
       double? progreso,
@@ -1682,37 +1806,29 @@ class SyncEngine {
       bool ligero = false}) async {
     final seqEmision = ++_emitSeq;
     if (ligero) {
-      final resL = resumen ?? _current.ultimoResumen;
-      final resHoraL =
-          resumen != null ? ahoraHabana() : _current.ultimoResumenHora;
-      _current = SyncStatus(
+      if (!_tocaAplicarLigera(phase)) {
+        _ligeraRetenida = (
           phase: phase,
-          pending: _current.pending,
-          lastOk: _current.lastOk,
-          lastError: error,
+          error: error,
           progreso: progreso,
           detalle: detalle,
-          hayNovedades: _current.hayNovedades,
-          ultimoResumen: resL,
-          ultimoResumenHora: resHoraL,
-          enLinea: _current.enLinea,
-          ultimoGuardado: _current.ultimoGuardado,
-          ultimoSincronizado: _current.ultimoSincronizado,
-          // 1.28 (M1-B5): la emisión ligera no recalcula la
-          // foto: hereda su sello y sus valores tal cual.
-          calculadoEn: _current.calculadoEn,
-          watermarkMinimo: _current.watermarkMinimo,
-          serverSeq: _current.serverSeq,
-          tablaAtrasada: _current.tablaAtrasada,
-          tablaSinVerificar: _current.tablaSinVerificar,
-          // 1.33: la emisión ligera tampoco recalcula el
-          // aviso del error persistido: lo hereda tal cual.
-          avisoSyncCorto: _current.avisoSyncCorto,
-          avisoSyncTs: _current.avisoSyncTs);
-      _emitAplicada = seqEmision;
-      _status.add(_current);
+          resumen: resumen,
+          seq: seqEmision
+        );
+        _timerLigera ??=
+            Timer(VentanaEmisionLigera.ventana, _soltarLigeraRetenida);
+        return;
+      }
+      _descartarLigeraRetenida();
+      _aplicarLigera(phase,
+          error: error,
+          progreso: progreso,
+          detalle: detalle,
+          resumen: resumen,
+          seqEmision: seqEmision);
       return;
     }
+    _descartarLigeraRetenida();
     final foto = await _construirFoto(phase,
         error: error,
         progreso: progreso,
