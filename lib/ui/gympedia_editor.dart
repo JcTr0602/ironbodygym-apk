@@ -15,6 +15,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../config.dart';
 import '../gympedia_almacen.dart';
@@ -411,14 +412,22 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       }
       _slug.text = s;
     }
-    await _db.gympediaGuardarBorrador(_borradorActual());
-    _slugBloqueado = true;
-    // 1.22 GY-04: una edición nueva guardada ya no es «lo
-    // que está en cola»: la marca de publicación se retira.
-    await _db.setMeta('gympedia_en_cola_${_slug.text.trim()}', '');
-    _huella = _huellaActual();
-    _aviso('Borrador guardado en este teléfono.');
-    setState(() {});
+    // Yunque 3 (K7-5), espejo de R5-M6-6 en guia_editor: un
+    // fallo local de guardado (BD bloqueada) era silencio
+    // total; ahora va a bitácora y el aviso nombra la causa.
+    try {
+      await _db.gympediaGuardarBorrador(_borradorActual());
+      _slugBloqueado = true;
+      // 1.22 GY-04: una edición nueva guardada ya no es «lo
+      // que está en cola»: la marca de publicación se retira.
+      await _db.setMeta('gympedia_en_cola_${_slug.text.trim()}', '');
+      _huella = _huellaActual();
+      _aviso('Borrador guardado en este teléfono.');
+      setState(() {});
+    } catch (e) {
+      AppLog.error('ui', 'gympedia_borrador_fallo', d: '$e');
+      _aviso('No se pudo guardar el borrador: $e');
+    }
   }
 
   Future<bool> _chequearObsoleto() async {
@@ -574,6 +583,15 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       }
       _aviso(avisoFinal);
       if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      // Yunque 3 (K7-5), espejo de R5-M6-6 en guia_editor:
+      // publicar encola y escribe en cadena; un fallo local a
+      // mitad (BD bloqueada) era silencio total (try/finally
+      // sin catch), con el riesgo de re-publicar a ciegas y
+      // encolar una segunda op condenada por CAS. El fallo va
+      // a bitácora y el aviso nombra la causa.
+      AppLog.error('ui', 'gympedia_publicar_fallo', d: '$e');
+      _aviso('No se pudo publicar: $e');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -650,19 +668,28 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
       ),
     );
     if (ok != true) return;
-    await _db.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'gympedia_retirar',
-      // CAS: no retirar una revisión más nueva que la vista aquí.
-      payload: {'id': slug, 'base_revision': _baseRevision},
-    );
-    await _db.deleteMirrorTexto('gympedia_articulos', slug);
-    await _db.gympediaEliminarBorrador(slug);
-    // Panel Pieza 7: retirar también apaga la marca de
-    // «en cola de publicación» de ese slug.
-    await _db.setMeta('gympedia_en_cola_$slug', '');
-    _aviso('Artículo retirado. Se aplicará al sincronizar.');
-    if (mounted) Navigator.of(context).pop(true);
+    // Yunque 3 (K7-5), espejo de R5-M6-6 en guia_editor: la
+    // cadena de retirar (encolar + espejo + borrador) fallaba
+    // en silencio ante una excepción local; ahora va a
+    // bitácora y el aviso nombra la causa.
+    try {
+      await _db.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'gympedia_retirar',
+        // CAS: no retirar una revisión más nueva que la vista aquí.
+        payload: {'id': slug, 'base_revision': _baseRevision},
+      );
+      await _db.deleteMirrorTexto('gympedia_articulos', slug);
+      await _db.gympediaEliminarBorrador(slug);
+      // Panel Pieza 7: retirar también apaga la marca de
+      // «en cola de publicación» de ese slug.
+      await _db.setMeta('gympedia_en_cola_$slug', '');
+      _aviso('Artículo retirado. Se aplicará al sincronizar.');
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      AppLog.error('ui', 'gympedia_retirar_fallo', d: '$e');
+      _aviso('No se pudo retirar: $e');
+    }
   }
 
   Future<void> _elegirImagen() async {
