@@ -297,11 +297,36 @@ class _SyncBannerState extends State<SyncBanner>
               icono = Icons.cloud_off_rounded;
               titulo = 'Sin sincronizar';
               subtitulo = 'Toca para sincronizar';
+            } else if (variante == VarianteBanner.error) {
+              // Yunque 3.34 (K1-1): A-3 del Y2 hizo que el
+              // idle con error PERSISTIDO (avisoSyncCorto)
+              // pinte la cáscara de error, pero esta
+              // composición seguía cayendo en la rama «al
+              // día» de abajo: cáscara roja con título
+              // «Todo guardado y sincronizado», icono check
+              // y subtítulo de éxito — contradicción DENTRO
+              // del banner (la píldora de la misma cabecera
+              // sí decía el aviso). Aquí la variante manda:
+              // título = el aviso, icono de problema de
+              // sync y subtítulo = la hora del aviso, con
+              // el mismo formato `hace(...)` de la píldora.
+              // Vale para el modo completo (AvisoEstado) y
+              // para el compacto, que compone de estas
+              // mismas variables antes del bloque de error.
+              icono = Icons.sync_problem_rounded;
+              titulo = s.avisoSyncCorto!;
+              final haceAviso =
+                  s.avisoSyncTs == null ? '' : hace(s.avisoSyncTs!);
+              subtitulo =
+                  haceAviso.isEmpty || haceAviso == 'nunca'
+                      ? null
+                      : haceAviso;
             } else {
               // Variante «al día»: el nivel ya devolvió
               // shrink arriba; esta rama es inalcanzable
-              // y se conserva solo por exhaustividad del
-              // switch de fases.
+              // (el idle con aviso persistido se compone en
+              // la rama K1-1 de arriba) y se conserva solo
+              // por exhaustividad del switch de fases.
               icono = Icons.check_circle_outline_rounded;
               subtitulo =
                   'Sincronizado ${_hace(s.ultimoSincronizado ?? s.lastOk)}';

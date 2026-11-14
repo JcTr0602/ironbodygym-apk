@@ -552,6 +552,7 @@ class FotoCache {
       // la respuesta original: un fallo de red no es un
       // vencimiento.
       if (r.statusCode == 401) {
+        String nuevo = '';
         try {
           // Yunque 2.34 (A-1/G-1): timeout — era el ÚNICO
           // refreshSession de la app sin él tras C3-1; con el
@@ -562,11 +563,22 @@ class FotoCache {
           final res = await Supabase.instance.client.auth
               .refreshSession()
               .timeout(const Duration(seconds: 20));
-          final nuevo = res.session?.accessToken ?? '';
-          if (nuevo.isNotEmpty) {
-            r = await pedir(nuevo);
-          }
+          nuevo = res.session?.accessToken ?? '';
         } catch (_) {}
+        if (nuevo.isNotEmpty) {
+          // Yunque 3.34 (K1-2): el REINTENTO va FUERA del
+          // try, espejo de A-2 en sync.dart (_reqAuth).
+          // Dentro, su propio timeout (el del llamador,
+          // 30 s) caía en el catch de arriba y quedaba en
+          // pie el 401 original: un corte de transporte se
+          // disfrazaba de fallo de autenticación (la ruta
+          // entraba en _fallo401, sin el castigo de la
+          // caché negativa, y el log decía «HTTP 401»).
+          // Fuera, el error del reintento lo trata el catch
+          // exterior de _descargarRed como lo que es: un
+          // fallo de descarga genérico.
+          r = await pedir(nuevo);
+        }
       }
       if (r.statusCode == 401) {
         _fallo401.add(storagePath);

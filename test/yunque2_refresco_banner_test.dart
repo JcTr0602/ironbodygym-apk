@@ -1,18 +1,42 @@
-/// Yunque 2.34 — pins de regresión de la familia C3-1/A-1/A-3:
+/// Yunque 2.34 — pins de regresión. Cobertura EXACTA de
+/// este archivo (precisada en el Yunque 3.34, K1-3: la
+/// cabecera original reclamaba la familia C3-1/A-1/A-3
+/// entera y no era verdad):
 ///
-/// 1. C3-1 (cobertura que el Yunque 1 declaró imposible y el
-///    clúster G del Yunque 2 demostró que existía): si el
-///    endpoint de auth ACEPTA la conexión y nunca responde
-///    (red hostil), el refresco de sesión del motor debe
+/// SÍ pincha:
+/// 1. C3-1, con servidor falso REAL (HttpServer loopback y
+///    el cliente gotrue real de Supabase; cobertura que el
+///    Yunque 1 declaró imposible y el clúster G del Yunque
+///    2 demostró que existía): si el endpoint de auth
+///    ACEPTA la conexión y nunca responde (red hostil), el
+///    refresco de sesión del MOTOR (sync.dart) debe
 ///    cortarse por su timeout de 20 s y la pierna debe
-///    terminar — no colgar la corrida para siempre. Arnés:
+///    avanzar — no colgar la corrida para siempre. Arnés:
 ///    el mismo patrón de servidor falso con HttpOverrides
 ///    de fix_sync133_coherencia_test (ninguna petición sale
 ///    de la máquina), con un modo «refresco colgado».
-/// 2. A-3: `varianteBannerDe` — un error persistido
-///    (avisoSyncCorto) en fase idle manda sobre el «al día»:
-///    el banner no puede apagarse mientras la píldora de la
-///    misma cabecera dice «La bajada falló».
+/// 2. De A-3, SOLO la mitad pura: `varianteBannerDe` /
+///    `nivelBannerDe` — un error persistido (avisoSyncCorto)
+///    en fase idle manda sobre el «al día» en la FUNCIÓN:
+///    el banner no puede apagarse (nivel ninguno) mientras
+///    la píldora de la misma cabecera dice «La bajada falló».
+///
+/// NO pincha (que nadie lo dé por cubierto desde aquí):
+/// - A-1: el timeout del refresco en FOTOS
+///   (`FotoCache._descargarRed` en lib/fotos.dart) no se
+///   ejercita en ningún test de este archivo — ningún
+///   camino de fotos se toca.
+/// - A-2: el reintento FUERA del try en `_reqAuth`
+///   (sync.dart) tampoco: en el modo colgado el refresco
+///   nunca tiene éxito y el reintento jamás se ejecuta; no
+///   hay escenario «refresco OK + reintento colgado», así
+///   que volver a meter el reintento en el try dejaría
+///   este archivo en verde.
+/// - A-3, el RENDER: el pintado del `SyncBanner` en idle
+///   con aviso no se probaba aquí (por ese hueco pasó
+///   K1-1 del Yunque 3: la cáscara de error pintaba
+///   «Todo guardado y sincronizado»). Queda pinchado por
+///   `test/yunque3_banner_test.dart`.
 library;
 
 import 'dart:convert';
