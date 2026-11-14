@@ -190,7 +190,13 @@ class TarjetaAccionesCliente extends StatelessWidget {
   /// sistema nuevo de solicitud/aprobación. La ficha pasa
   /// null cuando la sesión no es del dueño.
   final VoidCallback? onCongelar;
-  final VoidCallback onPapelera;
+
+  /// Yunque 2.34 (D-1): nullable con la misma regla que
+  /// onCongelar. La op `cambiar_estado` es SOLO del dueño en
+  /// el servidor (modo estricto): ofrecer «A papelera» al
+  /// entrenador encolaba una op que el servidor rechazaba en
+  /// silencio y el cliente volvía a las listas al bajar.
+  final VoidCallback? onPapelera;
 
   const TarjetaAccionesCliente({
     super.key,
@@ -263,22 +269,23 @@ class TarjetaAccionesCliente extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
-          if (onCongelar != null) ...[
+          if (onCongelar != null)
             _fila(
               icono: congelado ? Icons.wb_sunny_rounded : Icons.ac_unit_rounded,
               color: AppColores.naranja,
               texto: congelado ? 'Descongelar' : 'Congelar',
               onTap: onCongelar!,
             ),
+          if (onCongelar != null && onPapelera != null)
             const Divider(height: 1),
-          ],
-          _fila(
-            icono: Icons.delete_outline_rounded,
-            color: AppColores.error,
-            texto: 'A papelera',
-            onTap: onPapelera,
-            peligro: true,
-          ),
+          if (onPapelera != null)
+            _fila(
+              icono: Icons.delete_outline_rounded,
+              color: AppColores.error,
+              texto: 'A papelera',
+              onTap: onPapelera!,
+              peligro: true,
+            ),
         ],
       ),
     );

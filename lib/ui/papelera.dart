@@ -1,9 +1,14 @@
 /// Papelera de reciclaje: clientes inactivos (2–3 meses sin ir).
 /// Se pueden recuperar sin volver a inscribir desde cero.
 ///
-/// Nota (punto 45): la app NO tiene botón de borrado definitivo; los
-/// entrenadores solo pueden recuperar. Si se agrega un borrado definitivo
-/// en el futuro, debe mostrarse únicamente si AuthService().isOwner.
+/// Yunque 2.34 (D-1): recuperar (y eliminar definitivamente)
+/// es SOLO del dueño — la op `cambiar_estado` es SOLO_ADMIN
+/// en el servidor en modo estricto. Hasta esta pasada la
+/// pantalla ofrecía «Recuperar» también al entrenador: su op
+/// se rechazaba en silencio y el cliente seguía inactivo
+/// (en «Recuperar y renovar» el pago SÍ entraba y el cliente
+/// quedaba pagado pero inactivo). El entrenador ve la lista
+/// pero sin acciones de estado.
 library;
 
 import 'package:flutter/material.dart';
@@ -120,6 +125,15 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   }
 
   Future<void> _recuperar(Map<String, dynamic> c) async {
+    // Yunque 2.34 (D-1): guarda de rol en la ACCIÓN (los
+    // botones ya no se ofrecen a otros roles): cambiar_estado
+    // es solo del dueño en el servidor.
+    if (!AuthService().isOwner) {
+      mostrarSnack(context,
+          'Recuperar clientes es solo del dueño.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Recuperar cliente',
@@ -149,6 +163,15 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
 
   /// Recupera y de una vez registra la renovación (punto 30).
   Future<void> _recuperarYRenovar(Map<String, dynamic> c) async {
+    // Yunque 2.34 (D-1): misma guarda que _recuperar — sin
+    // ella, el pago entraba y el cliente quedaba pagado pero
+    // INACTIVO (el cambiar_estado se rechazaba en silencio).
+    if (!AuthService().isOwner) {
+      mostrarSnack(context,
+          'Recuperar clientes es solo del dueño.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Recuperar y renovar',
@@ -570,28 +593,36 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                               });
                             },
                           ) : null,
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // F5-25: la acción de recuperar
-                              // era el único botón de la fila
-                              // sin texto ni tooltip: ahora se
-                              // lee «Recuperar».
-                              TextButton.icon(
-                                icon: const Icon(
-                                    Icons.restore_from_trash_rounded,
-                                    size: 18),
-                                label: const Text('Recuperar'),
-                                onPressed: () =>
-                                    _recuperar(c),
-                              ),
-                              TextButton(
-                                child: const Text('Renovar'),
-                                onPressed: () =>
-                                    _recuperarYRenovar(c),
-                              ),
-                            ],
-                          ),
+                          // Yunque 2.34 (D-1): las acciones de
+                          // estado solo se ofrecen al dueño
+                          // (cambiar_estado es SOLO_ADMIN en
+                          // el servidor).
+                          trailing: esDueno
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // F5-25: la acción de
+                                    // recuperar era el único
+                                    // botón de la fila sin
+                                    // texto ni tooltip: ahora
+                                    // se lee «Recuperar».
+                                    TextButton.icon(
+                                      icon: const Icon(
+                                          Icons
+                                              .restore_from_trash_rounded,
+                                          size: 18),
+                                      label: const Text('Recuperar'),
+                                      onPressed: () =>
+                                          _recuperar(c),
+                                    ),
+                                    TextButton(
+                                      child: const Text('Renovar'),
+                                      onPressed: () =>
+                                          _recuperarYRenovar(c),
+                                    ),
+                                  ],
+                                )
+                              : null,
                         );
                       },
                     ),

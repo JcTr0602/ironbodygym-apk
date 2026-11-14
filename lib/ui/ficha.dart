@@ -2380,7 +2380,22 @@ class _FichaScreenState extends State<FichaScreen> {
     SyncEngine.instance.push();
   }
 
-  Future<void> _aPapelera() async {    final ok = await showDialog<bool>(
+  Future<void> _aPapelera() async {
+    // Yunque 2.34 (D-1): segunda puerta del patrón C5-4 — la
+    // tarjeta ya no ofrece la acción a otros roles. La op
+    // cambiar_estado es SOLO del dueño en el servidor: la del
+    // entrenador se rechazaba en silencio y el cliente
+    // volvía a las listas al sincronizar.
+    if (!AuthService().isOwner) {
+      if (!mounted) return;
+      mostrarSnack(context,
+          'Enviar a la papelera es solo del dueño: '
+          'cambiar el estado de un cliente no lo puede '
+          'aplicar el servidor desde una cuenta de entrenador.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(
         titulo: 'Enviar a papelera',
@@ -4058,7 +4073,12 @@ class _FichaScreenState extends State<FichaScreen> {
                         onCongelar: AuthService().isOwner
                             ? _congelar
                             : null,
-                        onPapelera: _aPapelera,
+                        // Yunque 2.34 (D-1): «A papelera»
+                        // (cambiar_estado) es solo del
+                        // dueño, como la congelación legada.
+                        onPapelera: AuthService().isOwner
+                            ? _aPapelera
+                            : null,
                       ),
                       // Bloque 1: panel del dueño (antes disperso
                       // en el menú ⋮): regalo, Cuenta a la Casa y

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../cliente_protegido.dart';
 import '../negocio.dart';
 
+import '../auth.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -130,16 +131,22 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                                                 context),
                                       ),
                                     ),
-                                    trailing: TextButton.icon(
-                                      icon: const Icon(
-                                          Icons.play_arrow_rounded,
-                                          size: 18),
-                                      label: const Text(
-                                          'Descongelar'),
-                                      onPressed: () =>
-                                          _descongelar(id,
-                                              '${c['nombre']}'),
-                                    ),
+                                    // Yunque 2.34 (D-2): el
+                                    // botón solo se ofrece al
+                                    // dueño (ver _descongelar).
+                                    trailing: AuthService().isOwner
+                                        ? TextButton.icon(
+                                            icon: const Icon(
+                                                Icons
+                                                    .play_arrow_rounded,
+                                                size: 18),
+                                            label: const Text(
+                                                'Descongelar'),
+                                            onPressed: () =>
+                                                _descongelar(id,
+                                                    '${c['nombre']}'),
+                                          )
+                                        : null,
                                     onTap: () => Navigator.push(
                                       context,
                                       RutaIron(
@@ -161,6 +168,18 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
   }
 
   Future<void> _descongelar(int id, String nombre) async {
+    // Yunque 2.34 (D-2): esta vía legada encola
+    // cambiar_estado, SOLO del dueño en el servidor — la
+    // pantalla no tenía puerta de rol propia (la de la ficha
+    // de C5-4 no la cubre). El entrenador descongela por el
+    // sistema nuevo de pausas, no desde esta lista.
+    if (!AuthService().isOwner) {
+      if (!mounted) return;
+      mostrarSnack(context,
+          'Descongelar desde esta lista es solo del dueño.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Descongelar membresía',
