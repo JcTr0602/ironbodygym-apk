@@ -1926,6 +1926,14 @@ class LocalDb {
         debugPrint('LocalDb: PRAGMA no efectivo en este teléfono '
             '(journal_mode=$modo, busy_timeout=$espera); '
             'queda constancia en meta journal_mode_efectivo.');
+        // Yunque 3 (K1-4): aquí NO se deja asiento en AppLog a
+        // propósito — app_log.dart importa localdb.dart, así
+        // que importar AppLog en este archivo cerraría un ciclo
+        // de imports (y AppLog vuelca su buffer SOBRE esta BD:
+        // anotar un fallo de apertura desde la propia apertura
+        // sería además reentrante). La superficie leíble es la
+        // meta: Salud del sync la lee y la pinta si no es 'wal'
+        // (ver cargarSaludSync / modoDiarioAnomalo).
       }
     } catch (_) {
       // La constancia jamás tumba la apertura.
