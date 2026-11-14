@@ -260,7 +260,9 @@ void main() {
         });
         await tester.pump(const Duration(milliseconds: 60));
         if (i >= 7 &&
-            find.text('Membresía').evaluate().isNotEmpty) break;
+            find.text('Membresía').evaluate().isNotEmpty) {
+          break;
+        }
       }
     }
 
