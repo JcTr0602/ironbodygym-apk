@@ -12,6 +12,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
@@ -648,66 +649,131 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               compact: true,
               alcance: 'suplementos',
               alTerminarSync: _recargarTrasBanner),
-          // v1.2.1: la promo la ven todos (el interruptor solo
-          // el dueño). Rediseño 1.20: banda compacta; Servicios
-          // vive ahora en el menú ⋮ del app bar.
-          _tarjetaPromo(),
-          Padding(
-            padding: const EdgeInsets.all(AppEspacio.md),
-            child: CampoTexto(
-              controller: _busquedaCtrl,
-              hint: 'Buscar suplemento…',
-              icono: Icons.search_rounded,
-              onChanged: (v) =>
-                  setState(() => _busqueda = v.trim()),
-            ),
-          ),
-          // v1.2.1 + 14/25, unificadas en 1.25 T33: UNA sola
-          // fila de filtros con scroll horizontal (categoría y
-          // disponibilidad): antes eran dos filas fijas que
-          // empujaban el catálogo media pantalla hacia abajo.
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.md, 0, AppEspacio.md, 0),
-            child: Row(
-              children: [
-                if (_categorias.isNotEmpty) ...[
-                  ChoiceChip(
-                    label: const Text('Todas',
-                        style: AppTexto.etiqueta),
-                    selected: _filtroCategoria == null,
-                    onSelected: (_) => setState(
-                        () => _filtroCategoria = null),
-                  ),
-                  const SizedBox(width: 8),
-                  for (final c in _categorias) ...[
-                    ChoiceChip(
-                      label: Text('${c['nombre']}',
-                          style: AppTexto.etiqueta),
-                      selected: _filtroCategoria ==
-                          (c['id'] as int?),
-                      onSelected: (_) => setState(() =>
-                          _filtroCategoria =
-                              c['id'] as int?),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  const SizedBox(width: 8),
-                ],
-                // 1.34 (C-48 · G-07, PARCIAL): el filtro de
-                // stock sale de la fila a su botón «Stock · …»
-                // al final de la misma fila; la categoría se
-                // queda (es navegación del catálogo, no un
-                // recorte ocasional).
-                _botonStock(),
-              ],
-            ),
+          // 1.34 Campo 2 (B-3): la cabecera del catálogo
+          // (promo + buscador + categorías) se PLIEGA al
+          // bajar por la lista y reaparece al subir o al
+          // llegar arriba — al scrollear manda el catálogo
+          // (orden de campo de Jc 2026-11-14: la lista era
+          // lo menos visible de su propia pantalla). El
+          // pliegue lo decide el gesto sobre la lista
+          // (el listener vive dentro del RefrescoIron).
+          AnimatedSize(
+            duration: AppMovimiento.media,
+            curve: AppMovimiento.curvaSuave,
+            alignment: Alignment.topCenter,
+            child: _cabeceraVisible
+                ? _cabeceraCatalogo()
+                : const SizedBox.shrink(),
           ),
           Expanded(child: _cuerpo()),
         ],
       ),
     );
+  }
+
+  /// La cabecera plegable del catálogo: promo, buscador y
+  /// la fila de categorías/stock (su contenido no cambia;
+  /// lo nuevo es que cede su alto al desplazar).
+  Widget _cabeceraCatalogo() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // v1.2.1: la promo la ven todos (el interruptor solo
+        // el dueño). Rediseño 1.20: banda compacta; Servicios
+        // vive ahora en el menú ⋮ del app bar.
+        _tarjetaPromo(),
+        Padding(
+          padding: const EdgeInsets.all(AppEspacio.md),
+          child: CampoTexto(
+            controller: _busquedaCtrl,
+            hint: 'Buscar suplemento…',
+            icono: Icons.search_rounded,
+            onChanged: (v) =>
+                setState(() => _busqueda = v.trim()),
+          ),
+        ),
+        // v1.2.1 + 14/25, unificadas en 1.25 T33: UNA sola
+        // fila de filtros con scroll horizontal (categoría y
+        // disponibilidad): antes eran dos filas fijas que
+        // empujaban el catálogo media pantalla hacia abajo.
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(
+              AppEspacio.md, 0, AppEspacio.md, 0),
+          child: Row(
+            children: [
+              if (_categorias.isNotEmpty) ...[
+                ChoiceChip(
+                  label: const Text('Todas',
+                      style: AppTexto.etiqueta),
+                  selected: _filtroCategoria == null,
+                  onSelected: (_) => setState(
+                      () => _filtroCategoria = null),
+                ),
+                const SizedBox(width: 8),
+                for (final c in _categorias) ...[
+                  ChoiceChip(
+                    label: Text('${c['nombre']}',
+                        style: AppTexto.etiqueta),
+                    selected: _filtroCategoria ==
+                        (c['id'] as int?),
+                    onSelected: (_) => setState(() =>
+                        _filtroCategoria =
+                            c['id'] as int?),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                const SizedBox(width: 8),
+              ],
+              // 1.34 (C-48 · G-07, PARCIAL): el filtro de
+              // stock sale de la fila a su botón «Stock · …»
+              // al final de la misma fila; la categoría se
+              // queda (es navegación del catálogo, no un
+              // recorte ocasional).
+              _botonStock(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool _cabeceraVisible = true;
+
+  /// El pliegue de la cabecera según el scroll del
+  /// catálogo: bajar la pliega; subir la despliega (y
+  /// volver arriba ES subir: llega desplegada). Solo
+  /// reacciona
+  /// al scroll VERTICAL (los carruseles horizontales de
+  /// chips y de «Más vendidos» no pliegan nada). Buscar y
+  /// filtrar quedan a los mismos toques: subir un gesto
+  /// devuelve la cabecera entera. El listener vive DENTRO
+  /// del RefrescoIron (ver _cuerpo): el RefreshIndicator
+  /// se queda las notificaciones de scroll que procesa y
+  /// un listener fuera nunca las vería.
+  bool _alDesplazarCatalogo(UserScrollNotification n) {
+    final eje = n.metrics.axisDirection;
+    if (eje != AxisDirection.down && eje != AxisDirection.up) {
+      return false;
+    }
+    // La notificación de dirección llega AL CAMBIAR el
+    // sentido del gesto, con los píxeles de ESE instante
+    // (al empezar a bajar, aún ~0): el sentido manda, no
+    // el recorrido acumulado ni la posición. Bajar →
+    // pliega; subir → despliega (y subir es también como
+    // se vuelve al tope: la cabecera ya va desplegada).
+    final bool debe;
+    if (n.direction == ScrollDirection.reverse) {
+      debe = false;
+    } else if (n.direction == ScrollDirection.forward) {
+      debe = true;
+    } else {
+      return false;
+    }
+    if (debe != _cabeceraVisible && mounted) {
+      setState(() => _cabeceraVisible = debe);
+    }
+    return false;
   }
 
   /// 1.34 (C-48 · G-07): botón «Stock · …» con el resumen
@@ -927,66 +993,102 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         Expanded(
           child: RefrescoIron(
             onRefresh: _actualizar,
-            child: _vistaLista
-                ? ListView.builder(
-                    padding: const EdgeInsets.all(AppEspacio.md),
-                    itemCount: items.length,
-                    itemBuilder: (ctx, i) => Padding(
-                      padding:
-                          const EdgeInsets.only(bottom: AppEspacio.sm),
-                      child: _TarjetaSuplemento.fila(
-                        key: ValueKey(items[i]['id']),
-                        sup: items[i],
-                        onVender: () => _irVender(items[i]),
-                        onTap: () => _irDetalle(items[i]),
-                        tasaUsd: _tasaUsd,
-                        categoriaNombre: _nombreCategoria(
-                            items[i]['categoria_id'] as int?),
+            child: NotificationListener<UserScrollNotification>(
+              onNotification: _alDesplazarCatalogo,
+              child: _vistaLista
+                ? CustomScrollView(
+                    slivers: [
+                      SliverPadding(
+                        padding:
+                            const EdgeInsets.all(AppEspacio.md),
+                        sliver: SliverList.builder(
+                          itemCount: items.length,
+                          itemBuilder: (ctx, i) => Padding(
+                            padding: const EdgeInsets.only(
+                                bottom: AppEspacio.sm),
+                            child: _TarjetaSuplemento.fila(
+                              key: ValueKey(items[i]['id']),
+                              sup: items[i],
+                              onVender: () => _irVender(items[i]),
+                              onTap: () => _irDetalle(items[i]),
+                              tasaUsd: _tasaUsd,
+                              categoriaNombre: _nombreCategoria(
+                                  items[i]['categoria_id'] as int?),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      // 1.34 Campo 2 (B-3): «Más vendidos»
+                      // cierra el catálogo DENTRO del scroll
+                      // (ver la nota en la vista de rejilla).
+                      if (top.isNotEmpty)
+                        SliverToBoxAdapter(
+                            child: _seccionTop(top)),
+                    ],
                   )
                 : LayoutBuilder(
                     // 1.30 (Oleada D6, UI130-32): la rejilla
                     // del catálogo adopta la cascada de la
                     // fundación, como el Home.
                     builder: (ctx, cons) => EntradaCascada(
-                        child: GridView.builder(
-                      padding: const EdgeInsets.all(AppEspacio.md),
-                      gridDelegate:
-                          SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        // 1.30 D5 (UI130-18): el alto de la celda
-                        // sale del contenido a la escala de texto
-                        // vigente (altoCeldaCatalogo), no de un
-                        // ratio fijo que recortaba a escala grande.
-                        mainAxisExtent: altoCeldaCatalogo(
-                            cons.maxWidth, MediaQuery.textScalerOf(ctx)),
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                      ),
-                      itemCount: items.length,
-                      itemBuilder: (ctx, i) => ItemCascada(
-                          indice: i,
-                          child: _TarjetaSuplemento(
-                        key: ValueKey(items[i]['id']),
-                        sup: items[i],
-                        onVender: () => _irVender(items[i]),
-                        onTap: () => _irDetalle(items[i]),
-                        tasaUsd: _tasaUsd,
-                        categoriaNombre: _nombreCategoria(
-                            items[i]['categoria_id'] as int?),
+                        child: CustomScrollView(
+                      slivers: [
+                        SliverPadding(
+                          padding:
+                              const EdgeInsets.all(AppEspacio.md),
+                          sliver: SliverGrid.builder(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              // 1.30 D5 (UI130-18): el alto de
+                              // la celda sale del contenido a
+                              // la escala de texto vigente
+                              // (altoCeldaCatalogo), no de un
+                              // ratio fijo que recortaba a
+                              // escala grande.
+                              mainAxisExtent: altoCeldaCatalogo(
+                                  cons.maxWidth,
+                                  MediaQuery.textScalerOf(ctx)),
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                            ),
+                            itemCount: items.length,
+                            itemBuilder: (ctx, i) => ItemCascada(
+                                indice: i,
+                                child: _TarjetaSuplemento(
+                                  key: ValueKey(items[i]['id']),
+                                  sup: items[i],
+                                  onVender: () =>
+                                      _irVender(items[i]),
+                                  onTap: () =>
+                                      _irDetalle(items[i]),
+                                  tasaUsd: _tasaUsd,
+                                  categoriaNombre:
+                                      _nombreCategoria(items[i]
+                                              ['categoria_id']
+                                          as int?),
+                                )),
+                          ),
                         ),
-                      ),
+                        // 1.34 Campo 2 (B-3): «Más vendidos»
+                        // deja de ser una banda FIJA al pie
+                        // que le robaba ~130 dp permanentes
+                        // a la lista (1.25 T33 la bajó ahí
+                        // buscando el pulgar; en campo de
+                        // 2026-11-14 Jc dictó lo contrario:
+                        // al scrollear manda el catálogo).
+                        // Ahora cierra el catálogo dentro
+                        // del propio scroll, tras el último
+                        // producto.
+                        if (top.isNotEmpty)
+                          SliverToBoxAdapter(
+                              child: _seccionTop(top)),
+                      ],
                     ),
-                    ),
+                    )),
                   ),
           ),
         ),
-        // 1.25 T33: «Más vendidos» baja a banda inferior (a
-        // alcance del pulgar al vender): encima del catálogo
-        // lo enterraba bajo cinco capas y el primer producto
-        // caía a mitad de pantalla.
-        if (top.isNotEmpty) _seccionTop(top),
       ],
     );
   }
