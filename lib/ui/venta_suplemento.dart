@@ -615,10 +615,17 @@ class _VentaSuplementoScreenState
       builder: (ctx) => DialogoApp(
         titulo: 'Confirma la venta',
         iconoTitulo: Icons.point_of_sale_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        // Yunque 3 (banco_flujos): el contenido va en un
+        // desplazable. Desde que el comprobante cierra con la
+        // línea automática (C6-4 del Yunque 1), la columna pide
+        // más alto que el tope del AlertDialog en pantallas
+        // bajas o con texto grande y el comprobante se recortaba
+        // en silencio (en el banco: desborde de 58 px a 800×600).
+        contenido: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Text(
               'Revisa el comprobante tal y como lo recibirá el cliente:',
               style: AppTexto.cuerpo
@@ -643,7 +650,8 @@ class _VentaSuplementoScreenState
                     .copyWith(color: AppColores.error),
               ),
             ],
-          ],
+            ],
+          ),
         ),
         acciones: [
           TextButton(
