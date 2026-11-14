@@ -25,6 +25,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/mediciones_cliente.dart';
 import 'package:ironbody_gym/plus_reportes.dart';
 import 'package:ironbody_gym/ui/buscar.dart';
 import 'package:ironbody_gym/ui/mi_turno.dart';
@@ -155,6 +156,54 @@ void main() {
               'pendingOpsLectura() (K5-2)');
       expect(fuente.substring(i, j),
           isNot(contains('pendingOps()')));
+    });
+  });
+
+  group('K5-3 · la medición con su op «enviada» no desaparece '
+      'de la lista local', () {
+    test('op registrar_medicion_cliente en «enviada» sin fila '
+        'en espejo: la lista la incluye una sola vez; con la '
+        'fila espejada, tampoco se duplica', () async {
+      final d = await _abrirDbVacia();
+      const medicionId = 'med-k5-3-0001';
+      await d.insert('ops_queue', {
+        'op_uuid': 'op-med-enviada',
+        'tipo': 'registrar_medicion_cliente',
+        'payload': jsonEncode({
+          'medicion_id': medicionId,
+          'cliente_id': 55,
+          'fecha_medicion': '2026-11-14',
+          'medidas': {'peso_kg': 90.0},
+          'registrado_por': 111,
+        }),
+        'estado': 'enviada',
+        'creada_ts': '2026-11-14T08:00:00.000-05:00',
+        'telegram_id': 111,
+      });
+      var lista = await medicionesClienteLocal(55);
+      expect(lista, hasLength(1),
+          reason: 'la medición recién registrada no puede '
+              'desaparecer mientras su op está «enviada» y el '
+              'espejo aún no la trae');
+      expect(lista.single['medicion_id'], medicionId);
+      expect(lista.single['espejado'], isFalse);
+
+      // Cuando el espejo ya trae la fila, manda ella y la op
+      // no duplica (dedupe por medicion_id: la tabla espejo
+      // usa id TEXT = el UUID de la medición).
+      await d.insert('cliente_mediciones', {
+        'id': medicionId,
+        'data': jsonEncode({
+          'id': medicionId,
+          'cliente_id': 55,
+          'fecha_medicion': '2026-11-14',
+          'peso_kg': 90.0,
+        }),
+        'sync_seq': 1,
+      });
+      lista = await medicionesClienteLocal(55);
+      expect(lista, hasLength(1));
+      expect(lista.single['espejado'], isTrue);
     });
   });
 }

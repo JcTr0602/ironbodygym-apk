@@ -158,7 +158,16 @@ Future<List<Map<String, dynamic>>> medicionesClienteLocal(
       'espejado': true,
     };
   }
-  for (final op in await db.pendingOps()) {
+  // Yunque 3 (K5-3): lectura AMPLIA (pendingOpsLectura:
+  // pendiente + enviada + error). Con pendingOps, al registrar
+  // con conexión el push pasaba la op a 'enviada' al momento y
+  // la medición desaparecía de la lista hasta que el ciclo del
+  // puente la bajaba al espejo (el entrenador podía registrarla
+  // otra vez). El dedupe por medicion_id de abajo ya evita el
+  // duplicado cuando la fila espejada llega. NO se toca
+  // cancelarMedicionPendienteSiExiste: su contrato «enviada ya
+  // no se cancela» es de diseño.
+  for (final op in await db.pendingOpsLectura()) {
     if ('${op['tipo']}' != 'registrar_medicion_cliente') continue;
     Map<String, dynamic> p;
     try {
