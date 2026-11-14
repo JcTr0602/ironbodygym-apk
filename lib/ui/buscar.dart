@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
@@ -106,6 +107,63 @@ class _BuscarScreenState extends State<BuscarScreen> {
   // registrado hoy (el registro del día de la bandeja):
   // la fila lo enseña y el flujo en lote los salta.
   Set<int> _avisadosHoyIds = {};
+  // 1.35 (UI-06): últimos clientes abiertos desde el
+  // Directorio (solo local, sin sync): con el campo vacío
+  // se enseñan como fila «Recientes» sobre la lista.
+  List<Map<String, dynamic>> _recientes = [];
+  static const _kRecientesDirectorio = 'directorio_recientes_v1';
+  static const _kMaxRecientesDirectorio = 5;
+
+  Future<void> _cargarRecientes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ids = prefs.getStringList(_kRecientesDirectorio) ?? const [];
+      if (ids.isEmpty) return;
+      final todos = await listaClientes('');
+      final porId = {
+        for (final c in todos) (c['id'] as num?)?.toInt(): c,
+      };
+      if (!mounted) return;
+      setState(() {
+        _recientes = [
+          for (final s in ids)
+            if (porId[int.tryParse(s)] != null) porId[int.tryParse(s)]!,
+        ];
+      });
+    } catch (_) {
+      // Sin recientes legibles, el Directorio abre como
+      // siempre: la lista completa.
+    }
+  }
+
+  Future<void> _registrarReciente(int id) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ids = [
+        '$id',
+        ...(prefs.getStringList(_kRecientesDirectorio) ?? const [])
+            .where((s) => s != '$id'),
+      ].take(_kMaxRecientesDirectorio).toList();
+      await prefs.setStringList(_kRecientesDirectorio, ids);
+      await _cargarRecientes();
+    } catch (_) {}
+  }
+
+  void _abrirFichaReciente(Map<String, dynamic> c) {
+    final id = (c['id'] as num?)?.toInt();
+    if (id == null) return;
+    _registrarReciente(id);
+    Navigator.of(context)
+        .push(RutaIron(
+            builder: (_) =>
+                FichaScreen(clienteId: id, origenHero: 'buscar')))
+        .then((_) {
+      if (mounted) {
+        _buscar();
+        _cargarRecientes();
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -121,6 +179,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
     }
     _cargarConfig();
     _buscar(); // lista completa por defecto
+    _cargarRecientes(); // 1.35 (UI-06)
   }
 
   /// Bloque 1: config local de deslizables + última bajada
@@ -872,6 +931,28 @@ class _BuscarScreenState extends State<BuscarScreen> {
             const SliverToBoxAdapter(
               child: TarjetaDiagnosticoEspejo(),
             ),
+            // 1.35 (UI-06): «Recientes» — los últimos
+            // clientes abiertos, solo con el campo vacío y
+            // fuera del modo selección; al teclear manda el
+            // resultado normal y la fila desaparece.
+            if (_q.text.trim().isEmpty &&
+                !_modoSeleccion &&
+                _recientes.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const EncabezadoSeccion(titulo: 'RECIENTES'),
+                    for (final c in _recientes)
+                      FilaCliente(
+                        cliente: c,
+                        compacta: true,
+                        desambiguar: !esVistaProtegida(c),
+                        onTap: () => _abrirFichaReciente(c),
+                      ),
+                  ],
+                ),
+              ),
             // 1.25 T116 (F1-52): el vacío dice SU causa
             // (espejo vacío, filtro o búsqueda) y da la
             // salida de cada una.
@@ -1049,6 +1130,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
                 if (cidFila == null) {
                   return;
                 }
+                // 1.35 (UI-06): abrir la ficha lo deja en
+                // los recientes del Directorio.
+                _registrarReciente(cidFila);
                 Navigator.of(context)
                     .push(RutaIron(
                         builder: (_) =>
@@ -1058,7 +1142,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
                                 origenHero:
                                     'buscar')))
                     .then((_) {
-                  if (mounted) _buscar();
+                  if (mounted) {
+                    _buscar();
+                    _cargarRecientes();
+                  }
                 });
               },
       ),

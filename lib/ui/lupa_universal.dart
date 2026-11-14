@@ -8,7 +8,7 @@
 /// 1.25 ([buscarClientesPanel], [buscarFuncionesPanel],
 /// [normalizarTextoPanel]): una sola tolerancia en la casa.
 ///
-/// Recientes: los últimos 3 destinos usados (clientes o
+/// Recientes: los últimos 5 destinos usados (clientes o
 /// funciones), en SharedPreferences. Nada de esto toca la red:
 /// el espejo local es la fuente (Compuerta: pintar local).
 library;
@@ -78,7 +78,9 @@ import 'turnos_hub.dart';
 import 'usuarios.dart';
 
 const _kRecientesLupa = 'lupa_recientes_v1';
-const _kMaxRecientesLupa = 3;
+// 1.35 (UI-06): la fila de recientes enseña hasta 5
+// destinos (antes 3), como el Directorio.
+const _kMaxRecientesLupa = 5;
 
 /// Resolvedor ÚNICO de destinos por id (1.32, Oleada 2 F1 —
 /// desviación 3 de Argón): lo usan la Lupa y el buscador del
@@ -334,7 +336,7 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
     abrirFuncionLupa(context, f.id);
   }
 
-  Widget _filaCliente(Map<String, dynamic> c) {
+  Widget _filaCliente(Map<String, dynamic> c, {bool compacta = false}) {
     final id = (c['id'] as num?)?.toInt() ?? 0;
     // 1.35 (UI-05): la fila del directorio (foto, chip de
     // estado) en vez del ListTile pelado: el estado del
@@ -347,6 +349,7 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
     // fila abre la ficha, donde la acción existe.
     return FilaCliente(
       cliente: c,
+      compacta: compacta,
       desambiguar: !esVistaProtegida(c, esDueno: _auth.isOwner),
       onTap: id > 0 ? () => _abrirCliente(id) : null,
     );
@@ -438,7 +441,7 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
         for (final r in _recientes) ...[
           if (r.startsWith('cliente:') &&
               porId[r.substring(8)] != null)
-            _filaCliente(porId[r.substring(8)]!),
+            _filaCliente(porId[r.substring(8)]!, compacta: true),
           if (!r.startsWith('cliente:'))
             for (final f in funciones)
               if (f.id == r)
