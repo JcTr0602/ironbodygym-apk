@@ -72,6 +72,23 @@ void main() {
     expect(s.length, lessThanOrEqualTo(44));
   });
 
+  test('K3-6: los actores sintéticos van enteros en el '
+      'resumen de Auditoría', () {
+    expect(
+        resumenFiltrosAuditoriaTxt(
+            alcance: 'Todo', soloHoy: false, actor: 'Este dispositivo'),
+        'Filtrar · Todo · Este dispositivo');
+    expect(
+        resumenFiltrosAuditoriaTxt(
+            alcance: 'Todo', soloHoy: false, actor: 'Otro usuario'),
+        'Filtrar · Todo · Otro usuario');
+    // Un nombre real sigue entrando por su primera palabra.
+    expect(
+        resumenFiltrosAuditoriaTxt(
+            alcance: 'Todo', soloHoy: false, actor: 'Gabriel Pérez'),
+        'Filtrar · Todo · Gabriel');
+  });
+
   test('Servicios · peor caso: tipo largo + vendedor '
       'completo', () {
     final s = resumenFiltrosServiciosTxt(

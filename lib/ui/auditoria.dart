@@ -1482,7 +1482,15 @@ String resumenFiltrosAuditoriaTxt({
 }) {
   final partes = <String>['Filtrar', alcance];
   if (soloHoy) partes.add('Hoy');
-  if (actor != null) partes.add(primeraPalabraResumen(actor));
+  if (actor != null) {
+    // Yunque 3 (K3-6): los actores sintéticos de actorDeOp
+    // («Este dispositivo» / «Otro usuario») van ENTEROS —
+    // su primera palabra («Este» / «Otro») se lee como el
+    // nombre de una persona y no nombra el estado real.
+    partes.add(actor == 'Este dispositivo' || actor == 'Otro usuario'
+        ? actor
+        : primeraPalabraResumen(actor));
+  }
   return partes.join(' · ');
 }
 
