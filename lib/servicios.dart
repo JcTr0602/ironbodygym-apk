@@ -318,17 +318,22 @@ List<Map<String, dynamic>> entradasHistorialServicios({
 
 /// 1.31 (Mejoras · Historial elevado): totales de UN día del
 /// historial (PURO). Operaciones = todas las entradas del día
-/// (ventas, reversos y salidas sin venta). Importe = ventas
-/// menos reversos: la venta ya reversada sigue sumando (su
-/// reverso es la entrada que resta) y las salidas no mueven
-/// dinero. Es el número que el encabezado de día enseña.
+/// (ventas, reversos y salidas sin venta). Importe = suma de
+/// los montos CON SU SIGNO: el monto del reverso ya nace
+/// negativo en `entradasHistorialServicios` (cantidad
+/// negativa × precio positivo, convención del servidor), así
+/// que netea sumando — la misma regla del cuadre
+/// (`_cuadreServiciosDia`). Yunque 3 (K6-1): la rama que
+/// volvía a negar el reverso lo SUMABA al día (venta 900 +
+/// reverso el mismo día daban 1800 en vez de 0). Las salidas
+/// no mueven dinero. Es el número que el encabezado de día
+/// enseña.
 ({int operaciones, double importe}) totalesDiaHistorialServicios(
     List<Map<String, dynamic>> entradasDelDia) {
   var importe = 0.0;
   for (final e in entradasDelDia) {
     if (e['kind'] != 'venta') continue;
-    final m = (e['monto'] as num?)?.toDouble() ?? 0;
-    importe += e['esReverso'] == true ? -m : m;
+    importe += (e['monto'] as num?)?.toDouble() ?? 0;
   }
   return (operaciones: entradasDelDia.length, importe: importe);
 }
