@@ -677,7 +677,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           Text(
             'Stock · ${etiquetaFiltroStock(_filtroStock)}',
             style: AppTexto.metadato,
-            maxLines: 1,
+            // Yunque 1.34 (C2-5): a 2 líneas, como los demás
+            // botones de filtros plegados (ver Auditoría).
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(width: 4),

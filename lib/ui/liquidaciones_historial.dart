@@ -137,7 +137,9 @@ class _LiquidacionesHistorialScreenState
             child: Text(
               _mes.isEmpty ? 'Mes · Todos' : 'Mes · ${_nombreMes(_mes)}',
               style: AppTexto.metadato,
-              maxLines: 1,
+              // Yunque 1.34 (C2-5): a 2 líneas, como los demás
+              // botones de filtros plegados (ver Auditoría).
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),

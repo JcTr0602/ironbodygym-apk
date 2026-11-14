@@ -620,9 +620,13 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   Widget _botonFiltrosAuditoria(bool esDueno) {
     return OutlinedButton.icon(
       icon: const Icon(Icons.filter_list_rounded, size: 16),
+      // Yunque 1.34 (C2-5): la etiqueta-resumen admite 2
+      // líneas en los seis botones de filtros plegados — a
+      // 360 dp con texto 1.3 la cola (rango, actor) se
+      // elidía y el botón dejaba de nombrar el estado.
       label: Text(_resumenFiltrosAuditoria(),
           style: AppTexto.metadato,
-          maxLines: 1,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(

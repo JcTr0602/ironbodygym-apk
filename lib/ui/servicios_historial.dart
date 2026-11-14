@@ -303,9 +303,10 @@ class _ServiciosHistorialCuerpoState
   Widget _botonFiltrosServicios(List<int> vendedores) {
     return OutlinedButton.icon(
       icon: const Icon(Icons.filter_list_rounded, size: 16),
+      // Yunque 1.34 (C2-5): resumen a 2 líneas (ver Auditoría).
       label: Text(_resumenFiltrosServicios(),
           style: AppTexto.metadato,
-          maxLines: 1,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(

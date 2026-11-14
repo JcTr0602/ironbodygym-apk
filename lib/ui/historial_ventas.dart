@@ -604,9 +604,10 @@ class _HistorialVentasScreenState
   Widget _botonFiltrosVentas() {
     return OutlinedButton.icon(
       icon: const Icon(Icons.filter_list_rounded, size: 16),
+      // Yunque 1.34 (C2-5): resumen a 2 líneas (ver Auditoría).
       label: Text(_resumenFiltrosVentas(),
           style: AppTexto.metadato,
-          maxLines: 1,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(

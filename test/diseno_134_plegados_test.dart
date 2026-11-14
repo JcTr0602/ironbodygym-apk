@@ -368,6 +368,33 @@ void main() {
       await _descartarDialogos(tester);
       await _cerrarCascara(tester);
     });
+
+    testWidgets('Yunque 1.34 (C2-5): a 360 dp con texto 1.3 '
+        'el botón de filtros admite 2 líneas y no desborda',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await sembrarBase(tester);
+      await tester.pumpWidget(MaterialApp(
+        theme: _temaCaptura(),
+        home: MediaQuery(
+          data: const MediaQueryData(
+              textScaler: TextScaler.linear(1.3)),
+          child: AuditoriaScreen(
+            servicioActividad:
+                ActividadClienteService(rpcParaTest: (_) async => []),
+          ),
+        ),
+      ));
+      await _drenar(tester);
+      expect(tester.takeException(), isNull);
+      final etiqueta =
+          tester.widget<Text>(find.text('Filtrar · Otros y alertas'));
+      expect(etiqueta.maxLines, 2,
+          reason: 'el resumen no se elide a 1 línea (C2-5)');
+      await _cerrarCascara(tester);
+    });
   });
 
   group('G-02 Historial de ventas', () {
