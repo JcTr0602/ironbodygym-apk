@@ -118,7 +118,11 @@ void main() {
       // push) se conserva y se refuerza: el resultado
       // expone el aborto para que _doPush salte fotos,
       // comprobantes y el segundo intento.
-      final i = sync.indexOf('_uploadOps({bool forzar = false})');
+      // 1.34 Campo 2 (P-9): la firma gana el corte de la
+      // corrida manual (`CorteManifiesto? corte`); el
+      // localizador se actualiza otra vez, semántica intacta.
+      final i = sync.indexOf(
+          '_uploadOps({bool forzar = false, CorteManifiesto? corte})');
       expect(i, isNonNegative);
       final cuerpo = sync.substring(i, i + 16000);
       final iAuth = cuerpo.indexOf('Decision4xxPush.bumpAuth');
@@ -145,7 +149,9 @@ void main() {
       // bump podría caer en transitorio/permanente: la op
       // quedaría con backoff o en revisión en vez de en el
       // carril de sesión.
-      final i = sync.indexOf('_uploadOps({bool forzar = false})');
+      // Localizador con la firma de P-9 (ver el test del lote).
+      final i = sync.indexOf(
+          '_uploadOps({bool forzar = false, CorteManifiesto? corte})');
       expect(i, isNonNegative);
       final cuerpo = sync.substring(i, i + 16000);
       final iAuth = cuerpo.indexOf('Decision4xxPush.bumpAuth');
