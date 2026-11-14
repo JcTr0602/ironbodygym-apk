@@ -593,6 +593,23 @@ class LocalDb {
     }
   }
 
+  /// Yunque 1.34 (C6-2): un downgrade (reinstalar una versión
+  /// ANTERIOR de la app sobre una base más nueva) NO borra la
+  /// base. Sin este callback, sqflite aplica por defecto
+  /// `onDatabaseDowngradeDelete` y se pierde TODO, incluida
+  /// la cola de operaciones sin subir. Las migraciones de
+  /// esta app son aditivas (columnas, tablas e índices
+  /// nuevos): el esquema nuevo es superconjunto del viejo y
+  /// la build anterior puede abrirlo sin tocar una fila. La
+  /// apertura siguiente con la versión actual re-ejecuta el
+  /// onUpgrade intermedio, que es idempotente.
+  static Future<void> onDowngradePreservar(
+      Database db, int oldVersion, int newVersion) async {
+    debugPrint('LocalDb: downgrade de esquema '
+        '$oldVersion → $newVersion: base PRESERVADA '
+        '(sin borrado); las migraciones son aditivas.');
+  }
+
   Future<Database> get db async {
     final d = _db;
     if (d != null) return d;
@@ -605,8 +622,15 @@ class LocalDb {
       // v1.2.9+34 (hotfix): try-catch — si el dispositivo no soporta WAL,
       // la app debe abrir igual en modo DELETE, no morir.
       onConfigure: (db) async {
+        // Yunque 1.34 (C6-1): journal_mode y busy_timeout van
+        // por rawQuery — DEVUELVEN fila y el execSQL de
+        // Android RECHAZA las sentencias con resultado (la
+        // lección de Clientes 0.6.1; aquí el try/catch lo
+        // tragaba y los dos PRAGMA jamás se aplicaban en
+        // Android: sin WAL ni espera entre isolates). El de
+        // foreign_keys no devuelve fila y se queda en execute.
         try {
-          await db.execute('PRAGMA journal_mode = WAL;');
+          await db.rawQuery('PRAGMA journal_mode = WAL;');
         } catch (_) {}
         // v1.3.1 (M3): activar FKs para que ON DELETE CASCADE funcione.
         try {
@@ -618,9 +642,11 @@ class LocalDb {
         // esperar unos segundos a que el otro termine (la
         // clase 'database is locked' ya se veía en campo).
         try {
-          await db.execute('PRAGMA busy_timeout = 5000;');
+          await db.rawQuery('PRAGMA busy_timeout = 5000;');
         } catch (_) {}
       },
+      // Yunque 1.34 (C6-2): ver [onDowngradePreservar].
+      onDowngrade: onDowngradePreservar,
       onCreate: (db, _) async {
         await _crearTablas(db);
         // 1.32 (O2F2S, síntesis AP-2): todo espejo nace
@@ -2697,15 +2723,32 @@ class LocalDb {
       final t = await db.rawQuery(
           "SELECT name FROM sqlite_master WHERE type='table' AND name='pagos'");
       if (t.isEmpty) return;
-      await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha)');
-      await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id, fecha)');
-      await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)');
-      await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_pagos_metodo ON pagos(metodo)');
-    } catch (_) {}
+    } catch (_) {
+      return;
+    }
+    // Yunque 1.34 (C1-4): cada índice con su propio try — un
+    // solo try/catch envolvía los cuatro y un fallo en el
+    // primero abortaba los demás EN SILENCIO, dejando la
+    // garantía de índices de la v75 a medias y sin rastro
+    // (el debugPrint es el patrón de esta misma clase para
+    // pasos de migración que fallan sin ser fatales).
+    const sentencias = <String, String>{
+      'idx_pagos_fecha':
+          'CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha)',
+      'idx_pagos_cliente':
+          'CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id, fecha)',
+      'idx_pagos_telegram':
+          'CREATE INDEX IF NOT EXISTS idx_pagos_telegram ON pagos(telegram_user_id, fecha)',
+      'idx_pagos_metodo':
+          'CREATE INDEX IF NOT EXISTS idx_pagos_metodo ON pagos(metodo)',
+    };
+    for (final e in sentencias.entries) {
+      try {
+        await db.execute(e.value);
+      } catch (err) {
+        debugPrint('LocalDb v75: índice ${e.key} no creado: $err');
+      }
+    }
   }
 
   /// v1.3.4 (ítem 2): backfill de las columnas indexadas de `pagos` en
