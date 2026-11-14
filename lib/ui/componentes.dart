@@ -743,7 +743,16 @@ class BadgeEstado extends StatelessWidget {
         children: [
           Icon(icono, size: 16, color: frente),
           const SizedBox(width: 4),
-          Text(texto, style: AppTexto.etiqueta.copyWith(color: frente)),
+          // Jornada 1 de la 1.34: un texto largo del badge
+          // («VENCIDO … DÍAS» en filas estrechas con
+          // trailing ancho, p. ej. la Papelera) desbordaba
+          // la columna en seco (158 px medidos); flexible
+          // con elipsis, como el chip de la Casa.
+          Flexible(
+            child: Text(texto,
+                overflow: TextOverflow.ellipsis,
+                style: AppTexto.etiqueta.copyWith(color: frente)),
+          ),
         ],
       ),
     );

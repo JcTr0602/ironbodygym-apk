@@ -99,7 +99,8 @@ void jornadaViewport(WidgetTester tester) {
 // mentira + setInitialSession). «jc» es alias de dueño en
 // AppConfig.ownerUsernames; Gabriel es entrenador real. ──
 
-String _jornadaJwt(String email, int telegramId, String sub) {
+String _jornadaJwt(String email, int telegramId, String sub,
+    {bool admin = false}) {
   String b64(Map<String, dynamic> m) =>
       base64Url.encode(utf8.encode(jsonEncode(m))).replaceAll('=', '');
   final header = b64({'alg': 'HS256', 'typ': 'JWT'});
@@ -110,16 +111,24 @@ String _jornadaJwt(String email, int telegramId, String sub) {
     'iat': 1700000000,
     'email': email,
     'role': 'authenticated',
-    'app_metadata': {'telegram_id': telegramId, 'provider': 'email'},
+    'app_metadata': {
+      'telegram_id': telegramId,
+      'provider': 'email',
+      // La cuenta real de Jc lleva rol admin en app_metadata
+      // (AuthService.isAdmin lo lee de ahí): sin esto, el
+      // arnés escondía las acciones solo-admin (p. ej. el
+      // ⋮ «Corregir pago» del historial, S20).
+      if (admin) 'rol': 'admin',
+    },
   });
   return '$header.$payload.firma-de-mentira';
 }
 
 Future<void> _jornadaSesion(WidgetTester tester, String email, int tid,
     String sub, String username,
-    {bool gastos = true}) async {
+    {bool gastos = true, bool admin = false}) async {
   final sesion = jsonEncode({
-    'access_token': _jornadaJwt(email, tid, sub),
+    'access_token': _jornadaJwt(email, tid, sub, admin: admin),
     'token_type': 'bearer',
     'expires_in': 3600,
     'refresh_token': 'refresh-de-mentira',
@@ -127,7 +136,11 @@ Future<void> _jornadaSesion(WidgetTester tester, String email, int tid,
       'id': sub,
       'aud': 'authenticated',
       'email': email,
-      'app_metadata': {'telegram_id': tid, 'provider': 'email'},
+      'app_metadata': {
+        'telegram_id': tid,
+        'provider': 'email',
+        if (admin) 'rol': 'admin',
+      },
       'user_metadata': <String, dynamic>{},
       'created_at': '2024-01-01T00:00:00.000Z',
     },
@@ -140,9 +153,11 @@ Future<void> _jornadaSesion(WidgetTester tester, String email, int tid,
   });
 }
 
-/// Sesión del DUEÑO (Jc, telegram 735772141).
+/// Sesión del DUEÑO (Jc, telegram 735772141; su cuenta
+/// real es además admin: isAdmin por rol en app_metadata).
 Future<void> jornadaSesionDueno(WidgetTester tester) => _jornadaSesion(tester,
-    'jc@ironbody.local', 735772141, '00000000-0000-0000-0000-0000000000e6', 'jc');
+    'jc@ironbody.local', 735772141, '00000000-0000-0000-0000-0000000000e6', 'jc',
+    admin: true);
 
 /// Sesión de ENTRENADOR (Gabriel, telegram 1403501391).
 /// [gastos] permite el contraste de la situación 11.
