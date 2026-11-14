@@ -512,7 +512,7 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
   Widget _lista(List<Map<String, dynamic>> items, String etiqueta) {
     if (items.isEmpty) {
       return EstadoVacio(
-        ilustracion: 'assets/vacio_pastel.jpg',
+        ilustracion: 'assets/vacio_pastel.webp',
         icono: Icons.cake_rounded,
         titulo: 'Sin cumpleaños en los $etiqueta.',
         subtitulo: 'La fecha sale del carnet de identidad.',

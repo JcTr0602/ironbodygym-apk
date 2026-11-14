@@ -798,7 +798,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
           _filtroCategoria != null ||
           _filtroStock != 'todos';
       return EstadoVacio(
-        ilustracion: 'assets/vacio_pomo.jpg',
+        ilustracion: 'assets/vacio_pomo.webp',
         icono: Icons.medication_rounded,
         titulo: 'Sin suplementos',
         subtitulo: hayFiltros

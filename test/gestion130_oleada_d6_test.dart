@@ -343,28 +343,22 @@ void main() {
 
     test('los 12 assets de la lámina existen y están en '
         'el pubspec', () {
-      // 1.34 (carril arte): 9 de las 12 ilustraciones van
-      // en WebP con alfa real; pomo, pastel y megafono
-      // quedan en JPG (escenas con mueble, cabos del
-      // carril — ver test/arte_134_contrato_test.dart).
+      // 1.34: las 12 ilustraciones van en WebP con alfa
+      // real — 9 convertidas por el carril de arte y pomo,
+      // pastel y megafono regeneradas como spots nativos
+      // por la pieza 134-arte-regen (ver
+      // test/arte_134_contrato_test.dart).
       const enWebp = [
         'papelera', 'caja', 'escudo', 'sobre', 'lupa',
         'recepcion', 'reloj', 'calendario', 'cable',
+        'pomo', 'pastel', 'megafono',
       ];
-      const enJpg = ['pomo', 'pastel', 'megafono'];
       final pubspec = _fuente('pubspec.yaml');
       for (final n in enWebp) {
         expect(File('assets/vacio_$n.webp').existsSync(),
             isTrue,
             reason: n);
         expect(pubspec, contains('assets/vacio_$n.webp'),
-            reason: n);
-      }
-      for (final n in enJpg) {
-        expect(File('assets/vacio_$n.jpg').existsSync(),
-            isTrue,
-            reason: n);
-        expect(pubspec, contains('assets/vacio_$n.jpg'),
             reason: n);
       }
     });
