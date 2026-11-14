@@ -2136,22 +2136,10 @@ class _FichaScreenState extends State<FichaScreen> {
     }
   }
 
-  /// Elimina la foto del cliente (v1.0.15).
-  Future<void> _eliminarFoto() async {
-    // 1.34 (G-1): la misma guarda de _cambiarFoto (son
-    // las dos puertas del flujo de foto de la ficha); el
-    // flujo interno lo invoca _cambiarFotoFlujo directo.
-    if (_fotoDialogoEnCurso) return;
-    _fotoDialogoEnCurso = true;
-    if (mounted) setState(() {});
-    try {
-      await _eliminarFotoFlujo();
-    } finally {
-      _fotoDialogoEnCurso = false;
-      if (mounted) setState(() {});
-    }
-  }
-
+  /// Elimina la foto del cliente (v1.0.15). 1.34 (G-1):
+  /// su ÚNICA entrada es la rama «eliminar» de
+  /// _cambiarFotoFlujo, ya bajo la guarda de _cambiarFoto
+  /// (no hay botón directo a este flujo).
   Future<void> _eliminarFotoFlujo() async {
     // 1.24 Bloque 3: eliminar_foto cuelga de can_editar_fichas.
     if (!await permisoOperativoOkConRefresco(

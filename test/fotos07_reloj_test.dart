@@ -9,8 +9,6 @@
 /// documenta el defecto con el reloj de pared inyectado.
 library;
 
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/fotos.dart';
 
