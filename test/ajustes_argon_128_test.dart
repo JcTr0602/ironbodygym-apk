@@ -422,7 +422,12 @@ void main() {
       // quedó a 4351. La aserción no cambia: el cableado
       // clasificación→huboRespuesta debe existir en la
       // función; solo se recolocó su ventana.
-      final cuerpo = src.substring(i, i + 6500);
+      // Yunque 2.34 (G §1.12): la ventana se estrecha a
+      // 4700 — con 6500, una recolocación de la llamada
+      // hasta ~2100 caracteres más lejos seguiría verde y
+      // el contrato dejaría de morder; 4700 deja ~350 de
+      // margen sobre la posición real (4351).
+      final cuerpo = src.substring(i, i + 4700);
       expect(
           cuerpo.contains(
               'huboRespuesta: huboRespuestaManifiesto(r.statusCode)'),

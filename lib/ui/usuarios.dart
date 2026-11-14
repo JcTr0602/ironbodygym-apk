@@ -242,15 +242,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
 
   /// v1.0.14: texto listo para compartir credenciales por WhatsApp.
   void _compartirCredenciales(String username, String password) {
-    final texto = '''🏋️ *Iron Body Gym*
-
-Hola $username, estas son tus credenciales para la app del gym:
-
-👤 *Usuario:* $username
-🔑 *Contraseña:* $password
-
-📲 Descarga la APK e inicia sesión con estos datos.
-⚠️ No compartas tu contraseña con nadie.''';
+    final texto = textoCredencialesStaff(username, password);
     showDialog<void>(
       context: context,
       builder: (ctx) => DialogoApp(
@@ -841,3 +833,19 @@ class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
     );
   }
 }
+
+/// v1.0.14: texto de credenciales del staff listo para
+/// compartir. Yunque 2.34 (G-2): cierra con la línea de
+/// mensaje automático de la regla de Jc (2026-11-01), como
+/// ya hacía el mensaje del PIN (C6-4) — este era el único
+/// mensaje compuesto por la app que no la llevaba. PURO.
+String textoCredencialesStaff(String username, String password) =>
+    '''🏋️ *Iron Body Gym*
+
+Hola $username, estas son tus credenciales para la app del gym:
+
+👤 *Usuario:* $username
+🔑 *Contraseña:* $password
+
+📲 Descarga la APK e inicia sesión con estos datos.
+⚠️ No compartas tu contraseña con nadie.$lineaMensajeAutomatico''';
