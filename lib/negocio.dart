@@ -542,10 +542,17 @@ Future<List<Map<String, dynamic>>> pagosDe(int clienteId,
 Future<({int n, double total})> totalesPagosCliente(
     int clienteId) async {
   final todos = await pagosDe(clienteId, limit: 100000);
+  // Yunque 4 (L5-1): el overlay de anulación de la casa
+  // (regla escrita en esPagoAnulado) — este lector quedó
+  // fuera y el «de por vida» sumaba el pago anulado hasta
+  // que el pull retiraba la fila borrada por el servidor.
+  final anuladosCola =
+      await LocalDb.instance.pagosAnuladosEnCola();
   var n = 0;
   var total = 0.0;
   for (final p in todos) {
     if (p['metodo'] == 'cortesia') continue;
+    if (esPagoAnulado(p, anuladosCola)) continue;
     n++;
     total += (p['monto'] as num?)?.toDouble() ?? 0;
   }

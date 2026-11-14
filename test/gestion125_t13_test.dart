@@ -71,6 +71,43 @@ void main() {
     expect(t.total, 1200);
   });
 
+  test('T14b (Yunque 4 · L5-1): el de por vida salta el pago '
+      'anulado (marca en el JSON y anulación viva en cola)',
+      () async {
+    final db = await LocalDb.instance.db;
+    Future<void> pago(int id, int monto, {bool anulado = false}) =>
+        db.insert('pagos', {
+          'id': id,
+          'data': jsonEncode({
+            'id': id,
+            'cliente_id': 7,
+            'fecha': '2026-10-15',
+            'monto': monto,
+            'metodo': 'transferencia',
+            if (anulado) 'anulado': 1,
+          }),
+          'sync_seq': 100 + id,
+          'cliente_id': 7,
+          'fecha': '2026-10-15',
+        });
+    await pago(1, 100);
+    // Anulado con la marca optimista en el propio JSON.
+    await pago(2, 2500, anulado: true);
+    // Anulado solo por la cola (un pull reescribió el JSON
+    // sin la marca; la op sigue viva en este teléfono).
+    await pago(3, 500);
+    await db.insert('ops_queue', {
+      'op_uuid': 'op-anula-3',
+      'tipo': 'anular_pago',
+      'payload': jsonEncode({'pago_id': 3}),
+      'estado': 'pendiente',
+      'creada_ts': '2026-10-16T08:00:00.000-05:00',
+    });
+    final t = await totalesPagosCliente(7);
+    expect(t.n, 1);
+    expect(t.total, 100);
+  });
+
   testWidgets('T13: cabecera de congelado dice CONGELADO',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(
