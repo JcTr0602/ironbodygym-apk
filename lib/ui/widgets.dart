@@ -45,10 +45,21 @@ enum VarianteBanner {
   pendientes,
   novedades,
   sinSincronizar,
+  // SYNC-12 (1.35): la foto no pudo verificar las novedades
+  // (lectura de watermark/server_seq fallida): ni «hay
+  // cambios» ni «al día» — el estado no se sabe.
+  sinVerificar,
   alDia,
 }
 
 /// PURO: la variante de una foto del motor.
+///
+/// SYNC-12 (1.35): la partición con los neutros del
+/// triestado — `enLinea` null NO es sinConexion (solo el
+/// false comprobado lo es) y `hayNovedades` null NO es
+/// alDia: con sync previa cae en [VarianteBanner.sinVerificar].
+/// El aviso persistido (un error CONOCIDO) manda sobre el
+/// «sin verificar» (un estado desconocido).
 VarianteBanner varianteBannerDe(SyncStatus s) {
   switch (s.phase) {
     case SyncPhase.uploading:
@@ -60,9 +71,9 @@ VarianteBanner varianteBannerDe(SyncStatus s) {
     case SyncPhase.error:
       return VarianteBanner.error;
     case SyncPhase.idle:
-      if (!s.enLinea) return VarianteBanner.sinConexion;
+      if (s.enLinea == false) return VarianteBanner.sinConexion;
       if (s.pending > 0) return VarianteBanner.pendientes;
-      if (s.hayNovedades) return VarianteBanner.novedades;
+      if (s.hayNovedades == true) return VarianteBanner.novedades;
       if (s.lastOk == null) return VarianteBanner.sinSincronizar;
       // Yunque 2.34 (A-3, el residual C3-4 de Y1): un error
       // PERSISTIDO (avisoSyncCorto) con la cola vacía y sin
@@ -70,6 +81,7 @@ VarianteBanner varianteBannerDe(SyncStatus s) {
       // misma cabecera decía «La bajada falló»: superficies
       // contradictorias. El aviso manda sobre el «al día».
       if (s.avisoSyncCorto != null) return VarianteBanner.error;
+      if (s.hayNovedades == null) return VarianteBanner.sinVerificar;
       return VarianteBanner.alDia;
   }
 }
@@ -100,6 +112,7 @@ NivelBanner nivelBannerDe(VarianteBanner v) {
     case VarianteBanner.pendientes:
     case VarianteBanner.novedades:
     case VarianteBanner.sinSincronizar:
+    case VarianteBanner.sinVerificar:
       return NivelBanner.filaNeutra;
   }
 }
@@ -125,6 +138,8 @@ Color colorEstadoBanner(VarianteBanner v) {
     case VarianteBanner.novedades:
       return AppColores.info;
     case VarianteBanner.sinSincronizar:
+      return AppColores.alertaOscuro;
+    case VarianteBanner.sinVerificar:
       return AppColores.alertaOscuro;
     case VarianteBanner.alDia:
       return AppColores.exito;
@@ -275,7 +290,7 @@ class _SyncBannerState extends State<SyncBanner>
           case SyncPhase.idle:
             // v1.2.5 (D11): frase en lenguaje humano según 3 dimensiones.
             titulo = s.frase;
-            if (!s.enLinea) {
+            if (s.enLinea == false) {
               icono = Icons.cloud_off_rounded;
               // v1.2.5 (D12): guardado vs sincronizado, sin tecnicismos.
               subtitulo = s.ultimoGuardado != null
@@ -288,7 +303,7 @@ class _SyncBannerState extends State<SyncBanner>
               subtitulo = s.ultimoSincronizado != null
                   ? '$nCambios listos para subir · Último respaldo ${_hace(s.ultimoSincronizado)}'
                   : '$nCambios listos para subir';
-            } else if (s.hayNovedades) {
+            } else if (s.hayNovedades == true) {
               icono = Icons.cloud_download_rounded;
               titulo = 'Hay cambios nuevos';
               subtitulo = 'Toca para descargar';
@@ -321,6 +336,14 @@ class _SyncBannerState extends State<SyncBanner>
                   haceAviso.isEmpty || haceAviso == 'nunca'
                       ? null
                       : haceAviso;
+            } else if (variante == VarianteBanner.sinVerificar) {
+              // SYNC-12 (1.35): la foto no pudo leer las
+              // novedades — el banner lo declara en vez de
+              // caer en la rama «al día» de abajo (que era
+              // exactamente el falso verde del sitio 1).
+              icono = Icons.help_outline_rounded;
+              titulo = 'Sin verificar';
+              subtitulo = 'Toca para sincronizar';
             } else {
               // Variante «al día»: el nivel ya devolvió
               // shrink arriba; esta rama es inalcanzable
@@ -724,6 +747,15 @@ class _SyncPillState extends State<SyncPill> {
           texto = haceAviso.isEmpty || haceAviso == 'nunca'
               ? s.avisoSyncCorto!
               : '${s.avisoSyncCorto} · $haceAviso';
+        } else if (s.hayNovedades == null) {
+          // SYNC-12 (1.35): la foto aún no verificó las
+          // novedades (recién nacida o su lectura falló):
+          // la píldora lo declara en neutro en vez del
+          // «Al día» verde fantasma — el verde exige la
+          // lectura hecha (hayNovedades == false).
+          color = AppColores.alertaOscuro;
+          icono = Icons.help_outline_rounded;
+          texto = 'Sin verificar';
         } else {
           color = AppColores.exito;
           icono = Icons.check_circle_outline_rounded;

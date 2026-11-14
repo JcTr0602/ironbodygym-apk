@@ -351,8 +351,11 @@ void main() {
     expect(varianteBannerDe(conAviso), VarianteBanner.error);
     expect(nivelBannerDe(varianteBannerDe(conAviso)),
         NivelBanner.avisoError);
-    // Sin aviso persistido, el mismo estado sigue «al día».
-    final sinAviso = SyncStatus(lastOk: DateTime(2026, 11, 13, 10, 0));
+    // Sin aviso persistido y con las novedades LEÍDAS en
+    // false (SYNC-12: sin leer serían sinVerificar), el
+    // mismo estado sigue «al día».
+    final sinAviso = SyncStatus(
+        hayNovedades: false, lastOk: DateTime(2026, 11, 13, 10, 0));
     expect(varianteBannerDe(sinAviso), VarianteBanner.alDia);
     // El aviso no tapa estados más fuertes: sin conexión y
     // pendientes siguen mandando sobre el error persistido.

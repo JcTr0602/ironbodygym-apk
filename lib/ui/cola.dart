@@ -643,11 +643,16 @@ class _ColaScreenState extends State<ColaScreen> {
   /// Corrección A4-D2: refresca [_hayInternet] desde la
   /// foto del motor (que reutiliza la suya si es fresca).
   /// Nunca lanza ni bloquea: es un dato para el texto.
+  ///
+  /// SYNC-12 (1.35): si la foto trae la línea sin verificar
+  /// (null), el bool local NO se toca — un «no se sabe» no
+  /// puede pisar el último valor conocido de la pantalla.
   Future<void> _refrescarInternet() async {
     try {
       final f = await SyncEngine.instance.fotoEstado();
-      if (mounted && f.enLinea != _hayInternet) {
-        setState(() => _hayInternet = f.enLinea);
+      final enLinea = f.enLinea;
+      if (mounted && enLinea != null && enLinea != _hayInternet) {
+        setState(() => _hayInternet = enLinea);
       }
     } catch (_) {}
   }

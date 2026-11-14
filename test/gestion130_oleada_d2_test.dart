@@ -21,7 +21,8 @@ void main() {
   group('D2 · UI130-07 mapa de estados del banner (fijado ANTES '
       'de tocar pantallas)', () {
     // Cada foto del motor → su variante de siempre → su nivel
-    // nuevo. La tabla es exhaustiva: las 9 variantes.
+    // nuevo. La tabla es exhaustiva: las 10 variantes (la
+    // décima, sinVerificar, la trajo SYNC-12 en la 1.35).
     final casos = <(SyncStatus, VarianteBanner, NivelBanner)>[
       (
         const SyncStatus(phase: SyncPhase.uploading),
@@ -64,14 +65,22 @@ void main() {
         NivelBanner.filaNeutra
       ),
       (
+        // SYNC-12 (1.35): sync previa con novedades sin
+        // verificar (hayNovedades null por defecto).
         SyncStatus(lastOk: DateTime(2026, 11, 8)),
+        VarianteBanner.sinVerificar,
+        NivelBanner.filaNeutra
+      ),
+      (
+        // «Al día» exige novedades leídas en false.
+        SyncStatus(hayNovedades: false, lastOk: DateTime(2026, 11, 8)),
         VarianteBanner.alDia,
         NivelBanner.ninguno
       ),
     ];
 
-    test('las 9 variantes caen en su nivel', () {
-      expect(casos, hasLength(9));
+    test('las 10 variantes caen en su nivel', () {
+      expect(casos, hasLength(10));
       for (final (foto, variante, nivel) in casos) {
         expect(varianteBannerDe(foto), variante, reason: '$foto');
         expect(nivelBannerDe(variante), nivel, reason: '$variante');
@@ -106,6 +115,10 @@ void main() {
       expect(colorEstadoBanner(VarianteBanner.novedades),
           AppColores.info);
       expect(colorEstadoBanner(VarianteBanner.sinSincronizar),
+          AppColores.alertaOscuro);
+      // SYNC-12 (1.35): sinVerificar comparte la familia
+      // apagada de los «no se sabe» (sinConexion/sinSincronizar).
+      expect(colorEstadoBanner(VarianteBanner.sinVerificar),
           AppColores.alertaOscuro);
       expect(colorEstadoBanner(VarianteBanner.alDia), AppColores.exito);
     });

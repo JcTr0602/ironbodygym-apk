@@ -98,8 +98,11 @@ void main() {
           VarianteBanner.novedades);
       expect(varianteBannerDe(const SyncStatus()),
           VarianteBanner.sinSincronizar);
+      // SYNC-12 (1.35): «al día» exige novedades leídas en
+      // false; sin pasarlas (null) sería sinVerificar.
       expect(
-          varianteBannerDe(SyncStatus(lastOk: DateTime(2026, 11, 7))),
+          varianteBannerDe(SyncStatus(
+              hayNovedades: false, lastOk: DateTime(2026, 11, 7))),
           VarianteBanner.alDia);
       // Prioridad del reposo: sin conexión manda sobre
       // pendientes, y pendientes sobre novedades.

@@ -13,7 +13,10 @@
 ///
 /// Sitios (inventario vivo @ 37b978c):
 ///  1. Foto del motor — `SyncStatus.hayNovedades`/`enLinea`
-///     como `bool` con defaults false/true (lib/sync.dart).
+///     como `bool` con defaults false/true (lib/sync.dart)
+///     — CONVERTIDOS por el paso 2 de SYNC-12: hoy son
+///     `bool?` con default null («sin verificar») y la
+///     partición del banner tiene variante propia.
 ///  2. `DiarioSync.conteosLocales` — fallo de COUNT por
 ///     tabla → 0 (lib/diario_sync.dart) — CONVERTIDO por el
 ///     paso 1 de SYNC-12: hoy el fallo da null («sin leer»).
@@ -58,21 +61,25 @@ Future<void> _init() async {
 }
 
 void main() {
-  group('SYNC-12 sitio 1 · foto del motor (defaults que aplanan)', () {
-    test('HOY: const SyncStatus() nace «en línea, sin novedades»', () {
+  group('SYNC-12 sitio 1 · foto del motor (triestado)', () {
+    test('SYNC-12 paso 2: const SyncStatus() nace SIN VERIFICAR', () {
       const s = SyncStatus();
-      // El aplanamiento nace en el constructor: antes del
-      // primer cálculo la foto ya afirma línea y ausencia de
-      // novedades, y sus marcas valen 0.
-      expect(s.enLinea, isTrue);
-      expect(s.hayNovedades, isFalse);
+      // Antes del paso 2 el constructor fingía los dos
+      // valores: enLinea=true y hayNovedades=false sin
+      // haber comprobado nada. Ahora nacen null.
+      expect(s.enLinea, isNull);
+      expect(s.hayNovedades, isNull);
       expect(s.watermarkMinimo, 0);
       expect(s.serverSeq, 0);
     });
 
-    test('HOY: frase de la foto por defecto = todo sincronizado', () {
-      const s = SyncStatus();
-      expect(s.frase, 'Todo guardado y sincronizado');
+    test('SYNC-12 paso 2: la frase por defecto solo afirma lo local',
+        () {
+      // Sin línea verificada no se dice «sincronizado».
+      expect(const SyncStatus().frase,
+          'Todo guardado en este teléfono');
+      expect(const SyncStatus(enLinea: true).frase,
+          'Todo guardado y sincronizado');
     });
 
     test('HOY: frase sin línea distingue pendientes de reposo', () {
@@ -83,7 +90,29 @@ void main() {
       expect(const SyncStatus(pending: 1).frase, '1 cambio por enviar');
     });
 
-    test('HOY: varianteBannerDe — la partición vigente sin neutros', () {
+    test('SYNC-12 paso 2: la costura pura hayNovedadesDeFoto', () {
+      // Lectura fallida → null, con los números que sean.
+      expect(
+          hayNovedadesDeFoto(
+              lecturaOk: false, watermarkMinimo: 0, serverSeq: 0),
+          isNull);
+      expect(
+          hayNovedadesDeFoto(
+              lecturaOk: false, watermarkMinimo: 3, serverSeq: 9),
+          isNull);
+      // Lectura buena → la comparación de siempre.
+      expect(
+          hayNovedadesDeFoto(
+              lecturaOk: true, watermarkMinimo: 3, serverSeq: 9),
+          isTrue);
+      expect(
+          hayNovedadesDeFoto(
+              lecturaOk: true, watermarkMinimo: 9, serverSeq: 9),
+          isFalse);
+    });
+
+    test('SYNC-12 paso 2: varianteBannerDe — partición con neutros',
+        () {
       final ok = DateTime(2026, 11, 14, 10, 0);
       // Sin línea manda sobre todo lo demás en reposo.
       expect(
@@ -101,12 +130,35 @@ void main() {
       // Sin lastOk nunca se puede decir «al día».
       expect(varianteBannerDe(const SyncStatus()),
           VarianteBanner.sinSincronizar);
-      expect(varianteBannerDe(SyncStatus(lastOk: ok)),
+      // «Al día» exige novedades LEÍDAS en false.
+      expect(
+          varianteBannerDe(
+              SyncStatus(hayNovedades: false, lastOk: ok)),
           VarianteBanner.alDia);
-      // El aviso persistido (A-3) manda sobre el «al día».
+      // SYNC-12: con sync previa y novedades sin verificar
+      // (null) la variante es sinVerificar — antes este
+      // mismo estado caía en «al día» (falso verde).
+      expect(varianteBannerDe(SyncStatus(lastOk: ok)),
+          VarianteBanner.sinVerificar);
+      expect(nivelBannerDe(VarianteBanner.sinVerificar),
+          NivelBanner.filaNeutra);
+      // La línea sin verificar (null) NO es sinConexion.
+      expect(
+          varianteBannerDe(
+              SyncStatus(hayNovedades: false, lastOk: ok)),
+          VarianteBanner.alDia);
+      // El aviso persistido (A-3) manda sobre el «al día»…
       expect(
           varianteBannerDe(
               SyncStatus(lastOk: ok, avisoSyncCorto: 'La bajada falló')),
+          VarianteBanner.error);
+      // …y también sobre el «sin verificar»: un error
+      // conocido pesa más que un estado desconocido.
+      expect(
+          varianteBannerDe(SyncStatus(
+              hayNovedades: null,
+              lastOk: ok,
+              avisoSyncCorto: 'La bajada falló')),
           VarianteBanner.error);
     });
   });

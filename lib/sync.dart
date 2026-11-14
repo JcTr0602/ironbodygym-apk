@@ -113,6 +113,22 @@ bool manifiestoSellaCompleta({
 }) =>
     corridaCompleta && concluyentes > 0 && sinVerificar == 0;
 
+/// SYNC-12 (1.35, paso 2): la novedad de la foto del motor
+/// desde lecturas ya hechas. Función pura (la costura que
+/// `_construirFoto` no tenía: leía LocalDb directo y su
+/// fallo no era forzable en test). Si la lectura de
+/// watermark/server_seq falló ([lecturaOk] = false), la
+/// novedad es null — «sin verificar» — y ningún consumidor
+/// puede pintarla ni como «hay cambios» ni como «al día».
+/// Antes el catch dejaba el `false` inicial: la foto
+/// afirmaba «sin novedades» sin haber leído nada.
+bool? hayNovedadesDeFoto({
+  required bool lecturaOk,
+  required int watermarkMinimo,
+  required int serverSeq,
+}) =>
+    lecturaOk ? serverSeq > watermarkMinimo : null;
+
 /// 1.28 (M1-B2): de los (rid → sseq) que devuelve la RPC,
 /// solo los posteriores a [seqPrevia] interesan en la
 /// pasada rápida. Función pura.
@@ -210,7 +226,12 @@ class SyncStatus {
   /// v1.0.15: true si el servidor tiene cambios no bajados
   /// (watermark < server_seq). "Cola vacía" no basta para decir
   /// que los datos están al día.
-  final bool hayNovedades;
+  ///
+  /// SYNC-12 (1.35): triestado — null = «sin verificar» (la
+  /// lectura de watermark/server_seq falló o aún no se ha
+  /// hecho). Antes era bool con default false: una lectura
+  /// fallida afirmaba «sin novedades» sin haber leído nada.
+  final bool? hayNovedades;
 
   /// v1.0.17: resumen discreto de la última sincronización,
   /// ej. "↑ 2 enviados · ↓ 3 nuevos" o "Sin cambios".
@@ -221,7 +242,12 @@ class SyncStatus {
 
   // v1.2.5 (D11): tres dimensiones independientes del estado.
   /// ¿Hay conexión ahora?
-  final bool enLinea;
+  ///
+  /// SYNC-12 (1.35): triestado — null = «sin verificar» (la
+  /// comprobación de línea falló o aún no se ha hecho). Antes
+  /// era bool con default true: la foto nacía «en línea» sin
+  /// haber comprobado nada.
+  final bool? enLinea;
 
   /// ¿Cuándo se guardó lo último en este teléfono (COMMIT local)?
   final DateTime? ultimoGuardado;
@@ -273,10 +299,10 @@ class SyncStatus {
       this.lastError,
       this.progreso,
       this.detalle,
-      this.hayNovedades = false,
+      this.hayNovedades,
       this.ultimoResumen,
       this.ultimoResumenHora,
-      this.enLinea = true,
+      this.enLinea,
       this.ultimoGuardado,
       this.ultimoSincronizado,
       this.calculadoEn,
@@ -288,15 +314,22 @@ class SyncStatus {
       this.avisoSyncTs});
 
   /// v1.2.5 (D11): frase en lenguaje humano según las 3 dimensiones.
+  ///
+  /// SYNC-12 (1.35): con la línea sin verificar (null) y la
+  /// cola vacía, la frase solo afirma lo local («guardado en
+  /// este teléfono»): «sincronizado» exige línea comprobada.
   String get frase {
-    if (!enLinea && pending > 0) {
+    if (enLinea == false && pending > 0) {
       return 'Sin conexión — $pending cambio${pending == 1 ? '' : 's'} '
           'guardado${pending == 1 ? '' : 's'} en este teléfono';
     }
-    if (!enLinea) return 'Sin conexión — todo guardado en este teléfono';
+    if (enLinea == false) {
+      return 'Sin conexión — todo guardado en este teléfono';
+    }
     if (pending > 0) {
       return '$pending cambio${pending == 1 ? '' : 's'} por enviar';
     }
+    if (enLinea == null) return 'Todo guardado en este teléfono';
     return 'Todo guardado y sincronizado';
   }
 }
@@ -1933,8 +1966,11 @@ class SyncEngine {
       required int seqEmision}) async {
     final pending = await _db.countPendingOps();
     final lastOk = await _ultimaOk();
-    // v1.0.15: detectar si el servidor tiene cambios sin bajar
-    bool novedades = false;
+    // v1.0.15: detectar si el servidor tiene cambios sin bajar.
+    // SYNC-12 (1.35): si la lectura falla, la novedad queda
+    // null («sin verificar») vía la costura pura — jamás el
+    // false fingido de antes.
+    bool? novedades;
     int wmObs = 0;
     int ssObs = 0;
     // Yunque B (YB-SYNC-01/02): nombres de la tabla que
@@ -1959,8 +1995,9 @@ class SyncEngine {
       final ss = int.tryParse(await _db.getMeta('server_seq') ?? '0') ?? 0;
       wmObs = wm;
       ssObs = ss;
-      novedades = ss > wm;
-      if (novedades && minR.tabla != null) {
+      novedades = hayNovedadesDeFoto(
+          lecturaOk: true, watermarkMinimo: wm, serverSeq: ss);
+      if (novedades == true && minR.tabla != null) {
         atrasadaObs = nombreAmigableTabla(minR.tabla!);
       }
       sinVerificarObs = (await atascoSinVerificar()).nombre;
@@ -1970,7 +2007,9 @@ class SyncEngine {
     final resHora =
         resumen != null ? ahoraHabana() : _current.ultimoResumenHora;
     // v1.2.5 (D11/D12): 3 dimensiones + marcas de guardado/sincronizado.
-    bool enLinea = true;
+    // SYNC-12 (1.35): si la comprobación de línea lanza, la
+    // línea queda null («sin verificar»), no un true fingido.
+    bool? enLinea;
     try {
       enLinea = await _hayInternet();
     } catch (_) {}
