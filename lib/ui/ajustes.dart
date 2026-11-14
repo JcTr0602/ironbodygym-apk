@@ -1558,6 +1558,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     await ThemeController.setFontScale(1.0);
     // v1.3.1: resetear alto contraste.
     await ThemeController.setAltoContraste(false);
+    // Yunque 3 (K7-3): el Modo Sol también vuelve a su
+    // defecto (apagado), por su vía propia — resetAjustes
+    // borra la clave, pero el notificador manda en sesión.
+    await ThemeController.setModoSol(false);
     _cargar();
     _msg('Ajustes restablecidos');
   }

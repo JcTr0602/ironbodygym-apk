@@ -645,6 +645,16 @@ class PerfilService {
       'tema',
       'tamano_letra',
       'bloqueo_minutos',
+      // Yunque 3 (K7-3): la escritura del bloqueo vive en
+      // la clave POR USUARIO desde Argón Acceso #7; la
+      // lista de borrado se quedó con la global legada y el
+      // ajuste sobrevivía a «Restablecer ajustes».
+      _key('bloqueo_minutos'),
+      // Yunque 3 (K7-3): el Modo Sol (theme.dart) también
+      // se restablece; _restablecer lo apaga además por su
+      // vía propia (ThemeController.setModoSol) para que el
+      // notificador en memoria quede coherente.
+      'modo_sol_v1',
       _key('ultima_actividad'),
       'pref_recordatorio_sync',
       'metricas_home',
