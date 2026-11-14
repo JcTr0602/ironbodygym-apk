@@ -997,17 +997,12 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   height: 264,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 264,
-                    decoration: BoxDecoration(
-                      color: AppColores.fondo(context),
-                      borderRadius:
-                          BorderRadius.circular(AppRadio.lg),
-                    ),
-                    child: Icon(
-                        Icons.medication_rounded,
-                        size: 72,
-                        color: AppColores.textoSecundario(context)),
+                  errorBuilder: (_, __, ___) =>
+                      // 1.35 (UI-14): placeholder compartido.
+                      const PlaceholderSuplemento(
+                    alto: 264,
+                    radio: AppRadio.lg,
+                    tamanoIcono: 72,
                   )),
                 ),
               ),
@@ -1028,17 +1023,11 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 builder: (ctx, snap) {
                   final f = snap.data;
                   if (f == null) {
-                    return Container(
-                      height: 264,
-                      decoration: BoxDecoration(
-                        color: AppColores.fondo(context),
-                        borderRadius:
-                            BorderRadius.circular(AppRadio.lg),
-                      ),
-                      child: Icon(
-                          Icons.medication_rounded,
-                          size: 72,
-                          color: AppColores.textoSecundario(context)),
+                    // 1.35 (UI-14): placeholder compartido.
+                    return const PlaceholderSuplemento(
+                      alto: 264,
+                      radio: AppRadio.lg,
+                      tamanoIcono: 72,
                     );
                   }
                   return ClipRRect(

@@ -1027,11 +1027,10 @@ class _SinFotoReserva extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: AppColores.borde(context).withValues(alpha: 0.3),
-      child: Icon(Icons.medication_rounded,
-          color: AppColores.textoSecundario(context), size: 20),
-    );
+    // 1.35 (UI-14): el placeholder compartido, rellenando
+    // el hueco de 48 dp (antes un gris propio con alfa).
+    return const PlaceholderSuplemento(
+        alto: null, tamanoIcono: 20);
   }
 }
 

@@ -2375,6 +2375,41 @@ class AvisoEstado extends StatelessWidget {
   }
 }
 
+/// 1.35 (UI-14): EL placeholder de la foto de suplemento
+/// sin foto: un solo componente con el fondo del tema
+/// para lista, detalle y reservas (antes había tres
+/// copias a mano, una con un gris distinto del tema).
+/// [alto] null = rellena el hueco que le dé el padre.
+class PlaceholderSuplemento extends StatelessWidget {
+  final double? alto;
+  final double radio;
+  final double tamanoIcono;
+
+  const PlaceholderSuplemento({
+    super.key,
+    this.alto = 64,
+    this.radio = AppRadio.md,
+    this.tamanoIcono = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: alto,
+      width: alto == null ? null : double.infinity,
+      decoration: BoxDecoration(
+        color: AppColores.fondo(context),
+        borderRadius: BorderRadius.circular(radio),
+      ),
+      child: Icon(
+        Icons.medication_rounded,
+        size: tamanoIcono,
+        color: AppColores.textoSecundario(context),
+      ),
+    );
+  }
+}
+
 /// Badge numérico discreto (V6): solo para cantidades (contadores),
 /// nunca para estados. Recorta a "99+" por encima de 99.
 ///

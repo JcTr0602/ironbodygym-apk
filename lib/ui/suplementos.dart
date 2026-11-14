@@ -1664,16 +1664,9 @@ class _FotoMiniTopState extends State<_FotoMiniTop> {
   // mismo archivo en ambos extremos del Hero.
   Future<File?> _resolver() => resolverFotoSuplemento(widget.sup);
 
-  Widget _sinFoto(BuildContext context) => Container(
-        height: 64,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: AppColores.fondo(context),
-          borderRadius: BorderRadius.circular(AppRadio.md),
-        ),
-        child: Icon(Icons.medication_rounded,
-            color: AppColores.textoSecundario(context)),
-      );
+  // 1.35 (UI-14): el placeholder compartido de la casa.
+  Widget _sinFoto(BuildContext context) =>
+      const PlaceholderSuplemento();
 
   @override
   Widget build(BuildContext context) {
