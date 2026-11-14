@@ -198,10 +198,10 @@ void main() {
         nombre: 'vacio_sinmarco_pomo_$tema',
         hijo: Scaffold(
           body: Padding(
-            padding: EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
             child: Card(
               child: Padding(
-                padding: EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
                 child: EstadoVacio(
                   sinMarco: true,
                   ilustracion: _vacio('pomo'),

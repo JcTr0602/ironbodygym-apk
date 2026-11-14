@@ -10,12 +10,11 @@
 /// (el archivo ni es WebP ni tiene canal alfa); con los WebP
 /// procesados pasa.
 ///
-/// pomo, pastel y megafono son la excepción DOCUMENTADA:
-/// escenas de objeto sobre mueble cuya separación
-/// automática no sale limpia (el mueble queda roto). Siguen
-/// en JPG a propósito y este test fija también eso: si
-/// alguien las convierte, que sea a sabiendas y tocando
-/// aquí.
+/// Las 12 quedan fijadas aquí: las 9 del carril de arte y
+/// pomo, pastel y megafono, que en la lámina eran escenas
+/// de objeto sobre mueble sin separación limpia y se
+/// cerraron REGENERADAS como spots nativos (pieza
+/// 134-arte-regen). Ningún vacio_* vive ya en JPG.
 library;
 
 import 'dart:io';
@@ -24,7 +23,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Spots convertidos a WebP con alfa (mismo nombre base).
+/// Las 12 ilustraciones, todas WebP con alfa (mismo nombre
+/// base): 9 convertidas por el carril de arte y 3 regeneradas
+/// (pomo, pastel, megafono) por la pieza 134-arte-regen.
 const _spots = [
   'papelera',
   'caja',
@@ -35,10 +36,10 @@ const _spots = [
   'reloj',
   'calendario',
   'cable',
+  'pomo',
+  'pastel',
+  'megafono',
 ];
-
-/// Escenas que quedan en JPG (cabos del carril arte).
-const _escenas = ['pomo', 'pastel', 'megafono'];
 
 Future<ui.Image> _decodificar(Uint8List bytes) async {
   final codec = await ui.instantiateImageCodec(bytes);
@@ -98,16 +99,6 @@ void main() {
           reason: 'vacio_$n apenas tiene motivo opaco');
     });
   }
-
-  test('las escenas en JPG siguen presentes y declaradas', () {
-    final pubspec = File('pubspec.yaml').readAsStringSync();
-    for (final n in _escenas) {
-      expect(File('assets/vacio_$n.jpg').existsSync(), isTrue,
-          reason: 'falta assets/vacio_$n.jpg');
-      expect(pubspec, contains('assets/vacio_$n.jpg'),
-          reason: 'pubspec sin vacio_$n.jpg');
-    }
-  });
 
   test('pubspec y lib/ no referencian los JPG convertidos', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
