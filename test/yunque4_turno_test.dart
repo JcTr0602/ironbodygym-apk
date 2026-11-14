@@ -34,7 +34,7 @@ void main() {
   test('L7-1: la venta de suplemento entra en el desglose del '
       'día y cuadra con miTurnoHoy', () async {
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
     final db = await _abrirDbVacia();
     const tid = 444;
     final hoy = hoyHabanaIso();
