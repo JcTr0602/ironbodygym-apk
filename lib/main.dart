@@ -449,10 +449,14 @@ class _IronBodyAppState extends State<IronBodyApp>
               final mq = MediaQuery.of(ctx);
               // La escala de la app se multiplica por la de accesibilidad
               // del sistema, en vez de reemplazarla.
+              // Yunque 2.34 (F-9): con TECHO conjunto 1.45
+              // (escalaTextoEfectiva): 1.3 × 1.3 = 1.69
+              // desbordaba filas calculadas al píxel.
               final sistema = mq.textScaler.scale(1.0);
               final app = MediaQuery(
                 data: mq.copyWith(
-                  textScaler: TextScaler.linear(escala * sistema),
+                  textScaler: TextScaler.linear(
+                      escalaTextoEfectiva(escala, sistema)),
                 ),
                 child: child!,
               );

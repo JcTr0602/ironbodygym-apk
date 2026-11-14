@@ -11,6 +11,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
 
 void main() {
+  test('F-9: escala conjunta con techo 1.45 y suelo 0.85', () {
+    // El caso del hallazgo: 1.3 × 1.3 ya no da 1.69.
+    expect(escalaTextoEfectiva(1.3, 1.3), 1.45);
+    // Dentro del rango, el producto manda tal cual.
+    expect(escalaTextoEfectiva(1.0, 1.0), 1.0);
+    expect(escalaTextoEfectiva(1.2, 1.1), closeTo(1.32, 1e-9));
+    expect(escalaTextoEfectiva(0.9, 1.0), 0.9);
+    // Suelo: dos escalas pequeñas no hunden el texto.
+    expect(escalaTextoEfectiva(0.8, 0.9), 0.85);
+  });
+
   final temas = <String, ThemeData Function()>{
     'claro': AppTema.claro,
     'oscuro': AppTema.oscuro,

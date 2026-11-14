@@ -781,6 +781,16 @@ class AppSombra {
 /// no plano: tarjetas y botones con la elevación del tema (único
 /// lenguaje de elevación desde la 1.29, D-18) y el gradiente naranja
 /// en el botón primario (BotonPrimario).
+/// Yunque 2.34 (F-9): escala de texto EFECTIVA = la de la
+/// app × la del sistema, con TECHO conjunto 1.45 (y suelo
+/// 0.85). Sin techo, app 1.3 × sistema 1.3 = 1.69 dejaba
+/// filas calculadas al píxel (la «Pagado el» del diálogo de
+/// pago) a 0-6 px del desborde. El techo es conjunto a
+/// propósito: cada escala por separado sigue mandando
+/// mientras el producto no se dispare. PURO.
+double escalaTextoEfectiva(double escalaApp, double escalaSistema) =>
+    (escalaApp * escalaSistema).clamp(0.85, 1.45).toDouble();
+
 class AppTema {
   AppTema._();
 
