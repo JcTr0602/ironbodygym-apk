@@ -31,12 +31,20 @@ class AppColores {
 
   /// Naranja más intenso para gradientes.
   static const naranjaOscuro = Color(0xFFD96A0B);
-
   /// Carbón / grafito.
   static const carbon = Color(0xFF232323);
 
   /// Carbón profundo (fondos oscuros).
   static const carbonProfundo = Color(0xFF141414);
+
+  /// 1.35 (UI-16): la escala de texto SOBRE superficie
+  /// oscura (login y piezas de marca), como tokens: antes
+  /// cada pantalla escribía sus blancos con alfa a mano.
+  static const textoSobreOscuro = Color(0xFFFFFFFF);
+  static const textoSobreOscuroSuave = Color(0x99FFFFFF);
+  static const textoSobreOscuroMedio = Color(0x8AFFFFFF);
+  static const textoSobreOscuroTenue = Color(0x61FFFFFF);
+  static const textoSobreOscuroMinimo = Color(0x3DFFFFFF);
 
   // --- Semánticos ---
   static const exito = Color(0xFF22C55E);

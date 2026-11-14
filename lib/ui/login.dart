@@ -236,7 +236,7 @@ class _LoginScreenState extends State<LoginScreen>
                           TextSpan(
                               text: 'IRON ',
                               style:
-                                  TextStyle(color: Colors.white)),
+                                  TextStyle(color: AppColores.textoSobreOscuro)),
                           TextSpan(
                               text: 'BODY',
                               style: TextStyle(
@@ -247,33 +247,49 @@ class _LoginScreenState extends State<LoginScreen>
                     const SizedBox(height: AppEspacio.sm),
                     Text('G E S T I Ó N',
                         style: AppTexto.etiqueta.copyWith(
-                            color: Colors.white60,
+                            color: AppColores.textoSobreOscuroSuave,
                             fontWeight: FontWeight.normal,
                             letterSpacing: 4)),
                     const SizedBox(height: AppEspacio.xxl),
-                    // Campo usuario
+                    // Campo usuario.
+                    // 1.35 (UI-16): teclado de correo, sin
+                    // corrector ni sugerencias, con su pista
+                    // de autorrelleno y «siguiente» hacia la
+                    // contraseña.
                     _campoOscuro(
                       controller: _user,
                       focusNode: _userFocus,
                       hint: 'Usuario',
                       icono: Icons.person_rounded,
-                      textCapitalization: TextCapitalization.words,
-                      onSubmitted: (_) => _entrar(),
+                      textCapitalization: TextCapitalization.none,
+                      keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.username],
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) =>
+                          _passFocus.requestFocus(),
                     ),
                     const SizedBox(height: AppEspacio.md),
-                    // Campo contraseña
+                    // Campo contraseña.
+                    // 1.35 (UI-16): pista de autorrelleno de
+                    // contraseña y «Entrar» desde su teclado.
                     _campoOscuro(
                       controller: _pass,
                       focusNode: _passFocus,
                       hint: 'Contraseña',
                       icono: Icons.lock_rounded,
                       obscure: !_verPass,
+                      autofillHints: const [AutofillHints.password],
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textInputAction: TextInputAction.done,
                       suffix: IconButton(
                         icon: Icon(
                             _verPass
                                 ? Icons.visibility_off_rounded
                                 : Icons.visibility_rounded,
-                            color: Colors.white54),
+                            color: AppColores.textoSobreOscuroMedio),
                         onPressed: () => setState(
                             () => _verPass = !_verPass),
                       ),
@@ -325,19 +341,19 @@ class _LoginScreenState extends State<LoginScreen>
                     Text(
                       'Sin conexión puedes entrar igual si ya lo hiciste antes.\n'
                       'Todo se guarda y sincroniza solo.',
-                      style: AppTexto.metadato.copyWith(color: Colors.white54),
+                      style: AppTexto.metadato.copyWith(color: AppColores.textoSobreOscuroMedio),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppEspacio.xxl),
                     Text(
                       '© Creado por JcTr0602',
-                      style: AppTexto.metadato.copyWith(color: Colors.white38),
+                      style: AppTexto.metadato.copyWith(color: AppColores.textoSobreOscuroTenue),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'v${AppConfig.appVersion}',
-                      style: AppTexto.minuscula.copyWith(color: Colors.white24),
+                      style: AppTexto.minuscula.copyWith(color: AppColores.textoSobreOscuroMinimo),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppEspacio.lg),
@@ -362,6 +378,11 @@ class _LoginScreenState extends State<LoginScreen>
     Widget? suffix,
     TextCapitalization textCapitalization =
         TextCapitalization.none,
+    TextInputType? keyboardType,
+    Iterable<String>? autofillHints,
+    bool autocorrect = true,
+    bool enableSuggestions = true,
+    TextInputAction? textInputAction,
     void Function(String)? onSubmitted,
   }) {
     final enfocado = focusNode.hasFocus;
@@ -384,12 +405,17 @@ class _LoginScreenState extends State<LoginScreen>
         focusNode: focusNode,
         obscureText: obscure,
         textCapitalization: textCapitalization,
-        style: const TextStyle(color: Colors.white),
+        keyboardType: keyboardType,
+        autofillHints: autofillHints,
+        autocorrect: autocorrect,
+        enableSuggestions: enableSuggestions,
+        textInputAction: textInputAction,
+        style: const TextStyle(color: AppColores.textoSobreOscuro),
         onSubmitted: onSubmitted,
         decoration: InputDecoration(
           hintText: hint,
           hintStyle:
-              const TextStyle(color: Colors.white38),
+              const TextStyle(color: AppColores.textoSobreOscuroTenue),
           prefixIcon:
               Icon(icono, color: AppColores.textoSecundario(context)),
           suffixIcon: suffix,
