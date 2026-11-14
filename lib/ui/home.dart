@@ -243,6 +243,14 @@ class _HomeScreenState extends State<HomeScreen>
   /// Evita recargas simultáneas de _cargar().
   bool _cargando = false;
 
+  /// Yunque 2.34 (B-3): la última carga del Mostrador falló
+  /// (p. ej. la base local no abrió). Sin esta bandera la
+  /// pantalla pintaba un gimnasio en cero y «al día» sin
+  /// nombrar el fallo; con ella, el Mostrador abre con el
+  /// banner de base no disponible hasta que una carga salga
+  /// bien.
+  bool _falloCarga = false;
+
   /// Panel B2 (Alta): una recarga forzada que llega con otra
   /// carga en curso queda pendiente aquí y se ejecuta al
   /// terminar la actual — no se descarta.
@@ -999,6 +1007,9 @@ class _HomeScreenState extends State<HomeScreen>
       // Fix #29 (Sol): NO actualizar _lastFetch si falló.
       // M4 (Argón): loguear y retornar en vez de rethrow.
       AppLog.error('home', 'cargar_fallo', d: '$e');
+      // Yunque 2.34 (B-3): el fallo se NOMBRA en pantalla
+      // (banner de base no disponible), no solo en bitácora.
+      if (mounted) setState(() => _falloCarga = true);
       return;
     } finally {
       _cargando = false;
@@ -1013,6 +1024,8 @@ class _HomeScreenState extends State<HomeScreen>
     }
     // Fix #29: solo marcar caché si llegamos aquí (éxito).
     _lastFetch = ahoraUtcReal();
+    // Yunque 2.34 (B-3): una carga buena retira el banner.
+    if (_falloCarga && mounted) setState(() => _falloCarga = false);
   }
 
 
@@ -1326,6 +1339,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// pegado al pie. El scroll lo recuerda PageStorageKey.
   Widget _cuerpoMostrador(bool esDueno) {
     final items = <Widget>[
+      // Yunque 2.34 (B-3): si la base no abrió, eso va
+      // PRIMERO — por encima del banner de sync y de los
+      // contadores en cero, que sin este aviso mienten.
+      if (_falloCarga)
+        KeyedSubtree(
+            key: const ValueKey('home-fallo-base'),
+            child: _bannerFalloBase()),
       KeyedSubtree(
           key: const ValueKey('home-banner'), child: _bannerSync()),
       const TarjetaDiagnosticoEspejo(key: ValueKey('home-diagnostico')),
@@ -1551,6 +1571,43 @@ class _HomeScreenState extends State<HomeScreen>
   /// al descartarlo reaparece el aviso. El fallo gana onTap a
   /// la cola (hallazgo de código Argón: la tarjeta roja no
   /// respondía al toque, mientras la amarilla sí).
+  /// Yunque 2.34 (B-3): banner de base local no disponible.
+  /// Misma gramática visual que el banner de fallo de sync,
+  /// pero SIN botón de cerrar: no debe poder ocultarse
+  /// mientras las cargas sigan fallando (desaparece solo
+  /// cuando una carga sale bien). Ofrece la salida guiada:
+  /// reintentar aquí mismo; si el fallo persiste, importar
+  /// el respaldo desde Ajustes.
+  Widget _bannerFalloBase() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+      child: Tarjeta(
+        color: AppColores.error.withValues(alpha: 0.12),
+        child: Row(
+          children: [
+            const Icon(Icons.storage_rounded, color: AppColores.error),
+            const SizedBox(width: AppEspacio.sm),
+            const Expanded(
+              child: Text(
+                'La base de datos de este teléfono no se pudo abrir. '
+                'Los números de esta pantalla pueden salir en cero '
+                'porque tus datos no se pudieron leer. Si el fallo '
+                'sigue tras reintentar, importa tu respaldo desde '
+                'Ajustes.',
+                style: AppTexto.secundario,
+              ),
+            ),
+            TextButton(
+              onPressed: () => _cargar(forceRefresh: true),
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _bannerSync() {
     if (_falloSync != null) {
       return Padding(
