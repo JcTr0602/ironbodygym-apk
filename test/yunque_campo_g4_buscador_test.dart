@@ -151,5 +151,11 @@ void main() {
         'a 2001 (resultados: ${r4.length})');
 
     await LocalDb.resetParaTest();
-  });
+  },
+      // Yunque 1.34: presupuesto propio — la siembra de 600
+      // clientes por el camino real es lenta por diseño y el
+      // test vivía al borde de los 30 s por defecto (flake
+      // crónico bajo carga, idéntico en la base). Las
+      // aserciones no cambian; solo el reloj.
+      timeout: const Timeout(Duration(seconds: 120)));
 }
