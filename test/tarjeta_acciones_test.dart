@@ -31,10 +31,11 @@ void main() {
     bool congelado = false,
     void Function()? onCongelar,
     void Function()? onPapelera,
+    bool conCongelar = true,
   }) {
     return TarjetaAccionesCliente(
       congelado: congelado,
-      onCongelar: onCongelar ?? () {},
+      onCongelar: conCongelar ? (onCongelar ?? () {}) : null,
       onPapelera: onPapelera ?? () {},
     );
   }
@@ -54,6 +55,16 @@ void main() {
     await tester.pumpWidget(envolver(tarjeta(congelado: true)));
     expect(find.text('Descongelar'), findsOneWidget);
     expect(find.text('Congelar'), findsNothing);
+  });
+
+  testWidgets('Yunque 1.34 (C5-4): sin callback de congelar '
+      '(sesión de entrenador) la fila NO existe; la papelera sí',
+      (tester) async {
+    await tester.pumpWidget(envolver(tarjeta(conCongelar: false)));
+    expect(find.text('Congelar'), findsNothing);
+    expect(find.text('Descongelar'), findsNothing);
+    expect(find.text('A papelera'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('cada fila dispara su callback', (tester) async {

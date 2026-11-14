@@ -1729,9 +1729,16 @@ class _FichaScreenState extends State<FichaScreen> {
     // 3456»), pasaban la validación (que limpia) y se
     // GUARDABAN sucios. La comparación de cambios también
     // usa el valor limpio.
-    final tel = datos.telefono.replaceAll(RegExp(r'[^0-9]'), '');
+    // Yunque 1.34 (C5-3): la limpieza pasa por
+    // sanitizarTelefono (la vía de Inscribir y del diálogo de
+    // teléfono): acepta el prefijo internacional 53 y guarda
+    // los 8 dígitos limpios. Esta vía solo quitaba no-dígitos
+    // y RECHAZABA «5358191577», que las demás vías aceptan.
+    final telCrudo = datos.telefono.trim();
+    final tel =
+        telCrudo.isEmpty ? '' : (sanitizarTelefono(telCrudo) ?? '');
     final car = datos.carnet.trim();
-    if (tel.isNotEmpty && !validarTelefono(tel)) {
+    if (telCrudo.isNotEmpty && tel.isEmpty) {
       mostrarSnack(context, 'Teléfono inválido: 8 dígitos empezando con 5 o 6', significado: SignificadoChip.alerta);
       return;
     }
@@ -2417,7 +2424,18 @@ class _FichaScreenState extends State<FichaScreen> {
   /// Revisado por Gemini 2026-10-13. Backend lo maneja directo.
   /// Congelar/descongelar membresía (v1.0.9).
   /// El cliente congelado no aparece en vencidos.
+  /// Yunque 1.34 (C5-4): vía LEGADA — solo dueño (la tarjeta
+  /// ni la ofrece a otros roles y esta guarda es la segunda
+  /// puerta); el entrenador congela por el sistema nuevo.
   Future<void> _congelar() async {
+    if (!AuthService().isOwner) {
+      if (!mounted) return;
+      mostrarSnack(context,
+          'Solo el dueño congela directamente desde la ficha; '
+          'las pausas del entrenador van por solicitud.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final esCongelado = (_c?['estado'] as String?) == 'congelado';
     final ok = await showDialog<bool>(
       context: context,
@@ -4032,7 +4050,14 @@ class _FichaScreenState extends State<FichaScreen> {
                       TarjetaAccionesCliente(
                         congelado: (_c?['estado'] as String?) ==
                             'congelado',
-                        onCongelar: _congelar,
+                        // Yunque 1.34 (C5-4): la congelación
+                        // legada (sin aprobación ni devolución
+                        // de días) es SOLO del dueño; el
+                        // entrenador usa el sistema nuevo de
+                        // solicitud/aprobación de pausas.
+                        onCongelar: AuthService().isOwner
+                            ? _congelar
+                            : null,
                         onPapelera: _aPapelera,
                       ),
                       // Bloque 1: panel del dueño (antes disperso

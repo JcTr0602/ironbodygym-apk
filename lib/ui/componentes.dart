@@ -182,7 +182,14 @@ class _ContenidoBoton extends StatelessWidget {
 /// donde se mira el estado que lo justifica.
 class TarjetaAccionesCliente extends StatelessWidget {
   final bool congelado;
-  final VoidCallback onCongelar;
+
+  /// Yunque 1.34 (C5-4): nullable — sin callback NO hay fila
+  /// de congelar. La congelación LEGADA de esta tarjeta
+  /// (op cambiar_estado, sin aprobación ni devolución de
+  /// días) es solo del dueño; el entrenador congela por el
+  /// sistema nuevo de solicitud/aprobación. La ficha pasa
+  /// null cuando la sesión no es del dueño.
+  final VoidCallback? onCongelar;
   final VoidCallback onPapelera;
 
   const TarjetaAccionesCliente({
@@ -256,13 +263,15 @@ class TarjetaAccionesCliente extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppEspacio.sm),
-          _fila(
-            icono: congelado ? Icons.wb_sunny_rounded : Icons.ac_unit_rounded,
-            color: AppColores.naranja,
-            texto: congelado ? 'Descongelar' : 'Congelar',
-            onTap: onCongelar,
-          ),
-          const Divider(height: 1),
+          if (onCongelar != null) ...[
+            _fila(
+              icono: congelado ? Icons.wb_sunny_rounded : Icons.ac_unit_rounded,
+              color: AppColores.naranja,
+              texto: congelado ? 'Descongelar' : 'Congelar',
+              onTap: onCongelar!,
+            ),
+            const Divider(height: 1),
+          ],
           _fila(
             icono: Icons.delete_outline_rounded,
             color: AppColores.error,
@@ -901,13 +910,16 @@ class EstadoVacio extends StatelessWidget {
   /// a la figura de icono cuando el estado tiene una
   /// asignada. Sin asignar, el icono de siempre.
   ///
-  /// 1.34 (carril arte): las ilustraciones en WebP son
-  /// spots con ALFA real (sin el fondo horneado de la
-  /// lámina) y se pintan con `BoxFit.contain` para que
-  /// floten sobre la superficie; las que quedan en JPG
-  /// (pomo, pastel, megafono: escenas con mueble cuya
-  /// separación no sale limpia) conservan el `cover`
-  /// de siempre.
+  /// 1.34 (carril arte + regeneración): las DOCE
+  /// ilustraciones de vacío son spots WebP con ALFA real
+  /// (sin el fondo horneado de la lámina) y se pintan con
+  /// `BoxFit.contain` para que floten sobre la superficie
+  /// — pomo, pastel y megafono incluidas, regeneradas como
+  /// ilustraciones sueltas en la integración. (Yunque 1.34,
+  /// C2-7: este comentario decía que esas tres quedaban en
+  /// JPG con cover; la decisión de regenerarlas lo dejó
+  /// falso. El `cover` queda solo como respaldo para una
+  /// ruta que no termine en .webp.)
   final String? ilustracion;
 
   const EstadoVacio({
