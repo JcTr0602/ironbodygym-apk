@@ -955,6 +955,9 @@ class _HistorialVentasScreenState
                     '${tasa.toStringAsFixed(2)} CUP/USD'),
               fila('Total', textoTotalVenta(total, moneda, tasa)),
               fila('Fecha', '${v['fecha'] ?? '—'}'),
+              // Yunque 1.34 (C2-3): el detalle no nombraba al
+              // vendedor (la fila y el diálogo de anular sí).
+              fila('Vendedor', nombreVendedorVentaSuplemento(v)),
               if (conPromo)
                 fila('Promo', '1 mes gratis asignado'),
             ],

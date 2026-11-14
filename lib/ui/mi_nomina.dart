@@ -30,6 +30,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'historial_ventas.dart' show vendedorVentaSuplementoId;
 import 'primitivas.dart';
 import 'servicios.dart';
 import 'widgets.dart';
@@ -316,14 +317,22 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     try {
       solicitudes = await SolicitudesAdelantoService.instance.mias();
     } catch (_) {}
-    // C5: mis ventas (suplementos por registrado_por; servicios por
-    // vendedor_id o registrado_por). Sin vendedor registrado, la
-    // fila no se atribuye: no se inventa.
+    // C5: mis ventas (servicios por vendedor_id o registrado_por).
+    // Yunque 1.34 (C2-2, decisión con la delegación de Jc): los
+    // SUPLEMENTOS se unifican al mismo criterio — antes iban
+    // solo por registrado_por y esta pantalla quedaba como la
+    // excepción del arreglo C5: cuando un fiado lo salda OTRO,
+    // el registrado_por pasa a ser el que salda y la venta del
+    // vendedor original desaparecía de SU «Mis ventas» (el
+    // caso exacto para el que nació vendedorVentaSuplementoId).
+    // Manda el vendedor; el registrador es solo el respaldo
+    // de las filas viejas sin vendedor. Sin atribución, la
+    // fila no se muestra: no se inventa.
     final ventas = <Map<String, dynamic>>[];
     if (tid != null) {
       for (final v
           in await LocalDb.instance.allMirror('ventas_suplementos')) {
-        if (LocalDb.normalizarTelegramId(v['registrado_por']) == tid) {
+        if (vendedorVentaSuplementoId(v) == tid) {
           ventas.add({'origen': 'suplemento', ...v});
         }
       }

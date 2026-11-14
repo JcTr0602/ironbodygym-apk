@@ -19,6 +19,7 @@ import '../nomina_calc.dart';
 import '../perfil.dart';
 import '../tiempo.dart';
 import 'cuentas_por_cobrar.dart' show esFiadoPendienteVenta;
+import 'historial_ventas.dart' show nombreVendedorVentaSuplemento;
 
 /// CSV de exportación (cabecera + filas). 1.29 (Oleada 6,
 /// D-B3-08): las celdas que empiezan por `=`, `+`, `-` o
@@ -116,7 +117,11 @@ List<List<String>> filasVentasMes(
       '${v['total'] ?? v['precio'] ?? ''}',
       '${v['moneda'] ?? 'CUP'}',
       '${v['comprador_nombre'] ?? ''}',
-      '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? ''}',
+      // Yunque 1.34 (C2-1): la columna se titula «vendedor» y
+      // llevaba al COBRADOR (registrado_por): el error C5
+      // seguía vivo en la exportación. Manda el criterio de
+      // la casa (vendedor; el registrador solo de respaldo).
+      nombreVendedorVentaSuplemento(v),
     ]);
   }
   return out;
