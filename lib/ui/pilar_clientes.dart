@@ -21,9 +21,15 @@
 /// pierde el scroll ni la búsqueda en curso.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../cliente_protegido.dart';
+import '../localdb.dart';
+import '../negocio.dart';
 import '../permisos_entrenador.dart';
+import '../sync.dart';
 import 'bandeja_whatsapp.dart';
 import 'buscar.dart';
 import 'control_acceso.dart';
@@ -45,6 +51,27 @@ class PilarClientes extends StatefulWidget {
   State<PilarClientes> createState() => _PilarClientesState();
 }
 
+/// 1.35 (UI-08): la cifra de la insignia del segmento
+/// Vencimientos — los que vencen HOY más los atrasados
+/// que aún no tienen aviso vigente. Se calcula con las
+/// MISMAS funciones que alimentan Listas (vencenHoy /
+/// atrasados / avisadosVigentesConFecha) y con su mismo
+/// filtro de protegidos: la insignia nunca promete un
+/// número distinto del que la pestaña enseña.
+Future<int> conteoInsigniaVencimientos() async {
+  final activos = await clientesActivos();
+  final hoy = await vencenHoy(activosPre: activos);
+  final m30 = await atrasados(masDe30: false, activosPre: activos);
+  final p30 = await atrasados(masDe30: true, activosPre: activos);
+  final avisados = await LocalDb.instance.avisadosVigentesConFecha();
+  int idDe(Map<String, dynamic> c) => (c['id'] as num?)?.toInt() ?? -1;
+  bool visible(Map<String, dynamic> c) => !esVistaProtegida(c);
+  final atrasadosSinAvisar = [...m30, ...p30]
+      .where((c) => visible(c) && !avisados.containsKey(idDe(c)))
+      .length;
+  return hoy.where(visible).length + atrasadosSinAvisar;
+}
+
 class _PilarClientesState extends State<PilarClientes> {
   String _segmento = 'directorio';
   int _tabListas = 0;
@@ -52,6 +79,22 @@ class _PilarClientesState extends State<PilarClientes> {
   String? _filtroBuscar;
   int _epochBuscar = 0;
   final Set<String> _visitados = {'directorio'};
+
+  /// 1.35 (UI-08): cifra de la insignia de Vencimientos.
+  /// Null = aún sin leer (o lectura fallida): no se pinta
+  /// insignia — nunca un cero falso (doctrina SYNC-12).
+  int? _urgenciaVenc;
+  StreamSubscription<SyncStatus>? _subSync;
+
+  Future<void> _contarUrgencia() async {
+    try {
+      final n = await conteoInsigniaVencimientos();
+      if (mounted) setState(() => _urgenciaVenc = n);
+    } catch (_) {
+      // Sin lectura, sin insignia: el segmento no afirma
+      // una cifra que no pudo comprobar.
+    }
+  }
 
   List<String> get _segmentos => [
         'directorio',
@@ -64,6 +107,13 @@ class _PilarClientesState extends State<PilarClientes> {
   void initState() {
     super.initState();
     MarcoNav.destinoClientes.addListener(_aplicarDestino);
+    // 1.35 (UI-08): la insignia se cuenta al nacer y se
+    // recuenta cada vez que la sync queda en reposo (la
+    // foto del espejo pudo cambiar).
+    _contarUrgencia();
+    _subSync = SyncEngine.instance.statusStream.listen((s) {
+      if (s.phase == SyncPhase.idle) _contarUrgencia();
+    });
     // Un destino pedido ANTES de montar el pilar (arranque
     // directo con salto) se aplica al nacer.
     if (MarcoNav.destinoClientes.value != null) {
@@ -75,6 +125,7 @@ class _PilarClientesState extends State<PilarClientes> {
   @override
   void dispose() {
     MarcoNav.destinoClientes.removeListener(_aplicarDestino);
+    _subSync?.cancel();
     super.dispose();
   }
 
@@ -185,10 +236,19 @@ class _PilarClientesState extends State<PilarClientes> {
                     value: 'directorio',
                     icon: Icon(Icons.people_rounded),
                     label: Text('Directorio')),
-                const ButtonSegment(
+                ButtonSegment(
                     value: 'vencimientos',
-                    icon: Icon(Icons.event_busy_rounded),
-                    label: Text('Vencimientos')),
+                    icon: const Icon(Icons.event_busy_rounded),
+                    // 1.35 (UI-08): la urgencia se ve antes
+                    // de entrar — solo si es mayor que cero
+                    // (la regla del cero de Jc) y solo si la
+                    // cifra se pudo leer.
+                    label: Badge(
+                      isLabelVisible:
+                          _urgenciaVenc != null && _urgenciaVenc! > 0,
+                      label: Text('${_urgenciaVenc ?? ''}'),
+                      child: const Text('Vencimientos'),
+                    )),
                 const ButtonSegment(
                     value: 'invitados',
                     icon: Icon(Icons.card_membership_rounded),
