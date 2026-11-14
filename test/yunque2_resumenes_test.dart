@@ -150,6 +150,43 @@ void main() {
       expect(_excede2Lineas(s, 1.0), isFalse, reason: s);
     });
 
+    test('L3-3 (Yunque 4) · Auditoría: sintético + Hoy cabe '
+        'a 1,3 (abreviado) y sin Hoy va entero', () {
+      for (final actor in ['Este dispositivo', 'Otro usuario']) {
+        final conHoy = resumenFiltrosAuditoriaTxt(
+          alcance: 'Otros y alertas',
+          soloHoy: true,
+          actor: actor,
+        );
+        expect(_excede2Lineas(conHoy, 1.3), isFalse,
+            reason: conHoy);
+        expect(_excede2Lineas(conHoy, 1.0), isFalse,
+            reason: conHoy);
+        final sinHoy = resumenFiltrosAuditoriaTxt(
+          alcance: 'Otros y alertas',
+          soloHoy: false,
+          actor: actor,
+        );
+        expect(sinHoy.endsWith(actor), isTrue,
+            reason: 'sin «Hoy» el sintético sigue entero '
+                '(K3-6): $sinHoy');
+        expect(_excede2Lineas(sinHoy, 1.3), isFalse,
+            reason: sinHoy);
+      }
+      expect(
+          resumenFiltrosAuditoriaTxt(
+              alcance: 'Otros y alertas',
+              soloHoy: true,
+              actor: 'Este dispositivo'),
+          'Filtrar · Otros · Hoy · Este disp.');
+      expect(
+          resumenFiltrosAuditoriaTxt(
+              alcance: 'Otros y alertas',
+              soloHoy: true,
+              actor: 'Otro usuario'),
+          'Filtrar · Otros · Hoy · Otro usu.');
+    });
+
     test('Ventas peor caso completo cabe a 1,0', () {
       final entreAnos = resumenFiltrosVentasTxt(
         producto: 'Creatina Optimun Nutrition',

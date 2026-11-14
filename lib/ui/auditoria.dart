@@ -1493,9 +1493,20 @@ String resumenFiltrosAuditoriaTxt({
     // («Este dispositivo» / «Otro usuario») van ENTEROS —
     // su primera palabra («Este» / «Otro») se lee como el
     // nombre de una persona y no nombra el estado real.
-    partes.add(actor == 'Este dispositivo' || actor == 'Otro usuario'
-        ? actor
-        : primeraPalabraResumen(actor));
+    // Yunque 4 (L3-3): con «Hoy» además, el sintético
+    // entero no cabe a escala 1,3 en las 2 líneas del botón
+    // (medido: 251/227 px contra 232 de presupuesto) y el
+    // ellipsis se comía justo la palabra salvada por K3-6;
+    // solo en esa combinación el sintético se abrevia —
+    // sin «Hoy» sigue entero.
+    final sintetico =
+        actor == 'Este dispositivo' || actor == 'Otro usuario';
+    if (sintetico && soloHoy) {
+      partes.add(
+          actor == 'Este dispositivo' ? 'Este disp.' : 'Otro usu.');
+    } else {
+      partes.add(sintetico ? actor : primeraPalabraResumen(actor));
+    }
   }
   return partes.join(' · ');
 }
