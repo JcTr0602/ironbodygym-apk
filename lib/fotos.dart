@@ -101,6 +101,25 @@ Future<File?> resolverFotoSuplemento(
 ///   llega, las filas visibles repintan por escucha.
 /// La descarga real la inyecta FotoCache; la política se
 /// prueba sola, sin red ni disco.
+
+/// 1.34 (FOTOS-07): reloj MONOTÓNICO para políticas de
+/// duración intra-proceso (backoff y ventana de
+/// aterrizaje de la cola). Devuelve instantes como
+/// DateTime desde un Stopwatch: solo valen sus
+/// DIFERENCIAS, que es lo único que la cola calcula. Con
+/// el reloj de pared, un retroceso manual de la hora del
+/// teléfono dejaba diferencias negativas y la ruta quedaba
+/// «dentro de ventana» mucho más allá de los 45 s/3 min;
+/// un adelanto las expiraba al instante. Los instantes no
+/// se persisten ni salen del dispositivo: los dos mapas de
+/// la cola viven en RAM dentro del proceso.
+DateTime Function() relojMonotonico() {
+  final sw = Stopwatch()..start();
+  return () => DateTime.fromMillisecondsSinceEpoch(
+      sw.elapsedMilliseconds,
+      isUtc: true);
+}
+
 class ColaPrecargaFotos {
   ColaPrecargaFotos({
     required Future<File?> Function(String ruta, Duration timeout)
@@ -260,6 +279,11 @@ class FotoCache {
     // IMP-18: un fallo por 401 (JWT vencido) no entra en
     // la caché negativa de la cola.
     esFalloSinCastigo: (String ruta) => _fallo401.contains(ruta),
+    // 1.34 (FOTOS-07): la instancia de producción mide
+    // sus duraciones (backoff, ventana de aterrizaje)
+    // con el reloj monotónico, inmune a los saltos
+    // manuales de la hora del teléfono.
+    ahora: relojMonotonico(),
   );
 
   /// Rutas cuya foto acaba de aterrizar (las filas repintan
@@ -633,15 +657,28 @@ class FotoCache {
       // La ruta que manda ahora nunca puede quedar como
       // víctima de una invalidación diferida anterior.
       _invalidacionesDiferidas.remove(nueva);
+      // 1.34 (FOTOS-06, carrera registro/aterrizaje): la
+      // diferida se registra ANTES de comprobar, no
+      // después. En el orden viejo, si la nueva aterrizaba
+      // durante el await de la comprobación, su _recordar
+      // corría sin entrada que cumplir y la entrada nacía
+      // ya cumplida: la vieja quedaba pegada hasta un
+      // futuro _recordar de la misma ruta (que puede no
+      // llegar en la sesión). Registrada ya, cualquier
+      // aterrizaje en la ventana la ejecuta al momento.
+      _invalidacionesDiferidas[vieja] = nueva;
       // Fase 1 (FOTOS-01): la comprobación es DIRECTA — con
       // la caída de enCache, la copia vieja de OTRA diferida
       // haría las veces de «la nueva ya está» y esta se
-      // invalidaría sin estar en disco.
-      if (await _enCacheDirecto(nueva) != null) {
+      // invalidaría sin estar en disco. Todo retorno no
+      // nulo de _enCacheDirecto recuerda la ruta: si ese
+      // _recordar ejecutó esta diferida (la entrada ya no
+      // está), no hay nada más que hacer; si la entrada
+      // sigue viva pese al acierto, se invalida aquí.
+      if (await _enCacheDirecto(nueva) != null &&
+          _invalidacionesDiferidas.remove(vieja) != null) {
         await invalidar(vieja);
-        return;
       }
-      _invalidacionesDiferidas[vieja] = nueva;
       return;
     }
     await invalidar(vieja);
