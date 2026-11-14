@@ -415,7 +415,14 @@ void main() {
       final src = File('lib/sync.dart').readAsStringSync();
       final i = src.indexOf('_verificarTablaManifiesto');
       expect(i, greaterThan(0));
-      final cuerpo = src.substring(i, i + 4200);
+      // Yunque 1.34: la ventana crece de 4200 a 6500 — el
+      // sello de completa (C3-2) y el predicado
+      // manifiestoSellaCompleta añadieron ~330 caracteres
+      // documentados en esta misma región y la llamada
+      // quedó a 4351. La aserción no cambia: el cableado
+      // clasificación→huboRespuesta debe existir en la
+      // función; solo se recolocó su ventana.
+      final cuerpo = src.substring(i, i + 6500);
       expect(
           cuerpo.contains(
               'huboRespuesta: huboRespuestaManifiesto(r.statusCode)'),
