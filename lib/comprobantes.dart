@@ -41,6 +41,47 @@ int backoffComprobanteSegundos(int intentos) {
 String rutaStorageComprobante(String uuid, String ext) =>
     'comprobantes/$uuid.$ext';
 
+/// 1.34 (comprobantes): comprime el comprobante a WebP dejando
+/// asiento del fallo. Hasta 1.33 la llamada moría SIEMPRE en el
+/// validador del plugin — el destino temporal terminaba en
+/// `.tmp` y el validador exige que el nombre TERMINE en `.webp`
+/// (misma causa raíz que las variantes de fotos, informe 134) —
+/// y el catch de encolar lo tragaba con un debugPrint; con un
+/// null del plugin ni eso: el WebP nunca nació y todo
+/// comprobante fue la copia JPG del original, sin una sola
+/// línea en la bitácora. Ahora TODO fallo (null o excepción)
+/// queda en AppLog con uuid, causa y parámetros. Devuelve el
+/// resultado del plugin, o null si el WebP no nació (encolar
+/// decide el fallback: la copia JPG de siempre — ninguna
+/// imagen se pierde por un fallo de compresión).
+Future<XFile?> _comprimirComprobanteWebp({
+  required String comprobanteUuid,
+  required String rutaOrigen,
+  required String rutaDestino,
+}) async {
+  try {
+    final res = await FlutterImageCompress.compressAndGetFile(
+      rutaOrigen,
+      rutaDestino,
+      minWidth: 1600,
+      minHeight: 1600,
+      quality: 80,
+      format: CompressFormat.webp,
+    );
+    if (res == null) {
+      AppLog.error('comprobantes', 'compresion_fallo',
+          d: 'uuid=$comprobanteUuid causa=null formato=webp '
+              'objetivo=1600x1600 q=80');
+    }
+    return res;
+  } catch (e) {
+    AppLog.error('comprobantes', 'compresion_fallo',
+        d: 'uuid=$comprobanteUuid causa=excepcion formato=webp '
+            'objetivo=1600x1600 q=80 detalle=$e');
+    return null;
+  }
+}
+
 class ComprobantesService {
   ComprobantesService._();
   static final ComprobantesService instance = ComprobantesService._();
@@ -87,28 +128,30 @@ class ComprobantesService {
     // uuid compartían el staging fijo — una podía renombrar
     // el de la otra o quedarse sin él.
     final sufijoStaging = const Uuid().v4().substring(0, 8);
+    // 1.34 (comprobantes): el staging WebP se llama
+    // `<uuid>.<rand>.tmp.webp` — el `.tmp` en el MEDIO, nunca al
+    // final. Con el nombre viejo (`<uuid>.webp.<rand>.tmp`) el
+    // destino no terminaba en `.webp` y el validador del plugin
+    // lanzaba antes de comprimir: el WebP jamás nació (ver el
+    // helper _comprimirComprobanteWebp). El staging JPG conserva
+    // su nombre: lo escribe File.copy, no pasa por el plugin.
     final stagingWebp =
-        File('${dir.path}/$comprobanteUuid.webp.$sufijoStaging.tmp');
+        File('${dir.path}/$comprobanteUuid.$sufijoStaging.tmp.webp');
     final stagingJpg =
         File('${dir.path}/$comprobanteUuid.jpg.$sufijoStaging.tmp');
     File? staging;
-    try {
-      final res = await FlutterImageCompress.compressAndGetFile(
-        rutaOrigen,
-        stagingWebp.path,
-        minWidth: 1600,
-        minHeight: 1600,
-        quality: 80,
-        format: CompressFormat.webp,
-      );
-      if (res != null &&
-          await stagingWebp.exists() &&
-          await stagingWebp.length() > 0) {
-        staging = stagingWebp;
-      }
-    } catch (e) {
-      debugPrint('Comprobantes: compresión falló ($e); se copia '
-          'el original');
+    final res = await _comprimirComprobanteWebp(
+      comprobanteUuid: comprobanteUuid,
+      rutaOrigen: rutaOrigen,
+      rutaDestino: stagingWebp.path,
+    );
+    if (res != null &&
+        await stagingWebp.exists() &&
+        await stagingWebp.length() > 0) {
+      staging = stagingWebp;
+    } else {
+      debugPrint('Comprobantes: compresión no produjo WebP; se '
+          'copia el original');
     }
     if (staging == null) {
       ext = 'jpg';
