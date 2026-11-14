@@ -267,17 +267,28 @@ void main() {
               'rol': 'entrenador'
             },
           ]));
+      // Yunque 3.34 (K4-4): el cliente se juzga por
+      // estado == 'activo' y su pagado_hasta
+      // (lib/negocio.dart:238, 252, 272, 287); 'activo': 1
+      // es clave de otra fila (acceso-app) y ningún
+      // consumidor de clientes la lee. Cobertura vigente
+      // (+30 días) coherente con clientes al día.
+      final pagadoHastaPlegados =
+          isoHabana(sumarDiasCalendario(ahoraHabana(), 30))
+              .substring(0, 10);
       await LocalDb.instance.upsertMirror('clientes', 5, {
         'id': 5,
         'nombre': 'Ana Prueba',
         'telefono': '53000005',
-        'activo': 1,
+        'estado': 'activo',
+        'pagado_hasta': pagadoHastaPlegados,
       }, 1);
       await LocalDb.instance.upsertMirror('clientes', 7, {
         'id': 7,
         'nombre': 'Beto Ejemplo',
         'telefono': '53000007',
-        'activo': 1,
+        'estado': 'activo',
+        'pagado_hasta': pagadoHastaPlegados,
       }, 1);
     });
   }
