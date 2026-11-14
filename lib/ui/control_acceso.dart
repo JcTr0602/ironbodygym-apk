@@ -342,15 +342,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   // 1.34 (C-48 · G-06): resumen del botón «Filtrar» — nombra
-  // los interruptores activos («Filtrar · PIN sin cambiar +
-  // Inactivos +30»); sin nada activo, «Filtrar» a secas.
-  String _resumenFiltrosAcceso() {
-    final partes = <String>[
-      if (_soloPinPendiente) 'PIN sin cambiar',
-      if (_soloInactivos30) 'Inactivos +30',
-    ];
-    return partes.isEmpty ? 'Filtrar' : 'Filtrar · ${partes.join(' + ')}';
-  }
+  // los interruptores activos; sin nada activo, «Filtrar» a
+  // secas. La gramática vive en resumenFiltrosAccesoTxt.
+  String _resumenFiltrosAcceso() => resumenFiltrosAccesoTxt(
+      soloPinPendiente: _soloPinPendiente,
+      soloInactivos30: _soloInactivos30);
 
   Widget _botonFiltrosAcceso() {
     return OutlinedButton.icon(
@@ -1509,4 +1505,25 @@ class _HojaFiltrosAccesoState extends State<_HojaFiltrosAcceso> {
       ),
     );
   }
+}
+
+/// Yunque 2.34 (F-7): resumen del botón «Filtrar» de Control
+/// de acceso con gramática corta. Con los DOS interruptores
+/// activos, la forma larga («PIN sin cambiar») no cabía en
+/// las 2 líneas de C2-5 a 360 dp × 1.3: el resumen pasa a
+/// «PIN + Inactivos +30» (la hoja de filtros conserva los
+/// textos completos). Con uno solo, va el texto entero.
+/// PURO.
+String resumenFiltrosAccesoTxt({
+  required bool soloPinPendiente,
+  required bool soloInactivos30,
+}) {
+  if (soloPinPendiente && soloInactivos30) {
+    return 'Filtrar · PIN + Inactivos +30';
+  }
+  final partes = <String>[
+    if (soloPinPendiente) 'PIN sin cambiar',
+    if (soloInactivos30) 'Inactivos +30',
+  ];
+  return partes.isEmpty ? 'Filtrar' : 'Filtrar · ${partes.join(' + ')}';
 }

@@ -292,6 +292,24 @@ class TarjetaAccionesCliente extends StatelessWidget {
   }
 }
 
+/// Yunque 2.34 (F-7): gramática corta de los resúmenes de
+/// filtros plegados — la primera palabra de un nombre
+/// («Gabriel Pérez» → «Gabriel») para que el resumen quepa
+/// en las 2 líneas de C2-5 sin elidir la cola.
+String primeraPalabraResumen(String nombre) {
+  final t = nombre.trim();
+  if (t.isEmpty) return t;
+  return t.split(RegExp(r'\s+')).first;
+}
+
+/// Yunque 2.34 (F-7): truncado con elipsis para los
+/// resúmenes plegados (un producto de 30 caracteres no puede
+/// comerse el rango de fechas del mismo botón).
+String truncarResumen(String texto, int max) {
+  if (texto.length <= max) return texto;
+  return '${texto.substring(0, max - 1).trimRight()}…';
+}
+
 /// Yunque 2.34 (F-2): RefreshIndicator en la marca.
 /// RefreshIndicator NO es temable en este SDK (lee
 /// `colorScheme.primary` directo, sin pasar por ningún tema

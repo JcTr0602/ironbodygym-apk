@@ -135,7 +135,10 @@ class _LiquidacionesHistorialScreenState
         children: [
           Flexible(
             child: Text(
-              _mes.isEmpty ? 'Mes · Todos' : 'Mes · ${_nombreMes(_mes)}',
+              // Yunque 2.34 (F-7): el botón usa el nombre
+              // CORTO (nombreMesBoton): con «Septiembre
+              // 2026» entero, el año se elidía.
+              _mes.isEmpty ? 'Mes · Todos' : 'Mes · ${nombreMesBoton(_mes)}',
               style: AppTexto.metadato,
               // Yunque 1.34 (C2-5): a 2 líneas, como los demás
               // botones de filtros plegados (ver Auditoría).
@@ -367,4 +370,31 @@ class _LiquidacionesHistorialScreenState
       ),
     );
   }
+}
+
+/// Yunque 2.34 (F-7): nombre del mes para el BOTÓN de
+/// Liquidaciones — si el nombre supera 8 letras se abrevia
+/// a 3 («septiembre» → «sep 2026»): con el nombre entero, el
+/// año se elidía del botón a 360 dp × 1.3 («Mes ·
+/// Septiembre 20…»). La hoja de meses conserva los nombres
+/// completos. PURO.
+String nombreMesBoton(String mes) {
+  const nombres = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre',
+    'Diciembre',
+  ];
+  const cortos = [
+    'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+  ];
+  if (mes.length < 7) return mes;
+  final m = int.tryParse(mes.substring(5, 7)) ?? 0;
+  // Fuera de rango: la misma salida de _etiquetaMes.
+  if (m < 1 || m > 12) {
+    return '${mes.substring(5, 7)}/${mes.substring(0, 4)}';
+  }
+  final nombre = nombres[m - 1];
+  final anio = mes.substring(0, 4);
+  return nombre.length > 8 ? '${cortos[m - 1]} $anio' : '$nombre $anio';
 }

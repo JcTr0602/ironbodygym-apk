@@ -610,12 +610,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         FiltroAuditoria.soloMias => 'Solo mías',
       };
 
-  String _resumenFiltrosAuditoria() {
-    final partes = <String>['Filtrar', _etiquetaAlcance(_filtro)];
-    if (_soloHoy) partes.add('Hoy');
-    if (_actorFiltro != null) partes.add(_actorFiltro!);
-    return partes.join(' · ');
-  }
+  String _resumenFiltrosAuditoria() => resumenFiltrosAuditoriaTxt(
+        alcance: _etiquetaAlcance(_filtro),
+        soloHoy: _soloHoy,
+        actor: _actorFiltro,
+      );
 
   Widget _botonFiltrosAuditoria(bool esDueno) {
     return OutlinedButton.icon(
@@ -1443,4 +1442,20 @@ class _HojaFiltrosAuditoriaState extends State<_HojaFiltrosAuditoria> {
       ),
     );
   }
+}
+
+/// Yunque 2.34 (F-7): resumen del botón de filtros de
+/// Auditoría con gramática corta — el actor entra por su
+/// primera palabra (un nombre completo se comía la cola a
+/// 360 dp × 1.3 y el resumen dejaba de nombrar el estado).
+/// PURO.
+String resumenFiltrosAuditoriaTxt({
+  required String alcance,
+  required bool soloHoy,
+  required String? actor,
+}) {
+  final partes = <String>['Filtrar', alcance];
+  if (soloHoy) partes.add('Hoy');
+  if (actor != null) partes.add(primeraPalabraResumen(actor));
+  return partes.join(' · ');
 }

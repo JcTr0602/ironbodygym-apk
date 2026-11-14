@@ -277,17 +277,13 @@ class _ServiciosHistorialCuerpoState
 
   // 1.34 (C-48 · G-03): resumen del botón de filtros —
   // nombra el tipo activo y, si lo hay, el vendedor.
-  String _resumenFiltrosServicios() {
-    final partes = <String>[
-      'Filtrar',
-      etiquetaTipoHistorialServicio(_filtroTipo),
-    ];
-    if (_filtroVendedor != null) {
-      partes.add(_nombreVendedor(
-          _filtroVendedor!, _respaldoPorTid[_filtroVendedor!]));
-    }
-    return partes.join(' · ');
-  }
+  String _resumenFiltrosServicios() => resumenFiltrosServiciosTxt(
+        tipo: etiquetaTipoHistorialServicio(_filtroTipo),
+        vendedor: _filtroVendedor == null
+            ? null
+            : _nombreVendedor(
+                _filtroVendedor!, _respaldoPorTid[_filtroVendedor!]),
+      );
 
   Widget _botonFiltrosServicios(List<int> vendedores) {
     return OutlinedButton.icon(
@@ -812,4 +808,16 @@ class _HojaFiltrosServiciosHistorialState
       ),
     );
   }
+}
+
+/// Yunque 2.34 (F-7): resumen del botón de filtros del
+/// Historial de servicios con gramática corta — el vendedor
+/// entra por su primera palabra. PURO.
+String resumenFiltrosServiciosTxt({
+  required String tipo,
+  required String? vendedor,
+}) {
+  final partes = <String>['Filtrar', tipo];
+  if (vendedor != null) partes.add(primeraPalabraResumen(vendedor));
+  return partes.join(' · ');
 }

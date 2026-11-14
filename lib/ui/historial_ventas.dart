@@ -588,18 +588,14 @@ class _HistorialVentasScreenState
     );
   }
 
-  String _resumenFiltrosVentas() {
-    final partes = <String>['Filtrar'];
-    if (_productoId != null) {
-      partes.add('${_productos[_productoId]?['nombre'] ?? 'Producto'}');
-    } else {
-      partes.add('Todos los productos');
-    }
-    if (_moneda != null) partes.add(_moneda!);
-    final rango = _resumenRangoVentas(_desde, _hasta);
-    if (rango != null) partes.add(rango);
-    return partes.join(' · ');
-  }
+  String _resumenFiltrosVentas() => resumenFiltrosVentasTxt(
+        producto: _productoId == null
+            ? null
+            : '${_productos[_productoId]?['nombre'] ?? 'Producto'}',
+        moneda: _moneda,
+        desde: _desde,
+        hasta: _hasta,
+      );
 
   Widget _botonFiltrosVentas() {
     return OutlinedButton.icon(
@@ -1070,22 +1066,64 @@ class _DialogoReciboWaState extends State<_DialogoReciboWa> {
 /// para la etiqueta del botón «Filtrar · …»: «1-30 nov» si
 /// ambas fechas caen en el mismo mes; si no, las fechas
 /// sueltas con fmtFecha. null si no hay rango.
+/// Yunque 2.34 (F-7): resumen del botón de filtros de
+/// Ventas con gramática corta — producto truncado a 14,
+/// «Todos» en vez de «Todos los productos» y rango sin el
+/// año cuando es el año en curso. El peor caso real (los 5
+/// botones a la vez) medía ~4 líneas a 360 dp × 1.3 y la
+/// cola se elidía pese a las 2 líneas de C2-5. PURO.
+String resumenFiltrosVentasTxt({
+  required String? producto,
+  required String? moneda,
+  required String? desde,
+  required String? hasta,
+}) {
+  final partes = <String>[
+    'Filtrar',
+    producto == null ? 'Todos' : truncarResumen(producto, 14),
+  ];
+  if (moneda != null) partes.add(moneda);
+  final rango = _resumenRangoVentas(desde, hasta);
+  if (rango != null) partes.add(rango);
+  return partes.join(' · ');
+}
+
 String? _resumenRangoVentas(String? desde, String? hasta) {
   if (desde == null && hasta == null) return null;
   const meses = [
     'ene', 'feb', 'mar', 'abr', 'may', 'jun',
     'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
   ];
+  final actual = ahoraHabana().year;
+  String corta(DateTime f, {required bool conAno}) =>
+      '${f.day} ${meses[f.month - 1]}${conAno ? ' ${f.year}' : ''}';
   if (desde != null && hasta != null) {
     final d = DateTime.tryParse(desde);
     final h = DateTime.tryParse(hasta);
-    if (d != null && h != null && d.year == h.year && d.month == h.month) {
-      return '${d.day}-${h.day} ${meses[d.month - 1]}';
+    if (d == null || h == null) {
+      return '${fmtFecha(desde)} – ${fmtFecha(hasta)}';
     }
-    return '${fmtFecha(desde)} – ${fmtFecha(hasta)}';
+    if (d.year == h.year && d.month == h.month) {
+      return '${d.day}-${h.day} ${meses[d.month - 1]}'
+          '${d.year == actual ? '' : ' ${d.year}'}';
+    }
+    if (d.year == h.year) {
+      // Yunque 2.34 (F-7): el año en curso no se repite.
+      return '${corta(d, conAno: false)} – '
+          '${corta(h, conAno: d.year != actual)}';
+    }
+    return '${corta(d, conAno: true)} – ${corta(h, conAno: true)}';
   }
-  if (desde != null) return 'Desde ${fmtFecha(desde)}';
-  return 'Hasta ${fmtFecha(hasta!)}';
+  if (desde != null) {
+    final d = DateTime.tryParse(desde);
+    return d == null
+        ? 'Desde ${fmtFecha(desde)}'
+        : 'Desde ${corta(d, conAno: d.year != actual)}';
+  }
+  final h = DateTime.tryParse(hasta!);
+  return h == null
+      ? 'Hasta ${fmtFecha(hasta)}'
+      : 'Hasta ${corta(h, conAno: h.year != actual)}';
 }
 
 /// 1.34 (C-48 · G-02): hoja de filtros del Historial de
