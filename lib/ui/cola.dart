@@ -3299,18 +3299,25 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     final detTs = _pushDetalleTs ?? '';
     final mostrarBanner =
         pushTs.isNotEmpty && detTs.isNotEmpty && pushTs != detTs;
-    return ListView(
+    // 1.34 Campo 2 (P-6): builder — antes la pestaña
+    // construía TODAS las tarjetas de golpe (ListView con
+    // children y spread del lote entero).
+    return ListView.builder(
       padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
-          child: Text(
-            'Lote de ${_fmtHora(_pushDetalleTs ?? _pushTs)}',
-            style: AppTexto.subtitulo,
-          ),
-        ),
-        if (mostrarBanner)
-          Container(
+      itemCount: 2 + _ops.length,
+      itemBuilder: (ctx, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.xs),
+            child: Text(
+              'Lote de ${_fmtHora(_pushDetalleTs ?? _pushTs)}',
+              style: AppTexto.subtitulo,
+            ),
+          );
+        }
+        if (i == 1) {
+          return mostrarBanner
+              ? Container(
             margin: const EdgeInsets.only(bottom: AppEspacio.md, top: AppEspacio.sm),
             padding: const EdgeInsets.all(AppEspacio.md),
             decoration: BoxDecoration(
@@ -3335,10 +3342,10 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
               ],
             ),
           )
-        else
-          const SizedBox(height: 12),
-        ..._ops.map(_tarjetaOp),
-      ],
+              : const SizedBox(height: 12);
+        }
+        return _tarjetaOp(_ops[i - 2]);
+      },
     );
   }
 
@@ -3389,15 +3396,20 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
     final detTs = _detalleTs ?? '';
     final mostrarBanner =
         pullTs.isNotEmpty && detTs.isNotEmpty && pullTs != detTs;
-    return ListView(
+    // P-6: builder, como _buildSubidos.
+    return ListView.builder(
       padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppEspacio.xs),
-          child: Text(cabecera, style: AppTexto.subtitulo),
-        ),
-        if (mostrarBanner)
-          Container(
+      itemCount: 2 + entradas.length,
+      itemBuilder: (ctx, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.xs),
+            child: Text(cabecera, style: AppTexto.subtitulo),
+          );
+        }
+        if (i == 1) {
+          return mostrarBanner
+              ? Container(
             margin: const EdgeInsets.only(bottom: AppEspacio.md, top: AppEspacio.sm),
             padding: const EdgeInsets.all(AppEspacio.md),
             decoration: BoxDecoration(
@@ -3422,24 +3434,22 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
               ],
             ),
           )
-        else
-          const SizedBox(height: 12),
-        ...entradas.map(
-          (e) => Card(
-            margin: const EdgeInsets.only(bottom: AppEspacio.sm),
-            child: ListTile(
-              leading:
-                  const Icon(Icons.download_rounded, color: AppColores.info),
-              title: Text(kEtiquetasTablaSync[e.key] ?? e.key),
-              trailing: Text(
-                '${e.value}',
-                style:
-                    AppTexto.subtitulo.copyWith(color: AppColores.info),
-              ),
+              : const SizedBox(height: 12);
+        }
+        final e = entradas[i - 2];
+        return Card(
+          margin: const EdgeInsets.only(bottom: AppEspacio.sm),
+          child: ListTile(
+            leading:
+                const Icon(Icons.download_rounded, color: AppColores.info),
+            title: Text(kEtiquetasTablaSync[e.key] ?? e.key),
+            trailing: Text(
+              '${e.value}',
+              style: AppTexto.subtitulo.copyWith(color: AppColores.info),
             ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -3455,15 +3465,20 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
           'error' => 'error',
           _ => 'pendiente',
         };
-    return ListView(
+    // P-6: builder, como las demás pestañas del detalle.
+    return ListView.builder(
       padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-          child:
-              Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
-        ),
-        ...ops.map((op) => Card(
+      itemCount: 1 + ops.length,
+      itemBuilder: (ctx, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child:
+                Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
+          );
+        }
+        final op = ops[i - 1];
+        return Card(
               margin: const EdgeInsets.only(bottom: AppEspacio.sm),
               child: ListTile(
                 title: Text(op.resumen ?? describirTipoOp(op.tipo)),
@@ -3487,8 +3502,8 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
                 ),
                 trailing: chipEstadoOp(estadoChip(op.resultado)),
               ),
-            )),
-      ],
+            );
+      },
     );
   }
 
@@ -3499,16 +3514,20 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
         .where((t) => t.aplicadas > 0 || t.tumbas > 0)
         .toList();
     if (tablas.isEmpty) return _placeholder();
-    return ListView(
+    // P-6: builder, como las demás pestañas del detalle.
+    return ListView.builder(
       padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-          child:
-              Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
-        ),
-        ...tablas.map(
-          (t) => Card(
+      itemCount: 1 + tablas.length,
+      itemBuilder: (ctx, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child:
+                Text(_corridaDiarioTxt ?? '', style: AppTexto.subtitulo),
+          );
+        }
+        final t = tablas[i - 1];
+        return Card(
             margin: const EdgeInsets.only(bottom: AppEspacio.sm),
             child: ListTile(
               leading:
@@ -3524,9 +3543,8 @@ class _DetalleSyncScreenState extends State<DetalleSyncScreen> {
                     AppTexto.subtitulo.copyWith(color: AppColores.info),
               ),
             ),
-          ),
-        ),
-      ],
+          );
+      },
     );
   }
 
