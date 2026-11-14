@@ -989,6 +989,64 @@ class AppTema {
               : const Color(0xFF9E9E9E);
         }),
       ),
+      // Yunque 1.34 (DIS-04, decisión con la delegación de
+      // Jc): los controles de selección y los selectores de
+      // fecha/hora NO tenían tema de componente y Material 3
+      // los pinta con `colorScheme.primary` — que en los
+      // temas de producción (sol/tacticoOscuro, que ponen el
+      // primary en cobalto) salía AZUL COBALTO plano: casillas
+      // (14), radios (24), deslizadores (4) y los diálogos de
+      // fecha (16) y hora (3) de toda la app, el mismo azul
+      // que Jc rechazó en la 1.32. Aquí quedan fijados a la
+      // marca SIN tocar el primary del esquema (su radio de
+      // impacto no es enumerable: navegación y superficies lo
+      // comparten a propósito).
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return Colors.transparent;
+        }),
+        checkColor: WidgetStateProperty.all(AppColores.sobreMarca),
+        side: BorderSide(color: secundario, width: 1.5),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return secundario;
+        }),
+      ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: AppColores.naranja,
+        thumbColor: AppColores.naranja,
+        overlayColor: AppColores.naranja.withValues(alpha: 0.12),
+        inactiveTrackColor: secundario.withValues(alpha: 0.35),
+      ),
+      datePickerTheme: DatePickerThemeData(
+        dayBackgroundColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return null;
+        }),
+        dayForegroundColor: WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.sobreMarca;
+          }
+          return null;
+        }),
+        todayBorder: const BorderSide(color: AppColores.naranja),
+      ),
+      timePickerTheme: const TimePickerThemeData(
+        // La manecilla del reloj era cobalto por el primary
+        // de producción; el selector AM/PM conserva el
+        // tratamiento del SDK (en esta versión dayPeriodColor
+        // no admite resolución por estado desde el tema).
+        dialHandColor: AppColores.naranja,
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor:
             oscuro ? AppColores.carbonProfundo : AppColores.carbon,
