@@ -139,6 +139,28 @@ void main() {
     });
 
     test(
+        'invalidarCambioFoto con la nueva YA en disco: la '
+        'vieja sobra desde ya (FOTOS-06, orden '
+        'registro→comprobación)', () async {
+      const display = 'clientes/9002/uuid-b_display.webp';
+      const original = 'clientes/9002/uuid-b_original.webp';
+      final vieja = await sembrar(display);
+      final nueva = await sembrar(original);
+      // La nueva ya aterrizó y está registrada en el
+      // índice (como la deja su descarga) ANTES de que el
+      // pull anuncie el cambio de variante.
+      expect(await FotoCache.instance.enCache(original), isNotNull);
+      await FotoCache.instance.invalidarCambioFoto(display, original);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(await vieja.exists(), isFalse,
+          reason: 'con la variante nueva verificada en '
+              'disco, la vieja no espera a ningún aterrizaje '
+              'futuro: sobra desde ya');
+      expect(await nueva.exists(), isTrue);
+      expect(await FotoCache.instance.enCache(display), isNull);
+    });
+
+    test(
         'invalidarCambioFoto con OTRA foto (otro uuid) borra '
         'como invalidar de siempre', () async {
       const vieja = 'clientes/9003/uuid-x_display.webp';
