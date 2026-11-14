@@ -658,23 +658,21 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         actor: _actorFiltro,
         esDueno: esDueno,
         actores: actores.toList()..sort(),
+        miActor: _miActor,
       ),
     );
     if (r == null || !mounted) return;
     setState(() {
-      _filtro = r.alcance;
       _soloHoy = r.soloHoy;
       _actorFiltro = r.actor;
-      // Argón Gmail_1-14 #3 (regla que ya vivía en el chip
-      // «Por entrenador»): «Solo mías» + otro entrenador =
+      // Argón Gmail_1-14 #3: «Solo mías» + otro entrenador =
       // lista vacía sin explicación; al filtrar por otro
-      // actor el alcance pasa a «Todo».
-      if (r.actor != null &&
-          r.actor!.isNotEmpty &&
-          _filtro == FiltroAuditoria.soloMias &&
-          r.actor != _miActor) {
-        _filtro = FiltroAuditoria.todo;
-      }
+      // actor el alcance pasa a «Todo». Yunque 2.34 (F-8):
+      // la hoja ya resuelve A LA VISTA con esta misma regla
+      // (alcanceAlElegirActor); esto queda como segunda
+      // puerta, no como corrección silenciosa.
+      _filtro = alcanceAlElegirActor(
+          alcance: r.alcance, actorElegido: r.actor, miActor: _miActor);
     });
   }
 
@@ -1310,6 +1308,7 @@ class _HojaFiltrosAuditoria extends StatefulWidget {
   final String? actor;
   final bool esDueno;
   final List<String> actores;
+  final String? miActor;
 
   const _HojaFiltrosAuditoria({
     required this.alcance,
@@ -1317,6 +1316,7 @@ class _HojaFiltrosAuditoria extends StatefulWidget {
     required this.actor,
     required this.esDueno,
     required this.actores,
+    required this.miActor,
   });
 
   @override
@@ -1408,7 +1408,20 @@ class _HojaFiltrosAuditoriaState extends State<_HojaFiltrosAuditoria> {
                     ChoiceChip(
                       label: Text(a),
                       selected: _actor == a,
-                      onSelected: (_) => setState(() => _actor = a),
+                      // Yunque 2.34 (F-8): al elegir un actor
+                      // ajeno con «Solo mías» puesto, el
+                      // alcance pasa a «Todo» A LA VISTA (el
+                      // radio se mueve en el acto): antes la
+                      // hoja devolvía la combinación imposible
+                      // y el padre la corregía en silencio al
+                      // aplicar.
+                      onSelected: (_) => setState(() {
+                        _actor = a;
+                        _alcance = alcanceAlElegirActor(
+                            alcance: _alcance,
+                            actorElegido: a,
+                            miActor: widget.miActor);
+                      }),
                     ),
                 ],
               ),
@@ -1458,4 +1471,22 @@ String resumenFiltrosAuditoriaTxt({
   if (soloHoy) partes.add('Hoy');
   if (actor != null) partes.add(primeraPalabraResumen(actor));
   return partes.join(' · ');
+}
+
+/// Yunque 2.34 (F-8): la regla «Solo mías» + actor ajeno =
+/// «Todo», en UN solo sitio. La usan la hoja de filtros (a
+/// la vista, al tocar el chip del actor) y la pantalla (como
+/// segunda puerta al aplicar). PURO.
+FiltroAuditoria alcanceAlElegirActor({
+  required FiltroAuditoria alcance,
+  required String? actorElegido,
+  required String? miActor,
+}) {
+  if (actorElegido != null &&
+      actorElegido.isNotEmpty &&
+      actorElegido != miActor &&
+      alcance == FiltroAuditoria.soloMias) {
+    return FiltroAuditoria.todo;
+  }
+  return alcance;
 }

@@ -109,4 +109,34 @@ void main() {
     expect(nombreMesBoton('2026-10'), 'Octubre 2026');
     expect(nombreMesBoton('2026-01'), 'Enero 2026');
   });
+
+  test('F-8: «Solo mías» + actor ajeno pasa a «Todo» en la '
+      'propia hoja', () {
+    expect(
+        alcanceAlElegirActor(
+            alcance: FiltroAuditoria.soloMias,
+            actorElegido: 'Gabriel',
+            miActor: 'Jc'),
+        FiltroAuditoria.todo);
+    // Mi propio actor: se queda.
+    expect(
+        alcanceAlElegirActor(
+            alcance: FiltroAuditoria.soloMias,
+            actorElegido: 'Jc',
+            miActor: 'Jc'),
+        FiltroAuditoria.soloMias);
+    // Sin actor o con otro alcance: se queda.
+    expect(
+        alcanceAlElegirActor(
+            alcance: FiltroAuditoria.soloMias,
+            actorElegido: null,
+            miActor: 'Jc'),
+        FiltroAuditoria.soloMias);
+    expect(
+        alcanceAlElegirActor(
+            alcance: FiltroAuditoria.otrosYAlertas,
+            actorElegido: 'Gabriel',
+            miActor: 'Jc'),
+        FiltroAuditoria.otrosYAlertas);
+  });
 }
