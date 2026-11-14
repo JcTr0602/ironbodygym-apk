@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
@@ -57,6 +58,21 @@ Future<void> _preparar(WidgetTester tester) async {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() {
+    // Patrón de la casa (banco v2): las pantallas completas
+    // tocan app_links; sin mock, el plugin truena el test.
+    const canalEventos = EventChannel('com.llfbandit.app_links/events');
+    const canalMensajes =
+        MethodChannel('com.llfbandit.app_links/messages');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockStreamHandler(canalEventos,
+            MockStreamHandler.inline(onListen: (_, __) {}));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(canalMensajes, (_) async => null);
+  });
+
   testWidgets('la acción «Guardar inscripción» es visible '
       'sin bajar el formulario (barra fija)', (tester) async {
     await _preparar(tester);
