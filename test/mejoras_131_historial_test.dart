@@ -66,8 +66,13 @@ void main() {
     }, 1);
     await LocalDb.instance.upsertMirror('servicio_pomos', 5, {
       'id': 5,
-      'producto_id': 3,
-      'responsable_id': 111,
+      // Yunque 2.34 (E-2): la forma REAL del espejo
+      // servicio_pomos. El fixture sembraba producto_id /
+      // responsable_id, claves que la fila no trae — por eso
+      // la resolución rota del Historial pasaba verde.
+      'suplemento_id': 3,
+      'titular_telegram_id': 111,
+      'es_principal': 0,
       'activo': 1,
       'saldo_cache': 12,
     }, 1);

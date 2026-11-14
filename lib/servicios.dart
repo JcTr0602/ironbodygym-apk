@@ -221,6 +221,37 @@ String nombreClienteVentaServicio(Map<String, dynamic> v) {
   return 'Sin identificar';
 }
 
+/// Yunque 2.34 (E-2): resolución de nombre de los pomos para
+/// el Historial, con las claves REALES del espejo
+/// servicio_pomos (`suplemento_id`, `titular_telegram_id`,
+/// `es_principal`) — la misma resolución de ServiciosScreen.
+/// La copia del Historial leía `producto_id`/`responsable_id`,
+/// claves que la fila no trae: todo pomo se llamaba
+/// «Suplemento» y toda salida se atribuía a «Mío (dueño)».
+/// «Mío (dueño)» SOLO para el pomo principal (es_principal=1);
+/// el titular se resuelve por telegram_id contra [personas].
+/// PURO.
+List<Map<String, dynamic>> resolverPomosHistorial(
+  List<Map<String, dynamic>> pomosCrudos,
+  Map<int, Map<String, dynamic>> supPorId,
+  Map<int, String> personas,
+) {
+  return <Map<String, dynamic>>[
+    for (final p in pomosCrudos)
+      {
+        ...p,
+        'producto_nombre':
+            '${supPorId[(p['suplemento_id'] as num?)?.toInt()]?['nombre'] ?? 'Suplemento'}',
+        'responsable_nombre':
+            (p['es_principal'] as num?)?.toInt() == 1
+                ? 'Mío (dueño)'
+                : (personas[LocalDb.normalizarTelegramId(
+                        p['titular_telegram_id'])] ??
+                    'Entrenador'),
+      },
+  ];
+}
+
 List<Map<String, dynamic>> entradasHistorialServicios({
   required List<Map<String, dynamic>> ventas,
   required List<Map<String, dynamic>> salidas,

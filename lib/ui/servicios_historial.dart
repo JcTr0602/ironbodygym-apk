@@ -161,19 +161,8 @@ class _ServiciosHistorialCuerpoState
         if ((x['id'] as num?)?.toInt() != null)
           (x['id'] as num).toInt(): x,
     };
-    final pomosResueltos = <Map<String, dynamic>>[
-      for (final p in pomosCrudos)
-        {
-          ...p,
-          'producto_nombre':
-              '${supPorId[(p['producto_id'] as num?)?.toInt()]?['nombre'] ?? 'Suplemento'}',
-          'responsable_nombre': p['responsable_id'] == null
-              ? 'Mío (dueño)'
-              : (widget.personas[
-                      int.tryParse('${p['responsable_id']}')] ??
-                  'Entrenador'),
-        },
-    ];
+    final pomosResueltos = resolverPomosHistorial(
+        pomosCrudos, supPorId, widget.personas);
     final salidas = widget.esDueno
         ? await LocalDb.instance.allMirror('servicio_salidas')
         : <Map<String, dynamic>>[];
