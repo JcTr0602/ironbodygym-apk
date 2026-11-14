@@ -546,8 +546,12 @@ Future<({int n, double total})> totalesPagosCliente(
   // (regla escrita en esPagoAnulado) — este lector quedó
   // fuera y el «de por vida» sumaba el pago anulado hasta
   // que el pull retiraba la fila borrada por el servidor.
-  final anuladosCola =
-      await LocalDb.instance.pagosAnuladosEnCola();
+  // Sin pagos no hay nada anulable: se ahorra la consulta
+  // (la cadena de carga de la ficha es secuencial y cada
+  // salto cuenta al abrirla).
+  final anuladosCola = todos.isEmpty
+      ? const <int>{}
+      : await LocalDb.instance.pagosAnuladosEnCola();
   var n = 0;
   var total = 0.0;
   for (final p in todos) {
