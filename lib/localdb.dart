@@ -597,17 +597,25 @@ class LocalDb {
   /// ANTERIOR de la app sobre una base más nueva) NO borra la
   /// base. Sin este callback, sqflite aplica por defecto
   /// `onDatabaseDowngradeDelete` y se pierde TODO, incluida
-  /// la cola de operaciones sin subir. Las migraciones de
-  /// esta app son aditivas (columnas, tablas e índices
-  /// nuevos): el esquema nuevo es superconjunto del viejo y
-  /// la build anterior puede abrirlo sin tocar una fila. La
-  /// apertura siguiente con la versión actual re-ejecuta el
-  /// onUpgrade intermedio, que es idempotente.
+  /// la cola de operaciones sin subir.
+  ///
+  /// Yunque 2.34 (B-2): la garantía real, sin prometer de más.
+  /// La cadena histórica NO es puramente aditiva (v12 recrea
+  /// `turnos_cierre`, v25 reescribe un estado, v32 retira
+  /// `fotos_pendientes`): una build anterior puede ABRIR la
+  /// base preservada, pero las muy viejas pueden no entender
+  /// estados ya migrados. El caso de campo — reinstalar la
+  /// release anterior (un esquema menos) y volver — es seguro:
+  /// de v60 en adelante todo es aditivo. Y la apertura
+  /// siguiente con la versión actual re-ejecuta el onUpgrade
+  /// intermedio SIN brickeo: los pasos re-ejecutables van por
+  /// vías idempotentes (test de ciclo en
+  /// test/yunque2_bd_ciclo_test.dart: 75→74→75 y 75→2→75).
   static Future<void> onDowngradePreservar(
       Database db, int oldVersion, int newVersion) async {
     debugPrint('LocalDb: downgrade de esquema '
         '$oldVersion → $newVersion: base PRESERVADA '
-        '(sin borrado); las migraciones son aditivas.');
+        '(sin borrado).');
   }
 
   Future<Database> get db async {
@@ -664,13 +672,15 @@ class LocalDb {
         }
         // v3 (v1.0.16): autoría en la cola offline. Sin esto, las ops
         // de un entrenador se atribuían a quien sincronizara después.
+        // Yunque 2.34 (B-2): por _addColumnIfMissing — el ciclo
+        // downgrade→re-upgrade re-ejecuta este bloque sobre columnas
+        // que ya existen y el ALTER desnudo brickeaba la apertura.
         if (oldV < 3) {
-          await db.execute(
-              'ALTER TABLE ops_queue ADD COLUMN user_id TEXT');
-          await db.execute(
-              'ALTER TABLE ops_queue ADD COLUMN telegram_id INTEGER');
-          await db.execute(
-              'ALTER TABLE fotos_pendientes ADD COLUMN user_id TEXT');
+          await _addColumnIfMissing(db, 'ops_queue', 'user_id', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'ops_queue', 'telegram_id', 'INTEGER');
+          await _addColumnIfMissing(
+              db, 'fotos_pendientes', 'user_id', 'TEXT');
         }
         // v4: espejos del módulo de suplementos.
         if (oldV < 4) {
@@ -687,18 +697,20 @@ class LocalDb {
         // v6 (v1.2.1 fix auditoría Gemini): ligar fotos pendientes a
         // suplementos (antes solo se soportaba cliente_id).
         if (oldV < 6) {
-          await db.execute(
-              'ALTER TABLE fotos_pendientes ADD COLUMN suplemento_id INTEGER');
+          // Yunque 2.34 (B-2): idempotente, ver el bloque v3.
+          await _addColumnIfMissing(
+              db, 'fotos_pendientes', 'suplemento_id', 'INTEGER');
         }
         // v7 (v1.2.3): control de reintentos para fotos (evita bucle infinito).
         // Sugerencia de GPT-5.4-mini: retry_count, last_error, last_retry_at.
         if (oldV < 7) {
-          await db.execute(
-              'ALTER TABLE fotos_pendientes ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0');
-          await db.execute(
-              'ALTER TABLE fotos_pendientes ADD COLUMN last_error TEXT');
-          await db.execute(
-              'ALTER TABLE fotos_pendientes ADD COLUMN last_retry_at TEXT');
+          // Yunque 2.34 (B-2): idempotentes, ver el bloque v3.
+          await _addColumnIfMissing(db, 'fotos_pendientes', 'retry_count',
+              'INTEGER NOT NULL DEFAULT 0');
+          await _addColumnIfMissing(
+              db, 'fotos_pendientes', 'last_error', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'fotos_pendientes', 'last_retry_at', 'TEXT');
         }
         // v8 (v1.2.5): visibilidad de incidencias + eventos autoritativos
         // + auditoría local con hash encadenado.
@@ -744,10 +756,11 @@ class LocalDb {
         }
         // v9 (v1.2.5 Fase 2): reintentos inteligentes + cola de bloqueadas.
         if (oldV < 9) {
-          await db.execute(
-              'ALTER TABLE ops_queue ADD COLUMN proximo_reintento TEXT');
-          await db.execute(
-              'ALTER TABLE ops_queue ADD COLUMN codigo_error TEXT');
+          // Yunque 2.34 (B-2): idempotentes, ver el bloque v3.
+          await _addColumnIfMissing(
+              db, 'ops_queue', 'proximo_reintento', 'TEXT');
+          await _addColumnIfMissing(
+              db, 'ops_queue', 'codigo_error', 'TEXT');
         }
         // v10: FTS5 para búsqueda de clientes (rev5 Gemini: Levenshtein en
         // el hilo UI no escala). Se crea y se rellena desde el espejo.
