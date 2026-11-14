@@ -208,7 +208,11 @@ class _PilarClientesState extends State<PilarClientes> {
           ),
         ),
         Expanded(
-          child: IndexedStack(
+          // 1.35 (UI-01): mismo fundido al cambiar de
+          // segmento, sin remontar las vistas visitadas.
+          child: FundidoAlCambiar(
+            indice: segmentos.indexOf(_segmento),
+            child: IndexedStack(
             index: segmentos.indexOf(_segmento),
             children: [
               for (final s in segmentos)
@@ -218,6 +222,7 @@ class _PilarClientesState extends State<PilarClientes> {
                 else
                   const SizedBox.shrink(),
             ],
+            ),
           ),
         ),
       ],

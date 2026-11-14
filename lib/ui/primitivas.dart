@@ -35,6 +35,78 @@ abstract final class Tacto {
   static void error() => HapticFeedback.vibrate();
 }
 
+/// 1.35 (UI-01): fundido corto con desplazamiento mínimo al
+/// cambiar el [indice] visible de un IndexedStack (pilares
+/// de la cáscara, segmentos de un pilar). El hijo NO se
+/// remonta: el stack y sus hijos son la misma instancia y
+/// solo se anima la entrada del que llega (opacidad +
+/// 6 dp de subida) con los tokens de la casa
+/// (AppMovimiento.media / curvaSuave). Con «reducir
+/// movimiento» del sistema el cambio es instantáneo.
+class FundidoAlCambiar extends StatefulWidget {
+  final int indice;
+  final Widget child;
+
+  const FundidoAlCambiar({
+    super.key,
+    required this.indice,
+    required this.child,
+  });
+
+  @override
+  State<FundidoAlCambiar> createState() => _FundidoAlCambiarState();
+}
+
+class _FundidoAlCambiarState extends State<FundidoAlCambiar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.media,
+    value: 1,
+  );
+
+  @override
+  void didUpdateWidget(FundidoAlCambiar old) {
+    super.didUpdateWidget(old);
+    if (old.indice == widget.indice) return;
+    if (MediaQuery.of(context).disableAnimations) {
+      _ctrl.value = 1;
+    } else {
+      _ctrl.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // La estructura es CONSTANTE (Opacity + Transform
+    // siempre, también en reposo con opacidad 1): si el
+    // envoltorio apareciera y desapareciera al animar, el
+    // elemento del hijo se remontaría y el stack perdería
+    // el estado de los pilares — justo lo que UI-01
+    // prohíbe.
+    return AnimatedBuilder(
+      animation: _ctrl,
+      child: widget.child,
+      builder: (context, child) {
+        final t = AppMovimiento.curvaSuave.transform(_ctrl.value);
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, 6 * (1 - t)),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// Pad numérico empotrado del mostrador: edita un importe
 /// como texto (dígitos y un punto decimal) sin abrir el
 /// teclado del sistema. Reutilizable por los demás cobros

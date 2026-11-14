@@ -64,6 +64,7 @@ import 'marco.dart';
 import 'pilar_clientes.dart';
 import 'pilar_negocio.dart';
 import 'pilar_tienda.dart';
+import 'primitivas.dart';
 import 'por_decidir.dart';
 import 'salud_sync_screen.dart';
 import 'hub_turnos.dart';
@@ -1322,7 +1323,12 @@ class _HomeScreenState extends State<HomeScreen>
               onAccionPerfil: _accionPerfilMarco,
             ),
             Expanded(
-              child: IndexedStack(
+              // 1.35 (UI-01): fundido corto al cambiar de
+              // pilar, sin remontar el stack (los pilares y
+              // su estado quedan intactos).
+              child: FundidoAlCambiar(
+                indice: _pilarActivo,
+                child: IndexedStack(
                 index: _pilarActivo,
                 children: [
                   for (var i = 0; i < 4; i++)
@@ -1341,6 +1347,7 @@ class _HomeScreenState extends State<HomeScreen>
                     else
                       SizedBox.shrink(key: ValueKey('pilar-vacio-$i')),
                 ],
+                ),
               ),
             ),
           ],
