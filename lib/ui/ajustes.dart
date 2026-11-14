@@ -53,6 +53,7 @@ const titulosPorSeccionAjustes = <String, List<String>>{
     'Tamaño de letra',
     'Vibración',
     'Alto contraste',
+    'Reducir movimiento',
   ],
   'Buscar cliente': ['Deslizar a la derecha', 'Deslizar a la izquierda'],
   'Notificaciones': [
@@ -134,6 +135,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
   bool _autoSync = true;
   bool _vibracion = true; // v1.2.5 (3.2)
   bool _altoContraste = false; // v1.2.5 (3.4)
+  bool _reducirMovimiento = false; // 1.35 (UI-20)
   bool _vincular = false;
   bool _tienePin = false;
   String _tema = 'sistema';
@@ -261,6 +263,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _autoSync = auto;
         _vibracion = vibracion;
         _altoContraste = altoContraste;
+        // 1.35 (UI-20): el notifier es la fuente (se cargó
+        // al arrancar con ThemeController.load).
+        _reducirMovimiento = ThemeController.reducirMovimiento.value;
         _vincular = vinc;
         _tienePin = pin != null;
         _tema = tema;
@@ -424,34 +429,84 @@ class _AjustesScreenState extends State<AjustesScreen> {
   }
 
   /// Selector de tema con vista previa (items 7 y 9).
+  ///
+  /// 1.35 (UI-20): tocar una opción APLICA el tema al
+  /// momento — la pantalla de detrás se recolorea con el
+  /// diálogo abierto (vista previa de verdad, no solo la
+  /// miniatura) — y el diálogo queda abierto: «Guardar»
+  /// se lo queda y «Cancelar» vuelve al tema de antes.
   Future<void> _elegirTema() async {
-    final sel = await showDialog<String>(
+    final previo = _tema;
+    var elegido = _tema;
+    final guardar = await showDialog<bool>(
       context: context,
-      builder: (ctx) => DialogoApp(
-        titulo: 'Tema',
-        iconoTitulo: Icons.palette_rounded,
-        contenido: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _opcionTema(ctx, 'sistema', Icons.brightness_auto_rounded,
-                'Según el sistema'),
-            _opcionTema(
-                ctx, 'claro', Icons.light_mode_rounded, 'Claro'),
-            _opcionTema(
-                ctx, 'oscuro', Icons.dark_mode_rounded, 'Oscuro'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => DialogoApp(
+          titulo: 'Tema',
+          iconoTitulo: Icons.palette_rounded,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _opcionTema(ctx, 'sistema',
+                  Icons.brightness_auto_rounded,
+                  'Según el sistema', elegido, (v) async {
+                elegido = v;
+                setLocal(() {});
+                await ThemeController.setTema(v);
+              }),
+              _opcionTema(ctx, 'claro', Icons.light_mode_rounded,
+                  'Claro', elegido, (v) async {
+                elegido = v;
+                setLocal(() {});
+                await ThemeController.setTema(v);
+              }),
+              _opcionTema(ctx, 'oscuro', Icons.dark_mode_rounded,
+                  'Oscuro', elegido, (v) async {
+                elegido = v;
+                setLocal(() {});
+                await ThemeController.setTema(v);
+              }),
+              const SizedBox(height: AppEspacio.sm),
+              Text(
+                'El cambio se ve ya en toda la app, detrás '
+                'de este diálogo.',
+                style: AppTexto.minuscula.copyWith(
+                    color: AppColores.textoSecundario(ctx)),
+              ),
+            ],
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Guardar'),
+            ),
           ],
         ),
       ),
     );
-    if (sel != null && mounted) {
-      await ThemeController.setTema(sel);
-      setState(() => _tema = sel);
+    if (!mounted) return;
+    if (guardar == true) {
+      setState(() => _tema = elegido);
+    } else {
+      // Cancelar (o cerrar el diálogo): la vista previa
+      // se revierte al tema que había al abrir.
+      await ThemeController.setTema(previo);
+      if (mounted) setState(() => _tema = previo);
     }
   }
 
   Widget _opcionTema(
-      BuildContext ctx, String valor, IconData icono, String titulo) {
-    final activo = _tema == valor;
+      BuildContext ctx,
+      String valor,
+      IconData icono,
+      String titulo,
+      String seleccionado,
+      ValueChanged<String> onElegir) {
+    final activo = seleccionado == valor;
     final oscuro = valor == 'oscuro';
     return ListTile(
       leading: Icon(icono,
@@ -489,7 +544,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 color: AppColores.naranja),
         ],
       ),
-      onTap: () => Navigator.pop(ctx, valor),
+      onTap: () => onElegir(valor),
     );
   }
 
@@ -1896,6 +1951,21 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     await ThemeController.setAltoContraste(v);
                     if (mounted) {
                       setState(() => _altoContraste = v);
+                    }
+                  },
+                ),
+                // 1.35 (UI-20): reducir movimiento de la
+                // app, junto al resto de la apariencia.
+                _switch(
+                  icono: Icons.motion_photos_off_rounded,
+                  titulo: 'Reducir movimiento',
+                  subtitulo:
+                      'Menos animaciones en toda la app',
+                  valor: _reducirMovimiento,
+                  onChanged: (v) async {
+                    await ThemeController.setReducirMovimiento(v);
+                    if (mounted) {
+                      setState(() => _reducirMovimiento = v);
                     }
                   },
                 ),

@@ -444,7 +444,10 @@ class _IronBodyAppState extends State<IronBodyApp>
           valueListenable: ThemeController.modoSol,
           builder: (_, solActivo, __) => ValueListenableBuilder<bool>(
           valueListenable: ThemeController.altoContraste,
-          builder: (_, hc, __) => MaterialApp(
+          builder: (_, hc, __) => ValueListenableBuilder<bool>(
+          // 1.35 (UI-20): «Reducir movimiento» de la app.
+          valueListenable: ThemeController.reducirMovimiento,
+          builder: (_, reducirMov, __) => MaterialApp(
             builder: (ctx, child) {
               final mq = MediaQuery.of(ctx);
               // La escala de la app se multiplica por la de accesibilidad
@@ -457,6 +460,12 @@ class _IronBodyAppState extends State<IronBodyApp>
                 data: mq.copyWith(
                   textScaler: TextScaler.linear(
                       escalaTextoEfectiva(escala, sistema)),
+                  // 1.35 (UI-20): el ajuste de la app se
+                  // suma al del sistema; las primitivas
+                  // que respetan disableAnimations nacen
+                  // puestas con cualquiera de los dos.
+                  disableAnimations:
+                      mq.disableAnimations || reducirMov,
                 ),
                 child: child!,
               );
@@ -541,6 +550,7 @@ class _IronBodyAppState extends State<IronBodyApp>
             highContrastDarkTheme:
                 hc ? AppTema.oscuroAltoContraste() : null,
             home: const RaizSesion(),
+          ),
           ),
           ),
         ),

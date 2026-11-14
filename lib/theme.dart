@@ -25,6 +25,14 @@ class ThemeController {
   static final ValueNotifier<bool> modoSol = ValueNotifier(false);
   static const _kModoSol = 'modo_sol_v1';
 
+  /// 1.35 (UI-20): «Reducir movimiento» de la app (además
+  /// del del sistema): cuando está activo, el builder de
+  /// la raíz presenta MediaQuery.disableAnimations y
+  /// todas las primitivas que lo respetan nacen puestas.
+  static final ValueNotifier<bool> reducirMovimiento =
+      ValueNotifier(false);
+  static const _kReducirMovimiento = 'reducir_movimiento_v1';
+
   static ThemeMode _aMode(String tema) {
     switch (tema) {
       case 'claro':
@@ -60,6 +68,9 @@ class ThemeController {
         await PerfilService.instance.getAltoContraste();
     // 1.32: Modo Sol persistido (default apagado).
     modoSol.value = p.getBool(_kModoSol) ?? false;
+    // 1.35 (UI-20): Reducir movimiento persistido.
+    reducirMovimiento.value =
+        p.getBool(_kReducirMovimiento) ?? false;
   }
 
   /// 1.32: enciende/apaga el Modo Sol y lo persiste. Al apagarlo
@@ -85,6 +96,14 @@ class ThemeController {
   static Future<void> setAltoContraste(bool v) async {
     await PerfilService.instance.setAltoContraste(v);
     altoContraste.value = v;
+  }
+
+  /// 1.35 (UI-20): activa/desactiva el «Reducir
+  /// movimiento» de la app y lo persiste.
+  static Future<void> setReducirMovimiento(bool v) async {
+    reducirMovimiento.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kReducirMovimiento, v);
   }
 
   /// Rota sistema → claro → oscuro → sistema (botón de la cabecera).
