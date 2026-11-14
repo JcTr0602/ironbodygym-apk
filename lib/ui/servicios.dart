@@ -1733,7 +1733,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         dosis += cant;
       }
       if ('${v['metodo']}' == 'efectivo') {
-        efectivo += esReverso ? -monto : monto;
+        // Yunque 3 (K6-2): el monto del reverso ya nace
+        // negativo (cantidad negativa × precio positivo,
+        // convención del servidor): se suma CON SU SIGNO,
+        // sin segunda negación — la rama anterior lo sumaba
+        // al efectivo del día (venta 900 + reverso = 1800).
+        efectivo += monto;
       }
       if (v['en_cola'] == true) porSincronizar++;
     }
