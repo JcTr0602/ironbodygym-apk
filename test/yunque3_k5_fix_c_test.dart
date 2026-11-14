@@ -381,4 +381,58 @@ void main() {
     });
   });
 
+  group('K5-7 · el recibo de una inscripción nueva entra en la '
+      'bandeja por la vía de cola', () {
+    test('op inscribir de hoy con precio_aplicado > 0: aparece '
+        'el recibo con el nombre del payload, y dos '
+        'inscripciones no comparten clave de atendido', () async {
+      final db = await _abrirDbVacia();
+      final hoy = hoyHabanaIso();
+      await LocalDb.instance.setMeta(
+          'usuarios_apk',
+          jsonEncode([
+            {'telegram_id': 222222, 'nombre': 'Gabriel'},
+          ]));
+      for (final (uuid, nombre) in [
+        ('op-insc-k57-1', 'Nueva Uno'),
+        ('op-insc-k57-2', 'Nueva Dos'),
+      ]) {
+        await _opCola(db,
+            uuid: uuid,
+            tipo: 'inscribir',
+            payload: {
+              'nombre': nombre,
+              'telefono': '58112233',
+              'periodo': 'mensual',
+              'meses': 1,
+              'metodo_pago': 'efectivo',
+              'precio_aplicado': 2000,
+              'fecha': hoy,
+            },
+            telegramId: 222222);
+      }
+      final avisos = await avisosWhatsappHoy();
+      final recibos = avisos
+          .where((a) =>
+              a['tipo'] == 'recibo' &&
+              ['Nueva Uno', 'Nueva Dos'].contains(a['nombre']))
+          .toList();
+      expect(recibos, hasLength(2),
+          reason: 'el recibo de la inscripción no puede esperar '
+              'al ciclo completo push→puente→pull');
+      for (final r in recibos) {
+        expect('${r['mensaje']}', contains('Cliente: ${r['nombre']}'));
+        expect('${r['mensaje']}', contains('Cobrado por: Gabriel'));
+        expect(r['telefono'], '5358112233');
+      }
+      final ids =
+          recibos.map((r) => r['cliente_id'] as int).toList();
+      expect(ids.toSet(), hasLength(2),
+          reason: 'la clave de atendido es tipo+cliente_id: dos '
+              'inscripciones con el mismo provisional chocarían');
+      expect(ids.every((i) => i < 0), isTrue,
+          reason: 'el provisional es negativo: no colisiona con '
+              'ningún id real del servidor');
+    });
+  });
 }
