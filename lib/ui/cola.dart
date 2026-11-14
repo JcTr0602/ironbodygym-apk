@@ -915,6 +915,24 @@ class _ColaScreenState extends State<ColaScreen> {
         totalPendientesFinal = propias.total;
         desgloseFinal = propias.porTipo;
       } catch (_) {}
+      // Yunque 4 (L7-3): la antigüedad de la más antigua y
+      // las retenidas que alimentan la tarjeta, el aviso de
+      // 6 h y el botón «Subir ahora» también son DEL AUTOR:
+      // las lecturas globales le atribuían al entrenador la
+      // op vieja retenida del dueño en el teléfono
+      // compartido.
+      try {
+        retenidas =
+            await LocalDb.instance.countOpsRetenidasDe(
+          esMia: (o) => esOpMia(o,
+              miActor: _miActor, miTelegramId: _miTelegramId),
+        );
+        masAntiguaIso = await LocalDb.instance
+            .isoOpPendienteMasAntiguaDe(
+          esMia: (o) => esOpMia(o,
+              miActor: _miActor, miTelegramId: _miTelegramId),
+        );
+      } catch (_) {}
     }
     // Yunque 3 (K7-1): los conteos del héroe (error/enviada)
     // salen de la BD, no de _ops truncada. Para el dueño son

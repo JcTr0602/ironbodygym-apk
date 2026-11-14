@@ -12839,6 +12839,62 @@ class LocalDb {
     return rows.first['creada_ts'] as String?;
   }
 
+  /// Yunque 4 (L7-3): variantes POR AUTOR de [countOpsRetenidas]
+  /// y [isoOpPendienteMasAntigua] — la tarjeta del entrenador
+  /// leía las GLOBALES y le atribuía la antigüedad y las
+  /// retenidas del dueño en el teléfono compartido (aviso de
+  /// 6 h y «Subir ahora (N)» ajenos), la mitad de la clase K7
+  /// que Y3 no alcanzó. [esMia] es el predicado de la propia
+  /// UI (esOpMia), como en [conteoPendientesPropias].
+  Future<int> countOpsRetenidasDe({
+    required bool Function(Map<String, dynamic> op) esMia,
+  }) async {
+    final d = await db;
+    final ahoraEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final filas = await d.query('ops_queue',
+        columns: [
+          'op_uuid',
+          'tipo',
+          'estado',
+          'payload',
+          'telegram_id',
+          'proximo_reintento'
+        ],
+        where: "estado IN ('pendiente','error') "
+            'AND proximo_reintento IS NOT NULL');
+    var n = 0;
+    for (final f in filas) {
+      if (!esMia(f)) continue;
+      final pr = DateTime.tryParse('${f['proximo_reintento'] ?? ''}');
+      if (pr != null &&
+          pr.millisecondsSinceEpoch ~/ 1000 > ahoraEpoch) {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  Future<String?> isoOpPendienteMasAntiguaDe({
+    required bool Function(Map<String, dynamic> op) esMia,
+  }) async {
+    final d = await db;
+    final filas = await d.query('ops_queue',
+        columns: [
+          'op_uuid',
+          'tipo',
+          'estado',
+          'payload',
+          'telegram_id',
+          'creada_ts'
+        ],
+        where: "estado IN ('pendiente','enviada','error')",
+        orderBy: 'creada_ts ASC');
+    for (final f in filas) {
+      if (esMia(f)) return f['creada_ts'] as String?;
+    }
+    return null;
+  }
+
   /// F4: marca un aviso como visto en SQLite local. INSERT OR IGNORE:
   /// el PRIMER visto es el que manda (un segundo PopUp jamás debe
   /// reescribir la fecha ni revivir el aviso).
