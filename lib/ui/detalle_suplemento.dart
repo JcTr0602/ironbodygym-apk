@@ -347,7 +347,14 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
       builder: (ctx) => DialogoApp(
         titulo: 'Confirma la venta',
         iconoTitulo: Icons.point_of_sale_rounded,
-        contenido: Column(
+        // Yunque 4 (L3-1): la vista previa envuelve su
+        // contenido en un desplazable, el mismo patrón que
+        // d2fdade (Y3) aplicó al gemelo de Vender — esta
+        // puerta (venta rápida desde el detalle) quedó con
+        // la Column desnuda y el comprobante completo
+        // desbordaba igual en pantallas bajas.
+        contenido: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -377,6 +384,7 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
               ),
             ],
           ],
+          ),
         ),
         acciones: [
           TextButton(

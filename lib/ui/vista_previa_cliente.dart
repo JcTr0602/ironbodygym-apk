@@ -315,11 +315,16 @@ class _VistaPreviaClienteScreenState
                 controller: _tabs,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
-                // Yunque 2.34 (F-1): indicador y etiqueta
-                // activa vienen del tabBarTheme de la marca;
-                // la no seleccionada se queda aquí porque
-                // esta barra vive sobre grafito (superficie
-                // propia de la vista previa).
+                // Yunque 2.34 (F-1): el indicador viene del
+                // tabBarTheme de la marca; las etiquetas se
+                // quedan aquí porque esta barra vive sobre
+                // grafito (superficie propia de la vista
+                // previa). Yunque 4 (L3-2): también la ACTIVA
+                // — la del tema se resuelve por brillo y en
+                // tema claro cae a naranjaTexto (3,73:1 sobre
+                // este grafito fijo); sobre grafito manda el
+                // naranja de marca local (6,81:1).
+                labelColor: _naranja,
                 unselectedLabelColor: Colors.white70,
                 tabs: const [
                   Tab(text: 'Inicio'),
