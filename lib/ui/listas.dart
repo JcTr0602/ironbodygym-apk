@@ -1219,7 +1219,15 @@ class _ListasScreenState extends State<ListasScreen>
           // 1.22 Diseño Bloque 1 (T3): cascada acotada —
           // FadeEntrada solo anima los primeros 10 ítems y
           // dentro de la ventana de 400 ms del montaje.
-          final filaPintada = FadeEntrada(
+          // 1.34 Campo 2 (P-8): cada fila es su propia capa
+          // de raster — al desplazar, el compositor traslada
+          // la fila sin repintarla (su botón de cobro lleva
+          // la sombra blur 12 de la casa; repintarla por
+          // frame era parte de los tirones de la lista). La
+          // sombra NO se abarata: es el valor de diseño del
+          // botón primario (D-18) y no se degrada por lista.
+          final filaPintada = RepaintBoundary(
+            child: FadeEntrada(
             indice: i,
             child: Container(
                 decoration: avisado
@@ -1330,6 +1338,7 @@ class _ListasScreenState extends State<ListasScreen>
               ],
                 ),
               ),
+            ),
             ),
           );
           // 1.28 (M4-C6): si esta fila es la del cobro que

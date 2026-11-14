@@ -1329,7 +1329,14 @@ class _HomeScreenState extends State<HomeScreen>
                     if (_pilaresVisitados.contains(i))
                       KeyedSubtree(
                         key: ValueKey('pilar-$i'),
-                        child: _pilarParaMostrar(i, esDueno),
+                        // 1.34 Campo 2 (P-8): cada pilar en su
+                        // propia capa de raster — un repintado
+                        // dentro de un pilar (su lista al
+                        // desplazar) no invalida la pintura de
+                        // los demás ni de la cáscara de Home.
+                        child: RepaintBoundary(
+                          child: _pilarParaMostrar(i, esDueno),
+                        ),
                       )
                     else
                       SizedBox.shrink(key: ValueKey('pilar-vacio-$i')),
