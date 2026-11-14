@@ -506,6 +506,12 @@ class _ColaScreenState extends State<ColaScreen> {
   // de edición (retenerHasta → proximo_reintento futuro).
   int _retenidas = 0;
   int _totalPendientes = 0;
+  // Yunque 3 (K7-1): conteos del héroe leídos de la BD
+  // (LocalDb.conteosHeroeCola), NO de la lista visible
+  // truncada a 30: una op en error/rechazada/enviada empujada
+  // fuera de la ventana ya no desaparece del encabezado.
+  int _heroErrorOps = 0;
+  int _heroEnLimbo = 0;
   // 1.15: desglose por tipo de LO PENDIENTE (mismo conjunto que
   // _totalPendientes), contado en la BD. Antes se agrupaba la
   // lista reciente (30 ops de cualquier estado) y el desglose
@@ -885,6 +891,8 @@ class _ColaScreenState extends State<ColaScreen> {
     var totalPendientesFinal = totalPendientes;
     var desgloseFinal = desglosePendientes;
     if (!_esDueno) {
+      // Respaldo (ventana): solo queda si la lectura de BD de
+      // abajo lanza; el valor bueno es el de la BD sin truncar.
       final pendientesPropias =
           opsVisibles.where((o) => o['estado'] == 'pendiente');
       totalPendientesFinal = pendientesPropias.length;
@@ -893,7 +901,38 @@ class _ColaScreenState extends State<ColaScreen> {
         final t = '${o['tipo']}';
         desgloseFinal[t] = (desgloseFinal[t] ?? 0) + 1;
       }
+      // Yunque 3 (K7-2): el total y el desglose del entrenador
+      // salen de la BD con su filtro de autor (el mismo
+      // esOpMia de la lista visible), no de la ventana de 30:
+      // con 35 pendientes propias entre aplicadas ajenas la
+      // tarjeta decía 30.
+      try {
+        final propias =
+            await LocalDb.instance.conteoPendientesPropias(
+          esMia: (o) => esOpMia(o,
+              miActor: _miActor, miTelegramId: _miTelegramId),
+        );
+        totalPendientesFinal = propias.total;
+        desgloseFinal = propias.porTipo;
+      } catch (_) {}
     }
+    // Yunque 3 (K7-1): los conteos del héroe (error/enviada)
+    // salen de la BD, no de _ops truncada. Para el dueño son
+    // globales; para el entrenador van filtrados por el mismo
+    // esOpMia. Si la lectura lanza, quedan los de la carga
+    // anterior (nunca un cero inventado a mitad de sesión).
+    var heroErrorOps = _heroErrorOps;
+    var heroEnLimbo = _heroEnLimbo;
+    try {
+      final hero = await LocalDb.instance.conteosHeroeCola(
+        esMia: _esDueno
+            ? null
+            : (o) => esOpMia(o,
+                miActor: _miActor, miTelegramId: _miTelegramId),
+      );
+      heroErrorOps = hero.error;
+      heroEnLimbo = hero.enviada;
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _ops = opsVisibles;
@@ -910,6 +949,8 @@ class _ColaScreenState extends State<ColaScreen> {
             '${op['op_uuid']}': tituloDeOp(op),
         };
         _retenidas = retenidas;
+        _heroErrorOps = heroErrorOps;
+        _heroEnLimbo = heroEnLimbo;
         _totalPendientes = totalPendientesFinal;
         _desglosePendientes = desgloseFinal;
         _masAntiguaIso = masAntiguaIso;
@@ -2291,24 +2332,17 @@ class _ColaScreenState extends State<ColaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Ronda 17 M6-H3: el encabezado usa el total de BD
-    // (_totalPendientes), no la lista visible (limit 30), y
-    // totalError se deduplica por op_uuid (una bloqueada
-    // también está en la lista reciente).
-    final uuidsError = <String>{};
-    for (final o in _ops) {
-      final e = '${o['estado']}';
-      if (e == 'error' || e == 'rechazada') {
-        uuidsError.add('${o['op_uuid']}');
-      }
-    }
-    for (final o in _bloqueadas) {
-      uuidsError.add('${o['op_uuid']}');
-    }
-    final totalError = uuidsError.length + _fotosError;
+    // Ronda 17 M6-H3 + Yunque 3 (K7-1): el encabezado usa los
+    // totales de BD (_totalPendientes y los conteos de
+    // LocalDb.conteosHeroeCola en _heroErrorOps/_heroEnLimbo),
+    // no la lista visible (limit 30). Antes totalError y
+    // enLimbo iteraban _ops: una op rechazada/enviada empujada
+    // fuera de la ventana por 30 ops más recientes dejaba de
+    // contar y el héroe decía «Todo subió» con la op fallida
+    // viva en la BD.
+    final totalError = _heroErrorOps + _fotosError;
     // v1.2.9+46 (Gemini): 'enviada' = confirmación pendiente (ámbar).
-    final enLimbo =
-        _ops.where((o) => o['estado'] == 'enviada').length;
+    final enLimbo = _heroEnLimbo;
     final totalPendiente =
         _totalPendientes + _fotosPendientes + _fotosSubiendo;
     final errorReciente = _det.error;
