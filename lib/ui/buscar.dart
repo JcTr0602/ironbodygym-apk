@@ -2081,9 +2081,17 @@ class _FilaClienteState extends State<_FilaCliente> {
                           const Icon(Icons.home_rounded,
                               size: 16, color: AppColores.casaIcono),
                           const SizedBox(width: 4),
-                          Text(textoDiasCasa,
-                              style: AppTexto.etiqueta.copyWith(
-                                  color: AppColores.casaTexto)),
+                          // Jornada 1 de la 1.34: el texto
+                          // completo desbordaba 3,1 px en la
+                          // fila con los dos botones del
+                          // trailing (Listas); flexible con
+                          // elipsis en vez de recorte seco.
+                          Flexible(
+                            child: Text(textoDiasCasa,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTexto.etiqueta.copyWith(
+                                    color: AppColores.casaTexto)),
+                          ),
                         ],
                       ),
                     )
