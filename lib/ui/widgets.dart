@@ -64,6 +64,12 @@ VarianteBanner varianteBannerDe(SyncStatus s) {
       if (s.pending > 0) return VarianteBanner.pendientes;
       if (s.hayNovedades) return VarianteBanner.novedades;
       if (s.lastOk == null) return VarianteBanner.sinSincronizar;
+      // Yunque 2.34 (A-3, el residual C3-4 de Y1): un error
+      // PERSISTIDO (avisoSyncCorto) con la cola vacía y sin
+      // novedades apagaba el banner mientras la píldora de la
+      // misma cabecera decía «La bajada falló»: superficies
+      // contradictorias. El aviso manda sobre el «al día».
+      if (s.avisoSyncCorto != null) return VarianteBanner.error;
       return VarianteBanner.alDia;
   }
 }

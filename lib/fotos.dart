@@ -553,8 +553,15 @@ class FotoCache {
       // vencimiento.
       if (r.statusCode == 401) {
         try {
-          final res =
-              await Supabase.instance.client.auth.refreshSession();
+          // Yunque 2.34 (A-1/G-1): timeout — era el ÚNICO
+          // refreshSession de la app sin él tras C3-1; con el
+          // endpoint de auth colgado (red hostil), el futuro
+          // compartido _enVuelo de esta ruta quedaba colgado
+          // toda la sesión. El catch ya conserva la respuesta
+          // original: degradación correcta sin tocar más.
+          final res = await Supabase.instance.client.auth
+              .refreshSession()
+              .timeout(const Duration(seconds: 20));
           final nuevo = res.session?.accessToken ?? '';
           if (nuevo.isNotEmpty) {
             r = await pedir(nuevo);

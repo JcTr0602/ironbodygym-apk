@@ -1586,6 +1586,7 @@ class SyncEngine {
       Future<http.Response> Function(String token) hacer) async {
     var r = await hacer(_auth.session?.accessToken ?? '');
     if (r.statusCode != 401) return r;
+    String nuevo;
     try {
       // Yunque 1.34 (C3-1): timeout — era la ÚNICA llamada de
       // red del motor sin él; un refresco colgado (red hostil
@@ -1595,12 +1596,18 @@ class SyncEngine {
       final res = await Supabase.instance.client.auth
           .refreshSession()
           .timeout(const Duration(seconds: 20));
-      final nuevo = res.session?.accessToken ?? '';
-      if (nuevo.isEmpty) return r;
-      r = await hacer(nuevo);
+      nuevo = res.session?.accessToken ?? '';
     } catch (_) {
       return r; // sin red para refrescar: no es vencimiento real
     }
+    if (nuevo.isEmpty) return r;
+    // Yunque 2.34 (A-2): el REINTENTO va FUERA del try. Dentro,
+    // su propio timeout caía en el catch y se devolvía el 401
+    // original disfrazado: un corte de transporte se leía como
+    // sesión muerta (el bucle TUS lo convertía en
+    // SessionExpired). Fuera, el timeout del reintento se
+    // propaga como el de la primera petición.
+    r = await hacer(nuevo);
     if (r.statusCode == 401) throw SessionExpired();
     return r;
   }
