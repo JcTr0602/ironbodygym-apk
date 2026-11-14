@@ -20,11 +20,34 @@
 ///   confirmar el envío (ver el grupo propio al final).
 library;
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/plus_reportes.dart';
 import 'package:ironbody_gym/ui/buscar.dart';
 import 'package:ironbody_gym/ui/mi_turno.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+Future<Database> _abrirDbVacia() async {
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+  SharedPreferences.setMockInitialValues({});
+  LocalDb.nombreArchivoDbForzado = 'test_yunque3_k5_fix_c.db';
+  final dir = await getDatabasesPath();
+  final dbPath = p.join(dir, 'test_yunque3_k5_fix_c.db');
+  try {
+    await File(dbPath).delete();
+  } catch (_) {}
+  await LocalDb.resetParaTest();
+  return await LocalDb.instance.db;
+}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('K5-1 · Mis vencimientos sin Casa ni protegidos', () {
     const hoy = '2026-11-14';
     const limite = '2026-11-21';
@@ -88,6 +111,50 @@ void main() {
         esDueno: true,
       );
       expect(out.map((m) => m['id']), contains(55));
+    });
+  });
+
+  group('K5-2 · Reportes Plus: la decisión «enviada» sigue '
+      'bloqueando la tarjeta', () {
+    test('op de decisión en «enviada»: bloquea vía '
+        'pendingOpsLectura y la pantalla la lee así', () async {
+      final d = await _abrirDbVacia();
+      await d.insert('ops_queue', {
+        'op_uuid': 'op-plus-enviada',
+        'tipo': kTipoOpConfirmarPlus,
+        'payload': jsonEncode(
+            {'reporte_id': 42, 'monto_cup': 1000, 'invitado_id': 'inv-42'}),
+        'estado': 'enviada',
+        'creada_ts': '2026-11-14T08:00:00.000-05:00',
+        'telegram_id': 111111,
+      });
+      final delPush = await LocalDb.instance.pendingOps();
+      expect(delPush.any((o) => o['op_uuid'] == 'op-plus-enviada'),
+          isFalse,
+          reason: 'pendingOps es la lectura del push: la op '
+              'enviada ya no está para él');
+      final deLectura = await LocalDb.instance.pendingOpsLectura();
+      expect(
+          deLectura.any((o) => o['op_uuid'] == 'op-plus-enviada'),
+          isTrue);
+      expect(reportesPlusConOpPendiente(deLectura), contains('42'),
+          reason: 'con la lectura amplia, la tarjeta del reporte '
+              '42 queda bloqueada hasta que el espejo baje y no '
+              'admite la decisión contraria');
+      expect(reportesPlusConOpPendiente(delPush),
+          isNot(contains('42')));
+      // La pantalla (_cargar) debe componer con la lectura
+      // amplia, como Reservas desde D-B2-02.
+      final fuente =
+          File('lib/ui/reportes_plus.dart').readAsStringSync();
+      final i = fuente.indexOf('Future<void> _cargar()');
+      final j = fuente.indexOf('Future<void> _decidir(', i);
+      expect(i, greaterThan(0));
+      expect(fuente.substring(i, j), contains('pendingOpsLectura()'),
+          reason: '_cargar de Reportes Plus debe leer '
+              'pendingOpsLectura() (K5-2)');
+      expect(fuente.substring(i, j),
+          isNot(contains('pendingOps()')));
     });
   });
 }

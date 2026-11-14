@@ -79,7 +79,15 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
       error = 'Sin conexión o error del servidor. '
           'Los reportes se consultan en vivo; inténtalo de nuevo.';
     }
-    final ops = await LocalDb.instance.pendingOps();
+    // Yunque 3 (K5-2): lectura AMPLIA (pendingOpsLectura:
+    // pendiente + enviada + error), no la del push — el gemelo
+    // del arreglo de Reservas D-B2-02 (1.29) que aquí no se
+    // había propagado. Con pendingOps, en cuanto la decisión
+    // salía del teléfono (estado 'enviada', aún sin aplicar el
+    // puente) la tarjeta se desbloqueaba y admitía la decisión
+    // CONTRARIA sobre el mismo reporte, que luego rebotaba en
+    // el servidor como REPORTE_YA_RESUELTO.
+    final ops = await LocalDb.instance.pendingOpsLectura();
     if (!mounted) return;
     setState(() {
       if (lista != null) _reportes = lista;
