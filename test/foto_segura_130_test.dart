@@ -174,6 +174,22 @@ void main() {
     completer.complete(null);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('sin-foto'), findsOneWidget);
+    // 1.34 integración (adjudicación A/B): el bloqueo del
+    // segundo toque deja aviso en la bitácora (G-1, carril
+    // campo), que programa su volcado a 3 s (con reintentos
+    // de 10 s si el volcado falla en este arnés) y el test
+    // moría por «Timer is still pending». Mismo drenaje que
+    // el carril aplicó a foto_elegir_129 en 91d9e2f: se
+    // quema la cadena alternando tiempo real (para que el
+    // volcado corra) y falso (para que los temporizadores
+    // venzan) antes de cerrar.
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(
+            const Duration(milliseconds: 120));
+      });
+      await tester.pump(const Duration(seconds: 6));
+    }
   });
 }
 
