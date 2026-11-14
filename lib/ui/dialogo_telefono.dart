@@ -57,7 +57,12 @@ class _DialogoTelefonoState extends State<_DialogoTelefono> {
       content: TextField(
         controller: _ctrl,
         keyboardType: TextInputType.phone,
-        maxLength: 8,
+        // Yunque 2.34 (D-6): SIN maxLength — con 8, pegar
+        // «5358191577» se truncaba a «53581915» ANTES de
+        // sanitizar y se guardaba un número equivocado pero
+        // «válido». Quien juzga es sanitizarTelefono al
+        // guardar (dialogoAgregarTelefono), que acepta el
+        // prefijo 53 y los espacios.
         decoration: const InputDecoration(
           hintText: 'Ej. 58191577',
           helperText: '8 dígitos, empieza con 5 o 6',
@@ -93,9 +98,10 @@ Future<String?> dialogoAgregarTelefono(
   {
     // Yunque B (YB-CLI-11): se guarda el teléfono SANITIZADO
     // (8 dígitos limpios), no el texto crudo — la validación
-    // limpia solo para comprobar. Hoy lo único que impedía
-    // un teléfono sucio era el maxLength del campo; la regla
-    // de la casa se aplica aquí, al guardar.
+    // limpia solo para comprobar. La regla de la casa se
+    // aplica aquí, al guardar. (Yunque 2.34, D-6: el campo ya
+    // no trunca a 8 — truncaba el pegado con prefijo 53 a un
+    // número distinto pero válido.)
     final tel = sanitizarTelefono(crudo) ?? '';
     if (!validarTelefono(tel)) {
       if (context.mounted) {

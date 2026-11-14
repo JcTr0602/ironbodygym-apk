@@ -71,6 +71,9 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   List<Map<String, dynamic>> _aperturasBase = [];
   List<Map<String, dynamic>> _cierresBase = [];
   List<Map<String, dynamic>> _pagosBase = [];
+  // Yunque 2.34 (D-7): anulaciones vivas en la cola, para que
+  // la auditoría no sume pagos ya anulados en este teléfono.
+  Set<int> _anuladosColaBase = const {};
   List<Map<String, dynamic>> _diariosBase = [];
   List<Map<String, dynamic>> _ventasSupBase = [];
   List<Map<String, dynamic>> _ventasServBase = [];
@@ -187,6 +190,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
     _aperturasBase = await db.allMirror('turnos_apertura');
     _cierresBase = await db.allMirror('turnos_cierre');
     _pagosBase = await db.allMirror('pagos');
+    _anuladosColaBase = await db.pagosAnuladosEnCola();
     _diariosBase = await db.allMirror('pagos_diarios');
     _ventasSupBase = await db.allMirror('ventas_suplementos');
     _ventasServBase = await db.allMirror('servicio_ventas');
@@ -265,6 +269,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         ventasSuplementos: ventasSup,
         ventasServicios: ventasServ,
         cierres: cierres,
+        anuladosEnCola: _anuladosColaBase,
       );
       // Bloque 3: el río de ops de ESTE teléfono (el de la
       // ventana cubierta, completo), filtrado EN MEMORIA
@@ -320,7 +325,8 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
               pagos: pagos,
               pagosDiarios: diarios,
               ventasSuplementos: ventasSup,
-              ventasServicios: ventasServ);
+              ventasServicios: ventasServ,
+              anuladosEnCola: _anuladosColaBase);
           _periodoTexto = textoPeriodoLegible(desdeIso, hastaIso);
           _cargando = false;
         });

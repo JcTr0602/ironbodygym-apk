@@ -206,8 +206,17 @@ class _VentaSuplementoInscripcionScreenState
     // teléfono de 7 dígitos) creaba un cliente duplicado o la
     // op rebotaba en el servidor con el stock ya descontado
     // en el teléfono.
-    final tel = _telefono.text.trim();
-    if (tel.isNotEmpty && !validarTelefono(tel)) {
+    // Yunque 2.34 (D-5): se valida el teléfono SANITIZADO
+    // (la regla de la casa, como en Inscribir): teclear o
+    // pegar «5358191577» es el mismo número que «58191577»
+    // con prefijo, y la validación sobre el crudo lo
+    // rechazaba. El payload de más abajo ya sanitizaba; la
+    // validación y el chequeo de duplicados quedaban con el
+    // valor sin limpiar.
+    final telCrudo = _telefono.text.trim();
+    final tel =
+        telCrudo.isEmpty ? '' : (sanitizarTelefono(telCrudo) ?? '');
+    if (telCrudo.isNotEmpty && !validarTelefono(tel)) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa el teléfono',
           mensaje: 'El teléfono debe tener 8 dígitos empezando '

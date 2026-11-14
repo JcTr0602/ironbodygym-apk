@@ -284,6 +284,27 @@ bool _enPeriodo(Map<String, dynamic> fila, String desde, String hasta) {
       f.substring(0, 10).compareTo(hasta) <= 0;
 }
 
+/// Yunque 2.34 (D-7): ¿el pago está anulado a efectos de
+/// dinero? Réplica en línea de `esPagoAnulado` (negocio.dart)
+/// — esta librería no importa negocio — con sus dos fuentes:
+/// la marca del propio JSON y la anulación viva en la cola
+/// de este teléfono ([anuladosEnCola], de
+/// LocalDb.pagosAnuladosEnCola). Sin esto, la Auditoría de
+/// persona sumaba como cobrado un pago ya anulado en el
+/// teléfono (la superficie que Jc usa para juzgar a un
+/// entrenador contaba dinero que no existía).
+bool _pagoAnuladoAuditoria(
+    Map<String, dynamic> p, Set<int> anuladosEnCola) {
+  if (p['anulado'] == 1 || p['anulado'] == true) return true;
+  final id = p['id'];
+  if (id is num) return anuladosEnCola.contains(id.toInt());
+  if (id is String) {
+    final n = int.tryParse(id);
+    if (n != null) return anuladosEnCola.contains(n);
+  }
+  return false;
+}
+
 DineroAuditado auditarDineroPersona({
   required PersonaApk persona,
   required String desdeIso,
@@ -293,9 +314,11 @@ DineroAuditado auditarDineroPersona({
   required List<Map<String, dynamic>> ventasSuplementos,
   required List<Map<String, dynamic>> ventasServicios,
   required List<Map<String, dynamic>> cierres,
+  Set<int> anuladosEnCola = const {},
 }) {
   final d = DineroAuditado();
   for (final p in pagos) {
+    if (_pagoAnuladoAuditoria(p, anuladosEnCola)) continue;
     if (!_enPeriodo(p, desdeIso, hastaIso)) continue;
     if (!filaEsDePersona(p, persona)) continue;
     final monto = _numTolerante(p['monto']);
@@ -469,6 +492,7 @@ List<Map<String, dynamic>> serieCobrosPorDia({
   required List<Map<String, dynamic>> pagosDiarios,
   required List<Map<String, dynamic>> ventasSuplementos,
   required List<Map<String, dynamic>> ventasServicios,
+  Set<int> anuladosEnCola = const {},
 }) {
   final dias = _diasDelPeriodo(desdeIso, hastaIso);
   // Autoauditoría 1.25: se acumula en double y se
@@ -482,6 +506,10 @@ List<Map<String, dynamic>> serieCobrosPorDia({
   }
 
   for (final p in pagos) {
+    // Yunque 2.34 (D-7): la serie promete «las mismas reglas
+    // de auditarDineroPersona»: el pago anulado tampoco suma
+    // aquí (antes sumaba en las DOS superficies).
+    if (_pagoAnuladoAuditoria(p, anuladosEnCola)) continue;
     suma(p, _numTolerante(p['monto']));
   }
   for (final p in pagosDiarios) {

@@ -1580,6 +1580,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
       seleccion: _modoSeleccion,
       // 1.29 (FB-01): teléfono efectivo (movil primero).
       tieneTelefonoWa: telefonoEfectivoWa(c).isNotEmpty,
+      // Yunque 2.34 (D-4): pausa en curso (sistema nuevo) o
+      // congelado legado: sin acción fantasma.
+      enPausa: _pausados.contains((c['id'] as num?)?.toInt()) ||
+          (c['estado'] as String?) == 'congelado',
     );
     return switch (cual) {
       'cobrar' => (
@@ -2302,8 +2306,15 @@ String? accionPrincipalBuscar({
   required bool protegido,
   required bool seleccion,
   required bool tieneTelefonoWa,
+  bool enPausa = false,
 }) {
   if (protegido || seleccion || esCasa) return null;
+  // Yunque 2.34 (D-4): en pausa no hay acción fantasma — la
+  // fila ya pinta «EN PAUSA» y el envío/cobro se frenaba
+  // dentro, dejando un botón muerto («Avisar»/«Cobrar» que
+  // no hacía nada). Simétrico a C5-1 (el botón de WhatsApp
+  // de esta misma fila ya excluía la pausa).
+  if (enPausa) return null;
   if (dias == null || dias < 0) return 'cobrar';
   if (dias <= 7) return tieneTelefonoWa ? 'avisar' : null;
   return null;
