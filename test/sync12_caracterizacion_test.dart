@@ -24,7 +24,9 @@
 ///     JSON publicado → 0 — CONVERTIDO por el paso 1: hoy el
 ///     null se conserva («no publicado»).
 ///  4. Salud — catches que componen gris/verde/«todo subió»
-///     ante fallo de lectura (lib/salud_sync.dart).
+///     ante fallo de lectura (lib/salud_sync.dart)
+///     — CONVERTIDO por el paso 3 de SYNC-12: hoy hay
+///     semáforo sinLeer y estado general sinVerificar.
 library;
 
 import 'dart:io';
@@ -210,11 +212,11 @@ void main() {
     });
   });
 
-  group('SYNC-12 sitio 4 · salud (catch → gris/verde/«todo subió»)', () {
-    test('HOY: estadoSaludSync(0, 0, sin rojos) = todoSubio', () {
-      // Los conteos de cola ilegibles llegan aquí como 0/0
-      // por los catches de cargarSaludSync: la composición
-      // pura no tiene forma de saber que no se pudo leer.
+  group('SYNC-12 sitio 4 · salud (triestado)', () {
+    test('SYNC-12 paso 3: con conteos LEÍDOS el general compone '
+        'como siempre', () {
+      // 0/0 leídos de verdad siguen siendo «todo subió»:
+      // el neutro no toca los valores conocidos.
       expect(
           estadoSaludSync(
               pendientes: 0, fallidas: 0, hayTablasEnRojo: false),
@@ -233,12 +235,43 @@ void main() {
           EstadoSaludSync.fallo);
     });
 
-    test('HOY: semaforoTabla con los valores de un COUNT fallido = gris',
-        () {
-      // Cuando contarFilasMirror lanza, cargarSaludSync deja
-      // filas=0 y watermark=0 sin error registrado: el
-      // semáforo pinta gris («nunca bajó»), no «no se pudo
-      // leer» — ese estado NO existe hoy. El paso 3 lo crea.
+    test('SYNC-12 paso 3: conteo ilegible (null) = sinVerificar, '
+        'jamás «todo subió»', () {
+      // Antes del paso 3, los catches de cargarSaludSync
+      // dejaban 0/0 y este mismo caso componía todoSubio.
+      expect(
+          estadoSaludSync(
+              pendientes: null, fallidas: 0, hayTablasEnRojo: false),
+          EstadoSaludSync.sinVerificar);
+      expect(
+          estadoSaludSync(
+              pendientes: 0, fallidas: null, hayTablasEnRojo: false),
+          EstadoSaludSync.sinVerificar);
+      expect(
+          estadoSaludSync(
+              pendientes: null,
+              fallidas: null,
+              hayTablasEnRojo: false),
+          EstadoSaludSync.sinVerificar);
+      // Un fallo CONOCIDO manda sobre el «sin verificar».
+      expect(
+          estadoSaludSync(
+              pendientes: null, fallidas: 2, hayTablasEnRojo: false),
+          EstadoSaludSync.fallo);
+      expect(
+          estadoSaludSync(
+              pendientes: null,
+              fallidas: null,
+              hayTablasEnRojo: true),
+          EstadoSaludSync.fallo);
+    });
+
+    test('SYNC-12 paso 3: semaforoTabla con sinLeer = sinLeer '
+        '(no el gris de «nunca bajó»)', () {
+      // Los valores exactos que produce un COUNT fallido,
+      // ahora CON la marca de lectura fallida: antes este
+      // mismo caso componía gris («nunca bajó»), un hecho
+      // falso sobre una tabla que no se pudo leer.
       expect(
           semaforoTabla(
               hayError: false,
@@ -249,11 +282,26 @@ void main() {
               sinVerificar: false,
               watermark: 0,
               serverSeq: 0,
-              filas: 0),
-          SemaforoTabla.gris);
+              filas: 0,
+              sinLeer: true),
+          SemaforoTabla.sinLeer);
+      // Un rojo YA conocido manda sobre el «sin leer».
+      expect(
+          semaforoTabla(
+              hayError: true,
+              corruptas: 0,
+              divergente: false,
+              ausente: false,
+              sinPermiso: false,
+              sinVerificar: false,
+              watermark: 0,
+              serverSeq: 0,
+              filas: 0,
+              sinLeer: true),
+          SemaforoTabla.rojo);
       // Y con filas reales leídas el mismo resto da verde:
-      // la diferencia entre «vacía» y «ilegible» hoy no
-      // existe en el tipo.
+      // la diferencia entre «vacía» y «ilegible» ya existe
+      // en el tipo.
       expect(
           semaforoTabla(
               hayError: false,
@@ -266,6 +314,33 @@ void main() {
               serverSeq: 5,
               filas: 3),
           SemaforoTabla.verde);
+    });
+  });
+
+  group('SYNC-12 sitio 4 · cargarSaludSync con tabla ilegible', () {
+    setUpAll(_init);
+
+    test('SYNC-12 paso 3: tabla caída (DROP) compone sinLeer, '
+        'no gris ni verde', () async {
+      final db = await LocalDb.instance.db;
+      await db.execute('DROP TABLE IF EXISTS pagos');
+      final salud = await cargarSaludSync();
+      final pagos =
+          salud.tablas.firstWhere((t) => t.tablaLocal == 'pagos');
+      // El COUNT de pagos lanza: la fila lo declara.
+      expect(pagos.estado, SemaforoTabla.sinLeer);
+      expect(pagos.sinLeer, isTrue);
+      expect(pagos.nota, contains('No se pudo leer'));
+      // Contraste: una tabla sana y vacía sigue en gris
+      // («nunca bajó») — sinLeer no es el gris renombrado.
+      final clientes =
+          salud.tablas.firstWhere((t) => t.tablaLocal == 'clientes');
+      expect(clientes.estado, SemaforoTabla.gris);
+      // Y la pasada de borrados, con su wm_err_ leída y
+      // vacía, sigue verde: el neutro no contamina lo leído.
+      final borrados =
+          salud.tablas.firstWhere((t) => t.tablaLocal == 'borrados');
+      expect(borrados.estado, SemaforoTabla.verde);
     });
   });
 }

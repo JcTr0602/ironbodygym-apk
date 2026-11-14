@@ -53,9 +53,19 @@ import 'reparar_sync_screen.dart';
             '${d.pendientes == 1 ? 'operación' : 'operaciones'} '
             'en la cola de este teléfono.',
       );
+    case EstadoSaludSync.sinVerificar:
+      // SYNC-12 (1.35): la cola no se pudo leer — el aviso
+      // lo declara en vez del «Todo subió» que el catch
+      // componía con 0/0 fingidos.
+      return (
+        tipo: TipoAviso.aviso,
+        texto: 'Sin verificar: no se pudo leer la cola de '
+            'sincronización de este teléfono. Revisa el '
+            'semáforo de abajo.',
+      );
     case EstadoSaludSync.fallo:
       final partes = <String>[
-        if (d.fallidas > 0)
+        if ((d.fallidas ?? 0) > 0)
           '${d.fallidas} '
               '${d.fallidas == 1 ? 'operación falló' : 'operaciones fallaron'} '
               'o esperan decisión',
@@ -155,6 +165,11 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
       case SemaforoTabla.rojo:
         return AppColores.error;
       case SemaforoTabla.gris:
+        return AppColores.textoSecundario(context);
+      case SemaforoTabla.sinLeer:
+        // SYNC-12: la familia gris de los «no se sabe», con
+        // su nota propia («No se pudo leer…») que lo
+        // distingue del gris «nunca bajó».
         return AppColores.textoSecundario(context);
     }
   }

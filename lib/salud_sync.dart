@@ -18,7 +18,12 @@ import 'sync.dart';
 import 'ultimo_sync.dart';
 
 /// Semáforo de una tabla espejo.
-enum SemaforoTabla { verde, ambar, rojo, gris }
+///
+/// SYNC-12 (1.35): [sinLeer] es el quinto estado — la tabla
+/// no se pudo LEER en este teléfono (COUNT o metas fallaron).
+/// No es el gris de «nunca bajó»: ese afirma un hecho (está
+/// vacía); este declara que no se sabe.
+enum SemaforoTabla { verde, ambar, rojo, gris, sinLeer }
 
 /// 1.32 (O2F2S, adjudicación F-8): pasadas consecutivas con
 /// 404/403 para que una tabla que ANTES bajaba bien escale
@@ -73,6 +78,12 @@ SemaforoTabla semaforoTabla({
   // 1.32 (F-8): 404/403 persistente en una tabla que antes
   // bajaba bien — regresión, no despliegue a medias: rojo.
   bool caidaPersistente = false,
+  // SYNC-12 (1.35): la lectura local de la tabla falló
+  // (COUNT o metas): los demás valores pueden ser defaults
+  // y no hechos. Un rojo YA conocido manda sobre el
+  // «sin leer»; todo lo demás compone sinLeer, jamás el
+  // verde/gris de una tabla vacía fingida.
+  bool sinLeer = false,
 }) {
   if (hayError ||
       corruptas > 0 ||
@@ -81,6 +92,7 @@ SemaforoTabla semaforoTabla({
       caidaPersistente) {
     return SemaforoTabla.rojo;
   }
+  if (sinLeer) return SemaforoTabla.sinLeer;
   if (ausente ||
       sinPermiso ||
       sinVerificar ||
@@ -126,6 +138,12 @@ class EstadoTablaSalud {
   /// 404/403 suelto.
   final bool caidaPersistente;
 
+  /// SYNC-12 (1.35): la lectura local de esta tabla falló
+  /// (el COUNT o alguna de sus metas): sus números pueden
+  /// ser defaults y el semáforo lo declara con el estado
+  /// [SemaforoTabla.sinLeer] en vez de componer un vacío.
+  final bool sinLeer;
+
   const EstadoTablaSalud({
     required this.tablaLocal,
     required this.nombre,
@@ -137,6 +155,7 @@ class EstadoTablaSalud {
     this.errorBajada = '',
     this.atascadaSinVerificar = false,
     this.caidaPersistente = false,
+    this.sinLeer = false,
   });
 }
 
@@ -172,8 +191,13 @@ class SaludSyncDatos {
   /// de la cola local — la materia del aviso de estado
   /// general de la pantalla («todo subió», «quedan
   /// cambios», «falló»).
-  final int pendientes;
-  final int fallidas;
+  ///
+  /// SYNC-12 (1.35): null = el conteo no se pudo leer (la
+  /// cola es ilegible en este teléfono): el estado general
+  /// compone «sin verificar», jamás «todo subió» sobre un
+  /// 0 fingido por el catch.
+  final int? pendientes;
+  final int? fallidas;
 
   /// Yunque 3 (K1-4): modo de diario EFECTIVO de la BD local
   /// (meta `journal_mode_efectivo`, la constancia que deja
@@ -192,8 +216,8 @@ class SaludSyncDatos {
     required this.copiaUltima,
     required this.copiaError,
     required this.telefonos,
-    this.pendientes = 0,
-    this.fallidas = 0,
+    this.pendientes,
+    this.fallidas,
     this.modoDiarioEfectivo = '',
   });
 }
@@ -222,14 +246,27 @@ String? avisoModoDiario(String? modo) {
 /// una op en error también cuenta como pendiente, pero
 /// lo que el dueño necesita saber primero es que algo
 /// falló. Una tabla espejo en rojo también es fallo.
-enum EstadoSaludSync { todoSubio, quedanCambios, fallo }
+///
+/// SYNC-12 (1.35): [sinVerificar] es el cuarto estado —
+/// alguno de los conteos de la cola no se pudo leer
+/// (null). Un fallo CONOCIDO (fallidas leídas > 0 o una
+/// tabla en rojo) manda sobre el «sin verificar»; el
+/// «sin verificar» manda sobre cualquier composición
+/// tranquila: con la cola ilegible no se afirma ni
+/// «quedan cambios» ni, sobre todo, «todo subió».
+enum EstadoSaludSync { todoSubio, quedanCambios, fallo, sinVerificar }
 
 EstadoSaludSync estadoSaludSync({
-  required int pendientes,
-  required int fallidas,
+  required int? pendientes,
+  required int? fallidas,
   required bool hayTablasEnRojo,
 }) {
-  if (fallidas > 0 || hayTablasEnRojo) return EstadoSaludSync.fallo;
+  if ((fallidas ?? 0) > 0 || hayTablasEnRojo) {
+    return EstadoSaludSync.fallo;
+  }
+  if (pendientes == null || fallidas == null) {
+    return EstadoSaludSync.sinVerificar;
+  }
   if (pendientes > 0) return EstadoSaludSync.quedanCambios;
   return EstadoSaludSync.todoSubio;
 }
@@ -250,6 +287,8 @@ String _notaTabla({
   bool caidaPersistente = false,
 }) {
   switch (s) {
+    case SemaforoTabla.sinLeer:
+      return 'No se pudo leer esta tabla en este teléfono';
     case SemaforoTabla.rojo:
       if (corruptas > 0) {
         return '$corruptas ${corruptas == 1 ? 'fila dañada' : 'filas dañadas'} en el espejo';
@@ -293,7 +332,8 @@ String _notaTabla({
 }
 
 /// Carga la salud completa. Nunca lanza por una tabla: la
-/// que no se pueda leer sale en gris con su nota.
+/// que no se pueda leer sale en «sin leer» con su nota
+/// (SYNC-12: antes salía en gris, fingiendo una vacía).
 Future<SaludSyncDatos> cargarSaludSync() async {
   final db = LocalDb.instance;
   // Corrección A4-D3 (auditorías 1.28): el server_seq se
@@ -327,12 +367,19 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     var sinVerificar = false;
     var atascada = false;
     var caidaPersistente = false;
+    // SYNC-12 (1.35): cualquier fallo de lectura de ESTA
+    // tabla (el COUNT o sus metas) marca sinLeer: sus
+    // valores dejan de ser hechos y el semáforo lo declara
+    // en vez de componer el vacío/verde de los defaults.
+    var sinLeer = false;
     try {
       // 'incidencias' se guarda en SQLite como
       // incidencias_local (el resto usa su propio nombre).
       filas = await db
           .contarFilasMirror(t == 'incidencias' ? 'incidencias_local' : t);
-    } catch (_) {}
+    } catch (_) {
+      sinLeer = true;
+    }
     try {
       corruptas =
           int.tryParse(await db.getMeta('mirror_corruptas_$t') ?? '') ?? 0;
@@ -364,7 +411,9 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       final man = await db.getMeta('manifiesto_tabla_$t');
       divergente = man == 'divergente';
       sinVerificar = man == 'sin_verificar';
-    } catch (_) {}
+    } catch (_) {
+      sinLeer = true;
+    }
     if (divergente) divergentes++;
     // Yunque B (YB-SYNC-06): las tablas de secuencia propia
     // (bandeja, congelaciones, incidencias) jamás se
@@ -387,6 +436,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       filas: filas,
       atascadaSinVerificar: atascada,
       caidaPersistente: caidaPersistente,
+      sinLeer: sinLeer,
     );
     tablas.add(EstadoTablaSalud(
       tablaLocal: t,
@@ -398,6 +448,7 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       errorBajada: errorBajada,
       atascadaSinVerificar: atascada,
       caidaPersistente: caidaPersistente,
+      sinLeer: sinLeer,
       nota: _notaTabla(
         s: s,
         hayError: hayError,
@@ -425,11 +476,23 @@ Future<SaludSyncDatos> cargarSaludSync() async {
   // con una pasada de borrados rota.
   for (final t in SyncEngine.clavesBorrados) {
     var errorBajada = '';
+    // SYNC-12 (1.35): si la meta wm_err_ no se puede LEER,
+    // la pasada NO está «al día»: está sin verificar. Antes
+    // el catch dejaba errorBajada='' y la fila componía
+    // VERDE «Al día» — el falso verde demostrado por la
+    // caracterización del sitio 4.
+    var sinLeer = false;
     try {
       errorBajada = await db.getMeta('wm_err_$t') ?? '';
-    } catch (_) {}
+    } catch (_) {
+      sinLeer = true;
+    }
     final hayError = errorBajada.isNotEmpty;
-    final s = hayError ? SemaforoTabla.rojo : SemaforoTabla.verde;
+    final s = hayError
+        ? SemaforoTabla.rojo
+        : sinLeer
+            ? SemaforoTabla.sinLeer
+            : SemaforoTabla.verde;
     tablas.add(EstadoTablaSalud(
       tablaLocal: t,
       nombre: SyncEngine.nombreAmigableTabla(t),
@@ -438,10 +501,13 @@ Future<SaludSyncDatos> cargarSaludSync() async {
       watermark: 0,
       estado: s,
       errorBajada: errorBajada,
+      sinLeer: sinLeer,
       nota: hayError
           ? 'La última bajada de esta tabla falló: '
               '${resumenErrorDiagnostico(errorBajada)}'
-          : 'Al día',
+          : sinLeer
+              ? 'No se pudo leer el estado de esta pasada'
+              : 'Al día',
     ));
   }
 
@@ -482,8 +548,11 @@ Future<SaludSyncDatos> cargarSaludSync() async {
   } catch (_) {}
 
   // D-16: la foto de la cola local para el aviso general.
-  var pendientes = 0;
-  var fallidas = 0;
+  // SYNC-12 (1.35): un conteo que falla queda null (no 0):
+  // el estado general compone «sin verificar», jamás un
+  // «todo subió» sobre la cola ilegible.
+  int? pendientes;
+  int? fallidas;
   try {
     pendientes = await db.countPendingOps();
     fallidas = await db.countOpsFallidas();
