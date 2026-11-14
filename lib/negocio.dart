@@ -5092,6 +5092,23 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
     suma(diaV, _montoServicioVenta(v), metodo,
         'Servicio x${v['cantidad'] ?? '?'} ($metodo)');
   }
+  // Yunque 4 (L7-1): las ventas de SUPLEMENTOS también entran —
+  // miTurnoHoy las suma al «Cobrado hoy» y este desglose las
+  // omitía (efectivo+transferencia ≠ cobrado hoy en cuanto
+  // había una venta en el día). La venta de suplemento no
+  // lleva selector de método (el servidor la deja en
+  // efectivo): método efectivo y gaveta por registrado_por,
+  // la misma atribución de miTurnoHoy; el fiado sin saldar
+  // queda fuera por el propio helper.
+  for (final v in await ventasSuplementosCup()) {
+    if (LocalDb.normalizarTelegramId(v['registrado_por']) !=
+        telegramId) {
+      continue;
+    }
+    final diaS = fechaNegocioHabana(v['fecha']);
+    if (diaS.isEmpty) continue;
+    suma(diaS, totalVentaCup(v), 'efectivo', 'Venta de suplemento');
+  }
   final lista = porDia.values.toList()
     ..sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
   return lista.take(dias).toList();
