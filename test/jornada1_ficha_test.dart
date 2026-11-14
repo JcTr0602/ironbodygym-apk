@@ -156,11 +156,21 @@ void main() {
           reason: 'y en el espejo local al momento');
       expect(espejo['nombre'], 'Buscar Jornada Pérez',
           reason: 'ningún otro campo cambió');
-      // La ficha sigue abierta y ya muestra el dato nuevo.
-      expect(find.textContaining('58998877'), findsWidgets);
       expect(toquesEdicion.n, 4,
           reason: 'desplazar + Editar + campo + Guardar '
               '(el tecleo no cuenta)');
+      // La ficha sigue abierta y muestra el dato nuevo en
+      // «Información personal». 1.34 Campo 2 (B-1): esa
+      // tarjeta bajó tras Membresía e Historial en la
+      // jerarquía nueva — el dato está, un desplazamiento
+      // más abajo (la comprobación de visibilidad se
+      // desplaza hasta él en vez de exigirlo en el primer
+      // pantallazo; el flujo de edición no cambia).
+      await tester.scrollUntilVisible(
+          find.textContaining('58998877'), 200,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('58998877'), findsWidgets);
       await jornadaCerrarCascara(tester);
     });
 

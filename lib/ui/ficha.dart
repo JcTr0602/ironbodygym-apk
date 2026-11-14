@@ -14,7 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
-import '../acceso_app_cache.dart';
+
 import '../auth.dart';
 import '../permisos_entrenador.dart';
 import '../mediciones_cliente.dart';
@@ -170,6 +170,22 @@ class CacheSeccionesFicha {
 /// Notas; la galería de Fotos de Progreso (G-23) es sección
 /// propia tras las medidas y va a Progreso y Marcas (Oleada
 /// 2, Fase 1 — desviación 2 de Argón).
+/// 1.34 Campo 2 (B-1): marcador de fin de la cabecera fija
+/// de la ficha. Separa lo siempre visible (identidad +
+/// Editar/Vender) de las secciones de las pestañas; no
+/// pinta nada y nunca llega a una lista: el build lo usa
+/// de corte y lo descarta. Sustituye al corte histórico
+/// sobre SeccionQueFaltaFicha, que ataba la cabecera a la
+/// posición de «Qué le falta» e impedía que la pestaña
+/// «Pagos y Notas» abriera por Membresía e Historial (lo
+/// importante primero, orden de campo de Jc 2026-11-14).
+class _FinCabeceraFicha extends StatelessWidget {
+  const _FinCabeceraFicha();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
 int pestanaDeSeccionFicha(Widget w) {
   if (w is TarjetaMedidas) return 1;
   if (w is SeccionFotosProgresoNube) return 1;
@@ -2778,11 +2794,15 @@ class _FichaScreenState extends State<FichaScreen> {
             protegido: protegido,
           );
 
-    // 1.32: reparto de las secciones — cabecera FIJA (todo lo
-    // anterior a «qué le falta») + las 3 pestañas. Los
-    // espaciadores siguen a la sección que preceden.
+    // 1.32: reparto de las secciones — cabecera FIJA + las
+    // 3 pestañas. Los espaciadores siguen a la sección que
+    // preceden. 1.34 Campo 2 (B-1): el corte es el marcador
+    // _FinCabeceraFicha (antes era la posición de «qué le
+    // falta»: la jerarquía nueva de la pestaña de pagos lo
+    // libera — Membresía e Historial abren la pestaña y
+    // «qué le falta» baja tras ellos).
     final corteFicha =
-        items.indexWhere((it) => it.widget is SeccionQueFaltaFicha);
+        items.indexWhere((it) => it.widget is _FinCabeceraFicha);
     final itemsCabecera =
         corteFicha < 0 ? items : items.sublist(0, corteFicha);
     final porPestana = <int, List<({String clave, Object version, Widget widget})>>{
@@ -2792,7 +2812,8 @@ class _FichaScreenState extends State<FichaScreen> {
     };
     if (corteFicha >= 0) {
       var pestanaEnCurso = 0;
-      for (final it in items.sublist(corteFicha)) {
+      // El marcador mismo no entra en ninguna pestaña.
+      for (final it in items.sublist(corteFicha + 1)) {
         if (it.widget is! SizedBox) {
           pestanaEnCurso = pestanaDeSeccionFicha(it.widget);
         }
@@ -2894,29 +2915,15 @@ class _FichaScreenState extends State<FichaScreen> {
                               onPressed: _pagar,
                             ),
                           ),
-                          // 1.25 Panel 18: repetir el último
-                          // cobro en 1 toque — el botón dice
-                          // qué repite (tipo · método); el
-                          // monto se recalcula hoy y el
-                          // Preview sigue confirmando.
-                          // Argón 1.25 MEDIA: el botón solo
-                          // aparece si el último cobro tiene
-                          // tipo repetible (un personalizado
-                          // puro o una promo prometían
-                          // repetir lo que no repetían).
-                          if (_ultimoPagoReal != null &&
-                              seleccionRepetirCobro(_ultimoPagoReal)
-                                      .tipoId !=
-                                  null)
-                            TextButton.icon(
-                              onPressed: () => _pagar(repetir: true),
-                              icon: const Icon(Icons.replay_rounded,
-                                  size: 18),
-                              label: Text(
-                                  'Repetir último cobro · '
-                                  '${seleccionRepetirCobro(_ultimoPagoReal).tipoId}'
-                                  ' · ${_ultimoPagoReal!['metodo'] ?? ''}'),
-                            ),
+                          // 1.34 Campo 2 (B-1, orden de Jc
+                          // 2026-11-14): «Repetir último
+                          // cobro» SALE de la ficha — en el
+                          // día a día no se usa y ocupaba la
+                          // barra del cobro. Cobrar sigue en
+                          // 1 toque con su Preview de
+                          // siempre; la selección de repetición
+                          // (seleccionRepetirCobro) queda en
+                          // dialogo_pago.dart sin llamador.
                         ],
                       ),
               ),
@@ -3051,10 +3058,10 @@ class _FichaScreenState extends State<FichaScreen> {
   /// [_alMoverScrollFicha]) con la foto pequeña, el nombre,
   /// el estado con el lenguaje de colores de Listas (el
   /// punto lleva el color del marco de estado) y la acción
-  /// principal del momento: Cobrar — o Dar acceso cuando
-  /// el cliente no tiene acceso a la app y quien mira
-  /// puede darlo (la generación vive en la sección, con
-  /// las guardas de A8: la barra solo desplaza hasta ella).
+  /// principal del momento: Cobrar (o Conciliar/Renovar).
+  /// Hasta la 1.33 la barra también ofrecía «Dar acceso»:
+  /// fuera por orden de campo de Jc (B-1 de Campo 2) — el
+  /// acceso se da en su sección de «App Clientes».
   /// 1.32: la barra de las 3 pestañas de la ficha (Pagos y
   /// Notas · Progreso y Marcas · App Clientes). Sin alturas
   /// fijas: la etiqueta puede crecer a 2 líneas al 200 %.
@@ -3137,18 +3144,21 @@ class _FichaScreenState extends State<FichaScreen> {
     required int? dias,
     required Color colorMarco,
   }) {
-    final puedeAcceso = AuthService().isOwner ||
-        PermisosEntrenador().canGeneratePin;
-    final sinAcceso = puedeAcceso &&
-        AccesoAppCache.instance.cargado &&
-        AccesoAppCache.instance.obtener(widget.clienteId) == null;
     // 1.30 (Oleada 10, FICHA-04): la barra ofrece LA
     // acción del momento (función pura
     // accionDelMomentoFicha): conciliar si hay una
     // transferencia por conciliar y quien mira es el
-    // dueño, renovar si está vencido, dar acceso si no
-    // tiene, cobrar en el resto. «Dar acceso» queda como
-    // secundaria cuando la del momento es otra.
+    // dueño, renovar si está vencido, cobrar en el resto.
+    // 1.34 Campo 2 (B-1, orden de Jc 2026-11-14): «Dar
+    // acceso» SALE de la barra — la tarjeta flotante de
+    // acceso molestaba más que ayudaba y la barra queda
+    // solo con la acción del momento del dinero/estado.
+    // El acceso NO se pierde: vive en su sección de la
+    // pestaña «App Clientes» y en el chip «Sin acceso a
+    // la app» de «Qué le falta» (mismos toques desde la
+    // ficha: pestaña → sección). Por eso aquí se pasa
+    // sinAcceso: false a la función pura (que se conserva
+    // intacta y probada).
     final accion = accionDelMomentoFicha(
       esCasa: esCasa,
       // Yunque 2.34 (D-3): el parámetro `congelado` de esta
@@ -3161,7 +3171,7 @@ class _FichaScreenState extends State<FichaScreen> {
       hayTransferenciaPorConciliar:
           _ultimaTransferenciaPorConciliar != null,
       esDueno: AuthService().isOwner,
-      sinAcceso: sinAcceso,
+      sinAcceso: false,
     );
     Widget botonMomento(IconData icono, String texto,
             VoidCallback alTocar) =>
@@ -3189,8 +3199,6 @@ class _FichaScreenState extends State<FichaScreen> {
               _ultimaTransferenciaPorConciliar!)),
       'renovar' => botonMomento(
           Icons.refresh_rounded, 'Renovar', _renovar),
-      'acceso' => botonMomento(Icons.key_rounded,
-          'Dar acceso', () => _irASeccionAcceso()),
       'cobrar' => botonMomento(
           Icons.payments_rounded, 'Cobrar', _pagar),
       _ => null,
@@ -3272,24 +3280,16 @@ class _FichaScreenState extends State<FichaScreen> {
                       ],
                     ),
                   ),
-                  // 1.34 (DIS-06): los dos botones ceden
-                  // espacio (Flexible + etiqueta recortable)
-                  // en vez de desbordar la barra: con la
-                  // escala de fuente a 1.3 sus anchos
-                  // intrínsecos sumaban 17 px de más a
-                  // 420 dp y el RenderFlex reventaba. A
-                  // escala normal sobra sitio y nada cambia.
-                  if (sinAcceso && accion != 'acceso')
-                    Flexible(
-                      child: TextButton.icon(
-                        icon: const Icon(Icons.key_rounded,
-                            size: 18),
-                        label: const Text('Dar acceso',
-                            overflow: TextOverflow.ellipsis,
-                            softWrap: false),
-                        onPressed: () => _irASeccionAcceso(),
-                      ),
-                    ),
+                  // 1.34 (DIS-06): el botón cede espacio
+                  // (Flexible + etiqueta recortable) en vez
+                  // de desbordar la barra: con la escala de
+                  // fuente a 1.3 su ancho intrínseco sumaba
+                  // de más a 420 dp y el RenderFlex
+                  // reventaba. A escala normal sobra sitio
+                  // y nada cambia. (El segundo botón que
+                  // aquí vivía era «Dar acceso»: fuera por
+                  // B-1, ver la nota de la acción del
+                  // momento.)
                   if (botonPrincipal != null)
                     Flexible(child: botonPrincipal),
                 ],
@@ -3505,201 +3505,10 @@ class _FichaScreenState extends State<FichaScreen> {
                           height: AppEspacio.lg),
                       const SizedBox(
                           height: AppEspacio.lg),
-                      // 1.28 (M4-B4): «qué le falta» a este
-                      // cliente, accionable, bajo la cabecera.
-                      // Sin pendientes, la sección no ocupa
-                      // espacio (se decide dentro del widget,
-                      // que además verifica el acceso por su
-                      // cuenta sin afirmar lo no verificado).
-                      SeccionQueFaltaFicha(
-                        clienteId: widget.clienteId,
-                        // 1.29 (FB-04): foto VERIFICADA (criterio
-                        // completo), no solo el archivo en memoria.
-                        tieneFoto: _tieneFotoVerificado,
-                        telefonoValido:
-                            _telefonoEfectivoWa(c).length >= 10,
-                        ultimaMedicionEn: _ultimaMedicionFecha,
-                        puedeGestionarAcceso:
-                            AuthService().isOwner ||
-                                PermisosEntrenador().canGeneratePin,
-                        onFoto: _cambiarFoto,
-                        onTelefono: () => _editar(),
-                        onAcceso: () => _irASeccionAcceso(),
-                        // 1.30 (Oleada 10, FICHA-12): el
-                        // pendiente «sin medición» ya NO
-                        // abre Progreso: desplaza a la
-                        // tarjeta de medidas de la propia
-                        // ficha, donde la medición se
-                        // registra. Progreso queda con
-                        // una sola puerta (la última
-                        // medida).
-                        onMedicion: () => _desplazarASeccion(
-                            _claveSeccionMedidas,
-                            pestana: 1),
-                      ),
-                      // Información personal
-                      Tarjeta(
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 30,
-                                  height: 30,
-                                  decoration: BoxDecoration(
-                                    color: AppColores.naranja
-                                        .withValues(alpha: 0.12),
-                                    borderRadius:
-                                        BorderRadius.circular(
-                                            AppRadio.sm),
-                                  ),
-                                  child: Icon(
-                                      Icons.person_outline_rounded,
-                                      size: 18,
-                                      color: AppColores.textoSecundario(context)),
-                                ),
-                                const SizedBox(
-                                    width: AppEspacio.sm),
-                                const Text(
-                                    'Información personal',
-                                    style: AppTexto.titulo),
-                              ],
-                            ),
-                            const SizedBox(
-                                height: AppEspacio.sm),
-                            FilaInfoFicha(icono: Icons.badge_rounded, etiqueta: 'Carnet', valor: '${c['carnet'] ?? '—'}'),
-                            if (edadDeCarnet(
-                                    '${c['carnet'] ?? ''}') !=
-                                null)
-                              FilaInfoFicha(icono: Icons.cake_rounded, etiqueta: 'Edad', valor: '${edadDeCarnet('${c['carnet']}')} años'),
-                            // 1.25 T117 (F1-44): el día del
-                            // cumpleaños visible todo el año
-                            // (antes solo salía la edad; la
-                            // fecha solo se infería el día
-                            // exacto por el banner).
-                            if (_textoCumple(c) != null)
-                              FilaInfoFicha(icono: Icons.celebration_rounded, etiqueta: 'Cumpleaños', valor: _textoCumple(c)!),
-                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: '${c['sexo'] ?? '—'}'),
-                            // Bloque 1: teléfono tocable para
-                            // WhatsApp (abre wa.me, no registra nada).
-                            InkWell(
-                              onTap: _abrirWhatsAppTelefono,
-                              borderRadius: BorderRadius.circular(
-                                  AppRadio.sm),
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(
-                                        vertical: AppEspacio.sm),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.phone_rounded,
-                                        color: AppColores.textoSecundario(context),
-                                        size: 20),
-                                    const SizedBox(
-                                        width: AppEspacio.md),
-                                    const Expanded(
-                                        child: Text('Teléfono',
-                                            style:
-                                                AppTexto.cuerpo)),
-                                    Expanded(
-                                      flex: 2,
-                                      child: Text(
-                                        _telefonoEfectivoVisible(c),
-                                        style: AppTexto.cuerpo
-                                            .copyWith(
-                                                fontWeight:
-                                                    FontWeight.w600,
-                                                color: AppColores
-                                                    .exitoTexto(
-                                                        context)),
-                                        textAlign:
-                                            TextAlign.right,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            FilaInfoFicha(icono: Icons.person_add_rounded, etiqueta: 'Inscrito por', valor: _textoInscritoPor(c[
-                                        'registrado_por_nombre']
-                                    as String?)),
-                            InkWell(
-                              onTap: _editarNotas,
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      AppRadio.sm),
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(
-                                        vertical:
-                                            AppEspacio.sm),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                        Icons.note_rounded,
-                                        color: AppColores.textoSecundario(context),
-                                        size: 20),
-                                    const SizedBox(
-                                        width:
-                                            AppEspacio.md),
-                                    const Expanded(
-                                        child: Text(
-                                            'Notas',
-                                            style: AppTexto
-                                                .cuerpo)),
-                                    Expanded(
-                                      flex: 2,
-                                      child: Text(
-                                        (c['notas']
-                                                        as String?)
-                                                    ?.isNotEmpty ==
-                                                true
-                                            ? '${c['notas']}'
-                                            : 'Toca para agregar…',
-                                        style: AppTexto.cuerpo
-                                            .copyWith(
-                                                fontWeight:
-                                                    FontWeight
-                                                        .w600),
-                                        textAlign:
-                                            TextAlign.right,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // 1.25 T117 (F1-45): la foto personal del
-                      // cliente también vive en la ficha principal,
-                      // bajo Información personal (antes solo en la
-                      // ficha de acceso, donde casi nadie la veía).
-                      // Solo dueño, igual que allí: con otro rol el
-                      // widget ni se construye ni se llama su RPC.
-                      if (AuthService().isOwner) ...[
-                        const SizedBox(height: AppEspacio.md),
-                        SeccionFotoPersonal(
-                          clienteId: widget.clienteId,
-                          // 1.25 T58: el par de fotos con la
-                          // de gestión y su visor.
-                          fotoGestion: _foto,
-                          onVerFotoGestion:
-                              _foto != null ? _verFotoGrande : null,
-                        ),
-                        // 1.32 (Oleada 2 F1, desviación 2 de
-                        // Argón): la galería de Fotos de
-                        // Progreso (G-23) ya no viaja aquí: es
-                        // sección propia tras las medidas, en
-                        // la pestaña «Progreso y Marcas». La
-                        // foto personal se queda con
-                        // Información personal.
-                      ],
-                      const SizedBox(
-                          height: AppEspacio.md),
+                      // 1.34 Campo 2 (B-1): fin de la
+                      // cabecera fija — ver
+                      // _FinCabeceraFicha.
+                      const _FinCabeceraFicha(),
                       // Membresía
                       Tarjeta(
                         child: Column(
@@ -3916,6 +3725,201 @@ class _FichaScreenState extends State<FichaScreen> {
                             ? null
                             : _verHistorialCompleto,
                       ),
+                      const SizedBox(
+                          height: AppEspacio.md),
+                      // 1.28 (M4-B4): «qué le falta» a este
+                      // cliente, accionable, bajo la cabecera.
+                      // Sin pendientes, la sección no ocupa
+                      // espacio (se decide dentro del widget,
+                      // que además verifica el acceso por su
+                      // cuenta sin afirmar lo no verificado).
+                      SeccionQueFaltaFicha(
+                        clienteId: widget.clienteId,
+                        // 1.29 (FB-04): foto VERIFICADA (criterio
+                        // completo), no solo el archivo en memoria.
+                        tieneFoto: _tieneFotoVerificado,
+                        telefonoValido:
+                            _telefonoEfectivoWa(c).length >= 10,
+                        ultimaMedicionEn: _ultimaMedicionFecha,
+                        puedeGestionarAcceso:
+                            AuthService().isOwner ||
+                                PermisosEntrenador().canGeneratePin,
+                        onFoto: _cambiarFoto,
+                        onTelefono: () => _editar(),
+                        onAcceso: () => _irASeccionAcceso(),
+                        // 1.30 (Oleada 10, FICHA-12): el
+                        // pendiente «sin medición» ya NO
+                        // abre Progreso: desplaza a la
+                        // tarjeta de medidas de la propia
+                        // ficha, donde la medición se
+                        // registra. Progreso queda con
+                        // una sola puerta (la última
+                        // medida).
+                        onMedicion: () => _desplazarASeccion(
+                            _claveSeccionMedidas,
+                            pestana: 1),
+                      ),
+                      // Información personal
+                      Tarjeta(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 30,
+                                  height: 30,
+                                  decoration: BoxDecoration(
+                                    color: AppColores.naranja
+                                        .withValues(alpha: 0.12),
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            AppRadio.sm),
+                                  ),
+                                  child: Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 18,
+                                      color: AppColores.textoSecundario(context)),
+                                ),
+                                const SizedBox(
+                                    width: AppEspacio.sm),
+                                const Text(
+                                    'Información personal',
+                                    style: AppTexto.titulo),
+                              ],
+                            ),
+                            const SizedBox(
+                                height: AppEspacio.sm),
+                            FilaInfoFicha(icono: Icons.badge_rounded, etiqueta: 'Carnet', valor: '${c['carnet'] ?? '—'}'),
+                            if (edadDeCarnet(
+                                    '${c['carnet'] ?? ''}') !=
+                                null)
+                              FilaInfoFicha(icono: Icons.cake_rounded, etiqueta: 'Edad', valor: '${edadDeCarnet('${c['carnet']}')} años'),
+                            // 1.25 T117 (F1-44): el día del
+                            // cumpleaños visible todo el año
+                            // (antes solo salía la edad; la
+                            // fecha solo se infería el día
+                            // exacto por el banner).
+                            if (_textoCumple(c) != null)
+                              FilaInfoFicha(icono: Icons.celebration_rounded, etiqueta: 'Cumpleaños', valor: _textoCumple(c)!),
+                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: '${c['sexo'] ?? '—'}'),
+                            // Bloque 1: teléfono tocable para
+                            // WhatsApp (abre wa.me, no registra nada).
+                            InkWell(
+                              onTap: _abrirWhatsAppTelefono,
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.sm),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                        vertical: AppEspacio.sm),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.phone_rounded,
+                                        color: AppColores.textoSecundario(context),
+                                        size: 20),
+                                    const SizedBox(
+                                        width: AppEspacio.md),
+                                    const Expanded(
+                                        child: Text('Teléfono',
+                                            style:
+                                                AppTexto.cuerpo)),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        _telefonoEfectivoVisible(c),
+                                        style: AppTexto.cuerpo
+                                            .copyWith(
+                                                fontWeight:
+                                                    FontWeight.w600,
+                                                color: AppColores
+                                                    .exitoTexto(
+                                                        context)),
+                                        textAlign:
+                                            TextAlign.right,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            FilaInfoFicha(icono: Icons.person_add_rounded, etiqueta: 'Inscrito por', valor: _textoInscritoPor(c[
+                                        'registrado_por_nombre']
+                                    as String?)),
+                            InkWell(
+                              onTap: _editarNotas,
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      AppRadio.sm),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(
+                                        vertical:
+                                            AppEspacio.sm),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                        Icons.note_rounded,
+                                        color: AppColores.textoSecundario(context),
+                                        size: 20),
+                                    const SizedBox(
+                                        width:
+                                            AppEspacio.md),
+                                    const Expanded(
+                                        child: Text(
+                                            'Notas',
+                                            style: AppTexto
+                                                .cuerpo)),
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text(
+                                        (c['notas']
+                                                        as String?)
+                                                    ?.isNotEmpty ==
+                                                true
+                                            ? '${c['notas']}'
+                                            : 'Toca para agregar…',
+                                        style: AppTexto.cuerpo
+                                            .copyWith(
+                                                fontWeight:
+                                                    FontWeight
+                                                        .w600),
+                                        textAlign:
+                                            TextAlign.right,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // 1.25 T117 (F1-45): la foto personal del
+                      // cliente también vive en la ficha principal,
+                      // bajo Información personal (antes solo en la
+                      // ficha de acceso, donde casi nadie la veía).
+                      // Solo dueño, igual que allí: con otro rol el
+                      // widget ni se construye ni se llama su RPC.
+                      if (AuthService().isOwner) ...[
+                        const SizedBox(height: AppEspacio.md),
+                        SeccionFotoPersonal(
+                          clienteId: widget.clienteId,
+                          // 1.25 T58: el par de fotos con la
+                          // de gestión y su visor.
+                          fotoGestion: _foto,
+                          onVerFotoGestion:
+                              _foto != null ? _verFotoGrande : null,
+                        ),
+                        // 1.32 (Oleada 2 F1, desviación 2 de
+                        // Argón): la galería de Fotos de
+                        // Progreso (G-23) ya no viaja aquí: es
+                        // sección propia tras las medidas, en
+                        // la pestaña «Progreso y Marcas». La
+                        // foto personal se queda con
+                        // Información personal.
+                      ],
                       const SizedBox(
                           height: AppEspacio.md),
                       // v1.13.0 (D4): medidas del entrenador (filas
