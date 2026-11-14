@@ -1219,6 +1219,21 @@ class _FichaScreenState extends State<FichaScreen> {
   /// bandera síncrona antes del primer await, try/finally.
   bool _cobroDialogoEnCurso = false;
 
+  /// 1.34 (G-1, campo de Jc 2026-11-13): guarda de
+  /// reentrada del flujo de foto de la ficha, espejo de
+  /// [_cobroDialogoEnCurso] (bandera síncrona antes del
+  /// primer await, try/finally). Sin ella, la espera sin
+  /// señal de `_tieneFoto()` —lectura de BD que tras la
+  /// primera subida tarda por la contención con la cola
+  /// de fotos y la sync— invitaba a tocar de nuevo el
+  /// botón, y cada toque apilaba otra copia idéntica del
+  /// diálogo «Foto del cliente»: las opciones «no
+  /// respondían» porque cada toque solo cerraba la copia
+  /// superior. Mientras la guarda vive, la cabecera pinta
+  /// su botón deshabilitado con indicador (la señal de
+  /// que el toque entró).
+  bool _fotoDialogoEnCurso = false;
+
   Future<void> _pagar({bool repetir = false}) async {
     if (_cobroDialogoEnCurso) return;
     _cobroDialogoEnCurso = true;
@@ -2123,6 +2138,21 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// Elimina la foto del cliente (v1.0.15).
   Future<void> _eliminarFoto() async {
+    // 1.34 (G-1): la misma guarda de _cambiarFoto (son
+    // las dos puertas del flujo de foto de la ficha); el
+    // flujo interno lo invoca _cambiarFotoFlujo directo.
+    if (_fotoDialogoEnCurso) return;
+    _fotoDialogoEnCurso = true;
+    if (mounted) setState(() {});
+    try {
+      await _eliminarFotoFlujo();
+    } finally {
+      _fotoDialogoEnCurso = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _eliminarFotoFlujo() async {
     // 1.24 Bloque 3: eliminar_foto cuelga de can_editar_fichas.
     if (!await permisoOperativoOkConRefresco(
         context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
@@ -2178,6 +2208,21 @@ class _FichaScreenState extends State<FichaScreen> {
 
   /// Cambia la foto del cliente: cámara, galería o eliminar (v1.0.15).
   Future<void> _cambiarFoto() async {
+    // 1.34 (G-1): guarda de reentrada — un toque = un
+    // diálogo, siempre (ver _fotoDialogoEnCurso). La
+    // señal visual la da la cabecera vía fotoOcupada.
+    if (_fotoDialogoEnCurso) return;
+    _fotoDialogoEnCurso = true;
+    if (mounted) setState(() {});
+    try {
+      await _cambiarFotoFlujo();
+    } finally {
+      _fotoDialogoEnCurso = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _cambiarFotoFlujo() async {
     // 1.24 Bloque 3: la foto de ficha cuelga de can_editar_fichas.
     if (!await permisoOperativoOkConRefresco(
         context, () => PermisosEntrenador().canEditarFichas, 'editar fichas')) {
@@ -2222,7 +2267,8 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (origen == null || !mounted) return;
     if (origen == 'eliminar') {
-      await _eliminarFoto();
+      // Flujo interno: la guarda ya la tomó _cambiarFoto.
+      await _eliminarFotoFlujo();
       return;
     }
     final src = origen == 'camera'
@@ -2237,7 +2283,21 @@ class _FichaScreenState extends State<FichaScreen> {
     final editada = await elegirFotoEditada(context, src,
         flujoFoto: 'ficha_cliente',
         entidadIdFoto: '${widget.clienteId}');
-    if (editada == null || !mounted) return;
+    if (editada == null) {
+      // 1.34 (G-1): el null de la guarda global de
+      // foto_elegir (otro flujo de foto en curso) ya no
+      // muere en silencio: si la guarda sigue tomada al
+      // volver, ESTE null es suyo y se avisa; si viene
+      // libre, fue la cancelación del usuario o un fallo
+      // que el propio helper ya anunció con su SnackBar.
+      if (mounted && elegirFotoEnCurso) {
+        mostrarSnack(context,
+            'Ya hay una petición de foto en curso, espera a que termine',
+            significado: SignificadoChip.info);
+      }
+      return;
+    }
+    if (!mounted) return;
     // v1.2.9: usar la cola persistente (no fotos_pendientes).
     final opUuid = const Uuid().v4();
     await FotosColaService.instance.encolarFoto(
@@ -3206,6 +3266,10 @@ class _FichaScreenState extends State<FichaScreen> {
                         // siempre puede).
                         puedeCambiarFoto: AuthService().isOwner ||
                             PermisosEntrenador().canEditarFichas,
+                        // 1.34 (G-1): señal de apertura del
+                        // flujo de foto (guarda tomada = botón
+                        // deshabilitado con indicador).
+                        fotoOcupada: _fotoDialogoEnCurso,
                         // 1.25 T53: el anillo del avatar ES
                         // el progreso del período (absorbe
                         // la barra del mes).
@@ -4172,6 +4236,16 @@ class _FichaScreenState extends State<FichaScreen> {
   }
 
   Object _versionSeccion(Widget w, Object versionBase, Object versionFoto) {
+    // 1.34 (G-1): la cabecera lleva ADEMÁS la señal del
+    // flujo de foto en curso (fotoOcupada) sumada a su
+    // versión: la caché sirve la instancia construida si
+    // la versión no cambia, y sin este sumando seguiría
+    // sirviendo la cabecera con el botón habilitado — la
+    // guarda de reentrada (campo del State) funcionaría
+    // igual, pero la señal visual nunca se pintaría.
+    if (w is FadeEntrada && w.child is CabeceraFicha) {
+      return Object.hash(versionFoto, _fotoDialogoEnCurso);
+    }
     if (w is FadeEntrada || w is SeccionFotoPersonal) return versionFoto;
     // 1.28 (M4-B4): «qué le falta» depende también de la
     // foto (su pendiente «sin foto» llega en segundo plano
