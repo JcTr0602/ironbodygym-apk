@@ -186,13 +186,37 @@ void main() {
       expect(await _esperarTexto(tester, '1 operación · 1 alerta'),
           isTrue,
           reason: 'hoy: solo el pago (alerta) es visible al abrir');
-      // «Hoy» aparece dos veces con papeles distintos: la
-      // cabecera del día y el chip de filtro rápido.
-      expect(find.text('Hoy'), findsNWidgets(2));
-      // A «Todo» (el chip vive en la cabecera, siempre a la
-      // vista): la misma cabecera recounta incluyendo la
-      // inscripción (los totales son del grupo VISIBLE).
-      await tester.tap(find.widgetWithText(ChoiceChip, 'Todo'));
+      // 1.34 (C-48 · G-01): los filtros van PLEGADOS — «Hoy»
+      // solo aparece ya como cabecera del día (el chip de
+      // filtro rápido vive en la hoja, tras el botón).
+      expect(find.text('Hoy'), findsOneWidget);
+      // A «Todo» (desde la hoja de filtros, tras el botón
+      // «Filtrar · Otros y alertas»): la misma cabecera
+      // recounta incluyendo la inscripción (los totales son
+      // del grupo VISIBLE).
+      await tester.tap(find.text('Filtrar · Otros y alertas'));
+      expect(await _esperarTexto(tester, 'Alcance'), isTrue,
+          reason: 'la hoja de filtros abre tras el botón');
+      // Se toca la FILA del radio (no su texto) y con la hoja
+      // ya asentada: durante la animación de entrada el toque
+      // al texto falla el hit-test y el radio no cambia.
+      final filaTodo = find.descendant(
+          of: find.byType(BottomSheet),
+          matching:
+              find.widgetWithText(RadioListTile<FiltroAuditoria>, 'Todo'));
+      await tester.ensureVisible(filaTodo);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(filaTodo);
+      await tester.pump(const Duration(milliseconds: 300));
+      // Con la fuente del entorno de test la hoja es más alta
+      // que la ventana: «Aplicar» nace bajo el pliegue y hay
+      // que traerlo a la vista antes de tocarlo.
+      await tester.scrollUntilVisible(find.text('Aplicar'), 100,
+          scrollable: find.descendant(
+              of: find.byType(BottomSheet),
+              matching: find.byType(Scrollable)));
+      await tester.tap(find.text('Aplicar'));
+      await tester.pump(const Duration(milliseconds: 400));
       expect(await _esperarTexto(tester, '2 operaciones · 1 alerta'),
           isTrue,
           reason: 'en Todo, hoy suma la inscripción rutinaria');

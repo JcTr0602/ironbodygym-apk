@@ -603,9 +603,24 @@ void main() {
           findsOneWidget);
 
       // La op de la mañana, buscable dentro de lo cargado.
-      await tester.tap(
-          find.widgetWithText(ChoiceChip, 'Todo'));
+      // 1.34 (C-48 · G-01): el alcance «Todo» se elige en la
+      // hoja de filtros (los chips se plegaron en el botón).
+      await tester.tap(find.text('Filtrar · Otros y alertas'));
+      await _pumps(tester, 10);
+      final filaTodo = find.descendant(
+          of: find.byType(BottomSheet),
+          matching:
+              find.widgetWithText(RadioListTile<FiltroAuditoria>, 'Todo'));
+      await tester.ensureVisible(filaTodo);
       await _pumps(tester, 4);
+      await tester.tap(filaTodo);
+      await _pumps(tester, 4);
+      await tester.scrollUntilVisible(find.text('Aplicar'), 100,
+          scrollable: find.descendant(
+              of: find.byType(BottomSheet),
+              matching: find.byType(Scrollable)));
+      await tester.tap(find.text('Aplicar'));
+      await _pumps(tester, 6);
       await tester.enterText(
           find.byType(TextField), 'Madrugador');
       await _pumps(tester, 6);
