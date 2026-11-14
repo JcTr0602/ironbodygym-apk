@@ -1002,6 +1002,20 @@ double totalVentaRegistrado(Map<String, dynamic> v) {
   return precio * cant;
 }
 
+/// Yunque 2.34 (D-3): predicado ÚNICO de «vencido cobrable»
+/// de la ficha. La ficha tenía TRES versiones: el cuerpo
+/// excluía la pausa nueva pero no el congelado legado, la
+/// barra compacta no excluía ninguna (ofrecía «Renovar»
+/// mientras pintaba «En pausa ❄ · el vencimiento no corre»)
+/// y el flujo de renovación no tenía guarda. En pausa el
+/// vencimiento NO corre: no hay nada cobrable. PURO.
+bool clienteVencidoCobrable({
+  required bool esCasa,
+  required bool pausado,
+  required int? dias,
+}) =>
+    !esCasa && !pausado && dias != null && dias < 0;
+
 /// Yunque 2.34 (E-1): predicado CANÓNICO de fiado pendiente
 /// con la forma tolerante de la casa (un flag vale si es 1 o
 /// true; el servidor puede entregar bool). Vivía como copia

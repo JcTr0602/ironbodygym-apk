@@ -2346,6 +2346,18 @@ class _FichaScreenState extends State<FichaScreen> {
     // con deshacer 15 s que el cobro normal.
     if (await mostrarBloqueoCasa(context, c)) return;
     if (!mounted) return;
+    // Yunque 2.34 (D-3): guarda espejo del predicado único —
+    // en pausa el vencimiento no corre y no se renueva (la
+    // barra ya no lo ofrece; esta es la segunda puerta para
+    // cualquier otra vía que llegue aquí).
+    if ((c['estado'] as String?) == 'congelado' ||
+        _enPausaCongelacion) {
+      mostrarSnack(context,
+          'Está en pausa: el vencimiento no corre. '
+          'Reanuda la membresía antes de renovar.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     // Ronda 3-9 #3: la renovación rápida cobra por el mismo motor
     // de precio que el diálogo (especial > menores > estándar).
     // Antes leía el ajuste global fijo (2000) e ignoraba la
@@ -2640,14 +2652,6 @@ class _FichaScreenState extends State<FichaScreen> {
     // sobre el chip dorado y activaba «Renovar 1 mes», que
     // rebotaba contra el bloqueo de Casa. Buscar ya lo hacía
     // bien (badge CASA); la ficha ahora coincide.
-    // Congelación 0.5 · Yunque B (YB-FLU-02): la pausa NUEVA
-    // en curso también apaga el «vencido» (no debe nada
-    // mientras dura su pausa aprobada).
-    final vencido = c != null &&
-        !esCasa &&
-        !_enPausaCongelacion &&
-        dias != null &&
-        dias < 0;
     // Cliente protegido (2026-10-26): marca del espejo local.
     final protegido = c != null && clienteEstaProtegido(c);
     // Bloque 1: marco de la foto en color de estado (3 dp): verde al día,
@@ -2660,6 +2664,15 @@ class _FichaScreenState extends State<FichaScreen> {
     // vencimiento (anillo, línea de periodo y botón de
     // aviso): en pausa no corre vencimiento.
     final pausado = congelado || _enPausaCongelacion;
+    // Congelación 0.5 · Yunque B (YB-FLU-02): la pausa NUEVA
+    // en curso también apaga el «vencido» (no debe nada
+    // mientras dura su pausa aprobada).
+    // Yunque 2.34 (D-3): predicado ÚNICO (clienteVencidoCobrable)
+    // — la versión de aquí excluía la pausa nueva pero no el
+    // congelado legado.
+    final vencido = c != null &&
+        clienteVencidoCobrable(
+            esCasa: esCasa, pausado: pausado, dias: dias);
     final colorMarco = esCasa
         ? AppColores.alerta
         : pausado
@@ -3112,7 +3125,13 @@ class _FichaScreenState extends State<FichaScreen> {
     // secundaria cuando la del momento es otra.
     final accion = accionDelMomentoFicha(
       esCasa: esCasa,
-      vencido: !esCasa && dias != null && dias < 0,
+      // Yunque 2.34 (D-3): el parámetro `congelado` de esta
+      // barra trae la fusión `pausado` desde el build; sin
+      // excluirla, la acción del momento ofrecía «Renovar»
+      // mientras el texto de la misma barra decía «En pausa
+      // ❄ · el vencimiento no corre».
+      vencido: clienteVencidoCobrable(
+          esCasa: esCasa, pausado: congelado, dias: dias),
       hayTransferenciaPorConciliar:
           _ultimaTransferenciaPorConciliar != null,
       esDueno: AuthService().isOwner,
