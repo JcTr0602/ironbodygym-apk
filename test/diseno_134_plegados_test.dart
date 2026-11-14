@@ -422,13 +422,19 @@ void main() {
         await LocalDb.instance.upsertMirror('suplementos', 1, {
           'id': 1,
           'nombre': 'Proteína Suero X',
-          'precio_cup': 4500,
+          // Yunque 3.34 (K4-3): forma REAL — precio de
+          // precio_oficial y stock de stock
+          // (lib/ui/suplementos.dart:368, 213); precio_cup
+          // no lo lee la fila de suplemento.
+          'precio_oficial': 4500,
+          'stock': 40,
           'activo': 1,
         }, 1);
         await LocalDb.instance.upsertMirror('suplementos', 2, {
           'id': 2,
           'nombre': 'Creatina Monohidrato',
-          'precio_cup': 3200,
+          'precio_oficial': 3200,
+          'stock': 3,
           'activo': 1,
         }, 1);
         await LocalDb.instance.upsertMirror('ventas_suplementos', 1, {
@@ -715,24 +721,31 @@ void main() {
         await LocalDb.instance.upsertMirror('suplementos', 1, {
           'id': 1,
           'nombre': 'Proteína Suero X',
-          'precio_cup': 4500,
+          // Yunque 3.34 (K4-3): precio_oficial real; el
+          // stock ya venía en su clave real (stock) y se
+          // queda; fuera stock_dosis, que nadie lee.
+          'precio_oficial': 4500,
           'stock': 40,
-          'stock_dosis': 40,
           'categoria_id': 1,
           'activo': 1,
         }, 1);
         await LocalDb.instance.upsertMirror('suplementos', 3, {
           'id': 3,
           'nombre': 'Omega Agotado',
-          'precio_cup': 2000,
+          'precio_oficial': 2000,
           'stock': 0,
-          'stock_dosis': 0,
           'categoria_id': 1,
           'activo': 1,
         }, 1);
       });
       await montar(tester, const SuplementosScreen());
       expect(find.text('Stock · Todos'), findsOneWidget);
+      // Yunque 3.34 (K4-3, refuerzo): la tarjeta pinta el
+      // precio REAL del suplemento (4500.00 desde
+      // precio_oficial, lib/ui/suplementos.dart:1175);
+      // con precio_cup pintaba 0.00.
+      expect(find.textContaining('4500.00'), findsWidgets,
+          reason: 'el precio visible sale de precio_oficial');
       // La categoría SIGUE en su fila (plegado parcial).
       expect(find.widgetWithText(ChoiceChip, 'Todas'), findsOneWidget);
       expect(find.widgetWithText(ChoiceChip, 'Agotados'), findsNothing);
@@ -765,7 +778,8 @@ void main() {
         await LocalDb.instance.upsertMirror('suplementos', 1, {
           'id': 1,
           'nombre': 'Proteína Suero X',
-          'precio_cup': 4500,
+          // Yunque 3.34 (K4-3): precio_oficial real.
+          'precio_oficial': 4500,
           'dosis_precio': 600,
         }, 1);
         await LocalDb.instance.upsertMirror('servicio_pomos', 10, {
