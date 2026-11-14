@@ -217,6 +217,19 @@ void main() {
     completer.complete(null);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('sin-foto'), findsOneWidget);
+    // 1.34 (G-1): el bloqueo del segundo toque ahora deja
+    // aviso en la bitácora, que programa su volcado a 3 s
+    // (con reintentos de 10 s si el volcado falla en este
+    // arnés): se quema la cadena alternando tiempo real
+    // (para que el volcado corra) y falso (para que los
+    // temporizadores venzan) antes de cerrar.
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(
+            const Duration(milliseconds: 120));
+      });
+      await tester.pump(const Duration(seconds: 6));
+    }
   });
 }
 
