@@ -159,6 +159,27 @@ String fmtFechaHabana(DateTime dt) {
   return '${h.day}/${h.month}/${h.year}';
 }
 
+/// Yunque 3 (K7-6): texto de frescura del espejo del
+/// Mostrador. «actualizado a las HH:MM» a secas mentía por
+/// omisión: un espejo de hace días se leía como de hoy.
+/// Aquí el día se nombra cuando no es hoy («ayer» o la
+/// fecha dd/MM), con la misma pauta de horaCorridaHabana
+/// del Centro de sync. [ultimo] y [ahora] son instantes;
+/// la comparación de día se hace en hora de La Habana.
+/// PURO.
+String textoFrescuraEspejo(DateTime ultimo, DateTime ahora) {
+  final h = aHabana(ultimo);
+  final hoy = aHabana(ahora);
+  String p(int n) => n.toString().padLeft(2, '0');
+  final hhmm = '${p(h.hour)}:${p(h.minute)}';
+  bool mismoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  if (mismoDia(h, hoy)) return 'actualizado a las $hhmm';
+  final ayer = hoy.subtract(const Duration(days: 1));
+  if (mismoDia(h, ayer)) return 'actualizado ayer a las $hhmm';
+  return 'actualizado el ${p(h.day)}/${p(h.month)} a las $hhmm';
+}
+
 /// 1.32 (H-B7-3/B567): fecha corta dd/mm/aaaa de un
 /// INSTANTE crudo del servidor (timestamptz serializado,
 /// p. ej. «2026-11-01T02:00:00+00:00»), pintada en hora de

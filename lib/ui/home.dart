@@ -1679,6 +1679,9 @@ class _HomeScreenState extends State<HomeScreen>
   /// «Datos del espejo · actualizado a las 07:42» según el
   /// último sync confirmado que conoce el motor; sin sync
   /// previo, lo dice tal cual.
+  /// Yunque 3 (K7-6): si el último sync no es de hoy, el
+  /// texto nombra el día (textoFrescuraEspejo): con solo la
+  /// hora, un espejo de hace días se leía como de hoy.
   Widget _lineaFrescuraEspejo() {
     final s = SyncEngine.instance.currentStatus;
     final ultimo = s.ultimoSincronizado ?? s.lastOk;
@@ -1687,10 +1690,9 @@ class _HomeScreenState extends State<HomeScreen>
           style: AppTexto.metadato.copyWith(
               color: AppColores.textoSecundario(context)));
     }
-    final h = aHabana(ultimo);
-    final hh = '${h.hour}'.padLeft(2, '0');
-    final mm = '${h.minute}'.padLeft(2, '0');
-    return Text('Datos del espejo · actualizado a las $hh:$mm',
+    return Text(
+        'Datos del espejo · '
+        '${textoFrescuraEspejo(ultimo, ahoraUtcReal())}',
         style: AppTexto.metadato.copyWith(
             color: AppColores.textoSecundario(context)));
   }

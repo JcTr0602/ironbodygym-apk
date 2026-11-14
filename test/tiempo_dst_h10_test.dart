@@ -50,4 +50,39 @@ void main() {
           const Duration(hours: -5));
     });
   });
+
+  group('K7-6 · textoFrescuraEspejo nombra el día', () {
+    // Noviembre: La Habana va a UTC-5. 12:42 UTC = 07:42
+    // en La Habana.
+    test('de hoy: solo la hora', () {
+      expect(
+          textoFrescuraEspejo(DateTime.utc(2026, 11, 14, 12, 42),
+              DateTime.utc(2026, 11, 14, 17, 0)),
+          'actualizado a las 07:42');
+    });
+
+    test('de ayer: dice «ayer» (el caso del informe)', () {
+      expect(
+          textoFrescuraEspejo(DateTime.utc(2026, 11, 13, 12, 42),
+              DateTime.utc(2026, 11, 14, 14, 0)),
+          'actualizado ayer a las 07:42');
+    });
+
+    test('de hace días: nombra la fecha dd/MM', () {
+      expect(
+          textoFrescuraEspejo(DateTime.utc(2026, 11, 10, 12, 42),
+              DateTime.utc(2026, 11, 14, 14, 0)),
+          'actualizado el 10/11 a las 07:42');
+    });
+
+    test('el día se juzga en hora de La Habana, no en UTC',
+        () {
+      // 04:30 UTC del 14 = 23:30 del 13 en La Habana; a las
+      // 06:00 UTC (01:00 Habana del 14) ya es «ayer».
+      expect(
+          textoFrescuraEspejo(DateTime.utc(2026, 11, 14, 4, 30),
+              DateTime.utc(2026, 11, 14, 6, 0)),
+          'actualizado ayer a las 23:30');
+    });
+  });
 }
