@@ -791,6 +791,25 @@ class AppSombra {
 double escalaTextoEfectiva(double escalaApp, double escalaSistema) =>
     (escalaApp * escalaSistema).clamp(0.85, 1.45).toDouble();
 
+/// Yunque 3 (K3-4): lo que el deslizador «Tamaño de letra»
+/// de Ajustes ANUNCIA debe ser la escala EFECTIVA, no la de
+/// la app a secas: con el sistema a 1,30, los pasos de app
+/// 1,15–1,30 caen todos en el techo 1,45 — la etiqueta
+/// cambiaba (115 % → 130 %) y la letra no se movía (zona
+/// muerta; simétrica en el suelo con sistema a 0,85).
+/// Devuelve el porcentaje efectivo y si el producto entró
+/// en clamp, para avisar «limitado por la escala del
+/// sistema». PURO.
+({int porcentaje, bool limitado}) anuncioEscalaLetra(
+    double escalaApp, double escalaSistema) {
+  final efectiva = escalaTextoEfectiva(escalaApp, escalaSistema);
+  final producto = escalaApp * escalaSistema;
+  return (
+    porcentaje: (efectiva * 100).round(),
+    limitado: (producto - efectiva).abs() > 0.001,
+  );
+}
+
 class AppTema {
   AppTema._();
 

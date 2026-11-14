@@ -137,6 +137,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
   bool _tienePin = false;
   String _tema = 'sistema';
   double _tamanoLetra = 1.0;
+  // Yunque 3 (K3-4): la escala del SISTEMA (la de
+  // accesibilidad del teléfono), para anunciar la escala
+  // EFECTIVA en el deslizador de letra. Ojo: la de
+  // MediaQuery en esta app ya es la efectiva (main.dart la
+  // compone), así que la del sistema se lee del dispatcher.
+  double get _escalaSistema =>
+      WidgetsBinding.instance.platformDispatcher.textScaleFactor;
   int _bloqueoMinutos = 0;
   String _swipeDer = 'cobrar'; // Bloque 1: deslizar en Buscar
   String _swipeIzq = 'ninguna';
@@ -1818,8 +1825,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                             min: 0.85,
                             max: 1.3,
                             divisions: 9,
+                            // Yunque 3 (K3-4): la burbuja
+                            // anuncia el % EFECTIVO (F-9),
+                            // no el de la app: en la zona de
+                            // clamp la etiqueta ya no promete
+                            // un cambio que no ocurre.
                             label:
-                                '${(_tamanoLetra * 100).round()}%',
+                                '${anuncioEscalaLetra(_tamanoLetra, _escalaSistema).porcentaje}%',
                             onChanged: (v) =>
                                 setState(() => _tamanoLetra = v),
                             onChangeEnd: (v) =>
@@ -1830,6 +1842,23 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     ),
                   ),
                 ),
+                // Yunque 3 (K3-4): aviso de la zona muerta —
+                // cuando app × sistema entra en el techo o el
+                // suelo de F-9, mover el deslizador ya no
+                // cambia la letra; se dice, no se esconde.
+                if (coincideBusquedaAjuste(
+                        'Tamaño de letra', _busquedaAjustes) &&
+                    anuncioEscalaLetra(_tamanoLetra, _escalaSistema)
+                        .limitado)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                        left: 4, top: AppEspacio.xs),
+                    child: Text(
+                        'Limitado por la escala del sistema',
+                        style: AppTexto.metadato.copyWith(
+                            color: AppColores.textoSecundario(
+                                context))),
+                  ),
 
                 // v1.2.5 (3.2): vibración háptica tras confirmaciones.
                 _switch(

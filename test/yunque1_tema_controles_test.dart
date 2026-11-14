@@ -22,6 +22,32 @@ void main() {
     expect(escalaTextoEfectiva(0.8, 0.9), 0.85);
   });
 
+  test('K3-4: el deslizador anuncia el % EFECTIVO y marca '
+      'la zona de clamp', () {
+    // Sin clamp: anuncia el producto y no avisa.
+    var a = anuncioEscalaLetra(1.0, 1.0);
+    expect(a.porcentaje, 100);
+    expect(a.limitado, isFalse);
+    a = anuncioEscalaLetra(1.2, 1.1);
+    expect(a.porcentaje, 132);
+    expect(a.limitado, isFalse);
+    // Techo: con sistema a 1,30, los pasos altos de la app
+    // anuncian TODOS 145 % (la zona muerta, nombrada).
+    for (final app in [1.15, 1.20, 1.25, 1.30]) {
+      a = anuncioEscalaLetra(app, 1.3);
+      expect(a.porcentaje, 145, reason: 'app=$app');
+      expect(a.limitado, isTrue, reason: 'app=$app');
+    }
+    // El primer paso que aún no toca el techo no avisa.
+    a = anuncioEscalaLetra(1.1, 1.3);
+    expect(a.porcentaje, 143);
+    expect(a.limitado, isFalse);
+    // Suelo simétrico: sistema a 0,85 hunde los pasos bajos.
+    a = anuncioEscalaLetra(0.85, 0.85);
+    expect(a.porcentaje, 85);
+    expect(a.limitado, isTrue);
+  });
+
   final temas = <String, ThemeData Function()>{
     'claro': AppTema.claro,
     'oscuro': AppTema.oscuro,
