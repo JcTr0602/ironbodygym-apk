@@ -90,6 +90,37 @@ Future<bool> encolarAnulacionVenta(int ventaId) async {
   });
 }
 
+/// 1.34 (cabo C5): el VENDEDOR de una venta de suplementos.
+/// Desde la fase de servidor C5 son columnas separadas:
+/// `vendedor_id` es quien vendió y `registrado_por` quien
+/// registra/cobra (cuando un fiado lo salda otro, el
+/// registrado_por cambia y la venta parecía ajena en «Mis
+/// ventas»). Manda el vendedor; el registrador es solo el
+/// respaldo de las filas viejas sin vendedor. Mismo
+/// criterio que servicio_ventas en servicios_historial y
+/// mi_nomina. PURO.
+int? vendedorVentaSuplementoId(Map<String, dynamic> v) =>
+    LocalDb.normalizarTelegramId(v['vendedor_id']) ??
+    LocalDb.normalizarTelegramId(v['registrado_por']);
+
+/// Nombre visible del vendedor de la venta (cabo C5):
+/// con vendedor propio manda SU nombre (o su id si el
+/// nombre no vino: jamás el del registrador, que es el
+/// error que se corrige); sin vendedor, el criterio de
+/// siempre (registrado_por_nombre, registrado_por, '?').
+/// PURO.
+String nombreVendedorVentaSuplemento(Map<String, dynamic> v) {
+  final vendId = LocalDb.normalizarTelegramId(v['vendedor_id']);
+  if (vendId != null) {
+    final n = '${v['vendedor_nombre'] ?? ''}'.trim();
+    return n.isNotEmpty ? n : '$vendId';
+  }
+  final r = '${v['registrado_por_nombre'] ?? ''}'.trim();
+  if (r.isNotEmpty) return r;
+  final regId = LocalDb.normalizarTelegramId(v['registrado_por']);
+  return regId != null ? '$regId' : '?';
+}
+
 /// Filtro del historial de ventas (PURO): texto (producto, comprador o
 /// vendedor, sin distinguir mayúsculas), producto, moneda y rango de
 /// fechas. La moneda ausente cuenta como CUP, igual que en
@@ -129,9 +160,10 @@ List<Map<String, dynamic>> filtrarVentasHistorial({
           '${productos[prodId]?['nombre'] ?? 'Producto $prodId'}'
               .toLowerCase();
       final comprador = '${v['comprador_nombre'] ?? ''}'.toLowerCase();
+      // Cabo C5: el buscador casa con el VENDEDOR de la
+      // venta, no con quien la registró/cobró.
       final vendedor =
-          '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? ''}'
-              .toLowerCase();
+          nombreVendedorVentaSuplemento(v).toLowerCase();
       if (!nombreProd.contains(t) &&
           !comprador.contains(t) &&
           !vendedor.contains(t)) {
@@ -284,7 +316,10 @@ class _HistorialVentasScreenState
     final ventas = widget.soloMias
         ? (tid != null
             ? todas
-                .where((v) => (v['registrado_por'] as num?)?.toInt() == tid)
+                // Cabo C5: «Mis ventas» = las que VENDÍ
+                // (vendedor_id ?? registrado_por), no solo
+                // las que registré/cobré.
+                .where((v) => vendedorVentaSuplementoId(v) == tid)
                 .toList()
             : <Map<String, dynamic>>[])
         : todas;
@@ -660,8 +695,7 @@ class _HistorialVentasScreenState
     final tasa = (v['usd_tasa'] as num?)?.toDouble();
     final total =
         (v['total'] as num?)?.toDouble() ?? precio * cant;
-    final vendedor =
-        '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}';
+    final vendedor = nombreVendedorVentaSuplemento(v);
     final comprador = '${v['comprador_nombre'] ?? '?'}';
     // Cliente protegido (2026-10-26, A5): candado junto al nombre
     // del comprador. Anular ya es solo dueño (v1.2.1), así que no
@@ -830,8 +864,7 @@ class _HistorialVentasScreenState
       conPromo: (v['promo_mes'] as int?) == 1,
       esFiado: v['es_fiado'] == 1 || v['es_fiado'] == true,
       metodo: metodo.isEmpty ? null : metodo,
-      vendedor:
-          '${v['registrado_por_nombre'] ?? v['registrado_por'] ?? '?'}',
+      vendedor: nombreVendedorVentaSuplemento(v),
     );
     final cid = (v['cliente_id'] as num?)?.toInt() ??
         (v['fiado_cliente_id'] as num?)?.toInt();
