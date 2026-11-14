@@ -643,21 +643,12 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                   ],
                   const SizedBox(width: 8),
                 ],
-                for (final f in const [
-                  ('todos', 'Todos'),
-                  ('con_stock', 'Con stock'),
-                  ('bajo', 'Stock bajo'),
-                  ('agotado', 'Agotados'),
-                ]) ...[
-                  ChoiceChip(
-                    label: Text(f.$2,
-                        style: AppTexto.etiqueta),
-                    selected: _filtroStock == f.$1,
-                    onSelected: (_) =>
-                        setState(() => _filtroStock = f.$1),
-                  ),
-                  const SizedBox(width: 8),
-                ],
+                // 1.34 (C-48 · G-07, PARCIAL): el filtro de
+                // stock sale de la fila a su botón «Stock · …»
+                // al final de la misma fila; la categoría se
+                // queda (es navegación del catálogo, no un
+                // recorte ocasional).
+                _botonStock(),
               ],
             ),
           ),
@@ -665,6 +656,89 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         ],
       ),
     );
+  }
+
+  /// 1.34 (C-48 · G-07): botón «Stock · …» con el resumen
+  /// del filtro de stock vigente (molde del botón «Mes · …»
+  /// de Liquidaciones).
+  Widget _botonStock() {
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: _abrirHojaStock,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Stock · ${etiquetaFiltroStock(_filtroStock)}',
+            style: AppTexto.metadato,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(width: 4),
+          const Icon(Icons.expand_more_rounded, size: 16),
+        ],
+      ),
+    );
+  }
+
+  /// Hoja del filtro de stock: una sola dimensión → tocar
+  /// una opción la aplica y cierra (como la hoja de meses).
+  Future<void> _abrirHojaStock() async {
+    final elegido = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+              AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Stock', style: AppTexto.subtitulo),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Cerrar',
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              RadioGroup<String>(
+                groupValue: _filtroStock,
+                onChanged: (v) => Navigator.of(ctx).pop(v),
+                child: Column(
+                  children: [
+                    for (final f in opcionesFiltroStock)
+                      RadioListTile<String>(
+                        value: f.$1,
+                        title: Text(f.$2),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (elegido == null || !mounted) return;
+    setState(() => _filtroStock = elegido);
   }
 
   Widget _tarjetaPromo() {
@@ -2348,4 +2422,21 @@ class _EditarSuplementoScreenState
       ),
     );
   }
+}
+
+/// 1.34 (C-48 · G-07): las opciones del filtro de stock y
+/// su etiqueta legible (las palabras que llevaban los chips
+/// antes del plegado).
+const opcionesFiltroStock = <(String, String)>[
+  ('todos', 'Todos'),
+  ('con_stock', 'Con stock'),
+  ('bajo', 'Stock bajo'),
+  ('agotado', 'Agotados'),
+];
+
+String etiquetaFiltroStock(String clave) {
+  for (final f in opcionesFiltroStock) {
+    if (f.$1 == clave) return f.$2;
+  }
+  return 'Todos';
 }
