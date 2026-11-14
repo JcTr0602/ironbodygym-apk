@@ -376,6 +376,21 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await sembrarBase(tester);
+      // La misma siembra de ops del test G-01: sin actividad
+      // la pantalla no compone aún el botón de filtros.
+      final hoyC25 = ahoraHabana();
+      await tester.runAsync(() async {
+        final db = await LocalDb.instance.db;
+        await db.insert('ops_queue', {
+          'op_uuid': 'c25-1',
+          'tipo': 'pago_mensual',
+          'payload': jsonEncode(
+              {'cliente_id': 5, 'monto': 2000, 'metodo': 'efectivo'}),
+          'estado': 'aplicada',
+          'creada_ts': isoHabana(
+              DateTime(hoyC25.year, hoyC25.month, hoyC25.day, 9, 15)),
+        });
+      });
       await tester.pumpWidget(MaterialApp(
         theme: _temaCaptura(),
         home: MediaQuery(
