@@ -74,4 +74,30 @@ void main() {
     expect(t.suplementos, 5000);
     expect(t.nSuplementos, 1);
   });
+
+  test('T79b: el reverso de servicio netea también el CONTEO de '
+      'la tarjeta Dosis (K2-2)', () {
+    // Yunque 3 (K2-2): la fila de reverso (cantidad negativa,
+    // reverso_de presente) neteaba el dinero pero SUMABA una
+    // venta al conteo: dosis vendida y reversada el mismo mes
+    // se leía «2 ventas · 0 CUP».
+    final t = totalesVentasMesPorTipo([
+      {'origen': 'servicio', 'fecha': '2026-11-03', 'precio_unitario': 900, 'cantidad': 1},
+      {'origen': 'servicio', 'fecha': '2026-11-05', 'precio_unitario': 900, 'cantidad': -1, 'reverso_de': 41},
+      // Otra dosis que sí queda: el conteo neto es 1.
+      {'origen': 'servicio', 'fecha': '2026-11-06', 'precio_unitario': 600, 'cantidad': 1},
+    ], '2026-11');
+    expect(t.dosis, 600);
+    expect(t.nDosis, 1);
+    expect(t.nSuplementos, 0);
+  });
+
+  test('T79c: reverso cuyo original es del mes anterior cuenta '
+      'en negativo, como su dinero (K2-2)', () {
+    final t = totalesVentasMesPorTipo([
+      {'origen': 'servicio', 'fecha': '2026-11-02', 'precio_unitario': 900, 'cantidad': -1, 'reverso_de': 40},
+    ], '2026-11');
+    expect(t.dosis, -900);
+    expect(t.nDosis, -1);
+  });
 }
