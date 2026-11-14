@@ -4839,7 +4839,15 @@ class _DialogoEditarClienteState extends State<_DialogoEditarCliente> {
             // v1.5.0 (Bloque G): aviso sin bloquear el guardado.
             if (_carnetInvalido) const AvisoFechaCarnet(),
             const SizedBox(height: 8),
-            Row(
+            // Jornada 1 de la 1.34: la fila era un Row y a
+            // ancho de teléfono desbordaba 20 px (la palabra
+            // entera de T117 no cabe junto a la etiqueta en
+            // el ancho del diálogo): Wrap la deja fluir a
+            // una segunda línea sin recortar el chip.
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Text('Sexo: '),
                 // 1.25 T117 (F1-48): la palabra entera — «M»/«F»
@@ -4849,7 +4857,6 @@ class _DialogoEditarClienteState extends State<_DialogoEditarCliente> {
                     label: const Text('Masculino'),
                     selected: _sexo == 'M',
                     onSelected: (_) => setState(() => _sexo = 'M')),
-                const SizedBox(width: 8),
                 ChoiceChip(
                     label: const Text('Femenino'),
                     selected: _sexo == 'F',
