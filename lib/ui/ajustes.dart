@@ -1859,7 +1859,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
                         .limitado)
                   Padding(
                     padding: const EdgeInsets.only(
-                        left: 4, top: AppEspacio.xs),
+                        left: AppEspacio.xs, top: AppEspacio.xs),
                     child: Text(
                         'Limitado por la escala del sistema',
                         style: AppTexto.metadato.copyWith(
