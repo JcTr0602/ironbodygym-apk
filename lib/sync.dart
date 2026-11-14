@@ -97,6 +97,22 @@ ModoChequeoManifiesto decidirModoChequeoManifiesto({
   return ModoChequeoManifiesto.rapido;
 }
 
+/// Yunque 1.34 (C3-2): ¿la pasada sella `manifiesto_completa_en`?
+/// Función pura. Antes el sello avanzaba con que UNA tabla
+/// concluyera en una corrida completa, aunque el resto
+/// quedara `sin_verificar` por el corte de presupuesto: la
+/// Salud enseñaba una «pasada completa» falsa y la política
+/// semanal se daba por servida 7 días con tablas sin
+/// comprobar. Ahora la completa solo se sella si TODAS las
+/// tablas concluyeron (el chequeo parcial sí avanza
+/// `manifiesto_chequeo_en`, fuera de este predicado).
+bool manifiestoSellaCompleta({
+  required bool corridaCompleta,
+  required int concluyentes,
+  required int sinVerificar,
+}) =>
+    corridaCompleta && concluyentes > 0 && sinVerificar == 0;
+
 /// 1.28 (M1-B2): de los (rid → sseq) que devuelve la RPC,
 /// solo los posteriores a [seqPrevia] interesan en la
 /// pasada rápida. Función pura.
@@ -8986,13 +9002,13 @@ class SyncEngine {
       if (concluyentes > 0) {
         await _db.setMeta(
             'manifiesto_chequeo_en', isoHabana(ahoraHabana()));
-        // Yunque 1.34 (C3-2): la pasada solo sella COMPLETA
-        // si TODAS las tablas concluyeron; con alguna
-        // sin_verificar (corte de presupuesto/transporte) la
-        // fecha de completa NO avanza — Salud no la presenta
-        // como completa ni la política semanal se da por
-        // servida durante 7 días con tablas sin comprobar.
-        if (corridaCompleta && sinVerificar.isEmpty) {
+        // Yunque 1.34 (C3-2): el sello de completa lo decide
+        // manifiestoSellaCompleta (todas concluyentes o no
+        // hay sello); el chequeo sí avanza con ≥1 concluyente.
+        if (manifiestoSellaCompleta(
+            corridaCompleta: corridaCompleta,
+            concluyentes: concluyentes,
+            sinVerificar: sinVerificar.length)) {
           await _db.setMeta(
               'manifiesto_completa_en', isoHabana(ahoraHabana()));
         }
