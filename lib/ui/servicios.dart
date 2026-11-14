@@ -158,6 +158,34 @@ class _HojaSalidaSinVentaState extends State<_HojaSalidaSinVenta> {
   }
 }
 
+/// Resumen de la franja «Hoy» de Vender, puro para test:
+/// dosis netas, efectivo neto y ventas por sincronizar.
+/// Yunque 4 (L2-4): el conteo de dosis netea con el signo
+/// del reverso (cantidad negativa), como ya netea el
+/// dinero desde K6-2 y como cuenta el cuadre de esta
+/// misma pantalla — antes el reverso se excluía del
+/// conteo y la pareja venta+reverso dejaba «1 dosis ·
+/// 0 CUP».
+(int, double, int) resumenFranjaDelDia(
+    List<Map<String, dynamic>> ventasHoy) {
+  var dosis = 0;
+  var efectivo = 0.0;
+  var porSincronizar = 0;
+  for (final v in ventasHoy) {
+    final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
+    final monto =
+        ((v['precio_unitario'] as num?)?.toDouble() ?? 0) * cant;
+    if ('${v['tipo']}' != 'agua_suelta') {
+      dosis += cant;
+    }
+    if ('${v['metodo']}' == 'efectivo') {
+      efectivo += monto;
+    }
+    if (v['en_cola'] == true) porSincronizar++;
+  }
+  return (dosis, efectivo, porSincronizar);
+}
+
 class ServiciosScreen extends StatefulWidget {
   /// Ítem 5 (post-1.8.0): el speed dial de Home abre la pantalla ya
   /// posicionada en un tipo de venta ('dosis_sin_agua' |
@@ -1721,27 +1749,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   /// efectivo neto y ventas por sincronizar — SIN saldos de
   /// pomos (pomo ciego también aquí). Tocarla lleva a Día.
   Widget _franjaDelDia() {
-    var dosis = 0;
-    var efectivo = 0.0;
-    var porSincronizar = 0;
-    for (final v in _ventasHoy) {
-      final esReverso = (v['reverso_de'] as num?) != null;
-      final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
-      final monto = ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
-          cant;
-      if (!esReverso && '${v['tipo']}' != 'agua_suelta') {
-        dosis += cant;
-      }
-      if ('${v['metodo']}' == 'efectivo') {
-        // Yunque 3 (K6-2): el monto del reverso ya nace
-        // negativo (cantidad negativa × precio positivo,
-        // convención del servidor): se suma CON SU SIGNO,
-        // sin segunda negación — la rama anterior lo sumaba
-        // al efectivo del día (venta 900 + reverso = 1800).
-        efectivo += monto;
-      }
-      if (v['en_cola'] == true) porSincronizar++;
-    }
+    final (dosis, efectivo, porSincronizar) =
+        resumenFranjaDelDia(_ventasHoy);
     final texto = _ventasHoy.isEmpty
         ? 'Hoy: sin ventas todavía'
         : 'Hoy: $dosis dosis · ${fmtMonto(efectivo)} CUP en efectivo'

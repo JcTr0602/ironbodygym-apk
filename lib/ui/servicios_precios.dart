@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
+import '../tipos_pago.dart';
 import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
@@ -215,7 +216,10 @@ class _ServiciosPreciosScreenState
     };
     final ef = cambios['servicio_precio_${stem}_efectivo'];
     if (ef != null &&
-        ef.toDouble() != (ajustes[legacyDe[stem]] as num?)?.toDouble()) {
+        // Yunque 4 (L2-3, clase K6-3): lector tolerante —
+        // el cast duro abortaba en silencio el guardado
+        // del grupo si la clave legacy venía en texto.
+        ef.toDouble() != montoAjusteTolerante(ajustes[legacyDe[stem]])) {
       cambios[legacyDe[stem]!] = ef;
     }
     if (cambios.isEmpty) {

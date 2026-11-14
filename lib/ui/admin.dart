@@ -1179,9 +1179,12 @@ class _AdminScreenState extends State<AdminScreen> {
       // FUENTE ÚNICA (precioMenoresDesdeAjustes: el tipo del
       // blob manda), no la clave fija legacy — el campo
       // enseñaba una cifra que podía no ser la cobrada.
+      // Yunque 4 (L2-2, clase K6-3): lector tolerante —
+      // el cast duro moría a mitad del bucle con la clave
+      // en texto y la foto de precios quedaba a medias.
       final num? v = clave == 'mensualidad_menores'
           ? precioMenoresDesdeAjustes(aj)
-          : aj[clave] as num?;
+          : montoAjusteTolerante(aj[clave]);
       _montos
           .putIfAbsent(clave, () => TextEditingController())
           .text = v != null

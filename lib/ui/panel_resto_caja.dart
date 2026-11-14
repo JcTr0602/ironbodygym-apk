@@ -26,6 +26,7 @@ import '../nomina_calc.dart';
 import '../nomina_foto.dart';
 import '../plus_reportes.dart';
 import '../tiempo.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'mi_nomina.dart' show BarraComposicionNomina;
@@ -834,12 +835,17 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     if (!AuthService().isOwner) return;
     final aj = await LocalDb.instance.getAjustes();
     for (final k in kClavesPreciosC6) {
+      // Yunque 4 (L2-1, clase K6-3): lector tolerante —
+      // con una clave en texto (edición por bot/SQL), el
+      // cast duro lanzaba TypeError y la pantalla quedaba
+      // en «Cargando precios…» eterno, sin poder editar
+      // ningún precio (ni la tasa que habría que corregir).
+      final valor = montoAjusteTolerante(aj[k]) ?? 0;
       // Pasada 2 de Argón (1.20): liberar el controlador
       // anterior si _cargar corre más de una vez.
       _ctrls[k]?.dispose();
-      _ctrls[k] = TextEditingController(
-          text: '${(aj[k] as num?)?.toDouble() ?? 0}');
-      _valores[k] = (aj[k] as num?)?.toDouble() ?? 0;
+      _ctrls[k] = TextEditingController(text: '$valor');
+      _valores[k] = valor;
       _focos[k]?.dispose();
       final foco = FocusNode();
       foco.addListener(() {
