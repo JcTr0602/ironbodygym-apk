@@ -148,4 +148,33 @@ void main() {
     expect(await NominaPrecalc.instance.asegurar(pref), 0);
     await db.close();
   });
+
+  test('Yunque 1.34 · C4-1 ADJUDICADO (no era defecto): encolar '
+      'anular_pago por queueOp invalida la huella y asegurar '
+      'descuenta el pago en el acto', () async {
+    final db = await _abrirDbVacia();
+    final pref = NominaCalc.prefMesActual();
+    await _insertarPago(db,
+        id: 1, clienteId: 10, fecha: '$pref-03', syncSeq: 1);
+    expect(await NominaPrecalc.instance.asegurar(pref), 1);
+    final hAntes = await NominaPrecalc.instance.huella();
+
+    // El camino REAL de anulación (ficha/pago): queueOp, que en
+    // la misma transacción marca anulado=1 en el espejo
+    // (marcarPagoAnuladoEnEspejo, 1.23) — y esa bandera entra
+    // en la tupla de negocio de la huella. El hallazgo C4-1 del
+    // Yunque suponía que encolar no tocaba el espejo: este test
+    // fija que sí, y que el precálculo lo ve al instante.
+    await LocalDb.instance.queueOp(
+      opUuid: 'y1-c4-1-anular',
+      tipo: 'anular_pago',
+      payload: {'pago_id': 1},
+    );
+    final hDespues = await NominaPrecalc.instance.huella();
+    expect(hDespues, isNot(hAntes),
+        reason: 'la marca optimista debe mover la huella');
+    expect(await NominaPrecalc.instance.asegurar(pref), 0,
+        reason: 'el pago anulado sale de la base sin esperar al pull');
+    await db.close();
+  });
 }
