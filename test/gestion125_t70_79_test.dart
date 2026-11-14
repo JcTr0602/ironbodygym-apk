@@ -54,15 +54,24 @@ void main() {
   });
 
   test('T79: totales de mis ventas del mes por tipo', () {
+    // Yunque 2.34 (C-1): las filas llevan la forma REAL del
+    // espejo. El fixture viejo sembraba una clave `monto` que
+    // servicio_ventas no tiene y la tarjeta «Dosis» sumaba 0
+    // en producción con el test verde.
     final t = totalesVentasMesPorTipo([
-      {'origen': 'servicio', 'fecha': '2026-11-03', 'monto': 600},
-      {'origen': 'servicio', 'fecha': '2026-11-04', 'monto': 900},
-      {'origen': 'suplemento', 'fecha': '2026-11-05', 'precio': 2500},
-      {'origen': 'suplemento', 'fecha': '2026-10-31', 'precio': 9999},
+      // Servicio: precio_unitario × cantidad (600 y 450×2).
+      {'origen': 'servicio', 'fecha': '2026-11-03', 'precio_unitario': 600, 'cantidad': 1},
+      {'origen': 'servicio', 'fecha': '2026-11-04', 'precio_unitario': 450, 'cantidad': 2},
+      // Suplemento: manda el total registrado (2500×2).
+      {'origen': 'suplemento', 'fecha': '2026-11-05', 'precio': 2500, 'cantidad': 2, 'total': 5000},
+      // Suplemento USD: no entra en la tarjeta rotulada CUP.
+      {'origen': 'suplemento', 'fecha': '2026-11-06', 'precio': 20, 'cantidad': 1, 'total': 20, 'moneda': 'USD'},
+      // Fuera del mes: no entra.
+      {'origen': 'suplemento', 'fecha': '2026-10-31', 'precio': 9999, 'cantidad': 1},
     ], '2026-11');
     expect(t.dosis, 1500);
     expect(t.nDosis, 2);
-    expect(t.suplementos, 2500);
+    expect(t.suplementos, 5000);
     expect(t.nSuplementos, 1);
   });
 }

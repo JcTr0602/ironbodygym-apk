@@ -15,7 +15,10 @@ import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtFecha, totalVentaRegistrado;
+import '../negocio.dart'
+    show esFiadoPendienteVenta, fmtFecha, totalVentaRegistrado;
+
+export '../negocio.dart' show esFiadoPendienteVenta;
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
@@ -30,19 +33,14 @@ import '../app_log.dart';
 /// 3000.00 USD). La moneda ausente es CUP, igual que en
 /// HistorialVentasScreen._totales(). PURO.
 /// Yunque R5-M4-1: predicado de fiado pendiente con la forma
-/// TOLERANTE canónica de negocio.dart (un flag vale si es 1 o
-/// true). La copia local de la pantalla usaba el cast numérico
-/// estricto: una venta cuyo `es_fiado` llegara como bool true
-/// quedaba FUERA de «Por cobrar» mientras negocio la contaba
-/// como fiado — la deuda desaparecía de la superficie de cobro.
-bool esFiadoPendienteVenta(Map<String, dynamic> v) {
-  final esFiado = v['es_fiado'] == 1 || v['es_fiado'] == true;
-  if (!esFiado) return false;
-  // Ya saldado (el servidor lo marca; tolerante si aún no llega).
-  final saldado =
-      v['fiado_saldado'] == 1 || v['fiado_saldado'] == true;
-  return !saldado;
-}
+/// TOLERANTE canónica (un flag vale si es 1 o true). La copia
+/// local de la pantalla usaba el cast numérico estricto: una
+/// venta cuyo `es_fiado` llegara como bool true quedaba FUERA
+/// de «Por cobrar» mientras negocio la contaba como fiado —
+/// la deuda desaparecía de la superficie de cobro.
+/// Yunque 2.34 (E-1): la definición vive AHORA en
+/// negocio.dart (`esFiadoPendienteVenta`) y esta pantalla la
+/// re-exporta para sus importadores históricos.
 
 ({double cup, double usd}) totalesFiados(
     List<Map<String, dynamic>> fiados) {

@@ -13,7 +13,8 @@ import '../adelantos.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
-import '../negocio.dart' show esPagoAnulado;
+import '../negocio.dart'
+    show esPagoAnulado, fmtMonto, totalVentaRegistrado;
 import '../nomina_bonos.dart';
 import '../nomina_calc.dart';
 import '../perfil.dart';
@@ -114,7 +115,13 @@ List<List<String>> filasVentasMes(
           ? (nombreProducto[prodId] ?? 'Producto $prodId')
           : 'Producto',
       '${(v['cantidad'] as num?)?.toInt() ?? 0}',
-      '${v['total'] ?? v['precio'] ?? ''}',
+      // Yunque 2.34 (C-3): el total REGISTRADO manda
+      // (totalVentaRegistrado). La tabla del servidor no
+      // trae columna `total` en la fila del espejo, así que
+      // el fallback viejo (el precio unitario, sin multiplicar
+      // por la cantidad) era el camino COMÚN: la hoja
+      // entregada al dueño sub-declaraba cada venta múltiple.
+      fmtMonto(totalVentaRegistrado(v)),
       '${v['moneda'] ?? 'CUP'}',
       '${v['comprador_nombre'] ?? ''}',
       // Yunque 1.34 (C2-1): la columna se titula «vendedor» y

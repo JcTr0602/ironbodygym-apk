@@ -1061,9 +1061,14 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     final tipo = v['origen'] == 'suplemento'
         ? 'suplemento'
         : ('${v['tipo'] ?? 'servicio'}');
-    final monto = v['monto'] ?? v['precio'] ?? v['total'];
-    final montoTxt =
-        monto != null ? ' · ${fmtMonto(monto)} CUP' : '';
+    // Yunque 2.34 (C-1): mismo monto que la tarjeta
+    // (montoVentaMisVentas) y la moneda REAL de la fila:
+    // una venta en USD se rotulaba CUP.
+    final monto = montoVentaMisVentas(v);
+    final moneda = v['origen'] == 'suplemento'
+        ? LocalDb.monedaDe(v)
+        : 'CUP';
+    final montoTxt = ' · ${fmtMonto(monto)} $moneda';
     return '· $fechaCorta · $cliente · $tipo$montoTxt';
   }
 
@@ -1202,9 +1207,29 @@ String textoReciboNomina({
 
 /// 1.25 T79: totales de mis ventas del mes [prefijoMes]
 /// ('AAAA-MM') separados por tipo: dosis/servicios
+/// Monto de UNA fila de «Mis ventas» según su forma REAL en
+/// el espejo (Yunque 2.34, C-1): la fila de SERVICIO no trae
+/// monto/precio/total — trae `precio_unitario` × `cantidad`
+/// (la misma regla de ServiciosScreen); la de SUPLEMENTO se
+/// valora por el total REGISTRADO (totalVentaRegistrado: la
+/// columna total manda; si falta, precio × cantidad). La
+/// cadena vieja (monto ?? precio ?? total) dejaba «Dosis»
+/// SIEMPRE en 0 y «Suplementos» en el unitario, y el test
+/// T79 no lo cazaba porque sembraba filas con una clave
+/// `monto` que el espejo real no tiene.
+double montoVentaMisVentas(Map<String, dynamic> v) {
+  if (v['origen'] == 'suplemento') return totalVentaRegistrado(v);
+  return ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
+      ((v['cantidad'] as num?)?.toDouble() ?? 0);
+}
+
 /// contra suplementos, con sus conteos. La clasificación
 /// es la de la lista (`origen`); el monto sale de
-/// monto/precio/total, como en `_textoVenta`.
+/// [montoVentaMisVentas], como en `_textoVenta`. Las
+/// tarjetas se rotulan CUP: las ventas de suplemento en USD
+/// no se suman ni se cuentan aquí (sumarlas como CUP era el
+/// otro brazo de C-1); la fila individual sí las muestra,
+/// con su moneda.
 ({double dosis, double suplementos, int nDosis, int nSuplementos})
     totalesVentasMesPorTipo(
         List<Map<String, dynamic>> ventas, String prefijoMes) {
@@ -1217,11 +1242,9 @@ String textoReciboNomina({
     if (prefijoMes.isNotEmpty && !fecha.startsWith(prefijoMes)) {
       continue;
     }
-    final monto =
-        ((v['monto'] ?? v['precio'] ?? v['total']) as num?)
-                ?.toDouble() ??
-            0;
+    final monto = montoVentaMisVentas(v);
     if (v['origen'] == 'suplemento') {
+      if (LocalDb.monedaDe(v) == 'USD') continue;
       suplementos += monto;
       nSuplementos++;
     } else {

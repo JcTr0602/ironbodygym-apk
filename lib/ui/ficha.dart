@@ -4479,16 +4479,21 @@ class _FichaScreenState extends State<FichaScreen> {
         'titulo':
             '${s['suplemento_nombre'] ?? s['nombre'] ?? 'Suplemento'} x${s['cantidad'] ?? 1}',
         'subtitulo':
-            '${fmtFecha(s['fecha'] as String?)} · ${(s['moneda'] ?? 'CUP')}${esFiado ? ' · FIADO' : ''}',
+            '${fmtFecha(s['fecha'] as String?)} · ${LocalDb.monedaDe(s)}${esFiado ? ' · FIADO' : ''}',
+        // Yunque 2.34 (C-2/E-3): el total REGISTRADO manda
+        // (totalVentaRegistrado, la regla de C4-3): con el
+        // precio unitario solo, una venta de cantidad 2 se
+        // veía y sumaba a la mitad en la fila, en los
+        // subtotales por mes y en «Comprado en total».
         'trailing':
-            '${fmtMonto((s['precio'] as num?)?.toDouble() ?? 0)} ${(s['moneda'] ?? 'CUP')}',
+            '${fmtMonto(totalVentaRegistrado(s))} ${LocalDb.monedaDe(s)}',
         'icono': Icons.shopping_bag_rounded,
         'color': AppColores.naranja,
         // 1.30 FICHA-05: monto estructurado para las
         // sumas de la cabecera de mes (antes solo vivía
         // como texto en 'trailing').
-        'montoVenta': (s['precio'] as num?)?.toDouble() ?? 0,
-        'monedaVenta': '${s['moneda'] ?? 'CUP'}',
+        'montoVenta': totalVentaRegistrado(s),
+        'monedaVenta': LocalDb.monedaDe(s),
       });
     }
     for (final s in _serviciosHist) {

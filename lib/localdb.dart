@@ -2518,26 +2518,41 @@ class LocalDb {
 
   /// v1.8.0: fiado de suplementos PENDIENTE de un cliente, por
   /// moneda ({'CUP': x, 'USD': y}; 0.0 si no debe en esa moneda).
-  /// Misma semántica que Cuentas por Cobrar: venta con es_fiado=1
-  /// y no saldada, cuyo deudor es el cliente; el monto es
-  /// cantidad × precio. Lo usa el diálogo de eliminar conservando
-  /// estadísticas para avisar de que la deuda se dará por
-  /// incobrable (candado 3 de Argón).
+  /// Misma semántica que Cuentas por Cobrar: venta fiada y no
+  /// saldada cuyo deudor es el cliente. Lo usa el diálogo de
+  /// eliminar conservando estadísticas para avisar de que la
+  /// deuda se dará por incobrable (candado 3 de Argón) y el
+  /// aviso de fiado al enviar el cliente a la Papelera.
   /// v61 (P1): sigue con allMirror a propósito — el deudor es
   /// fiado_cliente_id ?? cliente_id, una clave con fallback que
   /// no es igualdad sobre una sola columna indexable.
+  /// Yunque 2.34 (E-1): antes repetía la comprobación con cast
+  /// estricto (es_fiado en bool true quedaba FUERA), la moneda
+  /// cruda ('usd' en minúsculas abría un tercer cubo que
+  /// ningún lector mira) y cantidad × precio en vez del total
+  /// registrado — la misma venta era deuda distinta (o
+  /// ninguna) aquí que en Cuentas por cobrar. Esta capa no
+  /// importa negocio.dart: se replica en línea la forma
+  /// tolerante de `esFiadoPendienteVenta` y la regla de
+  /// `totalVentaRegistrado` (la columna total manda), y la
+  /// moneda se normaliza con [monedaDe].
   Future<Map<String, double>> fiadoPendienteDeCliente(
       int clienteId) async {
     final tot = <String, double>{'CUP': 0.0, 'USD': 0.0};
     for (final v in await allMirror('ventas_suplementos')) {
-      if ((v['es_fiado'] as num?)?.toInt() != 1) continue;
-      if ((v['fiado_saldado'] as num?)?.toInt() == 1) continue;
+      final esFiado = v['es_fiado'] == 1 || v['es_fiado'] == true;
+      if (!esFiado) continue;
+      final saldado =
+          v['fiado_saldado'] == 1 || v['fiado_saldado'] == true;
+      if (saldado) continue;
       final deudor = (v['fiado_cliente_id'] as num?)?.toInt() ??
           (v['cliente_id'] as num?)?.toInt();
       if (deudor != clienteId) continue;
-      final moneda = '${v['moneda'] ?? 'CUP'}';
-      final monto = ((v['cantidad'] as num?)?.toDouble() ?? 0) *
-          ((v['precio'] as num?)?.toDouble() ?? 0);
+      final moneda = monedaDe(v);
+      final totalCol = (v['total'] as num?)?.toDouble();
+      final monto = totalCol ??
+          ((v['precio'] as num?)?.toDouble() ?? 0) *
+              ((v['cantidad'] as num?)?.toInt() ?? 0);
       tot[moneda] = (tot[moneda] ?? 0) + monto;
     }
     return tot;

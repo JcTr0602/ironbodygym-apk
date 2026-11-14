@@ -1002,6 +1002,23 @@ double totalVentaRegistrado(Map<String, dynamic> v) {
   return precio * cant;
 }
 
+/// Yunque 2.34 (E-1): predicado CANÓNICO de fiado pendiente
+/// con la forma tolerante de la casa (un flag vale si es 1 o
+/// true; el servidor puede entregar bool). Vivía como copia
+/// local en Cuentas por cobrar mientras
+/// LocalDb.fiadoPendienteDeCliente repetía la comprobación
+/// con cast estricto: una venta con `es_fiado` en bool true
+/// era deuda en una superficie e invisible en la otra (no
+/// avisaba al enviar el cliente a la Papelera). LocalDb no
+/// importa este archivo (capas): replica la forma tolerante
+/// en línea con un comentario que apunta aquí.
+bool esFiadoPendienteVenta(Map<String, dynamic> v) {
+  final esFiado = v['es_fiado'] == 1 || v['es_fiado'] == true;
+  if (!esFiado) return false;
+  final saldado = v['fiado_saldado'] == 1 || v['fiado_saldado'] == true;
+  return !saldado;
+}
+
 /// Ventas de suplementos en CUP del espejo local.
 /// Argón P3#2 (parte fiados, REAL): una venta al fiado sin saldar no es
 /// ingreso ni pendiente a entregar hasta saldarse, así que queda fuera
