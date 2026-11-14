@@ -239,7 +239,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                     _seccionAvisos(),
                   ],
                   const SizedBox(height: 16),
-                  _seccionCobertura(),
+                  _seccionDetalleTecnico(),
                   const SizedBox(height: 16),
                   _seccionHistorial(),
                   const SizedBox(height: 16),
@@ -319,26 +319,36 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   /// denominador SOLO si el servidor publica conteos, y
   /// etiquetado «total publicado» (H-5/H-6 de la
   /// adjudicación: jamás un «de Y» inventado).
-  Widget _seccionCobertura() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('En este teléfono', style: AppTexto.subtitulo),
-        const SizedBox(height: 4),
-        Text(
-          _publicados == null
-              ? 'El servidor aún no publica los totales por '
-                  'tabla: se muestra solo lo que hay en el '
-                  'teléfono.'
-              : 'El «total publicado» es el conteo que el '
-                  'servidor declara por tabla.',
-          style: AppTexto.minuscula.copyWith(
-              color: AppColores.textoSecundario(context)),
-        ),
-        const SizedBox(height: 8),
-        Tarjeta(
-          child: Column(
+  ///
+  /// 1.35 (UI-19): la cobertura por tabla es el detalle
+  /// técnico del Centro: baja a la sección plegable
+  /// «Detalle técnico» (cerrada al entrar). El primer
+  /// nivel de la pantalla es el veredicto de mostrador,
+  /// los avisos y el historial en palabras llanas.
+  Widget _seccionDetalleTecnico() {
+    return Tarjeta(
+      padding: EdgeInsets.zero,
+      child: ExpansionTile(
+        title: const Text('Detalle técnico',
+            style: AppTexto.subtitulo),
+        subtitle: const Text('Conteos por tabla en este teléfono'),
+        childrenPadding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.lg),
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                _publicados == null
+                    ? 'El servidor aún no publica los totales por '
+                        'tabla: se muestra solo lo que hay en el '
+                        'teléfono.'
+                    : 'El «total publicado» es el conteo que el '
+                        'servidor declara por tabla.',
+                style: AppTexto.minuscula.copyWith(
+                    color: AppColores.textoSecundario(context)),
+              ),
+              const SizedBox(height: 8),
               for (final t in _tablasRol)
                 Padding(
                   padding:
@@ -362,8 +372,8 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                 ),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -454,6 +464,41 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
       ],
     );
   }
+}
+
+/// 1.35 (UI-19): el veredicto del Centro en lenguaje de
+/// mostrador — UNA frase que responde «¿estoy al día?»
+/// sin saber qué es una corrida ni una cola. PURA.
+/// El orden manda: lo que se puede ACCIONAR va primero
+/// (faltan por subir), el fallo después; «sin verificar»
+/// (enLinea/hayNovedades null) nunca afirma «al día» por
+/// la puerta de atrás: sin conexión comprobada y sin
+/// error, con la cola vacía, el veredicto es «al día»
+/// solo si tampoco hay señal contraria.
+String resumenMostradorSync({
+  required bool corriendo,
+  required int pendientes,
+  required bool? enLinea,
+  required bool hayError,
+  required bool? hayNovedades,
+}) {
+  if (corriendo) return 'Sincronizando ahora…';
+  if (pendientes > 0) {
+    return pendientes == 1
+        ? 'Falta 1 por subir'
+        : 'Faltan $pendientes por subir';
+  }
+  if (hayError) {
+    return 'La última sincronización falló: toca '
+        '«Sincronizar ahora»';
+  }
+  if (enLinea == false) {
+    return 'Sin conexión: todo se subirá solo cuando vuelva';
+  }
+  if (hayNovedades == true) {
+    return 'Hay novedades por bajar del servidor';
+  }
+  return 'Todo al día';
 }
 
 /// Detalle de UNA corrida del diario (M3): por tabla —
@@ -700,6 +745,16 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
   Widget build(BuildContext context) {
     final st = _st;
     final corriendo = st.phase != SyncPhase.idle;
+    // 1.35 (UI-19): el titular de la tarjeta es el
+    // veredicto en lenguaje de mostrador; el detalle de
+    // la fase queda debajo, como hasta ahora.
+    final veredicto = resumenMostradorSync(
+      corriendo: corriendo,
+      pendientes: st.pending,
+      enLinea: st.enLinea,
+      hayError: st.lastError != null,
+      hayNovedades: st.hayNovedades,
+    );
     return Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -709,15 +764,19 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
               Icon(
                 corriendo
                     ? Icons.sync_rounded
-                    : Icons.check_circle_rounded,
-                color: corriendo ? AppColores.info : AppColores.exito,
+                    : st.lastError != null
+                        ? Icons.error_outline_rounded
+                        : Icons.check_circle_rounded,
+                color: corriendo
+                    ? AppColores.info
+                    : st.lastError != null
+                        ? AppColores.error
+                        : AppColores.exito,
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  corriendo
-                      ? 'Sincronizando ahora'
-                      : 'Sin sincronización en curso',
+                  veredicto,
                   style: AppTexto.subtitulo,
                 ),
               ),
