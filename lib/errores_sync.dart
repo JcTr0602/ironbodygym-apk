@@ -697,6 +697,11 @@ const Map<String, String> _frasesCompletasErrorSync = {
       'reintentará en el próximo ciclo.',
   'subida_incompleta': 'La subida dejó operaciones sin '
       'enviar; se reintentarán en el próximo ciclo.',
+  // 1.34 Campo 2 (P-9): la corrida manual agotó su
+  // presupuesto global de tiempo/red.
+  'presupuesto_agotado': 'La sincronización se detuvo al '
+      'agotar su presupuesto de tiempo y red; lo que bajó '
+      'quedó aplicado y el resto seguirá en el próximo ciclo.',
 };
 
 /// Causa corta y llana por código de excepción clasificada,

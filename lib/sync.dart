@@ -2874,6 +2874,33 @@ class SyncEngine {
             presupuesto: const Duration(seconds: 60),
             maxFallosTransporte: 3)
         : null;
+    // 1.34 Campo 2 (P-9, evidencia S19 de la Jornada 2):
+    // la corrida MANUAL también lleva presupuesto — UNO
+    // solo, GLOBAL y compartido por push, pull (tablas +
+    // borrados + incidencias) y los reintentos del pull.
+    // Antes la corrida manual no tenía corte en ninguna
+    // pierna: contra una red colgada, el peor caso medido
+    // era ~65–75 min solo de pull (3 intentos × ~25 min)
+    // más la subida sin tope. 4 min acotan el gesto sin
+    // estrangular un enlace lento pero vivo (las tablas
+    // son páginas pequeñas; una corrida sana en 3G cabe).
+    // El cortacircuitos de 3 fallos de transporte es el
+    // mismo de siempre (lo alimenta _download por tabla).
+    // Lo aplicado hasta el corte queda aplicado
+    // (watermarks por tabla) y lo pendiente espera al
+    // próximo ciclo: la idempotencia por op_uuid no se
+    // toca. El manifiesto conserva SU corte propio de
+    // 150 s (corre solo tras una corrida completa y una
+    // vez al día; compartirle un presupuesto ya agotado
+    // lo marcaría «intento fallido» hasta mañana).
+    // El arranque conserva intacto su corte de 60 s.
+    final corteManual = esArranque
+        ? null
+        : CorteManifiesto(
+            presupuesto: const Duration(minutes: 4),
+            maxFallosTransporte: 3);
+    final cortePull = corteArranque ?? corteManual;
+    var corteAgotadoCorrida = false;
     // v1.3.1 (E1): si es manual y hay un ciclo en curso, esperar hasta 30s.
     if (forzar) {
       var espera = 0;
@@ -2920,7 +2947,8 @@ class SyncEngine {
               const SyncProgress(
                   fase: SyncFase.subiendo,
                   mensaje: 'Subiendo operaciones...'));
-          subidos = await _doPush(forzar: forzar, onProgreso: onProgreso);
+          subidos = await _doPush(
+              forzar: forzar, onProgreso: onProgreso, corte: corteManual);
           // Auditoría Definitiva (A-2): «no lanzó» ya no basta
           // para dar el push por bueno: _uploadOps traga los
           // fallos del POST con bumps y _doPush retorna normal
@@ -2972,11 +3000,19 @@ class SyncEngine {
           // 1.28 (M1-A1): cada intento de pull verifica que el
           // ciclo sigue siendo el dueño del lock.
           _exigirLockVivo();
+          // 1.34 Campo 2 (P-9): con el presupuesto de la
+          // corrida agotado no se abre otro intento de pull
+          // (cada intento nuevo volvería a quemar timeouts
+          // tabla a tabla contra la misma red muerta).
+          if (cortePull != null && cortePull.agotado) {
+            corteAgotadoCorrida = true;
+            break;
+          }
           try {
             // v1.8.0: sumar lo bajado en CADA intento (un intento
             // que avanza el watermark y falla después ya bajó
             // filas reales).
-            bajados += await _doPull(corte: corteArranque);
+            bajados += await _doPull(corte: cortePull);
           } catch (e) {
             // 1.28 (M1-A1): la pérdida del lock no es un fallo
             // de pull reintentable: aborta el ciclo entero.
@@ -3105,6 +3141,25 @@ class SyncEngine {
               bajados: bajados,
               motivo: msgCaida,
               error: msgCaida);
+        } else if (corteAgotadoCorrida && !completo) {
+          // 1.34 Campo 2 (P-9): la corrida se detuvo por su
+          // presupuesto global, no por un fallo de una pierna:
+          // el veredicto lo dice con su nombre. Lo bajado
+          // quedó aplicado (watermarks por tabla) y lo
+          // pendiente sigue en su sitio para el próximo
+          // ciclo; el sello de sync buena NO avanza.
+          const msgCorte = 'La sincronización se detuvo al '
+              'agotar su presupuesto de tiempo y red; lo que '
+              'bajó quedó aplicado y el resto seguirá en el '
+              'próximo ciclo.';
+          await _persistirErrorCorrida(
+              codigo: 'presupuesto_agotado', pierna: 'ciclo');
+          errorCorrida = msgCorte;
+          _diarioVeredicto(EstadoCorrida.parcial,
+              subidos: subidos,
+              bajados: bajados,
+              motivo: msgCorte,
+              error: msgCorte);
         } else if (completo && pushOk) {
           await _marcarOk();
           await _limpiarErrorCorrida();
@@ -3915,7 +3970,10 @@ class SyncEngine {
   Future<int> _doPush(
       {bool forzar = false,
       bool desdeForeground = false,
-      void Function(SyncProgress)? onProgreso}) async {
+      void Function(SyncProgress)? onProgreso,
+      // 1.34 Campo 2 (P-9): presupuesto compartido de la
+      // corrida (solo lo pasa run() en corridas manuales).
+      CorteManifiesto? corte}) async {
     // v1.2.9+46 (AppLog): inicio de push.
     AppLog.info('sync', 'push_ini');
     // Auditoría Definitiva (A-2): el veredicto de limpieza de
@@ -3948,7 +4006,7 @@ class SyncEngine {
       try {
         pendientesAlEntrar = await _db.countPendingOps();
       } catch (_) {}
-      final resPush1 = await _uploadOps(forzar: forzar);
+      final resPush1 = await _uploadOps(forzar: forzar, corte: corte);
       var totalOps = resPush1.aplicadas;
       final uuidsPush = <String>[...resPush1.uuids];
       AppLog.info('sync', 'ops_enviadas', d: 'n=$totalOps');
@@ -4060,7 +4118,7 @@ class SyncEngine {
       if (!abortadoPorAuth &&
           (fotosSubidas > 0 || pendientesTrasFotos > 0)) {
         // v1.2.9+46 (Gemini): sumar al total para last_uploaded.
-        final resPush2 = await _uploadOps(forzar: forzar);
+        final resPush2 = await _uploadOps(forzar: forzar, corte: corte);
         totalOps += resPush2.aplicadas;
         uuidsPush.addAll(resPush2.uuids);
       }
@@ -4729,7 +4787,21 @@ class SyncEngine {
       // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
       // Fix #11 (Sol): si falla, no se marca last_pull_ok general.
       var incidenciasOk = true;
+      // 1.34 Campo 2 (P-9): con el presupuesto de la corrida
+      // agotado, la pasada de incidencias ni se intenta (sus
+      // 4 sub-bajadas quemarían timeouts contra la misma
+      // red): queda como no-ok con su motivo, y el veredicto
+      // de la corrida lo nombra por el corte, no por fallo.
+      if (corte != null && corte.agotado) {
+        incidenciasOk = false;
+        _errorIncidenciasUltimaPasada =
+            'presupuesto de la corrida agotado';
+        AppLog.aviso('sync', 'incidencias_omitidas_corte');
+        await _db.setMeta('last_pull_incidencias_error',
+            'presupuesto de la corrida agotado');
+      }
       try {
+        if (incidenciasOk) {
         await _pullTiposIncidencia();
         await _pullIncidencias();
         // Argón A2: pull de tablas hijas de incidencias.
@@ -4739,6 +4811,7 @@ class SyncEngine {
         // (tabla inexistente en Supabase, 404 perpetuo).
         await _db.setMeta('last_pull_incidencias_ok',
             isoHabana(ahoraHabana()));
+        }
       } catch (e) {
         incidenciasOk = false;
         // Yunque B (YB-SYNC-03): el error de ESTA pasada,
@@ -5001,7 +5074,7 @@ class SyncEngine {
   /// (bulk + on_conflict para idempotencia), menos viajes de ida y vuelta
   /// con conexiones de alta latencia.
   Future<({int aplicadas, List<String> uuids, bool abortadoPorAuth})>
-      _uploadOps({bool forzar = false}) async {
+      _uploadOps({bool forzar = false, CorteManifiesto? corte}) async {
     var aplicadas = 0;
     // v1.3.5 (detalle Subidos): UUIDs confirmados en esta corrida, para
     // que el detalle liste exactamente lo que cuenta last_uploaded.
@@ -5190,6 +5263,15 @@ class SyncEngine {
     // repetiría el mismo fallo de sesión contra cada lote).
     var abortarPush = false;
     while (i < porEnviar.length) {
+      // 1.34 Campo 2 (P-9): presupuesto global de la corrida
+      // — agotado, no se abre un lote nuevo; las ops que
+      // quedan siguen pendientes (idempotencia por op_uuid
+      // intacta) y salen en el próximo ciclo.
+      if (corte?.agotado ?? false) {
+        AppLog.aviso('sync', 'push_corte_presupuesto',
+            d: 'quedan=${porEnviar.length - i}');
+        break;
+      }
       // 1.32 (O2F2S, adjudicación F-25): punto de control
       // por lote — si el ciclo perdió el lock (o arrancó
       // una purga, F-24), se detiene aquí en vez de seguir

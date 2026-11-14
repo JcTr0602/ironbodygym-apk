@@ -191,7 +191,12 @@ void main() {
       expect(sync.contains('presupuesto: const Duration(seconds: 60)'),
           isTrue);
       expect(sync.contains('maxFallosTransporte: 3)'), isTrue);
-      expect(sync.contains('_doPull(corte: corteArranque)'), isTrue);
+      // 1.34 Campo 2 (P-9): el corte del arranque viaja ahora
+      // como cortePull (corteArranque ?? corteManual); con
+      // esArranque es exactamente el de 60 s de siempre.
+      expect(sync.contains('_doPull(corte: cortePull)'), isTrue);
+      expect(sync.contains('final cortePull = corteArranque ?? corteManual'),
+          isTrue);
       expect(sync.contains('_download(silencioso: silencioso, corte: corte)'),
           isTrue);
       // La guarda vive en el bucle de tablas y en borrados, y
