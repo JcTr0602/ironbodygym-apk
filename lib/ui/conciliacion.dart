@@ -458,7 +458,7 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                           const EstadoVacio(
                             sinMarco: true,
                             ilustracion:
-                                'assets/vacio_calendario.jpg',
+                                'assets/vacio_calendario.webp',
                             icono: Icons.event_available_rounded,
                             titulo: 'No hay transferencias '
                                 'esperando comprobación.',

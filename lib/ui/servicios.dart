@@ -1794,7 +1794,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     if (_ventasHoy.isEmpty)
                       const EstadoVacio(
                         sinMarco: true,
-                        ilustracion: 'assets/vacio_caja.jpg',
+                        ilustracion: 'assets/vacio_caja.webp',
                         icono: Icons.receipt_long_rounded,
                         titulo: 'Sin ventas registradas hoy.',
                         subtitulo: 'Las ventas de hoy aparecen aquí.',
