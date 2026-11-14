@@ -598,6 +598,83 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     return diaIso;
   }
 
+  // 1.34 (C-48 · G-01): los filtros de la Auditoría van
+  // PLEGADOS — regla de diseño de Jc: nada de regueros de
+  // opciones sueltas ocupando espacio permanente. Las dos
+  // filas de chips (alcance + recortes) se resumen en UN botón
+  // en la fila del buscador que nombra el estado vigente y
+  // abre la hoja de filtros (molde de Actividad).
+  String _etiquetaAlcance(FiltroAuditoria f) => switch (f) {
+        FiltroAuditoria.otrosYAlertas => 'Otros y alertas',
+        FiltroAuditoria.todo => 'Todo',
+        FiltroAuditoria.soloMias => 'Solo mías',
+      };
+
+  String _resumenFiltrosAuditoria() {
+    final partes = <String>['Filtrar', _etiquetaAlcance(_filtro)];
+    if (_soloHoy) partes.add('Hoy');
+    if (_actorFiltro != null) partes.add(_actorFiltro!);
+    return partes.join(' · ');
+  }
+
+  Widget _botonFiltrosAuditoria(bool esDueno) {
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.filter_list_rounded, size: 16),
+      label: Text(_resumenFiltrosAuditoria(),
+          style: AppTexto.metadato,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: () => _abrirFiltrosAuditoria(esDueno),
+    );
+  }
+
+  Future<void> _abrirFiltrosAuditoria(bool esDueno) async {
+    final actores = <String>{};
+    for (final o in _ops) {
+      final a = _usuario(o);
+      if (a.isNotEmpty) actores.add(a);
+    }
+    final r = await showModalBottomSheet<
+        ({FiltroAuditoria alcance, bool soloHoy, String? actor})>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => _HojaFiltrosAuditoria(
+        alcance: _filtro,
+        soloHoy: _soloHoy,
+        actor: _actorFiltro,
+        esDueno: esDueno,
+        actores: actores.toList()..sort(),
+      ),
+    );
+    if (r == null || !mounted) return;
+    setState(() {
+      _filtro = r.alcance;
+      _soloHoy = r.soloHoy;
+      _actorFiltro = r.actor;
+      // Argón Gmail_1-14 #3 (regla que ya vivía en el chip
+      // «Por entrenador»): «Solo mías» + otro entrenador =
+      // lista vacía sin explicación; al filtrar por otro
+      // actor el alcance pasa a «Todo».
+      if (r.actor != null &&
+          r.actor!.isNotEmpty &&
+          _filtro == FiltroAuditoria.soloMias &&
+          r.actor != _miActor) {
+        _filtro = FiltroAuditoria.todo;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final hoy = hoyHabanaIso();
@@ -690,7 +767,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
           if (!_cargando && _ops.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: TextField(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: TextField(
                 controller: _busquedaCtrl,
                 decoration: InputDecoration(
                   hintText: 'Buscar por cliente o tipo…',
@@ -708,143 +789,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                   isDense: true,
                 ),
                 onChanged: (v) => setState(() => _busqueda = v),
-              ),
-            ),
-          // v1.6.0 (Jc): selector de filtro, visible y cambiable
-          // en un toque. La vista inicial es «Otros y alertas».
-          if (!_cargando && _ops.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    if (esDueno) ...[
-                      ChoiceChip(
-                        label: const Text('Otros y alertas'),
-                        selected:
-                            _filtro == FiltroAuditoria.otrosYAlertas,
-                        onSelected: (_) => setState(
-                            () => _filtro = FiltroAuditoria.otrosYAlertas),
-                      ),
-                      const SizedBox(width: 8),
-                      ChoiceChip(
-                        label: const Text('Todo'),
-                        selected: _filtro == FiltroAuditoria.todo,
-                        onSelected: (_) =>
-                            setState(() => _filtro = FiltroAuditoria.todo),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    ChoiceChip(
-                      label: const Text('Solo mías'),
-                      selected: _filtro == FiltroAuditoria.soloMias,
-                      onSelected: (_) => setState(
-                          () => _filtro = FiltroAuditoria.soloMias),
                     ),
-                  ],
-                ),
-              ),
-            ),
-          // Módulo 6 (1.19): filtros rápidos — hoy y por entrenador.
-          // Se combinan con el filtro de actor de arriba.
-          if (!_cargando && _ops.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Hoy'),
-                      selected: _soloHoy,
-                      onSelected: (_) =>
-                          setState(() => _soloHoy = !_soloHoy),
-                    ),
-                    if (esDueno) ...[
-                      const SizedBox(width: 8),
-                      Builder(
-                        builder: (chipCtx) => ChoiceChip(
-                          label: Text(_actorFiltro ?? 'Por entrenador'),
-                          selected: _actorFiltro != null,
-                          onSelected: (_) async {
-                            final actores = <String>{};
-                            for (final o in _ops) {
-                              final a = _usuario(o);
-                              if (a.isNotEmpty) actores.add(a);
-                            }
-                            // Argón Gmail_1-14 #5: el menú se ancla
-                            // al chip (RenderBox), no a una
-                            // coordenada fija que se desfasa si la
-                            // barra superior crece.
-                            var position =
-                                const RelativeRect.fromLTRB(
-                                    12, 200, 100, 100);
-                            final boton = chipCtx.findRenderObject()
-                                as RenderBox?;
-                            final overlay = Overlay.of(chipCtx)
-                                .context
-                                .findRenderObject() as RenderBox?;
-                            if (boton != null && overlay != null) {
-                              position = RelativeRect.fromRect(
-                                Rect.fromPoints(
-                                  boton.localToGlobal(Offset.zero,
-                                      ancestor: overlay),
-                                  boton.localToGlobal(
-                                      boton.size.bottomRight(
-                                          Offset.zero),
-                                      ancestor: overlay),
-                                ),
-                                Offset.zero & overlay.size,
-                              );
-                            }
-                            final elegido =
-                                await showMenu<String>(
-                              popUpAnimationStyle: estiloAparicionMenu,
-                              context: context,
-                              position: position,
-                              items: [
-                                const PopupMenuItem(
-                                    value: '',
-                                    child: Text('Todos')),
-                                for (final a in actores.toList()..sort())
-                                  PopupMenuItem(
-                                      value: a, child: Text(a)),
-                              ],
-                            );
-                            // null = menú cerrado sin elegir: no se
-                            // toca el filtro. '' = «Todos» (quitarlo).
-                            if (elegido != null) {
-                              setState(() {
-                                _actorFiltro =
-                                    elegido.isEmpty ? null : elegido;
-                                // Argón Gmail_1-14 #3: «Solo mías»
-                                // + otro entrenador = lista vacía
-                                // sin explicación. Al elegir a otro
-                                // actor, el filtro base pasa a todo.
-                                if (elegido.isNotEmpty &&
-                                    _filtro ==
-                                        FiltroAuditoria.soloMias &&
-                                    elegido != _miActor) {
-                                  _filtro = FiltroAuditoria.todo;
-                                }
-                              });
-                            }
-                          },
-                        ),
-                      ),
-                      if (_actorFiltro != null) ...[
-                        const SizedBox(width: 4),
-                        IconButton(
-                          icon: const Icon(Icons.clear_rounded, size: 18),
-                          tooltip: 'Quitar filtro',
-                          onPressed: () =>
-                              setState(() => _actorFiltro = null),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(child: _botonFiltrosAuditoria(esDueno)),
+                ],
               ),
             ),
           Expanded(
@@ -1346,4 +1295,148 @@ String descripcionOp(String tipo) {
       default:
         return tipo.replaceAll('_', ' ');
     }
+}
+
+/// 1.34 (C-48 · G-01): hoja de filtros de la Auditoría.
+/// Trabaja sobre una copia temporal: nada se aplica hasta
+/// tocar «Aplicar» (que devuelve el trío por el Navigator);
+/// «Limpiar» devuelve la copia a los valores por defecto.
+class _HojaFiltrosAuditoria extends StatefulWidget {
+  final FiltroAuditoria alcance;
+  final bool soloHoy;
+  final String? actor;
+  final bool esDueno;
+  final List<String> actores;
+
+  const _HojaFiltrosAuditoria({
+    required this.alcance,
+    required this.soloHoy,
+    required this.actor,
+    required this.esDueno,
+    required this.actores,
+  });
+
+  @override
+  State<_HojaFiltrosAuditoria> createState() =>
+      _HojaFiltrosAuditoriaState();
+}
+
+class _HojaFiltrosAuditoriaState extends State<_HojaFiltrosAuditoria> {
+  late FiltroAuditoria _alcance = widget.alcance;
+  late bool _soloHoy = widget.soloHoy;
+  late String? _actor = widget.actor;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Filtros', style: AppTexto.subtitulo),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Cerrar',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            const Text('Alcance', style: AppTexto.etiqueta),
+            RadioGroup<FiltroAuditoria>(
+              groupValue: _alcance,
+              onChanged: (v) =>
+                  setState(() => _alcance = v ?? _alcance),
+              child: Column(
+                children: [
+                  if (widget.esDueno) ...[
+                    const RadioListTile<FiltroAuditoria>(
+                      value: FiltroAuditoria.otrosYAlertas,
+                      title: Text('Otros y alertas'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const RadioListTile<FiltroAuditoria>(
+                      value: FiltroAuditoria.todo,
+                      title: Text('Todo'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                  const RadioListTile<FiltroAuditoria>(
+                    value: FiltroAuditoria.soloMias,
+                    title: Text('Solo mías'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            const Text('Recorte', style: AppTexto.etiqueta),
+            SwitchListTile(
+              value: _soloHoy,
+              onChanged: (v) => setState(() => _soloHoy = v),
+              title: const Text('Solo hoy'),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            if (widget.esDueno && widget.actores.isNotEmpty) ...[
+              const SizedBox(height: AppEspacio.sm),
+              const Text('Entrenador', style: AppTexto.etiqueta),
+              const SizedBox(height: AppEspacio.sm),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Todos'),
+                    selected: _actor == null,
+                    onSelected: (_) => setState(() => _actor = null),
+                  ),
+                  for (final a in widget.actores)
+                    ChoiceChip(
+                      label: Text(a),
+                      selected: _actor == a,
+                      onSelected: (_) => setState(() => _actor = a),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: AppEspacio.lg),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => setState(() {
+                    _alcance = widget.esDueno
+                        ? FiltroAuditoria.otrosYAlertas
+                        : FiltroAuditoria.soloMias;
+                    _soloHoy = false;
+                    _actor = null;
+                  }),
+                  child: const Text('Limpiar'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop((
+                    alcance: _alcance,
+                    soloHoy: _soloHoy,
+                    actor: _actor,
+                  )),
+                  child: const Text('Aplicar'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

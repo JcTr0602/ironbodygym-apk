@@ -340,6 +340,55 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     return lista;
   }
 
+  // 1.34 (C-48 · G-06): resumen del botón «Filtrar» — nombra
+  // los interruptores activos («Filtrar · PIN sin cambiar +
+  // Inactivos +30»); sin nada activo, «Filtrar» a secas.
+  String _resumenFiltrosAcceso() {
+    final partes = <String>[
+      if (_soloPinPendiente) 'PIN sin cambiar',
+      if (_soloInactivos30) 'Inactivos +30',
+    ];
+    return partes.isEmpty ? 'Filtrar' : 'Filtrar · ${partes.join(' + ')}';
+  }
+
+  Widget _botonFiltrosAcceso() {
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.filter_list_rounded, size: 16),
+      label: Text(_resumenFiltrosAcceso(),
+          style: AppTexto.metadato,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: _abrirFiltrosAcceso,
+    );
+  }
+
+  Future<void> _abrirFiltrosAcceso() async {
+    final r = await showModalBottomSheet<({bool pin, bool inactivos})>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => _HojaFiltrosAcceso(
+        pinPendiente: _soloPinPendiente,
+        inactivos30: _soloInactivos30,
+      ),
+    );
+    if (r == null || !mounted) return;
+    setState(() {
+      _soloPinPendiente = r.pin;
+      _soloInactivos30 = r.inactivos;
+    });
+  }
+
   bool get _hayFiltros =>
       _vista != 'todos' ||
       _busqueda.isNotEmpty ||
@@ -562,24 +611,17 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             ],
           ),
         ),
-        // Filtros extra (20-21) + contador (22) + limpiar (23)
+        // Filtros extra (20-21) + contador (22) + limpiar (23).
+        // 1.34 (C-48 · G-06): los dos FilterChip se PLIEGAN en
+        // el botón «Filtrar» con el resumen de lo activo; los
+        // interruptores viven en la hoja. El contador y el
+        // «Limpiar» de la fila se quedan (son información y
+        // acción global, no opciones sueltas).
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
           child: Row(
             children: [
-              FilterChip(
-                label: const Text('PIN sin cambiar'),
-                selected: _soloPinPendiente,
-                onSelected: (v) => setState(() => _soloPinPendiente = v),
-                visualDensity: VisualDensity.compact,
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              FilterChip(
-                label: const Text('Sin entrar +30 días'),
-                selected: _soloInactivos30,
-                onSelected: (v) => setState(() => _soloInactivos30 = v),
-                visualDensity: VisualDensity.compact,
-              ),
+              Flexible(child: _botonFiltrosAcceso()),
               const Spacer(),
               if (_hayFiltros)
                 TextButton(
@@ -1382,6 +1424,88 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
                     ),
                   ],
                 ),
+    );
+  }
+}
+
+/// 1.34 (C-48 · G-06): hoja de filtros de Control de acceso:
+/// los dos interruptores que antes eran FilterChip
+/// permanentes. Copia temporal con Aplicar/Limpiar.
+class _HojaFiltrosAcceso extends StatefulWidget {
+  final bool pinPendiente;
+  final bool inactivos30;
+
+  const _HojaFiltrosAcceso({
+    required this.pinPendiente,
+    required this.inactivos30,
+  });
+
+  @override
+  State<_HojaFiltrosAcceso> createState() => _HojaFiltrosAccesoState();
+}
+
+class _HojaFiltrosAccesoState extends State<_HojaFiltrosAcceso> {
+  late bool _pin = widget.pinPendiente;
+  late bool _inactivos = widget.inactivos30;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Filtros', style: AppTexto.subtitulo),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Cerrar',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            SwitchListTile(
+              value: _pin,
+              onChanged: (v) => setState(() => _pin = v),
+              title: const Text('PIN sin cambiar'),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            SwitchListTile(
+              value: _inactivos,
+              onChanged: (v) => setState(() => _inactivos = v),
+              title: const Text('Sin entrar +30 días'),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            const SizedBox(height: AppEspacio.lg),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => setState(() {
+                    _pin = false;
+                    _inactivos = false;
+                  }),
+                  child: const Text('Limpiar'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () => Navigator.of(context)
+                      .pop((pin: _pin, inactivos: _inactivos)),
+                  child: const Text('Aplicar'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

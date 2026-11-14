@@ -274,17 +274,6 @@ class _ServiciosHistorialCuerpoState
     return lista;
   }
 
-  Widget _chip(String clave, String texto) {
-    return Padding(
-      padding: const EdgeInsets.only(right: AppEspacio.sm),
-      child: ChoiceChip(
-        label: Text(texto),
-        selected: _filtroTipo == clave,
-        onSelected: (_) => setState(() => _filtroTipo = clave),
-      ),
-    );
-  }
-
   /// Desplaza a la venta resaltada y la tiñe (4/25). Si no está en la
   /// lista visible, no hace nada.
   void _irAResaltado() {
@@ -295,6 +284,66 @@ class _ServiciosHistorialCuerpoState
     setState(() => _resaltado = id);
     Scrollable.ensureVisible(ctx,
         duration: const Duration(milliseconds: 400), alignment: 0.5);
+  }
+
+  // 1.34 (C-48 · G-03): resumen del botón de filtros —
+  // nombra el tipo activo y, si lo hay, el vendedor.
+  String _resumenFiltrosServicios() {
+    final partes = <String>[
+      'Filtrar',
+      etiquetaTipoHistorialServicio(_filtroTipo),
+    ];
+    if (_filtroVendedor != null) {
+      partes.add(_nombreVendedor(
+          _filtroVendedor!, _respaldoPorTid[_filtroVendedor!]));
+    }
+    return partes.join(' · ');
+  }
+
+  Widget _botonFiltrosServicios(List<int> vendedores) {
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.filter_list_rounded, size: 16),
+      label: Text(_resumenFiltrosServicios(),
+          style: AppTexto.metadato,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: () => _abrirFiltrosServicios(vendedores),
+    );
+  }
+
+  Future<void> _abrirFiltrosServicios(List<int> vendedores) async {
+    final r = await showModalBottomSheet<({String tipo, int? vendedor})>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => _HojaFiltrosServiciosHistorial(
+        tipo: _filtroTipo,
+        vendedor: _filtroVendedor,
+        esDueno: widget.esDueno,
+        vendedores: [
+          for (final tid in vendedores)
+            (
+              tid: tid,
+              nombre: _nombreVendedor(tid, _respaldoPorTid[tid]),
+            ),
+        ],
+      ),
+    );
+    if (r == null || !mounted) return;
+    setState(() {
+      _filtroTipo = r.tipo;
+      _filtroVendedor = r.vendedor;
+    });
   }
 
   /// V23: aplana las entradas visibles intercalando el día
@@ -527,10 +576,17 @@ class _ServiciosHistorialCuerpoState
     return Column(
         children: [
           // 11/25: buscador por cliente, vendedor o tipo.
+          // 1.34 (C-48 · G-03): el tipo y el vendedor se
+          // PLIEGAN en el botón «Filtrar · …» de esta misma
+          // fila (molde de Actividad).
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: TextField(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: TextField(
               controller: _busquedaCtrl,
               onChanged: (v) => setState(() => _busqueda = v),
               decoration: InputDecoration(
@@ -551,55 +607,13 @@ class _ServiciosHistorialCuerpoState
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.md),
               ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _chip('todas', 'Todas'),
-                  _chip('racion', 'Dosis'),
-                  _chip('combo', 'Dosis con agua'),
-                  _chip('agua', 'Agua'),
-                  if (widget.esDueno) _chip('salida', 'Salidas'),
-                ],
-              ),
-            ),
-          ),
-          if (widget.esDueno && vendedores.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
-              child: Row(
-                children: [
-                  const Text('Vendedor: ',
-                      style: AppTexto.secundario),
-                  Expanded(
-                    child: DropdownButton<int?>(
-                      isExpanded: true,
-                      value: _filtroVendedor,
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Todos'),
-                        ),
-                        for (final tid in vendedores)
-                          DropdownMenuItem<int?>(
-                            value: tid,
-                            child: Text(_nombreVendedor(
-                                tid, _respaldoPorTid[tid])),
-                          ),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _filtroVendedor = v),
-                    ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: AppEspacio.sm),
+                Flexible(child: _botonFiltrosServicios(vendedores)),
+              ],
             ),
+          ),
           Expanded(
             // 1.23 B7+T7: cruce por tipo de estado en la zona de
             // resultados y vacío compartido (la carga sigue con
@@ -674,5 +688,138 @@ class _ServiciosHistorialCuerpoState
           ),
         ],
       );
+  }
+}
+
+/// 1.34 (C-48 · G-03): etiqueta legible de cada tipo del
+/// historial de servicios (las mismas palabras que llevaban
+/// los chips: Todas / Dosis / Dosis con agua / Agua /
+/// Salidas).
+String etiquetaTipoHistorialServicio(String clave) => switch (clave) {
+      'racion' => 'Dosis',
+      'combo' => 'Dosis con agua',
+      'agua' => 'Agua',
+      'salida' => 'Salidas',
+      _ => 'Todas',
+    };
+
+/// 1.34 (C-48 · G-03): hoja de filtros del Historial de
+/// servicios: Tipo (radio de 5; 4 para el entrenador) y
+/// Vendedor (solo dueño). Copia temporal con Aplicar/Limpiar.
+class _HojaFiltrosServiciosHistorial extends StatefulWidget {
+  final String tipo;
+  final int? vendedor;
+  final bool esDueno;
+  final List<({int tid, String nombre})> vendedores;
+
+  const _HojaFiltrosServiciosHistorial({
+    required this.tipo,
+    required this.vendedor,
+    required this.esDueno,
+    required this.vendedores,
+  });
+
+  @override
+  State<_HojaFiltrosServiciosHistorial> createState() =>
+      _HojaFiltrosServiciosHistorialState();
+}
+
+class _HojaFiltrosServiciosHistorialState
+    extends State<_HojaFiltrosServiciosHistorial> {
+  late String _tipo = widget.tipo;
+  late int? _vendedor = widget.vendedor;
+
+  @override
+  Widget build(BuildContext context) {
+    final tipos = <String>[
+      'todas',
+      'racion',
+      'combo',
+      'agua',
+      if (widget.esDueno) 'salida',
+    ];
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Filtros', style: AppTexto.subtitulo),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Cerrar',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+            const Text('Tipo', style: AppTexto.etiqueta),
+            RadioGroup<String>(
+              groupValue: _tipo,
+              onChanged: (v) => setState(() => _tipo = v ?? _tipo),
+              child: Column(
+                children: [
+                  for (final t in tipos)
+                    RadioListTile<String>(
+                      value: t,
+                      title: Text(etiquetaTipoHistorialServicio(t)),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                ],
+              ),
+            ),
+            if (widget.esDueno && widget.vendedores.isNotEmpty) ...[
+              const SizedBox(height: AppEspacio.md),
+              const Text('Vendedor', style: AppTexto.etiqueta),
+              const SizedBox(height: AppEspacio.sm),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Todos'),
+                    selected: _vendedor == null,
+                    onSelected: (_) =>
+                        setState(() => _vendedor = null),
+                  ),
+                  for (final v in widget.vendedores)
+                    ChoiceChip(
+                      label: Text(v.nombre),
+                      selected: _vendedor == v.tid,
+                      onSelected: (_) =>
+                          setState(() => _vendedor = v.tid),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: AppEspacio.lg),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => setState(() {
+                    _tipo = 'todas';
+                    _vendedor = null;
+                  }),
+                  child: const Text('Limpiar'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () => Navigator.of(context)
+                      .pop((tipo: _tipo, vendedor: _vendedor)),
+                  child: const Text('Aplicar'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

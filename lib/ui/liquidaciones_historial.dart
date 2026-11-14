@@ -103,6 +103,112 @@ class _LiquidacionesHistorialScreenState
     return '${mes.substring(5, 7)}/${mes.substring(0, 4)}';
   }
 
+  /// 1.34 (C-48 · G-04): nombre del mes para el botón y la
+  /// hoja («Octubre 2026»): la forma que el diseño C-48 usa
+  /// en su ejemplo («Mes · Octubre 2026»).
+  String _nombreMes(String mes) {
+    const nombres = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre',
+      'Diciembre',
+    ];
+    if (mes.length < 7) return mes;
+    final m = int.tryParse(mes.substring(5, 7)) ?? 0;
+    if (m < 1 || m > 12) return _etiquetaMes(mes);
+    return '${nombres[m - 1]} ${mes.substring(0, 4)}';
+  }
+
+  /// 1.34 (C-48 · G-04): el botón «Mes · …» que sustituye a
+  /// la fila de chips de meses, en la fila del buscador.
+  Widget _botonMes() {
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadio.lg),
+        ),
+      ),
+      onPressed: _abrirHojaMeses,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              _mes.isEmpty ? 'Mes · Todos' : 'Mes · ${_nombreMes(_mes)}',
+              style: AppTexto.metadato,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Icon(Icons.expand_more_rounded, size: 16),
+        ],
+      ),
+    );
+  }
+
+  /// Hoja con los meses en orden inverso (el mismo orden
+  /// descendente que traían los chips); tocar un mes lo
+  /// aplica y cierra, como hacía el menú de «Por entrenador».
+  Future<void> _abrirHojaMeses() async {
+    final elegido = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+              AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Mes', style: AppTexto.subtitulo),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Cerrar',
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              RadioGroup<String>(
+                groupValue: _mes,
+                onChanged: (v) => Navigator.of(ctx).pop(v),
+                child: Column(
+                  children: [
+                    const RadioListTile<String>(
+                      value: '',
+                      title: Text('Todos'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    for (final m in _meses)
+                      RadioListTile<String>(
+                        value: m,
+                        title: Text(_nombreMes(m)),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (elegido == null || !mounted) return;
+    setState(() => _mes = elegido);
+  }
+
   Widget _fila(Map<String, dynamic> h) {
     final entregado =
         (h['monto_entregado'] as num?)?.toDouble() ?? 0;
@@ -202,7 +308,11 @@ class _LiquidacionesHistorialScreenState
           Padding(
             padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                 AppEspacio.md, AppEspacio.lg, 0),
-            child: TextField(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: TextField(
               controller: _busquedaCtrl,
               onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
@@ -210,40 +320,15 @@ class _LiquidacionesHistorialScreenState
                 prefixIcon: Icon(Icons.search_rounded),
                 border: OutlineInputBorder(),
               ),
+                  ),
+                ),
+                if (_meses.length > 1) ...[
+                  const SizedBox(width: AppEspacio.sm),
+                  Flexible(child: _botonMes()),
+                ],
+              ],
             ),
           ),
-          if (_meses.length > 1)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
-                  AppEspacio.sm, AppEspacio.lg, 0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    Padding(
-                      padding:
-                          const EdgeInsets.only(right: AppEspacio.sm),
-                      child: ChoiceChip(
-                        label: const Text('Todos'),
-                        selected: _mes.isEmpty,
-                        onSelected: (_) => setState(() => _mes = ''),
-                      ),
-                    ),
-                    for (final m in _meses)
-                      Padding(
-                        padding: const EdgeInsets.only(
-                            right: AppEspacio.sm),
-                        child: ChoiceChip(
-                          label: Text(_etiquetaMes(m)),
-                          selected: _mes == m,
-                          onSelected: (_) =>
-                              setState(() => _mes = m),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
           Expanded(
             child: _cargando
                 ? const EstadoCargando(
