@@ -55,6 +55,13 @@ class CabeceraFicha extends StatelessWidget {
   /// prometer y denegar tras el toque.
   final bool puedeCambiarFoto;
 
+  /// 1.34 (G-1): el flujo de foto de la ficha está en
+  /// curso (la guarda de reentrada vive): el botón se
+  /// pinta deshabilitado y con un indicador breve, para
+  /// que el usuario VEA que su toque entró durante la
+  /// espera de apertura del diálogo.
+  final bool fotoOcupada;
+
   /// 1.25 T53: fracción transcurrida del período pagado
   /// (0–1) para el anillo de progreso del avatar, que
   /// absorbe la barra del mes. Null = sin período (el
@@ -77,6 +84,7 @@ class CabeceraFicha extends StatelessWidget {
       required this.onFotoTap,
       required this.onCambiarFoto,
       this.puedeCambiarFoto = true,
+      this.fotoOcupada = false,
       this.fraccionPeriodo,
       this.periodoPausado = false});
 
@@ -218,17 +226,28 @@ class CabeceraFicha extends StatelessWidget {
                 // «Añadir foto» (la pista que faltaba); sin
                 // permiso, candado y deshabilitado.
                 TextButton.icon(
-                  icon: Icon(
-                      puedeCambiarFoto
-                          // 1.29 (D-15): icono canónico de foto de
-                          // la tabla D-07 (photo_camera_rounded);
-                          // camera_alt_rounded se extingue.
-                          ? Icons.photo_camera_rounded
-                          : Icons.lock_rounded,
-                      size: 18),
+                  icon: fotoOcupada
+                      // 1.34 (G-1): indicador de apertura
+                      // mientras el flujo de foto vive.
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2),
+                        )
+                      : Icon(
+                          puedeCambiarFoto
+                              // 1.29 (D-15): icono canónico de foto de
+                              // la tabla D-07 (photo_camera_rounded);
+                              // camera_alt_rounded se extingue.
+                              ? Icons.photo_camera_rounded
+                              : Icons.lock_rounded,
+                          size: 18),
                   label: Text(
                       foto == null ? 'Añadir foto' : 'Cambiar foto'),
-                  onPressed: puedeCambiarFoto ? onCambiarFoto : null,
+                  onPressed: (puedeCambiarFoto && !fotoOcupada)
+                      ? onCambiarFoto
+                      : null,
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(
                         horizontal: AppEspacio.sm),

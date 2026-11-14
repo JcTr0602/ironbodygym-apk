@@ -46,6 +46,14 @@ typedef RecuperadorFotoPerdida = Future<LostDataResponse> Function();
 
 bool _elegirFotoEnCurso = false;
 
+/// 1.34 (G-1): lectura pública de la guarda global. El
+/// llamador que recibe un null puede así distinguir «el
+/// usuario canceló» o «fallo ya anunciado por el helper»
+/// (la guarda viene LIBRE al volver) de «otro flujo de
+/// foto sigue en curso» (la guarda sigue TOMADA al
+/// volver) y avisar en vez de morir en silencio.
+bool get elegirFotoEnCurso => _elegirFotoEnCurso;
+
 // ---------------------------------------------------------------------------
 // 1.32 (H-B6-1 + Compuerta 5 de Argón): contexto persistente
 // de la petición de foto y gancho de rehidratación.
@@ -190,7 +198,14 @@ Future<File?> elegirFotoEditada(
   String? flujoFoto,
   String? entidadIdFoto,
 }) async {
-  if (_elegirFotoEnCurso) return null;
+  if (_elegirFotoEnCurso) {
+    // 1.34 (G-1): el bloqueo deja registro (antes, null
+    // mudo sin rastro) y el llamador avisa si la guarda
+    // sigue tomada al volver (ver elegirFotoEnCurso).
+    AppLog.aviso('foto_elegir', 'peticion_bloqueada_en_curso',
+        d: 'elegirFotoEditada: otro flujo de foto en curso');
+    return null;
+  }
   _elegirFotoEnCurso = true;
   if (flujoFoto != null) {
     await registrarContextoFoto(flujo: flujoFoto, entidadId: entidadIdFoto);
@@ -247,7 +262,12 @@ Future<XFile?> elegirFotoSegura(
   String? flujoFoto,
   String? entidadIdFoto,
 }) async {
-  if (_elegirFotoEnCurso) return null;
+  if (_elegirFotoEnCurso) {
+    // 1.34 (G-1): mismo registro que en elegirFotoEditada.
+    AppLog.aviso('foto_elegir', 'peticion_bloqueada_en_curso',
+        d: 'elegirFotoSegura: otro flujo de foto en curso');
+    return null;
+  }
   _elegirFotoEnCurso = true;
   if (flujoFoto != null) {
     await registrarContextoFoto(flujo: flujoFoto, entidadId: entidadIdFoto);
