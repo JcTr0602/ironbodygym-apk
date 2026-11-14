@@ -97,11 +97,12 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   bool _cargando = true;
   List<CorridaSync> _corridas = [];
   List<AvisoSync> _avisos = [];
-  Map<String, int> _locales = {};
+  // SYNC-12 (1.35): null por tabla = «sin leer», no 0.
+  Map<String, int?> _locales = {};
   // Yunque 4 (L4-1): lecturas de _cargar que fallaron;
   // >0 obliga a declarar la foto parcial (ver _cargar).
   int _lecturasFallidas = 0;
-  Map<String, int>? _publicados;
+  Map<String, int?>? _publicados;
   List<String> _tablasRol = [];
 
   @override
@@ -123,8 +124,8 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
     final esAdmin = AuthService().isAdmin;
     final tablas = SyncEngine.tablasEspejoActivasParaRol(esAdmin);
     var corridas = <CorridaSync>[];
-    var locales = <String, int>{};
-    Map<String, int>? publicados;
+    var locales = <String, int?>{};
+    Map<String, int?>? publicados;
     var avisos = <AvisoSync>[];
     // Yunque 4 (L4-1, espejo de R4-M3-1 de Reparar): una
     // lectura fallida NO es un vacío — se cuenta y la
@@ -299,6 +300,21 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
     );
   }
 
+  /// SYNC-12 (1.35): el texto de una fila de cobertura con
+  /// los neutros del triestado — un conteo local que no se
+  /// pudo leer se declara «sin leer» (nunca un 0 inventado)
+  /// y un total publicado ausente deja la fila sin
+  /// denominador (nunca «X de 0»).
+  String _textoCobertura(String t) {
+    final local = _locales[t];
+    if (local == null) return 'sin leer';
+    final pub = _publicados == null
+        ? null
+        : (_publicados![t] ?? _publicados!['sync_$t']);
+    if (pub != null) return '$local de $pub (total publicado)';
+    return '$local en el teléfono';
+  }
+
   /// Cobertura: «en el teléfono: X» por tabla del rol; el
   /// denominador SOLO si el servidor publica conteos, y
   /// etiquetado «total publicado» (H-5/H-6 de la
@@ -336,14 +352,7 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
                         ),
                       ),
                       Text(
-                        _publicados != null &&
-                                (_publicados![t] ??
-                                        _publicados!['sync_$t']) !=
-                                    null
-                            ? '${_locales[t] ?? 0} de '
-                                '${_publicados![t] ?? _publicados!['sync_$t']} '
-                                '(total publicado)'
-                            : '${_locales[t] ?? 0} en el teléfono',
+                        _textoCobertura(t),
                         style: AppTexto.cuerpo.copyWith(
                             color: AppColores.textoSecundario(
                                 context)),

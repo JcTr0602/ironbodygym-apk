@@ -15,9 +15,11 @@
 ///  1. Foto del motor — `SyncStatus.hayNovedades`/`enLinea`
 ///     como `bool` con defaults false/true (lib/sync.dart).
 ///  2. `DiarioSync.conteosLocales` — fallo de COUNT por
-///     tabla → 0 (lib/diario_sync.dart:769).
+///     tabla → 0 (lib/diario_sync.dart) — CONVERTIDO por el
+///     paso 1 de SYNC-12: hoy el fallo da null («sin leer»).
 ///  3. `DiarioSync.conteosPublicados` — valor null en el
-///     JSON publicado → 0 (lib/diario_sync.dart:788).
+///     JSON publicado → 0 — CONVERTIDO por el paso 1: hoy el
+///     null se conserva («no publicado»).
 ///  4. Salud — catches que componen gris/verde/«todo subió»
 ///     ante fallo de lectura (lib/salud_sync.dart).
 library;
@@ -109,24 +111,24 @@ void main() {
     });
   });
 
-  group('SYNC-12 sitio 2 · conteosLocales (fallo de COUNT → 0)', () {
+  group('SYNC-12 sitio 2 · conteosLocales (fallo de COUNT → null)', () {
     setUpAll(_init);
 
-    test('HOY: tabla real vacía y tabla inexistente dan el MISMO 0',
+    test('SYNC-12 paso 1: tabla vacía = 0 real; inexistente = null',
         () async {
       final c = await DiarioSync.instance
           .conteosLocales(['clientes', 'tabla_que_no_existe_sync12']);
       // La tabla espejo existe y está vacía: 0 real.
       expect(c['clientes'], 0);
-      // La tabla no existe: el COUNT lanza y el catch lo
-      // aplana al mismo 0 — indistinguible del vacío real.
-      // ESTE es el aplanamiento que el paso 1 convertirá en
-      // null («sin leer»).
-      expect(c['tabla_que_no_existe_sync12'], 0);
+      // La tabla no existe: el COUNT lanza y el sitio 2 ya
+      // NO aplana el fallo a 0 — deja null («sin leer»),
+      // distinguible del vacío real. Antes del paso 1 este
+      // mismo expect fijaba 0 (la ambigüedad demostrada).
+      expect(c['tabla_que_no_existe_sync12'], isNull);
     });
   });
 
-  group('SYNC-12 sitio 3 · conteosPublicados (null publicado → 0)', () {
+  group('SYNC-12 sitio 3 · conteosPublicados (null se conserva)', () {
     setUpAll(_init);
 
     test('HOY: sin meta publicada → null (honesto a nivel de mapa)',
@@ -134,7 +136,7 @@ void main() {
       expect(await DiarioSync.instance.conteosPublicados(), isNull);
     });
 
-    test('HOY: un null DENTRO del JSON publicado se aplana a 0',
+    test('SYNC-12 paso 1: un null DENTRO del JSON se CONSERVA',
         () async {
       await LocalDb.instance.setMeta(
           'conteos_espejo_publicados', '{"clientes": 7, "pagos": null}');
@@ -142,9 +144,10 @@ void main() {
       expect(c, isNotNull);
       expect(c!['clientes'], 7);
       // El servidor no publicó conteo de pagos (null) y la
-      // app lo convierte en «0 en el servidor»: denominador
-      // fabricado. El paso 1 debe conservar el null.
-      expect(c['pagos'], 0);
+      // app lo CONSERVA como null: la fila del Centro queda
+      // sin denominador. Antes del paso 1 se aplanaba a 0
+      // («0 en el servidor», denominador fabricado).
+      expect(c['pagos'], isNull);
     });
 
     test('HOY: JSON corrupto en la meta → null (no inventa conteos)',

@@ -765,16 +765,24 @@ class DiarioSync {
 
   /// Conteos locales por tabla del espejo (para la foto «en
   /// el teléfono: X» del Centro). Una consulta por tabla
-  /// sobre la lista pedida; las tablas ausentes cuentan 0.
-  Future<Map<String, int>> conteosLocales(List<String> tablas) async {
+  /// sobre la lista pedida.
+  ///
+  /// SYNC-12 (1.35): el resultado es triestado POR TABLA —
+  /// un COUNT que falla (tabla ausente, BD ilegible) deja
+  /// null en esa clave («sin leer»), NUNCA un 0 inventado:
+  /// 0 es solo el cero real de una tabla leída y vacía.
+  /// Antes el catch aplanaba el fallo al mismo 0, y ni el
+  /// Centro ni la huella podían distinguir «vacía» de
+  /// «ilegible».
+  Future<Map<String, int?>> conteosLocales(List<String> tablas) async {
     final d = await _db.db;
-    final out = <String, int>{};
+    final out = <String, int?>{};
     for (final t in tablas) {
       try {
         final r = await d.rawQuery('SELECT COUNT(*) AS n FROM $t');
         out[t] = (r.first['n'] as num?)?.toInt() ?? 0;
       } catch (_) {
-        out[t] = 0;
+        out[t] = null;
       }
     }
     return out;
@@ -785,14 +793,18 @@ class DiarioSync {
   /// puente ya los publica; null si aún no (el Centro enseña
   /// entonces solo el conteo local, sin denominador: nada de
   /// porcentajes inventados).
-  Future<Map<String, int>?> conteosPublicados() async {
+  ///
+  /// SYNC-12 (1.35): un valor null DENTRO del JSON publicado
+  /// se CONSERVA como null («el servidor no publicó esta
+  /// tabla»): antes se aplanaba a 0 y el Centro fabricaba el
+  /// denominador «0 en el servidor».
+  Future<Map<String, int?>?> conteosPublicados() async {
     final raw = await _db.getMeta('conteos_espejo_publicados');
     if (raw == null || raw.isEmpty) return null;
     try {
       final m = jsonDecode(raw) as Map;
       return {
-        for (final e in m.entries)
-          '${e.key}': (e.value as num?)?.toInt() ?? 0,
+        for (final e in m.entries) '${e.key}': (e.value as num?)?.toInt(),
       };
     } catch (_) {
       return null;

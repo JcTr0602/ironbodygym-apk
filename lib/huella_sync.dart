@@ -104,6 +104,14 @@ bool frenoEmisionHuella({
 
 /// La fila de la huella, tal cual viaja en el cuerpo del upsert
 /// (función pura). Solo conteos y marcas de la corrida.
+///
+/// SYNC-12 (1.35) — contrato M5 de los conteos: un conteo que
+/// no se pudo leer (null en [conteosLocales]) viaja como
+/// CLAVE AUSENTE en el JSON, no como null ni como 0. El
+/// puente vuelca `conteos` crudo a gym.db y quién lo lee en
+/// el bot no es verificable desde aquí: ausencia = «sin
+/// leer» sin romper a un lector viejo que espera `int`, y 0
+/// sigue siendo solo el cero real.
 Map<String, dynamic> filaHuellaDispositivo({
   required String userId,
   required String deviceTag,
@@ -115,7 +123,7 @@ Map<String, dynamic> filaHuellaDispositivo({
   required int bajados,
   required int? watermarkMinimo,
   required int? serverSeqAlcanzado,
-  required Map<String, int> conteosLocales,
+  required Map<String, int?> conteosLocales,
   required String rolActivo,
   required String versionApp,
 }) {
@@ -130,7 +138,10 @@ Map<String, dynamic> filaHuellaDispositivo({
     'bajados': bajados,
     'watermark_minimo': watermarkMinimo,
     'server_seq': serverSeqAlcanzado,
-    'conteos': conteosLocales,
+    'conteos': {
+      for (final e in conteosLocales.entries)
+        if (e.value != null) e.key: e.value,
+    },
     'rol': rolActivo,
     'version_app': versionApp,
   };
@@ -182,7 +193,7 @@ class HuellaSync {
     required String rol,
     required String versionApp,
     required int ahoraEpoch,
-    Future<Map<String, int>> Function()? obtenerConteos,
+    Future<Map<String, int?>> Function()? obtenerConteos,
   }) async {
     try {
       // Sin sesión no hay fila propia que escribir (RLS manda
@@ -206,7 +217,7 @@ class HuellaSync {
         // Los conteos se calculan SOLO aquí: si el freno no
         // deja emitir, ni se paga su coste (M5-R2).
         final conteos = obtenerConteos == null
-            ? const <String, int>{}
+            ? const <String, int?>{}
             : await obtenerConteos();
         aEnviar = filaHuellaDispositivo(
           userId: userId,

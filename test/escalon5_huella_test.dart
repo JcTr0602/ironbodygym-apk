@@ -65,7 +65,7 @@ Future<bool> _cerrar(
   String estado = 'completa',
   int subidos = 0,
   int bajados = 0,
-  Future<Map<String, int>> Function()? conteos,
+  Future<Map<String, int?>> Function()? conteos,
 }) {
   return huella.registrarCierre(
     userId: userId,
@@ -165,6 +165,43 @@ void main() {
       expect(await db.getMeta(metaHuellaUltimoResultado), 'completa');
       expect(await db.getMeta(metaReportePendiente), isNull);
       expect(await db.getMeta(metaHuellaUltimoError), isNull);
+    });
+
+    test('SYNC-12: conteo ilegible (null) = clave AUSENTE en el JSON',
+        () async {
+      // Contrato M5 del paso 1 de SYNC-12: un conteo que no
+      // se pudo leer no viaja ni como null ni como 0 — la
+      // clave simplemente no va (el puente vuelca `conteos`
+      // crudo y un lector viejo que espera int no se rompe).
+      final t = _TransporteFalso(201);
+      final huella = HuellaSync(transporte: t.call);
+      final ok = await _cerrar(huella, conteos: () async {
+        return {'clientes': 186, 'pagos': null};
+      });
+      expect(ok, isTrue);
+      final conteos = t.cuerpo!['conteos'] as Map;
+      expect(conteos['clientes'], 186);
+      expect(conteos.containsKey('pagos'), isFalse,
+          reason: 'null = «sin leer» = clave ausente, jamás 0');
+    });
+
+    test('SYNC-12: el reporte pendiente conserva el contrato',
+        () async {
+      // Si la emisión falla, el payload guardado como
+      // pendiente es el mismo JSON ya depurado: el reintento
+      // no resucita el null como 0 ni como clave con null.
+      final t = _TransporteFalso(404);
+      final huella = HuellaSync(transporte: t.call);
+      final ok = await _cerrar(huella, conteos: () async {
+        return {'clientes': 186, 'pagos': null};
+      });
+      expect(ok, isFalse);
+      final pend = await LocalDb.instance.getMeta(metaReportePendiente);
+      expect(pend, isNotNull);
+      final m = Map<String, dynamic>.from(jsonDecode(pend!) as Map);
+      final conteos = m['conteos'] as Map;
+      expect(conteos['clientes'], 186);
+      expect(conteos.containsKey('pagos'), isFalse);
     });
 
     test('tabla ausente (404): se traga, registra y deja pendiente',
