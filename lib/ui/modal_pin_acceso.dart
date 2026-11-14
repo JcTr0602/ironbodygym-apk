@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../negocio.dart' show normalizarTelefonoWaMe;
+import '../negocio.dart' show normalizarTelefonoWaMe, mensajePinAcceso;
 import 'diseno.dart';
 import 'componentes.dart';
 
@@ -70,11 +70,8 @@ void mostrarModalPin(
               mostrarSnack(ctx, 'Teléfono inválido para WhatsApp ("$telefono"). Usa Copiar PIN.', significado: SignificadoChip.alerta);
               return;
             }
-            final mensaje =
-                'Hola $nombre, tu acceso a Iron Body App:\n'
-                'Teléfono: $tel8\n'
-                'PIN: $pin\n'
-                'Descarga la app y entra con estos datos.';
+            final mensaje = mensajePinAcceso(
+                nombre: nombre, telefono8: tel8, pin: pin);
             final url = Uri.parse(
                 'https://wa.me/$telWa?text=${Uri.encodeComponent(mensaje)}');
             launchUrl(url,

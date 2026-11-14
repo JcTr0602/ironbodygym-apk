@@ -646,17 +646,26 @@ String mensajeCumpleConRegalo({
   required String nuevoIso,
 }) {
   final buf = StringBuffer()
+    ..writeln(
+        '📩 Mensaje enviado por el sistema de gestión de Iron Body Gym:')
     ..writeln('¡Feliz cumpleaños, *$nombre*! 🎂🎉')
     ..writeln('Te hemos regalado 1 mensualidad por tu día.');
   if (anteriorIso != null && anteriorIso.length >= 10) {
     buf.writeln('📅 Vencía el: *${fechaLargaCorta(anteriorIso)}*');
     buf.writeln(
         '✅ Nuevo vencimiento: *${fechaLargaCorta(nuevoIso)}*');
+    buf.writeln('¡A seguir dándole duro! — Iron Body Gym 💪🔥');
   } else {
     buf.writeln('✅ Válida hasta el: *${fechaLargaCorta(nuevoIso)}*');
+    buf.writeln('¡Te esperamos para entrenar! — Iron Body Gym 💪🔥');
   }
-  buf.write('¡A seguir dándole duro! — Iron Body Gym 💪🔥');
-  buf.write(lineaMensajeAutomatico);
+  // Yunque 1.34 (C6-3): el regalo de cumpleaños usa el
+  // formato de EXCEPCIÓN de Jc (2026-11-01): apertura 📩 y
+  // cierre 📲, NO la línea automática común — como ya hacía
+  // el _mensajeRegalo de la ficha. Esta función canónica
+  // (bandeja y pantalla de Cumpleaños) había quedado con la
+  // línea común: dos formatos para el mismo regalo.
+  buf.write('📲 _Si vas a responder, escríbenos al 58191577._');
   return buf.toString();
 }
 
@@ -925,6 +934,10 @@ String textoComprobanteCompra({
   buf
     ..writeln('━━━━━━━━━━━━━━━')
     ..writeln('💪 ¡Gracias por tu compra! A seguir entrenando.');
+  // Yunque 1.34 (C6-4): la regla de Jc (2026-11-01) — todo
+  // mensaje que la app compone sola cierra con la línea
+  // automática; el comprobante de compra no la llevaba.
+  buf.write(lineaMensajeAutomatico);
   return buf.toString().trim();
 }
 
@@ -2940,6 +2953,22 @@ const String lineaMensajeAutomatico =
     '\n\n🤖 _Mensaje automático de nuestro sistema de gestión; '
     'no lo envía una persona. Si vas a responder, escríbenos '
     'al 58191577._';
+
+/// Mensaje de entrega del PIN de acceso a la app de
+/// Clientes. Yunque 1.34 (C6-4): UNA sola fuente — vivía
+/// duplicado en el modal de PIN y en Control de acceso, y
+/// ninguna de las dos copias cerraba con la línea automática
+/// de la regla de Jc (2026-11-01).
+String mensajePinAcceso({
+  required String nombre,
+  required String telefono8,
+  required String pin,
+}) =>
+    'Hola $nombre, tu acceso a Iron Body App:\n'
+    'Teléfono: $telefono8\n'
+    'PIN: $pin\n'
+    'Descarga la app y entra con estos datos.'
+    '$lineaMensajeAutomatico';
 
 /// 1.24.2: textos de aviso de vencimiento por WhatsApp — fuente
 /// única que comparten la bandeja de avisos y los avisos directos

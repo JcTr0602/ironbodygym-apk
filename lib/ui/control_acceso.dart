@@ -15,7 +15,8 @@ import '../acceso_app_cache.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
-import '../negocio.dart' show tiempoRelativo, normalizarTelefonoWaMe;
+import '../negocio.dart'
+    show tiempoRelativo, normalizarTelefonoWaMe, mensajePinAcceso;
 import 'acciones_acceso.dart';
 import 'app_bar.dart';
 import 'campana_wa.dart';
@@ -354,9 +355,10 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   Widget _botonFiltrosAcceso() {
     return OutlinedButton.icon(
       icon: const Icon(Icons.filter_list_rounded, size: 16),
+      // Yunque 1.34 (C2-5): resumen a 2 líneas (ver Auditoría).
       label: Text(_resumenFiltrosAcceso(),
           style: AppTexto.metadato,
-          maxLines: 1,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(
@@ -1234,11 +1236,10 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                         onPressed: telWa.isEmpty
                             ? null
                             : () {
-                                final mensaje =
-                                    'Hola ${r['nombre']}, tu acceso a Iron Body App:\n'
-                                    'Teléfono: $tel8\n'
-                                    'PIN: ${r['pin_temporal']}\n'
-                                    'Descarga la app y entra con estos datos.';
+                                final mensaje = mensajePinAcceso(
+                                    nombre: '${r['nombre']}',
+                                    telefono8: tel8,
+                                    pin: '${r['pin_temporal']}');
                                 launchUrl(
                                   Uri.parse(
                                       'https://wa.me/$telWa?text=${Uri.encodeComponent(mensaje)}'),
