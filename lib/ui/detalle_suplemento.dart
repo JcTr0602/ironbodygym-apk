@@ -22,6 +22,7 @@ import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos.dart';
+import '../tipos_pago.dart';
 import '../permisos_entrenador.dart';
 import 'permisos_ui.dart';
 import '../servicios.dart';
@@ -206,8 +207,8 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
     final clientes = await LocalDb.instance.allMirror('clientes');
     if (!mounted) return;
     setState(() {
-      _promoActiva =
-          (aj['promo_suplementos'] as num?)?.toInt() != 0;
+      // Yunque 3 (K6-3): lector tolerante de flags A2-D2.
+      _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
       _clientes = clientes
           .where((c) => (c['estado'] as String?) == 'activo')
           .toList()

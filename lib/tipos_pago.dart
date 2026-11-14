@@ -135,6 +135,16 @@ double? montoAjusteTolerante(dynamic v) {
   return null;
 }
 
+/// Lector tolerante de un FLAG de ajustes (Yunque 3, K6-3):
+/// vale si es 1, true o '1' — la misma tolerancia de
+/// `esCasaTolerante`. El gemelo de [montoAjusteTolerante]
+/// para los interruptores del blob (p. ej. promo_suplementos):
+/// el cast duro `(v as num?)` reventaba si el flag llegaba
+/// como bool desde el bot/SQL y tumbaba la carga entera de
+/// la pantalla (en Venta de Suplemento se llevaba también la
+/// tasa USD que se asignaba después, en el mismo cierre).
+bool flagAjusteTolerante(dynamic v) => v == 1 || v == true || v == '1';
+
 /// (Corrección A5-D2) ESCRITURA de la fuente única del precio
 /// de menores: devuelve el blob `tipos_pago` COMPLETO (sin
 /// filtros de activos/menores) con el monto del tipo

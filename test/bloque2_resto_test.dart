@@ -115,6 +115,31 @@ void main() {
       expect(agua?.concepto, 'agua');
       expect(agua?.monto, 600);
     });
+    test('fila espejo: el fiado en BOOL no explota ni suma '
+        '(Yunque 3, K2-1)', () {
+      // La forma que E-1 legitimó: es_fiado como bool. El cast
+      // estricto `as num?` lanzaba TypeError y el reporte de
+      // ingresos moría con esa fila en el espejo.
+      Map<String, dynamic> fila(Map<String, dynamic> extra) => {
+            'total': 5000,
+            'fecha': '2026-10-10',
+            'metodo': 'efectivo',
+            'moneda': 'CUP',
+            ...extra,
+          };
+      expect(
+          filaIngresoDesdeEspejo(
+              'ventas_suplementos', fila({'es_fiado': true})),
+          isNull);
+      expect(
+          filaIngresoDesdeEspejo(
+              'ventas_suplementos', fila({'es_fiado': 1})),
+          isNull);
+      final saldado = filaIngresoDesdeEspejo('ventas_suplementos',
+          fila({'es_fiado': true, 'fiado_saldado': true}));
+      expect(saldado, isNotNull);
+      expect(saldado?.monto, 5000);
+    });
   });
 
   group('C6/H1 fuente única (Argón ajuste 3)', () {

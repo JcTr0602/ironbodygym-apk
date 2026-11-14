@@ -4510,8 +4510,11 @@ class _FichaScreenState extends State<FichaScreen> {
       // se pintaba igual que una pagada y la deuda solo se
       // descubría en el Estado de cuenta. Saldada, la marca
       // desaparece (la deuda ya no existe).
-      final esFiado = (s['es_fiado'] as num?)?.toInt() == 1 &&
-          (s['fiado_saldado'] as num?)?.toInt() != 1;
+      // Yunque 3 (K2-1): predicado tolerante de la casa —
+      // el cast estricto explotaba con la fila en bool que
+      // E-1 legitimó (es_fiado: true) y tumbaba la carga del
+      // historial de esta misma ficha.
+      final esFiado = esFiadoPendienteVenta(s);
       entradas.add({
         'tipo': 'venta',
         'fecha': '${s['fecha'] ?? ''}',

@@ -2317,7 +2317,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// para no capturar "confiado" (nota de Argón).
   static final _reFiado = RegExp(r'\bfiado\b', caseSensitive: false);
   bool _esFiado(Map<String, dynamic> a) {
-    final estructurado = (a['es_fiado'] as num?)?.toInt() == 1;
+    // Yunque 3 (K2-1, gemelo): lectura tolerante del flag
+    // (1 o true, como esFiadoPendienteVenta) — el cast
+    // estricto explotaba con es_fiado en bool. NO se usa el
+    // predicado completo a propósito: esta pieza no mira
+    // fiado_saldado; su «pagado» se infiere del texto del
+    // detalle (respaldo de abajo), y esa semántica se conserva.
+    final estructurado = a['es_fiado'] == 1 || a['es_fiado'] == true;
     if (estructurado) return true;
     final det = '${a['detalle'] ?? ''}';
     return _reFiado.hasMatch(det) &&

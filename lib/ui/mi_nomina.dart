@@ -1249,7 +1249,14 @@ double montoVentaMisVentas(Map<String, dynamic> v) {
       nSuplementos++;
     } else {
       dosis += monto;
-      nDosis++;
+      // Yunque 3 (K2-2): el reverso de servicio netea el
+      // dinero (cantidad negativa) pero contaba como una
+      // venta MÁS: dosis vendida y reversada el mismo mes se
+      // leía «2 ventas · 0 CUP». El conteo netea con el
+      // mismo signo que el dinero (−1 por reverso): la
+      // pareja del mismo mes da 0 y el reverso de un original
+      // del mes anterior deja −1 en este, como su importe.
+      nDosis += v['reverso_de'] != null ? -1 : 1;
     }
   }
   return (

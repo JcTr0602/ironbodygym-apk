@@ -20,6 +20,7 @@ import '../localdb.dart';
 import '../permisos_entrenador.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import '../tipos_pago.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -147,8 +148,8 @@ class _VentaSuplementoInscripcionScreenState
     LocalDb.instance.getAjustes().then((aj) {
       if (mounted) {
         setState(() {
-          _promoActiva =
-              (aj['promo_suplementos'] as num?)?.toInt() != 0;
+          // Yunque 3 (K6-3): lector tolerante de flags A2-D2.
+          _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
         });
       }
     });
