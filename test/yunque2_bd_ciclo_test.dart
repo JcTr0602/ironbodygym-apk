@@ -103,4 +103,17 @@ void main() {
     await _downgrade(2);
     await _reupgradeComprueba();
   });
+
+  test('B-1: la apertura deja constancia del modo de diario '
+      'efectivo (estática y meta journal_mode_efectivo)', () async {
+    await LocalDb.resetParaTest(borrarArchivo: false);
+    await _borrar();
+    final db = await LocalDb.instance.db;
+    expect(LocalDb.journalModeEfectivo, 'wal');
+    expect(LocalDb.busyTimeoutEfectivo, 5000);
+    final meta = await db.query('meta',
+        where: 'k = ?', whereArgs: ['journal_mode_efectivo']);
+    expect(meta, hasLength(1));
+    expect(meta.first['v'], 'wal');
+  });
 }

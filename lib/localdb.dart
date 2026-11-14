@@ -1891,7 +1891,45 @@ class LocalDb {
     // v1.2.5+28: repara el índice FTS si la migración lo omitió y el
     // módulo sí está disponible (una vez por proceso).
     await _repararFtsSiHaceFalta(_db!);
+    // Yunque 2.34 (B-1): constancia del modo de diario EFECTIVO.
+    await _registrarModoDiarioEfectivo(_db!);
     return _db!;
+  }
+
+  /// Yunque 2.34 (B-1): el modo de diario y la espera entre
+  /// isolates que ESTA conexión lleva de verdad, leídos tras la
+  /// apertura. C6-1 (Yunque 1) hizo que los PRAGMA se aplicaran
+  /// por rawQuery, pero su resultado no se miraba: si en un
+  /// teléfono WAL no entra (fallback a DELETE previsto desde el
+  /// hotfix v1.2.9+34), el «database is locked» entre isolates
+  /// volvía sin dejar rastro en ningún sitio.
+  static String? journalModeEfectivo;
+  static int? busyTimeoutEfectivo;
+
+  static Future<void> _registrarModoDiarioEfectivo(Database db) async {
+    try {
+      final jm = await db.rawQuery('PRAGMA journal_mode');
+      final modo = jm.isEmpty ? null : '${jm.first.values.first}';
+      final bt = await db.rawQuery('PRAGMA busy_timeout');
+      final espera =
+          bt.isEmpty ? null : (bt.first.values.first as num?)?.toInt();
+      journalModeEfectivo = modo;
+      busyTimeoutEfectivo = espera;
+      // Constancia durable leíble (meta): el valor real de este
+      // teléfono, no el prometido. Si no es el esperado, además
+      // grita en el log de depuración.
+      await db.insert(
+          'meta',
+          {'k': 'journal_mode_efectivo', 'v': modo ?? 'desconocido'},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+      if (modo != 'wal' || espera != 5000) {
+        debugPrint('LocalDb: PRAGMA no efectivo en este teléfono '
+            '(journal_mode=$modo, busy_timeout=$espera); '
+            'queda constancia en meta journal_mode_efectivo.');
+      }
+    } catch (_) {
+      // La constancia jamás tumba la apertura.
+    }
   }
 
   /// 1.32 (O2F2S, síntesis AP-6): ¿es un error de migración
@@ -2716,7 +2754,12 @@ class LocalDb {
           "SELECT name FROM sqlite_master WHERE type='table' AND name='$tabla'");
       if (t.isEmpty) return;
       await db.execute(sql);
-    } catch (_) {}
+    } catch (e) {
+      // Yunque 2.34 (B-6): el patrón C1-4 — un índice que no nace
+      // deja debugPrint nominal, no silencio (el síntoma tardío
+      // sería un pull con escaneo completo, sin señal).
+      debugPrint('LocalDb: índice no creado en $tabla: $e');
+    }
   }
 
   /// v1.3.4 (ítem 2): crea los índices del espejo `pagos` solo si la
