@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 
 import '../auth.dart';
+import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
@@ -27,6 +28,46 @@ import 'permisos_ui.dart';
 import 'ficha.dart';
 import 'pendiente.dart';
 import 'widgets.dart';
+
+/// Yunque 3 (K5-1): filtro PURO de «Mis vencimientos» sobre las
+/// filas del espejo de clientes: solo los atribuidos al
+/// entrenador ([mios]), activos y con `pagado_hasta` dentro de
+/// la ventana (<= [limite]). NUNCA una Cuenta a la Casa — no
+/// vence nunca, aunque su `pagado_hasta` guardado ya pasó (al
+/// revocar manda él) — ni un protegido para quien no es dueño:
+/// es el mismo par de exclusiones que la pantalla hermana del
+/// panel (`panel_bloque2`) ya aplicaba en su bucle; esta lista
+/// propia era la única superficie de vencimientos sin ellas y
+/// el entrenador podía salir a cobrarle a quien no debe nada.
+/// [esDueno] solo lo fijan los tests; la pantalla lo omite y
+/// se resuelve la sesión.
+List<Map<String, dynamic>> filtrarMisVencimientos(
+  List<Map<String, dynamic>> clientes,
+  Set<int> mios, {
+  required String hoy,
+  required String limite,
+  bool? esDueno,
+}) {
+  final out = <Map<String, dynamic>>[];
+  for (final c in clientes) {
+    final id = (c['id'] as num?)?.toInt();
+    if (id == null || !mios.contains(id)) continue;
+    if ('${c['estado'] ?? 'activo'}' != 'activo') continue;
+    if (esCuentaCasa(c)) continue;
+    if (esVistaProtegida(c, esDueno: esDueno)) continue;
+    final ph = '${c['pagado_hasta'] ?? ''}';
+    if (ph.isEmpty || ph.compareTo(limite) > 0) continue;
+    out.add({
+      'id': id,
+      'nombre': '${c['nombre'] ?? 'Cliente $id'}',
+      'pagado_hasta': ph.length >= 10 ? ph.substring(0, 10) : ph,
+      'vencido': ph.compareTo(hoy) < 0,
+    });
+  }
+  out.sort((a, b) =>
+      '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
+  return out;
+}
 
 class MiTurnoScreen extends StatefulWidget {
   const MiTurnoScreen({super.key});
@@ -478,23 +519,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       final id = LocalDb.normalizarTelegramId(p['cliente_id']);
       if (id != null) mios.add(id);
     }
-    final out = <Map<String, dynamic>>[];
-    for (final c in await LocalDb.instance.allMirror('clientes')) {
-      final id = (c['id'] as num?)?.toInt();
-      if (id == null || !mios.contains(id)) continue;
-      if ('${c['estado'] ?? 'activo'}' != 'activo') continue;
-      final ph = '${c['pagado_hasta'] ?? ''}';
-      if (ph.isEmpty || ph.compareTo(limite) > 0) continue;
-      out.add({
-        'id': id,
-        'nombre': '${c['nombre'] ?? 'Cliente $id'}',
-        'pagado_hasta': ph.length >= 10 ? ph.substring(0, 10) : ph,
-        'vencido': ph.compareTo(hoy) < 0,
-      });
-    }
-    out.sort((a, b) =>
-        '${a['pagado_hasta']}'.compareTo('${b['pagado_hasta']}'));
-    return out;
+    return filtrarMisVencimientos(
+      await LocalDb.instance.allMirror('clientes'),
+      mios,
+      hoy: hoy,
+      limite: limite,
+    );
   }
 
   String _iso(DateTime d) =>

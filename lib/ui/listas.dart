@@ -514,7 +514,13 @@ class _ListasScreenState extends State<ListasScreen>
       _alDia = sinProtegidos(ad);
       _preciosFoto = pr;
       _especialesFoto = especiales;
-      _avisadoEl = avisados;
+      // Yunque 3 (K5-4, latente cazado por su test):
+      // avisadosVigentesConFecha devuelve const {} cuando no
+      // hay avisados — asignarlo tal cual dejaba _avisadoEl
+      // INMODIFICABLE y la primera marca del ciclo reventaba
+      // en el setState de _avisarEnCadena (la marca de BD ya
+      // había quedado persistida). Copia mutable siempre.
+      _avisadoEl = Map<int, DateTime>.of(avisados);
       _avisados = avisados.keys.toSet();
       _cargando = false;
       _recalcularVisibles();
@@ -952,6 +958,37 @@ class _ListasScreenState extends State<ListasScreen>
     return ok;
   }
 
+  /// Yunque 3 (K5-4): espejo del patrón de Cumpleaños
+  /// (1.26, MEDIA 4): abrir WhatsApp NO prueba que el mensaje
+  /// se envió (launchUrl solo confirma que la app abrió con
+  /// el texto listo). La marca «avisado» — que aquí dura todo
+  /// el ciclo del vencimiento — solo se pone si el usuario
+  /// confirma el envío al volver. Sin confirmación, el
+  /// cliente sigue sin avisar y la pasada guiada lo vuelve a
+  /// ofrecer. La vía «Solo marcar como avisado» de
+  /// _elegirAviso sigue marcando directo: es el gesto expreso.
+  Future<bool> _confirmarEnvioWhatsApp(String nombre) async {
+    if (!mounted) return false;
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Se envió el aviso?'),
+        content: Text('WhatsApp se abrió con el mensaje listo '
+            'para $nombre. Solo se marca «Avisado» si '
+            'confirmas que lo enviaste.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No lo envié')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Sí, enviado')),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
   /// F10 (1.20): avisar a un cliente de la lista y, si
   /// quedan más sin avisar DESPUÉS de él, ofrecer en el
   /// propio aviso el paso directo al siguiente (sin volver
@@ -968,6 +1005,10 @@ class _ListasScreenState extends State<ListasScreen>
     if (via == 'whatsapp') {
       final ok = await _abrirWhatsapp(c);
       if (!ok) return;
+      // K5-4: sin confirmación de envío no hay marca ni
+      // cadena: el cliente no sale de la pasada de avisos.
+      final nombre = '${c['nombre'] ?? ''}'.split(' ').first;
+      if (!await _confirmarEnvioWhatsApp(nombre)) return;
     }
     await LocalDb.instance
         .marcarAvisado(id, pagadoHasta: c['pagado_hasta'] as String?);

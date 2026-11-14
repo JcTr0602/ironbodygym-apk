@@ -767,7 +767,17 @@ class _DialogoCambiarTelefonoAccesoState
           TextField(
             controller: _ctrl,
             keyboardType: TextInputType.phone,
-            maxLength: 8,
+            // Yunque 3 (K5-5): SIN maxLength — la clase exacta
+            // de D-6 (Y2) que la corrección del diálogo
+            // compartido no alcanzó en este diálogo privado.
+            // Con 8, pegar «5358191577» se truncaba a
+            // «53581915» ANTES de sanitizar y ese número
+            // equivocado pero «válido» quedaba como teléfono
+            // de acceso del cliente. Quien juzga es
+            // sanitizarTelefono al guardar
+            // (_cambiarTelefonoAccesoInterna), que acepta el
+            // prefijo 53 y los espacios; la etiqueta «8
+            // dígitos» queda como ayuda.
             decoration: const InputDecoration(
               labelText: 'Nuevo teléfono (8 dígitos)',
             ),

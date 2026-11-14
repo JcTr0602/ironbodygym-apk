@@ -3100,6 +3100,22 @@ String mensajeWaValeRechazado({
       '$lineaMensajeAutomatico';
 }
 
+/// Yunque 3 (K5-7): cliente_id provisional de un aviso
+/// compuesto desde una op SIN cliente en el servidor (la
+/// inscripción nueva: el id lo asigna el servidor al aplicar
+/// la op). Negativo derivado determinista del op_uuid
+/// (FNV-1a truncado): distinto por op — la clave de atendido
+/// de la bandeja es `tipo_cliente_id` y dos inscripciones del
+/// mismo día no pueden compartir provisional — y jamás un id
+/// real (los del servidor son positivos). PURO.
+int clienteIdProvisionalOp(String opUuid) {
+  var h = 0x811c9dc5;
+  for (final u in opUuid.codeUnits) {
+    h = ((h ^ u) * 0x01000193) & 0x3fffffff;
+  }
+  return -1 - h;
+}
+
 /// Arma la bandeja de avisos de WhatsApp del día: cumpleañeros, vencen hoy,
 /// por vencer (3 días) y recibos de pagos de hoy. Cada mapa trae:
 /// tipo, cliente_id, nombre, telefono, detalle y mensaje (texto pre-rellenado
@@ -3301,6 +3317,26 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   // pago_mensual/inscribir de hoy que el espejo aún no refleja
   // (descarte por op_uuid, B-03), con las mismas reglas de
   // privacidad que los recibos del espejo.
+  //
+  // Yunque 3 (K5-6): el «Cobrado por» de esta rama se resuelve
+  // a NOMBRE desde el directorio canónico (usuarios_apk →
+  // nombresCanonEntrenadores), como los demás lectores de la
+  // cola; antes salía el telegram_id numérico crudo en el
+  // recibo que se envía al cliente. Si el id no resuelve y la
+  // op es del propio teléfono, vale el nombre de la sesión; si
+  // ninguna fuente da nombre, la línea se OMITE — nunca el id.
+  final nombresCola = await nombresCanonEntrenadores();
+  String cobradoPorDe(Map<String, dynamic> op) {
+    final opTid = LocalDb.normalizarTelegramId(op['telegram_id']);
+    final delDirectorio =
+        opTid != null ? (nombresCola[opTid] ?? '') : '';
+    if (delDirectorio.isNotEmpty) return delDirectorio;
+    if (opTid != null && opTid == tid) {
+      return AuthService().displayName.trim();
+    }
+    return '';
+  }
+
   for (final op in await LocalDb.instance.pendingOpsLectura()) {
     final tipo = '${op['tipo']}';
     if (tipo != 'pago_mensual' && tipo != 'inscribir') continue;
@@ -3323,13 +3359,51 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
           fechaNegocioHabana(fechaOp) != hoy) {
         continue;
       }
+      final monto = await montoCobradoCupOp(op);
+      if (monto <= 0) continue;
+      final cobradoPor = cobradoPorDe(op);
+      final lineaCobrado =
+          cobradoPor.isEmpty ? '' : '\nCobrado por: $cobradoPor';
+      if (tipo == 'inscribir') {
+        // Yunque 3 (K5-7): la op de inscripción NO trae
+        // cliente_id (lo asigna el servidor al aplicar), así
+        // que exigirlo descartaba en silencio TODO recibo de
+        // inscripción por esta vía. El recibo se compone del
+        // propio payload (nombre, teléfono, precio vía
+        // montoCobradoCupOp) con un cliente_id provisional
+        // NEGATIVO derivado del op_uuid: distinto por op (la
+        // clave de atendido de la bandeja es tipo+cliente_id
+        // y dos inscripciones no pueden chocar) y sin
+        // colisionar con ningún id real. El cliente nuevo no
+        // puede ser protegido (la marca la pone el dueño sobre
+        // un cliente ya existente), así que componer sin espejo
+        // no abre la vía que el fail-closed de abajo cierra
+        // para los pagos.
+        final nombrePayload = '${payload['nombre'] ?? ''}'.trim();
+        final nombreInsc =
+            nombrePayload.isEmpty ? 'Cliente nuevo' : nombrePayload;
+        avisos.add({
+          'tipo': 'recibo',
+          'cliente_id': clienteIdProvisionalOp('${op['op_uuid'] ?? ''}'),
+          'nombre': nombreInsc,
+          'telefono': telefonoEfectivoWa(
+              {'telefono': payload['telefono']}),
+          'foto_storage': null,
+          'detalle': 'Recibo: ${fmtMonto(monto)} CUP',
+          'mensaje': '*Iron Body Gym* — Recibo\n'
+              'Cliente: $nombreInsc\n'
+              'Monto: ${fmtMonto(monto)} CUP\n'
+              'Fecha: $hoy'
+              '$lineaCobrado$lineaMensajeAutomatico'
+                  .trim(),
+        });
+        continue;
+      }
       final cid = (payload['cliente_id'] as num?)?.toInt() ?? 0;
       if (cid <= 0) continue;
       final c = await clienteDeRecibo(cid);
       if (!esDueno && c == null) continue;
       if (c != null && esVistaProtegida(c, esDueno: esDueno)) continue;
-      final monto = await montoCobradoCupOp(op);
-      if (monto <= 0) continue;
       final nombre = c != null ? nombreDe(c) : 'Cliente $cid';
       avisos.add({
         'tipo': 'recibo',
@@ -3341,8 +3415,8 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
         'mensaje': '*Iron Body Gym* — Recibo\n'
             'Cliente: $nombre\n'
             'Monto: ${fmtMonto(monto)} CUP\n'
-            'Fecha: $hoy\n'
-            'Cobrado por: ${op['telegram_id'] ?? ''}$lineaMensajeAutomatico'
+            'Fecha: $hoy'
+            '$lineaCobrado$lineaMensajeAutomatico'
                 .trim(),
       });
     } catch (_) {}
