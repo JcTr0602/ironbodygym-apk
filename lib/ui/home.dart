@@ -1387,7 +1387,11 @@ class _HomeScreenState extends State<HomeScreen>
       children: [
         Expanded(
           child: RefrescoIron(
-            onRefresh: () => _cargar(forceRefresh: true),
+            // 1.34 Campo 2 (P-7): regla de Jc — fresco
+            // (≤10 min) solo relee; viejo corre un ciclo
+            // completo antes (refrescoGeneralIron).
+            onRefresh: () => refrescoGeneralIron(
+                releer: () => _cargar(forceRefresh: true)),
             child: EntradaCascada(
               child: ListView.builder(
               key: const PageStorageKey<String>('mostrador-scroll'),

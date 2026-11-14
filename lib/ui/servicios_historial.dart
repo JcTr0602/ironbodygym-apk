@@ -132,6 +132,20 @@ class _ServiciosHistorialCuerpoState
     _cargar();
   }
 
+  /// 1.34 Campo 2 (P-7): el Historial gana el gesto de
+  /// bajar-para-actualizar (era la primera pantalla sin
+  /// él): alcance de servicios con la regla de Jc
+  /// (fresco = solo local) y relectura. Sin avisos, como
+  /// el resto de la pantalla.
+  Future<void> _actualizarHistorial() async {
+    try {
+      await refrescoScopeIron('servicios');
+    } catch (_) {
+      // Sin red: se relee lo local igualmente.
+    }
+    await _cargar();
+  }
+
   /// 10/25: carga propia. El predicado de rol es el mismo que
   /// «Ventas de hoy» en Servicios (vendedor o pomo propio).
   Future<void> _cargar() async {
@@ -623,7 +637,9 @@ class _ServiciosHistorialCuerpoState
                             }
                           : null,
                     )
-                  : ListView.builder(
+                  : RefrescoIron(
+                    onRefresh: _actualizarHistorial,
+                    child: ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: itemsHist.length + 1,
                     itemBuilder: (context, index) {
@@ -669,6 +685,7 @@ class _ServiciosHistorialCuerpoState
                       }
                       return _filaEntrada(it as Map<String, dynamic>);
                     },
+                  ),
                   ),
             ),
           ),

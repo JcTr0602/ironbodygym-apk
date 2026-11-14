@@ -486,14 +486,48 @@ class _ReservasScreenState extends State<ReservasScreen> {
   }
 
   Future<void> _refrescar() async {
+    // 1.34 Campo 2 (P-7): el gesto dice la verdad y sigue
+    // la regla de Jc. Fresco (≤10 min) → solo relectura
+    // local. Viejo → alcance detallado y se anuncia el
+    // desenlace (bajó / al día / sin conexión / no corrió
+    // / parcial), como en Buscar y en Admin; antes se
+    // tragaba el resultado booleano y callaba siempre.
+    ResultadoScopeDetallado? r;
+    var lanzo = false;
     try {
-      await SyncEngine.instance.sincronizarScope('suplementos');
+      r = await refrescoScopeIron('suplementos');
     } catch (_) {
-      // Sin red o sync ocupado: la cola y el bloqueo ya están
-      // persistidos; se relee lo que haya y el ciclo normal de
-      // sincronización resuelve el envío.
+      lanzo = true;
     }
     await _cargar();
+    if (!mounted) return;
+    if (lanzo) {
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+          significado: SignificadoChip.alerta);
+    } else if (r == null) {
+      mostrarSnack(context, 'Reservas al día, sin cambios',
+          significado: SignificadoChip.exito);
+    } else if (!r.corrio) {
+      mostrarSnack(
+          context,
+          r.motivo == SyncMotivoNoCorrio.sinSesion
+              ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
+              : 'Ya hay una sincronización en curso',
+          significado: SignificadoChip.alerta);
+    } else if (r.error) {
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+          significado: SignificadoChip.alerta);
+    } else if (r.parcial) {
+      mostrarSnack(context,
+          'Bajada parcial: ${r.fallidas} filas no bajaron; mostrando lo que hay',
+          significado: SignificadoChip.alerta);
+    } else if (r.bajados == 0) {
+      mostrarSnack(context, 'Reservas al día, sin cambios',
+          significado: SignificadoChip.exito);
+    } else {
+      mostrarSnack(context, 'Reservas actualizadas',
+          significado: SignificadoChip.exito);
+    }
   }
 
   Future<void> _encolar(String tipo, Map<String, dynamic> payload,
@@ -769,13 +803,27 @@ class _ReservasScreenState extends State<ReservasScreen> {
                   (b.solicitadas.isEmpty &&
                       b.reservadas.isEmpty &&
                       b.historial.isEmpty)
-              ? EstadoVacio(
-                  icono: Icons.event_available_rounded,
-                  titulo: 'Todavía no hay reservas.',
-                  subtitulo: 'Cuando un cliente reserve un suplemento '
-                      'desde su app, aparece aquí.',
-                  textoAccion: 'Actualizar',
-                  onAccion: _refrescar,
+              // 1.34 Campo 2 (P-7): el vacío también oye el
+              // gesto — va dentro de una lista desplazable
+              // bajo el RefrescoIron (antes el EstadoVacio
+              // pelado se tragaba el tirar-para-actualizar).
+              ? RefrescoIron(
+                  onRefresh: _refrescar,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      const SizedBox(height: 120),
+                      EstadoVacio(
+                        icono: Icons.event_available_rounded,
+                        titulo: 'Todavía no hay reservas.',
+                        subtitulo:
+                            'Cuando un cliente reserve un suplemento '
+                            'desde su app, aparece aquí.',
+                        textoAccion: 'Actualizar',
+                        onAccion: _refrescar,
+                      ),
+                    ],
+                  ),
                 )
               : RefrescoIron(
                   onRefresh: _refrescar,

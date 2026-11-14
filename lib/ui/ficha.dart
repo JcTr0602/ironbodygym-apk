@@ -975,13 +975,39 @@ class _FichaScreenState extends State<FichaScreen> {
   /// de un solo cliente (_verificarServidor); esto es el
   /// refresco ligero de todos los días.
   Future<void> _refrescarFicha() async {
+    // 1.34 Campo 2 (P-7): el gesto dice la verdad y sigue
+    // la regla de Jc. Fresco (≤10 min) → solo relectura
+    // local, en silencio como siempre. Viejo → pull real
+    // y se anuncia el desenlace (bajó / sin conexión / no
+    // corrió), como en Buscar y en Admin; antes la ficha
+    // bajaba SIEMPRE y callaba el resultado.
+    if (await SyncEngine.instance.datosFrescos()) {
+      if (!mounted) return;
+      await _cargar();
+      return;
+    }
+    SyncResultado? res;
     try {
-      await SyncEngine.instance.pull();
+      res = await SyncEngine.instance.pull();
     } catch (_) {
-      // Sin conexión: se relee lo local igualmente.
+      res = null;
     }
     if (!mounted) return;
     await _cargar();
+    if (!mounted) return;
+    if (res == null) {
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+          significado: SignificadoChip.alerta);
+    } else if (!res.corrio) {
+      mostrarSnack(context, res.resumenCorto,
+          significado: SignificadoChip.alerta);
+    } else if (res.error != null) {
+      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+          significado: SignificadoChip.alerta);
+    } else {
+      mostrarSnack(context, 'Ficha actualizada',
+          significado: SignificadoChip.exito);
+    }
   }
 
   /// Verifica los datos del cliente contra el servidor (v1.0.10).

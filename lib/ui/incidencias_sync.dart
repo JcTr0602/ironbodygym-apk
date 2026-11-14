@@ -104,7 +104,11 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
   }
 
   Future<void> _sincronizar() async {
-    await SyncEngine.instance.sincronizarScope('incidencias_sync');
+    // 1.34 Campo 2 (P-7): regla de Jc — fresco (≤10 min)
+    // solo relee lo local; viejo baja el alcance primero.
+    if (!await SyncEngine.instance.datosFrescos()) {
+      await SyncEngine.instance.sincronizarScope('incidencias_sync');
+    }
     await _cargar();
   }
 

@@ -187,6 +187,21 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   /// v1.3.3 (Argón): si es el mes actual, fusionar los pagos optimistas de
   /// hoy (diariosDeHoy, incluye ops_queue) para que el total del día en la
   /// lista coincida con el detalle.
+  /// 1.34 Campo 2 (P-7): el gesto de Mi Día con la regla
+  /// de Jc — fresco (≤10 min) solo relee lo local; viejo
+  /// baja primero el alcance del día (pagos, diarios,
+  /// ventas, adelantos) y luego relee. Sin avisos, como
+  /// siempre en esta pantalla.
+  Future<void> _refrescarMiDia(
+      Future<void> Function() releer) async {
+    try {
+      await refrescoScopeIron('arqueo');
+    } catch (_) {
+      // Sin red: se relee lo local igualmente.
+    }
+    await releer();
+  }
+
   Future<void> _cargarMes() async {
     setState(() => _cargando = true);
     // v1.3.6: filtro por entrenador (null = dueño, ve todo).
@@ -455,7 +470,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   /// v1.3.3: vista mensual — selector de mes + lista de días con totales.
   Widget _vistaMes() {
     return RefrescoIron(
-      onRefresh: _cargarMes,
+      onRefresh: () => _refrescarMiDia(_cargarMes),
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
@@ -605,7 +620,8 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     ];
     const nombres = {'mañana': 'Mañana', 'tarde': 'Tarde', 'noche': 'Noche'};
     return RefrescoIron(
-      onRefresh: () => _cargarDiaDetalle(_diaDetalle!),
+      onRefresh: () =>
+          _refrescarMiDia(() => _cargarDiaDetalle(_diaDetalle!)),
       child: ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
@@ -716,7 +732,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   /// Vista original del día actual (Hoy).
   Widget _vistaHoy() {
     return RefrescoIron(
-      onRefresh: _cargar,
+      onRefresh: () => _refrescarMiDia(_cargar),
       child: _contenidoHoy(),
     );
   }

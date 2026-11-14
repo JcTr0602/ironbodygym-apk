@@ -126,6 +126,17 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     _cargar();
   }
 
+  /// 1.34 Campo 2 (P-7): gesto del Centro de compras —
+  /// alcance de servicios con la regla de Jc y relectura.
+  Future<void> _actualizarCompras() async {
+    try {
+      await refrescoScopeIron('servicios');
+    } catch (_) {
+      // Sin red: se relee lo local igualmente.
+    }
+    await _cargar();
+  }
+
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
@@ -388,16 +399,27 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando compras…')
           : RefrescoIron(
-              onRefresh: _cargar,
+              // 1.34 Campo 2 (P-7): el gesto baja el alcance
+              // de servicios si los datos están viejos
+              // (regla de Jc) y relee; su vacío va en una
+              // lista desplazable — antes era un Center
+              // fijo y la física del gesto moría en él.
+              onRefresh: _actualizarCompras,
               child: Column(
                 children: [
                   _cabecera(),
                   _filtros(),
                   Expanded(
                     child: _visibles.isEmpty
-                        ? const Center(
-                            child: Text('Sin compras para este filtro.',
-                                style: AppTexto.secundario))
+                        ? ListView(
+                            children: const [
+                              SizedBox(height: 180),
+                              Center(
+                                  child: Text(
+                                      'Sin compras para este filtro.',
+                                      style: AppTexto.secundario)),
+                            ],
+                          )
                         : ListView(
                             padding: const EdgeInsets.all(AppEspacio.lg),
                             children: [

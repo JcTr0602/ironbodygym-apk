@@ -242,7 +242,10 @@ class _GympediaScreenState extends State<GympediaScreen> {
     // 1.22 GY-06: snack honesto según si el ciclo corrió.
     var corrio = false;
     try {
-      corrio = await SyncEngine.instance.sincronizarScope('gympedia');
+      // P-7: con datos frescos manda el catálogo local
+      // (regla de Jc); viejos → el alcance baja primero.
+      corrio = await SyncEngine.instance.datosFrescos() ||
+          await SyncEngine.instance.sincronizarScope('gympedia');
     } catch (_) {}
     await _cargar();
     if (!mounted) return;

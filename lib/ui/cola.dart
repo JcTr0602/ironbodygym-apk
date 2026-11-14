@@ -2448,7 +2448,10 @@ class _ColaScreenState extends State<ColaScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Sincronización'),
       body: RefrescoIron(
-        onRefresh: _cargar,
+        // P-7: regla de Jc (refrescoGeneralIron) — la
+        // pantalla ya tiene sus botones de sincronizar;
+        // el gesto sigue la misma regla que el resto.
+        onRefresh: () => refrescoGeneralIron(releer: _cargar),
         child: ListView(
           padding: const EdgeInsets.all(AppEspacio.lg),
           children: [

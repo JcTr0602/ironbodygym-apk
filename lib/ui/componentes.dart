@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../fotos.dart';
+import '../sync.dart';
 import '../tiempo.dart';
 
 import 'diseno.dart';
@@ -362,6 +363,42 @@ class RefrescoIron extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// 1.34 Campo 2 (P-7): el gesto de bajar-para-actualizar
+/// de una pantalla de ALCANCE, con la regla de Jc
+/// (2026-11-14): «que sincronice en muchos casos con los
+/// datos reales que ya están descargados; pero si llevan
+/// mucho tiempo sin actualizar, que aparte de verificar
+/// en local actualice la BD en tiempo real».
+/// Operativización: última bajada buena ≤10 min → NO se
+/// toca la red y se devuelve null (la pantalla solo
+/// relee lo local); más vieja (o nunca) → se baja el
+/// alcance primero y se devuelve su resultado detallado
+/// para que la pantalla anuncie el desenlace veraz.
+Future<ResultadoScopeDetallado?> refrescoScopeIron(String scope) async {
+  if (await SyncEngine.instance.datosFrescos()) return null;
+  return SyncEngine.instance.sincronizarScopeDetallado(scope);
+}
+
+/// 1.34 Campo 2 (P-7): el gesto de una pantalla SIN
+/// alcance propio (su dato cruza varias tablas), con la
+/// misma regla de Jc: fresco → solo [releer]; viejo → un
+/// ciclo completo del motor y después [releer]. Sin
+/// avisos: estas pantallas nunca los han dado al tirar
+/// (Listas, Home, Papelera, Cola, secciones de Admin).
+Future<void> refrescoGeneralIron(
+    {required Future<void> Function() releer}) async {
+  if (!await SyncEngine.instance.datosFrescos()) {
+    try {
+      await SyncEngine.instance.run();
+    } catch (_) {
+      // Sin conexión o ciclo en curso: se relee lo local
+      // igualmente (offline-first); el banner de sync de
+      // la cáscara cuenta el estado real del motor.
+    }
+  }
+  await releer();
 }
 
 /// Botón secundario: contorno neutro, fondo transparente

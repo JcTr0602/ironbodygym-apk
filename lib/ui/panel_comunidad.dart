@@ -7,6 +7,7 @@ import '../comunidad_panel.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'diseno.dart' show AppEspacio, AppRadio, AppTexto;
+import 'componentes.dart';
 import 'ficha.dart';
 
 /// 1.27 (Comunidad MVP, Pieza G): «Comunidad» del
@@ -182,6 +183,18 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
       });
 
   // ── Cargas ──
+
+  /// 1.34 Campo 2 (P-7): el Panel gana el gesto de
+  /// bajar-para-actualizar en sus tres pestañas. Sus
+  /// datos no son espejo: el cargador ES una consulta
+  /// viva al servidor, así que el gesto re-consulta
+  /// (perfiles, reportes e historial) sin pasar por la
+  /// regla de frescura de los espejos.
+  Future<void> _refrescarPanel() async {
+    await _cargar();
+    await _cargarReportes();
+    await _cargarHistorial();
+  }
 
   Future<void> _cargar() async {
     setState(() {
@@ -594,12 +607,15 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
           child: visibles.isEmpty
               ? _mensaje('Ningún perfil coincide con '
                   '«$_consulta».')
-              : ListView.builder(
-                  padding:
-                      const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  itemCount: visibles.length,
-                  itemBuilder: (context, i) =>
-                      _tarjeta(visibles[i]),
+              : RefrescoIron(
+                  onRefresh: _refrescarPanel,
+                  child: ListView.builder(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    itemCount: visibles.length,
+                    itemBuilder: (context, i) =>
+                        _tarjeta(visibles[i]),
+                  ),
                 ),
         ),
       ],
@@ -699,10 +715,13 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
           'Cuando un cliente reporte un perfil, '
           'aparecerá aquí para resolverlo.');
     }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: _reportes.length,
-      itemBuilder: (context, i) => _tarjetaReporte(_reportes[i]),
+    return RefrescoIron(
+      onRefresh: _refrescarPanel,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        itemCount: _reportes.length,
+        itemBuilder: (context, i) => _tarjetaReporte(_reportes[i]),
+      ),
     );
   }
 
@@ -775,7 +794,9 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
           'Nicks retirados y los reportes '
           'resueltos quedarán registrados aquí.');
     }
-    return ListView.builder(
+    return RefrescoIron(
+      onRefresh: _refrescarPanel,
+      child: ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       itemCount: _historial.length,
       itemBuilder: (context, i) {
@@ -790,6 +811,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
           ),
         );
       },
+      ),
     );
   }
 

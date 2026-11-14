@@ -80,9 +80,15 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       // detallado: si el ciclo NO corrió (otra sincronización en
       // curso o sin sesión) o corrió con error, no se anuncia
       // «Lista actualizada» — mismo engaño que en Buscar.
-      final r = await SyncEngine.instance.sincronizarScopeDetallado('pagos');
+      // 1.34 Campo 2 (P-7): regla de Jc (fresco = solo
+      // local) y la bajada parcial se anuncia (T-3).
+      final r = await refrescoScopeIron('pagos');
       await _cargar();
       if (!mounted) return;
+      if (r == null) {
+        mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
+        return;
+      }
       if (!r.corrio) {
         mostrarSnack(
             context,
@@ -94,6 +100,12 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       }
       if (r.error) {
         mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      if (r.parcial) {
+        mostrarSnack(context,
+            'Bajada parcial: ${r.fallidas} filas no bajaron; mostrando lo que hay',
             significado: SignificadoChip.alerta);
         return;
       }

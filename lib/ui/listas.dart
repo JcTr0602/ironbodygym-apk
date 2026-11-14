@@ -1163,8 +1163,12 @@ class _ListasScreenState extends State<ListasScreen>
         [...rows, ...?cola]
             .where((c) => _avisados.contains((c['id'] as int?) ?? 0))
             .length;
+    // 1.34 Campo 2 (P-7): el gesto sigue la regla de Jc
+    // vía refrescoGeneralIron — fresco (≤10 min) solo
+    // relee lo local; viejo corre un ciclo completo
+    // antes de releer. Sin avisos, como siempre aquí.
     final lista = RefrescoIron(
-      onRefresh: _cargar,
+      onRefresh: () => refrescoGeneralIron(releer: _cargar),
       child: ListView.separated(
         itemCount:
             desplaza + rows.length + (hayCola ? cola.length + 1 : 0),

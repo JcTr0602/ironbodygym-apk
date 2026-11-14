@@ -600,14 +600,23 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     var mensaje = 'Servicios actualizados';
     var esError = false;
     try {
-      final r =
-          await SyncEngine.instance.sincronizarScopeDetallado('servicios');
-      if (!r.corrio) {
+      // 1.34 Campo 2 (P-7): gesto con la regla de Jc —
+      // datos frescos (≤10 min) = solo relectura local;
+      // viejos = bajar el alcance primero. Y el desenlace
+      // dice la verdad, incluida la bajada PARCIAL (T-3).
+      final r = await refrescoScopeIron('servicios');
+      if (r == null) {
+        mensaje = 'Servicios al día, sin cambios';
+      } else if (!r.corrio) {
         mensaje = r.motivo == SyncMotivoNoCorrio.sinSesion
             ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
             : 'Ya hay una sincronización en curso';
       } else if (r.error) {
         mensaje = 'Sin conexión, mostrando datos locales';
+        esError = true;
+      } else if (r.parcial) {
+        mensaje = 'Bajada parcial: ${r.fallidas} filas no '
+            'bajaron; mostrando lo que hay';
         esError = true;
       } else if (r.bajados == 0) {
         mensaje = 'Servicios al día, sin cambios';
@@ -647,9 +656,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (actual != null) return actual;
     var confirmado = false;
     try {
-      final r = await SyncEngine.instance
-          .sincronizarScopeDetallado('servicios');
-      confirmado = r.corrio && !r.error;
+      // P-7: con datos frescos el espejo local YA es la
+      // comprobación (regla de Jc); si están viejos manda
+      // el alcance, y una bajada parcial NO confirma.
+      final r = await refrescoScopeIron('servicios');
+      confirmado = r == null || (r.corrio && !r.error && !r.parcial);
     } catch (_) {}
     if (!confirmado) {
       _aviso(

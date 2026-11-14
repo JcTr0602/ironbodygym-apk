@@ -974,7 +974,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       body: _cargando
           ? const EstadoCargando(texto: 'Leyendo diagnóstico…')
           : RefrescoIron(
-              onRefresh: _cargar,
+              onRefresh: () => refrescoGeneralIron(releer: _cargar),
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
@@ -1222,7 +1222,7 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
               ? const Center(
                   child: Text('Sin eventos de sync recientes.'))
               : RefrescoIron(
-                  onRefresh: _cargar,
+                  onRefresh: () => refrescoGeneralIron(releer: _cargar),
                   child: ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
                     itemCount: _eventos.length + 1,
@@ -1913,7 +1913,7 @@ class _InvitadosFrecuentesScreenState
       body: _cargando
           ? const EstadoCargando(texto: 'Buscando candidatos…')
           : RefrescoIron(
-              onRefresh: _cargar,
+              onRefresh: () => refrescoGeneralIron(releer: _cargar),
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [

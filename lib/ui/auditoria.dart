@@ -804,7 +804,13 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             // propio (con filas vive como último ítem de la
             // lista del registro: un solo scroll, sin
             // anidados).
-            child: _sinFilasVisibles(_cargando, visibles)
+            // 1.34 Campo 2 (P-7): el RefrescoIron envuelve
+            // TODAS las ramas (vacío incluido): antes solo
+            // la lista con filas lo tenía y en los vacíos
+            // el gesto moría sin indicador ni recarga.
+            child: RefrescoIron(
+              onRefresh: _cargar,
+              child: _sinFilasVisibles(_cargando, visibles)
                 ? SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     child: Column(
@@ -868,9 +874,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                                 : () => setState(
                                     () => _filtro = FiltroAuditoria.todo),
                           )
-                        : RefrescoIron(
-                        onRefresh: _cargar,
-                        child: ListView.builder(
+                        : ListView.builder(
                           // FB-16: los primeros ítems son los
                           // grupos por día; después, mientras
                           // el río tenga más bloques, el botón

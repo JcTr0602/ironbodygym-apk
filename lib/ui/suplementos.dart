@@ -131,14 +131,21 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     var mensaje = 'Suplementos actualizados';
     var esError = false;
     try {
-      final r =
-          await SyncEngine.instance.sincronizarScopeDetallado('suplementos');
-      if (!r.corrio) {
+      // 1.34 Campo 2 (P-7): regla de Jc (fresco = solo
+      // local) y desenlace veraz, parcial incluida (T-3).
+      final r = await refrescoScopeIron('suplementos');
+      if (r == null) {
+        mensaje = 'Suplementos al día, sin cambios';
+      } else if (!r.corrio) {
         mensaje = r.motivo == SyncMotivoNoCorrio.sinSesion
             ? 'Sin sesión: vuelve a iniciar sesión para sincronizar'
             : 'Ya hay una sincronización en curso';
       } else if (r.error) {
         mensaje = 'Sin conexión, mostrando datos locales';
+        esError = true;
+      } else if (r.parcial) {
+        mensaje = 'Bajada parcial: ${r.fallidas} filas no '
+            'bajaron; mostrando lo que hay';
         esError = true;
       } else if (r.bajados == 0) {
         mensaje = 'Suplementos al día, sin cambios';

@@ -374,6 +374,14 @@ class SyncScope {
       'adelantos',
     ],
     'incidencias_sync': ['incidencias_sync'],
+    // 1.34 Campo 2 (P-7): la Bandeja GymPedia gana gesto
+    // de refresco con su alcance propio (solicitudes,
+    // borradores y permisos de la bandeja).
+    'bandeja': [
+      'gympedia_solicitudes',
+      'espejo_gympedia_borradores',
+      'permisos_bandeja'
+    ],
     // v1.4.4 (v33): refresco puntual del espejo de GymPedia.
     'gympedia': ['gympedia_articulos'],
     // Biblioteca / Guía (v47): refresco puntual de fichas y equipos.
@@ -1314,6 +1322,32 @@ class VentanaEmisionLigera {
   }
 }
 
+/// 1.34 Campo 2 (P-7, regla de Jc 2026-11-14): ¿la
+/// última bajada buena es FRESCA? El gesto de
+/// bajar-para-actualizar, si los datos llevan poco sin
+/// actualizarse (≤10 min: el ciclo automático corre cada
+/// 2 min), se limita a releer lo ya descargado; solo si
+/// llevan MUCHO sin actualizarse baja datos frescos
+/// primero. Función pura: se prueba sin motor.
+bool syncEsFresca(DateTime? ultimaBajadaOk, DateTime ahora,
+    {Duration ventana = const Duration(minutes: 10)}) {
+  if (ultimaBajadaOk == null) return false;
+  final d = ahora.difference(ultimaBajadaOk);
+  return !d.isNegative && d <= ventana;
+}
+
+/// Resultado detallado de una sincronización por
+/// alcance (ver [SyncEngine.sincronizarScopeDetallado]).
+typedef ResultadoScopeDetallado = ({
+  bool corrio,
+  bool error,
+  int bajados,
+  SyncMotivoNoCorrio? motivo,
+  bool cortado,
+  bool parcial,
+  int fallidas
+});
+
 class SyncEngine {
   SyncEngine._();
   static final SyncEngine instance = SyncEngine._();
@@ -2115,6 +2149,24 @@ class SyncEngine {
 
   Future<void> _marcarOk() =>
       _db.setMeta('last_sync_ok', isoHabana(ahoraHabana()));
+
+  /// 1.34 Campo 2 (P-7): ¿los datos locales están
+  /// FRESCOS para la regla del gesto? Vale la más
+  /// reciente de la última sync completa buena
+  /// (last_sync_ok) y el último pull limpio
+  /// (ultimo_pull_ts, que también sellan los alcances
+  /// sin filas fallidas).
+  Future<bool> datosFrescos() async {
+    final ok = await _ultimaOk();
+    final pullTs = await _db.getMeta('ultimo_pull_ts');
+    final pull = pullTs == null ? null : DateTime.tryParse(pullTs);
+    final ultimo = ok == null
+        ? pull
+        : (pull == null || ok.isAfter(pull))
+            ? ok
+            : pull;
+    return syncEsFresca(ultimo, ahoraHabana());
+  }
 
   // ── 1.33: el error de corrida se persiste como CÓDIGO ──
   // (coherencia de sync, §7.2/§7.3 de la investigación).
@@ -3371,14 +3423,8 @@ class SyncEngine {
   /// todo lo que no fuera un ciclo completo y exitoso se
   /// anunciaba como «Sin conexión», también cuando el ciclo
   /// ni siquiera corrió porque ya había uno en curso.
-  Future<
-      ({
-        bool corrio,
-        bool error,
-        int bajados,
-        SyncMotivoNoCorrio? motivo,
-        bool cortado
-      })> sincronizarScopeDetallado(String scope) async {
+  Future<ResultadoScopeDetallado> sincronizarScopeDetallado(
+      String scope) async {
     // H-08: el alcance también se intersecta con el rol.
     final tablas = SyncScope.resolver(scope, esAdmin: _esAdminSeguro);
     if (tablas.isEmpty) {
@@ -3387,13 +3433,20 @@ class SyncEngine {
         error: false,
         bajados: 0,
         motivo: null,
-        cortado: false
+        cortado: false,
+        parcial: false,
+        fallidas: 0
       );
     }
     var errorEnCiclo = false;
     // Auditoría Definitiva (B-6): marca de corte por lock.
     var cortadoScope = false;
     var bajadosScope = 0;
+    // 1.34 Campo 2 (P-7/T-3): las filas fallidas del
+    // alcance viven fuera del cierre para que el
+    // RESULTADO las declare (antes el alcance parcial se
+    // anunciaba «Sincronizado» y devolvía error=false).
+    var fallidasScope = 0;
     final noCorrioScope = await _conLock(() async {
       try {
         // Push global primero (nunca filtrado por scope).
@@ -3429,7 +3482,6 @@ class SyncEngine {
         // (El desglose por tabla de la corrida vive en el
         // diario desde M1: resScope.porTabla ya no alimenta
         // ninguna meta.)
-        var fallidasScope = 0;
         if (tablasNormales.isNotEmpty) {
           final resScope = await _download(tablasFiltro: tablasNormales);
           n += resScope.aplicadas;
@@ -3467,9 +3519,12 @@ class SyncEngine {
           'incidencias_sync': 'incidencias de sync', // v1.3.6
         }[scope] ?? scope;
         _emit(SyncPhase.idle,
-            resumen: n == 0
-                ? 'Sin cambios en $nombreScope'
-                : 'Sincronizado: $nombreScope ($n)');
+            resumen: fallidasScope > 0
+                ? 'Bajada parcial de $nombreScope: '
+                    '$fallidasScope filas no bajaron'
+                : n == 0
+                    ? 'Sin cambios en $nombreScope'
+                    : 'Sincronizado: $nombreScope ($n)');
         // Cliente protegido (2026-10-26, A4): el alcance no trae
         // todas las tablas; el pull extra garantiza que el espejo
         // del cliente quede pisado aunque el alcance no lo cubra.
@@ -3542,6 +3597,8 @@ class SyncEngine {
       bajados: bajadosScope,
       motivo: noCorrioScope,
       cortado: cortadoScope,
+      parcial: fallidasScope > 0,
+      fallidas: fallidasScope,
     );
   }
 
@@ -3549,7 +3606,9 @@ class SyncEngine {
   /// sin error (ver sincronizarScopeDetallado).
   Future<bool> sincronizarScope(String scope) async {
     final r = await sincronizarScopeDetallado(scope);
-    return r.corrio && !r.error;
+    // P-7/T-3: una bajada parcial tampoco es un éxito
+    // completo para los llamadores booleanos.
+    return r.corrio && !r.error && !r.parcial;
   }
 
   /// ¿Hay sesión activa? Defensivo: si el acceso a la sesión

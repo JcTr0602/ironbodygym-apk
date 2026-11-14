@@ -65,6 +65,20 @@ class _BandejaScreenState extends State<BandejaScreen>
     super.dispose();
   }
 
+  /// 1.34 Campo 2 (P-7): la Bandeja gana el gesto de
+  /// bajar-para-actualizar en sus listas (no lo tenía):
+  /// alcance propio 'bandeja' con la regla de Jc
+  /// (fresco = solo local) y relectura. El botón ⟳ de la
+  /// barra hace lo mismo (antes solo releía lo local).
+  Future<void> _actualizarBandeja() async {
+    try {
+      await refrescoScopeIron('bandeja');
+    } catch (_) {
+      // Sin red: se relee lo local igualmente.
+    }
+    await _cargar();
+  }
+
   Future<void> _cargar() async {
     setState(() {
       _cargando = true;
@@ -438,14 +452,17 @@ class _BandejaScreenState extends State<BandejaScreen>
               ? 'Aún no se publicó ningún artículo desde la bandeja.'
               : 'Ninguna solicitud descartada.');
     }
-    return ListView(
-      padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
-        for (final s in lista) ...[
-          _tarjetaSolicitud(s, estado),
-          const SizedBox(height: 8),
+    return RefrescoIron(
+      onRefresh: _actualizarBandeja,
+      child: ListView(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        children: [
+          for (final s in lista) ...[
+            _tarjetaSolicitud(s, estado),
+            const SizedBox(height: 8),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -454,9 +471,11 @@ class _BandejaScreenState extends State<BandejaScreen>
       return _vacio('Sin borradores compartidos.\nCrea uno desde una '
           'solicitud pendiente.');
     }
-    return ListView(
-      padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
+    return RefrescoIron(
+      onRefresh: _actualizarBandeja,
+      child: ListView(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        children: [
         for (final b in _borradores) ...[
           Tarjeta(
             child: Column(
@@ -525,7 +544,8 @@ class _BandejaScreenState extends State<BandejaScreen>
           ),
           const SizedBox(height: 8),
         ],
-      ],
+        ],
+      ),
     );
   }
 
@@ -533,9 +553,11 @@ class _BandejaScreenState extends State<BandejaScreen>
     if (_entrenadores.isEmpty) {
       return _vacio('Sin entrenadores registrados en la app.');
     }
-    return ListView(
-      padding: const EdgeInsets.all(AppEspacio.lg),
-      children: [
+    return RefrescoIron(
+      onRefresh: _actualizarBandeja,
+      child: ListView(
+        padding: const EdgeInsets.all(AppEspacio.lg),
+        children: [
         const Padding(
           padding: EdgeInsets.only(bottom: AppEspacio.md),
           child: Text('Con permiso, el entrenador ve la bandeja, '
@@ -580,7 +602,8 @@ class _BandejaScreenState extends State<BandejaScreen>
           ),
           const SizedBox(height: 8),
         ],
-      ],
+        ],
+      ),
     );
   }
 
@@ -599,7 +622,7 @@ class _BandejaScreenState extends State<BandejaScreen>
         acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: _cargar,
+            onPressed: _actualizarBandeja,
             tooltip: 'Actualizar',
           ),
         ],

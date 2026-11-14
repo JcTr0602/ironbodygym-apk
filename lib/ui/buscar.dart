@@ -521,6 +521,20 @@ class _BuscarScreenState extends State<BuscarScreen> {
   Future<void> _actualizar() async {
     // v1.3.1: manejar fallo de red (offline-first en Cuba).
     try {
+      // 1.34 Campo 2 (P-7): regla de Jc — con datos
+      // frescos (≤10 min) el gesto solo relee lo local
+      // (el aviso «Lista actualizada» cubre la relectura,
+      // como manda la regla); viejos → pull real primero.
+      if (await SyncEngine.instance.datosFrescos()) {
+        final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
+        if (mounted && ts != null) {
+          setState(() => _ultimoPull = _pullEnHabana(ts));
+        }
+        await _buscar();
+        if (!mounted) return;
+        mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
+        return;
+      }
       final res = await SyncEngine.instance.pull();
       // 1.23.1 (bug de campo 2026-11-04): si el pull NO corrió
       // (otra sincronización en curso o sin sesión), NO se anuncia

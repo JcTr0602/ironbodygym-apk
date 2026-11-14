@@ -537,7 +537,9 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                             'No se encontraron clientes inactivos para «$_filtro».',
                       )
                     : RefrescoIron(
-                        onRefresh: _cargar,
+                        // P-7: regla de Jc (refrescoGeneralIron).
+                        onRefresh: () =>
+                            refrescoGeneralIron(releer: _cargar),
                         child: ListView.builder(
                           itemCount: listaFiltrada.length,
                           itemBuilder: (ctx, i) {

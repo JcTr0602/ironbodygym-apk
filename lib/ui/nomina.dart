@@ -98,6 +98,19 @@ class _NominaScreenState extends State<NominaScreen> {
   // solo chequeaba mounted.
   int _genCarga = 0;
 
+  /// 1.34 Campo 2 (P-7): la Nómina gana el gesto de
+  /// bajar-para-actualizar (no lo tenía): alcance de
+  /// pagos con la regla de Jc (fresco = solo local) y
+  /// relectura. El botón ⟳ de la barra hace lo mismo.
+  Future<void> _actualizarNomina() async {
+    try {
+      await refrescoScopeIron('pagos');
+    } catch (_) {
+      // Sin red: se relee lo local igualmente.
+    }
+    await _cargar();
+  }
+
   Future<void> _cargar() async {
     final gen = ++_genCarga;
     // (Yunque R2-X1) red de seguridad: la bandera baja
@@ -887,14 +900,16 @@ class _NominaScreenState extends State<NominaScreen> {
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
-            onPressed: _cargar,
+            onPressed: _actualizarNomina,
           ),
         ],
       ),
       body: _cargando
           // 1.28 (M3-C6): esqueleto espejo de la pantalla.
           ? const SkeletonNomina()
-          : ListView(
+          : RefrescoIron(
+              onRefresh: _actualizarNomina,
+              child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 // 1.23 (W2): la puerta del cierre de mes guiado
@@ -1028,6 +1043,7 @@ class _NominaScreenState extends State<NominaScreen> {
                   ),
                 ],
               ],
+              ),
             ),
     );
   }

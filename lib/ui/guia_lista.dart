@@ -171,7 +171,11 @@ class _GuiaScreenState extends State<GuiaScreen> {
     // ciclo corrió; si no, se dice que manda el catálogo local.
     var corrio = false;
     try {
-      corrio = await SyncEngine.instance.sincronizarScope('guia');
+      // P-7: con datos frescos manda el catálogo local
+      // (regla de Jc) y el aviso de éxito cubre la
+      // relectura; viejos → el alcance baja primero.
+      corrio = await SyncEngine.instance.datosFrescos() ||
+          await SyncEngine.instance.sincronizarScope('guia');
     } catch (_) {}
     await _cargar();
     if (!mounted) return;
