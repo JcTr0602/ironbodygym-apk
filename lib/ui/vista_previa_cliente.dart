@@ -315,8 +315,11 @@ class _VistaPreviaClienteScreenState
                 controller: _tabs,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
-                indicatorColor: _naranja,
-                labelColor: _naranja,
+                // Yunque 2.34 (F-1): indicador y etiqueta
+                // activa vienen del tabBarTheme de la marca;
+                // la no seleccionada se queda aquí porque
+                // esta barra vive sobre grafito (superficie
+                // propia de la vista previa).
                 unselectedLabelColor: Colors.white70,
                 tabs: const [
                   Tab(text: 'Inicio'),

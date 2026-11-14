@@ -1024,6 +1024,29 @@ class AppTema {
         thumbColor: AppColores.naranja,
         overlayColor: AppColores.naranja.withValues(alpha: 0.12),
         inactiveTrackColor: secundario.withValues(alpha: 0.35),
+        // Yunque 2.34 (F-6): la burbuja del valor salía
+        // cobalto (primary del esquema de producción).
+        valueIndicatorColor: AppColores.naranja,
+        valueIndicatorTextStyle:
+            const TextStyle(color: AppColores.sobreMarca),
+      ),
+      // Yunque 2.34 (F-1): sin tabBarTheme, el indicador y la
+      // etiqueta activa de las pestañas salían cobalto en 9
+      // de 10 sitios (primary de producción). La etiqueta NO
+      // seleccionada no se fija aquí: depende de la
+      // superficie (barra oscura o tarjeta clara) y el valor
+      // del SDK la resuelve por contexto.
+      tabBarTheme: const TabBarThemeData(
+        indicatorColor: AppColores.naranja,
+        labelColor: AppColores.naranja,
+      ),
+      // Yunque 2.34 (F-3): cursor, selección y manijas de los
+      // campos de texto en la marca (salían cobalto por el
+      // primary de producción, como los controles de DIS-04).
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: AppColores.naranja,
+        selectionColor: AppColores.naranja.withValues(alpha: 0.35),
+        selectionHandleColor: AppColores.naranjaOscuro,
       ),
       datePickerTheme: DatePickerThemeData(
         dayBackgroundColor: WidgetStateProperty.resolveWith((estados) {
@@ -1039,13 +1062,64 @@ class AppTema {
           return null;
         }),
         todayBorder: const BorderSide(color: AppColores.naranja),
+        // Yunque 2.34 (F-4): «hoy» y el selector de AÑO
+        // también en la marca (salían cobalto). La celda
+        // «hoy» del selector de RANGO la fuerza el SDK por su
+        // cuenta y no es temable: residual aceptado.
+        todayForegroundColor:
+            WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.sobreMarca;
+          }
+          return AppColores.naranja;
+        }),
+        yearBackgroundColor:
+            WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return null;
+        }),
+        yearForegroundColor:
+            WidgetStateProperty.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.sobreMarca;
+          }
+          return null;
+        }),
       ),
-      timePickerTheme: const TimePickerThemeData(
+      timePickerTheme: TimePickerThemeData(
         // La manecilla del reloj era cobalto por el primary
-        // de producción; el selector AM/PM conserva el
-        // tratamiento del SDK (en esta versión dayPeriodColor
-        // no admite resolución por estado desde el tema).
+        // de producción.
         dialHandColor: AppColores.naranja,
+        // Yunque 2.34 (F-5): el selector AM/PM y las cajas de
+        // hora/minuto también en la marca. La nota de DIS-04
+        // («dayPeriodColor no admite resolución por estado»)
+        // era FALSA en este SDK: admite WidgetStateColor.
+        dayPeriodColor: WidgetStateColor.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja;
+          }
+          return AppColores.naranja.withValues(alpha: 0.12);
+        }),
+        dayPeriodTextColor: WidgetStateColor.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.sobreMarca;
+          }
+          return AppColores.naranjaOscuro;
+        }),
+        hourMinuteColor: WidgetStateColor.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranja.withValues(alpha: 0.16);
+          }
+          return AppColores.naranja.withValues(alpha: 0.06);
+        }),
+        hourMinuteTextColor: WidgetStateColor.resolveWith((estados) {
+          if (estados.contains(WidgetState.selected)) {
+            return AppColores.naranjaOscuro;
+          }
+          return oscuro ? Colors.white : AppColores.carbon;
+        }),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor:
