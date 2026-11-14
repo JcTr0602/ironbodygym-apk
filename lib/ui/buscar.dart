@@ -418,7 +418,7 @@ class _BuscarScreenState extends State<BuscarScreen> {
       );
     }
     return EstadoVacio(
-      ilustracion: 'assets/vacio_lupa.jpg',
+      ilustracion: 'assets/vacio_lupa.webp',
       icono: Icons.search_off_rounded,
       titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
       subtitulo: _busco

@@ -66,15 +66,20 @@ flutter:
     - assets/sup_generica_botella.jpg
     # 1.30 D6 (UI130-22, ALTA-02): las 12 ilustraciones de
     # la lámina de vacíos, una por estado vacío asignado.
-    - assets/vacio_papelera.jpg
-    - assets/vacio_caja.jpg
-    - assets/vacio_escudo.jpg
-    - assets/vacio_sobre.jpg
-    - assets/vacio_lupa.jpg
-    - assets/vacio_recepcion.jpg
+    # 1.34 (carril arte): 9 de las 12 van en WebP con alfa
+    # real (spots sin el fondo horneado de la lámina);
+    # pomo, pastel y megafono quedan en JPG — escenas de
+    # objeto sobre mueble cuya separación no sale limpia
+    # (ver 134_arte_informe.md, cabos).
+    - assets/vacio_papelera.webp
+    - assets/vacio_caja.webp
+    - assets/vacio_escudo.webp
+    - assets/vacio_sobre.webp
+    - assets/vacio_lupa.webp
+    - assets/vacio_recepcion.webp
     - assets/vacio_pomo.jpg
-    - assets/vacio_reloj.jpg
-    - assets/vacio_calendario.jpg
-    - assets/vacio_cable.jpg
+    - assets/vacio_reloj.webp
+    - assets/vacio_calendario.webp
+    - assets/vacio_cable.webp
     - assets/vacio_pastel.jpg
     - assets/vacio_megafono.jpg

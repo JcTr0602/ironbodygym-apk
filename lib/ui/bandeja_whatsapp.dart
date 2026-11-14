@@ -661,7 +661,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                     // artesanal pasa al EstadoVacio de la
                     // casa, con el sobre de la lámina.
                     ? const EstadoVacio(
-                        ilustracion: 'assets/vacio_sobre.jpg',
+                        ilustracion: 'assets/vacio_sobre.webp',
                         icono: Icons.mark_chat_read_rounded,
                         titulo: 'Sin avisos por hoy.',
                         subtitulo:

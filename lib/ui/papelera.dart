@@ -503,7 +503,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
           Expanded(
             child: _res.isEmpty
                 ? const EstadoVacio(
-                    ilustracion: 'assets/vacio_papelera.jpg',
+                    ilustracion: 'assets/vacio_papelera.webp',
                     icono: Icons.delete_outline_rounded,
                     titulo: 'Papelera vacía',
                   )

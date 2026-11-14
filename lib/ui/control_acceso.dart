@@ -725,7 +725,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       // al EstadoVacio de la casa, con el escudo de la
       // lámina.
       return const EstadoVacio(
-        ilustracion: 'assets/vacio_escudo.jpg',
+        ilustracion: 'assets/vacio_escudo.webp',
         icono: Icons.shield_rounded,
         titulo: 'Sin resultados con estos filtros.',
       );

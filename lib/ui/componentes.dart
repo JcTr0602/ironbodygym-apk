@@ -897,9 +897,17 @@ class EstadoVacio extends StatelessWidget {
   final bool sinMarco;
 
   /// 1.30 D6 (UI130-22, ALTA-02): ilustración de la
-  /// lámina de vacíos (`assets/vacio_*.jpg`) que sustituye
+  /// lámina de vacíos (`assets/vacio_*`) que sustituye
   /// a la figura de icono cuando el estado tiene una
   /// asignada. Sin asignar, el icono de siempre.
+  ///
+  /// 1.34 (carril arte): las ilustraciones en WebP son
+  /// spots con ALFA real (sin el fondo horneado de la
+  /// lámina) y se pintan con `BoxFit.contain` para que
+  /// floten sobre la superficie; las que quedan en JPG
+  /// (pomo, pastel, megafono: escenas con mueble cuya
+  /// separación no sale limpia) conservan el `cover`
+  /// de siempre.
   final String? ilustracion;
 
   const EstadoVacio({
@@ -943,10 +951,17 @@ class EstadoVacio extends StatelessWidget {
     final Widget figura;
     if (ilustracion != null) {
       final lado = sinMarco ? 96.0 : (compacto ? 72.0 : 128.0);
+      // 1.34 (carril arte): el spot con alfa (WebP) va
+      // en contain — recortarlo con cover amputaría el
+      // motivo y su sombra; la escena opaca (JPG) sigue
+      // en cover, llenando el cuadrado como hasta hoy.
+      final esSpot = ilustracion!.endsWith('.webp');
       figura = ClipRRect(
         borderRadius: BorderRadius.circular(AppRadio.lg),
         child: Image.asset(ilustracion!,
-            width: lado, height: lado, fit: BoxFit.cover),
+            width: lado,
+            height: lado,
+            fit: esSpot ? BoxFit.contain : BoxFit.cover),
       );
     } else if (sinMarco) {
       figura = Icon(icono,

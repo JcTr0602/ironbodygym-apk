@@ -853,7 +853,7 @@ class _ListasScreenState extends State<ListasScreen>
               children: [
                 _lista(_visHoy, Icons.celebration_rounded,
                     'Nadie vence hoy', 'Todo al día.',
-                    ilustracionVacio: 'assets/vacio_reloj.jpg'),
+                    ilustracionVacio: 'assets/vacio_reloj.webp'),
                 // 1.25 T116 (F1-25): fuera la celebración
                 // en pestañas de deuda y en «Por vencer»:
                 // icono tranquilo y, en atrasados, el paso
