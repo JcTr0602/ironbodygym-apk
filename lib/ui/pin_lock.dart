@@ -5,6 +5,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -14,6 +15,7 @@ import '../perfil.dart';
 import 'cierre_sesion.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 
 /// 1.28 (M5-C6): la cuenta atrás del bloqueo en texto
 /// «M:SS» (o «H:MM:SS» si pasa de la hora). Redondea
@@ -37,10 +39,24 @@ class PinLockScreen extends StatefulWidget {
   State<PinLockScreen> createState() => _PinLockScreenState();
 }
 
-class _PinLockScreenState extends State<PinLockScreen> {
+class _PinLockScreenState extends State<PinLockScreen>
+    with SingleTickerProviderStateMixin {
   String _pin = '';
   String? _error;
   bool _verificando = false;
+
+  /// 1.35 (UI-17): la sacudida de los puntos al fallar el
+  /// PIN (con Tacto.error y el error anunciado por
+  /// semántica). Con «reducir movimiento» no se anima.
+  late final AnimationController _sacudida = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.larga,
+  );
+
+  void _sacudir() {
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    _sacudida.forward(from: 0);
+  }
 
   // 1.28 (M5-C6): la cuenta atrás VIVA del bloqueo: el
   // tiempo restante se relee del servicio cada segundo
@@ -64,6 +80,7 @@ class _PinLockScreenState extends State<PinLockScreen> {
   @override
   void dispose() {
     _temporizador?.cancel();
+    _sacudida.dispose();
     super.dispose();
   }
 
@@ -121,6 +138,11 @@ class _PinLockScreenState extends State<PinLockScreen> {
         // tiempo restante: si hay espera, ESE es el
         // mensaje (con sus minutos), no «PIN incorrecto».
         if (!await _avisarSiBloqueado() && mounted) {
+          // 1.35 (UI-17): el fallo se siente (Tacto.error),
+          // se ve (sacudida de los puntos) y se anuncia
+          // (el error lleva semántica de región viva).
+          Tacto.error();
+          _sacudir();
           setState(() => _error = 'PIN incorrecto');
         }
       }
@@ -239,23 +261,40 @@ class _PinLockScreenState extends State<PinLockScreen> {
                   style: AppTexto.secundario.copyWith(
                       color: AppColores.textoSecundario(context))),
               const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(4, (i) {
-                  final lleno = i < _pin.length;
-                  return Container(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: AppEspacio.sm),
-                    width: 18,
-                    height: 18,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: lleno
-                          ? AppColores.naranja
-                          : AppColores.borde(context),
-                    ),
-                  );
-                }),
+              // 1.35 (UI-17): los puntos se sacuden al
+              // fallar y su estado se anuncia («PIN: N de
+              // 4 dígitos»).
+              Semantics(
+                label: 'PIN: ${_pin.length} de 4 dígitos',
+                child: AnimatedBuilder(
+                  animation: _sacudida,
+                  builder: (context, child) {
+                    final v = _sacudida.value;
+                    final dx = v == 0
+                        ? 0.0
+                        : math.sin(v * math.pi * 4) * 8 * (1 - v);
+                    return Transform.translate(
+                        offset: Offset(dx, 0), child: child);
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(4, (i) {
+                      final lleno = i < _pin.length;
+                      return Container(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.sm),
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: lleno
+                              ? AppColores.naranja
+                              : AppColores.borde(context),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
               ),
               if (_bloqueado) ...[
                 // 1.28 (M5-C6): la cuenta atrás, grande y
@@ -278,8 +317,14 @@ class _PinLockScreenState extends State<PinLockScreen> {
                 ),
               ] else if (_error != null) ...[
                 const SizedBox(height: 12),
-                Text(_error!,
-                    style: const TextStyle(color: AppColores.error)),
+                // 1.35 (UI-17): el error se anuncia con su
+                // rol (región viva) además de verse.
+                Semantics(
+                  container: true,
+                  liveRegion: true,
+                  child: Text(_error!,
+                      style: const TextStyle(color: AppColores.error)),
+                ),
               ],
               const SizedBox(height: 24),
               if (_verificando)
