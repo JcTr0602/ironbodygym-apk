@@ -64,10 +64,53 @@ Future<bool> sesionPersistidaCaducadaParaFondo() async {
     if (mapa is! Map) return false;
     final exp = mapa['expires_at'];
     if (exp is! num) return false;
-    final ahoraEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    return exp.toInt() <= ahoraEpoch + 120;
+    // 1.35 (campo 1.34 nº 7, H3): la caducidad se juzga
+    // contra la hora EFECTIVA — la mayor entre el reloj
+    // del teléfono y la hora del servidor estimada desde
+    // el ancla persistida — y no solo contra el reloj
+    // local. Con el reloj atrasado >120 s, la fórmula
+    // vieja creía vigente una sesión ya caducada: el
+    // isolate inicializaba sobre ella con el auto-refresco
+    // apagado y gotrue BORRABA el almacén compartido
+    // entero (el login limpio sin aviso del diagnóstico).
+    // La guardia solo se vuelve más conservadora: sin
+    // ancla legible manda el reloj local, como siempre.
+    final ahoraEpoch = await _ahoraEpochParaGuardia();
+    return sesionExpiradaSegun(exp.toInt(), ahoraEpoch,
+        margenSeg: 120);
   } catch (_) {
     return false;
+  }
+}
+
+/// Hora efectiva para la pre-guardia de fondo: el reloj
+/// local, corregido AL ALZA por la hora del servidor
+/// estimada desde el ancla persistida del candado de
+/// acceso (metas `bloqueo_ancla_server` /
+/// `bloqueo_ancla_pared` de AccesoBloqueoService; las
+/// claves van como literales porque auth.dart no puede
+/// importar acceso_bloqueo.dart sin ciclo:
+/// acceso_bloqueo → sync → auth). Nunca lanza; ante
+/// cualquier duda devuelve el reloj local.
+Future<int> _ahoraEpochParaGuardia() async {
+  final local = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  try {
+    final db = LocalDb.instance;
+    final s = await db.getMeta('bloqueo_ancla_server');
+    final p = await db.getMeta('bloqueo_ancla_pared');
+    final serverMs = DateTime.tryParse(s ?? '')?.millisecondsSinceEpoch;
+    if (serverMs == null) return local;
+    final paredMs =
+        DateTime.tryParse(p ?? '')?.millisecondsSinceEpoch ??
+            serverMs;
+    final estimado = epochServidorEstimado(
+      anclaServerEpoch: serverMs ~/ 1000,
+      anclaParedEpoch: paredMs ~/ 1000,
+      ahoraLocalEpoch: local,
+    );
+    return estimado > local ? estimado : local;
+  } catch (_) {
+    return local;
   }
 }
 
