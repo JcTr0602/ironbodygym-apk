@@ -496,12 +496,24 @@ class AuthService {
           timeout: timeoutRefresco,
           tokenQueFallo: tokenQueFallo,
         );
-        if (r != ResultadoRefresco.vigente &&
-            r != ResultadoRefresco.renovada) {
-          return null;
+        if (r == ResultadoRefresco.renovada) {
+          final t = session?.accessToken;
+          return (t == null || t.isEmpty) ? null : t;
         }
-        final t = session?.accessToken;
-        return (t == null || t.isEmpty) ? null : t;
+        if (r == ResultadoRefresco.vigente) {
+          // Vigente sirve solo si el token vigente es OTRO
+          // (adoptado): con el mismo que acaba de fallar no
+          // hay reintento posible — en un isolate de fondo
+          // con la sesión válida es exactamente este caso, y
+          // devolverlo haría al llamador reintentar con el
+          // token rechazado y declarar la sesión vencida
+          // desde el fondo.
+          final t = session?.accessToken;
+          return (t == null || t.isEmpty || t == tokenQueFallo)
+              ? null
+              : t;
+        }
+        return null;
       });
 
   Future<ResultadoRefresco> _asegurarSesion({
