@@ -33,7 +33,6 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_log.dart';
 import 'auth.dart';
@@ -652,38 +651,35 @@ class FotoCache {
               if (token.isNotEmpty) 'Authorization': 'Bearer $token',
             },
           ).timeout(timeout);
-      var r = await pedir(_auth.session?.accessToken ?? '');
+      final tokenInicial = _auth.session?.accessToken ?? '';
+      var r = await pedir(tokenInicial);
       // 1.31 (IMP-18): ante un 401 (JWT vencido), refrescar
       // la sesión y reintentar UNA vez — el patrón _reqAuth
       // de sync. Si el refresh falla (sin red), se conserva
       // la respuesta original: un fallo de red no es un
       // vencimiento.
+      // 1.35 (campo 1.34 nº 7): el refresco va por el
+      // pipeline de sesión (AuthService.tokenTras401), como
+      // en _reqAuth — serializado, adopción de la persistida
+      // primero, sin re-presentar a ciegas tras un corte (el
+      // timeout de 20 s de A-1/G-1 vive ahora en el
+      // pipeline) y en un isolate de fondo NUNCA: el pipeline
+      // devuelve null y se conserva el 401 original, la
+      // degradación de siempre ante un refresco imposible.
       if (r.statusCode == 401) {
-        String nuevo = '';
-        try {
-          // Yunque 2.34 (A-1/G-1): timeout — era el ÚNICO
-          // refreshSession de la app sin él tras C3-1; con el
-          // endpoint de auth colgado (red hostil), el futuro
-          // compartido _enVuelo de esta ruta quedaba colgado
-          // toda la sesión. El catch ya conserva la respuesta
-          // original: degradación correcta sin tocar más.
-          final res = await Supabase.instance.client.auth
-              .refreshSession()
-              .timeout(const Duration(seconds: 20));
-          nuevo = res.session?.accessToken ?? '';
-        } catch (_) {}
-        if (nuevo.isNotEmpty) {
-          // Yunque 3.34 (K1-2): el REINTENTO va FUERA del
-          // try, espejo de A-2 en sync.dart (_reqAuth).
-          // Dentro, su propio timeout (el del llamador,
-          // 30 s) caía en el catch de arriba y quedaba en
-          // pie el 401 original: un corte de transporte se
-          // disfrazaba de fallo de autenticación (la ruta
-          // entraba en _fallo401, sin el castigo de la
-          // caché negativa, y el log decía «HTTP 401»).
-          // Fuera, el error del reintento lo trata el catch
-          // exterior de _descargarRed como lo que es: un
-          // fallo de descarga genérico.
+        final nuevo = await _auth.tokenTras401(tokenInicial);
+        if (nuevo != null && nuevo.isNotEmpty) {
+          // Yunque 3.34 (K1-2): el REINTENTO va FUERA de
+          // cualquier try, espejo de A-2 en sync.dart
+          // (_reqAuth). Dentro, su propio timeout (el del
+          // llamador, 30 s) caía en el catch del refresco y
+          // quedaba en pie el 401 original: un corte de
+          // transporte se disfrazaba de fallo de
+          // autenticación (la ruta entraba en _fallo401, sin
+          // el castigo de la caché negativa, y el log decía
+          // «HTTP 401»). Fuera, el error del reintento lo
+          // trata el catch exterior de _descargarRed como lo
+          // que es: un fallo de descarga genérico.
           r = await pedir(nuevo);
         }
       }
