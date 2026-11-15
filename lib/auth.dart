@@ -529,8 +529,21 @@ class AuthService {
     }
     final tokenAlEntrar = session?.accessToken;
     final presentados = <String>{};
+    // Tras una adopción lograda, la persistida y la memoria
+    // quedan sincronizadas POR CONSTRUCCIÓN (recoverSession
+    // adopta lo persistido): la siguiente decisión se toma
+    // sobre la memoria, SIN re-leer el almacén. Re-leerlo
+    // competiría con la re-persistencia asíncrona de la
+    // propia gotrue y podría ver la entrada ANTERIOR a la
+    // adopción — una «rotación» fantasma que haría
+    // re-presentar un token ya gastado (lo cazó la batería
+    // de esta pieza, caso a2).
+    var sincronizadaTrasAdoptar = false;
     for (var paso = 0; paso < 4; paso++) {
-      final persistida = await _leerPersistida();
+      final sesPrevio = session;
+      final persistida = sincronizadaTrasAdoptar
+          ? (rt: sesPrevio?.refreshToken, exp: sesPrevio?.expiresAt)
+          : await _leerPersistida();
       final ses = session;
       final accion = decidirAccionSesion(
         esFondo: false,
@@ -555,7 +568,33 @@ class AuthService {
           // puede completar después y adoptar entonces; la
           // decisión se re-evalúa en el siguiente paso).
           try {
-            await releerSesionPersistida().timeout(timeout);
+            final rtAntes = ses?.refreshToken;
+            final ok =
+                await releerSesionPersistida().timeout(timeout);
+            final rtDespues = session?.refreshToken;
+            if (ok &&
+                (rtDespues == persistida.rt ||
+                    rtDespues != rtAntes)) {
+              // Adoptada tal cual, o adoptada CON refresco
+              // (el recoverSession gastó el token persistido
+              // y el servidor rotó al conceder): en ambos
+              // casos memoria y almacén quedan sincronizados.
+              sincronizadaTrasAdoptar = true;
+            } else if (ok) {
+              // gotrue ATAJÓ la adopción: su recoverSession
+              // devuelve la sesión de memoria cuando sigue
+              // VIGENTE y es del mismo usuario, sin adoptar
+              // la persistida (la persistida rotó pero su
+              // acceso ya venció). No es un fallo ni hay
+              // nada que refrescar: la memoria manda
+              // mientras valga, y la adopción se consumará
+              // en la pasada en que venza — presentando
+              // SOLO el token persistido, nunca este viejo.
+              final ses2 = session;
+              if (ses2 != null && !ses2.isExpired) {
+                return ResultadoRefresco.vigente;
+              }
+            }
           } catch (_) {}
         case AccionSesion.refrescar:
           final rt = session?.refreshToken;
