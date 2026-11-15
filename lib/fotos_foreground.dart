@@ -252,6 +252,11 @@ class _SyncTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // 1.35 (campo 1.34 nº 7): este isolate es de FONDO y no
+    // es dueño del refresco — el pipeline de sesión
+    // (AuthService) solo constatará la sesión persistida y
+    // diferirá sin rotar jamás el token compartido.
+    AuthService.esIsolateDeFondo = true;
     WidgetsFlutterBinding.ensureInitialized();
     try {
       // 1.32 (O2F2S, AP-5 — residual del Foreground
