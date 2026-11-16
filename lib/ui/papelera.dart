@@ -458,7 +458,8 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(alcance: 'papelera'),
+          // SL-9 (G09-5): fuera la banda de sync repetida — la
+          // sync se dice una sola vez, en la cabecera de la app.
           Padding(
             padding: const EdgeInsets.all(AppEspacio.md),
             child: Text(
