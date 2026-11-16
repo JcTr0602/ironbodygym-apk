@@ -1422,7 +1422,12 @@ List<
   var cup = 0.0;
   var usd = 0.0;
   for (final s in suplementos) {
-    final m = (s['precio'] as num?)?.toDouble() ?? 0;
+    // G#15 (Hy4): el total REGISTRADO de la venta (la
+    // columna `total` si la fila la trae; si no,
+    // precio×cantidad), no el precio unitario suelto:
+    // con el unitario, «Comprado en total» mentía en
+    // toda venta de más de una unidad.
+    final m = totalVentaRegistrado(s);
     if ('${s['moneda'] ?? 'CUP'}' == 'USD') {
       usd += m;
     } else {
