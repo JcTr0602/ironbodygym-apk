@@ -40,6 +40,14 @@ class ArqueoScreen extends StatefulWidget {
 
 class _ArqueoScreenState extends State<ArqueoScreen> {
   bool _cargando = true;
+  // SL-5 G07-1 · Patrón error≠vacío de la familia caja/nómina:
+  // una LECTURA FALLIDA nunca se pinta como vacío tranquilo.
+  // Toda pantalla de esta familia lleva su bandera de fallo:
+  // si la lectura principal lanzó, se pinta EstadoError con
+  // Reintentar; los textos de calma («Todo cuadrado», «Sin
+  // liquidaciones», «No hay diferencias») SOLO se afirman
+  // con datos leídos sin error.
+  bool _falloCarga = false;
   List<Map<String, dynamic>> _entrenadores = [];
   // T5 (1.20): expedientes de diferencia abiertos (badge de
   // la entrada a la bandeja).
@@ -56,7 +64,10 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _falloCarga = false;
+    });
     try {
       final lista = await entrenadoresConPendiente();
       var difAbiertas = _difAbiertas;
@@ -80,8 +91,17 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // SL-5 G07-1: el fallo de la lectura principal NO es
+      // «nadie debe nada»: queda marcado y se pinta como
+      // error con Reintentar, nunca como «Todo cuadrado».
+      AppLog.error('arqueo', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -109,7 +129,10 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
         'Arqueo del día',
         acciones: [
           IconButton(
-            tooltip: 'Sincronizar arqueo',
+            // SL-5 G07-3: el nombre dice el hecho real —
+            // baja el alcance del arqueo si está viejo y
+            // relee (vocabulario del Centro de Sync).
+            tooltip: 'Bajar cambios del arqueo',
             icon: const Icon(Icons.sync_rounded),
             onPressed: _sincronizar,
           ),
@@ -117,9 +140,15 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
       ),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-5 G07-2: fuera la banda de SyncBanner de esta
+          // pantalla — la sync se dice UNA sola vez en la
+          // cáscara/pilar (uso retirado; lo anota GC-2).
           // T5 (1.20): entrada a la bandeja de diferencias
           // de caja, con el conteo de expedientes abiertos.
+          // SL-5 G07-2: en cero NO se pinta (regla de filas
+          // en cero de Jc): sin expedientes abiertos, la
+          // tarjeta fija no apila sobre la lista.
+          if (_difAbiertas > 0)
           Padding(
             padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                 AppEspacio.sm, AppEspacio.lg, 0),
@@ -193,7 +222,21 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                     // (M2-BC C5) esqueleto estructural en vez
                     // del spinner genérico.
                     ? const SkeletonArqueo()
-                    : _entrenadores.isEmpty
+                    : _falloCarga
+                      // SL-5 G07-1: fallo de lectura ≠ vacío:
+                      // error con Reintentar, jamás la calma.
+                      ? ListView(
+                          children: [
+                            EstadoError(
+                              titulo: 'No se pudo leer el arqueo',
+                              detalle: 'Puede que haya pendiente '
+                                  'sin mostrar. Revisa la conexión '
+                                  'y reintenta.',
+                              onReintentar: _cargar,
+                            ),
+                          ],
+                        )
+                      : _entrenadores.isEmpty
                       ? ListView(
                           children: [
                             Padding(
@@ -359,6 +402,10 @@ class DetalleArqueoScreen extends StatefulWidget {
 
 class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
   bool _cargando = true;
+  // SL-5 G07-1: patrón error≠vacío (ver ArqueoScreen): si
+  // la lectura del detalle falla, no se afirma «Sin
+  // liquidaciones» ni un pendiente de 0: se pinta el error.
+  bool _falloCarga = false;
   bool _liquidando = false;
   double _cup = 0;
   double _usd = 0;
@@ -408,7 +455,10 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
   double get _totalMoneda => _moneda == 'USD' ? _usdTotal : _cupTotal;
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _falloCarga = false;
+    });
     try {
       // 1.25 T05: el resumen reconciliado (única función):
       // _cup/_usd siguen siendo el CONFIRMADO (base de la
@@ -436,8 +486,15 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
               : '';
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // SL-5 G07-1: fallo de lectura ≠ historial vacío.
+      AppLog.error('arqueo', 'detalle_carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
+      }
     }
     unawaited(_refrescarEnCola());
   }
@@ -663,9 +720,21 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
       appBar: appBarIron(context, 'Arqueo · ${widget.nombre}'),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-5 G07-2: sin SyncBanner propio en el detalle
+          // (uso retirado; la sync se dice una vez en la
+          // cáscara — ver la nota en ArqueoScreen / GC-2).
           Expanded(
-            child: _cargando
+            child: _falloCarga && !_cargando
+                // SL-5 G07-1: el detalle fallido se pinta
+                // como error con Reintentar, no como un
+                // pendiente de 0 con historial vacío.
+                ? EstadoError(
+                    titulo: 'No se pudo leer este arqueo',
+                    detalle: 'El pendiente y el historial no '
+                        'se pudieron leer. Reintenta.',
+                    onReintentar: _cargar,
+                  )
+                : _cargando
                 // (M2-BC C5) esqueleto estructural en vez del
                 // spinner genérico.
                 ? ListView(
@@ -988,24 +1057,17 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w700),
                                     ),
-                                    Container(
-                                      padding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: AppEspacio.sm, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: (h['estado'] == 'parcial'
-                                                ? AppColores.alerta
-                                                : Colors.green)
-                                            .withValues(alpha: 0.15),
-                                        borderRadius:
-                                            BorderRadius.circular(AppRadio.md),
-                                      ),
-                                      child: Text(
-                                        h['estado'] == 'parcial'
-                                            ? 'Parcial'
-                                            : 'Liquidado',
-                                        style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w600),
-                                      ),
+                                    // SL-5 G07-8: chip de estado
+                                    // de la casa (ChipEstado), no
+                                    // un Container armado a mano.
+                                    ChipEstado.semantico(
+                                      texto: h['estado'] == 'parcial'
+                                          ? 'Parcial'
+                                          : 'Liquidado',
+                                      significado:
+                                          h['estado'] == 'parcial'
+                                              ? SignificadoChip.alerta
+                                              : SignificadoChip.exito,
                                     ),
                                   ],
                                 ),
@@ -1017,7 +1079,12 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                           context)),
                                 ),
                                 Text(
-                                  '${h['creada_en'] ?? ''} · por ${h['creada_por'] ?? ''}',
+                                  // SL-5 G07-5: fecha habanera
+                                  // con fmtFecha y autor legible
+                                  // (nombre; «—» si no viene),
+                                  // nunca el ISO ni el id crudos.
+                                  '${fmtFecha('${h['creada_en'] ?? ''}')} · por '
+                                  '${'${h['creada_por'] ?? ''}'.trim().isEmpty ? '—' : '${h['creada_por']}'.trim()}',
                                   style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                           context)),
                                 ),
