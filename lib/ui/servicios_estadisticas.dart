@@ -60,6 +60,9 @@ class _ServiciosEstadisticasScreenState
   // 1.28 (M3-B4): ventas del período aún en la cola de este
   // teléfono (las estadísticas leen SOLO el espejo).
   int _ventasColaPeriodo = 0;
+  // G#21: ventas del período ya excluidas de las cifras
+  // por tener su reversión aún en la cola (el sello lo dice).
+  int _reversosColaPeriodo = 0;
   Map<String, dynamic> _a = const {}; // 1A rendimiento
   Map<String, dynamic> _b = const {}; // 1B inversión
   // v1.13.0 (Bloque 4): agrupaciones Habana, indicadores por bote
@@ -249,7 +252,19 @@ class _ServiciosEstadisticasScreenState
     // original quedaba sobreestimada (y la del reverso, en negativo
     // sola). Para estadísticas, reversada es como si no hubiera
     // ocurrido. El CSV exporta estos mismos agregados.
-    final ventasSinReversos = ventasServicioSinReversos(ventas);
+    // G#21 (Hy4): también salen las ventas cuya reversión
+    // sigue EN LA COLA de este teléfono (aún sin espejar):
+    // sin esto, las cifras sobreestimaban dosis e ingresos
+    // hasta que la reversión sincronizara (Servicios e
+    // Historial ya lo fusionaban; aquí faltaba).
+    final reversosPend = await reversosPendientesVentaIds();
+    final ventasSinReversos = ventasServicioSinReversos(ventas,
+        reversadasExtra: reversosPend);
+    final reversosColaPeriodo = ventas
+        .where(enP)
+        .where((v) =>
+            reversosPend.contains((v['id'] as num?)?.toInt()))
+        .length;
     final ventasP = ventasSinReversos.where(enP).toList();
     final salidasP = salidas.where(enP).toList();
 
@@ -589,6 +604,7 @@ class _ServiciosEstadisticasScreenState
       _kpis = kpisAct;
       _kpisAnt = kpisAnt;
       _ventasColaPeriodo = ventasColaPeriodo;
+      _reversosColaPeriodo = reversosColaPeriodo;
       _cargando = false;
     });
   }
@@ -732,6 +748,21 @@ class _ServiciosEstadisticasScreenState
                           'por sincronizar: aún '
                           '${_ventasColaPeriodo == 1 ? 'está' : 'están'} '
                           'en este teléfono',
+                      significado: SignificadoChip.alerta,
+                      icono: Icons.sync_rounded,
+                    ),
+                  ],
+                  // G#21: el reverso del sello — ventas que
+                  // las cifras YA no cuentan porque su
+                  // reversión está en la cola de este teléfono.
+                  if (_reversosColaPeriodo > 0) ...[
+                    const SizedBox(height: AppEspacio.sm),
+                    ChipEstado.semantico(
+                      texto: 'Ya no incluye $_reversosColaPeriodo '
+                          'venta${_reversosColaPeriodo == 1 ? '' : 's'} '
+                          'con reversión por sincronizar: '
+                          'saldrá${_reversosColaPeriodo == 1 ? '' : 'n'} '
+                          'del espejo al subir',
                       significado: SignificadoChip.alerta,
                       icono: Icons.sync_rounded,
                     ),
