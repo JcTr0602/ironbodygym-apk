@@ -339,11 +339,10 @@ void main() {
       expect(AuthService().telegramId, isNull);
       await tester.pumpWidget(const MaterialApp(home: AdminScreen()));
       await _abrirModulo(tester, 'Caja y dinero');
-      await tester.scrollUntilVisible(
-          find.text('Cierre / caja hoy'), 300,
+      await tester.scrollUntilVisible(find.text('Cierre de caja'), 300,
           maxScrolls: 60);
       await tester.pump();
-      await tester.tap(find.text('Cierre / caja hoy'));
+      await tester.tap(find.text('Cierre de caja'));
       expect(await _esperarHasta(tester, find.text('Recogida')),
           isTrue,
           reason: 'la sección de cobros no pintó la recogida');
