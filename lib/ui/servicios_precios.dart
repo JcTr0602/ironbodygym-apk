@@ -33,6 +33,10 @@ class ServiciosPreciosScreen extends StatefulWidget {
 class _ServiciosPreciosScreenState
     extends State<ServiciosPreciosScreen> {
   bool _cargando = true;
+  // SL-7 (G06-1): el fallo de carga se VE (EstadoError con
+  // Reintentar, el patrón de la pantalla principal); antes la
+  // pantalla caía en los precios vacíos en silencio.
+  bool _errorCarga = false;
   ({double sinAgua, double conAgua, double agua, double comision})?
       _precios;
   // Ítem 7: un controlador por clave precio_<producto>_<método> y el
@@ -87,6 +91,7 @@ class _ServiciosPreciosScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -127,6 +132,7 @@ class _ServiciosPreciosScreenState
       }
       _baseComision = precios.comision;
       _cargando = false;
+      _errorCarga = false;
     });
   }
 
@@ -474,10 +480,17 @@ class _ServiciosPreciosScreenState
       ),
       body: _cargando
           ? const SkeletonAjustes(grupos: 4)
-          : ListView(
-              padding: const EdgeInsets.all(AppEspacio.lg),
-              children: [_seccionPrecios()],
-            ),
+          : _errorCarga
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los precios',
+                  detalle:
+                      'Revisa la conexión o vuelve a intentarlo.',
+                  onReintentar: _cargar,
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(AppEspacio.lg),
+                  children: [_seccionPrecios()],
+                ),
     );
   }
 }

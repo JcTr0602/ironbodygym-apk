@@ -35,6 +35,10 @@ class ServiciosEstadisticasScreen extends StatefulWidget {
 class _ServiciosEstadisticasScreenState
     extends State<ServiciosEstadisticasScreen> {
   bool _cargando = true;
+  // SL-7 (G06-1): el fallo de carga se VE (EstadoError con
+  // Reintentar, el patrón de la pantalla principal); antes las
+  // estadísticas caían en cifras vacías en silencio.
+  bool _errorCarga = false;
   String _periodo = 'mes'; // 'mes' | 'todo' | 'rango' (M3-B3)
   // 1.28 (M3-B3): el rango a medida del período (ISO
   // 'yyyy-mm-dd', ambos extremos incluidos). Nace en los
@@ -137,6 +141,7 @@ class _ServiciosEstadisticasScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -275,7 +280,7 @@ class _ServiciosEstadisticasScreenState
       if (id == null) continue;
       porBote[id] = {
         'nombre': nombreSup[(b['suplemento_id'] as num?)?.toInt()] ??
-            'Bote #$id',
+            'Bote sin nombre',
         'rendimiento': (b['dosis_rendimiento'] as num?)?.toInt() ?? 0,
         'servidas': 0,
         'casa': 0,
@@ -394,7 +399,7 @@ class _ServiciosEstadisticasScreenState
         if (autonomiaPomoMin == null || aut < autonomiaPomoMin) {
           autonomiaPomoMin = aut;
           final sup = (p['suplemento_id'] as num?)?.toInt();
-          autonomiaPomoNombre = nombreSup[sup] ?? 'Pomo #$pomoId';
+          autonomiaPomoNombre = nombreSup[sup] ?? 'Pomo sin nombre';
         }
       }
     }
@@ -504,7 +509,7 @@ class _ServiciosEstadisticasScreenState
         if ((p['id'] as num?) != null)
           (p['id'] as num).toInt(): (nombreSup[
                       suplementoDePomo[(p['id'] as num).toInt()]] ??
-                  'Pomo #${(p['id'] as num).toInt()}'),
+                  'Pomo sin nombre'),
     };
     final kpisAct = (
       ingresos: (agg1B.b['ingresos'] as num?)?.toDouble() ?? 0,
@@ -584,7 +589,9 @@ class _ServiciosEstadisticasScreenState
       _porFranja = porFranja;
       _indBote = indBote;
       _semanaTexto = semanaTexto;
-      _semanaRango = '$lunesTxt al $domingoTxt';
+      // SL-7 (G06-6): el rango de la tarjeta va con fmtFecha;
+      // el texto para compartir (semanaTexto) conserva su forma.
+      _semanaRango = '${fmtFecha(lunesTxt)} al ${fmtFecha(domingoTxt)}';
       _b = {
         ...agg1B.b,
         'autonomia_dias': autonomia,
@@ -606,6 +613,7 @@ class _ServiciosEstadisticasScreenState
       _ventasColaPeriodo = ventasColaPeriodo;
       _reversosColaPeriodo = reversosColaPeriodo;
       _cargando = false;
+      _errorCarga = false;
     });
   }
 
@@ -632,7 +640,14 @@ class _ServiciosEstadisticasScreenState
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando estadísticas…')
-          : ListView(
+          : _errorCarga
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar las estadísticas',
+                  detalle:
+                      'Revisa la conexión o vuelve a intentarlo.',
+                  onReintentar: () => _cargar(),
+                )
+              : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 // Argón stats MEDIO 2: sin banner, el dueño veía
@@ -826,14 +841,16 @@ class _ServiciosEstadisticasScreenState
     var bote = abiertos.first;
     var precioSin = 600.0;
     var precioCon = 900.0;
-    // Etiquetas del desplegable (nombre + id, para no confundir dos
-    // botes abiertos del mismo suplemento).
+    // Etiquetas del desplegable (nombre + posición, para no
+    // confundir dos botes abiertos del mismo suplemento sin
+    // pintar la clave interna — SL-7 G06-4).
     final etiquetasBote = <String>[];
-    for (final b in abiertos) {
+    for (var i = 0; i < abiertos.length; i++) {
+      final b = abiertos[i];
       final nom = nombreSup[(b['suplemento_id'] as num?)?.toInt()];
       etiquetasBote.add(nom == null || nom.isEmpty
-          ? 'Bote #${b['id']}'
-          : '$nom · Bote #${b['id']}');
+          ? 'Bote ${i + 1}'
+          : '$nom · Bote ${i + 1}');
     }
     await showModalBottomSheet<void>(
       context: context,

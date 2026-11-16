@@ -109,6 +109,10 @@ class _ServiciosHistorialCuerpoState
 
   List<Map<String, dynamic>> _entradas = [];
   bool _cargando = true;
+  // SL-7 (G06-1): el fallo de carga se VE (EstadoError con
+  // Reintentar, el patrón de la pantalla principal); antes el
+  // historial caía en la lista vacía en silencio.
+  bool _errorCarga = false;
 
   /// 1.31 (Mejoras): pomos con el producto resuelto, para el
   /// detalle único y para nombrar el pomo en las salidas.
@@ -158,6 +162,7 @@ class _ServiciosHistorialCuerpoState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -217,6 +222,7 @@ class _ServiciosHistorialCuerpoState
       _respaldoPorTid = respaldo;
       _pomosResueltos = pomosResueltos;
       _cargando = false;
+      _errorCarga = false;
     });
     if (widget.resaltarId != null) {
       WidgetsBinding.instance
@@ -410,7 +416,7 @@ class _ServiciosHistorialCuerpoState
         return '${p['producto_nombre']} · ${p['responsable_nombre']}';
       }
     }
-    return 'Pomo #$pid';
+    return 'Pomo sin nombre';
   }
 
   Widget _filaEntrada(Map<String, dynamic> e) {
@@ -474,7 +480,7 @@ class _ServiciosHistorialCuerpoState
     final vendedor = widget.esDueno
         ? ' · ${_nombreVendedor(_vendedorDe(e), '${e['registradoPor'] ?? ''}')}'
         : '';
-    final metodo = '${e['metodo'] ?? ''}';
+    final metodo = etiquetaMetodoServicio('${e['metodo'] ?? ''}');
     final idVenta = (e['id'] as num?)?.toInt() ?? 0;
     final llave = _llaves.putIfAbsent(idVenta, () => GlobalKey());
     // 1.31 (Mejoras · Historial elevado): la fila es una
@@ -570,6 +576,13 @@ class _ServiciosHistorialCuerpoState
   Widget build(BuildContext context) {
     if (_cargando) {
       return const EstadoCargando(texto: 'Cargando historial…');
+    }
+    if (_errorCarga) {
+      return EstadoError(
+        titulo: 'No se pudo cargar el historial',
+        detalle: 'Revisa la conexión o vuelve a intentarlo.',
+        onReintentar: _cargar,
+      );
     }
     final visibles = _visibles;
     final itemsHist = _itemsPorDia(visibles);

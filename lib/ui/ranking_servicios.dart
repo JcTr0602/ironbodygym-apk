@@ -29,6 +29,10 @@ class RankingServiciosScreen extends StatefulWidget {
 
 class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
   bool _cargando = true;
+  // SL-7 (G06-1): el fallo de carga se VE (EstadoError con
+  // Reintentar, el patrón de la pantalla principal); antes el
+  // ranking caía en «Sin compras» en silencio.
+  bool _errorCarga = false;
   bool _esteMes = false;
   List<Map<String, dynamic>> _todas = [];
   List<Map<String, dynamic>> _filas = [];
@@ -51,6 +55,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -73,6 +78,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
         _todas = ventas;
         _nombresPorId = nombres;
         _cargando = false;
+        _errorCarga = false;
         _recalcular();
       });
     }
@@ -105,7 +111,14 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
       appBar: appBarIron(context, 'Ranking de Servicios'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ranking…')
-          : Column(
+          : _errorCarga
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el ranking',
+                  detalle:
+                      'Revisa la conexión o vuelve a intentarlo.',
+                  onReintentar: _cargar,
+                )
+              : Column(
               children: [
                 const SyncBanner(),
                 Padding(

@@ -16,6 +16,120 @@ import 'hoja_accion.dart';
 /// (G-2): ahora el monto manda arriba y el cliente es el
 /// protagonista, como pidió Jc.
 
+/// (1.30 D3, UI130-15) Hoja de «Salida sin venta»: HojaAccion
+/// con estado propio, dueña de sus controladores (dispose
+/// al cerrar). Devuelve (motivo, dosis, nota) ya validado;
+/// null si se cancela. Nace como hoja: era uno de los dos
+/// diálogos excluidos a propósito de la oleada 7.
+/// SL-7 (G06-2): es LA ÚNICA superficie de salida sin venta
+/// — la comparten Vender (Servicios) e Inventario (Admin);
+/// el diálogo propio que Inventario tenía desaparece.
+class HojaSalidaSinVenta extends StatefulWidget {
+  final bool esDueno;
+  const HojaSalidaSinVenta({super.key, required this.esDueno});
+
+  @override
+  State<HojaSalidaSinVenta> createState() =>
+      _HojaSalidaSinVentaState();
+}
+
+class _HojaSalidaSinVentaState extends State<HojaSalidaSinVenta> {
+  var _motivo = 'merma';
+  // 1.26 (BAJA): error de validación DENTRO de la hoja
+  // (antes «Registrar» cerraba y validaba después: lo
+  // tecleado se perdía con el aviso de error).
+  String? _errorDosis;
+  final _dosisCtrl = TextEditingController(text: '1');
+  final _notaCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _dosisCtrl.dispose();
+    _notaCtrl.dispose();
+    super.dispose();
+  }
+
+  void _registrar() {
+    // 1.26 (BAJA): validar sin cerrar la hoja.
+    final d = int.tryParse(_dosisCtrl.text.trim());
+    if (d == null || d <= 0) {
+      setState(() =>
+          _errorDosis = 'Escribe cuántas dosis salen (1 o más).');
+      return;
+    }
+    final nota = _notaCtrl.text.trim();
+    Navigator.pop(context, (
+      motivo: _motivo,
+      dosis: d,
+      nota: nota.isEmpty ? null : nota,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return HojaAccion(
+      titulo: 'Salida sin venta',
+      icono: Icons.outbox_rounded,
+      cuerpo: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectorIronForm<String>(
+            valorInicial: _motivo,
+            etiqueta: 'Motivo',
+            opciones: [
+              const OpcionSelector('merma', 'Merma / rotura'),
+              if (widget.esDueno) ...[
+                const OpcionSelector(
+                    'cortesia', 'Cortesía (solo dueño)'),
+                const OpcionSelector('consumo_staff',
+                    'Consumo del staff (solo dueño)'),
+                const OpcionSelector(
+                    'ajuste', 'Ajuste (solo dueño)'),
+              ],
+            ],
+            alCambiar: (v) =>
+                setState(() => _motivo = v ?? 'merma'),
+          ),
+          const SizedBox(height: AppEspacio.md),
+          CampoCantidad(
+            controller: _dosisCtrl,
+            etiqueta: 'Dosis',
+            errorText: _errorDosis,
+            onChanged: (_) {
+              if (_errorDosis != null) {
+                setState(() => _errorDosis = null);
+              }
+            },
+          ),
+          const SizedBox(height: AppEspacio.md),
+          CampoTexto(
+            controller: _notaCtrl,
+            etiqueta: 'Nota (opcional)',
+          ),
+        ],
+      ),
+      pie: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: BotonPrimario(
+              texto: 'Registrar',
+              icono: Icons.check_rounded,
+              onPressed: _registrar,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Hoja de «Revertir venta» (nació en Servicios en la 1.30 D3):
 /// HojaAccion con estado propio, dueña de su controlador.
 /// Devuelve (motivo, polvoPerdido) ya validado; null si se
@@ -309,7 +423,8 @@ Future<void> mostrarDetalleVentaServicio(
                 '${fecha10.isEmpty ? '—' : fmtFecha(fecha10)} · ${horaVentaServicio(v)}'),
             fila('Pomo', nombrePomoVenta(v, pomos)),
             fila('Cantidad', '$cant'),
-            fila('Método', '${v['metodo'] ?? '—'}'),
+            fila('Método',
+                v['metodo'] == null ? '—' : etiquetaMetodoServicio('${v['metodo']}')),
             fila('Registrado por',
                 '${v['registrado_por_nombre'] ?? '—'}'),
             if (com > 0) fila('Comisión', '${fmtMonto(com)} CUP'),

@@ -44,117 +44,6 @@ final _reNoDigitosServicios = RegExp(r'[^0-9]');
 /// pomos/agua/precios (Administración) y ve las estadísticas. La
 /// lógica vive en lib/servicios.dart; aquí solo se presenta y se
 /// captura la intención.
-/// (1.30 D3, UI130-15) Hoja de «Salida sin venta»: HojaAccion
-/// con estado propio, dueña de sus controladores (dispose
-/// al cerrar). Devuelve (motivo, dosis, nota) ya validado;
-/// null si se cancela. Nace como hoja: era uno de los dos
-/// diálogos excluidos a propósito de la oleada 7.
-class _HojaSalidaSinVenta extends StatefulWidget {
-  final bool esDueno;
-  const _HojaSalidaSinVenta({required this.esDueno});
-
-  @override
-  State<_HojaSalidaSinVenta> createState() =>
-      _HojaSalidaSinVentaState();
-}
-
-class _HojaSalidaSinVentaState extends State<_HojaSalidaSinVenta> {
-  var _motivo = 'merma';
-  // 1.26 (BAJA): error de validación DENTRO de la hoja
-  // (antes «Registrar» cerraba y validaba después: lo
-  // tecleado se perdía con el aviso de error).
-  String? _errorDosis;
-  final _dosisCtrl = TextEditingController(text: '1');
-  final _notaCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    _dosisCtrl.dispose();
-    _notaCtrl.dispose();
-    super.dispose();
-  }
-
-  void _registrar() {
-    // 1.26 (BAJA): validar sin cerrar la hoja.
-    final d = int.tryParse(_dosisCtrl.text.trim());
-    if (d == null || d <= 0) {
-      setState(() =>
-          _errorDosis = 'Escribe cuántas dosis salen (1 o más).');
-      return;
-    }
-    final nota = _notaCtrl.text.trim();
-    Navigator.pop(context, (
-      motivo: _motivo,
-      dosis: d,
-      nota: nota.isEmpty ? null : nota,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return HojaAccion(
-      titulo: 'Salida sin venta',
-      icono: Icons.outbox_rounded,
-      cuerpo: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SelectorIronForm<String>(
-            valorInicial: _motivo,
-            etiqueta: 'Motivo',
-            opciones: [
-              const OpcionSelector('merma', 'Merma / rotura'),
-              if (widget.esDueno) ...[
-                const OpcionSelector(
-                    'cortesia', 'Cortesía (solo dueño)'),
-                const OpcionSelector('consumo_staff',
-                    'Consumo del staff (solo dueño)'),
-                const OpcionSelector(
-                    'ajuste', 'Ajuste (solo dueño)'),
-              ],
-            ],
-            alCambiar: (v) =>
-                setState(() => _motivo = v ?? 'merma'),
-          ),
-          const SizedBox(height: AppEspacio.md),
-          CampoCantidad(
-            controller: _dosisCtrl,
-            etiqueta: 'Dosis',
-            errorText: _errorDosis,
-            onChanged: (_) {
-              if (_errorDosis != null) {
-                setState(() => _errorDosis = null);
-              }
-            },
-          ),
-          const SizedBox(height: AppEspacio.md),
-          CampoTexto(
-            controller: _notaCtrl,
-            etiqueta: 'Nota (opcional)',
-          ),
-        ],
-      ),
-      pie: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-          ),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: BotonPrimario(
-              texto: 'Registrar',
-              icono: Icons.check_rounded,
-              onPressed: _registrar,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Resumen de la franja «Hoy» de Vender, puro para test:
 /// dosis netas, efectivo neto y ventas por sincronizar.
 /// Yunque 4 (L2-4): el conteo de dosis netea con el signo
@@ -1609,7 +1498,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ({String motivo, int dosis, String? nota})>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => _HojaSalidaSinVenta(esDueno: _esDueno),
+      builder: (ctx) => HojaSalidaSinVenta(esDueno: _esDueno),
     );
     if (res == null) return;
     try {
@@ -2306,9 +2195,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         _pidiendoRelleno = false;
         _rellenoPedidoSel = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pedido enviado al dueño')),
-      );
+      // SL-7 (G06-7): el éxito va por el aviso de la casa,
+      // como ya iba el error de este mismo flujo.
+      _aviso('Pedido enviado al dueño');
     } catch (e) {
       if (!mounted) return;
       setState(() => _pidiendoRelleno = false);
@@ -2749,7 +2638,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ),
         subtitle: Text(
           '${nombreClienteVentaServicio(v)}'
-          '${esCasa ? ' · Casa' : ' · ${v['metodo'] ?? ''}'}'
+          '${esCasa ? ' · Casa' : ' · ${etiquetaMetodoServicio('${v['metodo'] ?? ''}')}'}'
           ' · ${v['registrado_por_nombre'] ?? ''}'
           '${insignia != null ? '\n$insignia' : ''}',
         ),
