@@ -405,23 +405,26 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
               // lista desplazable — antes era un Center
               // fijo y la física del gesto moría en él.
               onRefresh: _actualizarCompras,
-              child: Column(
+              // SL-6 (G05-3): la cabecera y los filtros viven
+              // DENTRO del único scroll, al inicio: antes la
+              // cabecera quedaba fija sobre la lista y la
+              // ahogaba; ahora la lista manda y la cabecera
+              // rueda con ella.
+              child: ListView(
                 children: [
                   _cabecera(),
                   _filtros(),
-                  Expanded(
+                  Padding(
+                    padding: const EdgeInsets.all(AppEspacio.lg),
                     child: _visibles.isEmpty
-                        ? ListView(
-                            children: const [
-                              SizedBox(height: 180),
-                              Center(
-                                  child: Text(
-                                      'Sin compras para este filtro.',
-                                      style: AppTexto.secundario)),
-                            ],
+                        ? const Padding(
+                            padding: EdgeInsets.only(top: 120),
+                            child: Center(
+                                child: Text(
+                                    'Sin compras para este filtro.',
+                                    style: AppTexto.secundario)),
                           )
-                        : ListView(
-                            padding: const EdgeInsets.all(AppEspacio.lg),
+                        : Column(
                             children: [
                               for (final f in _visibles)
                                 _filaCompra(f),
@@ -530,7 +533,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             style: TextStyle(
                 decoration:
                     anulada ? TextDecoration.lineThrough : null)),
-        subtitle: Text('${f['fecha'] ?? ''} · ${f['cliente'] ?? '—'}'),
+        // SL-6 (G05-6): la fecha sale con fmtFecha, nunca
+        // la ISO cruda.
+        subtitle:
+            Text('${fmtFecha(f['fecha'] as String?)} · ${f['cliente'] ?? '—'}'),
         trailing: Text(
             '${fmtMonto((f['monto'] as num).toDouble())} ${f['moneda'] ?? 'CUP'}',
             style: AppTexto.cuerpo),
@@ -551,7 +557,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Fecha: ${f['fecha'] ?? '—'}'),
+            Text('Fecha: ${fmtFecha(f['fecha'] as String?)}'),
             Text('Cliente: ${f['cliente'] ?? '—'}'),
             Text(
                 'Monto: ${fmtMonto((f['monto'] as num).toDouble())} ${f['moneda'] ?? 'CUP'}'),
@@ -1064,10 +1070,15 @@ class _FotoExtractoState extends State<_FotoExtracto> {
       builder: (ctx, snap) {
         final f = snap.data;
         if (f == null) {
-          return Icon(Icons.shopping_bag_rounded,
-              color: widget.anulada
-                  ? Colors.grey
-                  : AppColores.naranja);
+          // SL-6 (G05-13): sin foto, la marca única de la
+          // casa (PlaceholderSuplemento), no el icono de
+          // bolsa que solo salía aquí.
+          return const SizedBox(
+            width: 40,
+            height: 40,
+            child: PlaceholderSuplemento(
+                alto: 40, radio: AppRadio.sm, tamanoIcono: 20),
+          );
         }
         return ClipRRect(
           borderRadius: BorderRadius.circular(AppRadio.sm),
