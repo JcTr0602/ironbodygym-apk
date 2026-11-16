@@ -365,10 +365,25 @@ void main() {
               'y «Por Decidir» justo debajo con su conteo '
               'visible; en la 1.32 el orden era el inverso '
               '(Compuerta 1 del veredicto g132)');
+      // 1.35 (M-8): el orden de la portada del día —
+      // titular → Por Decidir → buzón → Atención hoy →
+      // informe plegado. La Bandeja de WhatsApp ya no es
+      // bloque propio: es una fila DENTRO de Atención hoy
+      // (su clave vive en _tiraAlertas, en home.dart).
       expect(
-          vista.indexOf("ValueKey('hoy-bandeja')") <
+          vista.indexOf("ValueKey('hoy-pordecidir')") <
               vista.indexOf("ValueKey('hoy-alertas')"),
-          isTrue);
+          isTrue,
+          reason: 'M-8: Por Decidir va sobre Atención hoy');
+      expect(
+          vista.indexOf("ValueKey('hoy-alertas')") <
+              vista.indexOf("ValueKey('hoy-informe')"),
+          isTrue,
+          reason: 'M-8/M-1: el informe plegado cierra la '
+              'portada, tras Atención hoy');
+      expect(home.contains("ValueKey('hoy-bandeja')"), isTrue,
+          reason: 'la fila de la Bandeja conserva su clave '
+              'dentro de la tira de alertas (M-8)');
     });
 
     test('las claves de sección se conservan', () {

@@ -6,6 +6,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -74,7 +75,6 @@ import 'pago.dart';
 import 'pago_diario.dart';
 import 'pagaron_mes.dart';
 import 'suplementos.dart';
-import 'pendiente.dart';
 import 'pin_lock.dart';
 import '../app_log.dart';
 import '../turno_service.dart';
@@ -156,18 +156,18 @@ const bloquesEstacionDiaria =
     <({String id, String titulo, String ayuda})>[
   (
     id: 'finanzas',
-    titulo: 'Tarjeta financiera',
-    ayuda: 'El dinero de hoy y del mes, según tu rol',
+    titulo: 'Dinero del día e informe',
+    ayuda: 'El titular del día y «Tu semana y tu mes», según tu rol',
   ),
   (
     id: 'bandeja',
     titulo: 'Bandeja de WhatsApp',
-    ayuda: 'El botón de avisos del día (solo dueño)',
+    ayuda: 'La fila de avisos del día en Atención hoy (solo dueño)',
   ),
   (
     id: 'alertas',
     titulo: 'Tira de alertas',
-    ayuda: 'Los avisos urgentes bajo la tarjeta financiera',
+    ayuda: 'Los avisos urgentes bajo Por Decidir',
   ),
 ];
 
@@ -203,12 +203,12 @@ class _HomeScreenState extends State<HomeScreen>
   int _activosMes = 0;
   // 1.25 T45: cobrado por día de los últimos 7 días (dueño).
   List<Map<String, dynamic>> _serie7 = const [];
-  // 1.32 (Yunque exhaustivo, fila Y-1): conteo «al día» del
-  // Pulso = el conjunto EXACTO que su destino abre
-  // (Directorio con filtro 'aldia': diasRestantes > 7, la
-  // Casa cuenta). Antes la celda enseñaba _activosMes (el
-  // total de activos) bajo el rótulo «Al día».
-  int _alDiaPulso = 0;
+  // 1.32 (Yunque exhaustivo, fila Y-1): el conteo «al día»
+  // del Pulso vivía en la celda de la tarjeta jubilada;
+  // 1.35 (M-2) retira la fila «Vencidos / Al día» del
+  // Mostrador (el atraso vive solo en Atención hoy) y el
+  // campo se jubila con ella — la consulta res[22] se
+  // sigue trayendo en el lote, sin guardar su valor.
   int _tarifaMes = 150; // v1.4.0: tarifa por cliente (base del entrenador)
   double _pagoEntrenadoresNeto =
       0; // post-1.15: neto a pagar (suma de la nómina, no bruto ×300)
@@ -327,6 +327,26 @@ class _HomeScreenState extends State<HomeScreen>
   /// Inicio en Clientes 0.16.
   final ScrollController _scrollCtrl = ScrollController();
 
+  /// 1.35 (M-7): el Dock del Mostrador se recoge al bajar
+  /// (deja leer la portada entera) y reaparece al subir o
+  /// al volver arriba. Lo mueve SOLO el scroll del
+  /// Mostrador (su propio controlador), con la misma
+  /// histéresis de la cabecera (140/60).
+  bool _dockVisible = true;
+  double _ultimoOffsetMostrador = 0;
+
+  void _alMoverMostrador() {
+    if (!_scrollCtrl.hasClients) return;
+    final off = _scrollCtrl.offset;
+    final delta = off - _ultimoOffsetMostrador;
+    _ultimoOffsetMostrador = off;
+    if ((off < 60 || delta < -4) && !_dockVisible) {
+      setState(() => _dockVisible = true);
+    } else if (off > 140 && delta > 4 && _dockVisible) {
+      setState(() => _dockVisible = false);
+    }
+  }
+
   /// Cambia de nivel guardando el offset del saliente y
   /// restaurando el del entrante tras el frame (condición 1
   /// de Argón: la posición nunca se reinicia por un rebuild).
@@ -335,6 +355,8 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() {
       _pilarActivo = i;
       _pilaresVisitados.add(i);
+      // 1.35 (M-7): al cambiar de pilar, el Dock vuelve.
+      _dockVisible = true;
     });
     if (MarcoNav.pilar.value != i) MarcoNav.pilar.value = i;
   }
@@ -573,6 +595,8 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 1.35 (M-7): el Dock escucha el scroll del Mostrador.
+    _scrollCtrl.addListener(_alMoverMostrador);
     // 1.25 T30: siembra las franjas de turno desde la caché
     // del horario del gym (sin red): editar el horario mueve
     // los turnos; sin siembra mandan las constantes.
@@ -658,6 +682,8 @@ class _HomeScreenState extends State<HomeScreen>
     MarcoNav.pilar.removeListener(_oigoMarco);
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
+    _tapTitularCobrado.dispose();
+    _tapTitularPorRecoger.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -1111,7 +1137,6 @@ class _HomeScreenState extends State<HomeScreen>
           _pagaronMes = res[16] as int;
           _activosMes = res[20] as int;
           _serie7 = res[21] as List<Map<String, dynamic>>;
-          _alDiaPulso = res[22] as int;
           _tarifaMes = res[17] as int;
           final neto = res[18] as double?;
           if (neto != null) _pagoEntrenadoresNeto = neto;
@@ -1424,8 +1449,16 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     final esDueno = _auth.isOwner;
     return Scaffold(
-      body: SafeArea(
-        child: Column(
+      // 1.35 (UX-09): el marco vive sobre el fondo con
+      // profundidad (resplandor de marca en oscuro; el
+      // contenido de los pilares no pinta fondo propio
+      // y lo deja ver).
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const FondoProfundidad(),
+          SafeArea(
+            child: Column(
           children: [
             CabeceraMarco(
               rol: _rolSimple(),
@@ -1467,8 +1500,10 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
             ),
-          ],
-        ),
+            ],
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: BarraPilares(
         key: const ValueKey('marco-pilares'),
@@ -1547,7 +1582,15 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
         ),
-        DockMostrador(
+        // 1.35 (M-7): el Dock se recoge al bajar y
+        // reaparece al subir o al volver arriba.
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.bottomCenter,
+          child: !_dockVisible
+              ? const SizedBox.shrink()
+              : DockMostrador(
           esDueno: esDueno,
           onCobrar: () => _ir(const PagoScreen()),
           onServicio: () async {
@@ -1580,6 +1623,7 @@ class _HomeScreenState extends State<HomeScreen>
           onSuplemento:
               esDueno ? () => _ir(const SuplementosScreen()) : null,
           onGasto: esDueno ? () => _ir(const GastosScreen()) : null,
+        ),
         ),
       ],
     );
@@ -1710,23 +1754,28 @@ class _HomeScreenState extends State<HomeScreen>
     if (esDueno) {
       return _VistaHoyDueno(
         bloquesHoy: _bloquesHoy,
-        porDecidir: BandejaPorDecidir(
-          incidencias: _incidenciasAbiertas,
-          rellenos: _buzon.rellenos,
-          adelantos: _buzon.adelantos,
-          onIr: _ir,
+        porDecidir: KeyedSubtree(
+          // 1.35 (M-4): el titular baja hasta este bloque
+          // al tocar «por recoger».
+          key: _clavePorDecidir,
+          child: BandejaPorDecidir(
+            incidencias: _incidenciasAbiertas,
+            rellenos: _buzon.rellenos,
+            adelantos: _buzon.adelantos,
+            onIr: _ir,
+          ),
         ),
-        finanzas: _tarjetaFinanciera(true),
-        bandeja: _botonBandejaWhatsapp(),
+        finanzas: _titularDelDia(),
         buzon: _tarjetaBuzon(),
         hayBuzon: _buzon.hay,
-        alertas: _tiraAlertas(),
+        alertas: _tiraAlertas(esDueno: true),
+        informe: _informeSemanaMes(),
         onPersonalizar: _personalizarEstacion,
       ).secciones();
     }
     return _VistaHoyEntrenador(
       bloquesHoy: _bloquesHoy,
-      finanzas: _tarjetaFinanciera(false),
+      finanzas: _tarjetaFinanciera(),
       alertas: _tiraAlertas(),
       onPersonalizar: _personalizarEstacion,
     ).secciones();
@@ -1855,26 +1904,31 @@ class _HomeScreenState extends State<HomeScreen>
 
 
 
-  /// 1.25 T116 (F1-11): metadato discreto de frescura —
-  /// «Datos del espejo · actualizado a las 07:42» según el
-  /// último sync confirmado que conoce el motor; sin sync
-  /// previo, lo dice tal cual.
+  /// 1.25 T116 (F1-11): metadato discreto de frescura
+  /// según el último sync confirmado que conoce el motor;
+  /// sin sync previo, lo dice tal cual.
   /// Yunque 3 (K7-6): si el último sync no es de hoy, el
   /// texto nombra el día (textoFrescuraEspejo): con solo la
   /// hora, un espejo de hace días se leía como de hoy.
-  Widget _lineaFrescuraEspejo() {
+  /// 1.35 (M-9): palabras del dueño, no del sistema —
+  /// «espejo» era jerga interna: «Datos guardados en este
+  /// teléfono · …». [sobreGrafito] pinta la variante para
+  /// la banda grafito del titular del día.
+  Widget _lineaFrescuraEspejo({bool sobreGrafito = false}) {
     final s = SyncEngine.instance.currentStatus;
     final ultimo = s.ultimoSincronizado ?? s.lastOk;
+    final estilo = AppTexto.metadato.copyWith(
+        color: sobreGrafito
+            ? AppColores.textoSobreOscuroMedio
+            : AppColores.textoSecundario(context));
     if (ultimo == null) {
-      return Text('Datos del espejo · sin sincronizar todavía',
-          style: AppTexto.metadato.copyWith(
-              color: AppColores.textoSecundario(context)));
+      return Text('Datos guardados en este teléfono · falta sincronizar',
+          style: estilo);
     }
     return Text(
-        'Datos del espejo · '
+        'Datos guardados en este teléfono · '
         '${textoFrescuraEspejo(ultimo, ahoraUtcReal())}',
-        style: AppTexto.metadato.copyWith(
-            color: AppColores.textoSecundario(context)));
+        style: estilo);
   }
 
 
@@ -1895,8 +1949,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// mes» al listado PagaronMesScreen y «Mi base del mes» a la
   /// Nómina (que por rol muestra su resumen). La cabecera
   /// «Mi Turno Hoy» sigue llevando a Mi Turno.
-  Widget _tarjetaFinanciera(bool esDueno) {
-    if (!esDueno) {
+  /// 1.35 (M-8): la tarjeta del ENTRENADOR («Mi Turno Hoy»)
+  /// no fue auditada por la pieza del Mostrador y queda
+  /// como estaba; la del dueño se jubiló — su dinero de hoy
+  /// vive en el titular del día y su semana/mes en el
+  /// informe plegado (_titularDelDia / _informeSemanaMes).
+  Widget _tarjetaFinanciera() {
       // Rediseño Argón: cabecera en una línea (título + chip
       // compacto), 2x2 de métricas y una sola fila de acciones
       // (nómina + acción de turno). Sin acción (turno ya
@@ -2084,218 +2142,288 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       );
+  }
+
+  // 1.35 (M-8/M-4): los toques dentro del titular del
+  // día — «cobrados» abre el Dashboard con el detalle y
+  // «por recoger» baja a las filas de Por Decidir, donde
+  // se liquida (M-4: fuera el destino a la pantalla
+  // aparte de Pendiente a entregar).
+  late final TapGestureRecognizer _tapTitularCobrado =
+      TapGestureRecognizer()
+        ..onTap = () => _ir(const DashboardScreen());
+  late final TapGestureRecognizer _tapTitularPorRecoger =
+      TapGestureRecognizer()..onTap = _bajarAPorDecidir;
+
+  /// La clave del bloque «Por Decidir» en la lista del
+  /// Mostrador: el titular baja hasta él (M-4).
+  final _clavePorDecidir = GlobalKey();
+
+  void _bajarAPorDecidir() {
+    final ctx = _clavePorDecidir.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeOutCubic,
+          alignment: 0.08);
+      return;
     }
+    // El bloque aún no se ha construido (fuera de la
+    // ventana de la lista): se salta a pulso para que la
+    // lista lo construya y, en el frame siguiente, se
+    // reintenta el ajuste fino sobre el bloque real.
+    _scrollCtrl.jumpTo(300);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final c2 = _clavePorDecidir.currentContext;
+      if (c2 != null) {
+        Scrollable.ensureVisible(c2,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+            alignment: 0.08);
+      }
+    });
+  }
+
+  /// 1.35 (M-8 + M-1): el titular del día del dueño — una
+  /// banda grafito con la frase del día en tipografía
+  /// display: cuánto se cobró hoy (toca → Dashboard) y
+  /// cuánto queda por recoger (toca → baja a Por
+  /// Decidir). Debajo, la barra del dinero de hoy con su
+  /// «En mano · En cuenta» y la línea de frescura en
+  /// palabras del dueño (M-9). La semana, la salud del
+  /// mes y el pago de entrenadores ya NO viven aquí:
+  /// bajan al informe plegado «Tu semana y tu mes» (M-1),
+  /// y la fila «Vencidos / Al día» se jubiló (M-2: el
+  /// atraso vive solo en Atención hoy).
+  Widget _titularDelDia() {
+    return Container(
+      key: const ValueKey('hoy-titular'),
+      decoration: BoxDecoration(
+        color: AppColores.grafitoTactico,
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+      ),
+      padding: const EdgeInsets.all(AppEspacio.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            TextSpan(
+              style: AppTexto.display.copyWith(
+                  fontSize: 25,
+                  color: AppColores.textoSobreOscuro,
+                  height: 1.15),
+              children: [
+                const TextSpan(text: 'Hoy: '),
+                TextSpan(
+                  text: '${fmtMonto(_cobradoHoy)} cobrados',
+                  style: const TextStyle(color: AppColores.naranja),
+                  recognizer: _tapTitularCobrado,
+                ),
+                const TextSpan(text: ' · '),
+                TextSpan(
+                  text: '${fmtMonto(_porRecoger)} por recoger',
+                  style: const TextStyle(
+                    color: AppColores.naranja,
+                    decoration: TextDecoration.underline,
+                    decorationColor: AppColores.naranja,
+                  ),
+                  recognizer: _tapTitularPorRecoger,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppEspacio.sm),
+          _barraDineroHoy(sobreGrafito: true),
+          const SizedBox(height: AppEspacio.xs),
+          _lineaFrescuraEspejo(sobreGrafito: true),
+        ],
+      ),
+    );
+  }
+
+  /// 1.35 (M-1): el informe plegado del dueño — la semana
+  /// (barras de los últimos 7 días con su diferencia), la
+  /// salud del mes (el anillo «Pagaron el mes») y el pago
+  /// de entrenadores viven aquí, cerrados al abrir: lo
+  /// ocasional va plegado y el Mostrador respira (regla
+  /// de diseño de Jc). «Ver actividad reciente» se
+  /// conserva al pie del informe.
+  bool _informeAbierto = false;
+
+  Widget _informeSemanaMes() {
     return Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.insights_rounded,
-                  size: 18,
-                  color: AppColores.textoSecundario(context)),
-              SizedBox(width: 8),
-              Text('Estadísticas Rápidas',
-                  style: AppTexto.subtitulo),
-            ],
-          ),
-          // 1.25 T116 (F1-11): las cifras dicen de cuándo
-          // son — salen del espejo local, no del servidor.
-          _lineaFrescuraEspejo(),
-          const SizedBox(height: AppEspacio.sm),
-          Row(
-            children: [
-              Expanded(
-                  child: _datoFinancieroTappable(
-                      'Cobrado hoy',
-                      fmtMonto(_cobradoHoy),
-                      AppColores.exito,
-                      () => _ir(const DashboardScreen()),
-                      detalle: _cobradoHoyEf > 0 || _cobradoHoyTr > 0
-                          ? 'Ef. ${fmtMonto(_cobradoHoyEf)} · '
-                              'Transf. ${fmtMonto(_cobradoHoyTr)}'
-                          : null)),
-              Expanded(
-                  child: _datoFinancieroTappable(
-                      'Por recoger',
-                      fmtMonto(_porRecoger),
-                      AppColores.alerta,
-                      () => _ir(const PendienteScreen()),
-                      detalle: _pendienteUsd > 0
-                          ? '+ ${fmtMonto(_pendienteUsd)} USD'
-                          : null)),
-            ],
-          ),
-          // 1.25 T44 + T45: la barra del dinero de hoy y la
-          // tendencia de la semana, en la misma tarjeta.
-          _barraYSemanaDueno(),
-          const SizedBox(height: AppEspacio.sm),
-          // v1.4.0 (Jc): pagaron el mes y la base ×300.
-          // v1.6.0 (Jc): destinos CORREGIDOS — «Pagaron el mes» abre
-          // el LISTADO exacto de los que pagaron el mes
-          // (PagaronMesScreen, mismo conjunto NominaCalc que la
-          // cifra; antes abría la Nómina, que no es lo que la cifra
-          // cuenta).
-          // post-1.15 (fix Jc): «Pago de entrenadores» ya NO es la
-          // base ×300 (bruto sin adelantos ni comisiones): es el
-          // NETO a pagar, suma de las filas de la Nómina
-          // (totalNetoNominaMes), y sigue abriendo la Nómina.
-          Row(
-            children: [
-              // 1.25 T43: anillo de salud del mes — de un
-              // vistazo, qué parte de los activos ya pagó
-              // (el dato ya estaba cargado; faltaba el
-              // denominador y el dibujo). Tocar sigue
-              // abriendo el listado exacto.
-              Expanded(child: _celdaAnilloSaludMes()),
-              Expanded(
-                  child: _datoFinancieroTappable(
-                      'Pago de entrenadores',
-                      fmtMonto(_pagoEntrenadoresNeto),
-                      AppColores.exito,
-                      () => _ir(const NominaScreen()))),
-            ],
-          ),
-          // 24/25: hub operativo del día (quién está de turno y
-          // pendiente a entregar por entrenador).
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.schedule_rounded, size: 18),
-                  label: const Text('Turnos de hoy'),
-                  onPressed: () => _ir(const HubTurnosScreen()),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppEspacio.sm),
-          // 1.32 (D-3 absorbido por el veredicto g132): las
-          // cifras de vencimiento del Pulso saltan al Pilar
-          // 2 con su chip puesto — «Vencidos» y «Al día» al
-          // directorio filtrado (la pantalla recalcula
-          // desde el espejo: el destino nunca miente aunque
-          // la cifra envejezca en pantalla).
-          // (Yunque Y-1: la cifra «Al día» es el conteo del
-          // filtro 'aldia' — res[22] —, no el total de
-          // activos: prometer el total enseñaba un conjunto
-          // que el destino no muestra.)
-          Row(
-            children: [
-              Expanded(
-                  child: _datoFinancieroTappable(
-                      'Vencidos',
-                      '$_atras',
-                      urgenciaVencimientos(
-                              atrasLeve: _atras - _atras30,
-                              atras30: _atras30)
-                          .color,
-                      () => MarcoNav.irAClientes(const DestinoClientes(
-                          segmento: 'directorio', filtro: 'vencidos')))),
-              Expanded(
-                  child: _datoFinancieroTappable(
-                      'Al día',
-                      '$_alDiaPulso',
-                      AppColores.exito,
-                      () => MarcoNav.irAClientes(const DestinoClientes(
-                          segmento: 'directorio', filtro: 'aldia')))),
-            ],
-          ),
-          // Puerta a la Actividad al pie del Pulso
-          // (asignada por Argón en el veredicto g132).
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              key: const ValueKey('pulso-actividad'),
-              onPressed: () => _ir(const ActividadScreen()),
-              child: const Text('Ver actividad reciente →'),
-            ),
-          ),
-          // v1.3.6 (ítem 4): el banner se puede descartar (X).
-          // v1.6.0 (Jc): el descarte es DURABLE por instancia
-          // (fecha+turno, en SharedPreferences): refrescar o reabrir
-          // la app ya no lo revive; un turno NUEVO sin reporte sí
-          // genera su aviso. Un solo icono de advertencia (el de la
-          // izquierda); el texto ya no lleva el emoji ⚠️ duplicado.
-          if (_turnosSinReporteVisibles.isNotEmpty) ...[
-            const SizedBox(height: AppEspacio.sm),
-            InkWell(
-              borderRadius:
-                  BorderRadius.circular(AppRadio.md),
-              onTap: () =>
-                  _ir(const MiDiaScreen()),
-              child: Container(
-                // 1.23 B11: alto mínimo cómodo de 48 (con texto
-                // de una línea quedaba en ~36).
-                constraints: const BoxConstraints(minHeight: 48),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: AppEspacio.md,
-                    vertical: AppEspacio.sm),
-                decoration: BoxDecoration(
-                  color: AppColores.alerta
-                      .withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(
-                      AppRadio.md),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color:
-                            AppColores.alertaOscuro),
-                    const SizedBox(
-                        width: AppEspacio.sm),
-                    Expanded(
-                      child: Text(
-                        '${_turnosSinReporteVisibles.length} turno(s) sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
-                        style: AppTexto.secundario,
-                      ),
-                    ),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(AppRadio.lg),
-                      onTap: () async {
-                        // Descarta solo las instancias visibles ahora
-                        // (clave por turno: la tarjeta solo volverá a
-                        // listar los NO descartados); un turno nuevo
-                        // sin reporte genera su propio aviso. v1.6.0:
-                        // además se PERSISTE en SharedPreferences.
-                        // Panel 1.6.0: la persistencia se ESPERA y el
-                        // estado visual solo se aplica cuando la
-                        // escritura ya completó (si el proceso muere
-                        // justo tras tocar la X, el aviso NO revive
-                        // por un descarte nunca guardado). Si la
-                        // escritura falla, el aviso se queda visible
-                        // en vez de darse por descartado.
-                        final hoy = hoyHabanaIso();
-                        final claves = _turnosSinReporteVisibles
-                            .map((t) => claveDescarteSinReporte(hoy, t))
-                            .toList();
-                        final guardado =
-                            await _guardarDescartesSinReporte(claves);
-                        if (!guardado || !mounted) return;
-                        setState(() {
-                          _turnosSinReporteDescartados.addAll(claves);
-                        });
-                      },
-                      child: const Padding(
-                        // 1.23 B11: la X medía 24×24 (icono 16 +
-                        // padding xs); el área tocable sube a
-                        // 48×48 con el mismo icono.
-                        padding: EdgeInsets.all(AppEspacio.lg),
-                        child: Icon(Icons.close_rounded,
-                            size: 16,
-                            color: AppColores.alertaOscuro),
-                      ),
-                    ),
-                  ],
-                ),
+          InkWell(
+            key: const ValueKey('hoy-informe-cabecera'),
+            borderRadius: BorderRadius.circular(AppRadio.md),
+            onTap: () =>
+                setState(() => _informeAbierto = !_informeAbierto),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(vertical: AppEspacio.xs),
+              child: Row(
+                children: [
+                  Icon(Icons.insights_rounded,
+                      size: 18,
+                      color: AppColores.textoSecundario(context)),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text('Tu semana y tu mes',
+                        style: AppTexto.subtitulo),
+                  ),
+                  Icon(
+                      _informeAbierto
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      color: AppColores.textoSecundario(context)),
+                ],
               ),
             ),
-          ],
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: !_informeAbierto
+                ? const SizedBox.shrink()
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _semanaDueno(),
+                      const SizedBox(height: AppEspacio.md),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // La celda del anillo lleva un
+                          // Expanded DENTRO (su columna de
+                          // texto): sin flex propio recibe
+                          // ancho infinito y revienta —
+                          // en la tarjeta vieja iba en
+                          // Expanded, y aquí también.
+                          Expanded(child: _celdaAnilloSaludMes()),
+                          const SizedBox(width: AppEspacio.md),
+                          Expanded(
+                            child: _datoFinancieroTappable(
+                              'Pago de entrenadores',
+                              _pagoEntrenadoresNeto <= 0
+                                  ? '—'
+                                  : fmtMonto(_pagoEntrenadoresNeto),
+                              AppColores.naranja,
+                              () => _ir(const NominaScreen()),
+                              detalle:
+                                  'Estimado del mes · toca para la nómina',
+                            ),
+                          ),
+                        ],
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          key: const ValueKey('pulso-actividad'),
+                          onPressed: () =>
+                              _ir(const ActividadScreen()),
+                          child:
+                              const Text('Ver actividad reciente →'),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ],
       ),
     );
+  }
+
+  /// 1.35 (M-5): el aviso de turnos sin reporte sale de
+  /// la tarjeta de dinero (jubilada con M-1) y vive en la
+  /// sección de Atención hoy, con su descarte durable
+  /// intacto y su destino (Mi Día) sin cambiar.
+  // v1.3.6 (ítem 4): el banner se puede descartar (X).
+  // v1.6.0 (Jc): el descarte es DURABLE por instancia
+  // (fecha+turno, en SharedPreferences): refrescar o reabrir
+  // la app ya no lo revive; un turno NUEVO sin reporte sí
+  // genera su aviso. Un solo icono de advertencia (el de la
+  // izquierda); el texto ya no lleva el emoji ⚠️ duplicado.
+  Widget _avisoTurnosSinReporte() {
+    if (_turnosSinReporteVisibles.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return InkWell(
+          borderRadius:
+              BorderRadius.circular(AppRadio.md),
+          onTap: () =>
+              _ir(const MiDiaScreen()),
+          child: Container(
+            // 1.23 B11: alto mínimo cómodo de 48 (con texto
+            // de una línea quedaba en ~36).
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.md,
+                vertical: AppEspacio.sm),
+            decoration: BoxDecoration(
+              color: AppColores.alerta
+                  .withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(
+                  AppRadio.md),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 16,
+                    color:
+                        AppColores.alertaOscuro),
+                const SizedBox(
+                    width: AppEspacio.sm),
+                Expanded(
+                  child: Text(
+                    '${_turnosSinReporteVisibles.length} turno(s) sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
+                    style: AppTexto.secundario,
+                  ),
+                ),
+                InkWell(
+                  borderRadius: BorderRadius.circular(AppRadio.lg),
+                  onTap: () async {
+                    // Descarta solo las instancias visibles ahora
+                    // (clave por turno: la tarjeta solo volverá a
+                    // listar los NO descartados); un turno nuevo
+                    // sin reporte genera su propio aviso. v1.6.0:
+                    // además se PERSISTE en SharedPreferences.
+                    // Panel 1.6.0: la persistencia se ESPERA y el
+                    // estado visual solo se aplica cuando la
+                    // escritura ya completó (si el proceso muere
+                    // justo tras tocar la X, el aviso NO revive
+                    // por un descarte nunca guardado). Si la
+                    // escritura falla, el aviso se queda visible
+                    // en vez de darse por descartado.
+                    final hoy = hoyHabanaIso();
+                    final claves = _turnosSinReporteVisibles
+                        .map((t) => claveDescarteSinReporte(hoy, t))
+                        .toList();
+                    final guardado =
+                        await _guardarDescartesSinReporte(claves);
+                    if (!guardado || !mounted) return;
+                    setState(() {
+                      _turnosSinReporteDescartados.addAll(claves);
+                    });
+                  },
+                  child: const Padding(
+                    // 1.23 B11: la X medía 24×24 (icono 16 +
+                    // padding xs); el área tocable sube a
+                    // 48×48 con el mismo icono.
+                    padding: EdgeInsets.all(AppEspacio.lg),
+                    child: Icon(Icons.close_rounded,
+                        size: 16,
+                        color: AppColores.alertaOscuro),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
   }
 
   /// v1.3.3: estado real del turno, desdoblado por el rediseño
@@ -2690,8 +2818,64 @@ class _HomeScreenState extends State<HomeScreen>
   /// con hoy destacado y la diferencia contra ayer. Sin
   /// cobros hoy, la barra no se pinta (no se inventa la
   /// proporción); la serie se pinta siempre que llegó.
-  Widget _barraYSemanaDueno() {
+  /// 1.35 (M-8): la barra del dinero de hoy (efectivo vs
+  /// cuenta) y su línea «En mano · En cuenta» — vive en el
+  /// titular del día. [sobreGrafito] ajusta el texto a la
+  /// banda oscura.
+  Widget _barraDineroHoy({bool sobreGrafito = false}) {
     final total = _cobradoHoyEf + _cobradoHoyTr;
+    // Sin nada cobrado y sin USD por recoger, la pieza no
+    // se pinta; con USD aunque el CUP de hoy sea cero, la
+    // línea sí (la barra no: no hay proporción que pintar).
+    if (total <= 0 && _pendienteUsd <= 0) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (total > 0)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadio.sm),
+          child: SizedBox(
+            height: 10,
+            child: Row(
+              children: [
+                if (_cobradoHoyEf > 0)
+                  Expanded(
+                    flex: (_cobradoHoyEf * 1000).round(),
+                    child: Container(color: AppColores.exito),
+                  ),
+                if (_cobradoHoyTr > 0)
+                  Expanded(
+                    flex: (_cobradoHoyTr * 1000).round(),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppColores.exito.withValues(alpha: 0.25),
+                        border: Border.all(color: AppColores.exito),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: AppEspacio.xs),
+        Text(
+          'En mano ${fmtMonto(_cobradoHoyEf)} · '
+          'En cuenta ${fmtMonto(_cobradoHoyTr)}'
+          '${_pendienteUsd > 0 ? ' · + ${fmtMonto(_pendienteUsd)} USD por recoger' : ''}',
+          style: AppTexto.metadato.copyWith(
+              color: sobreGrafito
+                  ? AppColores.textoSobreOscuroSuave
+                  : AppColores.textoSecundario(context)),
+        ),
+      ],
+    );
+  }
+
+  /// 1.35 (M-1/M-8): las barras de los últimos 7 días —
+  /// viven en el informe plegado «Tu semana y tu mes».
+  Widget _semanaDueno() {
     final difTxt = textoDiferenciaHoyAyer(_serie7);
     final maxSerie = _serie7.fold<double>(
         0, (m, d) => ((d['monto'] as num?)?.toDouble() ?? 0) > m
@@ -2700,41 +2884,6 @@ class _HomeScreenState extends State<HomeScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (total > 0) ...[
-          const SizedBox(height: AppEspacio.sm),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadio.sm),
-            child: SizedBox(
-              height: 10,
-              child: Row(
-                children: [
-                  if (_cobradoHoyEf > 0)
-                    Expanded(
-                      flex: (_cobradoHoyEf * 1000).round(),
-                      child: Container(color: AppColores.exito),
-                    ),
-                  if (_cobradoHoyTr > 0)
-                    Expanded(
-                      flex: (_cobradoHoyTr * 1000).round(),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: AppColores.exito.withValues(alpha: 0.25),
-                          border: Border.all(color: AppColores.exito),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: AppEspacio.xs),
-          Text(
-            'En mano ${fmtMonto(_cobradoHoyEf)} · '
-            'En cuenta ${fmtMonto(_cobradoHoyTr)}',
-            style: AppTexto.metadato.copyWith(
-                color: AppColores.textoSecundario(context)),
-          ),
-        ],
         if (_serie7.isNotEmpty) ...[
           const SizedBox(height: AppEspacio.md),
           Row(
@@ -2868,7 +3017,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// Una sola tarjeta, una fila por alerta (solo las de contador >
   /// 0), número grande a la derecha, color SOLO en el icono (el
   /// resto del texto neutro). Cada fila navega a su destino actual.
-  Widget _tiraAlertas() {
+  /// 1.35 (M-8/M-5, solo dueño): la Bandeja de WhatsApp deja de
+  /// ser tarjeta propia y entra como fila más — SOLO si hay
+  /// avisos pendientes (con 0 no aparece: regla de Jc) —; el
+  /// aviso de turnos sin reporte vive bajo la tarjeta y el
+  /// acceso a Turnos queda como fila fina junto a él.
+  Widget _tiraAlertas({bool esDueno = false}) {
     final filas = <({IconData icono, String texto, int conteo, Color color, VoidCallback ir})>[];
     // 1.23 (H-02): la señal de atención del dueño vive DENTRO
     // de la tira, al final del Nivel 1 — el segundo pase solo
@@ -2915,41 +3069,115 @@ class _HomeScreenState extends State<HomeScreen>
           color: AppColores.alertaOscuro,
           ir: () => _ir(const ListaIncidenciasScreen())));
     }
-    if (filas.isEmpty) return const SizedBox.shrink();
+    // 1.35 (M-8): la fila de la Bandeja de WhatsApp del
+    // dueño — solo con avisos pendientes y solo si su
+    // bloque sigue activo en la personalización.
+    final hayWhats = esDueno &&
+        _bloquesHoy.contains('bandeja') &&
+        _avisosPendientes > 0;
+    final hayAvisoTurnos =
+        esDueno && _turnosSinReporteVisibles.isNotEmpty;
+    if (filas.isEmpty && !hayWhats && !esDueno) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-      child: Tarjeta(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Atención hoy', style: AppTexto.titulo),
-            const SizedBox(height: AppEspacio.sm),
-            for (final f in filas)
-              InkWell(
-                borderRadius: BorderRadius.circular(AppRadio.sm),
-                onTap: f.ir,
-                child: Padding(
-                  // 1.23 B11: la fila medía ~42 de alto
-                  // (contenido ~26 + padding sm×2); con md×2
-                  // queda en ~50.
-                  padding:
-                      const EdgeInsets.symmetric(vertical: AppEspacio.md),
-                  child: Row(
-                    children: [
-                      Icon(f.icono, size: 20, color: f.color),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(f.texto, style: AppTexto.cuerpo),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (filas.isNotEmpty || hayWhats)
+            Tarjeta(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Atención hoy', style: AppTexto.titulo),
+                  const SizedBox(height: AppEspacio.sm),
+                  for (final f in filas)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(AppRadio.sm),
+                      onTap: f.ir,
+                      child: Padding(
+                        // 1.23 B11: la fila medía ~42 de alto
+                        // (contenido ~26 + padding sm×2); con md×2
+                        // queda en ~50.
+                        padding: const EdgeInsets.symmetric(
+                            vertical: AppEspacio.md),
+                        child: Row(
+                          children: [
+                            Icon(f.icono, size: 20, color: f.color),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(f.texto, style: AppTexto.cuerpo),
+                            ),
+                            Text('${f.conteo}',
+                                style: AppTexto.tituloPagina),
+                          ],
+                        ),
                       ),
-                      Text('${f.conteo}',
-                          style: AppTexto.tituloPagina),
-                    ],
-                  ),
+                    ),
+                  if (hayWhats)
+                    InkWell(
+                      key: const ValueKey('hoy-bandeja'),
+                      borderRadius: BorderRadius.circular(AppRadio.sm),
+                      onTap: () => _ir(const BandejaWhatsappScreen()),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: AppEspacio.md),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.mark_chat_unread_rounded,
+                                size: 20, color: AppColores.exito),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text('Bandeja WhatsApp · Avisos de hoy',
+                                  style: AppTexto.cuerpo),
+                            ),
+                            Text('$_avisosPendientes',
+                                style: AppTexto.tituloPagina),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (hayAvisoTurnos) ...[
+            const SizedBox(height: AppEspacio.md),
+            _avisoTurnosSinReporte(),
+          ],
+          if (esDueno) ...[
+            const SizedBox(height: AppEspacio.xs),
+            // 1.35 (M-5): el acceso a Turnos del dueño, como
+            // fila fina junto al aviso — fuera el botón
+            // ancho de la tarjeta de dinero jubilada.
+            InkWell(
+              key: const ValueKey('hoy-turnos'),
+              borderRadius: BorderRadius.circular(AppRadio.sm),
+              onTap: () => _ir(const HubTurnosScreen()),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppEspacio.md),
+                child: Row(
+                  children: [
+                    Icon(Icons.schedule_rounded,
+                        size: 20,
+                        color: AppColores.textoSecundario(context)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Turnos de hoy',
+                          style: AppTexto.cuerpo),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 20,
+                        color: AppColores.textoSecundario(context)),
+                  ],
                 ),
               ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -2957,51 +3185,6 @@ class _HomeScreenState extends State<HomeScreen>
 
 
   
-  /// v1.3.6 (ítem 1A): botón horizontal de ancho completo para la bandeja
-  /// de avisos de WhatsApp del día. v1.3.6 (Argón, diseño): badge squircle
-  /// verde semántico + contador si hay pendientes. Solo visible para el
-  /// dueño (auditoría Argón, Fix 1a).
-  Widget _botonBandejaWhatsapp() {
-    final pendientes = _avisosPendientes;
-    return Tarjeta(
-      onTap: () => _ir(const BandejaWhatsappScreen()),
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.md, vertical: AppEspacio.md),
-      child: Row(
-        children: [
-          IconoModuloBadge.verde(
-              pendientes > 0
-                  ? Icons.mark_chat_unread_rounded
-                  : Icons.chat_rounded,
-              tamanoIcono: 21),
-          const SizedBox(width: AppEspacio.sm),
-          Expanded(
-            child: Text('Bandeja WhatsApp · Avisos de hoy',
-                style: AppTexto.secundario
-                    .copyWith(fontWeight: FontWeight.w600)),
-          ),
-          if (pendientes > 0) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppEspacio.sm, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColores.exito.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(AppRadio.md),
-              ),
-              child: Text('$pendientes',
-                  style: AppTexto.etiqueta.copyWith(
-                      color: AppColores.exitoOscuro,
-                      fontWeight: FontWeight.w700)),
-            ),
-            const SizedBox(width: 4),
-          ],
-          Icon(Icons.chevron_right_rounded,
-              size: 20,
-              color: AppColores.textoSecundario(context)),
-        ],
-      ),
-    );
-  }
 
 
 
@@ -3012,42 +3195,43 @@ class _HomeScreenState extends State<HomeScreen>
 /// la 1.32 la reordena con el veredicto g132; la 1.33 la
 /// reordena por orden de Jc en campo y jubila la zona
 /// del mostrador rápido con su barra de buscar). Recibe
-/// las secciones ya construidas y solo las ordena:
-/// Estadísticas Rápidas (Pulso) → Por Decidir → bandeja
-/// → buzón → alertas. La tarjeta de Administración de
-/// la 1.30 se jubiló: sus contadores viven en Por
-/// Decidir y sus destinos en el Pilar Negocio. Las
-/// secciones entran en cascada (fundación de D1) con
-/// sus ValueKey estables.
+/// las secciones ya construidas y solo las ordena.
+/// 1.35 (M-8): el orden de la portada del día — titular
+/// del día (el dinero de hoy sobre grafito) → Por
+/// Decidir → buzón si hay → Atención hoy (con la fila
+/// de la Bandeja de WhatsApp dentro, solo si hay
+/// avisos) → el informe plegado «Tu semana y tu mes».
+/// La tarjeta de Administración de la 1.30 se jubiló:
+/// sus contadores viven en Por Decidir y sus destinos
+/// en el Pilar Negocio. Las secciones entran en
+/// cascada (fundación de D1) con sus ValueKey estables.
 class _VistaHoyDueno extends StatelessWidget {
   final Set<String> bloquesHoy;
   final Widget porDecidir;
   final Widget finanzas;
-  final Widget bandeja;
   final Widget buzon;
   final bool hayBuzon;
   final Widget alertas;
+  final Widget informe;
   final VoidCallback onPersonalizar;
 
   const _VistaHoyDueno({
     required this.bloquesHoy,
     required this.porDecidir,
     required this.finanzas,
-    required this.bandeja,
     required this.buzon,
     required this.hayBuzon,
     required this.alertas,
+    required this.informe,
     required this.onPersonalizar,
   });
 
   List<Widget> secciones() {
     return [
-      // v1.3.3: tarjeta financiera por rol («Estadísticas
-      // Rápidas»). 1.33 (orden de Jc en campo, 2026-11-12):
-      // las Estadísticas abren el Mostrador — es lo que
-      // mira cada vez que entra en la app — y «Por Decidir»
-      // baja justo debajo (siguiente bloque), sin perder
-      // su conteo visible de pendientes.
+      // 1.35 (M-8): el titular del día abre la portada —
+      // la frase del dinero de hoy sobre grafito. El
+      // bloque 'finanzas' de la personalización lo
+      // gobierna (y gobierna también el informe).
       if (bloquesHoy.contains('finanzas'))
         KeyedSubtree(
           key: const ValueKey('hoy-finanzas'),
@@ -3062,8 +3246,8 @@ class _VistaHoyDueno extends StatelessWidget {
         ),
       // La bandeja «Por Decidir» (Compuerta 1 del
       // veredicto g132 en la 1.32; reordenada por Jc en
-      // la 1.33): inmediatamente tras las Estadísticas,
-      // siempre visible para el dueño con su titular de
+      // la 1.33): inmediatamente tras el titular, siempre
+      // visible para el dueño con su titular de
       // pendientes — nada urgente se esconde. La vieja
       // tarjeta de Administración se funde aquí (sus
       // contadores de atención) y en el Pilar 4 (sus
@@ -3079,21 +3263,6 @@ class _VistaHoyDueno extends StatelessWidget {
           ),
         ),
       ),
-      // Zona 4 — Atención hoy: la bandeja del dueño,
-      // sobre la tira de alertas. SOLO del dueño (abre
-      // su WhatsApp y el check vive en su teléfono).
-      if (bloquesHoy.contains('bandeja'))
-        KeyedSubtree(
-          key: const ValueKey('hoy-bandeja'),
-          child: ItemCascada(
-            indice: 2,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-              child: bandeja,
-            ),
-          ),
-        ),
       // 1.29 (Oleada 5, FB-12): buzón del dueño — solo
       // si hay algo por responder. No es un bloque de
       // la estación personalizable: es un aviso
@@ -3102,7 +3271,7 @@ class _VistaHoyDueno extends StatelessWidget {
         KeyedSubtree(
           key: const ValueKey('hoy-buzon'),
           child: ItemCascada(
-            indice: 3,
+            indice: 2,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
@@ -3110,11 +3279,26 @@ class _VistaHoyDueno extends StatelessWidget {
             ),
           ),
         ),
-      // v1.3.3: tira de alertas (solo si hay algo).
+      // Atención hoy (con la Bandeja de WhatsApp como
+      // fila más cuando hay avisos: M-8).
       if (bloquesHoy.contains('alertas'))
         KeyedSubtree(
           key: const ValueKey('hoy-alertas'),
-          child: ItemCascada(indice: 4, child: alertas),
+          child: ItemCascada(indice: 3, child: alertas),
+        ),
+      // 1.35 (M-1): el informe plegado «Tu semana y tu
+      // mes» cierra la portada, cerrado al abrir.
+      if (bloquesHoy.contains('finanzas'))
+        KeyedSubtree(
+          key: const ValueKey('hoy-informe'),
+          child: ItemCascada(
+            indice: 4,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: informe,
+            ),
+          ),
         ),
       // Panel 19: si la estación quedó vacía por
       // elección, se dice y se ofrece reabrir el editor.
@@ -3141,8 +3325,10 @@ class _VistaHoyDueno extends StatelessWidget {
             ),
           ),
         ),
-      // Aire inferior para que el FAB no tape el final.
-      const SizedBox(key: ValueKey('hoy-aire'), height: 96),
+      // 1.35 (campo nº 5): el aire inferior baja de 96 a
+      // un respiro mínimo — el Dock ya no es un FAB que
+      // tape el final; los 96 dp eran espacio muerto.
+      const SizedBox(key: ValueKey('hoy-aire'), height: 24),
     ];
   }
 
@@ -3225,7 +3411,9 @@ class _VistaHoyEntrenador extends StatelessWidget {
             ),
           ),
         ),
-      const SizedBox(key: ValueKey('hoy-aire'), height: 96),
+      // 1.35 (campo nº 5): el aire inferior baja de 96 a
+      // un respiro mínimo, como en la vista del dueño.
+      const SizedBox(key: ValueKey('hoy-aire'), height: 24),
     ];
   }
 

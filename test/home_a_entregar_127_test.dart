@@ -14,9 +14,10 @@
 ///    la celda «A entregar» vive dentro de un InkWell con
 ///    onTap y el micro-chevron de las celdas tocables, y
 ///    al tocarla se navega a DetallePendienteScreen.
-/// 2. En modo dueño la tarjeta es la de siempre
-///    («Estadísticas Rápidas» / «Por recoger»): no aparece
-///    ninguna celda «A entregar» nueva.
+/// 2. En modo dueño no aparece ninguna celda
+///    «A entregar» nueva: su dinero vive en el titular
+///    del día (1.35 M-8; antes la tarjeta «Estadísticas
+///    Rápidas» con su celda «Por recoger»).
 ///
 /// Harness: el del banco widget / home_scroll — las
 /// lecturas FFI no resuelven bajo FakeAsync; se afirma la
@@ -198,7 +199,7 @@ void main() {
   });
 
   testWidgets(
-      'dueño: la tarjeta no cambia («Por recoger», sin '
+      'dueño: el titular del día manda («por recoger», sin '
       'celda «A entregar»)', (tester) async {
     await tester.runAsync(() => _fijarSesion(
         email: 'jctr0602@ironbody.gym',
@@ -206,9 +207,11 @@ void main() {
         nombre: 'Jc'));
     await _abrirHome(tester);
 
-    await _revelar(tester, find.text('Estadísticas Rápidas'));
-    expect(find.text('Estadísticas Rápidas'), findsOneWidget);
-    expect(find.text('Por recoger'), findsOneWidget);
+    // 1.35 (M-8): la tarjeta «Estadísticas Rápidas» se
+    // jubiló; el dinero del dueño vive en el titular.
+    await _revelar(tester, find.byKey(const ValueKey('hoy-titular')));
+    expect(find.byKey(const ValueKey('hoy-titular')), findsOneWidget);
+    expect(find.textContaining('por recoger'), findsOneWidget);
     expect(find.text('A entregar'), findsNothing);
     expect(find.text('Mi Turno Hoy'), findsNothing);
     // Drenaje real simétrico al del entrenador: que ningún

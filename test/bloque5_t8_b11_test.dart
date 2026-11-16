@@ -197,7 +197,11 @@ void main() {
       // 2 de B11 que quedan más la fila tocable del buzón
       // del dueño (FB-12); la del segmento vive ahora en la
       // BarraPilares (ver arriba).
-      expect('minHeight: 48'.allMatches(home).length, 3);
+      // 1.35 (FASE 4, M-5): la fila fina «Turnos de hoy»
+      // del Mostrador nace con la misma garantía (área
+      // tocable de 48): el conteo sube a 4 porque la
+      // garantía CRECE, no porque ninguna se pierda.
+      expect('minHeight: 48'.allMatches(home).length, 4);
       // La X crece por padding (icono intacto en 16).
       expect(
           home.contains('padding: EdgeInsets.all(AppEspacio.lg)'),
