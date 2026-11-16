@@ -355,24 +355,15 @@ class _DialogoEditarAvisoState extends State<_DialogoEditarAviso> {
               maxLength: 500,
             ),
             const SizedBox(height: AppEspacio.md),
-            DropdownButtonFormField<int?>(
-              initialValue: _destinatario,
-              decoration: const InputDecoration(
-                labelText: 'Para',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                const DropdownMenuItem<int?>(
-                  value: null,
-                  child: Text('Todos los entrenadores'),
-                ),
+            SelectorIronForm<int?>(
+              valorInicial: _destinatario,
+              etiqueta: 'Para',
+              opciones: [
+                const OpcionSelector<int?>(null, 'Todos los entrenadores'),
                 for (final e in kEntrenadoresAviso.entries)
-                  DropdownMenuItem<int?>(
-                    value: e.key,
-                    child: Text('Solo ${e.value}'),
-                  ),
+                  OpcionSelector<int?>(e.key, 'Solo ${e.value}'),
               ],
-              onChanged: (v) => setState(() => _destinatario = v),
+              alCambiar: (v) => setState(() => _destinatario = v),
             ),
             const SizedBox(height: AppEspacio.md),
             RadioListTile<String>(

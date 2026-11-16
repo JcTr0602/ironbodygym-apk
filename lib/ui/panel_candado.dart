@@ -479,55 +479,40 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      DropdownButtonFormField<String>(
-                        initialValue: _alcance,
-                        decoration: const InputDecoration(
-                            labelText: 'Alcance'),
-                        items: const [
-                          DropdownMenuItem(
-                              value: 'global',
-                              child: Text('Todos (ambas apps)')),
-                          DropdownMenuItem(
-                              value: 'app', child: Text('Una app')),
-                          DropdownMenuItem(
-                              value: 'rol', child: Text('Por rol')),
-                          DropdownMenuItem(
-                              value: 'persona',
-                              child: Text('Una persona')),
+                      SelectorIronForm<String>(
+                        valorInicial: _alcance,
+                        etiqueta: 'Alcance',
+                        opciones: const [
+                          OpcionSelector('global', 'Todos (ambas apps)'),
+                          OpcionSelector('app', 'Una app'),
+                          OpcionSelector('rol', 'Por rol'),
+                          OpcionSelector('persona', 'Una persona'),
                         ],
-                        onChanged: (v) =>
+                        alCambiar: (v) =>
                             setState(() => _alcance = v ?? 'global'),
                       ),
                       if (_alcance != 'global') ...[
                         const SizedBox(height: AppEspacio.md),
-                        DropdownButtonFormField<String>(
+                        SelectorIronForm<String>(
                           // C-1: con app derivada, la llave
                           // fuerza el remontaje al cambiar el
                           // objetivo y el selector queda
                           // deshabilitado con el valor forzado.
                           key: ValueKey(
                               'app-candado-${appForzada ?? 'libre'}'),
-                          initialValue: appForzada ?? _app,
-                          decoration: InputDecoration(
-                            labelText: 'App',
-                            helperText: appForzada == null
-                                ? null
-                                : 'Fijada por el tipo de objetivo: '
-                                    'el servidor no acepta otra app '
-                                    'para este candado.',
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                                value: 'ambas',
-                                child: Text('Ambas apps')),
-                            DropdownMenuItem(
-                                value: 'gestion',
-                                child: Text('Solo Gestión')),
-                            DropdownMenuItem(
-                                value: 'clientes',
-                                child: Text('Solo Clientes')),
+                          valorInicial: appForzada ?? _app,
+                          etiqueta: 'App',
+                          textoAyuda: appForzada == null
+                              ? null
+                              : 'Fijada por el tipo de objetivo: '
+                                  'el servidor no acepta otra app '
+                                  'para este candado.',
+                          opciones: const [
+                            OpcionSelector('ambas', 'Ambas apps'),
+                            OpcionSelector('gestion', 'Solo Gestión'),
+                            OpcionSelector('clientes', 'Solo Clientes'),
                           ],
-                          onChanged: appForzada == null
+                          alCambiar: appForzada == null
                               ? (v) =>
                                   setState(() => _app = v ?? 'ambas')
                               : null,
@@ -535,55 +520,40 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                       ],
                       if (_alcance == 'rol') ...[
                         const SizedBox(height: AppEspacio.md),
-                        DropdownButtonFormField<String>(
-                          initialValue: _rol,
-                          decoration:
-                              const InputDecoration(labelText: 'Rol'),
-                          items: const [
-                            DropdownMenuItem(
-                                value: 'entrenador',
-                                child: Text('Entrenadores')),
-                            DropdownMenuItem(
-                                value: 'cliente',
-                                child: Text('Clientes')),
-                            DropdownMenuItem(
-                                value: 'invitado',
-                                child: Text('Invitados')),
+                        SelectorIronForm<String>(
+                          valorInicial: _rol,
+                          etiqueta: 'Rol',
+                          opciones: const [
+                            OpcionSelector('entrenador', 'Entrenadores'),
+                            OpcionSelector('cliente', 'Clientes'),
+                            OpcionSelector('invitado', 'Invitados'),
                           ],
-                          onChanged: (v) =>
+                          alCambiar: (v) =>
                               setState(() => _rol = v ?? 'entrenador'),
                         ),
                       ],
                       if (_alcance == 'persona') ...[
                         const SizedBox(height: AppEspacio.md),
-                        DropdownButtonFormField<String>(
-                          initialValue: _personaTipo,
-                          decoration: const InputDecoration(
-                              labelText: 'Tipo de persona'),
-                          items: const [
-                            DropdownMenuItem(
-                                value: 'entrenador',
-                                child: Text('Entrenador (Gestión)')),
-                            DropdownMenuItem(
-                                value: 'cliente',
-                                child:
-                                    Text('Cliente o invitado (Clientes)')),
+                        SelectorIronForm<String>(
+                          valorInicial: _personaTipo,
+                          etiqueta: 'Tipo de persona',
+                          opciones: const [
+                            OpcionSelector('entrenador', 'Entrenador (Gestión)'),
+                            OpcionSelector('cliente', 'Cliente o invitado (Clientes)'),
                           ],
-                          onChanged: (v) => setState(
+                          alCambiar: (v) => setState(
                               () => _personaTipo = v ?? 'entrenador'),
                         ),
                         const SizedBox(height: AppEspacio.md),
                         if (_personaTipo == 'entrenador')
-                          DropdownButtonFormField<String>(
-                            initialValue: _personaTid,
-                            decoration: const InputDecoration(
-                                labelText: 'Entrenador'),
-                            items: [
+                          SelectorIronForm<String>(
+                            valorInicial: _personaTid,
+                            etiqueta: 'Entrenador',
+                            opciones: [
                               for (final e in _entrenadores)
-                                DropdownMenuItem(
-                                    value: e.tid, child: Text(e.nombre)),
+                                OpcionSelector(e.tid, e.nombre),
                             ],
-                            onChanged: (v) =>
+                            alCambiar: (v) =>
                                 setState(() => _personaTid = v),
                           )
                         else ...[
@@ -667,21 +637,16 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                         etiqueta: 'Mensaje que verán (opcional)',
                       ),
                       const SizedBox(height: AppEspacio.md),
-                      DropdownButtonFormField<int>(
-                        initialValue: _horasCaducidad,
-                        decoration: const InputDecoration(
-                            labelText: 'Caducidad'),
-                        items: const [
-                          DropdownMenuItem(
-                              value: 0, child: Text('Sin caducidad')),
-                          DropdownMenuItem(
-                              value: 1, child: Text('1 hora')),
-                          DropdownMenuItem(
-                              value: 4, child: Text('4 horas')),
-                          DropdownMenuItem(
-                              value: 24, child: Text('24 horas')),
+                      SelectorIronForm<int>(
+                        valorInicial: _horasCaducidad,
+                        etiqueta: 'Caducidad',
+                        opciones: const [
+                          OpcionSelector(0, 'Sin caducidad'),
+                          OpcionSelector(1, '1 hora'),
+                          OpcionSelector(4, '4 horas'),
+                          OpcionSelector(24, '24 horas'),
                         ],
-                        onChanged: (v) =>
+                        alCambiar: (v) =>
                             setState(() => _horasCaducidad = v ?? 0),
                       ),
                       const SizedBox(height: AppEspacio.lg),

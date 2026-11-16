@@ -287,18 +287,14 @@ class _SeccionActividadAppClientesState
               style: AppTexto.secundario,
             )
           else ...[
-            DropdownButtonFormField<int>(
-              initialValue: _clienteId,
-              decoration: const InputDecoration(
-                labelText: 'Persona',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              items: [
+            SelectorIronForm<int>(
+              valorInicial: _clienteId,
+              etiqueta: 'Persona',
+              opciones: [
                 for (final c in _clientes)
-                  DropdownMenuItem(value: c.id, child: Text(c.nombre)),
+                  OpcionSelector(c.id, c.nombre),
               ],
-              onChanged: _elegir,
+              alCambiar: _elegir,
             ),
             const SizedBox(height: AppEspacio.sm),
             Wrap(
