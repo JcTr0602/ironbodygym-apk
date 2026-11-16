@@ -27,6 +27,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -38,6 +39,23 @@ import '../localdb.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'tarjeta_imagen.dart';
+
+/// SL-4 · G10-6: genera los bytes PNG de [imagen] (el ticket
+/// a resolución 3.0), los pasa a [usar] y libera la imagen
+/// SIEMPRE (finally): también si [usar] falla a mitad del
+/// envío. Antes la imagen creada en cada envío nunca se
+/// liberaba — fuga de memoria nativa por envío.
+Future<T> conImagenTicket<T>(
+    ui.Image imagen, Future<T> Function(Uint8List bytes) usar) async {
+  try {
+    final datos =
+        await imagen.toByteData(format: ui.ImageByteFormat.png);
+    if (datos == null) throw StateError('sin imagen');
+    return await usar(datos.buffer.asUint8List());
+  } finally {
+    imagen.dispose();
+  }
+}
 
 /// Acción extra opcional de la pantalla de confirmación (p. ej.
 /// «Enviar por WhatsApp» con el comprobante de la venta). Se
@@ -137,14 +155,15 @@ class _ConfirmacionOperacionScreenState
       final boundary = _ticketKey.currentContext!
           .findRenderObject() as RenderRepaintBoundary;
       final imagen = await boundary.toImage(pixelRatio: 3.0);
-      final datos =
-          await imagen.toByteData(format: ui.ImageByteFormat.png);
-      if (datos == null) throw 'sin imagen';
-      final dir = await getTemporaryDirectory();
-      final f = await File('${dir.path}/comprobante_cobro.png')
-          .writeAsBytes(datos.buffer.asUint8List());
-      await Share.shareXFiles([XFile(f.path)],
-          text: widget.comprobantePie);
+      // SL-4 · G10-6: la imagen se libera tras generar los
+      // bytes, también si compartir falla (conImagenTicket).
+      await conImagenTicket(imagen, (bytes) async {
+        final dir = await getTemporaryDirectory();
+        final f = await File('${dir.path}/comprobante_cobro.png')
+            .writeAsBytes(bytes);
+        await Share.shareXFiles([XFile(f.path)],
+            text: widget.comprobantePie);
+      });
     } catch (_) {
       if (mounted) {
         mostrarSnack(context, 'No se pudo compartir la imagen',
