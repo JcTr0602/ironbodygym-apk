@@ -89,7 +89,7 @@ void main() {
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   test('G#4 «Todo»: la pareja venta+reverso se netea y no '
