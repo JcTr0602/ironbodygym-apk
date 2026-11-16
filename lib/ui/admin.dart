@@ -90,7 +90,6 @@ import 'pago.dart';
 import 'reportes_plus.dart';
 import 'reservas.dart';
 import 'suplementos.dart';
-import 'widgets.dart';
 import 'mi_dia.dart';
 import 'dashboard.dart';
 import 'panel_bloque2.dart';
@@ -295,12 +294,11 @@ class _AdminScreenState extends State<AdminScreen> {
   int _reportesComunidadGen = 0;
 
   // 1.28 (M5-B1): la foto de cifras de la visita anterior
-  // pinta AL INSTANTE al abrir (con su hora) mientras la
-  // carga real refresca en segundo plano. _horaCache no
-  // es null solo mientras lo pintado ES la foto guardada
-  // (la carga fresca la limpia); _cargaFrescaLista evita
+  // pinta AL INSTANTE al abrir mientras la carga real
+  // refresca en segundo plano; _cargaFrescaLista evita
   // que una foto que llega tarde pise cifras ya frescas.
-  DateTime? _horaCache;
+  // (La hora de la foto solo la leía el sello «Actualizado
+  // …», retirado por SL-9 G09-5: el campo se fue con él.)
   bool _cargaFrescaLista = false;
 
   // 1.28 (M5-C1): los badges de la última visita: un
@@ -579,9 +577,8 @@ class _AdminScreenState extends State<AdminScreen> {
         if (ajOk != null) _aplicarConfig(aj, tipos, pagoEnt);
         _cargando = false;
         // 1.28 (M5-B1): lo pintado ya es fresco: la foto
-        // guardada deja de mandar (su sello se apaga).
+        // guardada deja de mandar.
         _cargaFrescaLista = true;
-        _horaCache = null;
       });
     }
     // La fila de solicitudes se rellena en segundo plano, sin
@@ -928,7 +925,6 @@ class _AdminScreenState extends State<AdminScreen> {
       _aplicarCifrasCache(foto.cifras);
       if (!mounted) return;
       setState(() {
-        _horaCache = foto.hora;
         _cargando = false;
       });
     } catch (_) {}
