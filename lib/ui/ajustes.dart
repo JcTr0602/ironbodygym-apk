@@ -38,7 +38,6 @@ import 'panel_buscador.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
 import 'importar_respaldo.dart';
-import 'widgets.dart';
 
 /// 1.25 T113: el índice de ajustes por sección — la
 /// reagrupación fijada (Vibración y Alto contraste en
