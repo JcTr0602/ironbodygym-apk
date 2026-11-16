@@ -146,7 +146,7 @@ void main() {
     HttpOverrides.global = _HttpReal();
     server = await _servidorFake();
     await Supabase.initialize(
-        url: 'http://127.0.0.1:${server.port}', anonKey: 'dummy');
+        url: 'http://127.0.0.1:${server.port}', publishableKey: 'dummy');
   });
 
   tearDownAll(() async {
