@@ -206,11 +206,17 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
       if (nombre != null && nombre.isNotEmpty) {
         partes.add('Cliente: $nombre');
       }
+      // G#40 (Hy4): la moneda sale del payload (la op de
+      // saldar fiado la trae: un fiado en USD se rotulaba
+      // «CUP» y el dueño decidía sobre un monto mal
+      // rotulado; el servidor sí aplica la moneda real).
+      final monedaRaw = '${p['moneda'] ?? ''}'.trim();
+      final moneda = monedaRaw.isEmpty ? 'CUP' : monedaRaw;
       if (p['monto'] != null) {
-        partes.add('Monto: ${fmtMonto(p['monto'])} CUP');
+        partes.add('Monto: ${fmtMonto(p['monto'])} $moneda');
       }
       if (p['total'] != null) {
-        partes.add('Total: ${fmtMonto(p['total'])} CUP');
+        partes.add('Total: ${fmtMonto(p['total'])} $moneda');
       }
       if (p['concepto'] != null) partes.add('Concepto: ${p['concepto']}');
       if (p['fecha'] != null) {
