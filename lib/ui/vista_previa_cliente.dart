@@ -192,8 +192,11 @@ class _VistaPreviaClienteScreenState
   // Colores de la app de clientes.
   // 1.35 (UI-18): el naranja de marca, desde el token.
   static const _naranja = AppColores.naranja;
-  static const _grafito = Color(0xFF121214);
-  static const _colorTarjeta = Color(0xFF1E1E20);
+  // 1.35 (UX-07): la superficie espejo habla los
+  // tokens de la plantilla (antes literales propios
+  // #121214/#1E1E20 fuera de la fundación).
+  static const _grafito = AppColores.pizarra;
+  static const _colorTarjeta = AppColores.grafitoTactico;
 
   @override
   void initState() {

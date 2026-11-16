@@ -57,7 +57,10 @@ class ImagenCierreNomina extends StatelessWidget {
   /// 'Generada el 31 de octubre de 2026'.
   final String generadoEtiqueta;
 
-  static const _fondo = Color(0xFF1C1C1F);
+  // 1.35 (UX-07): el fondo de la plantilla única
+  // «tarjeta Iron Body» — el grafito de los tokens
+  // (antes un literal propio #1C1C1F).
+  static const _fondo = AppColores.grafitoTactico;
   // 1.35 (UI-18): el naranja de marca, desde el token
   // (antes #FF6B00, un naranja viejo).
   static const _naranja = AppColores.naranja;
@@ -83,12 +86,14 @@ class ImagenCierreNomina extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                // 1.35 (UI-18): el gradiente de marca
-                // (naranja → naranja intenso de los tokens).
-                colors: [AppColores.naranja, AppColores.naranjaOscuro],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+              // 1.35 (UX-07): la cabecera de la plantilla
+              // — grafito con el wordmark y la línea de
+              // luz naranja al pie (antes un degradado
+              // naranja propio de esta imagen).
+              color: AppColores.pizarra,
+              border: Border(
+                bottom:
+                    BorderSide(color: AppColores.naranja, width: 2),
               ),
               borderRadius:
                   BorderRadius.vertical(top: Radius.circular(16)),

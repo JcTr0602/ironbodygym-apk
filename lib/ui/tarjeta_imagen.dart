@@ -19,6 +19,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'diseno.dart' show AppColores;
+
 /// La línea oficial del sistema de gestión, en texto
 /// plano para imagen (la misma promesa que cierra los
 /// mensajes de texto de la app).
@@ -29,6 +31,52 @@ const String lineaOficialTarjetaImagen =
 /// responde (el de Jc), visible en la imagen.
 const String lineaContactoTarjetaImagen =
     'Si vas a responder, escríbenos al 58191577';
+
+/// 1.35 (UX-07): la cabecera única de las tarjetas en
+/// imagen — banda grafito con el arte del rayo y el
+/// wordmark «IRON BODY GYM». La estrena el ticket de
+/// cobro (UX-05) DENTRO del RepaintBoundary, así la
+/// foto del comprobante que sale por WhatsApp hereda
+/// la plantilla entera: cabecera, dato y pie firmado.
+class CabeceraTarjetaIron extends StatelessWidget {
+  const CabeceraTarjetaIron({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        color: AppColores.grafitoTactico,
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(15)),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.asset(
+              'assets/arte_marca_rayo.jpg',
+              width: 26,
+              height: 26,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Text(
+            'IRON BODY GYM',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// El pie firmado de una tarjeta en imagen: wordmark
 /// opcional (las tarjetas que ya lo llevan en la

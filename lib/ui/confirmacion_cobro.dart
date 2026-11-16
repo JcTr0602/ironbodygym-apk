@@ -261,12 +261,20 @@ class _ConfirmacionOperacionScreenState
                   curve: AppMovimiento.curvaPop,
                   builder: (context, escala, hijo) =>
                       Transform.scale(scale: escala, child: hijo),
+                  // 1.35 (UX-05): la marca de hecho vive
+                  // dentro del anillo naranja de marca; el
+                  // check conserva su color de estado
+                  // (norma de la casa: el estado no se
+                  // tiñe de marca).
                   child: Container(
                     width: 120,
                     height: 120,
                     decoration: BoxDecoration(
-                      color: AppColores.exito.withValues(alpha: 0.12),
+                      color:
+                          AppColores.naranja.withValues(alpha: 0.08),
                       shape: BoxShape.circle,
+                      border: Border.all(
+                          color: AppColores.naranja, width: 3),
                     ),
                     child: const Icon(
                       Icons.check_circle_rounded,
@@ -305,20 +313,22 @@ class _ConfirmacionOperacionScreenState
                     ),
                     child: Column(
                       children: [
+                        // 1.35 (UX-05/UX-07): la cabecera
+                        // grafito de la plantilla «tarjeta
+                        // Iron Body» DENTRO del ticket: la
+                        // foto del comprobante hereda la
+                        // cabecera, no solo el pie.
+                        const CabeceraTarjetaIron(),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(
-                              16, 4, 16, 0),
+                              16, 10, 16, 0),
                           child: _filaMonto(context),
                         ),
                         const SizedBox(height: 4),
-                        SizedBox(
-                          height: 1.2,
-                          width: double.infinity,
-                          child: CustomPaint(
-                            painter: _PunteadaPainter(
-                                AppColores.borde(context)),
-                          ),
-                        ),
+                        // 1.35 (UX-05): el corte del papel
+                        // — línea punteada con las muescas
+                        // laterales del ticket rasgado.
+                        const _CorteTicket(),
                         if (widget.detalles.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.fromLTRB(
@@ -565,17 +575,20 @@ class _ConfirmacionOperacionScreenState
           Text(widget.etiquetaMonto, style: AppTexto.secundario),
           const SizedBox(width: 16),
           Flexible(
+            // 1.35 (UX-05): el monto es el protagonista
+            // del recibo — sube de métrica a display.
             child: widget.montoValor != null
                 ? MontoAnimado(
                     valor: widget.montoValor!,
                     formato:
                         widget.montoFormato ?? (_) => widget.monto,
-                    style: AppTexto.metrica,
+                    style: AppTexto.displayPequeno,
                   )
                 : Text(
                     widget.monto,
-                    style: AppTexto.metrica.copyWith(fontFeatures:
-                        const [FontFeature.tabularFigures()]),
+                    style: AppTexto.displayPequeno.copyWith(
+                        fontFeatures:
+                            const [FontFeature.tabularFigures()]),
                     textAlign: TextAlign.right,
                   ),
           ),
@@ -652,6 +665,47 @@ class ConfirmacionCobroScreen extends StatelessWidget {
       opUuid: opUuid,
       accionExtra: accionExtra,
       comprobantePie: comprobantePie,
+    );
+  }
+}
+
+/// 1.35 (UX-05): el corte del ticket — la línea
+/// punteada con las dos muescas laterales del papel
+/// rasgado: círculos del color del fondo de la
+/// pantalla que «muerden» los bordes del ticket (el
+/// ticket no se recorta: las muescas se pintan encima
+/// de sus esquinas del corte).
+class _CorteTicket extends StatelessWidget {
+  const _CorteTicket();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget muesca() => Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: AppColores.fondo(context),
+            shape: BoxShape.circle,
+            border: Border.all(color: AppColores.borde(context)),
+          ),
+        );
+    return SizedBox(
+      height: 14,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            height: 1.2,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _PunteadaPainter(AppColores.borde(context)),
+            ),
+          ),
+          Positioned(left: -7, child: muesca()),
+          Positioned(right: -7, child: muesca()),
+        ],
+      ),
     );
   }
 }
