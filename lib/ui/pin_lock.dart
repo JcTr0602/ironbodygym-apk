@@ -216,7 +216,12 @@ class _PinLockScreenState extends State<PinLockScreen>
             errorBuilder: (_, __, ___) => const SizedBox.expand(),
           ),
           Container(
-            color: AppColores.fondo(context).withValues(alpha: 0.86),
+            // 1.35 (UX-06): la misma puerta que la de
+            // entrar — la cortina se aligera (0.86 → 0.80)
+            // y el arte del rayo respira más; el teclado
+            // y los puntos conservan su contraste porque
+            // sus superficies son opacas.
+            color: AppColores.fondo(context).withValues(alpha: 0.80),
           ),
           SafeArea(
         child: Padding(

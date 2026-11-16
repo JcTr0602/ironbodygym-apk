@@ -190,11 +190,41 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: AppColores.gradienteCarbon,
-        ),
-        child: SafeArea(
+      // 1.35 (UX-06): UNA sola puerta con la del PIN —
+      // el arte del rayo a pantalla completa como
+      // escenario y el velo grafito calculado para que
+      // los campos se lean igual que sobre el degradado
+      // carbón de antes (más denso al pie, donde viven
+      // los campos). Si el activo fallara, el velo solo
+      // sigue siendo la puerta oscura de siempre.
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/arte_marca_rayo.jpg',
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const SizedBox.expand(),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                // El velo respira arriba (la zona del
+                // logo: el arte se reconoce) y se cierra
+                // donde viven los campos (su contraste
+                // es el de siempre: cristal grafito
+                // sobre velo denso).
+                colors: [
+                  AppColores.pizarra.withValues(alpha: 0.78),
+                  AppColores.pizarra.withValues(alpha: 0.90),
+                  AppColores.pizarra.withValues(alpha: 0.95),
+                ],
+                stops: const [0, 0.45, 1],
+              ),
+            ),
+          ),
+          SafeArea(
           child: FadeTransition(
             opacity: _fade,
             child: SlideTransition(
@@ -206,9 +236,13 @@ class _LoginScreenState extends State<LoginScreen>
                   children: [
                     const SizedBox(height: AppEspacio.xxl),
                     // Logo
+                    // 1.35 (UX-06): sin recorte circular —
+                    // el logo se apoya sobre el arte en su
+                    // cuadrado redondeado, con su resplandor.
                     Container(
                       decoration: BoxDecoration(
-                        shape: BoxShape.circle,
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.xl),
                         boxShadow: [
                           BoxShadow(
                             color: AppColores.naranja
@@ -219,7 +253,8 @@ class _LoginScreenState extends State<LoginScreen>
                         ],
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(AppRadio.circular),
+                        borderRadius:
+                            BorderRadius.circular(AppRadio.xl),
                         child: Image.asset('assets/logo.jpg',
                             height: 130,
                             width: 130,
@@ -362,7 +397,8 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -420,7 +456,13 @@ class _LoginScreenState extends State<LoginScreen>
               Icon(icono, color: AppColores.textoSecundario(context)),
           suffixIcon: suffix,
           filled: true,
-          fillColor: AppColores.superficieElevadaOscuro,
+          // 1.35 (UX-06): cristal grafito — el relleno
+          // se vuelve translúcido sobre el velo y el
+          // arte se insinúa tras el campo sin pelear
+          // con el texto (el velo mantiene el contraste
+          // de siempre).
+          fillColor:
+              AppColores.grafitoTactico.withValues(alpha: 0.78),
           border: OutlineInputBorder(
             borderRadius:
                 BorderRadius.circular(AppRadio.lg),
