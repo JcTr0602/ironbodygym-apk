@@ -6508,8 +6508,14 @@ Future<
   }
   final ventasServ = await LocalDb.instance
       .mirrorPorFecha('servicio_ventas', 'fecha', fechaIso, fechaIso);
+  // G#10 (Hy4): el conjunto de revertidas es GLOBAL (todas
+  // las filas del espejo), como en ingresosPorDia: el
+  // reverso lleva la fecha de su creación, así que un
+  // reverso de mañana debe excluir la venta de hoy; con el
+  // conjunto solo del día, la venta revertida seguía
+  // sumando en su día para siempre.
   final reversadasServ = <int>{
-    for (final v in ventasServ)
+    for (final v in await LocalDb.instance.allMirror('servicio_ventas'))
       if ((v['reverso_de'] as num?) != null)
         (v['reverso_de'] as num).toInt(),
   };
@@ -8265,7 +8271,14 @@ Future<Map<String, double>> cobradoHoyPorMetodo(
   // el desglose por método necesita igualmente todas las filas
   // del día. (M2-A A9) El día se compara por fechaNegocioHabana
   // (la definición única de «hoy»), no por substring crudo.
-  for (final v in await LocalDb.instance.allMirror('servicio_ventas')) {
+  // G#9 (Hy4): la fuente es el neteo GLOBAL
+  // (_servicioVentasNetas), como en el dashboard: el reverso
+  // nace con fecha de hoy y cantidad negativa, y sumarlo tal
+  // cual dejaba un negativo suelto en el cierre del día (la
+  // venta era de otro día) — diferencia falsa de arqueo con
+  // neto entre días cero. Neteada la pareja, ninguno de los
+  // dos días la cuenta.
+  for (final v in await _servicioVentasNetas()) {
     notaUuid(v);
     if (soloTelegramId != null) {
       final resp =
