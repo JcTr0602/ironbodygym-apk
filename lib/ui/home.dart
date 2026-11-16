@@ -1314,7 +1314,9 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
           const SizedBox(height: AppEspacio.xs),
-          for (final parte in _buzon.partes)
+          // E3 (C6-01): la portada solo anuncia las partes
+          // que Por Decidir no cubre (partesPortada).
+          for (final parte in _buzon.partesPortada)
             InkWell(
               borderRadius: BorderRadius.circular(AppRadio.md),
               onTap: () => _abrirBuzon(parte.destino),
@@ -1769,7 +1771,9 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         finanzas: _titularDelDia(),
         buzon: _tarjetaBuzon(),
-        hayBuzon: _buzon.hay,
+        // E3 (C6-01): la tarjeta existe en la portada solo
+        // si trae algo que Por Decidir no anuncia ya.
+        hayBuzon: _buzon.hayPortada,
         alertas: _tiraAlertas(esDueno: true),
         informe: _informeSemanaMes(),
         onPersonalizar: _personalizarEstacion,
@@ -3032,20 +3036,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// acceso a Turnos queda como fila fina junto a él.
   Widget _tiraAlertas({bool esDueno = false}) {
     final filas = <({IconData icono, String texto, int conteo, Color color, VoidCallback ir})>[];
-    // 1.23 (H-02): la señal de atención del dueño vive DENTRO
-    // de la tira, al final del Nivel 1 — el segundo pase solo
-    // la añade aquí, nunca sobre zonas interactivas.
-    if (_atencion.visible) {
-      // 1.25 T116 (F1-09): la fila dice el desglose ya
-      // cargado, no solo el total.
-      filas.add((icono: Icons.person_add_rounded,
-          texto: _atencion.desglose.isEmpty
-              ? 'Esperando atención'
-              : 'Esperando atención · ${_atencion.desglose}',
-          conteo: _atencion.total,
-          color: AppColores.naranja,
-          ir: () => _ir(const AdminScreen())));
-    }
+    // 1.35 (corrección E3, C6-01): la fila «Esperando
+    // atención» SALE de la tira: agregaba las solicitudes
+    // de inscripción y los reportes Plus que «Por Decidir»
+    // ya anuncia fila a fila en la misma portada — el
+    // mismo pendiente dos veces. La señal `_atencion` se
+    // queda: alimenta la insignia de urgencias de la barra
+    // (urgenciasHome), que es la voz única a nivel cáscara.
     if (_vencen > 0) {
       filas.add((icono: Icons.event_available_rounded,
           texto: 'Vencen hoy', conteo: _vencen,
@@ -3071,12 +3068,10 @@ class _HomeScreenState extends State<HomeScreen>
           texto: 'Cumpleaños', conteo: _cumpleHoy, color: AppColores.info,
           ir: () => _ir(const CumpleanosScreen())));
     }
-    if (_incidenciasAbiertas > 0) {
-      filas.add((icono: Icons.report_problem_rounded,
-          texto: 'Incidencias', conteo: _incidenciasAbiertas,
-          color: AppColores.alertaOscuro,
-          ir: () => _ir(const ListaIncidenciasScreen())));
-    }
+    // E3 (C6-01): la fila «Incidencias» también sale: es
+    // una fila de «Por Decidir» con el mismo conteo y el
+    // mismo destino. El conteo sigue alimentando Por
+    // Decidir y la insignia de urgencias de la barra.
     // 1.35 (M-8): la fila de la Bandeja de WhatsApp del
     // dueño — solo con avisos pendientes y solo si su
     // bloque sigue activo en la personalización.
