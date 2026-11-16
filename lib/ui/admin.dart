@@ -20,6 +20,7 @@ import 'package:uuid/uuid.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart' show mensajeErrorAmable;
 import '../config.dart' show AppConfig;
 import '../bloque2_resto.dart';
 import '../conciliacion.dart';
@@ -105,6 +106,56 @@ import 'centro_compras.dart';
 import 'tarifas_especiales.dart';
 import 'usuarios.dart';
 import 'servicios_admin.dart';
+
+/// SL-9 (A1): líneas de DIFERENCIA de un cambio de montos —
+/// «Etiqueta: viejo → nuevo» SOLO para las claves cuyo valor
+/// cambia de verdad. Pura: la confirmación previa a aplicar
+/// un cambio de precios se arma con esto (antes la
+/// confirmación listaba solo los valores nuevos y el dueño no
+/// veía qué se movía ni desde dónde).
+List<String> lineasDiffMontos(
+    Map<String, double> cambios, Map<String, dynamic> actuales) {
+  return [
+    for (final e in cambios.entries)
+      if ((montoAjusteTolerante(actuales[e.key]) ?? 0) != e.value)
+        '${etiquetaMonto(e.key)}: '
+            '${fmtMonto(montoAjusteTolerante(actuales[e.key]) ?? 0)} → '
+            '${fmtMonto(e.value)} CUP',
+  ];
+}
+
+/// SL-9 (A1): diferencia de UN tipo de pago editado, campo a
+/// campo («Monto: 2000 → 2500 CUP»). Cadena vacía si el tipo
+/// quedó igual.
+String textoDiffTipoPago(TipoPago antes, TipoPago despues) {
+  final lineas = <String>[
+    if (antes.nombre != despues.nombre)
+      'Nombre: ${antes.nombre} → ${despues.nombre}',
+    if (antes.monto != despues.monto)
+      'Monto: ${fmtMonto(antes.monto)} → ${fmtMonto(despues.monto)} CUP',
+    if (antes.dias != despues.dias)
+      'Días: ${antes.dias} → ${despues.dias}',
+  ];
+  return lineas.join('\n');
+}
+
+/// SL-9 (A1): diferencias entre la lista de tipos vigente y
+/// la editada (cambios de monto/días, altas y bajas), para la
+/// confirmación de «Guardar tipos de pago».
+List<String> lineasDiffTipos(
+    List<TipoPago> antes, List<TipoPago> despues) {
+  final porIdAntes = {for (final t in antes) t.id: t};
+  final idsDespues = {for (final t in despues) t.id};
+  return [
+    for (final t in despues)
+      if (!porIdAntes.containsKey(t.id))
+        'Nuevo: ${t.nombre} — ${fmtMonto(t.monto)} CUP · ${t.dias} días'
+      else if (textoDiffTipoPago(porIdAntes[t.id]!, t).isNotEmpty)
+        '${t.nombre}: ${textoDiffTipoPago(porIdAntes[t.id]!, t)}',
+    for (final t in antes)
+      if (!idsDespues.contains(t.id)) 'Se elimina: ${t.nombre}',
+  ];
+}
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -1417,9 +1468,19 @@ class _AdminScreenState extends State<AdminScreen> {
       mostrarSnack(context, 'No hay montos válidos para guardar', significado: SignificadoChip.alerta);
       return;
     }
+    // SL-9 (A1): la confirmación muestra las DIFERENCIAS
+    // (viejo → nuevo) contra los ajustes vigentes, no solo los
+    // valores nuevos; sin diferencias no hay nada que aplicar
+    // y no se encola nada.
+    final ajVigentes = await LocalDb.instance.getAjustes();
+    if (!mounted) return;
+    final diffs = lineasDiffMontos(cambios, ajVigentes);
+    if (diffs.isEmpty) {
+      mostrarSnack(context, 'Los precios ya son esos; no hay cambios.', significado: SignificadoChip.alerta);
+      return;
+    }
     final mensaje = [
-      for (final e in cambios.entries)
-        '• ${etiquetaMonto(e.key)}: ${fmtMonto(e.value)} CUP',
+      for (final d in diffs) '• $d',
       '',
       'Se aplicará en la próxima sincronización.',
     ].join('\n');
@@ -1578,19 +1639,34 @@ class _AdminScreenState extends State<AdminScreen> {
       mostrarSnack(context, 'Nombre y monto válido requeridos', significado: SignificadoChip.alerta);
       return;
     }
+    final nuevo = TipoPago(
+        id: t.id,
+        nombre: nombre,
+        monto: monto,
+        dias: (dias != null && dias > 0) ? dias : t.dias,
+        activo: t.activo,
+        soloMenores: t.soloMenores);
+    // SL-9 (A1): un cambio de PRECIO no se aplica a ciegas: se
+    // muestra la diferencia (viejo → nuevo) y se confirma;
+    // cancelar deja el tipo intacto y no encola nada.
+    final diff = textoDiffTipoPago(t, nuevo);
+    if (diff.isEmpty) {
+      mostrarSnack(context, 'El tipo quedó igual; no se guardó nada.', significado: SignificadoChip.alerta);
+      return;
+    }
+    final okCambio = await DialogoApp.confirmar(
+      context,
+      titulo: 'Confirmar cambio de precio',
+      mensaje: '${t.nombre}\n$diff\n\n'
+          'Se aplicará en la próxima sincronización.',
+      aceptar: 'Aplicar cambio',
+      icono: Icons.price_change_rounded,
+    );
+    if (okCambio != true || !mounted) return;
     setState(() {
       _tipos = [
         for (final x in _tipos)
-          if (x.id == t.id)
-            TipoPago(
-                id: x.id,
-                nombre: nombre,
-                monto: monto,
-                dias: (dias != null && dias > 0) ? dias : x.dias,
-                activo: x.activo,
-                soloMenores: x.soloMenores)
-          else
-            x,
+          if (x.id == t.id) nuevo else x,
       ];
     });
     await _persistirTipos();
@@ -1675,9 +1751,26 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _guardarTiposImpl() async {
+    // SL-9 (A1): la confirmación muestra las DIFERENCIAS
+    // contra el blob vigente en ajustes (viejo → nuevo, altas
+    // y bajas), no la lista nueva a secas; sin diferencias no
+    // se encola nada.
+    final ajVigentes = await LocalDb.instance.getAjustes();
+    if (!mounted) return;
+    final crudo = ajVigentes['tipos_pago'];
+    final antes = <TipoPago>[
+      if (crudo is List)
+        for (final t in crudo)
+          if (t is Map)
+            TipoPago.desdeJson(Map<String, dynamic>.from(t)),
+    ];
+    final diffs = lineasDiffTipos(antes, _tipos);
+    if (diffs.isEmpty) {
+      mostrarSnack(context, 'Los tipos ya son esos; no hay cambios.', significado: SignificadoChip.alerta);
+      return;
+    }
     final mensaje = [
-      for (final t in _tipos)
-        '• ${t.nombre}: ${fmtMonto(t.monto)} CUP · ${t.dias} días${t.activo ? '' : ' (inactivo)'}',
+      for (final d in diffs) '• $d',
       '',
       'Se aplicará en la próxima sincronización.',
     ].join('\n');
@@ -1832,8 +1925,13 @@ class _AdminScreenState extends State<AdminScreen> {
         permitirAnticipada: true,
       );
     } catch (e) {
+      // SL-9 (G09-4): la excepción va a la bitácora; a la
+      // pantalla solo llega el mensaje amable de la casa —
+      // nunca «No se pudo registrar: Exception: …» en un flujo
+      // de efectivo.
+      AppLog.error('admin', 'recogida_fallo', d: '$e');
       if (!mounted) return;
-      mostrarSnack(context, 'No se pudo registrar: $e', significado: SignificadoChip.error);
+      mostrarSnack(context, 'No se pudo registrar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       return;
     }
     if (!mounted) return;
@@ -2001,7 +2099,10 @@ class _AdminScreenState extends State<AdminScreen> {
       ]),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-9 (G09-5): fuera la banda de sync del Panel — la
+          // sync se dice UNA sola vez, en la cabecera de la app
+          // (regla de Jc 2026-11-14); aquí era la primera de
+          // cinco superficies que la repetían.
           Expanded(
             child: _cargando
                 // 1.28 (M5-C3): esqueleto con la forma
@@ -2024,10 +2125,9 @@ class _AdminScreenState extends State<AdminScreen> {
                           titulo: 'ESTACIÓN DIARIA',
                           variante: VarianteEncabezado.panel),
                         _estacionDiaria(),
-                        EncabezadoSeccion(
+                        const EncabezadoSeccion(
                           titulo: 'PULSO DEL MES',
-                          variante: VarianteEncabezado.panel,
-                          derecha: _textoActualizado()),
+                          variante: VarianteEncabezado.panel),
                         _resumenMes(),
                         _lineaCuentasCasa(),
                         _lineaNomina(),
@@ -2058,21 +2158,12 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Cabecera del panel (mockup v2): título con acento naranja,
-  /// subtítulo y chip con el estado de sincronización.
+  /// Cabecera del panel (mockup v2): título con acento naranja
+  /// y subtítulo. SL-9 (G09-5): el chip con el estado de
+  /// sincronización SALE de aquí — la sync se dice una sola
+  /// vez, en la cabecera de la app; el diagnóstico sigue a un
+  /// toque en la tarjeta «Estado de sync» del módulo Control.
   Widget _cabeceraPanel() {
-    final Color chipColor;
-    final String chipTxt;
-    if (_syncDet.error != null && _syncDet.error!.isNotEmpty) {
-      chipColor = AppColores.error;
-      chipTxt = 'Error de sync';
-    } else if (_pendientesSubir > 0) {
-      chipColor = AppColores.alerta;
-      chipTxt = '$_pendientesSubir por subir';
-    } else {
-      chipColor = AppColores.exito;
-      chipTxt = 'Sincronizado';
-    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2097,36 +2188,6 @@ class _AdminScreenState extends State<AdminScreen> {
                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        // 1.14 (rediseño): la píldora es tocable — abre el
-        // diagnóstico de sync, el mismo destino de la fila
-        // «Problema de sincronización» del bloque de atención.
-        InkWell(
-          borderRadius: BorderRadius.circular(AppRadio.circular),
-          onTap: () => _irLigera(const SaludSyncScreen()),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.xs),
-            decoration: BoxDecoration(
-              color: chipColor.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(AppRadio.circular),
-              border: Border.all(color: chipColor.withValues(alpha: 0.4)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration:
-                      BoxDecoration(color: chipColor, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 8),
-                Text(chipTxt,
-                    style: AppTexto.metadato.copyWith(color: chipColor, fontWeight: FontWeight.w700)),
-              ],
-            ),
           ),
         ),
       ],
@@ -2471,21 +2532,6 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
       ),
     );
-  }
-
-  /// «Actualizado …» del Resumen: última sincronización registrada
-  /// (los datos son del espejo local; el panel de diseño pidió que se
-  /// vea cuándo se actualizaron).
-  String? _textoActualizado() {
-    // 1.28 (M5-B1): mientras lo pintado es la foto
-    // guardada, el sello lo dice con su hora: nadie cree
-    // fresco lo que aún se está actualizando.
-    if (_horaCache != null) {
-      return 'Datos de ${_fechaHora(_horaCache!)} · actualizando…';
-    }
-    final u = _syncDet.ultimaPull ?? _syncDet.ultimaPush;
-    if (u == null) return null;
-    return 'Actualizado ${_fechaHora(u)}';
   }
 
   /// Bloque 3 · Resumen del mes: las 3 cifras del mockup v2
@@ -2862,7 +2908,9 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.handshake_rounded,
         'Liquidar efectivo de entrenadores',
-        'La puerta única de liquidación vive en la Caja',
+        // SL-9 (G09-10): el texto dice la acción del toque, no
+        // cómo está implementada la puerta.
+        'Liquidar en la Caja',
         () => _irACajaPilar(),
       ),
       _tarjetaFlujo(
@@ -3318,9 +3366,10 @@ class _AdminScreenState extends State<AdminScreen> {
       _tarjetaFlujo(
         Icons.sync_rounded,
         'Estado de sync',
-        _pendientesSubir > 0
-            ? '$_pendientesSubir ops por subir'
-            : 'Sincronizado',
+        // SL-9 (G09-5): la tarjeta dice la ACCIÓN que abre el
+        // toque, no el estado de sync (eso ya lo dice la
+        // cabecera de la app, una sola vez).
+        'Diagnóstico y salud de la sincronización',
         () => _irLigera(const SaludSyncScreen()),
       ),
       // Módulo 6 (pendientes + reintento): la pantalla ya existía
@@ -3522,15 +3571,6 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Formatea fecha/hora para la sección de salud ("nunca" si es null).
-  String _fechaHora(DateTime? dt) {
-    if (dt == null) return 'nunca';
-    final d = dt.day.toString().padLeft(2, '0');
-    final m = dt.month.toString().padLeft(2, '0');
-    final h = dt.hour.toString().padLeft(2, '0');
-    final min = dt.minute.toString().padLeft(2, '0');
-    return '$d/$m $h:$min';
-  }
 }
 
 /// Un pendiente del bloque «Necesita tu atención» (v1.6.0): icono,
@@ -3750,6 +3790,8 @@ class _DialogoPagoEntrenador extends StatefulWidget {
 class _DialogoPagoEntrenadorState
     extends State<_DialogoPagoEntrenador> {
   late final TextEditingController _ctrl;
+  // SL-9 (G09-3): el error de validación vive dentro.
+  String? _error;
 
   @override
   void initState() {
@@ -3782,6 +3824,12 @@ class _DialogoPagoEntrenadorState
               border: OutlineInputBorder(),
             ),
           ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!,
+                style: AppTexto.cuerpo
+                    .copyWith(color: AppColores.error)),
+          ],
         ],
       ),
       actions: [
@@ -3791,8 +3839,16 @@ class _DialogoPagoEntrenadorState
         BotonPrimario(
           texto: 'Guardar',
           onPressed: () {
-              final v = int.tryParse(_ctrl.text);
-              Navigator.pop(context, v != null && v > 0 ? v : null);
+              // SL-9 (G09-3): validar ANTES de cerrar — antes un
+              // «12x» o un 0 cerraban el diálogo en silencio
+              // (pop con null = cancelar) y parecía guardado.
+              final v = int.tryParse(_ctrl.text.trim());
+              if (v == null || v <= 0) {
+                setState(() => _error =
+                    'Pago inválido: escribe un número mayor que 0.');
+                return;
+              }
+              Navigator.pop(context, v);
             },
           expandido: false,
         ),
