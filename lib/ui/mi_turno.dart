@@ -940,14 +940,18 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                     }
                     return;
                   }
-                  await LocalDb.instance.setMeta(
-                      _claveCierre(),
-                      isoHabana(ahoraHabana()));
                   // v1.2.5-rev5 (Gemini): encolar el cierre para sincronizar.
                   // El admin ve el historial de todos los entrenadores.
                   // v1.2.5-rev6: pagos_count = operaciones de pago reales de
                   // hoy (el número que muestra este diálogo), no la longitud
                   // de la cola sin sincronizar.
+                  // G#7 (Hy4): el encolado va PRIMERO y la
+                  // meta de «cerrado» solo se marca si la op
+                  // quedó en la cola — antes la meta se
+                  // sellaba antes, el catch tragaba el fallo
+                  // del encolado y el snack decía éxito: el
+                  // cierre quedaba marcado local para
+                  // siempre y ningún camino lo re-encolaba.
                   try {
                     await SyncEngine.instance.registrarCierreTurno(
                       fecha: _hoy(),
@@ -955,7 +959,20 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       totalCobrado: _cobrado,
                       pagosCount: nOps,
                     );
-                  } catch (_) {}
+                  } catch (e) {
+                    AppLog.error('mi_turno', 'cierre_legado_sin_encolar',
+                        d: '$e');
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    if (mounted) {
+                      mostrarSnack(context,
+                          'No se pudo registrar el cierre del turno. Inténtalo de nuevo.',
+                          significado: SignificadoChip.error);
+                    }
+                    return;
+                  }
+                  await LocalDb.instance.setMeta(
+                      _claveCierre(),
+                      isoHabana(ahoraHabana()));
                   // v1.2.5 (3.2): vibra TRAS la confirmación real.
                   await vibrarConfirmacion();
                   if (ctx.mounted) Navigator.of(ctx).pop();
