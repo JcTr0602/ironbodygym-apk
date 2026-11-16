@@ -250,6 +250,14 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   }
 
   Future<void> _abrir() async {
+    // G#34 (Hy4): la guarda se marca ANTES del await del
+    // permiso — con el doble toque, dos flujos pasaban el
+    // permiso en paralelo y solapaban dos diálogos de
+    // suplencia (el turno no se duplicaba: abrirTurnoAtomico
+    // devuelve creado=false; el daño era el doble diálogo).
+    if (_procesando) return;
+    setState(() => _procesando = true);
+    try {
     // 1.25 cierre (autoauditoría ronda 2): abrir turno
     // cuelga de can_gestionar_turnos, como en Home y
     // Mi Turno (el hub no lo comprobaba). El cierre ya
@@ -258,8 +266,6 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
         () => PermisosEntrenador().canGestionarTurnos, 'gestionar turnos')) {
       return;
     }
-    setState(() => _procesando = true);
-    try {
       // F9: al abrir se puede marcar a quién se cubre.
       final abiertoOk = await abrirTurnoConSuplente(context);
       if (!abiertoOk) return;
