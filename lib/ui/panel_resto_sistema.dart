@@ -313,9 +313,21 @@ const _etiquetasTablaF5 = {
   'ventas_suplementos': 'Ventas de suplementos',
   'servicio_ventas': 'Dosis y servicios',
   'suplementos': 'Suplementos (catálogo)',
+  // SL-9 (G09-9): las demás tablas que pinta la verificación
+  // del espejo, para que ninguna salga con su nombre crudo.
+  'reservas': 'Reservas',
+  'gympedia_solicitudes': 'Solicitudes de GymPedia',
+  'permisos_bandeja': 'Bandeja de permisos',
+  'espejo_gympedia_borradores': 'Borradores de GymPedia',
+  'avisos_entrenadores': 'Avisos a entrenadores',
 };
 
 String _etiquetaTablaF5(String t) => _etiquetasTablaF5[t] ?? t;
+
+/// SL-9 (G09-9): el traductor de tablas de la casa, público
+/// para las demás pantallas del Panel (la verificación del
+/// espejo lo usa en vez de pintar el nombre crudo de la tabla).
+String etiquetaTablaEspejo(String t) => _etiquetaTablaF5(t);
 
 class MantenimientoScreen extends StatefulWidget {
   const MantenimientoScreen({super.key});
