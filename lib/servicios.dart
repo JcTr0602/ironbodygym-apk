@@ -213,6 +213,16 @@ String etiquetaTipoServicio(String tipo) => switch (tipo) {
       _ => tipo,
     };
 
+/// SL-7 (G06-4): etiqueta del método de pago de una venta de
+/// Servicios, la de la casa (capitalizada). El código crudo
+/// ('efectivo'/'transferencia') nunca llega a pantalla.
+String etiquetaMetodoServicio(String? metodo) => switch (metodo) {
+      'efectivo' => 'Efectivo',
+      'transferencia' => 'Transferencia',
+      null || '' => '',
+      _ => metodo,
+    };
+
 String nombreClienteVentaServicio(Map<String, dynamic> v) {
   final propio = '${v['cliente_nombre'] ?? ''}'.trim();
   if (propio.isNotEmpty) return propio;
