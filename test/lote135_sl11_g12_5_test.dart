@@ -14,8 +14,10 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
@@ -75,6 +77,20 @@ void main() {
   setUpAll(() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    // Fuente real: sin Roboto, los glifos de test miden un
+    // cuadrado por carácter y todo Row «desborda» en falso.
+    const dirFuentes =
+        '/home/hatch/flutter-sdk/flutter/bin/cache/artifacts/material_fonts';
+    final loader = FontLoader('Roboto');
+    for (final f in [
+      'Roboto-Regular.ttf',
+      'Roboto-Medium.ttf',
+      'Roboto-Bold.ttf'
+    ]) {
+      final bytes = await File('$dirFuentes/$f').readAsBytes();
+      loader.addFont(Future.value(ByteData.view(bytes.buffer)));
+    }
+    await loader.load();
     SharedPreferences.setMockInitialValues({});
     await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
   });
@@ -106,7 +122,17 @@ void main() {
       theme: AppTema.tacticoOscuro(),
       home: const HubTurnosScreen(),
     ));
-    await _drenar(tester);
+    // La carga del hub encadena decenas de lecturas FFI: se
+    // sondea hasta que el botón exista de verdad.
+    var aparecio = false;
+    for (var i = 0; i < 40 && !aparecio; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 250)));
+      await tester.pump(const Duration(milliseconds: 80));
+      aparecio = find.text('Abrir turno').evaluate().isNotEmpty;
+    }
+    expect(aparecio, isTrue,
+        reason: 'el hub del entrenador debe ofrecer Abrir turno');
     final boton = find.text('Abrir turno');
     expect(boton, findsOneWidget);
     await tester.ensureVisible(boton);
