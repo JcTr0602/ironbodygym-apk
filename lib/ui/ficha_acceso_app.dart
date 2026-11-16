@@ -36,6 +36,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../acceso_app_cache.dart';
 import '../auth.dart';
+import '../invitados.dart';
 import '../negocio.dart' show fmtFecha, tiempoRelativo;
 import '../plus_residual.dart';
 import '../tiempo.dart';
@@ -184,6 +185,13 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
   /// aunque el caché no lo enseñe.
   bool _recienGenerado = false;
 
+  /// 1.35 (campo nº 14 de Clientes): el cliente nació de
+  /// una conversión de invitado cuya confirmación — la que
+  /// crea su acceso — aún no ha llegado al servidor. Su
+  /// ficha lo dice («pendiente de sincronizar») en vez de
+  /// ofrecer un PIN que competiría con el traslado.
+  bool _conversionPendiente = false;
+
   @override
   void initState() {
     super.initState();
@@ -193,6 +201,17 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
       _verificando = true;
       unawaited(_cargarCache());
     }
+    unawaited(_cargarConversionPendiente());
+  }
+
+  Future<void> _cargarConversionPendiente() async {
+    try {
+      final ids =
+          await InvitadosService().clientesConConversionPendiente();
+      if (mounted && ids.contains(widget.clienteId)) {
+        setState(() => _conversionPendiente = true);
+      }
+    } catch (_) {}
   }
 
   Future<void> _cargarCache() async {
@@ -257,6 +276,28 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
             label: const Text('Reintentar'),
             onPressed: _reintentarCargaAcceso,
           ),
+        ],
+      );
+    } else if (acceso == null && _conversionPendiente) {
+      // 1.35 (campo nº 14 de Clientes): la conversión creó
+      // al cliente en este teléfono y su acceso se crea al
+      // confirmarse en el servidor. Sin botón de PIN: el
+      // traslado de la conversión lo trae.
+      contenido = const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ChipEstado.semantico(
+            texto: 'Pendiente de sincronizar',
+            significado: SignificadoChip.info,
+            icono: Icons.sync_rounded,
+          ),
+          SizedBox(height: AppEspacio.sm),
+          Text(
+              'Acceso a la app: pendiente de sincronizar. '
+              'Viene de una conversión de invitado: su acceso '
+              'se crea cuando la conversión se confirme en '
+              'el servidor.',
+              style: AppTexto.secundario),
         ],
       );
     } else if (acceso == null && _recienGenerado) {

@@ -855,11 +855,23 @@ enum EstadoConversion {
 
 class ConversionInvitado {
   final String invitadoId;
-  final String conversionUuid;
+
+  /// Mutable desde 1.35 (campo nº 14 de Clientes): una
+  /// conversión nacida sin conexión lleva un uuid LOCAL que
+  /// la verificación sustituye por el que el servidor emite
+  /// al prepararla ya con red, antes de confirmar.
+  String conversionUuid;
   EstadoConversion estado;
   String? opUuid;
   int? clienteId;
   ResultadoMedidasInvitado? resultadoMedidas;
+
+  /// 1.35 (campo nº 14 de Clientes): la preparación nació en
+  /// este teléfono SIN conexión — el servidor aún no conoce
+  /// [conversionUuid]. Al confirmar, la verificación primero
+  /// prepara la conversión en el servidor y adopta su uuid
+  /// (ver [InvitadosService.verificarConversiones]).
+  bool nacidaOffline;
 
   /// 1.31 (Yunque A): mensaje legible del último intento de
   /// confirmar la conversión en el servidor que FALLÓ. Antes el
@@ -879,6 +891,7 @@ class ConversionInvitado {
     this.clienteId,
     this.resultadoMedidas,
     this.errorConfirmacion,
+    this.nacidaOffline = false,
     required this.creadaEn,
     required this.actualizadaEn,
   });
@@ -893,6 +906,7 @@ class ConversionInvitado {
           'resultado_medidas': resultadoMedidas!.toJson(),
         if (errorConfirmacion != null)
           'error_confirmacion': errorConfirmacion,
+        if (nacidaOffline) 'nacida_offline': true,
         'creada_en': creadaEn,
         'actualizada_en': actualizadaEn,
       };
@@ -913,6 +927,7 @@ class ConversionInvitado {
               rm.map((k, v) => MapEntry('$k', v)))
           : null,
       errorConfirmacion: j['error_confirmacion'] as String?,
+      nacidaOffline: j['nacida_offline'] == true,
       creadaEn: '${j['creada_en'] ?? ''}',
       actualizadaEn: '${j['actualizada_en'] ?? ''}',
     );
@@ -1681,8 +1696,80 @@ class InvitadosService {
     return datos;
   }
 
+  /// 1.35 (campo nº 14 de Clientes): prepara la conversión
+  /// SIN conexión, con los datos que el teléfono ya tiene
+  /// del invitado (el detalle en caché). El conversion_uuid
+  /// nace local y el registro queda marcado `nacidaOffline`:
+  /// la inscripción se encola como cualquier op y, cuando
+  /// la verificación la confirme ya con red, primero se
+  /// prepara la conversión en el servidor y se adopta SU
+  /// uuid (ver [_adoptarUuidDelServidor]). El invitado pasa
+  /// a ser cliente en el teléfono desde que la op se
+  /// encola; su acceso a la app se crea al confirmarse.
+  Future<DatosConversionInvitado> prepararConversionLocal(
+      InvitadoDetalle detalle) async {
+    final datos = DatosConversionInvitado(
+      invitadoId: detalle.id,
+      conversionUuid: const Uuid().v4(),
+      nombre: detalle.nombre,
+      telefono: detalle.telefono,
+      fechaNac: detalle.fechaNac,
+      carnet: detalle.carnet,
+      medidas: detalle.mediciones,
+    );
+    final ahora = isoHabana(ahoraHabana());
+    await ConversionInvitadoStore().guardar(ConversionInvitado(
+      invitadoId: datos.invitadoId,
+      conversionUuid: datos.conversionUuid,
+      estado: EstadoConversion.preparada,
+      nacidaOffline: true,
+      creadaEn: ahora,
+      actualizadaEn: ahora,
+    ));
+    return datos;
+  }
+
+  /// 1.35 (campo nº 14 de Clientes): una conversión nacida
+  /// sin conexión no existe en el servidor: antes de
+  /// confirmarla hay que prepararla allá (la verificación
+  /// solo corre con la op ya aplicada, es decir, con red) y
+  /// adoptar el uuid que el servidor emite. El registro se
+  /// persiste con el uuid nuevo y la marca quitada ANTES de
+  /// confirmar: si la app muere entre ambos pasos, la
+  /// siguiente pasada confirma directo, sin repreparar.
+  Future<void> _adoptarUuidDelServidor(ConversionInvitado conv) async {
+    final res = await _rpc('invitado_preparar_conversion',
+        {'p_invitado_id': conv.invitadoId});
+    if (res is! Map) {
+      throw const InvitadoError(
+          'RED', 'Respuesta inesperada del servidor.');
+    }
+    final m = res.map((k, v) => MapEntry('$k', v));
+    final uuid = '${m['conversion_uuid'] ?? ''}';
+    if (uuid.isEmpty) {
+      throw const InvitadoError(
+          'RED', 'El servidor no devolvió la conversión.');
+    }
+    conv.conversionUuid = uuid;
+    conv.nacidaOffline = false;
+    await ConversionInvitadoStore().guardar(conv);
+  }
+
   Future<void> cancelarConversion(String conversionUuid,
       {String? invitadoId}) async {
+    // 1.35 (campo nº 14 de Clientes): una preparación nacida
+    // sin conexión y aún no adoptada no existe en el
+    // servidor: no hay nada que cancelar allá.
+    if (invitadoId != null) {
+      final previa = await ConversionInvitadoStore().leer(invitadoId);
+      if (previa != null &&
+          previa.nacidaOffline &&
+          previa.conversionUuid == conversionUuid) {
+        previa.estado = EstadoConversion.cancelada;
+        await ConversionInvitadoStore().guardar(previa);
+        return;
+      }
+    }
     try {
       await _rpc('invitado_cancelar_conversion',
           {'p_conversion_uuid': conversionUuid});
@@ -1954,6 +2041,42 @@ class InvitadosService {
     return cambios.length;
   }
 
+  /// 1.35 (campo nº 14 de Clientes): clientes cuya conversión
+  /// ya creó el cliente (su op `inscribir` se aplicó) pero
+  /// cuya confirmación en el servidor — la que crea su
+  /// acceso a la app — aún no ha ocurrido. La ficha del
+  /// cliente lo dice con su fórmula: «Acceso a la app:
+  /// pendiente de sincronizar», en vez de «aún no tiene
+  /// acceso» con un botón de generar PIN que competiría con
+  /// el traslado de la conversión. Todo local, sin red.
+  Future<Set<int>> clientesConConversionPendiente() async {
+    final store = ConversionInvitadoStore();
+    // Misma reconstrucción que la verificación: un registro
+    // aún `preparada` cuya op ya se encoló se lee como
+    // opEncolada (la ficha puede abrirse antes de la
+    // primera pasada de verificarConversiones).
+    await reconstruirConversionesDesdeCola();
+    final res = <int>{};
+    for (final conv in await store.todas()) {
+      if (conv.estado != EstadoConversion.opEncolada ||
+          conv.opUuid == null) {
+        continue;
+      }
+      final ops = await LocalDb.instance.opsPorUuids([conv.opUuid!]);
+      if (ops.isEmpty) continue;
+      final crudo = ops.first['resultado_servidor'];
+      dynamic resultado;
+      if (crudo is String && crudo.isNotEmpty) {
+        try {
+          resultado = jsonDecode(crudo);
+        } catch (_) {}
+      }
+      final id = extraerIdDeResultado(resultado, 'cliente_id');
+      if (id != null) res.add(id);
+    }
+    return res;
+  }
+
   /// Cierra las conversiones locales cuya op `inscribir` ya se
   /// aplicó: lee el resultado (cliente_id + medidas) de la cola y
   /// llama `invitado_confirmar_conversion`. Idempotente: la RPC
@@ -2003,6 +2126,16 @@ class InvitadosService {
       if (accion == AccionConversion.confirmarEnServidor) {
         final clienteId = extraerIdDeResultado(resultado, 'cliente_id')!;
         try {
+          // 1.35 (campo nº 14 de Clientes): nacida sin
+          // conexión, la conversión no existe en el servidor:
+          // se prepara ahora y se adopta su uuid antes de
+          // confirmar (si preparar falla — p. ej. otro
+          // teléfono la tiene en curso — el error queda
+          // guardado como cualquier fallo de confirmación y
+          // la siguiente pasada lo reintenta).
+          if (conv.nacidaOffline) {
+            await _adoptarUuidDelServidor(conv);
+          }
           await confirmarConversion(
               conv.conversionUuid, clienteId, conv.opUuid);
         } catch (e) {

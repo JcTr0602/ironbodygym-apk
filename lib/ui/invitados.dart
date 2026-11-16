@@ -441,15 +441,58 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   /// el chip de candidato abre el MISMO flujo que el
   /// detalle (prepararConversion → Inscribir con los datos
   /// del invitado), sin pasar por la pantalla de detalle.
-  /// Guardas en el mismo orden que _convertir del detalle:
-  /// sin conexión no hay conversión (la preparación vive en
-  /// el servidor) y el caducado se extiende antes.
+  /// Guardas en el mismo orden que _convertir del detalle
+  /// y el caducado se extiende antes. Desde 1.35 (campo
+  /// nº 14 de Clientes) sin conexión se convierte con el
+  /// detalle en caché y preparación local.
   Future<void> _convertirDesdeLista(InvitadoResumen inv) async {
     if (_convirtiendoId != null) return;
+    // 1.35 (campo nº 14 de Clientes): sin conexión también
+    // se convierte, con el detalle guardado en caché (el
+    // mismo flujo sin red del detalle). Sin caché no hay
+    // datos del invitado en el teléfono y no se inventan.
     if (_offline) {
-      mostrarSnack(
-          context, 'Sin conexión: convertir necesita conexión.',
-          significado: SignificadoChip.alerta);
+      final cache = await _svc.leerDetalleCache(inv.id);
+      if (!mounted) return;
+      if (cache == null) {
+        mostrarSnack(
+            context,
+            'Sin conexión y sin datos guardados de este '
+            'invitado: ábrelo una vez con conexión antes de '
+            'convertirlo.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      final det = cache.detalle;
+      if (det.caducado) {
+        mostrarSnack(
+            context,
+            'Este invitado está caducado: extiende su vida antes '
+            'de convertirlo.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Convertir sin conexión',
+        mensaje: 'Se convierte ahora en este teléfono y el '
+            'acceso a su app se crea cuando haya conexión.',
+        aceptar: 'Convertir',
+        cancelar: 'Ahora no',
+        icono: Icons.person_add_rounded,
+      );
+      if (ok != true || !mounted) return;
+      setState(() => _convirtiendoId = inv.id);
+      try {
+        final datos = await _svc.prepararConversionLocal(det);
+        if (!mounted) return;
+        await Navigator.of(context).push(RutaIron(
+          builder: (_) => InscribirScreen(conversion: datos),
+        ));
+        await _cargar();
+      } finally {
+        if (mounted) setState(() => _convirtiendoId = null);
+      }
       return;
     }
     if (inv.caducado) {
@@ -1828,9 +1871,46 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
 
   Future<void> _convertir() async {
     final d = _d!;
-    // v1.12.0 (D5): en caché de solo lectura no hay acciones.
+    // 1.35 (campo nº 14 de Clientes): la conversión es la
+    // UNA acción que la caché de solo lectura sí permite —
+    // el invitado confirma en persona en el gym y convertir
+    // no puede esperar a que vuelva la conexión. Se prepara
+    // local con los datos del detalle en caché, la
+    // inscripción se encola como cualquier op y el acceso
+    // a su app se crea al confirmarse la conversión ya con
+    // red. El resto de acciones sigue en solo lectura.
     if (_offlineCache) {
-      _snack('Sin conexión: el detalle está en solo lectura.');
+      if (d.caducado) {
+        _snack(
+            'Este invitado está caducado: extiende su vida antes de convertirlo.');
+        return;
+      }
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Convertir sin conexión',
+        mensaje: 'Se convierte ahora en este teléfono y el '
+            'acceso a su app se crea cuando haya conexión.',
+        aceptar: 'Convertir',
+        cancelar: 'Ahora no',
+        icono: Icons.person_add_rounded,
+      );
+      if (ok != true || !mounted) return;
+      setState(() => _actuando = true);
+      try {
+        final datos = await _svc.prepararConversionLocal(d);
+        if (!mounted) return;
+        await Navigator.of(context).push(RutaIron(
+          builder: (_) => InscribirScreen(conversion: datos),
+        ));
+        // El registro local manda ahora en la tarjeta de
+        // conversión (la caché no lo traía): se relee para
+        // pintar su estado real al volver del formulario.
+        final local =
+            await ConversionInvitadoStore().leer(widget.invitadoId);
+        if (mounted) setState(() => _local = local);
+      } finally {
+        if (mounted) setState(() => _actuando = false);
+      }
       return;
     }
     // AA3 F-I1: la RPC no rechaza al invitado caducado (calcula el
@@ -1974,8 +2054,10 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     final hayWa = normalizarTelefonoWaMe(d.telefono).isNotEmpty;
     final reanudar = reanudarPara(
         local: _local, enServidor: d.conversionPreparada);
+    // 1.35 (campo nº 14 de Clientes): convertir también se
+    // ofrece sin conexión (la caché lo permite solo para
+    // esta acción; _convertir abre su flujo sin red).
     final puedeConvertir = !d.convertido &&
-        !_offlineCache &&
         reanudar == ReanudarConversion.ninguna;
     // 1.25 T87: la acción DEL MOMENTO también es
     // reanudar: si la conversión quedó preparada, la
