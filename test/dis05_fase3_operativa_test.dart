@@ -13,7 +13,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
-import 'package:ironbody_gym/sync.dart';
 import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/hoja_accion.dart';
 import 'package:ironbody_gym/ui/horario_turnos.dart';
