@@ -350,6 +350,17 @@ Future<int> reintentarFotoGrupoCola(
 /// H-01: no se le quita el lease al worker). Para el
 /// no-dueño, TODAS las variantes deben ser visibles
 /// para él (fail-closed). Devuelve las filas borradas.
+///
+/// G#25 (Hy4): el descarte es ATÓMICO respecto a la
+/// subida — chequeo y borrado van en una transacción y
+/// si CUALQUIER variante está 'subiendo' en ese momento
+/// no se borra NINGUNA (devuelve -1). Antes el borrado
+/// excluía solo la fila subiendo: si el worker empezaba
+/// a subir una variante mientras el diálogo de
+/// confirmación estaba abierto (el chequeo de la UI se
+/// hizo sobre la foto pintada), el grupo quedaba partido
+/// — las demás se borraban, la subiendo subía sola y el
+/// snack decía «Foto descartada».
 Future<int> descartarFotoGrupoCola(
   Database db,
   String opUuid, {
@@ -367,9 +378,16 @@ Future<int> descartarFotoGrupoCola(
       return 0;
     }
   }
-  return db.delete('fotos_cola',
-      where: "op_uuid = ? AND estado != 'subiendo'",
-      whereArgs: [opUuid]);
+  return db.transaction((txn) async {
+    final subiendo = await txn.query('fotos_cola',
+        columns: ['id'],
+        where: "op_uuid = ? AND estado = 'subiendo'",
+        whereArgs: [opUuid],
+        limit: 1);
+    if (subiendo.isNotEmpty) return -1;
+    return txn.delete('fotos_cola',
+        where: 'op_uuid = ?', whereArgs: [opUuid]);
+  });
 }
 
 /// 1.29 (Oleada 6, FA-06): etiqueta de autor para una op
@@ -875,8 +893,15 @@ class _ColaScreenState extends State<ColaScreen> {
           d: 'op=${g.opUuid} filas=$n');
       await _cargar();
       if (mounted) {
-        mostrarSnack(context,
-            n == 0 ? 'Esa foto ya no estaba en la cola' : 'Foto descartada');
+        // G#25: -1 = una variante empezó a subir durante
+        // la confirmación: no se descartó nada.
+        if (n < 0) {
+          mostrarSnack(context, 'Esa foto se está subiendo ahora mismo',
+              significado: SignificadoChip.alerta);
+        } else {
+          mostrarSnack(context,
+              n == 0 ? 'Esa foto ya no estaba en la cola' : 'Foto descartada');
+        }
       }
     } catch (e) {
       if (mounted) {
