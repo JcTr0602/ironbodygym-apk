@@ -2984,12 +2984,6 @@ class _ColaScreenState extends State<ColaScreen> {
         // el gesto sigue la misma regla que el resto.
         onRefresh: () => refrescoGeneralIron(releer: _cargar),
         child: ListView(
-          // G08-4: la pantalla es acotada (la lista visible
-          // tiene límite de 30) y los auxiliares plegados
-          // viven al final: sin margen de construcción, el
-          // ListView perezoso ni los crea hasta hacer
-          // scroll hasta ellos.
-          cacheExtent: 4000,
           padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             // Cabecera de estado visual (v1.0.14: tres estados)
