@@ -35,6 +35,7 @@ import 'historial_entrenador.dart';
 import 'incidencias_sync.dart';
 import 'arqueo.dart';
 import 'nomina.dart';
+import 'panel_resto_sistema.dart' show etiquetaTablaEspejo;
 
 /// Tarjeta de sección (mismo diseño que la antigua administración).
 /// v1.3.6 (Argón, diseño): el icono del encabezado usa el badge squircle
@@ -91,10 +92,18 @@ Widget filaAdmin(BuildContext context, IconData? icono, String etiqueta,
           ),
         ),
         const SizedBox(width: AppEspacio.sm),
-        Text(valor,
-            style: TextStyle(
-                fontWeight:
-                    negrita ? FontWeight.bold : FontWeight.w600)),
+        // SL-9 (G09-8): el VALOR también cede — dentro de su
+        // Flexible, con ellipsis y alineado a la derecha: un
+        // valor largo desbordaba la fila a 360 dp porque solo
+        // cedía la etiqueta.
+        Flexible(
+          child: Text(valor,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                  fontWeight:
+                      negrita ? FontWeight.bold : FontWeight.w600)),
+        ),
       ],
     ),
   );
@@ -189,7 +198,7 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                   Text('Nada pendiente. Todo cuadrado.',
                       style: TextStyle(
                           color: AppColores.textoSecundario(context))),
-                for (final t in pend)
+                for (final t in pend) ...[
                   ListTile(
                     dense: true,
                     title: Text('${t['nombre']}'),
@@ -198,35 +207,47 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                     onTap: () => _irYActualizar(DetallePendienteScreen(
                         trainerId: t['id'] as int,
                         nombre: '${t['nombre']}')),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          child: const Text('Recogida'),
+                  ),
+                  // SL-9 (G09-11): las acciones de efectivo se
+                  // confirman con la forma de la casa (la de
+                  // «Liquidar» del Arqueo y las demás
+                  // confirmaciones de cobro: BotonPrimario, con
+                  // BotonSecundario para la alternativa), no con
+                  // botones de texto sueltos. La acción y su
+                  // resultado no cambian.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: BotonSecundario(
+                          texto: 'Recogida',
+                          icono: Icons.handshake_rounded,
                           onPressed: () => _registrarYActualizar(
                               trainerId: t['id'] as int?,
                               nombre: '${t['nombre']}',
                               pendiente:
                                   (t['total'] as num?)?.toDouble() ?? 0),
                         ),
-                        TextButton(
-                          child: const Text('Confirmar'),
+                      ),
+                      const SizedBox(width: AppEspacio.sm),
+                      Expanded(
+                        child: BotonPrimario(
+                          texto: 'Confirmar',
+                          icono: Icons.done_rounded,
                           onPressed: () => _confirmarYActualizar(
                               trainerId: t['id'] as int?,
                               nombre: '${t['nombre']}'),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: AppEspacio.sm),
+                ],
                 if (pend.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.done_all_rounded),
-                      label: const Text('Confirmar todo'),
-                      onPressed: () =>
-                          _confirmarYActualizar(nombre: 'todos'),
-                    ),
+                  BotonPrimario(
+                    texto: 'Confirmar todo',
+                    icono: Icons.done_all_rounded,
+                    onPressed: () =>
+                        _confirmarYActualizar(nombre: 'todos'),
                   ),
               ]),
           // v1.3.6 (ítem 1B): arqueo de caja con liquidaciones.
@@ -1605,8 +1626,12 @@ class _VerificacionEspejoScreenState
                         return Row(
                           children: [
                             Expanded(
-                              child:
-                                  Text(t, style: AppTexto.subtitulo),
+                              // SL-9 (G09-9): el nombre LEGIBLE
+                              // de la tabla, por el traductor de
+                              // la casa — nunca el nombre crudo
+                              // de la base de datos.
+                              child: Text(etiquetaTablaEspejo(t),
+                                  style: AppTexto.subtitulo),
                             ),
                             if (_conteos[t] == null)
                               const Text('sin espejo',
@@ -1797,16 +1822,22 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          FilledButton(
-            onPressed: (_ocupado || sinPendientes) ? null : _subir,
-            child: Text(_ocupado
+          // SL-9 (G09-13): UNA sola acción principal — la de
+          // esta pantalla, «Bajar todo de nuevo» — y las dos
+          // preparatorias como secundarias de la casa (antes
+          // tres botones llenos competían al mismo nivel).
+          BotonSecundario(
+            texto: _ocupado
                 ? 'Trabajando…'
-                : 'Subir pendientes ahora'),
+                : 'Subir pendientes ahora',
+            icono: Icons.upload_rounded,
+            onPressed: (_ocupado || sinPendientes) ? null : _subir,
           ),
           const SizedBox(height: 8),
-          FilledButton(
+          BotonSecundario(
+            texto: 'Crear copia local',
+            icono: Icons.backup_rounded,
             onPressed: _ocupado ? null : _copiar,
-            child: const Text('Crear copia local'),
           ),
           const SizedBox(height: 8),
           FilledButton(
@@ -1822,26 +1853,27 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
             ),
           ],
           const SizedBox(height: 16),
-          const Tarjeta(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Cómo es segura esta bajada',
-                    style: AppTexto.subtitulo),
-                SizedBox(height: 8),
-                Text(
-                  'No borra los espejos antes de bajar: re-descarga '
-                  'cada tabla desde 0 y aplica por encima de lo '
-                  'viejo. Solo al final, con la pasada completa y '
-                  'la cola limpia, se purgan las filas que ya no '
-                  'están en el servidor. Si algo falla, lo viejo '
-                  'queda y el próximo ciclo reintenta solo. Subir '
-                  'los pendientes primero es recomendable (así la '
-                  'limpieza no queda diferida), pero no obligatorio.',
-                  style: AppTexto.cuerpo,
-                ),
-              ],
-            ),
+          // SL-9 (G09-13): la explicación, PLEGADA tras su
+          // resumen (regla de Jc: lo ocasional va plegado, no
+          // ocupando espacio permanente).
+          const ExpansionTile(
+            title: Text('Cómo es segura esta bajada',
+                style: AppTexto.subtitulo),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.only(top: AppEspacio.xs),
+            children: [
+              Text(
+                'No borra los espejos antes de bajar: re-descarga '
+                'cada tabla desde 0 y aplica por encima de lo '
+                'viejo. Solo al final, con la pasada completa y '
+                'la cola limpia, se purgan las filas que ya no '
+                'están en el servidor. Si algo falla, lo viejo '
+                'queda y el próximo ciclo reintenta solo. Subir '
+                'los pendientes primero es recomendable (así la '
+                'limpieza no queda diferida), pero no obligatorio.',
+                style: AppTexto.cuerpo,
+              ),
+            ],
           ),
         ],
       ),
