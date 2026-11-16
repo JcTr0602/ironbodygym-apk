@@ -227,6 +227,11 @@ class AppColores {
   /// Superficie 1 del tema táctico oscuro.
   static const grafitoTactico = Color(0xFF151C24);
 
+  /// 1.35 (UX-02): gris cálido fantasma de los destinos
+  /// inactivos de la barra «Grafito» (sobre el cuerpo
+  /// grafito, en ambos temas: la barra es de marca).
+  static const fantasmaBarra = Color(0xFFA79C8F);
+
   /// Superficie 2 del tema táctico oscuro.
   static const acero = Color(0xFF1E2936);
 

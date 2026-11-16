@@ -114,11 +114,14 @@ void main() {
         findsNothing);
     expect(find.byType(PilarNegocio, skipOffstage: false),
         findsNothing);
+    // 1.35 (UX-02): la barra ya no es NavigationBar sino la
+    // propia «Grafito» (BarraPilares); la costura lee su
+    // pilar activo con la misma intención.
     expect(
         tester
-            .widget<NavigationBar>(
+            .widget<BarraPilares>(
                 find.byKey(const ValueKey('marco-pilares')))
-            .selectedIndex,
+            .activo,
         0);
 
     // Pilar 2 · Clientes
@@ -130,9 +133,9 @@ void main() {
     expect(MarcoNav.pilar.value, PilarGestion.clientes.index);
     expect(
         tester
-            .widget<NavigationBar>(
+            .widget<BarraPilares>(
                 find.byKey(const ValueKey('marco-pilares')))
-            .selectedIndex,
+            .activo,
         1);
 
     // Pilar 3 · Tienda (Servicios envuelto, sin reconstruir)

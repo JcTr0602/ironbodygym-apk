@@ -420,6 +420,18 @@ class CabeceraMarco extends StatelessWidget {
 /// siempre visibles, insignia de urgencias sobre Mostrador.
 /// El cuarto pilar se llama «Negocio» para el dueño y
 /// «Mi Caja» para el entrenador.
+///
+/// 1.35 (UX-02): barra PROPIA «Grafito» (antes
+/// `NavigationBar` de Material tal cual): flota con margen
+/// sobre el fondo, cuerpo grafito con sombra real y línea
+/// de luz superior de 1 dp; el destino activo va en
+/// pastilla naranja plena con icono y etiqueta en grafito
+/// (norma 2: sobre la marca, grafito) y peso fuerte; los
+/// inactivos, en gris cálido fantasma. Mismo patrón que la
+/// barra V1 «Grafito» de Clientes. No cambian los 4
+/// destinos, sus claves, la insignia ni el hueco que la
+/// barra reserva (el Dock del Pilar 1 vive en el cuerpo,
+/// no aquí).
 class BarraPilares extends StatelessWidget {
   final int activo;
   final bool esDueno;
@@ -436,58 +448,203 @@ class BarraPilares extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NavigationBar(
-      key: const ValueKey('marco-pilares'),
-      selectedIndex: activo,
-      // 1.35 (UI-02): cambiar de pilar se siente (selección).
-      onDestinationSelected: (i) {
-        Tacto.seleccion();
-        onTap(i);
-      },
-      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-      destinations: [
-        NavigationDestination(
-          key: const ValueKey('pilar-tab-mostrador'),
-          // 1.32 (integración, RD-10): la cifra de la
-          // insignia usa el token mínimo de la escala
-          // (minuscula, 11) en vez del literal 10.
-          icon: Badge(
-            isLabelVisible: urgencias > 0,
-            label: Text('$urgencias',
-                style: AppTexto.conTabulares(AppTexto.minuscula)),
-            child: const Icon(Icons.storefront_outlined),
+    final reducido = MediaQuery.disableAnimationsOf(context);
+    final destinos = <({
+      Key key,
+      IconData icono,
+      IconData iconoActivo,
+      String etiqueta,
+      bool conInsignia,
+    })>[
+      (
+        key: const ValueKey('pilar-tab-mostrador'),
+        icono: Icons.storefront_outlined,
+        iconoActivo: Icons.storefront_rounded,
+        etiqueta: 'Mostrador',
+        conInsignia: true,
+      ),
+      (
+        key: const ValueKey('pilar-tab-clientes'),
+        icono: Icons.people_outline_rounded,
+        iconoActivo: Icons.people_rounded,
+        etiqueta: 'Clientes',
+        conInsignia: false,
+      ),
+      (
+        key: const ValueKey('pilar-tab-tienda'),
+        icono: Icons.science_outlined,
+        iconoActivo: Icons.science_rounded,
+        etiqueta: 'Tienda',
+        conInsignia: false,
+      ),
+      (
+        key: const ValueKey('pilar-tab-negocio'),
+        icono: esDueno
+            ? Icons.business_center_outlined
+            : Icons.account_balance_wallet_outlined,
+        iconoActivo: esDueno
+            ? Icons.business_center_rounded
+            : Icons.account_balance_wallet_rounded,
+        etiqueta: esDueno ? 'Negocio' : 'Mi Caja',
+        conInsignia: false,
+      ),
+    ];
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.xs, AppEspacio.md, AppEspacio.sm),
+        child: Container(
+          // Altura mínima, no fija: con la letra al 200 %
+          // la barra CRECE (como hacía NavigationBar) en
+          // vez de reventar el destino.
+          constraints: const BoxConstraints(minHeight: 64),
+          decoration: BoxDecoration(
+            color: AppColores.grafitoTactico,
+            borderRadius: BorderRadius.circular(AppRadio.xl),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x59000000),
+                blurRadius: 18,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-          selectedIcon: Badge(
-            isLabelVisible: urgencias > 0,
-            label: Text('$urgencias',
-                style: AppTexto.conTabulares(AppTexto.minuscula)),
-            child: const Icon(Icons.storefront_rounded),
+          child: Stack(
+            children: [
+              // Línea de luz superior (1 dp): el borde de
+              // arriba de la barra coge la luz.
+              Positioned(
+                top: 0,
+                left: AppRadio.xl,
+                right: AppRadio.xl,
+                child: Container(
+                  height: 1,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(colors: [
+                      Color(0x00FFFFFF),
+                      Color(0x3DFFFFFF),
+                      Color(0x00FFFFFF),
+                    ]),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  for (var i = 0; i < destinos.length; i++)
+                    Expanded(
+                      child: _DestinoGrafito(
+                        key: destinos[i].key,
+                        icono: destinos[i].icono,
+                        iconoActivo: destinos[i].iconoActivo,
+                        etiqueta: destinos[i].etiqueta,
+                        activo: activo == i,
+                        reducido: reducido,
+                        insignia: destinos[i].conInsignia
+                            ? urgencias
+                            : 0,
+                        // 1.35 (UI-02): cambiar de pilar se
+                        // siente (selección).
+                        onTap: () {
+                          Tacto.seleccion();
+                          onTap(i);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ],
           ),
-          label: 'Mostrador',
         ),
-        const NavigationDestination(
-          key: ValueKey('pilar-tab-clientes'),
-          icon: Icon(Icons.people_outline_rounded),
-          selectedIcon: Icon(Icons.people_rounded),
-          label: 'Clientes',
+      ),
+    );
+  }
+}
+
+/// Un destino de la barra «Grafito»: pastilla naranja
+/// plena si está activo; fantasma cálido si no.
+class _DestinoGrafito extends StatelessWidget {
+  final IconData icono;
+  final IconData iconoActivo;
+  final String etiqueta;
+  final bool activo;
+  final bool reducido;
+  final int insignia;
+  final VoidCallback onTap;
+
+  const _DestinoGrafito({
+    super.key,
+    required this.icono,
+    required this.iconoActivo,
+    required this.etiqueta,
+    required this.activo,
+    required this.reducido,
+    required this.insignia,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = activo
+        ? AppColores.sobreMarca
+        : AppColores.fantasmaBarra;
+    Widget iconoW = Icon(activo ? iconoActivo : icono,
+        color: color, size: 24);
+    if (insignia > 0) {
+      iconoW = Badge(
+        isLabelVisible: true,
+        // 1.32 (integración, RD-10): la cifra de la
+        // insignia usa el token mínimo de la escala
+        // (minuscula, 11) en vez del literal 10.
+        label: Text('$insignia',
+            style: AppTexto.conTabulares(AppTexto.minuscula)),
+        child: iconoW,
+      );
+    }
+    return Semantics(
+      button: true,
+      selected: activo,
+      label: etiqueta,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadio.xl),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.xs, vertical: AppEspacio.sm),
+          child: AnimatedContainer(
+            duration:
+                reducido ? Duration.zero : AppMovimiento.corta,
+            curve: AppMovimiento.curvaSuave,
+            decoration: BoxDecoration(
+              color: activo
+                  ? AppColores.naranja
+                  : const Color(0x00000000),
+              borderRadius: BorderRadius.circular(AppRadio.lg),
+            ),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                iconoW,
+                const SizedBox(height: 2),
+                Text(
+                  etiqueta,
+                  style: AppTexto.etiqueta.copyWith(
+                    color: color,
+                    fontWeight: activo
+                        ? FontWeight.w800
+                        : FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
         ),
-        const NavigationDestination(
-          key: ValueKey('pilar-tab-tienda'),
-          icon: Icon(Icons.science_outlined),
-          selectedIcon: Icon(Icons.science_rounded),
-          label: 'Tienda',
-        ),
-        NavigationDestination(
-          key: const ValueKey('pilar-tab-negocio'),
-          icon: Icon(esDueno
-              ? Icons.business_center_outlined
-              : Icons.account_balance_wallet_outlined),
-          selectedIcon: Icon(esDueno
-              ? Icons.business_center_rounded
-              : Icons.account_balance_wallet_rounded),
-          label: esDueno ? 'Negocio' : 'Mi Caja',
-        ),
-      ],
+      ),
     );
   }
 }

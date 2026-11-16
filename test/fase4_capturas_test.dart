@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ironbody_gym/ui/arranque_marca.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
+import 'package:ironbody_gym/ui/marco.dart';
 
 const _capturasHabilitadas = bool.fromEnvironment('UI135_CAPTURAS');
 const _dirCapturas =
@@ -94,5 +95,31 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 600)));
     await t.pump();
     await _capturar(t, k, 'ux14_marca.png');
+  });
+
+  testWidgets('UX-02: barra Grafito a 360 dp', (t) async {
+    if (!_capturasHabilitadas) return;
+    await t.runAsync(_cargarFuentesReales);
+    t.view.physicalSize = const Size(360, 800);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.reset);
+    final k = GlobalKey();
+    await t.pumpWidget(MaterialApp(
+      theme: AppTema.tacticoOscuro(),
+      home: RepaintBoundary(
+        key: k,
+        child: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: BarraPilares(
+            activo: 0,
+            esDueno: true,
+            urgencias: 3,
+            onTap: (_) {},
+          ),
+        ),
+      ),
+    ));
+    await t.pump();
+    await _capturar(t, k, 'ux02_barra_grafito.png');
   });
 }

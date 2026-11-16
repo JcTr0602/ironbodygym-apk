@@ -1471,6 +1471,7 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       ),
       bottomNavigationBar: BarraPilares(
+        key: const ValueKey('marco-pilares'),
         activo: _pilarActivo,
         esDueno: esDueno,
         urgencias: urgenciasHome(
