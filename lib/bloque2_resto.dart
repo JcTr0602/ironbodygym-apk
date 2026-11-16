@@ -812,16 +812,19 @@ Future<void> guardarConfigGym(Map<String, dynamic> cambios) async {
   final nuevos = {...actuales, ...cambios};
   // SL-X1 (ficha B, patrón A5-D2): si el cambio toca un
   // precio con tipo en el blob `tipos_pago`, el blob se
-  // actualiza EN LA MISMA operación — espejo local y clave
-  // 'tipos_pago' dentro del mismo payload `config` — porque
-  // el cobro lee el blob primero: guardar solo la clave
-  // plana dejaba la pantalla enseñando el precio nuevo y el
-  // cobro aplicando el viejo (divergencia probada por SL-9).
+  // actualiza en la MISMA transacción — espejo local y una
+  // op `guardar_tipos_pago` encolada junto a la de config,
+  // como hace aplicarCambiosMontos en el Panel — porque el
+  // cobro lee el blob primero: guardar solo la clave plana
+  // dejaba la pantalla enseñando el precio nuevo y el cobro
+  // aplicando el viejo (divergencia probada por SL-9). La
+  // op separada es obligada: el handler de
+  // `actualizar_config_gym` en el servidor IGNORA las
+  // claves que no conoce, así que un 'tipos_pago' dentro de
+  // `config` no bajaría a los demás teléfonos.
   final blob = blobTiposTrasCambiosPrecios(nuevos, cambios);
-  final cambiosEfectivos = {...cambios};
   if (blob != null) {
     nuevos['tipos_pago'] = blob;
-    cambiosEfectivos['tipos_pago'] = blob;
   }
   // Atómico (misma auditoría): ajustes locales + op en UNA
   // transacción; si el proceso muere entre ambos, no queda ni
@@ -833,12 +836,20 @@ Future<void> guardarConfigGym(Map<String, dynamic> cambios) async {
       opUuid: const Uuid().v4(),
       tipo: kTipoOpActualizarConfigGym,
       payload: {
-        'config': cambiosEfectivos,
+        'config': cambios,
         'fecha_hora_havana': isoHabana(ahoraHabana()),
         'autor_dueno_id': AuthService().telegramId,
       },
       txn: txn,
     );
+    if (blob != null) {
+      await db.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'guardar_tipos_pago',
+        payload: {'tipos': blob},
+        txn: txn,
+      );
+    }
   });
   // 1.15 (Panel A4): si cambió el precio Plus, publicar el precio
   // público (la pantalla C6 no pasa por _guardarMontos, que es la
