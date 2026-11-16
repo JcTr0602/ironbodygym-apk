@@ -241,7 +241,11 @@ class ReportePlus {
       resueltoEn: instanteServidorHabana(j['resuelto_en']),
       alertaReferenciaRechazada:
           alerta == true || alerta == 1 || alerta == 'true',
-      estadoAtencion: j['estado_atencion'] as String?,
+      // BG-01 (gemelo): un estado_atencion no-texto tumbaba el
+      // parseo de la fila entera con el cast duro; tolerante.
+      estadoAtencion: j['estado_atencion'] is String
+          ? j['estado_atencion'] as String
+          : null,
     );
   }
 }
@@ -250,8 +254,13 @@ class ReportePlus {
 /// (función pura sobre la respuesta: testeable sin red).
 List<ReportePlus> parsearReportesPlus(dynamic res) {
   final lista = res is Map ? (res['reportes'] ?? res['pendientes']) : res;
+  // Lote 1.35 (SL-1 · BG-01): el contrato de esta función es
+  // TOLERANTE (forma rara = lista vacía), pero el cast
+  // `(lista as List?)` LANZABA TypeError si la RPC devolvía
+  // una forma no-List (un Map, un número): guarda de tipo
+  // real en vez de cast.
   return [
-    for (final j in (lista as List? ?? const []))
+    for (final j in (lista is List ? lista : const []))
       if (j is Map)
         if (ReportePlus.fromJson(
                 j.map((k, v) => MapEntry('$k', v)))

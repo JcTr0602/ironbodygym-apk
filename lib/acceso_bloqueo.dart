@@ -47,6 +47,34 @@ const String kMensajeCandadoDefecto =
     'Acceso pausado por el dueño. Cuando se reactive, '
     'continuarás normalmente.';
 
+/// Lote 1.35 (SL-1 · A-09): cota del adelanto que el reloj de
+/// PARED puede aportar a la hora estimada del servidor tras
+/// un reinicio. El ancla protegía el reloj ATRASADO (suelo en
+/// el ancla) pero no el ADELANTADO: un salto de pared hacia
+/// adelante (cambio de zona, ajuste manual, error de NTP)
+/// adelantaba la estimación sin cota y una pausa temporal se
+/// levantaba antes de tiempo. Regla: el transcurrido de pared
+/// solo se usa si es plausible (≤ 24 h, el cierre largo
+/// razonable entre dos aperturas de la app en el gym); ante
+/// un salto implausible se devuelve el ancla SIN adelantar —
+/// la estimación queda corta, nunca larga: el candado puede
+/// durar de más hasta el próximo pull que refresque el ancla,
+/// jamás de menos.
+const Duration kMaxAdelantoAnclaPared = Duration(hours: 24);
+
+/// Hora estimada del servidor desde el ancla persistida y el
+/// reloj de pared (función pura; ver [kMaxAdelantoAnclaPared]).
+DateTime estimarHoraServidorDesdeAncla({
+  required DateTime anclaServidor,
+  required DateTime paredGuardada,
+  required DateTime ahoraPared,
+}) {
+  final diff = ahoraPared.difference(paredGuardada);
+  if (diff.isNegative) return anclaServidor;
+  if (diff > kMaxAdelantoAnclaPared) return anclaServidor;
+  return anclaServidor.add(diff);
+}
+
 bool _activoDe(dynamic v) => v == 1 || v == true;
 
 DateTime? _parseTs(dynamic v) {
@@ -173,8 +201,13 @@ class AccesoBloqueoService {
     }
     final pared = _anclaPared;
     if (pared == null) return ancla;
-    final diff = DateTime.now().difference(pared);
-    return diff.isNegative ? ancla : ancla.add(diff);
+    // A-09: el adelanto de pared va acotado (un salto
+    // implausible no adelanta la estimación).
+    return estimarHoraServidorDesdeAncla(
+      anclaServidor: ancla,
+      paredGuardada: pared,
+      ahoraPared: DateTime.now(),
+    );
   }
 
   /// Adopta como ancla la marca de servidor más reciente de las
@@ -217,10 +250,16 @@ class AccesoBloqueoService {
       // este retrocedía) hasta que llegara una fila más nueva.
       final paredGuardada = _anclaPared;
       if (paredGuardada != null) {
-        final diff = DateTime.now().difference(paredGuardada);
-        if (!diff.isNegative) {
-          _anclaServer = server.add(diff);
-        }
+        // A-09: el desplazamiento capturado al arrancar va
+        // acotado por la misma regla — un salto de pared de
+        // +30 días con la app cerrada minutos NO adelanta la
+        // hora estimada (antes la adelantaba entera y la
+        // pausa temporal se levantaba antes de tiempo).
+        _anclaServer = estimarHoraServidorDesdeAncla(
+          anclaServidor: server,
+          paredGuardada: paredGuardada,
+          ahoraPared: DateTime.now(),
+        );
         _anclaPared = DateTime.now();
       }
       _reloj = Stopwatch()..start();

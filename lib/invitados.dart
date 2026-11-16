@@ -1863,6 +1863,13 @@ class InvitadosService {
   Future<ConversionInvitado> reconciliarPreparadaObsoleta(
       InvitadoDetalle detalle, ConversionInvitado local) async {
     if (local.estado != EstadoConversion.preparada) return local;
+    // Lote 1.35 (SL-1 · A-12): una preparación NACIDA OFFLINE
+    // no existe en el servidor por definición — que el detalle
+    // no la vea no es obsolescencia, es lo esperado hasta que
+    // la verificación la prepare allá y adopte su uuid. Sin
+    // esta exención, la reconciliación cancelaba preparaciones
+    // locales legítimas recién creadas sin conexión.
+    if (local.nacidaOffline) return local;
     if (vigenciaPreparada(local, detalle.conversionPreparada) ==
         VigenciaConversionPreparada.vigente) {
       return local;
@@ -1940,6 +1947,42 @@ class InvitadosService {
   Future<void> guardarInfoPublica(String clave, String valor) async {
     await _rpc('info_publica_guardar',
         {'p_clave': clave, 'p_valor': valor});
+  }
+
+  /// Lote 1.35 (SL-1 · A-20): guardado EN BLOQUE de la
+  /// información pública. La pantalla guardaba clave a clave
+  /// por RPC inmediata, sin durabilidad: un corte a mitad
+  /// dejaba unas claves nuevas y otras viejas, en silencio.
+  /// Aquí TODAS las claves se marcan primero como pendientes
+  /// (durable, tabla v37) y después se republica el bloque en
+  /// serie: o todo queda aplicado, o lo no aplicado queda
+  /// pendiente y VISIBLE — la función devuelve exactamente
+  /// las claves que no se aplicaron, que son las que la marca
+  /// conserva para el reintento de fin de sync. Nunca lanza
+  /// por red: el desenlace va en el valor devuelto.
+  Future<Map<String, String>> guardarInfoPublicaEnBloque(
+      Map<String, String> cambios) async {
+    var quedan = Map<String, String>.of(cambios);
+    try {
+      await _enSerieInfoPublica(() async {
+        for (final e in cambios.entries) {
+          await LocalDb.instance
+              .marcarInfoPublicaPendiente(e.key, e.value);
+        }
+        await _republicarInfoPublicaPendienteEnSerie();
+        final pendientes =
+            await LocalDb.instance.infoPublicaPendientes();
+        quedan = {
+          for (final e in cambios.entries)
+            if (pendientes.containsKey(e.key))
+              e.key: pendientes[e.key]!,
+        };
+      });
+    } catch (_) {
+      // La marca ya quedó escrita antes del intento de
+      // publicar: lo no aplicado sigue pendiente y visible.
+    }
+    return quedan;
   }
 
   /// v1.7.0 (panel): guarda una clave de info pública con
