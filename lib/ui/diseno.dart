@@ -588,11 +588,24 @@ class AppTexto {
     );
   }
 
+  /// 1.35 (UI-25): la familia de marca de los roles
+  /// grandes — Barlow Condensed, embebida en dos pesos
+  /// (600/700, declarada en pubspec.yaml). SOLO los
+  /// cuatro roles de abajo la llevan; el cuerpo sigue en
+  /// la fuente del sistema, que rinde mejor en tamaños
+  /// pequeños. El wordmark del login hereda la familia
+  /// por salir de `display`.
+  static const familiaDisplay = 'Barlow Condensed';
+
   /// Números grandes: dinero, conteos, vencimientos.
   /// 1.23 (Delta Argón 6ª, pulido): cifras tabulares — los
   /// dígitos ocupan el mismo ancho y las columnas de dinero
-  /// dejan de «bailar» al cambiar un valor.
+  /// dejan de «bailar» al cambiar un valor. 1.35 (UI-25):
+  /// con Barlow Condensed la feature es real (verificado
+  /// en el archivo: los 10 dígitos a 475/498 ud. exactas
+  /// con `tnum` activa).
   static const display = TextStyle(
+    fontFamily: familiaDisplay,
     fontSize: 32,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.5,
@@ -601,6 +614,7 @@ class AppTexto {
   );
 
   static const displayPequeno = TextStyle(
+    fontFamily: familiaDisplay,
     fontSize: 24,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,
@@ -610,6 +624,7 @@ class AppTexto {
 
   /// Título de página (P0 1.20).
   static const tituloPagina = TextStyle(
+    fontFamily: familiaDisplay,
     fontSize: 20,
     fontWeight: FontWeight.bold,
     height: 1.25,
@@ -617,6 +632,7 @@ class AppTexto {
 
   /// Métrica destacada (P0 1.20): cifra única protagonista.
   static const metrica = TextStyle(
+    fontFamily: familiaDisplay,
     fontSize: 22,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,

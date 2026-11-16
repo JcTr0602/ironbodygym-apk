@@ -51,6 +51,26 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  # 1.35 (UI-25): la fuente de marca de los titulares y
+  # las cifras grandes — Barlow Condensed (SIL OFL 1.1,
+  # licencia en assets/fonts/OFL.txt), dos pesos (600 y
+  # 700). Elegida con capturas comparadas y forense de
+  # cifras: es la única candidata con cifras tabulares
+  # reales (`tnum`: los 10 dígitos al mismo ancho exacto
+  # con la feature activa); Oswald y Saira Condensed no
+  # las traen y las columnas de dinero bailarían. El
+  # cuerpo de texto sigue en la fuente del sistema: la
+  # familia se aplica SOLO en los roles grandes de
+  # AppTexto (display, displayPequeno, metrica,
+  # tituloPagina) y, por herencia de `display`, en el
+  # wordmark del login.
+  fonts:
+    - family: Barlow Condensed
+      fonts:
+        - asset: assets/fonts/BarlowCondensed-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/BarlowCondensed-Bold.ttf
+          weight: 700
   assets:
     - assets/logo.jpg
     # 1.30 D1 (UI130-29 + portadas ALTA-02): el arte de
