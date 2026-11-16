@@ -291,6 +291,29 @@ int? reportesNuevosDesdeRespuesta(Object? res, int maxIdVisto) {
 String claveReportesComunidadVistos(int telegramId) =>
     'comunidad_reportes_vistos_maxid_$telegramId';
 
+/// SL-10 G13-1: la etiqueta humana de un bloque de la
+/// vitrina por su clave del servidor. Una clave nueva
+/// se presenta capitalizada y sin guiones bajos, nunca
+/// la clave cruda como título.
+String etiquetaBloqueComunidad(String clave) {
+  const mapa = {
+    'actividad': 'Actividad',
+    'rutina': 'Rutina',
+    'logros': 'Logros',
+    'marcas': 'Marcas',
+    'constancia': 'Constancia',
+    'nivel': 'Nivel',
+    'foto': 'Foto',
+    'cumple': 'Cumpleaños',
+    'identidad': 'Identidad',
+  };
+  final v = mapa[clave];
+  if (v != null) return v;
+  final limpio = clave.replaceAll('_', ' ').trim();
+  if (limpio.isEmpty) return 'Bloque';
+  return limpio[0].toUpperCase() + limpio.substring(1);
+}
+
 /// El texto humano de un motivo de reporte.
 String motivoReporteTexto(String? motivo) {
   switch (motivo) {
