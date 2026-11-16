@@ -232,16 +232,26 @@ void main() {
       expect(quedan.single['op_uuid'], 'f2');
     });
 
-    test('descartar no toca la variante que está subiendo', () async {
+    // Hy4 G#25 (1.35): el contrato cambió — el descarte
+    // re-verifica DENTRO de la transacción y si alguna
+    // variante está subiendo no descarta NADA (-1). El
+    // contrato anterior (borrar las demás y dejar la
+    // subiendo) partía el grupo y el snack decía
+    // «Foto descartada» mientras una variante seguía
+    // subiendo sola: eso es lo que G#25 corrige.
+    test('descartar con una variante subiendo no parte '
+        'el grupo', () async {
       final db = await _bdVacia();
       await _insertarFoto(db, uuid: 'f1', tipo: 'thumb', clienteId: 7);
       await _insertarFoto(db,
           uuid: 'f1', tipo: 'display', clienteId: 7, estado: 'subiendo');
       final n = await descartarFotoGrupoCola(db, 'f1',
           esDueno: true, miTelegramId: 735772141);
-      expect(n, 1, reason: 'solo sale la que no está subiendo');
+      expect(n, -1,
+          reason: 'con una variante subiendo no se descarta nada');
       final quedan = await db.query('fotos_cola');
-      expect(quedan.single['tipo'], 'display');
+      expect(quedan, hasLength(2),
+          reason: 'el grupo queda entero, nunca partido');
     });
 
     test('reintentar resetea todas las variantes y fuerza QoS',
