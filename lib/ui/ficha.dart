@@ -108,6 +108,28 @@ bool mostrarFotoFicha({
   return true;
 }
 
+/// SL-2 G03-4: traductor del sexo del espejo para la ficha.
+/// El diálogo de edición ya decía «Masculino»/«Femenino»
+/// (ChoiceChip sobre 'M'/'F'); la fila pintaba la clave
+/// cruda. Mismo vocabulario que el diálogo; una clave
+/// desconocida no se pinta cruda.
+String etiquetaSexoFicha(Object? sexo) => switch ('$sexo') {
+      'M' => 'Masculino',
+      'F' => 'Femenino',
+      _ => '—',
+    };
+
+/// SL-2 G03-6: traductor del método de pago del espejo para
+/// el histórico de la ficha. Una clave desconocida (la que
+/// el servidor añada mañana) NO se pinta cruda: «Otro».
+String etiquetaMetodoPagoFicha(Object? metodo) =>
+    switch ('$metodo') {
+      'efectivo' => 'Efectivo',
+      'transferencia' => 'Transferencia',
+      'cortesia' => 'Cortesía',
+      _ => 'Otro',
+    };
+
 /// 1.28 (ítem fijo «ficha perezosa»): caché de secciones de
 /// la ficha por (clave, versión). La lista de la ficha es un
 /// ListView.builder y cada sección se crea SOLO si su versión
@@ -2659,7 +2681,10 @@ class _FichaScreenState extends State<FichaScreen> {
         double.tryParse(datos['monto']!.replaceAll(',', '.'));
     final fecha = datos['fecha']!.trim();
     final motivo = (datos['motivo'] ?? '').trim();
-    final fechaOk = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(fecha);
+    // SL-2 G03-9: la validación es la del selector (fecha
+    // real de calendario vía fechaIsoEstricta), no un
+    // RegExp de forma sobre texto tecleado.
+    final fechaOk = fechaIsoEstricta(fecha) != null;
     if (monto == null || monto <= 0 || !fechaOk) {
       mostrarSnack(context, 'Monto o fecha inválidos', significado: SignificadoChip.alerta);
       return;
@@ -2674,8 +2699,8 @@ class _FichaScreenState extends State<FichaScreen> {
         titulo: 'Confirmar corrección',
         iconoTitulo: Icons.check_circle_rounded,
         contenido: Text(
-            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${p['metodo'] ?? ''}\n'
-            'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}\n'
+            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${etiquetaMetodoPagoFicha(p['metodo'])}\n'
+            'A: ${fmtMonto(monto)} CUP — ${fmtFecha(fecha)} — ${etiquetaMetodoPagoFicha(datos['metodo'])}\n'
             'Motivo: $motivo'),
         acciones: [
           TextButton(
@@ -3938,7 +3963,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             // exacto por el banner).
                             if (_textoCumple(c) != null)
                               FilaInfoFicha(icono: Icons.celebration_rounded, etiqueta: 'Cumpleaños', valor: _textoCumple(c)!),
-                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: '${c['sexo'] ?? '—'}'),
+                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: etiquetaSexoFicha(c['sexo'])),
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
                             InkWell(
@@ -4646,13 +4671,11 @@ class _FichaScreenState extends State<FichaScreen> {
         'tipo': 'pago',
         'fecha': '${p['fecha'] ?? ''}',
         'titulo': metodo == 'cortesia'
-            ? 'Cortesía (regalo)'
-            : metodo == 'transferencia'
-                ? 'Transferencia'
-                : 'Efectivo',
+            ? '${etiquetaMetodoPagoFicha(metodo)} (regalo)'
+            : etiquetaMetodoPagoFicha(metodo),
         'trailing': '${fmtMonto(p['monto'])} CUP',
         'subtitulo':
-            '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}'
+            '${fmtFecha(p['fecha'] as String?)} · ${etiquetaPeriodo(p)}'
             '${cobradoPor.isEmpty ? '' : '\n$cobradoPor'}',
         'icono': metodo == 'cortesia'
             ? Icons.card_giftcard_rounded
@@ -4721,7 +4744,7 @@ class _FichaScreenState extends State<FichaScreen> {
           if (casa)
             'Cuenta a la Casa'
           else if ('${s['metodo'] ?? ''}'.isNotEmpty)
-            '${s['metodo']}',
+            etiquetaMetodoPagoFicha(s['metodo']),
           if ('${s['registrado_por_nombre'] ?? ''}'.isNotEmpty)
             '${s['registrado_por_nombre']}',
         ].join(' · '),
@@ -5251,7 +5274,10 @@ class _DialogoEditarPagoFicha extends StatefulWidget {
 
 class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
   late final TextEditingController _montoCtrl;
-  late final TextEditingController _fechaCtrl;
+  // SL-2 G03-9: la fecha ya NO se teclea en ISO: vive como
+  // DateTime y la elige el CampoFecha de la casa (su
+  // validación es la del selector, no un RegExp).
+  late DateTime? _fecha;
   late final TextEditingController _motivoCtrl;
   late String _metodo;
 
@@ -5259,7 +5285,7 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
   void initState() {
     super.initState();
     _montoCtrl = TextEditingController(text: widget.montoInicial);
-    _fechaCtrl = TextEditingController(text: widget.fechaInicial);
+    _fecha = DateTime.tryParse(widget.fechaInicial);
     _motivoCtrl = TextEditingController();
     _metodo = widget.metodoInicial;
   }
@@ -5267,9 +5293,17 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
   @override
   void dispose() {
     _montoCtrl.dispose();
-    _fechaCtrl.dispose();
     _motivoCtrl.dispose();
     super.dispose();
+  }
+
+  /// La fecha elegida en ISO (AAAA-MM-DD), el formato que
+  /// viaja en la op; '' si el selector quedó sin fecha.
+  String get _fechaIso {
+    final f = _fecha;
+    if (f == null) return '';
+    String dos(int n) => n.toString().padLeft(2, '0');
+    return '${f.year.toString().padLeft(4, '0')}-${dos(f.month)}-${dos(f.day)}';
   }
 
   @override
@@ -5300,12 +5334,12 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
             },
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _fechaCtrl,
-            keyboardType: TextInputType.datetime,
-            decoration: const InputDecoration(
-                labelText: 'Fecha (AAAA-MM-DD)',
-                border: OutlineInputBorder()),
+          // SL-2 G03-9: selector de la casa, no ISO tecleado.
+          CampoFecha(
+            valor: _fecha,
+            limpiable: false,
+            etiqueta: 'Fecha',
+            onCambio: (f) => setState(() => _fecha = f),
           ),
           const SizedBox(height: 8),
           Row(
@@ -5340,7 +5374,7 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
         ElevatedButton(
             onPressed: () => Navigator.pop(context, {
                   'monto': _montoCtrl.text,
-                  'fecha': _fechaCtrl.text,
+                  'fecha': _fechaIso,
                   'metodo': _metodo,
                   'motivo': _motivoCtrl.text,
                 }),

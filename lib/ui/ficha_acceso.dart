@@ -15,10 +15,33 @@ import 'acciones_acceso.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'ficha_secciones.dart' show FilaInfoFicha;
 import 'foto_personal_ficha.dart';
 import 'componentes.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
+
+/// SL-2 G03-12: etiquetas de las acciones de auditoría de
+/// acceso CONOCIDAS. Una clave nueva del servidor (la que
+/// añada mañana) NO se pinta cruda: [etiquetaAccionAcceso]
+/// cae a «Acción registrada».
+const Map<String, String> kEtiquetasAccionAcceso = {
+  'resetear_pin': 'PIN reseteado',
+  'bloquear': 'Bloqueo',
+  'desbloquear': 'Desbloqueo',
+  'revocar': 'Acceso revocado',
+  'reactivar': 'Acceso reactivado',
+  'forzar_cambio_pin': 'Cambio de PIN forzado',
+  'cerrar_sesion': 'Sesión cerrada',
+  'cambiar_telefono': 'Teléfono cambiado',
+  'generar_acceso': 'Acceso generado',
+  'auto_activacion': 'Auto-activación del cliente',
+};
+
+/// SL-2 G03-12: traductor de la clave de acción de la
+/// auditoría de acceso, con rama por defecto genérica.
+String etiquetaAccionAcceso(Object? accion) =>
+    kEtiquetasAccionAcceso['$accion'] ?? 'Acción registrada';
 
 class FichaAccesoScreen extends StatefulWidget {
   final int clienteId;
@@ -233,19 +256,34 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     );
   }
 
+  /// SL-2 G03-14: icono de cada fila de datos de la ficha
+  /// de acceso (la fila en sí es FilaInfoFicha de la casa).
+  static const _iconosDatoAcceso = {
+    'Teléfono': Icons.phone_rounded,
+    'Último acceso': Icons.login_rounded,
+    'Total de accesos': Icons.format_list_numbered_rounded,
+    'Dispositivo': Icons.phone_android_rounded,
+    'Versión de la app': Icons.info_rounded,
+    'Acceso creado': Icons.person_add_rounded,
+    'PIN cambiado': Icons.pin_rounded,
+    'PIN temporal sin cambiar': Icons.pin_rounded,
+    'Cambio de PIN forzado': Icons.key_rounded,
+    'Intentos fallidos': Icons.warning_amber_rounded,
+    'Motivo de bloqueo': Icons.block_rounded,
+    'Bloqueado hasta': Icons.lock_rounded,
+    'Revocado el': Icons.block_rounded,
+    'Sesión abierta': Icons.login_rounded,
+  };
+
   Widget _dato(String etiqueta, String valor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(etiqueta, style: AppTexto.secundario),
-          ),
-          Expanded(child: Text(valor, style: AppTexto.cuerpo)),
-        ],
-      ),
+    // SL-2 G03-14: antes esta sección construía su fila
+    // propia (etiqueta de 150 px + valor); ahora usa la
+    // fila de la casa, FilaInfoFicha, con la MISMA
+    // información (misma etiqueta y mismo valor).
+    return FilaInfoFicha(
+      icono: _iconosDatoAcceso[etiqueta] ?? Icons.info_rounded,
+      etiqueta: etiqueta,
+      valor: valor,
     );
   }
 
@@ -343,6 +381,146 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     final revocado = a['revocado'] == true || a['activo'] != true;
     final bloqueado =
         a['esta_bloqueado'] == true || a['bloqueo_manual_vigente'] == true;
+    // F3-25: UN solo botón «Restablecer acceso» —
+    // «Resetear PIN» y «Reenviar credenciales» eran
+    // la misma RPC con distinto título de
+    // confirmación; la confirmación unificada vive
+    // en resetearPinAcceso (esReenvio: null).
+    final principal = FilledButton.icon(
+      icon: const Icon(Icons.pin_rounded, size: 18),
+      label: const Text('Restablecer acceso'),
+      onPressed: _ocupado || revocado
+          ? null
+          : () => _conOcupado(() => resetearPinAcceso(context,
+                clienteId: widget.clienteId,
+                nombre: '${a['nombre'] ?? 'el cliente'}',
+                telefono: '${a['telefono'] ?? ''}',
+                esReenvio: null,
+                alTerminar: _refrescarTodo)),
+    );
+    // El bloqueo/desbloqueo responde al estado VIGENTE:
+    // es la acción contextual, queda junto a la principal.
+    final Widget? botonBloqueo = !revocado && !bloqueado
+        ? OutlinedButton.icon(
+            icon: const Icon(Icons.lock_rounded, size: 18),
+            label: const Text('Bloquear'),
+            onPressed: _ocupado
+                ? null
+                : () => _conOcupado(() => bloquearAcceso(context,
+                    clienteId: widget.clienteId,
+                    alTerminar: _refrescarTodo)),
+          )
+        : !revocado && bloqueado
+            ? FilledButton.icon(
+                icon: const Icon(Icons.lock_open_rounded, size: 18),
+                label: const Text('Desbloquear'),
+                onPressed: _ocupado
+                    ? null
+                    : () => _conOcupado(() => accionSimpleAcceso(
+                          context,
+                          clienteId: widget.clienteId,
+                          rpc: 'desbloquear_acceso_cliente',
+                          mensajeOk: 'Acceso desbloqueado.',
+                          // 1.25 T88: la misma
+                          // confirmacion que en la
+                          // lista y en el menu.
+                          confirmarAntes: true,
+                          titulo: 'Desbloquear acceso',
+                          texto:
+                              '¿Desbloquear el acceso de este cliente?',
+                          alTerminar: _refrescarTodo,
+                        )),
+              )
+            : null;
+    // SL-2 G03-2: las acciones OCASIONALES (forzar PIN,
+    // cerrar sesión, cambiar teléfono, revocar/reactivar)
+    // ya no ocupan espacio permanente de golpe: van
+    // PLEGADAS tras un solo control que las resume.
+    final ocasionales = <Widget>[
+      if (!revocado)
+        OutlinedButton.icon(
+          icon: const Icon(Icons.key_rounded, size: 18),
+          label: const Text('Forzar cambio de PIN'),
+          onPressed: _ocupado
+              ? null
+              : () => _conOcupado(() => accionSimpleAcceso(
+                    context,
+                    clienteId: widget.clienteId,
+                    rpc: 'forzar_cambio_pin_cliente',
+                    mensajeOk:
+                        'En su próximo ingreso deberá cambiar el PIN.',
+                    confirmarAntes: true,
+                    titulo: 'Forzar cambio de PIN',
+                    texto:
+                        'En el próximo ingreso se le pedirá cambiar el PIN antes de entrar.',
+                    alTerminar: _refrescarTodo,
+                  )),
+        ),
+      if (!revocado)
+        OutlinedButton.icon(
+          icon: const Icon(Icons.logout_rounded, size: 18),
+          label: const Text('Cerrar sesión remota'),
+          onPressed: _ocupado
+              ? null
+              : () => _conOcupado(() => accionSimpleAcceso(
+                    context,
+                    clienteId: widget.clienteId,
+                    rpc: 'cerrar_sesion_cliente',
+                    mensajeOk:
+                        'Sesión cerrada. Deberá entrar de nuevo.',
+                    confirmarAntes: true,
+                    titulo: 'Cerrar sesión remota',
+                    texto:
+                        'Su sesión actual dejará de funcionar al instante.',
+                    alTerminar: _refrescarTodo,
+                  )),
+        ),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.phone_rounded, size: 18),
+        label: const Text('Cambiar teléfono'),
+        onPressed: _ocupado || revocado
+            ? null
+            : () => _conOcupado(() => cambiarTelefonoAcceso(
+                context,
+                clienteId: widget.clienteId,
+                telefonoActual: '${a['telefono'] ?? ''}',
+                alTerminar: _refrescarTodo)),
+      ),
+      if (!revocado)
+        OutlinedButton.icon(
+          icon: const Icon(Icons.block_rounded, size: 18),
+          label: const Text('Revocar acceso'),
+          style: OutlinedButton.styleFrom(
+              foregroundColor: AppColores.error),
+          onPressed: _ocupado
+              ? null
+              : () => _conOcupado(() => accionSimpleAcceso(
+                    context,
+                    clienteId: widget.clienteId,
+                    rpc: 'revocar_acceso_cliente',
+                    mensajeOk: 'Acceso revocado.',
+                    confirmarAntes: true,
+                    titulo: 'Revocar acceso',
+                    texto:
+                        'El cliente ya no podrá entrar a la app. Puedes reactivarlo cuando quieras.',
+                    alTerminar: _refrescarTodo,
+                  )),
+        ),
+      if (revocado)
+        FilledButton.icon(
+          icon: const Icon(Icons.restore_rounded, size: 18),
+          label: const Text('Reactivar acceso'),
+          onPressed: _ocupado
+              ? null
+              : () => _conOcupado(() => accionSimpleAcceso(
+                    context,
+                    clienteId: widget.clienteId,
+                    rpc: 'reactivar_acceso_cliente',
+                    mensajeOk: 'Acceso reactivado.',
+                    alTerminar: _refrescarTodo,
+                  )),
+        ),
+    ];
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -355,139 +533,27 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                // F3-25: UN solo botón «Restablecer acceso» —
-                // «Resetear PIN» y «Reenviar credenciales» eran
-                // la misma RPC con distinto título de
-                // confirmación; la confirmación unificada vive
-                // en resetearPinAcceso (esReenvio: null).
-                FilledButton.icon(
-                  icon: const Icon(Icons.pin_rounded, size: 18),
-                  label: const Text('Restablecer acceso'),
-                  onPressed: _ocupado || revocado
-                      ? null
-                      : () => _conOcupado(() => resetearPinAcceso(context,
-                            clienteId: widget.clienteId,
-                            nombre: '${a['nombre'] ?? 'el cliente'}',
-                            telefono: '${a['telefono'] ?? ''}',
-                            esReenvio: null,
-                            alTerminar: _refrescarTodo)),
-                ),
-                if (!revocado && !bloqueado)
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.lock_rounded, size: 18),
-                    label: const Text('Bloquear'),
-                    onPressed: _ocupado
-                        ? null
-                        : () => _conOcupado(() => bloquearAcceso(context,
-                            clienteId: widget.clienteId,
-                            alTerminar: _refrescarTodo)),
-                  ),
-                if (!revocado && bloqueado)
-                  FilledButton.icon(
-                    icon: const Icon(Icons.lock_open_rounded, size: 18),
-                    label: const Text('Desbloquear'),
-                    onPressed: _ocupado
-                        ? null
-                        : () => _conOcupado(() => accionSimpleAcceso(
-                              context,
-                              clienteId: widget.clienteId,
-                              rpc: 'desbloquear_acceso_cliente',
-                              mensajeOk: 'Acceso desbloqueado.',
-                              // 1.25 T88: la misma
-                              // confirmacion que en la
-                              // lista y en el menu.
-                              confirmarAntes: true,
-                              titulo: 'Desbloquear acceso',
-                              texto:
-                                  '¿Desbloquear el acceso de este cliente?',
-                              alTerminar: _refrescarTodo,
-                            )),
-                  ),
-                if (!revocado)
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.key_rounded, size: 18),
-                    label: const Text('Forzar cambio de PIN'),
-                    onPressed: _ocupado
-                        ? null
-                        : () => _conOcupado(() => accionSimpleAcceso(
-                              context,
-                              clienteId: widget.clienteId,
-                              rpc: 'forzar_cambio_pin_cliente',
-                              mensajeOk:
-                                  'En su próximo ingreso deberá cambiar el PIN.',
-                              confirmarAntes: true,
-                              titulo: 'Forzar cambio de PIN',
-                              texto:
-                                  'En el próximo ingreso se le pedirá cambiar el PIN antes de entrar.',
-                              alTerminar: _refrescarTodo,
-                            )),
-                  ),
-                if (!revocado)
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.logout_rounded, size: 18),
-                    label: const Text('Cerrar sesión remota'),
-                    onPressed: _ocupado
-                        ? null
-                        : () => _conOcupado(() => accionSimpleAcceso(
-                              context,
-                              clienteId: widget.clienteId,
-                              rpc: 'cerrar_sesion_cliente',
-                              mensajeOk:
-                                  'Sesión cerrada. Deberá entrar de nuevo.',
-                              confirmarAntes: true,
-                              titulo: 'Cerrar sesión remota',
-                              texto:
-                                  'Su sesión actual dejará de funcionar al instante.',
-                              alTerminar: _refrescarTodo,
-                            )),
-                  ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.phone_rounded, size: 18),
-                  label: const Text('Cambiar teléfono'),
-                  onPressed: _ocupado || revocado
-                        ? null
-                        : () => _conOcupado(() => cambiarTelefonoAcceso(
-                            context,
-                            clienteId: widget.clienteId,
-                            telefonoActual: '${a['telefono'] ?? ''}',
-                            alTerminar: _refrescarTodo)),
-                ),
-                if (!revocado)
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.block_rounded, size: 18),
-                    label: const Text('Revocar acceso'),
-                    style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColores.error),
-                    onPressed: _ocupado
-                        ? null
-                        : () => _conOcupado(() => accionSimpleAcceso(
-                              context,
-                              clienteId: widget.clienteId,
-                              rpc: 'revocar_acceso_cliente',
-                              mensajeOk: 'Acceso revocado.',
-                              confirmarAntes: true,
-                              titulo: 'Revocar acceso',
-                              texto:
-                                  'El cliente ya no podrá entrar a la app. Puedes reactivarlo cuando quieras.',
-                              alTerminar: _refrescarTodo,
-                            )),
-                  ),
-                if (revocado)
-                  FilledButton.icon(
-                    icon: const Icon(Icons.restore_rounded, size: 18),
-                    label: const Text('Reactivar acceso'),
-                    onPressed: _ocupado
-                        ? null
-                        : () => _conOcupado(() => accionSimpleAcceso(
-                              context,
-                              clienteId: widget.clienteId,
-                              rpc: 'reactivar_acceso_cliente',
-                              mensajeOk: 'Acceso reactivado.',
-                              alTerminar: _refrescarTodo,
-                            )),
-                  ),
+                principal,
+                if (botonBloqueo != null) botonBloqueo,
               ],
             ),
+            if (ocasionales.isNotEmpty)
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: Text(
+                    'Más acciones (${ocasionales.length})',
+                    style: AppTexto.cuerpo),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: ocasionales,
+                    ),
+                  ),
+                ],
+              ),
             if (_ocupado)
               const Padding(
                 padding: EdgeInsets.only(top: AppEspacio.md),
@@ -533,18 +599,6 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
   }
 
   Widget _seccionAuditoria() {
-    const nombres = {
-      'resetear_pin': 'PIN reseteado',
-      'bloquear': 'Bloqueo',
-      'desbloquear': 'Desbloqueo',
-      'revocar': 'Acceso revocado',
-      'reactivar': 'Acceso reactivado',
-      'forzar_cambio_pin': 'Cambio de PIN forzado',
-      'cerrar_sesion': 'Sesión cerrada',
-      'cambiar_telefono': 'Teléfono cambiado',
-      'generar_acceso': 'Acceso generado',
-      'auto_activacion': 'Auto-activación del cliente',
-    };
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -562,8 +616,8 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.history_rounded, size: 18),
-                title: Text(nombres['${(u as Map)['accion']}'] ??
-                    '${u['accion']}'),
+                title: Text(
+                    etiquetaAccionAcceso((u as Map)['accion'])),
                 subtitle: Text(
                   '${u['actor'] ?? 'sistema'} · ${_fmtFecha(u['creado_en'])}',
                   style: AppTexto.secundario,

@@ -11,9 +11,12 @@
 /// - sin foto: no ocupa espacio (SizedBox.shrink).
 /// - cargando: línea compacta «verificando» (1.25 T117 F1-45:
 ///   ya no se confunde con el estado sin foto).
-/// - sin conexión/error al consultar: aviso compacto de una línea.
+/// - error al consultar: aviso compacto de una línea; dice
+///   «sin conexión» SOLO si la causa es de red con certeza
+///   (SL-2 G03-10), si no «no se pudo verificar».
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -50,8 +53,36 @@ class SeccionFotoPersonal extends StatefulWidget {
 
 enum _EstadoFoto { cargando, conFoto, sinFoto, error }
 
+/// SL-2 G03-10: ¿el fallo al verificar la foto personal es
+/// de RED con certeza? Solo entonces la pantalla puede
+/// decir «sin conexión»: un 500 del servidor, un timeout o
+/// un error de la RPC NO son «sin conexión» y afirmarlo
+/// mentía sobre la causa. Ante la duda, false.
+bool esFalloDeRedFotoPersonal(Object e) {
+  if (e is SocketException) return true;
+  if (e is TimeoutException) return false;
+  final raw = e.toString().toLowerCase();
+  return raw.contains('socketexception') ||
+      raw.contains('failed host lookup') ||
+      raw.contains('clientexception') ||
+      raw.contains('handshakeexception') ||
+      raw.contains('network is unreachable') ||
+      raw.contains('connection closed') ||
+      raw.contains('connection reset');
+}
+
+/// SL-2 G03-10: el texto del estado de error de la foto
+/// personal según la causa CONOCIDA; sin causa conocida,
+/// genérico-amable que no afirma conexión.
+String textoErrorFotoPersonal({required bool fueDeRed}) => fueDeRed
+    ? 'Foto personal: sin conexión para verificar.'
+    : 'Foto personal: no se pudo verificar.';
+
 class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
   _EstadoFoto _estado = _EstadoFoto.cargando;
+  // SL-2 G03-10: la causa del último fallo de verificación
+  // era de red con certeza (solo entonces «sin conexión»).
+  bool _falloFueDeRed = false;
   String? _path;
   File? _archivo;
   String? _actualizadaEn;
@@ -126,8 +157,16 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
         _actualizadaEn = data['actualizada_en'] as String?;
         _estado = _EstadoFoto.conFoto;
       });
-    } catch (_) {
-      if (vigente()) setState(() => _estado = _EstadoFoto.error);
+    } catch (e) {
+      if (vigente()) {
+        setState(() {
+          // SL-2 G03-10: se guarda la causa conocida para
+          // que el texto no afirme «sin conexión» sin
+          // saberlo (un 500 no es un corte de red).
+          _falloFueDeRed = esFalloDeRedFotoPersonal(e);
+          _estado = _EstadoFoto.error;
+        });
+      }
     }
   }
 
@@ -260,11 +299,15 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
         return Tarjeta(
           child: Row(
             children: [
-              const Icon(Icons.wifi_off_rounded, size: 18),
+              Icon(
+                  _falloFueDeRed
+                      ? Icons.wifi_off_rounded
+                      : Icons.help_outline_rounded,
+                  size: 18),
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                 child: Text(
-                    'Foto personal: sin conexión para verificar.',
+                    textoErrorFotoPersonal(fueDeRed: _falloFueDeRed),
                     style: AppTexto.secundario),
               ),
               TextButton(

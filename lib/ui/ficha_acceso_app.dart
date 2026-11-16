@@ -467,49 +467,38 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
               contenido,
               const SizedBox(height: AppEspacio.md),
               const Divider(height: 1),
-              const SizedBox(height: AppEspacio.md),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.preview_rounded, size: 18),
-                  label: const Text('Vista previa App'),
-                  onPressed: _abrirVistaPrevia,
-                ),
+              const SizedBox(height: AppEspacio.xs),
+              // SL-2 G03-3: las tres salidas secundarias
+              // (Vista previa · Comunidad · Actividad) ya NO
+              // son botones a ancho completo que empujan lo
+              // importante: fila compacta de texto, al final
+              // de la tarjeta. Sus destinos no cambian:
+              // FB-20 (Comunidad, solo dueño) y FICHA-08
+              // (actividad en la app, solo dueño).
+              Wrap(
+                spacing: AppEspacio.xs,
+                runSpacing: 0,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.preview_rounded, size: 18),
+                    label: const Text('Vista previa App'),
+                    onPressed: _abrirVistaPrevia,
+                  ),
+                  if (AuthService().isOwner)
+                    TextButton.icon(
+                      icon: const Icon(Icons.groups_rounded, size: 18),
+                      label: const Text('Ver en Comunidad'),
+                      onPressed: _verEnComunidad,
+                    ),
+                  if (AuthService().isOwner)
+                    TextButton.icon(
+                      icon: const Icon(
+                          Icons.phone_android_rounded, size: 18),
+                      label: const Text('Ver su actividad en la app'),
+                      onPressed: _verActividadApp,
+                    ),
+                ],
               ),
-              // 1.29 (Oleada 6, FB-20): «Ver en Comunidad» —
-              // salta de la ficha del cliente a su tarjeta en
-              // el panel de Comunidad (filtro por nombre). Es
-              // solo del dueño, como todo el panel.
-              if (AuthService().isOwner) ...[
-                const SizedBox(height: AppEspacio.sm),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.groups_rounded, size: 18),
-                    label: const Text('Ver en Comunidad'),
-                    onPressed: _verEnComunidad,
-                  ),
-                ),
-              ],
-              // 1.30 (Oleada 10, FICHA-08): «Ver su
-              // actividad en la app» — la actividad que
-              // el sistema ya recoge de ESTE cliente
-              // (activaciones, sesiones, vales), abierta
-              // desde su ficha sin pasar por Auditoría ni
-              // re-elegirlo en el selector. Solo dueño,
-              // como la propia sección de actividad.
-              if (AuthService().isOwner) ...[
-                const SizedBox(height: AppEspacio.sm),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(
-                        Icons.phone_android_rounded, size: 18),
-                    label: const Text('Ver su actividad en la app'),
-                    onPressed: _verActividadApp,
-                  ),
-                ),
-              ],
             ],
           ),
         ),

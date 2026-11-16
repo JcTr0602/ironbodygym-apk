@@ -14,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth.dart';
 import '../config.dart';
+import '../errores_sync.dart' show mensajeErrorAmable;
 import '../negocio.dart' show clientePorId, esCuentaCasa;
 import 'diseno.dart';
 import 'horario_gym.dart';
@@ -157,6 +158,16 @@ String fechaHumana(Object? v) {
   return '${dos(p.day)}/${dos(p.month)}/${p.year}';
 }
 
+/// SL-2 G03-8: traductor del estado del espejo para la
+/// vista previa. Una clave desconocida (la que el servidor
+/// añada mañana) NO se pinta cruda: se lee «Sin verificar».
+String etiquetaEstadoVistaPrevia(Object? estado) => switch ('$estado') {
+      'activo' => 'Activo',
+      'congelado' => 'Congelado',
+      'inactivo' => 'Inactivo',
+      _ => 'Sin verificar',
+    };
+
 class VistaPreviaClienteScreen extends StatefulWidget {
   final int clienteId;
   final String nombreCliente;
@@ -180,10 +191,6 @@ class _VistaPreviaClienteScreenState
   // primera pintura y para saber si es Cuenta a la Casa sin
   // depender de que la RPC lo traiga.
   Map<String, dynamic>? _clienteLocal;
-  // 1.25 T20: el detalle técnico del fallo, en pequeño
-  // bajo el mensaje en sencillo (antes la excepción cruda
-  // ERA todo el mensaje y no había cómo reintentar).
-  String? _errorDetalle;
   // Argón P1#13: horario canónico (no texto fijo): se carga junto a
   // los datos; mientras tanto se muestra el texto anterior.
   String? _horarioCanonico;
@@ -254,7 +261,7 @@ class _VistaPreviaClienteScreenState
     setState(() {
       _cargando = true;
       _error = null;
-      _errorDetalle = null;
+      
     });
     // Horario canónico en paralelo al RPC (caché local primero).
     cargarHorarioCanonico().then((dias) {
@@ -285,11 +292,14 @@ class _VistaPreviaClienteScreenState
     } catch (e) {
       if (mounted) {
         setState(() {
-          // 1.25 T20: mensaje en sencillo + reintento; la
-          // excepción cruda queda como detalle en pequeño.
-          _error = 'Sin conexión o el servidor no respondió '
-              'al pedir la vista previa.';
-          _errorDetalle = '$e';
+          // 1.25 T20: mensaje en sencillo + reintento.
+          // SL-2 G03-8: la excepción cruda NO se pinta ni
+          // como detalle: el texto sale del traductor
+          // amable de la casa, que solo afirma «sin
+          // conexión» cuando la causa es de red.
+          _error = mensajeErrorAmable(e,
+              enTimeout:
+                  'Sin respuesta del servidor al pedir la vista previa.');
           _cargando = false;
         });
       }
@@ -484,15 +494,9 @@ class _VistaPreviaClienteScreenState
                                   style: const TextStyle(
                                       color: Colors.white70),
                                   textAlign: TextAlign.center),
-                              if (_errorDetalle != null) ...[
-                                const SizedBox(
-                                    height: AppEspacio.sm),
-                                Text(_errorDetalle!,
-                                    style: const TextStyle(
-                                        color: Colors.white38,
-                                        fontSize: 11),
-                                    textAlign: TextAlign.center),
-                              ],
+                              // SL-2 G03-8: el detalle crudo de
+                              // la excepción NO se pinta (queda
+                              // solo el mensaje amable de _error).
                               const SizedBox(
                                   height: AppEspacio.lg),
                               OutlinedButton.icon(
@@ -564,7 +568,7 @@ class _VistaPreviaClienteScreenState
                       _chip('Plan: $plan', _naranja),
                     ],
                     const SizedBox(height: 4),
-                    Text('Estado: ${c['estado'] ?? '—'}',
+                    Text('Estado: ${etiquetaEstadoVistaPrevia(c['estado'])}',
                         style: AppTexto.secundario.copyWith(color: Colors.white70)),
                   ],
                 ),
