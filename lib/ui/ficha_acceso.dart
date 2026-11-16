@@ -15,6 +15,7 @@ import 'acciones_acceso.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'ficha_secciones.dart' show FilaInfoFicha;
 import 'foto_personal_ficha.dart';
 import 'componentes.dart';
 import '../errores_sync.dart';
@@ -255,19 +256,34 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     );
   }
 
+  /// SL-2 G03-14: icono de cada fila de datos de la ficha
+  /// de acceso (la fila en sí es FilaInfoFicha de la casa).
+  static const _iconosDatoAcceso = {
+    'Teléfono': Icons.phone_rounded,
+    'Último acceso': Icons.login_rounded,
+    'Total de accesos': Icons.format_list_numbered_rounded,
+    'Dispositivo': Icons.phone_android_rounded,
+    'Versión de la app': Icons.info_rounded,
+    'Acceso creado': Icons.person_add_rounded,
+    'PIN cambiado': Icons.pin_rounded,
+    'PIN temporal sin cambiar': Icons.pin_rounded,
+    'Cambio de PIN forzado': Icons.key_rounded,
+    'Intentos fallidos': Icons.warning_amber_rounded,
+    'Motivo de bloqueo': Icons.block_rounded,
+    'Bloqueado hasta': Icons.lock_rounded,
+    'Revocado el': Icons.block_rounded,
+    'Sesión abierta': Icons.login_rounded,
+  };
+
   Widget _dato(String etiqueta, String valor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(etiqueta, style: AppTexto.secundario),
-          ),
-          Expanded(child: Text(valor, style: AppTexto.cuerpo)),
-        ],
-      ),
+    // SL-2 G03-14: antes esta sección construía su fila
+    // propia (etiqueta de 150 px + valor); ahora usa la
+    // fila de la casa, FilaInfoFicha, con la MISMA
+    // información (misma etiqueta y mismo valor).
+    return FilaInfoFicha(
+      icono: _iconosDatoAcceso[etiqueta] ?? Icons.info_rounded,
+      etiqueta: etiqueta,
+      valor: valor,
     );
   }
 
