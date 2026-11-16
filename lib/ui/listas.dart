@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -170,6 +171,46 @@ class _ListasScreenState extends State<ListasScreen>
   // 16/25: buscador dentro de Listas (nombre o teléfono).
   String _busqueda = '';
   final _busquedaCtrl = TextEditingController();
+  // 1.35 (CAMPO-3, corrección de la reconciliación §3.3):
+  // la pila propia de esta pantalla (sub-pestañas cuando
+  // va embebida + buscador con su menú de orden + fila de
+  // vistas) se PLIEGA al bajar por la lista y vuelve al
+  // subir o al llegar arriba — el mismo patrón de la
+  // cabecera de Suplementos. CAMPO-13 ya había plegado
+  // las acciones del PILAR y suprimido la banda duplicada;
+  // faltaba esta pila, que es la que Jc midió ocupando
+  // más de la mitad de la pantalla (campo nº 3 y nº 13).
+  // El botón «Avisar a los N sin avisar» de las pestañas
+  // de cobro se recoge con la misma señal (ver _lista).
+  bool _pilaVisible = true;
+
+  /// El pliegue de la pila según el scroll de cualquiera
+  /// de las listas: bajar la pliega; subir la despliega
+  /// (y volver arriba ES subir: llega desplegada). Solo
+  /// reacciona al scroll VERTICAL (el gesto horizontal
+  /// entre pestañas no pliega nada). El listener vive
+  /// DENTRO del RefrescoIron de cada lista (ver _lista):
+  /// el RefreshIndicator se queda las notificaciones que
+  /// procesa y un listener fuera nunca las vería — la
+  /// misma razón que en Suplementos.
+  bool _alDesplazarLista(UserScrollNotification n) {
+    final eje = n.metrics.axisDirection;
+    if (eje != AxisDirection.down && eje != AxisDirection.up) {
+      return false;
+    }
+    final bool debe;
+    if (n.direction == ScrollDirection.reverse) {
+      debe = false;
+    } else if (n.direction == ScrollDirection.forward) {
+      debe = true;
+    } else {
+      return false;
+    }
+    if (debe != _pilaVisible && mounted) {
+      setState(() => _pilaVisible = debe);
+    }
+    return false;
+  }
   // D-08 (1.21): visibles memoizados (antes _visibles() corría
   // 5× por build, ordenando y filtrando todo en cada tecla) y
   // avisados precargados (antes un FutureBuilder por fila).
@@ -796,7 +837,6 @@ class _ListasScreenState extends State<ListasScreen>
               bottom: _barraPestanas()),
       body: Column(
         children: [
-          if (widget.embebida) _barraPestanas(),
           // 1.30 (Oleada D6, UI130-20): banner compacto,
           // como en Buscar, y la fila «Ordenar:» se funde
           // en la fila del buscador como menú de orden
@@ -804,10 +844,27 @@ class _ListasScreenState extends State<ListasScreen>
           // F1-24: la elección manual manda).
           // 1.35 (campo nº 13): embebida, la banda no se
           // pinta — el estado de sync lo dice una sola vez
-          // la píldora de la cabecera de la app.
+          // la píldora de la cabecera de la app. La banda
+          // queda FUERA de la pila plegable: es de CAMPO-13,
+          // no de esta pila.
           if (!widget.embebida) const SyncBanner(compact: true),
-          // 16/25: buscador (nombre o teléfono, en las 5 pestañas).
-          Padding(
+          // 1.35 (CAMPO-3): la pila propia de la pantalla
+          // (sub-pestañas si va embebida + buscador con su
+          // menú de orden + fila de vistas) se recoge al
+          // bajar y vuelve al subir, con el AnimatedSize
+          // del patrón de Suplementos. Ningún bloque se
+          // elimina: todo vuelve a estar a un gesto.
+          AnimatedSize(
+            duration: AppMovimiento.media,
+            curve: AppMovimiento.curvaSuave,
+            alignment: Alignment.topCenter,
+            child: _pilaVisible
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.embebida) _barraPestanas(),
+                      // 16/25: buscador (nombre o teléfono, en las 5 pestañas).
+                      Padding(
             padding:
                 const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Row(
@@ -864,8 +921,12 @@ class _ListasScreenState extends State<ListasScreen>
                 ),
               ],
             ),
+                      ),
+                      _filaVistas(),
+                    ],
+                  )
+                : const SizedBox.shrink(),
           ),
-          _filaVistas(),
           Expanded(
             // 1.28 (M4-A2/R1M4-M2): mientras la primera foto
             // carga, esqueleto honesto en vez de las pestañas
@@ -1167,7 +1228,13 @@ class _ListasScreenState extends State<ListasScreen>
     // antes de releer. Sin avisos, como siempre aquí.
     final lista = RefrescoIron(
       onRefresh: () => refrescoGeneralIron(releer: _cargar),
-      child: ListView.separated(
+      // 1.35 (CAMPO-3): el oído del pliegue de la pila,
+      // DENTRO del RefrescoIron (el RefreshIndicator se
+      // queda las notificaciones que procesa; fuera no
+      // llegarían) — el patrón de Suplementos.
+      child: NotificationListener<UserScrollNotification>(
+        onNotification: _alDesplazarLista,
+        child: ListView.separated(
         itemCount:
             desplaza + rows.length + (hayCola ? cola.length + 1 : 0),
         separatorBuilder: (_, __) => Divider(
@@ -1350,7 +1417,8 @@ class _ListasScreenState extends State<ListasScreen>
             );
           }
           return filaPintada;
-      },
+        },
+        ),
       ),
     );
     // 1.25 T50: con la sesión de avisos empezada, el
@@ -1396,20 +1464,33 @@ class _ListasScreenState extends State<ListasScreen>
     if (esColaCobro && sinAvisar > 0) {
       cuerpo = Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.tonalIcon(
-                icon: const Icon(Icons.notifications_rounded,
-                    size: 18),
-                label: Text(sinAvisar == 1
-                    ? 'Avisar al que falta de esta pestaña'
-                    : 'Avisar a los $sinAvisar sin avisar de '
-                        'esta pestaña'),
-                onPressed: () => _avisarPestana(rows, cola),
-              ),
-            ),
+          // 1.35 (CAMPO-3): el botón se recoge con la pila
+          // (misma señal _pilaVisible): al bajar por la
+          // lista de cobro cede también su alto, y vuelve
+          // al subir — no se elimina, queda a un gesto.
+          AnimatedSize(
+            duration: AppMovimiento.media,
+            curve: AppMovimiento.curvaSuave,
+            alignment: Alignment.topCenter,
+            child: _pilaVisible
+                ? Padding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.tonalIcon(
+                        icon: const Icon(
+                            Icons.notifications_rounded,
+                            size: 18),
+                        label: Text(sinAvisar == 1
+                            ? 'Avisar al que falta de esta pestaña'
+                            : 'Avisar a los $sinAvisar sin avisar de '
+                                'esta pestaña'),
+                        onPressed: () => _avisarPestana(rows, cola),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
           Expanded(child: cuerpo),
         ],
