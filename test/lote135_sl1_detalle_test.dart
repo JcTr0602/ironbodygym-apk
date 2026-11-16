@@ -187,6 +187,10 @@ void main() {
         find.text('Sin conexión: el detalle está en solo lectura.'),
         findsOneWidget,
         reason: 'debe salir el aviso estándar de solo lectura');
+    // Se suelta la RPC colgada: su temporizador de lectura
+    // (12 s) no debe quedar pendiente al cerrar el test.
+    colgada.complete(_detalleJson());
+    await _drenar(tester, vueltas: 4);
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
   });
@@ -257,11 +261,12 @@ void main() {
     await _drenar(tester, vueltas: 4);
 
     int botones(String fragmento) {
+      // Sin ElevatedButton: BotonPrimario lo lleva DENTRO y
+      // se contaría dos veces la misma superficie.
       var n = 0;
       for (final tipo in [
         FilledButton,
         OutlinedButton,
-        ElevatedButton,
         TextButton,
         BotonPrimario,
       ]) {
@@ -281,7 +286,6 @@ void main() {
     for (final tipo in [
       FilledButton,
       OutlinedButton,
-      ElevatedButton,
       TextButton,
       BotonPrimario,
     ]) {
