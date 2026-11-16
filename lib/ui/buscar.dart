@@ -57,7 +57,8 @@ class BuscarScreen extends StatefulWidget {
   State<BuscarScreen> createState() => _BuscarScreenState();
 }
 
-class _BuscarScreenState extends State<BuscarScreen> {
+class _BuscarScreenState extends State<BuscarScreen>
+    with WidgetsBindingObserver {
   final _q = TextEditingController();
   List<Map<String, dynamic>> _res = [];
 
@@ -86,6 +87,12 @@ class _BuscarScreenState extends State<BuscarScreen> {
   // de la lista, deslizables configurables y salto por letra.
   Map<String, int> _conteos = {};
   DateTime? _ultimoPull;
+  // 1.35 (SP-00): la última bajada PARCIAL con filas
+  // aplicadas (sello aparte del motor) y si la corrida
+  // vigente murió por presupuesto — el cartel los nombra
+  // en vez de gritar «sin bajar cambios» a secas.
+  DateTime? _ultimoPullParcial;
+  bool _bajadaCortadaPorPresupuesto = false;
   String _swipeDer = 'cobrar';
   String _swipeIzq = 'ninguna';
   // B1 (estéticas 1.19): aviso único del gesto deslizar.
@@ -180,6 +187,61 @@ class _BuscarScreenState extends State<BuscarScreen> {
     _cargarConfig();
     _buscar(); // lista completa por defecto
     _cargarRecientes(); // 1.35 (UI-06)
+    // 1.35 (SP-00): el sello de frescura se relee al
+    // volver a la app (la pantalla vive en un IndexedStack
+    // y su initState no vuelve a correr tras una sync de
+    // fondo: el cartel medía la foto del nacimiento).
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didUpdateWidget(BuscarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 1.35 (SP-00): la cáscara reconstruye el pilar al
+    // reactivarlo (didUpdateWidget): releer el sello.
+    unawaited(_refrescarSello());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refrescarSello());
+    }
+  }
+
+  /// 1.35 (SP-00): relee la foto de frescura ENTERA con el
+  /// criterio único del motor (ultimaBajadaReal: la más
+  /// reciente entre la sync completa buena y la bajada
+  /// limpia), la última bajada parcial y si la corrida
+  /// vigente murió por presupuesto.
+  Future<void> _refrescarSello() async {
+    try {
+      final real = await SyncEngine.instance.ultimaBajadaReal();
+      final parcialTs =
+          await LocalDb.instance.getMeta('ultimo_pull_parcial_ts');
+      final errCodigo =
+          await LocalDb.instance.getMeta('last_sync_error');
+      final errTs = await LocalDb.instance.getMeta('last_sync_error_ts');
+      if (!mounted) return;
+      final parcial =
+          parcialTs == null ? null : _pullEnHabana(parcialTs);
+      final errEn = errTs == null ? null : _pullEnHabana(errTs);
+      setState(() {
+        // FIN-28: el instante del motor viene de tryParse
+        // (UTC si trae offset); se normaliza a pared
+        // Habana como hacía la lectura directa de la meta.
+        _ultimoPull =
+            real == null ? null : (real.isUtc ? aHabana(real) : real);
+        _ultimoPullParcial = parcial;
+        // La corrida cortada solo «vigente» si su error es
+        // posterior a la última bajada buena (si no, ya la
+        // tapó una bajada limpia y no hay nada que decir).
+        _bajadaCortadaPorPresupuesto =
+            errCodigo == 'presupuesto_agotado' &&
+                errEn != null &&
+                (real == null || errEn.isAfter(real));
+      });
+    } catch (_) {}
   }
 
   /// Bloque 1: config local de deslizables + última bajada
@@ -190,7 +252,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
     const cerrada = {'ninguna', 'cobrar', 'diario', 'venta', 'editar'};
     final der = await PerfilService.instance.getSwipeBuscarDer();
     final izq = await PerfilService.instance.getSwipeBuscarIzq();
-    final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
     final ordenGuardado =
         await LocalDb.instance.getMeta('buscar_orden');
     final compactaGuardada =
@@ -199,7 +260,6 @@ class _BuscarScreenState extends State<BuscarScreen> {
     setState(() {
       _swipeDer = cerrada.contains(der) ? der : 'cobrar';
       _swipeIzq = cerrada.contains(izq) ? izq : 'ninguna';
-      _ultimoPull = ts == null ? null : _pullEnHabana(ts);
       const ordenes = {
         'nombre',
         'venceAntes',
@@ -222,6 +282,10 @@ class _BuscarScreenState extends State<BuscarScreen> {
       if (!mounted) return;
       setState(() => _mostrarAvisoSwipe = true);
     }
+    // 1.35 (SP-00): la foto de frescura, con el criterio
+    // único del motor (antes esta pantalla leía la meta
+    // cruda una sola vez al nacer).
+    await _refrescarSello();
   }
 
   int _gen = 0;
@@ -585,10 +649,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
       // (el aviso «Lista actualizada» cubre la relectura,
       // como manda la regla); viejos → pull real primero.
       if (await SyncEngine.instance.datosFrescos()) {
-        final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
-        if (mounted && ts != null) {
-          setState(() => _ultimoPull = _pullEnHabana(ts));
-        }
+        // 1.35 (SP-00): el sello se relee con el criterio
+        // único (el mismo instante que datosFrescos juzgó).
+        await _refrescarSello();
         await _buscar();
         if (!mounted) return;
         mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
@@ -609,11 +672,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
             significado: SignificadoChip.alerta);
         return;
       }
-      // Bloque 1: la bajada quedó registrada en ultimo_pull_ts.
-      final ts = await LocalDb.instance.getMeta('ultimo_pull_ts');
-      if (mounted && ts != null) {
-        setState(() => _ultimoPull = _pullEnHabana(ts));
-      }
+      // Bloque 1: la bajada quedó registrada; el sello se
+      // relee con el criterio único (SP-00).
+      await _refrescarSello();
       await _buscar();
       if (!mounted) return;
       mostrarSnack(context, 'Lista actualizada', significado: SignificadoChip.exito);
@@ -626,24 +687,49 @@ class _BuscarScreenState extends State<BuscarScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _debounceBusqueda?.cancel();
     _q.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  /// Frescura de la lista para la franja de resumen:
-  /// las mismas palabras del SyncBanner («hace X min»).
+  /// Frescura de la lista para la franja de resumen.
+  /// 1.35 (SP-00): la frase dice lo que el instante ES —
+  /// la última bajada COMPLETA confirmada (el criterio
+  /// único del motor) — no un «Actualizado» genérico.
   String get _frescura {
     final u = _ultimoPull;
-    if (u == null) return 'Actualizado nunca';
+    if (u == null) return 'Sin bajada completa registrada';
     final d = ahoraHabana().difference(u);
-    if (d.inMinutes < 1) return 'Actualizado ahora mismo';
+    if (d.inMinutes < 1) return 'Última bajada completa: ahora mismo';
     if (d.inMinutes < 60) {
-      return 'Actualizado hace ${d.inMinutes} min';
+      return 'Última bajada completa: hace ${d.inMinutes} min';
     }
-    if (d.inHours < 24) return 'Actualizado hace ${d.inHours} h';
-    return 'Actualizado hace ${d.inDays} d';
+    if (d.inHours < 24) return 'Última bajada completa: hace ${d.inHours} h';
+    return 'Última bajada completa: hace ${d.inDays} d';
+  }
+
+  /// 1.35 (SP-00): el texto del cartel de lista vieja dice
+  /// la verdad que se sepa: si la corrida vigente murió
+  /// por presupuesto, se nombra como tal (no como «sin
+  /// bajar cambios»); si después de la última completa
+  /// bajaron cambios en una bajada parcial, se dice.
+  String get _textoCartelViejo {
+    if (_bajadaCortadaPorPresupuesto) {
+      return 'La última bajada se detuvo antes de completarse '
+          '(se acabó el tiempo de la corrida). La última '
+          'bajada completa fue hace más de 24 h.';
+    }
+    final parcial = _ultimoPullParcial;
+    if (parcial != null &&
+        _ultimoPull != null &&
+        parcial.isAfter(_ultimoPull!)) {
+      return 'La última bajada completa fue hace más de 24 h; '
+          'después bajaron cambios (bajada parcial) ${hace(parcial)}.';
+    }
+    return 'Lista desactualizada: la última bajada completa '
+        'fue hace más de 24 h';
   }
 
   @override
@@ -830,9 +916,9 @@ class _BuscarScreenState extends State<BuscarScreen> {
                     const Icon(Icons.warning_amber_rounded,
                         size: 18, color: AppColores.alerta),
                     const SizedBox(width: 8),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                          'Lista desactualizada: hace más de 24 h sin bajar cambios',
+                          _textoCartelViejo,
                           style: AppTexto.etiqueta),
                     ),
                     TextButton(

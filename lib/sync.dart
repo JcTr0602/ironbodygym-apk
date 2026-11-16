@@ -2190,6 +2190,24 @@ class SyncEngine {
   Future<void> _marcarOk() =>
       _db.setMeta('last_sync_ok', isoHabana(ahoraHabana()));
 
+  /// 1.35 (SP-00): EL instante de frescura de este
+  /// teléfono — la última vez que los datos quedaron
+  /// confirmados contra el servidor: la más reciente
+  /// entre la última sync completa buena (last_sync_ok)
+  /// y la última bajada limpia (ultimo_pull_ts). Lo usan
+  /// el gesto ([datosFrescos]) y el cartel del
+  /// Directorio: UN solo criterio, para que el cartel no
+  /// grite «24 h sin bajar cambios» el mismo día en que
+  /// el gesto decide «fresco, solo relee lo local».
+  Future<DateTime?> ultimaBajadaReal() async {
+    final ok = await _ultimaOk();
+    final pullTs = await _db.getMeta('ultimo_pull_ts');
+    final pull = pullTs == null ? null : DateTime.tryParse(pullTs);
+    if (ok == null) return pull;
+    if (pull == null) return ok;
+    return ok.isAfter(pull) ? ok : pull;
+  }
+
   /// 1.34 Campo 2 (P-7): ¿los datos locales están
   /// FRESCOS para la regla del gesto? Vale la más
   /// reciente de la última sync completa buena
@@ -2197,15 +2215,7 @@ class SyncEngine {
   /// (ultimo_pull_ts, que también sellan los alcances
   /// sin filas fallidas).
   Future<bool> datosFrescos() async {
-    final ok = await _ultimaOk();
-    final pullTs = await _db.getMeta('ultimo_pull_ts');
-    final pull = pullTs == null ? null : DateTime.tryParse(pullTs);
-    final ultimo = ok == null
-        ? pull
-        : (pull == null || ok.isAfter(pull))
-            ? ok
-            : pull;
-    return syncEsFresca(ultimo, ahoraHabana());
+    return syncEsFresca(await ultimaBajadaReal(), ahoraHabana());
   }
 
   // ── 1.33: el error de corrida se persiste como CÓDIGO ──
@@ -3599,7 +3609,11 @@ class SyncEngine {
         final tsPullScope = isoHabana(ahoraHabana());
         // 1.28 (M1-A7/R1M1-H5): ultimo_pull_ts también se
         // sella solo con la bajada del alcance limpia.
-        if (fallidasScope == 0) {
+        // 1.35 (SP-00): y solo si el alcance incluye
+        // CLIENTES — el sello global significa «el
+        // Directorio bajó completo»; un alcance de
+        // papelera o servicios no puede prometer eso.
+        if (fallidasScope == 0 && tablas.contains('clientes')) {
           await _db.setMeta('ultimo_pull_ts', tsPullScope);
         }
         // v1.3.5: resumen con nombre amigable del alcance (no claves técnicas).
@@ -4818,11 +4832,26 @@ class SyncEngine {
       // ultimo_pull_detalle_ts quedaron JUBILADAS con M1 —
       // el desglose por tabla vive en el diario de corridas;
       // ultimo_pull_ts se conserva como sello estricto.)
-      if (!silencioso && resDownload.fallidas == 0) {
+      if (resDownload.fallidas == 0) {
         // 1.24.2: ultimo_pull_ts SOLO con la bajada limpia —
         // es el sello que Buscar presenta como «Actualizado»;
         // sellarlo con filas fallidas mentía (M3-H03).
+        // 1.35 (SP-00): los ciclos SILENCIOSOS también
+        // sellan — bajan cambios a diario dentro del push y
+        // sin sello el cartel del Directorio gritaba «24 h
+        // sin bajar cambios» con la bajada de hace un rato
+        // hecha. La condición sigue siendo la estricta:
+        // bajada completa y limpia (fallidas == 0); una
+        // corrida silenciosa que no bajó limpio no sella.
         await _db.setMeta('ultimo_pull_ts', isoHabana(ahoraHabana()));
+      } else if (resDownload.aplicadas > 0) {
+        // 1.35 (SP-00): bajada PARCIAL con filas aplicadas:
+        // se sella aparte (ultimo_pull_parcial_ts) para que
+        // el cartel diga la verdad entera — la última
+        // bajada COMPLETA sigue siendo la del sello
+        // estricto, pero cambios sí bajaron en esta.
+        await _db.setMeta(
+            'ultimo_pull_parcial_ts', isoHabana(ahoraHabana()));
       }
       // v1.3.0: pull de incidencias (tipos → incidencias, orden por FK).
       // Fix #11 (Sol): si falla, no se marca last_pull_ok general.
