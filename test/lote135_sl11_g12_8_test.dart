@@ -28,15 +28,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-Future<void> _drenar(WidgetTester tester,
-    {int vueltas = 16, int ms = 120}) async {
-  for (var i = 0; i < vueltas; i++) {
-    await tester.runAsync(
-        () => Future<void>.delayed(Duration(milliseconds: ms)));
-    await tester.pump(const Duration(milliseconds: 60));
-  }
-}
-
 Future<bool> _esperar(WidgetTester tester, bool Function() cond,
     {int intentos = 30}) async {
   for (var i = 0; i < intentos; i++) {
