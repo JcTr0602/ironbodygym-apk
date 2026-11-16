@@ -170,6 +170,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // (T60) se refrescan al teclear nombre/teléfono.
     _nombre.addListener(_refrescar);
     _telefono.addListener(_refrescar);
+    // SL-3 (G02-1): días y monto del personalizado también
+    // alimentan la barra de pasos (su estado sale de ellos).
+    _dias.addListener(_refrescar);
+    _monto.addListener(_refrescar);
     _carnet.addListener(_actualizarEsMenor);
     // Q5 (cola 1.20): el aviso «parece teléfono» depende de
     // AMBOS campos: también se recalcula al teclear el
@@ -802,27 +806,59 @@ class _InscribirScreenState extends State<InscribirScreen> {
     if (mounted) setState(() {});
   }
 
+  /// SL-3 (G02-1): ¿la membresía pasaría el guardado? La
+  /// MISMA regla de _guardarAhora: en Casa no hay cobro
+  /// (completa sin pago); con período personalizado hacen
+  /// falta días y monto válidos (el guardado rechaza
+  /// «Indica días y monto válidos»); con cualquier otro
+  /// período, la selección siempre trae un período válido.
+  /// Antes la barra copiaba el estado de «Datos» y daba la
+  /// membresía por completa con datos que el guardado
+  /// rechazaba.
+  bool get _membresiaOkSegunGuardado {
+    if (_cuentaCasa) return true;
+    if (_periodo != 'personalizado') return true;
+    final v = double.tryParse(_monto.text.trim().replaceAll(',', '.'));
+    return _diasPeriodo() > 0 && v != null && v.isFinite && v > 0;
+  }
+
   /// 1.25 T61: barra de pasos «Datos → Membresía →
   /// Foto» con su progreso. El paso activo es el primero
-  /// incompleto; tocar un paso salta a su sección. La
-  /// validación de cada paso es la misma del guardado
-  /// (nombre escrito; teléfono vacío o válido) y la
-  /// membresía siempre trae un período válido por
-  /// defecto — en Casa cuenta como completa sin cobro.
+  /// incompleto; tocar un paso salta a su sección.
+  /// SL-3 (G02-1): cada paso deriva su estado de las
+  /// MISMAS validaciones del guardado — Datos: nombre,
+  /// teléfono vacío o sanitizable, carnet vacío o válido
+  /// y, con «crear acceso», teléfono válido de 8 dígitos;
+  /// Membresía: [_membresiaOkSegunGuardado]. Foto es
+  /// OPCIONAL: se marca «opcional», nunca «pendiente», y
+  /// no bloquea el progreso ni el paso activo.
   Widget _barraPasos() {
     final tel = _telefono.text.trim();
     // 1.29 (FB-07): el paso «Datos» valida lo mismo que el
     // guardado: vacío o sanitizable a 8 dígitos.
+    final telSano = tel.isEmpty ? '' : (sanitizarTelefono(tel) ?? '');
+    final carnetDigitos = _carnet.text.replaceAll(RegExp(r'[^0-9]'), '');
     final datosOk = _nombre.text.trim().isNotEmpty &&
-        (tel.isEmpty || sanitizarTelefono(tel) != null);
-    final pasos = <({String etiqueta, bool ok, GlobalKey clave})>[
-      (etiqueta: 'Datos', ok: datosOk, clave: _claveDatos),
-      (etiqueta: 'Membresía', ok: datosOk, clave: _claveMembresia),
-      (etiqueta: 'Foto', ok: _foto != null, clave: _claveFoto),
+        (tel.isEmpty || sanitizarTelefono(tel) != null) &&
+        (carnetDigitos.isEmpty || validarCarnet(carnetDigitos)) &&
+        (!_crearAccesoApp || validarTelefono(telSano));
+    final pasos = <({String etiqueta, bool ok, bool opcional, GlobalKey clave})>[
+      (etiqueta: 'Datos', ok: datosOk, opcional: false, clave: _claveDatos),
+      (
+        etiqueta: 'Membresía',
+        ok: _membresiaOkSegunGuardado,
+        opcional: false,
+        clave: _claveMembresia
+      ),
+      (
+        etiqueta: 'Foto',
+        ok: _foto != null,
+        opcional: true,
+        clave: _claveFoto
+      ),
     ];
-    var activo = pasos.indexWhere((p) => !p.ok);
-    if (activo < 0) activo = pasos.length - 1;
-    final completos = pasos.where((p) => p.ok).length;
+    final activo = pasos.indexWhere((p) => !p.ok && !p.opcional);
+    final completos = pasos.where((p) => p.ok || p.opcional).length;
     return Material(
       color: AppColores.superficie(context),
       child: Padding(
@@ -880,15 +916,27 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                     ? AppColores.naranja
                                     : AppColores.borde(context),
                             child: Icon(
+                              // SL-3 (G02-1): el paso
+                              // opcional sin completar no
+                              // es un «pendiente»: lleva su
+                              // icono propio, no el punto
+                              // de paso incompleto.
                               pasos[i].ok
                                   ? Icons.check_rounded
-                                  : Icons.circle,
-                              size: pasos[i].ok ? 13 : 6,
+                                  : pasos[i].opcional
+                                      ? Icons.photo_camera_rounded
+                                      : Icons.circle,
+                              size: pasos[i].ok || pasos[i].opcional
+                                  ? 13
+                                  : 6,
                               color: Colors.white,
                             ),
                           ),
                           const SizedBox(width: AppEspacio.xs),
-                          Text(pasos[i].etiqueta,
+                          Text(
+                              pasos[i].opcional
+                                  ? '${pasos[i].etiqueta} · opcional'
+                                  : pasos[i].etiqueta,
                               style: AppTexto.etiqueta.copyWith(
                                   // 1.30 D1 (UI130-03): el paso
                                   // activo es TEXTO de marca:
