@@ -190,6 +190,24 @@ bool lecturaIdsSinEvidencia({
     suplementoId == null &&
     (!clienteOk || !suplementoOk);
 
+/// 1.35 (SP-01, BLOQUEANTE): desenlace de un intento de
+/// vinculación. Hasta la 1.34 `_vincularFotoCliente` devolvía en
+/// silencio cuando el cliente no estaba en el espejo y la fila se
+/// marcaba 'completada' igual: la op 'foto' nunca se encolaba y
+/// los bytes quedaban huérfanos en Storage (caso Claudia, 240).
+/// Desde la 1.35 el desenlace se DEVUELVE y la transacción de
+/// completado decide con ese dato:
+/// - [vinculada]: espejo actualizado y op 'foto'/'foto_suplemento'
+///   encolada — la foto puede completarse.
+/// - [superada]: otra foto más nueva porta (o portará) el enlace;
+///   completar sin vincular es legítimo, con constancia en AppLog.
+/// - [espejoSinEntidad]: la entidad aún NO está en el espejo (un
+///   cliente nuevo entra por pull, y la pasada de fotos corre en
+///   la misma pierna de push que aplicó su inscripción). NO es
+///   «cliente eliminado»: la fila vuelve a 'pendiente' conservando
+///   storage_path, jamás a 'completada'.
+enum ResultadoVinculacion { vinculada, superada, espejoSinEntidad }
+
 class FotosColaService {
   FotosColaService._();
   static final FotosColaService instance = FotosColaService._();
@@ -576,6 +594,11 @@ class FotosColaService {
     // v1.13.0 (G5): barrido de huérfanas viejas (filas en 'error'
     // por problemas del op padre, escritas por el código anterior).
     await _descartarHuerfanasViejas(db);
+
+    // 1.35 (SP-01): red de autocura — fotos 'completada' cuyo
+    // espejo no enlaza ninguna foto vuelven a 'pendiente' para
+    // vincular de verdad. Dentro del lease: un solo worker barre.
+    await reencolarVinculacionesPerdidas();
 
     // Caza Fotos L1-MEDIA (Argón): limpiarHuerfanos solo se
     // invocaba a mano desde Ajustes; en el ciclo normal nadie lo
@@ -1054,6 +1077,11 @@ class FotosColaService {
         // v1.2.9+43 (Gemini Ronda 2): transacción blindada con try/catch.
         // Verifica ownership ANTES, vincula, y marca completada AL FINAL.
         bool exitoVinculacion = false;
+        // 1.35 (SP-01): la vinculación quedó pendiente porque la
+        // entidad aún no está en el espejo — desenlace propio,
+        // distinto del fallo: no quema intentos ni va a 'error'
+        // hasta agotar la ventana amplia (ver la rama posterior).
+        bool pendienteEspejo = false;
         try {
           await db.transaction((txn) async {
             // 1. Verificar que el worker sigue siendo dueño exclusivo
@@ -1086,7 +1114,43 @@ class FotosColaService {
 
             // 3. Vincular primero (si falla, la transacción hace rollback)
             if (debeVincular) {
-              await _vincularEnTransaccion(txn, id, fFresco, storagePath);
+              final resultadoVinc = await _vincularEnTransaccion(
+                  txn, id, fFresco, storagePath);
+              if (resultadoVinc == ResultadoVinculacion.espejoSinEntidad) {
+                // 1.35 (SP-01, BLOQUEANTE): el espejo aún no tiene
+                // a la entidad (cliente nuevo que entra por pull;
+                // esta pasada corre en la misma pierna de push que
+                // aplicó su inscripción). NO es «eliminado» y la
+                // fila NO se marca 'completada': vuelve a
+                // 'pendiente' con backoff corto CONSERVANDO
+                // storage_path (los bytes ya están en Storage y
+                // _subirUna los reutiliza sin re-subir), hasta que
+                // un pull traiga a la entidad y la vinculación
+                // encole su op 'foto'. Sin quemar intentos: el
+                // fallo no es de la foto.
+                await txn.update(
+                  'fotos_cola',
+                  {
+                    'estado': 'pendiente',
+                    'storage_path': storagePath,
+                    'worker_id': null,
+                    'lease_hasta': null,
+                    'proximo_intento_en': isoHabana(ahoraHabana()
+                        .add(const Duration(minutes: 2))),
+                    'actualizado_en': isoHabana(ahoraHabana()),
+                  },
+                  where: 'id = ? AND worker_id = ?',
+                  whereArgs: [id, workerId],
+                );
+                pendienteEspejo = true;
+                return;
+              }
+              if (resultadoVinc == ResultadoVinculacion.superada) {
+                AppLog.info('fotos', 'completada_superada',
+                    d: 'id=$id tipo=${f['tipo']}: completa sin '
+                        'vincular; el enlace lo porta una foto '
+                        'más nueva');
+              }
             }
 
             // 4. Marcar completada SOLO tras confirmar posesión y vinculación
@@ -1119,6 +1183,42 @@ class FotosColaService {
 
         if (exitoVinculacion) {
           subidas++;
+        } else if (pendienteEspejo) {
+          // 1.35 (SP-01): la foto espera a que el espejo traiga a
+          // la entidad. La espera no es infinita: si la fila lleva
+          // más de 24 h desde su creación sin que el espejo la
+          // traiga, pasa a 'error' VISIBLE con texto humano (la
+          // ventana amplia de la corrección) en vez de completar
+          // en silencio o esperar para siempre.
+          AppLog.aviso('fotos', 'vinculacion_esperando_espejo',
+              d: 'id=$id tipo=${f['tipo']}: la entidad aún no '
+                  'está en el espejo; vinculación pendiente con '
+                  'storage_path conservado');
+          final creadaEn =
+              DateTime.tryParse('${fFresco['creado_en'] ?? ''}');
+          if (creadaEn != null &&
+              ahoraHabana().difference(creadaEn) >
+                  const Duration(hours: 24)) {
+            final aError = await db.update(
+              'fotos_cola',
+              {
+                'estado': 'error',
+                'ultimo_error':
+                    'La foto no pudo enlazarse: el cliente no '
+                        'aparece en este teléfono',
+                'worker_id': null,
+                'lease_hasta': null,
+                'actualizado_en': isoHabana(ahoraHabana()),
+              },
+              where: "id = ? AND estado = 'pendiente'",
+              whereArgs: [id],
+            );
+            if (aError == 1) {
+              AppLog.error('fotos', 'vinculacion_espejo_vencida',
+                  d: 'id=$id: >24 h esperando el espejo; a error '
+                      'visible');
+            }
+          }
         } else {
           // Argón #8-3: un fallo determinista de vinculación (ej.
           // JSON corrupto) NO puede reintentarse para siempre sin
@@ -1730,14 +1830,20 @@ class FotosColaService {
     }
   }
 
-  Future<void> _vincularEnTransaccion(
+  /// 1.35 (SP-01): devuelve el desenlace de la vinculación
+  /// ([ResultadoVinculacion]) en vez de tragar los no-op: quien
+  /// marca 'completada' decide con ese dato.
+  Future<ResultadoVinculacion> _vincularEnTransaccion(
       dynamic txn, int fotoId, Map<String, dynamic> f, String storagePath) async {
     final opUuid = f['op_uuid'] as String;
     var clienteId = f['cliente_id'] as int?;
     var suplementoId = f['suplemento_id'] as int?;
 
     if (clienteId == null && suplementoId == null) {
-      return;
+      // Sin entidad resuelta no hay vinculación posible: no se
+      // completa en silencio (defensivo; el despachador solo
+      // llega aquí con ids resueltos).
+      return ResultadoVinculacion.espejoSinEntidad;
     }
 
     // Caza Fotos L2-ALTA (Argón): precedencia contra la COLA, no
@@ -1761,7 +1867,12 @@ class FotosColaService {
     if (masNueva > 0) {
       debugPrint('[Fotos] Foto $fotoId superada por una más nueva '
           'en la cola; no se vincula.');
-      return;
+      // 1.35 (SP-01): completar sin vincular SOLO por esta vía
+      // (otra foto portará el enlace), con constancia en AppLog.
+      AppLog.info('fotos', 'vinculacion_superada',
+          d: 'id=$fotoId op=$opUuid: una foto más nueva en la '
+              'cola portará el enlace');
+      return ResultadoVinculacion.superada;
     }
 
     // v1.2.9+43 (Gemini R2): UUID v5 determinista, compatible con RFC 4122.
@@ -1775,7 +1886,7 @@ class FotosColaService {
         'foto:${f['op_uuid']}:$tipoVariante');
 
     if (clienteId != null) {
-      await _vincularFotoCliente(
+      return _vincularFotoCliente(
           txn, clienteId, opUuid, storagePath, opUuidDeterminista);
     } else if (suplementoId != null) {
       // v1.2.9+43 (Gemini R3): sin catch silencioso. Si falla, la
@@ -1785,34 +1896,36 @@ class FotosColaService {
           where: 'id = ?',
           whereArgs: [suplementoId],
           limit: 1);
-      if (rows.isNotEmpty) {
-        final raw = rows.first['data'];
-        final data = Map<String, dynamic>.from(
-            raw is String ? jsonDecode(raw) : raw as Map);
+      // 1.35 (SP-01): espejo sin el suplemento = vinculación
+      // pendiente, no completado silencioso (antes la op se
+      // encolaba sin espejo y la fila completaba igual).
+      if (rows.isEmpty) return ResultadoVinculacion.espejoSinEntidad;
+      final raw = rows.first['data'];
+      final data = Map<String, dynamic>.from(
+          raw is String ? jsonDecode(raw) : raw as Map);
 
-        // Verificar precedencia: no sobrescribir foto más nueva.
-        final fotoUuidVigente = data['foto_uuid'] as String?;
-        if (fotoUuidVigente != null && fotoUuidVigente != opUuid) {
-          // B-20: mismo criterio temporal que en clientes.
-          if (await _esFotoRealmenteMasNueva(
-              txn, fotoUuidVigente, opUuid)) {
-            debugPrint(
-                '[Fotos] Suplemento $suplementoId ya tiene foto más nueva.');
-            return;
-          }
-          debugPrint('[Fotos] Suplemento $suplementoId: el '
-              'espejo traía una foto más vieja; vincula la actual.');
+      // Verificar precedencia: no sobrescribir foto más nueva.
+      final fotoUuidVigente = data['foto_uuid'] as String?;
+      if (fotoUuidVigente != null && fotoUuidVigente != opUuid) {
+        // B-20: mismo criterio temporal que en clientes.
+        if (await _esFotoRealmenteMasNueva(
+            txn, fotoUuidVigente, opUuid)) {
+          debugPrint(
+              '[Fotos] Suplemento $suplementoId ya tiene foto más nueva.');
+          return ResultadoVinculacion.superada;
         }
-
-        data['foto_storage'] = storagePath;
-        data['foto_uuid'] = opUuid;
-        // Argón #8-4: foto_local apuntaba al archivo en fotosDir que
-        // limpiarHuerfanos borra a los 7 días; con foto_storage ya
-        // vinculado, la UI baja de la nube en vez de un archivo muerto.
-        data.remove('foto_local');
-        await txn.update('suplementos', {'data': jsonEncode(data)},
-            where: 'id = ?', whereArgs: [suplementoId]);
+        debugPrint('[Fotos] Suplemento $suplementoId: el '
+            'espejo traía una foto más vieja; vincula la actual.');
       }
+
+      data['foto_storage'] = storagePath;
+      data['foto_uuid'] = opUuid;
+      // Argón #8-4: foto_local apuntaba al archivo en fotosDir que
+      // limpiarHuerfanos borra a los 7 días; con foto_storage ya
+      // vinculado, la UI baja de la nube en vez de un archivo muerto.
+      data.remove('foto_local');
+      await txn.update('suplementos', {'data': jsonEncode(data)},
+          where: 'id = ?', whereArgs: [suplementoId]);
       await txn.insert('ops_queue', {
         'op_uuid': opUuidDeterminista,
         'tipo': 'foto_suplemento',
@@ -1826,7 +1939,10 @@ class FotosColaService {
         // v1.3.3 (Argón): no dejar la op huérfana si cambia la sesión.
         ..._identidadSegura(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      return ResultadoVinculacion.vinculada;
     }
+    // Inalcanzable: arriba se descartó el caso sin ids.
+    return ResultadoVinculacion.espejoSinEntidad;
   }
 
   /// Vincula foto a cliente: mirror local + op para Supabase.
@@ -1860,7 +1976,15 @@ class FotosColaService {
     return otro.compareTo(actual) >= 0;
   }
 
-  Future<void> _vincularFotoCliente(dynamic db, int clienteId,
+  /// 1.35 (SP-01): devuelve el desenlace. Que el cliente no esté
+  /// en el espejo NO es «cliente eliminado»: un cliente nuevo solo
+  /// entra al espejo por pull, y la pasada de fotos puede correr
+  /// en la misma pierna de push que aplicó su inscripción, antes
+  /// de cualquier pull. Ese caso es `espejoSinEntidad` y la fila
+  /// NO puede completarse (antes devolvía en silencio y la foto
+  /// se perdía marcada 'completada').
+  Future<ResultadoVinculacion> _vincularFotoCliente(dynamic db,
+      int clienteId,
       String opUuid, String storagePath, String opUuidDeterminista) async {
     final rows = await db.query(
       'clientes',
@@ -1869,7 +1993,7 @@ class FotosColaService {
       whereArgs: [clienteId],
       limit: 1,
     );
-    if (rows.isEmpty) return; // Cliente eliminado.
+    if (rows.isEmpty) return ResultadoVinculacion.espejoSinEntidad;
 
     Map<String, dynamic> data;
     try {
@@ -1895,7 +2019,7 @@ class FotosColaService {
       // manda es la que se está vinculando y se sigue.
       if (await _esFotoRealmenteMasNueva(db, fotoUuidVigente, opUuid)) {
         debugPrint('[Fotos] Foto más nueva existe, no sobrescribo mirror.');
-        return;
+        return ResultadoVinculacion.superada;
       }
       debugPrint('[Fotos] El espejo traía una foto más vieja '
           '(posible reversión por pull): vincula la actual.');
@@ -1930,6 +2054,7 @@ class FotosColaService {
       // v1.3.3 (Argón): no dejar la op huérfana si cambia la sesión.
       ..._identidadSegura(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return ResultadoVinculacion.vinculada;
   }
 
 
@@ -2051,6 +2176,112 @@ class FotosColaService {
     return (r.first['n'] as int? ?? 0);
   }
 
+  /// ¿El espejo del cliente enlaza una foto? Devuelve:
+  /// - true: enlaza ESTA foto (foto_uuid == opUuid) u OTRA
+  ///   (foto_uuid/foto_storage presentes): nada que rescatar.
+  /// - false: el cliente ESTÁ en el espejo y no enlaza ninguna
+  ///   foto: la vinculación se perdió.
+  /// - null: el cliente no está en el espejo (aún) o su JSON es
+  ///   ilegible: no se puede concluir pérdida.
+  Future<bool?> _espejoEnlazaFoto(
+      dynamic db, int clienteId, String opUuid) async {
+    final rows = await db.query('clientes',
+        columns: ['data'],
+        where: 'id = ?',
+        whereArgs: [clienteId],
+        limit: 1);
+    if (rows.isEmpty) return null;
+    try {
+      final raw = rows.first['data'];
+      final data = Map<String, dynamic>.from(
+          raw is String ? jsonDecode(raw) : raw as Map);
+      final fotoUuid = data['foto_uuid'] as String?;
+      final fotoStorage = data['foto_storage'] as String?;
+      if (fotoUuid == opUuid) return true;
+      if ((fotoUuid != null && fotoUuid.isNotEmpty) ||
+          (fotoStorage != null && fotoStorage.isNotEmpty)) {
+        return true; // enlaza otra foto: esta quedó superada
+      }
+      return false;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 1.35 (SP-01): red de autocura de vinculaciones perdidas.
+  /// Cruza las fotos 'completada' de cliente cuyo espejo YA tiene
+  /// al cliente pero no enlaza NINGUNA foto: la subida fue real
+  /// (storage_path conservado) pero el enlace se perdió — caza
+  /// también los casos ya perdidos en otros teléfonos antes de
+  /// esta corrección. Re-encola la vinculación devolviendo la
+  /// fila a 'pendiente' con storage_path intacto (_subirUna lo
+  /// reutiliza: no se re-suben bytes). Solo actúa sobre la
+  /// variante que porta el enlace: 'display' siempre; 'original'
+  /// solo si su 'display' no puede portarlo (ausente o en
+  /// 'error'). Si el espejo enlaza OTRA foto, esta quedó superada
+  /// de verdad y no se toca. Devuelve cuántas re-encoló.
+  Future<int> reencolarVinculacionesPerdidas() async {
+    final db = await LocalDb.instance.db;
+    var reencoladas = 0;
+    try {
+      final candidatas = await db.query(
+        'fotos_cola',
+        columns: ['id', 'op_uuid', 'tipo', 'cliente_id', 'storage_path'],
+        where: "estado = 'completada' AND cliente_id IS NOT NULL "
+            "AND storage_path IS NOT NULL AND storage_path != '' "
+            "AND tipo IN ('display', 'original')",
+        orderBy: 'creado_en ASC',
+        limit: 200,
+      );
+      for (final fila in candidatas) {
+        if (reencoladas >= 50) break;
+        final opUuid = fila['op_uuid'] as String;
+        final clienteId = fila['cliente_id'] as int;
+        final tipo = fila['tipo'] as String;
+        final enlaza = await _espejoEnlazaFoto(db, clienteId, opUuid);
+        if (enlaza != false) continue;
+        if (tipo == 'original') {
+          // La 'display' de la misma foto manda: si existe y no
+          // está en 'error', ella porta (o portará) el enlace —
+          // su propia fila se re-encola en este mismo barrido si
+          // también quedó completada sin enlazar.
+          final disp = await db.query('fotos_cola',
+              columns: ['estado'],
+              where: 'op_uuid = ? AND tipo = ?',
+              whereArgs: [opUuid, 'display'],
+              limit: 1);
+          if (disp.isNotEmpty && disp.first['estado'] != 'error') {
+            continue;
+          }
+        }
+        final n = await db.update(
+          'fotos_cola',
+          {
+            'estado': 'pendiente',
+            'intentos': 0,
+            'ultimo_error': null,
+            'worker_id': null,
+            'lease_hasta': null,
+            'proximo_intento_en': null,
+            'actualizado_en': isoHabana(ahoraHabana()),
+          },
+          where: "id = ? AND estado = 'completada'",
+          whereArgs: [fila['id']],
+        );
+        if (n == 1) {
+          reencoladas++;
+          AppLog.aviso('fotos', 'vinculacion_rescatada',
+              d: 'id=${fila['id']} op=$opUuid tipo=$tipo: '
+                  'completada sin enlace en el espejo; '
+                  're-encolada conservando storage_path');
+        }
+      }
+    } catch (e) {
+      AppLog.error('fotos', 'autocura_vinculacion_fallo', d: '$e');
+    }
+    return reencoladas;
+  }
+
   /// Fix Luna 7: elimina archivos huérfanos (en disco pero no en la cola,
   /// o de filas 'completada' hace más de 7 días). Las filas en
   /// 'error' no se tocan (B-13: su archivo es la única copia).
@@ -2080,11 +2311,26 @@ class FotosColaService {
           isoHabana(ahoraHabana().subtract(const Duration(days: 7)));
       final viejas = await db.query(
         'fotos_cola',
-        columns: ['id', 'ruta_local', 'suplemento_id', 'cliente_id'],
+        columns: [
+          'id', 'ruta_local', 'suplemento_id', 'cliente_id', 'op_uuid',
+          'tipo'
+        ],
         where: "estado = 'completada' AND actualizado_en < ?",
         whereArgs: [limite],
       );
       for (final v in viejas) {
+        // 1.35 (SP-01): una completada cuyo espejo existe pero no
+        // enlaza ninguna foto NO se purga: su enlace se perdió y
+        // la red de autocura la rescata re-encolando la
+        // vinculación. Purgarla borraría el storage_path, la
+        // única pista del rescate.
+        final cliIdPre = v['cliente_id'] as int?;
+        if (cliIdPre != null &&
+            (v['tipo'] == 'display' || v['tipo'] == 'original')) {
+          final enlazaPre = await _espejoEnlazaFoto(
+              db, cliIdPre, v['op_uuid'] as String);
+          if (enlazaPre == false) continue;
+        }
         try {
           final f = File(v['ruta_local'] as String);
           if (await f.exists()) await f.delete();
