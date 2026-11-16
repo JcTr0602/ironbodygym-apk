@@ -40,7 +40,7 @@ void main() {
         theme: AppTema.tacticoOscuro(),
         home: Scaffold(
           body: GraficoBarrasDiarias(
-            datos: [
+            datos: const [
               {'fecha': '2026-11-14', 'total': 5},
               {'fecha': '2026-11-15', 'total': 9},
               {'fecha': '2026-11-16', 'total': 30},
