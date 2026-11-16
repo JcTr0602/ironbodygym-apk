@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
@@ -40,6 +41,7 @@ import 'package:ironbody_gym/ui/lupa_universal.dart';
 import 'package:ironbody_gym/ui/pago.dart';
 import 'package:ironbody_gym/ui/pago_diario.dart';
 import 'package:ironbody_gym/ui/pendiente.dart';
+import 'package:ironbody_gym/ui/por_decidir.dart';
 import 'package:ironbody_gym/ui/pilar_clientes.dart';
 import 'package:ironbody_gym/ui/pilar_negocio.dart';
 import 'package:ironbody_gym/ui/publicador.dart';
@@ -265,6 +267,31 @@ Future<void> _volver(WidgetTester tester) async {
 Future<void> _irAPilar(WidgetTester tester, String key) async {
   await tester.tap(find.byKey(ValueKey(key)));
   await _drenar(tester, vueltas: 5, ms: 80);
+}
+
+/// 1.35 (FASE 4, M-8): toca un tramo del titular del
+/// Mostrador («cobrados» / «por recoger»). El titular
+/// es un Text.rich cuyos tramos llevan reconocedores
+/// de toque: no hay un widget por tramo que buscar,
+/// así que se calcula la caja del tramo en el párrafo
+/// renderizado y se toca su centro.
+Future<void> _tocarTramoTitular(
+    WidgetTester tester, String tramo) async {
+  final titulares = find.byWidgetPredicate((w) =>
+      w is Text &&
+      w.textSpan != null &&
+      w.textSpan!.toPlainText().contains('Hoy:'));
+  expect(titulares, findsOneWidget,
+      reason: 'el titular grafito del día está pintado');
+  final parrafo = tester.renderObject<RenderParagraph>(titulares);
+  final plano = parrafo.text.toPlainText();
+  final i = plano.indexOf(tramo);
+  expect(i, greaterThanOrEqualTo(0),
+      reason: 'el tramo «$tramo» vive en el titular: $plano');
+  final cajas = parrafo.getBoxesForSelection(
+      TextSelection(baseOffset: i, extentOffset: i + tramo.length));
+  expect(cajas, isNotEmpty);
+  await tester.tapAt(parrafo.localToGlobal(cajas.first.toRect().center));
 }
 
 void main() {
@@ -599,7 +626,21 @@ void main() {
       await tester.tap(find.text('Centro de sincronización'));
       await _drenar(tester, vueltas: 6, ms: 80);
       expect(find.byType(CentroSyncScreen), findsOneWidget);
-      expect(find.text('En este teléfono'), findsOneWidget);
+      // 1.35 (FASE 4, adjudicación): la expectativa vieja
+      // («En este teléfono») ya estaba rota en la base —
+      // ese texto exacto nunca existió; el subtítulo real
+      // de la sección de conteos locales es el de abajo y
+      // se trae rodando, como el Historial.
+      await tester.scrollUntilVisible(
+          find.text('Detalle técnico'), 200,
+          scrollable: find
+              .descendant(
+                  of: find.byType(CentroSyncScreen),
+                  matching: find.byType(Scrollable))
+              .first);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('Conteos por tabla en este teléfono'),
+          findsOneWidget);
       // «Historial» vive bajo el pliegue (lista perezosa):
       // se trae rodando, como en el teléfono.
       await tester.scrollUntilVisible(
@@ -688,31 +729,38 @@ void main() {
       await _cerrarCascara(tester);
     });
 
-    testWidgets('Pulso del dueño: «Cobrado hoy» → Dashboard y '
-        '«Por recoger» → Pendiente', (tester) async {
+    // 1.35 (FASE 4, M-8/M-4): el contrato nuevo del
+    // pulso del dueño. La tarjeta de celdas («Cobrado
+    // hoy» / «Por recoger») se jubiló: el titular
+    // grafito dice el día en una línea y sus dos
+    // tramos mandan — «cobrados» abre el Dashboard y
+    // «por recoger» ya no navega a Pendiente: BAJA
+    // hasta Por Decidir en el mismo Mostrador. Los
+    // tramos son spans con reconocedor dentro del
+    // Text.rich del titular: se tocan por su caja
+    // real en el párrafo renderizado.
+    testWidgets('Titular del dueño (M-8/M-4): «cobrados» → '
+        'Dashboard y «por recoger» baja a Por Decidir',
+        (tester) async {
       await _montarHome(tester, _sesionDueno);
-      await tester.scrollUntilVisible(find.text('Cobrado hoy'), 200,
-          scrollable: find
-              .descendant(
-                  of: find.byType(HomeScreen),
-                  matching: find.byType(Scrollable))
-              .first);
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.tap(find.text('Cobrado hoy'));
+      await _drenar(tester, vueltas: 6, ms: 80);
+      await _tocarTramoTitular(tester, 'cobrados');
       await _drenar(tester, vueltas: 6, ms: 80);
       expect(find.byType(DashboardScreen), findsOneWidget);
       await _volver(tester);
-      await tester.scrollUntilVisible(find.text('Por recoger'), 200,
-          scrollable: find
-              .descendant(
-                  of: find.byType(HomeScreen),
-                  matching: find.byType(Scrollable))
-              .first);
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.tap(find.text('Por recoger'));
-      await _drenar(tester, vueltas: 6, ms: 80);
-      expect(find.byType(PendienteScreen), findsOneWidget);
-      await _volver(tester);
+      await _tocarTramoTitular(tester, 'por recoger');
+      await _drenar(tester, vueltas: 8, ms: 80);
+      // No navega a ninguna pantalla: Por Decidir
+      // queda a la vista en el propio Mostrador.
+      expect(find.byType(PendienteScreen), findsNothing);
+      final bandeja = find.byType(BandejaPorDecidir);
+      expect(bandeja, findsOneWidget);
+      final rect = tester.getRect(bandeja);
+      final alto = tester.view.physicalSize.height /
+          tester.view.devicePixelRatio;
+      expect(rect.top, lessThan(alto),
+          reason: 'la bandeja entró en la pantalla');
+      expect(rect.bottom, greaterThan(0));
       _sinExcepciones(tester);
       await _cerrarCascara(tester);
     });
