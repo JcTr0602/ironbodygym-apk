@@ -1689,13 +1689,33 @@ class _HomeScreenState extends State<HomeScreen>
       }
       if (ctxFoto?.flujo == 'ficha_cliente') {
         final id = int.tryParse(ctxFoto?.entidadId ?? '');
+        if (id == null) {
+          await limpiarContextoFoto();
+          return;
+        }
+        // G#26 (Hy4): el contexto se limpia DESPUÉS de
+        // encolar, no antes — si encolarFoto lanzaba (el
+        // archivo recuperado falta o está corrupto), el
+        // contexto ya estaba borrado: la foto no se volvía
+        // a ofrecer nunca y nadie avisaba. Ahora el fallo
+        // se ve y el contexto queda para reintentarlo (o
+        // descartarlo) en el próximo arranque.
+        try {
+          await FotosColaService.instance.encolarFoto(
+            opUuid: const Uuid().v4(),
+            clienteId: id,
+            rutaOriginal: rec.archivo.path,
+          );
+        } catch (e) {
+          AppLog.error('home', 'foto_recuperada_encolar_fallo',
+              d: '$e');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'No se pudo recuperar la foto elegida. Se volverá a ofrecer al abrir la app; también puedes elegirla de nuevo desde la ficha.')));
+          return;
+        }
         await limpiarContextoFoto();
-        if (id == null) return;
-        await FotosColaService.instance.encolarFoto(
-          opUuid: const Uuid().v4(),
-          clienteId: id,
-          rutaOriginal: rec.archivo.path,
-        );
         LocalDb.limpiarFotoEliminadaSesion(id);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
