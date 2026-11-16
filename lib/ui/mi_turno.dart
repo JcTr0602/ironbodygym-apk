@@ -118,6 +118,10 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   // no la pantalla en ceros; y el chip de cabecera sale
   // del turno REAL de hoy (turnoVisible), no del reloj.
   bool _cargando = true;
+  // SL-11 (G12-1): la carga fallida se DICE con EstadoError:
+  // antes el fallo se tragaba y la pantalla pintaba
+  // «Cobrado hoy 0 CUP» (dinero) como si fuera el dato.
+  bool _errorCarga = false;
   Map<String, dynamic>? _turnoVisible;
   // 1.28 (M3-B6): el último turno propio cerrado
   // automáticamente (olvidado) aún no reconocido: su aviso
@@ -139,6 +143,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
   Future<void> _cargar() async {
     try {
       await _cargarDatos();
+      if (mounted) setState(() => _errorCarga = false);
+    } catch (e) {
+      // SL-11 (G12-1): el fallo NO se disfraza de ceros:
+      // queda en bitácora y la pantalla muestra el error.
+      AppLog.error('mi_turno', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       // 1.25 T84: la carga inicial termina siempre,
       // también si la lectura falla a mitad.
@@ -1095,7 +1105,15 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             child: _cargando
                 ? const EstadoCargando(
                     texto: 'Cargando tu turno…')
-                : RefrescoIron(
+                : _errorCarga
+                    ? EstadoError(
+                        detalle: 'No se pudieron cargar los datos '
+                            'de tu turno. Lo que haya cobrado hoy '
+                            'no se puede mostrar hasta que la '
+                            'lectura funcione.',
+                        onReintentar: _cargar,
+                      )
+                    : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
