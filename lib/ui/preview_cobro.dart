@@ -212,13 +212,10 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
                 children: [
-                  const Text(
-                    'Revisa antes de confirmar: al confirmar se guarda '
-                    'el cobro en el teléfono.',
-                    textAlign: TextAlign.center,
-                    style: AppTexto.metadato,
-                  ),
-                  const SizedBox(height: 12),
+                  // SL-4 · G10-13: la nota que competía con el
+                  // total sale de la vista previa (la sync la
+                  // dice la cabecera de la app, una sola vez).
+                  const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,
                     child: BotonPrimario(
@@ -247,9 +244,13 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                     ),
                   ],
                   const SizedBox(height: 8),
+                  // SL-4 · G10-13: «Cancelar» es la acción
+                  // secundaria (texto, sin borde ni ancho que
+                  // compita): la única acción que pesa aquí
+                  // es «Confirmar cobro».
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton(
+                    child: TextButton(
                       onPressed: () =>
                           Navigator.of(context).pop('cancelar'),
                       child: const Text('Cancelar'),
