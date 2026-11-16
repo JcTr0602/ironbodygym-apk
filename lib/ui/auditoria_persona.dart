@@ -17,7 +17,7 @@ import '../auditoria_persona.dart';
 import '../app_log.dart';
 import '../auth.dart';
 import '../localdb.dart';
-import '../negocio.dart' show fmtMonto;
+import '../negocio.dart' show fmtFecha, fmtMonto;
 import '../tiempo.dart';
 import '../turnos_resolucion.dart';
 import 'app_bar.dart';
@@ -25,6 +25,17 @@ import 'auditoria.dart' show descripcionOp, payloadDeOp, tiposOpSensibles;
 import 'componentes.dart';
 import 'skeleton.dart';
 import 'diseno.dart';
+
+/// SL-2 G03-7: fecha legible (DD/MM/AAAA) de una marca ISO
+/// de la auditoría por persona. El resumen ya calculaba su
+/// período en texto legible (textoPeriodoLegible); las
+/// filas de turnos y de acciones pintaban el ISO crudo con
+/// substring(0, 10). Delega en fmtFecha de la casa.
+String fechaLegibleAuditoria(Object? iso) {
+  final s = '${iso ?? ''}';
+  if (s.length < 10) return '—';
+  return fmtFecha(s.substring(0, 10));
+}
 
 class AuditoriaPersonaScreen extends StatefulWidget {
   // 1.25 T112: embebida = pestaña del Centro de control.
@@ -558,7 +569,9 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   }
 
   Widget _lineaTurno(TurnoAuditado t) {
-    final f = isoFechaTurno(t.fecha);
+    // SL-2 G03-7: la fila pinta la fecha legible; el ISO
+    // queda para las comparaciones internas.
+    final f = fechaLegibleAuditoria(isoFechaTurno(t.fecha));
     final franja = t.franja == 'manana' ? 'Mañana' : 'Tarde';
     final partes = <String>[];
     if (t.noApertura) {
@@ -666,9 +679,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
                     SizedBox(
                       width: 84,
                       child: Text(
-                          '${op['creada_ts'] ?? ''}'.length >= 10
-                              ? '${op['creada_ts']}'.substring(0, 10)
-                              : '',
+                          fechaLegibleAuditoria(op['creada_ts']),
                           style: AppTexto.metadato),
                     ),
                     Expanded(
