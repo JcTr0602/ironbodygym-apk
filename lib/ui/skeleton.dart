@@ -146,14 +146,19 @@ class SkeletonDashboard extends StatelessWidget {
         SizedBox(height: 16),
         SkeletonLinea(ancho: 100, alto: 16),
         SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(child: SkeletonTarjeta()),
-            SizedBox(width: 8),
-            Expanded(child: SkeletonTarjeta()),
-            SizedBox(width: 8),
-            Expanded(child: SkeletonTarjeta()),
-          ],
+        // 1.35 (UX-12): la fila de ingresos es UNA banda
+        // segmentada — el esqueleto enseña una sola pieza
+        // ancha con sus tres huecos, no tres tarjetas.
+        Tarjeta(
+          child: Row(
+            children: [
+              Expanded(child: SkeletonLinea(ancho: 70, alto: 26)),
+              SizedBox(width: 16),
+              Expanded(child: SkeletonLinea(ancho: 70, alto: 26)),
+              SizedBox(width: 16),
+              Expanded(child: SkeletonLinea(ancho: 70, alto: 26)),
+            ],
+          ),
         ),
         SizedBox(height: 16),
         SkeletonTarjeta(),

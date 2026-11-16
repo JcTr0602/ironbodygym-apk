@@ -476,6 +476,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           : 'CUP')),
             ],
           ),
+          // 1.35 (UX-12): la comparativa contra el mes
+          // anterior vive INTEGRADA en el héroe — deja de
+          // ser una tarjeta suelta bajo los ingresos. El
+          // dato y su condición son los de siempre (solo
+          // con mes anterior > 0).
+          if (_mesAnterior > 0) ...[
+            const SizedBox(height: 12),
+            const Divider(color: Colors.white24, height: 1),
+            const SizedBox(height: 10),
+            Builder(builder: (context) {
+              final diff = _mes - _mesAnterior;
+              final pct = diff / _mesAnterior * 100;
+              final sube = diff >= 0;
+              return Row(
+                children: [
+                  Icon(
+                      sube
+                          ? Icons.trending_up_rounded
+                          : Icons.trending_down_rounded,
+                      size: 20,
+                      color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      sube
+                          ? 'Sube ${pct.toStringAsFixed(0)}% vs mes anterior '
+                              '(${fmtMonto(_mesAnterior)} CUP)'
+                          : 'Baja ${pct.abs().toStringAsFixed(0)}% vs mes anterior '
+                              '(${fmtMonto(_mesAnterior)} CUP)',
+                      style: AppTexto.secundario
+                          .copyWith(color: Colors.white),
+                    ),
+                  ),
+                ],
+              );
+            }),
+          ],
         ],
       ),
     );
@@ -881,31 +918,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _tarjetaIngreso(
-      String titulo, double valor, IconData icono, VoidCallback onTap) {
-    return Expanded(
-      child: Tarjeta(
-        onTap: onTap,
-        padding:
-            const EdgeInsets.symmetric(vertical: AppEspacio.lg, horizontal: AppEspacio.sm),
-        child: Column(
+  /// 1.35 (UX-12): la banda segmentada de ingresos — las
+  /// tres cifras (hoy, 7 días, este mes) en UNA tarjeta,
+  /// con «hoy» encendida (tinte y cifra en la marca) y
+  /// cada segmento tocable a su detalle, como lo eran
+  /// las tres tarjetas de antes. Ni un dato más, ni uno
+  /// menos.
+  Widget _bandaIngresos() {
+    return Tarjeta(
+      padding: EdgeInsets.zero,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadio.lg),
+        child: Row(
           children: [
-            Icon(icono, color: AppColores.textoSecundario(context), size: 24),
-            const SizedBox(height: 8),
-            Text(titulo,
-                style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
-            const SizedBox(height: 2),
-            MontoAnimado(
-                valor: valor,
-                formato: fmtMonto,
-                style: AppTexto.metrica.copyWith(color: naranja)),
-            Text('CUP',
-                style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context))),
-            const SizedBox(height: 4),
-            Icon(Icons.touch_app_rounded,
-                size: 14,
-                color: AppColores.textoSecundario(context)),
+            _segmentoIngreso('Hoy', _hoy, Icons.today_rounded,
+                () => _detalleIngresos('hoy'),
+                encendida: true),
+            _segmentoIngreso('7 días', _semana,
+                Icons.date_range_rounded,
+                () => _detalleIngresos('semana')),
+            _segmentoIngreso('Este mes', _mes,
+                Icons.calendar_month_rounded,
+                () => _detalleIngresos('mes')),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _segmentoIngreso(String titulo, double valor,
+      IconData icono, VoidCallback onTap,
+      {bool encendida = false}) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          color: encendida
+              ? AppColores.naranja.withValues(alpha: 0.12)
+              : null,
+          padding: const EdgeInsets.symmetric(
+              vertical: AppEspacio.lg, horizontal: AppEspacio.sm),
+          child: Column(
+            children: [
+              Icon(icono,
+                  color: encendida
+                      ? AppColores.naranja
+                      : AppColores.textoSecundario(context),
+                  size: 24),
+              const SizedBox(height: 8),
+              Text(titulo,
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context))),
+              const SizedBox(height: 2),
+              MontoAnimado(
+                  valor: valor,
+                  formato: fmtMonto,
+                  style: AppTexto.metrica.copyWith(
+                      color: encendida
+                          ? AppColores.naranja
+                          : AppColores.texto(context))),
+              Text('CUP',
+                  style: AppTexto.minuscula.copyWith(
+                      color: AppColores.textoSecundario(context))),
+            ],
+          ),
         ),
       ),
     );
@@ -918,46 +994,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) _cargar();
   }
 
-  /// v1.0.15: comparativa vs mes anterior.
-  Widget _comparativaMes() {
-    if (_mesAnterior <= 0) return const SizedBox.shrink();
-    final diff = _mes - _mesAnterior;
-    final pct = _mesAnterior > 0 ? diff / _mesAnterior * 100 : 0.0;
-    final sube = diff >= 0;
-    return Container(
-      padding: const EdgeInsets.all(AppEspacio.md),
-      decoration: BoxDecoration(
-        color: sube
-            ? AppColores.exito.withValues(alpha: 0.12)
-            : AppColores.error.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadio.md),
-        border: Border.all(
-            color: sube
-                ? AppColores.exito.withValues(alpha: 0.35)
-                : AppColores.error.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Icon(sube ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-              size: 20,
-              color: sube ? AppColores.exito : AppColores.error),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              sube
-                  ? 'Sube ${pct.toStringAsFixed(0)}% vs mes anterior '
-                      '(${fmtMonto(_mesAnterior)} CUP)'
-                  : 'Baja ${pct.abs().toStringAsFixed(0)}% vs mes anterior '
-                      '(${fmtMonto(_mesAnterior)} CUP)',
-              style: AppTexto.secundario.copyWith(color: sube
-                      ? AppColores.exito
-                      : AppColores.error),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   /// v1.0.15: desgloses por método y tipo + proyección.
   /// D2 (panel 2026-10-21): AMBOS bloques incluyen Suplementos y
@@ -1628,23 +1664,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const EncabezadoSeccion(titulo: 'Hoy hay que…'),
                   _bloqueHoyHayQue(),
                   const EncabezadoSeccion(titulo: 'Ingresos'),
-                  Row(
-                    children: [
-                      _tarjetaIngreso('Hoy', _hoy, Icons.today_rounded,
-                          () => _detalleIngresos('hoy')),
-                      const SizedBox(width: 8),
-                      _tarjetaIngreso('7 días', _semana,
-                          Icons.date_range_rounded, () => _detalleIngresos('semana')),
-                      const SizedBox(width: 8),
-                      _tarjetaIngreso('Este mes', _mes,
-                          Icons.calendar_month_rounded, () => _detalleIngresos('mes')),
-                    ],
-                  ),
-                  // v1.0.15: comparativa vs mes anterior
-                  if (_mesAnterior > 0) ...[
-                    const SizedBox(height: 8),
-                    _comparativaMes(),
-                  ],
+                  // 1.35 (UX-12): las tres cifras de ingreso
+                  // pasan a UNA banda segmentada, con «hoy»
+                  // encendida; cada segmento conserva su
+                  // destino (el detalle del período).
+                  _bandaIngresos(),
                   // Gráfico con selector de período (v1.0.15: 7 o 30 días)
                   Row(
                     children: [
@@ -1779,15 +1803,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                   // Q3 (Argón): el ranking degrada a UNA fila
                   // compacta al final, sin trofeos.
+                  // 1.35 (UX-12): los dos entrenadores se
+                  // COMPARAN en la portada — nombre, cifra y
+                  // su barra proporcional — con los mismos
+                  // datos de siempre (los dos primeros del
+                  // ranking del mes).
                   if (_ranking.length > 1) ...[
                     const EncabezadoSeccion(
                         titulo: 'Ranking del mes'),
                     Tarjeta(
                       padding: const EdgeInsets.all(AppEspacio.md),
-                      child: Text(
-                        'Mes: ${_ranking.take(2).toList().asMap().entries.map((e) => '${e.key + 1}° ${e.value['nombre']} (${fmtMonto(e.value['total'])} CUP)').join(' · ')}',
-                        style: AppTexto.secundario,
-                      ),
+                      child: Builder(builder: (context) {
+                        final dos = _ranking.take(2).toList();
+                        final maximo = dos
+                            .map((e) =>
+                                (e['total'] as num?)?.toDouble() ??
+                                0)
+                            .fold<double>(0, (m, v) => v > m ? v : m);
+                        return Column(
+                          children: [
+                            for (var i = 0; i < dos.length; i++) ...[
+                              if (i > 0)
+                                const SizedBox(
+                                    height: AppEspacio.md),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                        '${i + 1}° ${dos[i]['nombre'] ?? ''}',
+                                        style: AppTexto.cuerpo,
+                                        maxLines: 1,
+                                        overflow:
+                                            TextOverflow.ellipsis),
+                                  ),
+                                  Text(
+                                      '${fmtMonto((dos[i]['total'] as num?)?.toDouble() ?? 0)} CUP',
+                                      style: AppTexto.cuerpo.copyWith(
+                                          fontWeight:
+                                              FontWeight.w700)),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Container(
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: AppColores.borde(context),
+                                  borderRadius:
+                                      BorderRadius.circular(4),
+                                ),
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: maximo <= 0
+                                      ? 0
+                                      : (((dos[i]['total'] as num?)
+                                                  ?.toDouble() ??
+                                              0) /
+                                          maximo),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: i == 0
+                                          ? AppColores.naranja
+                                          : AppColores.naranja
+                                              .withValues(alpha: 0.45),
+                                      borderRadius:
+                                          BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        );
+                      }),
                     ),
                     const SizedBox(height: 16),
                   ],
