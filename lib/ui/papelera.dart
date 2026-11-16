@@ -27,7 +27,6 @@ import 'dialogo_pago.dart';
 import 'diseno.dart';
 import 'preview_cobro.dart';
 import 'ficha.dart';
-import 'widgets.dart';
 
 class PapeleraScreen extends StatefulWidget {
   const PapeleraScreen({super.key});
