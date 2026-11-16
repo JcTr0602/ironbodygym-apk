@@ -749,6 +749,13 @@ class AppMovimiento {
   /// Cifras protagonistas que cuentan hasta su valor.
   static const larga = Duration(milliseconds: 300);
 
+  /// El desplazamiento deliberado hasta un bloque lejano
+  /// (el «bajar a Por Decidir» del Mostrador, M-4): recorre
+  /// media pantalla y por eso dura más que una transición
+  /// ordinaria. Nace en la corrección de UI-13 (1.35): el
+  /// gesto vivía como literal de 450 ms en home.dart.
+  static const desplazamiento = Duration(milliseconds: 450);
+
   /// Curva de entrada del sistema (la de la ruta desde 1.22).
   static const curva = Curves.easeOutCubic;
 
