@@ -48,6 +48,12 @@ class DetalleEntrenadorScreen extends StatefulWidget {
 
 class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   bool _cargando = true;
+  // Hy4 G#38: generación de carga — el bloque
+  // reinicio+acumulación+publicación es síncrono, pero
+  // una carga del filtro viejo que termina después que
+  // la del nuevo dejaba SUS totales bajo el filtro
+  // nuevo; la guarda va ANTES del reinicio de campos.
+  int _genCarga = 0;
   // 0 = semana, 1 = mes, 2 = últimos 90 días (rodantes;
   // F3-27: antes se llamaba «trimestre» y no lo era).
   int _filtro = 1;
@@ -104,6 +110,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   }
 
   Future<void> _cargarDatos() async {
+    final gen = ++_genCarga;
     setState(() => _cargando = true);
     _miTid = widget.telegramId ??
         await telegramIdDeEntrenador(widget.nombre);
@@ -163,6 +170,10 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
         nombrePorId[id] = '${c['nombre'] ?? 'Cliente $id'}';
       }
     }
+
+    // Hy4 G#38: si el filtro cambió mientras esta carga
+    // leía, no toca los campos compartidos ni publica.
+    if (gen != _genCarga) return;
 
     _total = 0;
     _nCobros = 0;
