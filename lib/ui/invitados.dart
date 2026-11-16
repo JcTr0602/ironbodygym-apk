@@ -703,14 +703,45 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   /// convertidas se conservan 90 días desde la conversión. La
   /// confirmación previa explica el alcance con el conteo.
   Future<void> _limpiarCaducados() async {
-    final n = _listaVisible.length;
+    // Lote 1.35 (SL-1 · A-18): la RPC purga TODOS los vencidos
+    // del servidor, no la página visible (≤50): confirmar con
+    // el conteo de la vista era confirmar 3 y purgar 7. El
+    // diálogo pide el TOTAL fresco al servidor (resumen) y lo
+    // muestra antes de confirmar; si la lectura falla, manda
+    // el último conteo conocido de cabecera. Sin total fiable
+    // NO se purga: confirmar un número menor que el real es
+    // el defecto, no un detalle de forma.
+    var total = _conteos?.caducados;
+    try {
+      final fresco = await _svc.resumen();
+      if (fresco?.caducados != null) total = fresco!.caducados;
+    } catch (_) {
+      // Sin lectura fresca: manda el conteo conocido.
+    }
+    if (!mounted) return;
+    if (total == null) {
+      mostrarSnack(
+          context,
+          'No se pudo confirmar cuántos caducados hay en el '
+          'servidor: la limpieza purga TODOS, no solo los que '
+          'ves. Revisa la conexión e inténtalo de nuevo.',
+          significado: SignificadoChip.error);
+      return;
+    }
+    final n = total;
+    final conBusqueda = _busqueda.isNotEmpty;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Limpiar caducados'),
         content: Text(
           'Se eliminarán las $n cuentas de invitado caducadas '
-          'que están a la vista.\n\nLas ya convertidas en clientes '
+          'que hay en el servidor (en esta vista se ven '
+          '${_listaVisible.length}). La limpieza alcanza a '
+          'todas, también a las que no están cargadas aquí.'
+          '${conBusqueda ? '\n\nOjo: tienes una búsqueda activa, '
+              'pero la purga es global: no se limita a lo que '
+              'ves.' : ''}\n\nLas ya convertidas en clientes '
           'se conservan 90 días desde su conversión y no se tocan '
           'aquí. Esta acción no se puede deshacer.',
         ),
@@ -1662,12 +1693,45 @@ class InvitadoDetalleScreen extends StatefulWidget {
 
 /// F3-20: traducción del estado crudo del invitado a
 /// lenguaje llano para la tarjeta de Datos.
+/// Lote 1.35 (SL-1 · G12-7): la rama por defecto ya no
+/// devuelve la clave cruda — un estado futuro se lee como
+/// «Estado registrado», no como su nombre interno.
 String _estadoLegibleInvitado(String estado) => switch (estado) {
       'activo' => 'Activo',
       'en_conversion' => 'Convirtiéndose en cliente',
       'convertido' => 'Ya es cliente',
-      _ => estado,
+      'caducado' => 'Caducado',
+      _ => 'Estado registrado',
     };
+
+/// Lote 1.35 (SL-1 · G12-7): traducción de una acción del
+/// equipo sobre el invitado a lenguaje llano (la tarjeta
+/// «Acciones del equipo»). La rama por defecto era la clave
+/// cruda (`resetear_pin` y cualquier acción futura salían tal
+/// cual a pantalla): ahora las conocidas tienen su texto y
+/// las desconocidas se leen «Acción registrada».
+String textoAccionStaffInvitado(AccionStaffInvitado a) {
+  final motivo = a.detalle['motivo'] as String?;
+  final dias = (a.detalle['dias'] as num?)?.toInt();
+  final base = switch (a.accion) {
+    'plus_cortesia' => '🎁 Dio Plus de cortesía'
+        '${dias != null ? ' ($dias días)' : ''}',
+    'plus_quitar' => '🚫 Quitó el Plus',
+    'vida_extender' => '⏳ Extendió la vida'
+        '${dias != null ? ' (+$dias días)' : ''}',
+    'eliminar_invitado' => '🗑 Eliminó la cuenta',
+    'resetear_pin' => '🔑 Restableció el PIN de acceso',
+    'ajustar_clave' => '🔑 Ajustó la clave de acceso',
+    'resetear_pin_cliente' => '🔑 Restableció el PIN de acceso',
+    'revocar' => '🚫 Revocó el acceso',
+    'reactivar' => '✅ Reactivó el acceso',
+    _ => 'Acción registrada',
+  };
+  return '$base'
+      '${a.actor != null ? ' · ${a.actor}' : ''}'
+      '${a.fecha != null ? ' · ${fmtFecha(a.fecha!.toIso8601String())}' : ''}'
+      '${motivo != null ? ' · «$motivo»' : ''}';
+}
 
 class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   // 1.32 (H-B5-1): la misma costura de test que la lista —
@@ -2061,31 +2125,29 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     }
   }
 
-  /// 1.25 T119 (F3-20): barra de acción fija del detalle —
-  /// las dos acciones que dan valor (escribir y convertir)
-  /// vivían enterradas tras 7-8 tarjetas de scroll. La de
-  /// convertir solo aparece en el mismo caso en que la
-  /// tarjeta de conversión muestra su botón (sin preparar ni
-  /// en curso), y llama al mismo método.
+  /// 1.25 T119 (F3-20): barra de acción fija del detalle.
+  /// Lote 1.35 (SL-1 · G12-3): ya no lleva WhatsApp ni
+  /// Convertir (duplicaban la tarjeta de acciones y la de
+  /// conversión); solo «Reanudar inscripción» cuando una
+  /// conversión quedó preparada (T87).
   Widget? _barraAccionesDetalle() {
     final d = _d;
     if (d == null || _cargando) return null;
-    final hayWa = normalizarTelefonoWaMe(d.telefono).isNotEmpty;
     final reanudar = reanudarPara(
         local: _local, enServidor: d.conversionPreparada);
-    // 1.35 (campo nº 14 de Clientes): convertir también se
-    // ofrece sin conexión (la caché lo permite solo para
-    // esta acción; _convertir abre su flujo sin red).
-    final puedeConvertir = !d.convertido &&
-        reanudar == ReanudarConversion.ninguna;
-    // 1.25 T87: la acción DEL MOMENTO también es
-    // reanudar: si la conversión quedó preparada, la
-    // barra la ofrece a un toque (antes solo vivía en
-    // su tarjeta, tras el scroll).
+    // Lote 1.35 (SL-1 · G12-3, VIS aprobada por Jc): la barra
+    // REPETÍA WhatsApp y Convertir, que ya viven en la
+    // tarjeta de acciones y en la tarjeta de conversión —
+    // tres superficies para las mismas dos acciones. Queda
+    // UNA superficie por acción: Convertir en su tarjeta y
+    // WhatsApp en la de acciones. La barra conserva solo
+    // «Reanudar inscripción» (1.25 T87), la acción del
+    // momento cuando una conversión quedó preparada, que no
+    // duplica a ninguna de las dos.
     final puedeReanudar =
         reanudar == ReanudarConversion.abrirInscribir &&
             !_offlineCache;
-    if (!hayWa && !puedeConvertir && !puedeReanudar) {
+    if (!puedeReanudar) {
       return null;
     }
     return SafeArea(
@@ -2094,34 +2156,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
             AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
         child: Row(
           children: [
-            if (hayWa)
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.chat_rounded, size: 18),
-                  label: const Text('WhatsApp'),
-                  onPressed: _whatsapp,
-                ),
+            Expanded(
+              child: FilledButton.icon(
+                icon: const Icon(Icons.play_arrow_rounded,
+                    size: 18),
+                label: const Text('Reanudar inscripción'),
+                onPressed: _actuando ? null : _reanudar,
               ),
-            if (hayWa && (puedeConvertir || puedeReanudar))
-              const SizedBox(width: AppEspacio.sm),
-            if (puedeConvertir)
-              Expanded(
-                child: FilledButton.icon(
-                  icon: const Icon(Icons.person_add_rounded,
-                      size: 18),
-                  label: const Text('Convertir en cliente'),
-                  onPressed: _actuando ? null : _convertir,
-                ),
-              ),
-            if (puedeReanudar)
-              Expanded(
-                child: FilledButton.icon(
-                  icon: const Icon(Icons.play_arrow_rounded,
-                      size: 18),
-                  label: const Text('Reanudar inscripción'),
-                  onPressed: _actuando ? null : _reanudar,
-                ),
-              ),
+            ),
           ],
         ),
       ),
@@ -2890,8 +2932,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
         case 'reporte_rechazado':
           return '↩️ Reporte rechazado · $fecha'
               '${h.motivo != null ? ' · «${h.motivo}»' : ''}';
+        case 'resetear_pin':
+          return '🔑 PIN de acceso restablecido · $fecha';
         default:
-          return '${h.tipo} · $fecha';
+          // G12-7: nunca la clave cruda a pantalla.
+          return 'Acción registrada · $fecha';
       }
     }
 
@@ -2996,24 +3041,8 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   /// v1.8.0 — Historial de acciones de staff (diseño §5.7):
   /// responde «¿quién le regaló el Plus / le extendió la vida?».
   Widget _tarjetaStaff(InvitadoDetalle d) {
-    String textoAccion(AccionStaffInvitado a) {
-      final motivo = a.detalle['motivo'] as String?;
-      final dias = (a.detalle['dias'] as num?)?.toInt();
-      final base = switch (a.accion) {
-        'plus_cortesia' => '🎁 Dio Plus de cortesía'
-            '${dias != null ? ' ($dias días)' : ''}',
-        'plus_quitar' => '🚫 Quitó el Plus',
-        'vida_extender' => '⏳ Extendió la vida'
-            '${dias != null ? ' (+$dias días)' : ''}',
-        'eliminar_invitado' => '🗑 Eliminó la cuenta',
-        _ => a.accion,
-      };
-      return '$base'
-          '${a.actor != null ? ' · ${a.actor}' : ''}'
-          '${a.fecha != null ? ' · ${fmtFecha(a.fecha!.toIso8601String())}' : ''}'
-          '${motivo != null ? ' · «$motivo»' : ''}';
-    }
-
+    // G12-7: el traductor vive fuera como
+    // textoAccionStaffInvitado (testeable y sin clave cruda).
     return Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3024,7 +3053,7 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
           for (final a in d.staffAcciones)
             Padding(
               padding: const EdgeInsets.only(bottom: AppEspacio.xs),
-              child: Text(textoAccion(a),
+              child: Text(textoAccionStaffInvitado(a),
                   style: AppTexto.secundario),
             ),
         ],
@@ -3207,6 +3236,16 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     // Ronda 3-9 #10: ajustar acceso es de dueño o admin (la UI ya
     // lo oculta; esto frena un cambio de sesión a mitad).
     if (!AuthService().isOwner && !AuthService().isAdmin) return;
+    // Lote 1.35 (SL-1 · A-22): la MISMA guarda offline que sus
+    // hermanas (_atender, _accionUnica, _eliminar). Era la
+    // única acción destructiva del detalle sin ella: con la
+    // ficha en caché (datos sin verificar) se podía revocar el
+    // acceso del invitado y dejarlo fuera con una clave nueva
+    // asentada sobre datos viejos.
+    if (_offlineCache) {
+      _snack('Sin conexión: el detalle está en solo lectura.');
+      return;
+    }
     final d = _d!;
     // 1.29 (Oleada 4, barrido): el diálogo vive en un
     // StatefulWidget dueño de su controlador
@@ -3302,6 +3341,11 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
   bool _cargando = true;
   bool _guardando = false;
   String? _error;
+  // Lote 1.35 (SL-1 · A-20): claves del último guardado en
+  // bloque que NO se aplicaron (pendientes de publicar, con
+  // reintento durable): se enseñan en la pantalla, no solo en
+  // un aviso pasajero.
+  Map<String, String> _pendientesInfo = {};
   // v1.6.0 (Jc): el horario ya NO se edita en esta pantalla: la
   // fuente única es el horario del sistema («Horario del Gym»).
   // Aquí se muestra en solo lectura y al guardar se republica como
@@ -3399,13 +3443,27 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
     }
     setState(() => _guardando = true);
     try {
-      for (final e in cambios.entries) {
-        await _svc.guardarInfoPublica(e.key, e.value);
-      }
+      // Lote 1.35 (SL-1 · A-20): guardado EN BLOQUE con
+      // reintento durable (antes: una RPC inmediata por clave
+      // y un corte a mitad dejaba claves mezcladas en
+      // silencio). Lo no aplicado queda pendiente, visible
+      // aquí y en el aviso, y la sync lo reintenta sola.
+      final quedan = await _svc.guardarInfoPublicaEnBloque(cambios);
       if (!mounted) return;
-      mostrarSnack(context, 'Información pública actualizada: la app de '
-              'clientes la verá en su próxima sincronización', significado: SignificadoChip.exito);
-      await _cargar();
+      setState(() => _pendientesInfo = quedan);
+      if (quedan.isEmpty) {
+        mostrarSnack(context, 'Información pública actualizada: la app de '
+                'clientes la verá en su próxima sincronización', significado: SignificadoChip.exito);
+        await _cargar();
+      } else {
+        mostrarSnack(context,
+            'Se guardó una parte y ${quedan.length} '
+            '${quedan.length == 1 ? 'clave quedó' : 'claves quedaron'} '
+            'pendiente(s) de publicar: se reintentan solas con '
+            'la próxima sincronización. Nada quedó a medias en '
+            'silencio.',
+            significado: SignificadoChip.alerta);
+      }
     } on InvitadoError catch (e) {
       if (!mounted) return;
       mostrarSnack(context, e.mensaje, significado: SignificadoChip.error);
@@ -3496,6 +3554,28 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
           'Deja un campo vacío para que no se muestre.',
           style: AppTexto.secundario,
         ),
+        // A-20: el pendiente de publicación se VE aquí hasta
+        // que se aplique (la sync lo reintenta sola); no es un
+        // aviso que pasa y se olvida.
+        if (_pendientesInfo.isNotEmpty) ...[
+          const SizedBox(height: AppEspacio.md),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppEspacio.md),
+            decoration: BoxDecoration(
+              color: AppColores.alerta.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadio.md),
+            ),
+            child: Text(
+              '⏳ ${_pendientesInfo.length} '
+              '${_pendientesInfo.length == 1 ? 'clave pendiente' : 'claves pendientes'} '
+              'de publicar: el resto sí se aplicó. Se reintentan '
+              'solas con la próxima sincronización.',
+              style: AppTexto.cuerpo.copyWith(
+                  fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
         const SizedBox(height: AppEspacio.md),
         for (final c in clavesInfoPublica) ...[
           // v1.6.0 (Jc): el horario ya no es un campo editable
