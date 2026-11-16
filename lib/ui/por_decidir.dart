@@ -417,8 +417,12 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
         // 1.35 (M-3): el guardián de arriba ya devolvió
         // shrink con valor null o 0 — aquí valor siempre
         // es un entero > 0 verificado (de ahora o de foto).
-        trailing: Text(
-                deFoto ? '$valor · foto' : '$valor',
+        // SL-5B G07-11: la cifra se asienta con
+        // MontoAnimado, no salta en un Text crudo.
+        trailing: MontoAnimado(
+                valor: (valor ?? 0).toDouble(),
+                formato: (v) =>
+                    deFoto ? '${v.toInt()} · foto' : '${v.toInt()}',
                 style: AppTexto.conTabulares(
                     AppTexto.subtitulo.copyWith(
                         fontWeight: FontWeight.w700)),
