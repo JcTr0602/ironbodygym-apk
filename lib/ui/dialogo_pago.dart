@@ -1035,27 +1035,25 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
             ),
             const SizedBox(height: 8),
             const Text('Período:'),
-            DropdownButton<String>(
-              value: tipoSel.id,
-              isExpanded: true,
-              items: [
+            SelectorIron<String>(
+              valor: tipoSel.id,
+              tituloPanel: 'Período',
+              opciones: [
                 // v1.3.1 (Argón): tiposDisp ya excluye 'mensual' si
                 // menor == true; value y items siempre coinciden.
                 for (final t in tiposDisp)
-                  DropdownMenuItem(
-                      value: t.id,
-                      child: Text(
-                          // 1.25 T117 (F1-89): los días del tipo
-                          // van en la etiqueta (dos tipos con
-                          // igual monto y distinta duración ya
-                          // no se confunden). Mismo arreglo que
-                          // en Inscribir (F1-62).
-                          '${t.nombre} · ${t.dias} días · ${fmtMonto(montoEtiqueta(t))} CUP')),
-                const DropdownMenuItem(
-                    value: 'personalizado',
-                    child: Text('Personalizado…')),
+                  OpcionSelector(
+                      t.id,
+                      // 1.25 T117 (F1-89): los días del tipo
+                      // van en la etiqueta (dos tipos con
+                      // igual monto y distinta duración ya
+                      // no se confunden). Mismo arreglo que
+                      // en Inscribir (F1-62).
+                      '${t.nombre} · ${t.dias} días · ${fmtMonto(montoEtiqueta(t))} CUP'),
+                const OpcionSelector(
+                    'personalizado', 'Personalizado…'),
               ],
-              onChanged: (v) => setState(() {
+              alCambiar: (v) => setState(() {
                 // v1.3.1: resetear meses/días al cambiar de tipo.
                 meses = 1;
                 diasCtrl.clear();
@@ -1087,18 +1085,14 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                 tipoSel.id == 'menores') ...[
               const SizedBox(height: 8),
               const Text('Meses:'),
-              DropdownButton<int>(
-                value: meses,
-                isExpanded: true,
-                items: [
+              SelectorIron<int>(
+                valor: meses,
+                tituloPanel: 'Meses',
+                opciones: [
                   for (final m in [1, 2, 3, 6, 12])
-                    DropdownMenuItem(
-                        value: m,
-                        child: Text(
-                            '$m mes${m == 1 ? '' : 'es'}')),
+                    OpcionSelector(m, '$m mes${m == 1 ? '' : 'es'}'),
                 ],
-                onChanged: (v) =>
-                    setState(() => meses = v ?? 1),
+                alCambiar: (v) => setState(() => meses = v ?? 1),
               ),
             ],
             if (tipoSel.id == 'personalizado') ...[
