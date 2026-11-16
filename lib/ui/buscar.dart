@@ -2245,9 +2245,18 @@ class _FilaClienteState extends State<_FilaCliente> {
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
                               horizontal: AppEspacio.sm),
-                          minimumSize: Size.zero,
+                          // 1.35 (UI-24): la «próxima
+                          // acción» medía 21 dp de alto
+                          // tocable (minimumSize cero +
+                          // shrinkWrap): es el atajo de
+                          // cobrar/avisar de la fila y pasa
+                          // al objetivo de 48 de la casa,
+                          // con el mismo glifo y la misma
+                          // letra — crece la caja, no el
+                          // contenido.
+                          minimumSize: const Size(64, 48),
                           tapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
+                              MaterialTapTargetSize.padded,
                           foregroundColor: AppColores.naranja,
                         ),
                         onPressed: widget.accionPrincipal!.alTocar,
@@ -2325,7 +2334,11 @@ class _FilaClienteState extends State<_FilaCliente> {
                         icon: const Icon(Icons.chat_rounded,
                             color: AppColores.whatsapp),
                         tooltip: 'Avisar por WhatsApp',
-                        visualDensity: VisualDensity.compact,
+                        // 1.35 (UI-24): sin densidad
+                        // compacta — el botón medía 40 dp
+                        // de alto tocable; a densidad
+                        // estándar toca los 48 de la casa
+                        // sin cambiar el glifo ni la fila.
                         onPressed: widget.accionWhatsapp,
                       )
                     : Icon(Icons.chevron_right_rounded,

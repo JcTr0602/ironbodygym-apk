@@ -561,10 +561,19 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
                 // el título (2 líneas con elipsis) gana el
                 // aire que el botón ancho le quitaba con
                 // nombres compuestos a 360 dp.
+                // 1.35 (UI-24): medido — con la densidad
+                // compacta el botón tocaba 40 dp: la
+                // densidad compacta descuenta 8 dp del
+                // mínimo resuelto, así que ni el suelo de
+                // 48 del tema ni un minimumSize explícito
+                // mandan con ella puesta. Fuera la densidad
+                // compacta y declarado el mínimo de la
+                // casa; el relleno horizontal que protege
+                // el título no se toca.
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppEspacio.sm),
-                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(64, 48),
                 ),
                 onPressed: () => _liquidarRapido(e),
                 child: const Text('Liquidar Arqueo'),
