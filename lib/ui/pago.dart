@@ -506,6 +506,19 @@ class _PagoScreenState extends State<PagoScreen> {
                 u.clienteId!, {'pagado_hasta': null});
           }
         }
+        // G#18 (Hy4): el sello de procedencia tampoco
+        // sobrevive a la op deshecha — la vía de la vista
+        // previa ya lo limpiaba (YS-5) y esta no: si el
+        // sello quedara apuntando a la op borrada, un cobro
+        // ANTERIOR aún en vuelo y rechazado después vería
+        // la procedencia de la op deshecha y NO revertiría
+        // su vencimiento falso. La limpieza es condicional
+        // al uuid: si un cobro posterior ya selló el suyo,
+        // no se toca.
+        if (u.clienteId != null) {
+          await LocalDb.instance
+              .limpiarProcedenciaPago(u.clienteId!, u.opUuid!);
+        }
         mostrarSnack(context, 'Pago deshecho (no había sido enviado)', significado: SignificadoChip.exito);
       } else {
         // 'enviada': ya va en camino al servidor, no se puede borrar.
