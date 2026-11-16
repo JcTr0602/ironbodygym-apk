@@ -152,6 +152,218 @@ Future<int> reintentarTodasFotosCola(
   );
 }
 
+/// 1.35 (CAMPO-9): UNA foto de la cola = el grupo de sus
+/// variantes (thumb/display/original) bajo el mismo
+/// `op_uuid`. La pantalla del panel enseña fotos, no
+/// variantes: la fila es la foto, identificada por su
+/// cliente, con el estado CONJUNTO de sus variantes y las
+/// acciones (reintentar/descartar) sobre la foto entera;
+/// las variantes viven dentro del detalle de la fila.
+class GrupoFotoCola {
+  GrupoFotoCola(this.opUuid, this.variantes);
+
+  final String opUuid;
+  final List<Map<String, dynamic>> variantes;
+
+  int? get clienteId {
+    for (final v in variantes) {
+      final c = v['cliente_id'];
+      if (c is num) return c.toInt();
+    }
+    return null;
+  }
+
+  int? get suplementoId {
+    for (final v in variantes) {
+      final s = v['suplemento_id'];
+      if (s is num) return s.toInt();
+    }
+    return null;
+  }
+
+  /// Estado conjunto con prioridad: error > subiendo >
+  /// pendiente (el peor estado de una variante es el
+  /// estado que el usuario debe leer de la foto).
+  String get estadoConjunto {
+    if (variantes.any((v) => v['estado'] == 'error')) return 'error';
+    if (variantes.any((v) => v['estado'] == 'subiendo')) {
+      return 'subiendo';
+    }
+    return 'pendiente';
+  }
+
+  bool get algunaSubiendo =>
+      variantes.any((v) => v['estado'] == 'subiendo');
+
+  /// 1.35 (SP-09): la variante grande ('original') sigue
+  /// pendiente sin que nadie la haya forzado: está en la
+  /// espera QoS de la casa (sale cuando la cola de
+  /// operaciones lleva un rato vacía, o a los 15 min).
+  bool get originalEsperaQos => variantes.any((v) =>
+      v['tipo'] == 'original' &&
+      v['estado'] == 'pendiente' &&
+      ((v['forzar_qos'] as num?)?.toInt() ?? 0) != 1);
+
+  /// Ruta para la miniatura de la fila: la de pantalla si
+  /// está; si no, la miniatura; si no, la original.
+  String? get rutaMiniatura {
+    for (final tipo in const ['display', 'thumb', 'original']) {
+      for (final v in variantes) {
+        if (v['tipo'] == tipo) {
+          final r = v['ruta_local'];
+          if (r is String && r.isNotEmpty) return r;
+        }
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? variante(String tipo) {
+    for (final v in variantes) {
+      if (v['tipo'] == tipo) return v;
+    }
+    return null;
+  }
+
+  /// El instante más antiguo del grupo (cuándo se pidió
+  /// la foto), para ordenar y para «Solicitada: …».
+  String? get creadoEn {
+    String? menor;
+    for (final v in variantes) {
+      final c = v['creado_en'];
+      if (c is String && (menor == null || c.compareTo(menor) < 0)) {
+        menor = c;
+      }
+    }
+    return menor;
+  }
+}
+
+/// Agrupa las filas vivas de fotos_cola por `op_uuid`
+/// (CAMPO-9). Las variantes de cada grupo quedan en orden
+/// de presentación (thumb, display, original) y los
+/// grupos, por su instante más antiguo.
+List<GrupoFotoCola> agruparFotosCola(List<Map<String, dynamic>> filas) {
+  final porUuid = <String, List<Map<String, dynamic>>>{};
+  for (final f in filas) {
+    final uuid = '${f['op_uuid'] ?? ''}';
+    if (uuid.isEmpty) continue;
+    porUuid.putIfAbsent(uuid, () => []).add(f);
+  }
+  const ordenTipo = {'thumb': 0, 'display': 1, 'original': 2};
+  final grupos = porUuid.entries.map((e) {
+    final variantes = [...e.value]..sort((a, b) => (ordenTipo[a['tipo']] ?? 9)
+        .compareTo(ordenTipo[b['tipo']] ?? 9));
+    return GrupoFotoCola(e.key, variantes);
+  }).toList();
+  grupos.sort((a, b) => (a.creadoEn ?? '').compareTo(b.creadoEn ?? ''));
+  return grupos;
+}
+
+/// 1.35 (SP-05): conteos del panel POR FOTO, no por
+/// variante — el estado que cuenta es el conjunto del
+/// grupo (una foto con la original en error y las demás
+/// subidas es UNA foto con error, no tres pendientes).
+({int pendientes, int subiendo, int error}) conteosFotosPorFoto(
+    List<Map<String, dynamic>> filas) {
+  var p = 0, s = 0, e = 0;
+  for (final g in agruparFotosCola(filas)) {
+    switch (g.estadoConjunto) {
+      case 'error':
+        e++;
+      case 'subiendo':
+        s++;
+      default:
+        p++;
+    }
+  }
+  return (pendientes: p, subiendo: s, error: e);
+}
+
+/// 1.35 (SP-08): la fila de foto NUNCA pinta el
+/// `ultimo_error` crudo (excepciones con rutas y códigos
+/// internos): se traduce por CLASE a la frase de la casa.
+/// El texto crudo queda en la BD y en AppLog para el
+/// detalle técnico.
+String fraseErrorFoto(String? ultimoError) {
+  final e = (ultimoError ?? '').trim();
+  if (e.isEmpty) return 'No pudo subirse';
+  if (e.contains('vinculación')) {
+    return 'Llegó al servidor pero no pudo enlazarse';
+  }
+  if (e.contains('archivo no existe') ||
+      e.contains('archivo ilegible') ||
+      e.contains('archivo cambió') ||
+      e.contains('archivo del sistema')) {
+    return 'El archivo ya no está en este teléfono';
+  }
+  if (e.contains('ID de entidad nunca resuelto')) {
+    return 'No se pudo saber de quién es esta foto';
+  }
+  if (e.contains('SocketException') ||
+      e.contains('TimeoutException') ||
+      e.contains('HttpException') ||
+      e.contains('ClientException') ||
+      e.contains('tiempo de espera') ||
+      e.contains('conexión') ||
+      e.contains('red')) {
+    return 'La conexión falló al subirla';
+  }
+  return 'No pudo subirse';
+}
+
+/// 1.35 (SP-07): reintento POR FOTO — actúa sobre todas
+/// las variantes del grupo (cada una pasa por
+/// [reintentarFotoCola], con su filtro de autor y su
+/// cinturón de 'subiendo'). Devuelve cuántas filas se
+/// tocaron de verdad.
+Future<int> reintentarFotoGrupoCola(
+  Database db,
+  String opUuid, {
+  required bool esDueno,
+  required int? miTelegramId,
+}) async {
+  final filas = await db.query('fotos_cola',
+      columns: ['id'], where: 'op_uuid = ?', whereArgs: [opUuid]);
+  var tocadas = 0;
+  for (final f in filas) {
+    final r = await reintentarFotoCola(db, (f['id'] as num).toInt(),
+        esDueno: esDueno, miTelegramId: miTelegramId);
+    tocadas += r.tocadas;
+  }
+  return tocadas;
+}
+
+/// 1.35 (SP-07): descarte POR FOTO — borra TODAS las
+/// variantes del grupo (antes el botón borraba una sola
+/// fila y la foto «descartada» reaparecía con otra
+/// variante, contra lo que el diálogo prometía). La
+/// variante que esté 'subiendo' no se toca (cinturón
+/// H-01: no se le quita el lease al worker). Para el
+/// no-dueño, TODAS las variantes deben ser visibles
+/// para él (fail-closed). Devuelve las filas borradas.
+Future<int> descartarFotoGrupoCola(
+  Database db,
+  String opUuid, {
+  required bool esDueno,
+  required int? miTelegramId,
+}) async {
+  if (!esDueno) {
+    final filas = await db.query('fotos_cola',
+        columns: ['telegram_id'],
+        where: 'op_uuid = ?',
+        whereArgs: [opUuid]);
+    if (filas.isEmpty ||
+        filas.any((f) => !fotoVisibleParaActor(f,
+            esDueno: false, miTelegramId: miTelegramId))) {
+      return 0;
+    }
+  }
+  return db.delete('fotos_cola',
+      where: "op_uuid = ? AND estado != 'subiendo'",
+      whereArgs: [opUuid]);
+}
+
 /// 1.29 (Oleada 6, FA-06): etiqueta de autor para una op
 /// pendiente AJENA en la vista del DUEÑO («de Duany ·
 /// suben cuando él entre»): las ops de otra cuenta en
@@ -475,7 +687,9 @@ class _ColaScreenState extends State<ColaScreen> {
   bool _esDueno = false;
   // Ronda 17 M6-H2: candados anti-doble-toque en reintentos.
   final Set<String> _opsReintentando = {};
-  final Set<int> _fotosReintentando = {};
+  // 1.35 (CAMPO-9): el candado anti-doble-toque del
+  // reintento de fotos es por FOTO (op_uuid), no por fila.
+  final Set<String> _fotosReintentando = {};
   bool _reintentandoTodasFotos = false;
   // Corrección A4-D2: ¿hay internet AHORA? (de la foto de
   // estado del motor, refrescada sin bloquear la carga).
@@ -569,7 +783,14 @@ class _ColaScreenState extends State<ColaScreen> {
   int _pendientesSinAutor = 0;
   Map<int, String> _nombresPorTelegram = {};
   // v1.2.9+46: detalle de fotos pendientes/error para gestión.
-  List<Map<String, dynamic>> _fotosDetalle = [];
+  // 1.35 (CAMPO-9): el detalle son GRUPOS (una fila por foto);
+  // _nombresFotos identifica cada foto por su entidad
+  // ('c<clienteId>' / 's<suplementoId>' → nombre del espejo)
+  // y _fotosGruposExpandidos guarda qué grupos muestran sus
+  // variantes.
+  List<GrupoFotoCola> _fotosGrupos = [];
+  Map<String, String> _nombresFotos = {};
+  final Set<String> _fotosGruposExpandidos = {};
   bool _fotosExpandido = false;
   // Pasada (Argón): la expansión pinta una VENTANA de
   // filas (12); sin ella, expandir decodificaba hasta 50
@@ -608,29 +829,31 @@ class _ColaScreenState extends State<ColaScreen> {
 
 
   /// v1.3.1: permite descartar una foto pendiente (ej: sin cliente asociado).
-  Future<void> _cancelarFoto(int id) async {
-    // 1.24 Bloque 4 (H-01, cinturón): si el worker la está
-    // subiendo, no se descarta (la fila desaparecería a mitad
-    // de la subida y los bytes quedarían huérfanos). La UI ya
-    // no ofrece el botón en ese estado; esto cubre la ventana
-    // en que la fila cambió tras pintarse.
-    try {
-      final db0 = await LocalDb.instance.db;
-      final filas = await db0.query('fotos_cola',
-          columns: ['estado'], where: 'id = ?', whereArgs: [id]);
-      if (filas.isNotEmpty && '${filas.first['estado']}' == 'subiendo') {
-        if (mounted) {
-          mostrarSnack(
-              context, 'Esa foto se está subiendo ahora mismo',
-              significado: SignificadoChip.alerta);
-        }
-        return;
+  /// 1.35 (SP-07): el descarte es POR FOTO — borra todas
+  /// las variantes del grupo (antes borraba una sola fila
+  /// y la foto «descartada» reaparecía con la variante
+  /// siguiente, contra lo que el diálogo prometía).
+  Future<void> _cancelarFotoGrupo(GrupoFotoCola g) async {
+    // 1.24 Bloque 4 (H-01, cinturón): si el worker está
+    // subiendo alguna variante, no se descarta (la fila
+    // desaparecería a mitad de la subida y los bytes
+    // quedarían huérfanos). La UI ya no ofrece el botón
+    // en ese estado; esto cubre la ventana en que la
+    // foto cambió tras pintarse.
+    if (g.algunaSubiendo) {
+      if (mounted) {
+        mostrarSnack(
+            context, 'Esa foto se está subiendo ahora mismo',
+            significado: SignificadoChip.alerta);
       }
-    } catch (_) {}
+      return;
+    }
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Descartar foto',
-      mensaje: '¿Descartar esta foto pendiente? No se subirá al sistema.',
+      mensaje: '¿Descartar esta foto? Se descartan todas '
+          'sus versiones (miniatura, pantalla y original) '
+          'y no se subirá al sistema.',
       aceptar: 'Sí, descartar',
       peligro: true,
       icono: Icons.delete_outline_rounded,
@@ -638,15 +861,14 @@ class _ColaScreenState extends State<ColaScreen> {
     if (ok != true) return;
     try {
       final db = await LocalDb.instance.db;
-      await db.delete(
-        'fotos_cola',
-        where: "id = ? AND estado != 'subiendo'",
-        whereArgs: [id],
-      );
-      AppLog.info('fotos', 'descartada_manual', d: 'id=$id');
+      final n = await descartarFotoGrupoCola(db, g.opUuid,
+          esDueno: _esDueno, miTelegramId: _miTelegramId);
+      AppLog.info('fotos', 'descartada_manual',
+          d: 'op=${g.opUuid} filas=$n');
       await _cargar();
       if (mounted) {
-        mostrarSnack(context, 'Foto descartada');
+        mostrarSnack(context,
+            n == 0 ? 'Esa foto ya no estaba en la cola' : 'Foto descartada');
       }
     } catch (e) {
       if (mounted) {
@@ -778,6 +1000,7 @@ class _ColaScreenState extends State<ColaScreen> {
         'fotos_cola',
         columns: [
           'id',
+          'op_uuid',
           'tipo',
           'cliente_id',
           'suplemento_id',
@@ -797,12 +1020,13 @@ class _ColaScreenState extends State<ColaScreen> {
     } catch (_) {}
     if (_esDueno) {
       // El dueño ve el total global, como siempre.
-      for (final f in filasFotos) {
-        if (f['estado'] == 'pendiente') fPend++;
-        if (f['estado'] == 'subiendo') fSub++;
-        if (f['estado'] == 'error') fErr++;
-      }
-      fDet = filasFotos.take(50).toList();
+      // 1.35 (SP-05): conteos POR FOTO (estado conjunto del
+      // grupo), no por variante.
+      final conteosF = conteosFotosPorFoto(filasFotos);
+      fPend = conteosF.pendientes;
+      fSub = conteosF.subiendo;
+      fErr = conteosF.error;
+      fDet = filasFotos;
     }
     // v1.12.0 (E1/E2): totales reales (la lista visible tiene
     // límite) + retenidas + la más antigua, para el resumen en
@@ -913,9 +1137,11 @@ class _ColaScreenState extends State<ColaScreen> {
         }).toList();
       } catch (_) {}
       fotosVisibles = porAutor;
-      fPend = porAutor.where((f) => f['estado'] == 'pendiente').length;
-      fSub = porAutor.where((f) => f['estado'] == 'subiendo').length;
-      fErr = porAutor.where((f) => f['estado'] == 'error').length;
+      // 1.35 (SP-05): también aquí, conteos por foto.
+      final conteosF = conteosFotosPorFoto(porAutor);
+      fPend = conteosF.pendientes;
+      fSub = conteosF.subiendo;
+      fErr = conteosF.error;
     }
     // Ronda 17 M6-H1+H3: a un no-dueño, el banner cuenta
     // solo lo suyo (el total de BD es global).
@@ -982,6 +1208,10 @@ class _ColaScreenState extends State<ColaScreen> {
       heroErrorOps = hero.error;
       heroEnLimbo = hero.enviada;
     } catch (_) {}
+    // 1.35 (CAMPO-9): el detalle se agrupa por foto y cada
+    // foto se identifica por el nombre de su entidad.
+    final fotosGrupos = agruparFotosCola(fotosVisibles);
+    final nombresFotos = await _nombresDeFotos(fotosGrupos);
     if (mounted) {
       setState(() {
         _ops = opsVisibles;
@@ -990,7 +1220,8 @@ class _ColaScreenState extends State<ColaScreen> {
         _fotosPendientes = fPend;
         _fotosSubiendo = fSub;
         _fotosError = fErr;
-        _fotosDetalle = fotosVisibles;
+        _fotosGrupos = fotosGrupos;
+        _nombresFotos = nombresFotos;
         _fotosIncError = fotosIncError;
         _compError = compError;
         _titulosOp = {
@@ -1010,6 +1241,47 @@ class _ColaScreenState extends State<ColaScreen> {
       });
     }
     unawaited(_cargarBajada());
+  }
+
+  /// 1.35 (CAMPO-9): nombres de las entidades de los
+  /// grupos de fotos, desde el espejo local, para que la
+  /// fila diga «Foto de <cliente>» en vez de un id. Claves
+  /// 'c<clienteId>' y 's<suplementoId>'. Tolerante: sin
+  /// espejo o sin nombre, la fila cae a su etiqueta por id.
+  Future<Map<String, String>> _nombresDeFotos(
+      List<GrupoFotoCola> grupos) async {
+    final out = <String, String>{};
+    try {
+      // mirrorPorIds devuelve la data ya decodificada con
+      // la columna 'id' garantizada.
+      final idsC =
+          grupos.map((g) => g.clienteId).whereType<int>().toSet();
+      if (idsC.isNotEmpty) {
+        final filas = await LocalDb.instance
+            .mirrorPorIds('clientes', idsC.toList());
+        for (final f in filas) {
+          final id = (f['id'] as num?)?.toInt();
+          final n = f['nombre'];
+          if (id != null && n is String && n.trim().isNotEmpty) {
+            out['c$id'] = n.trim();
+          }
+        }
+      }
+      final idsS =
+          grupos.map((g) => g.suplementoId).whereType<int>().toSet();
+      if (idsS.isNotEmpty) {
+        final filas = await LocalDb.instance
+            .mirrorPorIds('suplementos', idsS.toList());
+        for (final f in filas) {
+          final id = (f['id'] as num?)?.toInt();
+          final n = f['nombre'];
+          if (id != null && n is String && n.trim().isNotEmpty) {
+            out['s$id'] = n.trim();
+          }
+        }
+      }
+    } catch (_) {}
+    return out;
   }
 
   /// Yunque B (YB-SYNC-01/02): lee el diagnóstico de la
@@ -1042,23 +1314,18 @@ class _ColaScreenState extends State<ColaScreen> {
   }
 
   /// v1.2.9+46: reintenta una foto específica (resetea backoff).
-  Future<void> _reintentarFoto(int id) async {
+  /// 1.35 (CAMPO-9/SP-07): el reintento es POR FOTO —
+  /// resetea el backoff de todas sus variantes (cada una
+  /// pasa por reintentarFotoCola, con su filtro de autor).
+  Future<void> _reintentarFotoGrupo(GrupoFotoCola g) async {
     // Ronda 17 M6-H2: candado anti-doble-toque.
-    if (_fotosReintentando.contains(id)) return;
-    _fotosReintentando.add(id);
+    if (_fotosReintentando.contains(g.opUuid)) return;
+    _fotosReintentando.add(g.opUuid);
     try {
       final db = await LocalDb.instance.db;
-      // 1.30 (Oleada 9, ítem 11): la mutación vive en
-      // reintentarFotoCola, con el filtro de autor — un
-      // no-dueño no procesa foto ajena (la lista que ofrece
-      // el botón ya nace filtrada; esto es el cinturón).
-      final r = await reintentarFotoCola(db, id,
+      final tocadas = await reintentarFotoGrupoCola(db, g.opUuid,
           esDueno: _esDueno, miTelegramId: _miTelegramId);
-      if (!r.autorizada) {
-        await _cargar();
-        return;
-      }
-      if (r.tocadas == 0) {
+      if (tocadas == 0) {
         if (mounted) {
           mostrarSnack(
               context, 'Esa foto se está subiendo ahora mismo',
@@ -1067,7 +1334,7 @@ class _ColaScreenState extends State<ColaScreen> {
         await _cargar();
         return;
       }
-      AppLog.info('fotos', 'reintento_manual', d: 'id=$id');
+      AppLog.info('fotos', 'reintento_manual', d: 'op=${g.opUuid}');
       await _cargar();
       if (mounted) {
         mostrarSnack(context, 'Foto marcada para reintento', significado: SignificadoChip.exito);
@@ -1075,12 +1342,12 @@ class _ColaScreenState extends State<ColaScreen> {
       // Disparar sincronización para procesarla de inmediato.
       unawaited(SyncEngine.instance.push());
     } catch (e) {
-      AppLog.error('fotos', 'reintento_manual_fallo', d: 'id=$id · $e');
+      AppLog.error('fotos', 'reintento_manual_fallo', d: 'op=${g.opUuid} · $e');
       if (mounted) {
         mostrarSnack(context, 'No se pudo reintentar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
-      _fotosReintentando.remove(id);
+      _fotosReintentando.remove(g.opUuid);
     }
   }
 
@@ -1095,6 +1362,13 @@ class _ColaScreenState extends State<ColaScreen> {
       // reintentarTodasFotosCola, con el filtro de autor:
       // el no-dueño solo marca las suyas; el dueño conserva
       // la cola completa (su reintento es el rescate).
+      // 1.35 (SP-05): el aviso cuenta FOTOS (grupos con
+      // alguna variante por reintentar), no filas: el
+      // helper devuelve filas tocadas y una foto son 3.
+      final fotos = _fotosGrupos
+          .where((g) => g.variantes.any((v) =>
+              v['estado'] == 'pendiente' || v['estado'] == 'error'))
+          .length;
       final n = await reintentarTodasFotosCola(db,
           esDueno: _esDueno, miTelegramId: _miTelegramId);
       AppLog.info('fotos', 'reintento_manual_todas', d: 'tocadas=$n');
@@ -1102,13 +1376,13 @@ class _ColaScreenState extends State<ColaScreen> {
       if (mounted) {
         mostrarSnack(
             context,
-            n == 0
+            fotos == 0
                 ? 'No había fotos por reintentar'
-                : n == 1
+                : fotos == 1
                     ? '1 foto marcada para reintento'
-                    : '$n fotos marcadas para reintento',
+                    : '$fotos fotos marcadas para reintento',
             significado:
-                n == 0 ? SignificadoChip.alerta : SignificadoChip.exito);
+                fotos == 0 ? SignificadoChip.alerta : SignificadoChip.exito);
       }
       if (n > 0) unawaited(SyncEngine.instance.push());
     } catch (e) {
@@ -1328,26 +1602,42 @@ class _ColaScreenState extends State<ColaScreen> {
               : Border.all(color: AppColores.alertaBorde(context)),
           borderRadius: BorderRadius.circular(AppRadio.md),
         ),
-        child: errorVigente == null
-            ? const Text(
-                '✅ No tienes operaciones por subir.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '✅ No tienes operaciones por subir.',
+              style: AppTexto.cuerpo,
+            ),
+            // 1.35 (SP-04): con 0 operaciones pero fotos en
+            // la cola, el resumen NO declara vacío total:
+            // nombra las fotos (por foto, SP-05).
+            if (_fotosPendientes + _fotosSubiendo > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                '📷 Además, ${_fotosPendientes + _fotosSubiendo} '
+                'foto(s) por subir.',
                 style: AppTexto.cuerpo,
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '✅ No tienes operaciones por subir.',
-                    style: AppTexto.cuerpo,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '⚠️ Ojo: $avisoPierna. '
-                    '$errorVigente',
-                    style: AppTexto.cuerpo,
-                  ),
-                ],
               ),
+            ],
+            if (_fotosError > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                '⚠️ $_fotosError foto(s) fallaron al subir — '
+                'míralas en «Fotos», aquí abajo.',
+                style: AppTexto.cuerpo,
+              ),
+            ],
+            if (errorVigente != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                '⚠️ Ojo: $avisoPierna. '
+                '$errorVigente',
+                style: AppTexto.cuerpo,
+              ),
+            ],
+          ],
+        ),
       );
     }
     // 1.15: desglose por tipo de LO PENDIENTE, contado en la BD
@@ -1426,10 +1716,13 @@ class _ColaScreenState extends State<ColaScreen> {
               style: AppTexto.secundario,
             ),
           ],
-          if (_fotosPendientes > 0) ...[
+          if (_fotosPendientes + _fotosSubiendo > 0) ...[
             const SizedBox(height: 4),
             Text(
-              'Además, $_fotosPendientes foto(s) por subir.',
+              // 1.35 (SP-04/SP-05): «por subir» cuenta las
+              // fotos pendientes Y las que están subiendo,
+              // por foto (no por variante).
+              'Además, ${_fotosPendientes + _fotosSubiendo} foto(s) por subir.',
               style: AppTexto.secundario,
             ),
           ],
@@ -1892,10 +2185,16 @@ class _ColaScreenState extends State<ColaScreen> {
                     borderRadius: BorderRadius.circular(AppRadio.md),
                   ),
                   child: Text(
+                    // 1.35 (SP-06): la pastilla también cuenta
+                    // las fotos CON ERROR (antes una foto
+                    // fallida desaparecía del titular y solo
+                    // salía en una línea con la tarjeta
+                    // plegada).
                     total == 0
                         ? 'Al día'
                         : '$_fotosPendientes pendientes · '
-                            '$_fotosSubiendo subiendo',
+                            '$_fotosSubiendo subiendo'
+                            '${hayError ? ' · $_fotosError con error' : ''}',
                     style: AppTexto.metadato.copyWith(color: color, fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -1909,21 +2208,23 @@ class _ColaScreenState extends State<ColaScreen> {
               ],
             ),
           ),
-          if (_fotosExpandido && _fotosDetalle.isNotEmpty) ...[
+          if (_fotosExpandido && _fotosGrupos.isNotEmpty) ...[
             const SizedBox(height: 8),
             const Divider(height: 1),
-            for (final f in (_fotosMostrarTodas
-                ? _fotosDetalle
-                : _fotosDetalle.take(12).toList()))
-              _filaFoto(context, f),
-            if (!_fotosMostrarTodas && _fotosDetalle.length > 12)
+            // 1.35 (CAMPO-9): una fila por FOTO (grupo de
+            // variantes), no una por variante.
+            for (final g in (_fotosMostrarTodas
+                ? _fotosGrupos
+                : _fotosGrupos.take(12).toList()))
+              _filaFotoGrupo(context, g),
+            if (!_fotosMostrarTodas && _fotosGrupos.length > 12)
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   onPressed: () =>
                       setState(() => _fotosMostrarTodas = true),
                   child: Text(
-                      'Ver las ${_fotosDetalle.length - 12} restantes'),
+                      'Ver las ${_fotosGrupos.length - 12} restantes'),
                 ),
               ),
             const SizedBox(height: 8),
@@ -2009,22 +2310,36 @@ class _ColaScreenState extends State<ColaScreen> {
     );
   }
 
-  /// Fila de una foto pendiente: miniatura, entidad, fecha, intentos, error.
-  Widget _filaFoto(BuildContext context, Map<String, dynamic> f) {
-    final id = f['id'] as int;
-    final tipo = '${f['tipo']}';
-    final estado = '${f['estado']}';
-    final intentos = f['intentos'] as int? ?? 0;
-    final error = f['ultimo_error'] as String?;
-    final ruta = f['ruta_local'] as String?;
-    final creadoEn = DateTime.tryParse('${f['creado_en']}');
-    // Entidad: cliente o suplemento.
-    String entidad = '—';
-    if (f['cliente_id'] != null) {
-      entidad = 'Cliente ${f['cliente_id']}';
-    } else if (f['suplemento_id'] != null) {
-      entidad = 'Suplemento ${f['suplemento_id']}';
+  /// 1.35 (CAMPO-9): fila de UNA foto (su grupo de
+  /// variantes): miniatura, identificación por su cliente,
+  /// estado conjunto, cuándo se pidió y las acciones sobre
+  /// la foto entera. Las variantes viven en el detalle
+  /// expandible de la fila.
+  Widget _filaFotoGrupo(BuildContext context, GrupoFotoCola g) {
+    final estado = g.estadoConjunto;
+    final ruta = g.rutaMiniatura;
+    final creadoEn = DateTime.tryParse('${g.creadoEn}');
+    // Identificación por la entidad: nombre del espejo si
+    // se conoce; si no, la etiqueta por id de siempre.
+    final String titulo;
+    final cid = g.clienteId;
+    final sid = g.suplementoId;
+    if (cid != null) {
+      final n = _nombresFotos['c$cid'];
+      titulo = n != null ? 'Foto de $n' : 'Cliente $cid';
+    } else if (sid != null) {
+      final n = _nombresFotos['s$sid'];
+      titulo = n != null ? 'Suplemento $n' : 'Suplemento $sid';
+    } else {
+      titulo = 'Foto sin asignar';
     }
+    // 1.35 (SP-09): si lo único que queda vivo de la foto
+    // es la variante grande en su espera QoS, la etiqueta
+    // dice ESA verdad (espera a que la cola esté
+    // tranquila), no un problema de red.
+    final soloEsperaLaOriginal = estado == 'pendiente' &&
+        g.originalEsperaQos &&
+        g.variantes.every((v) => v['tipo'] == 'original');
     final colorEstado = estado == 'error'
         ? AppColores.error
         : estado == 'subiendo'
@@ -2038,140 +2353,234 @@ class _ColaScreenState extends State<ColaScreen> {
         : estado == 'subiendo'
             ? AppColores.infoTexto(context)
             : AppColores.alertaTexto(context);
-    // v1.4.0 (Argón): estado VISUAL calculado en lectura, sin tocar
-    // la columna estado de la BD. Una 'original' pesada retenida por
-    // el QoS (pendiente, sin forzar, sin error) no está fallando:
-    // está "Esperando buena conexión". El botón de reintento de la
-    // fila activa forzar_qos ("Subir ahora").
-    // v1.13.0 (G5): TODA 'original' pendiente espera la puerta QoS
-    // (el bypass de <=512 KB se eliminó): la etiqueta ya no depende
-    // del tamaño, solo de que no esté forzada manualmente.
-    final esperandoConexion = estado == 'pendiente' &&
-        tipo == 'original' &&
-        (f['forzar_qos'] as int? ?? 0) != 1 &&
-        (error == null || error.isEmpty);
+    // El error que se enseña es el de la primera variante
+    // en error, TRADUCIDO por clase (SP-08): jamás el
+    // texto crudo de la excepción.
+    String? errorVisible;
+    for (final v in g.variantes) {
+      if (v['estado'] == 'error') {
+        errorVisible = fraseErrorFoto(v['ultimo_error'] as String?);
+        break;
+      }
+    }
+    final intentos = g.variantes.fold<int>(
+        0, (m, v) => (v['intentos'] as num?)?.toInt() != null &&
+                (v['intentos'] as num).toInt() > m
+            ? (v['intentos'] as num).toInt()
+            : m);
+    final expandida = _fotosGruposExpandidos.contains(g.opUuid);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Miniatura.
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadio.sm),
-            child: ruta != null
-                ? Image.file(
-                    File(ruta),
-                    width: 48,
-                    height: 48,
-                    // 1.32 (S-G3/Paso 0): la decodificación
-                    // se acota al triple del destino físico
-                    // (48 dp × 3): sin cota, cada miniatura
-                    // de la lista decodificaba la foto
-                    // entera. Solo cacheWidth (la regla de
-                    // componentes.dart: fijar también la
-                    // altura fuerza «exact» y estira).
-                    cacheWidth: 144,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 48,
-                      height: 48,
-                      color: AppColores.fondo(context),
-                      child: const Icon(Icons.broken_image_rounded, size: 24),
-                    ),
-                  )
-                : Container(
-                    width: 48,
-                    height: 48,
-                    color: AppColores.fondo(context),
-                    child: const Icon(Icons.image_rounded, size: 24),
-                  ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Miniatura (la variante de pantalla si está).
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadio.sm),
+                child: ruta != null
+                    ? Image.file(
+                        File(ruta),
+                        width: 48,
+                        height: 48,
+                        // 1.32 (S-G3/Paso 0): decodificación
+                        // acotada al triple del destino.
+                        cacheWidth: 144,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          width: 48,
+                          height: 48,
+                          color: AppColores.fondo(context),
+                          child: const Icon(Icons.broken_image_rounded, size: 24),
+                        ),
+                      )
+                    : Container(
+                        width: 48,
+                        height: 48,
+                        color: AppColores.fondo(context),
+                        child: const Icon(Icons.image_rounded, size: 24),
+                      ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        '$entidad · $tipo',
-                        style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w600),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            titulo,
+                            style: AppTexto.secundario.copyWith(fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppEspacio.sm, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: colorEstado.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(AppRadio.md),
+                            ),
+                            child: Text(
+                              estado == 'error'
+                                  ? 'Falló'
+                                  : estado == 'subiendo'
+                                      ? 'Subiendo'
+                                      : soloEsperaLaOriginal
+                                          ? 'En espera'
+                                          : 'Pendiente',
+                              style: AppTexto.metadato.copyWith(color: textoEstado, fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    Flexible(
-                      child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.sm, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: colorEstado.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(AppRadio.md),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Solicitada: ${_hora(creadoEn)} · '
+                      '${g.variantes.length} ${g.variantes.length == 1 ? 'versión' : 'versiones'}'
+                      '${intentos > 0 ? ' · $intentos ${intentos == 1 ? 'intento' : 'intentos'}' : ''}',
+                      style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
+                    ),
+                    if (soloEsperaLaOriginal) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        // SP-09: la verdad de la espera QoS y
+                        // cuándo sale (la puerta de la casa:
+                        // cola tranquila unos minutos o la
+                        // holgura de 15 min).
+                        'La foto grande espera a que la cola '
+                        'esté tranquila; sale sola en unos '
+                        'minutos, o súbela ahora.',
+                        style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
                       ),
-                      child: Text(
-                        estado == 'error'
-                            ? 'Falló'
-                            : estado == 'subiendo'
-                                ? 'Subiendo'
-                                : esperandoConexion
-                                    ? 'Esperando buena conexión'
-                                    : 'Pendiente',
-                        style: AppTexto.metadato.copyWith(color: textoEstado, fontWeight: FontWeight.w600),
-                        // La pastilla larga («Esperando buena
-                        // conexión») va en Flexible (ver el
-                        // Row): si no cabe, elide ella, no
-                        // empuja la fila fuera.
-                        maxLines: 1,
+                    ],
+                    if (errorVisible != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        errorVisible,
+                        style: AppTexto.metadato.copyWith(color: AppColores.error),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      ),
-                    ),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Solicitada: ${_hora(creadoEn)} · $intentos ${intentos == 1 ? 'intento' : 'intentos'}',
-                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
-                ),
-                if (error != null && error.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    'Error: $error',
-                    style: AppTexto.metadato.copyWith(color: AppColores.error),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+              ),
+              // 1.24 Bloque 4 (H-01): mientras alguna variante
+              // está 'subiendo', el worker la tiene tomada:
+              // sin botones de acción, solo el indicador.
+              if (g.algunaSubiendo)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                ],
+                )
+              else ...[
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded, size: 20),
+                  tooltip:
+                      soloEsperaLaOriginal ? 'Subir ahora' : 'Reintentar',
+                  onPressed: () => _reintentarFotoGrupo(g),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  tooltip: 'Descartar',
+                  onPressed: () => _cancelarFotoGrupo(g),
+                ),
               ],
+              IconButton(
+                icon: Icon(
+                    expandida
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 20),
+                tooltip: expandida ? 'Ocultar versiones' : 'Ver versiones',
+                onPressed: () => setState(() {
+                  if (expandida) {
+                    _fotosGruposExpandidos.remove(g.opUuid);
+                  } else {
+                    _fotosGruposExpandidos.add(g.opUuid);
+                  }
+                }),
+              ),
+            ],
+          ),
+          if (expandida)
+            Padding(
+              padding: const EdgeInsets.only(left: 56, top: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final v in g.variantes) _filaVarianteFoto(context, v),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 1.35 (CAMPO-9): una variante dentro del detalle de su
+  /// foto: nombre de la versión, su estado y — si falló —
+  /// el error traducido por clase (SP-08), nunca el crudo.
+  Widget _filaVarianteFoto(BuildContext context, Map<String, dynamic> v) {
+    final tipo = '${v['tipo']}';
+    final estado = '${v['estado']}';
+    final nombre = switch (tipo) {
+      'thumb' => 'Miniatura',
+      'display' => 'De pantalla',
+      'original' => 'Original (grande)',
+      _ => tipo,
+    };
+    // SP-09: la original pendiente sin forzar está en la
+    // espera QoS: se dice así, no como fallo de red.
+    final esperaQos = estado == 'pendiente' &&
+        tipo == 'original' &&
+        ((v['forzar_qos'] as num?)?.toInt() ?? 0) != 1;
+    final textoEstado = estado == 'error'
+        ? fraseErrorFoto(v['ultimo_error'] as String?)
+        : estado == 'subiendo'
+            ? 'Subiendo'
+            : esperaQos
+                ? 'Espera a que la cola esté tranquila'
+                : 'Pendiente';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(
+            estado == 'error'
+                ? Icons.error_outline_rounded
+                : estado == 'subiendo'
+                    ? Icons.cloud_upload_rounded
+                    : Icons.schedule_rounded,
+            size: 16,
+            color: estado == 'error'
+                ? AppColores.error
+                : AppColores.textoSecundario(context),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '$nombre · $textoEstado',
+              style: AppTexto.metadato.copyWith(
+                color: estado == 'error'
+                    ? AppColores.error
+                    : AppColores.textoSecundario(context),
+              ),
             ),
           ),
-          // 1.24 Bloque 4 (H-01): mientras la foto está
-          // 'subiendo', el worker la tiene tomada: ofrecer
-          // Reintentar/Descartar aquí forzaba una carrera con
-          // la subida (doble reclamo de la fila, bytes huérfanos
-          // en el bucket al descartar). Sin botones: solo el
-          // indicador de que está en curso.
-          if (estado == 'subiendo')
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else ...[
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              tooltip:
-                  esperandoConexion ? 'Subir ahora' : 'Reintentar',
-              onPressed: () => _reintentarFoto(id),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close_rounded, size: 20),
-              tooltip: 'Descartar',
-              onPressed: () => _cancelarFoto(id),
-            ),
-          ],
         ],
       ),
     );
@@ -2210,7 +2619,9 @@ class _ColaScreenState extends State<ColaScreen> {
                           'Foto ${f['id']} (${f['tipo']}) — '
                           '${f['intentos']} intentos'),
                       subtitle: Text(
-                        '${f['ultimo_error'] ?? 'sin detalle'}',
+                        // 1.35 (SP-08): también aquí se pinta
+                        // la frase por clase, no el crudo.
+                        fraseErrorFoto(f['ultimo_error'] as String?),
                         style: AppTexto.metadato,
                       ),
                     ),
