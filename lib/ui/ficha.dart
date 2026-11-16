@@ -108,6 +108,17 @@ bool mostrarFotoFicha({
   return true;
 }
 
+/// SL-2 G03-4: traductor del sexo del espejo para la ficha.
+/// El diálogo de edición ya decía «Masculino»/«Femenino»
+/// (ChoiceChip sobre 'M'/'F'); la fila pintaba la clave
+/// cruda. Mismo vocabulario que el diálogo; una clave
+/// desconocida no se pinta cruda.
+String etiquetaSexoFicha(Object? sexo) => switch ('$sexo') {
+      'M' => 'Masculino',
+      'F' => 'Femenino',
+      _ => '—',
+    };
+
 /// 1.28 (ítem fijo «ficha perezosa»): caché de secciones de
 /// la ficha por (clave, versión). La lista de la ficha es un
 /// ListView.builder y cada sección se crea SOLO si su versión
@@ -3938,7 +3949,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             // exacto por el banner).
                             if (_textoCumple(c) != null)
                               FilaInfoFicha(icono: Icons.celebration_rounded, etiqueta: 'Cumpleaños', valor: _textoCumple(c)!),
-                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: '${c['sexo'] ?? '—'}'),
+                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: etiquetaSexoFicha(c['sexo'])),
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
                             InkWell(
