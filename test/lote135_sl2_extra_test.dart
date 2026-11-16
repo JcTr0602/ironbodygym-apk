@@ -111,16 +111,21 @@ void main() {
       expect(componentes.contains('elegirModoEliminacion'), isTrue);
       expect(componentes.contains('String? avisoFiado'), isTrue);
     });
-    test('hueco verificado: el aviso de fiado solo se pinta '
-        'con el modo «conservar» elegido', () {
+    test('A2 cerrada por SL-X1: el aviso de fiado se pinta '
+        'con cualquier modo elegido', () {
+      // Este test nació en SL-2 fijando el hueco (el aviso
+      // solo salía con «conservar»). SL-X1 aplicó A2 y el
+      // coordinador actualizó la fijación al comportamiento
+      // corregido: la condición ya no mira el modo.
       final componentes = _src('lib/ui/componentes.dart');
       expect(
           componentes
               .contains("avisoFiado != null && modo == 'conservar'"),
-          isTrue,
-          reason: 'con «Eliminar todo» el aviso de fiado no '
-              'se muestra: es el hueco de A2, en archivos '
-              'fuera del mapa de SL-2');
+          isFalse,
+          reason: 'A2: el aviso de fiado debe mostrarse '
+              'también con «Eliminar todo»');
+      expect(componentes.contains('if (avisoFiado != null)'),
+          isTrue);
     });
   });
 }
