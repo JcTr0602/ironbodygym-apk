@@ -604,7 +604,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               style: TextButton.styleFrom(
-                  foregroundColor: Colors.red),
+                  foregroundColor: AppColores.error),
               child: const Text('Suspender'),
             ),
           ],
@@ -812,7 +812,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
                       ),
                       Text(
                         ent.email,
-                        style: AppTexto.metadato.copyWith(color: Colors.grey[600]),
+                        style: AppTexto.metadato.copyWith(
+                            color: AppColores.textoSecundario(context)),
                       ),
                     ],
                   ),
@@ -820,15 +821,18 @@ class _PanelPermisosState extends State<PanelPermisos> {
                 // Toggle maestro ACTIVO
                 Column(
                   children: [
-                    Text(
-                      ent.activo ? 'ACTIVO' : 'SUSPENDIDO',
-                      style: AppTexto.minuscula.copyWith(color: ent.activo
-                            ? Colors.green
-                            : Colors.red, fontWeight: FontWeight.bold),
+                    // SL-9 (G09-14): el estado va en el chip de
+                    // la casa y con sus tokens, no en un texto
+                    // con Colors.green/red a pelo.
+                    ChipEstado.semantico(
+                      texto: ent.activo ? 'ACTIVO' : 'SUSPENDIDO',
+                      significado: ent.activo
+                          ? SignificadoChip.exito
+                          : SignificadoChip.error,
                     ),
                     Switch(
                       value: ent.activo,
-                      activeColor: Colors.green,
+                      activeColor: AppColores.exito,
                       onChanged: (_) => _toggleActivo(ent),
                     ),
                   ],
