@@ -469,15 +469,14 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                           : 'Sin cola pendiente: se puede re-descargar.',
                       style: AppTexto.secundario),
                 ),
-                DropdownButton<String>(
-                  value: _tabla,
-                  isExpanded: true,
-                  items: [
+                SelectorIron<String>(
+                  valor: _tabla,
+                  tituloPanel: 'Tabla espejo',
+                  opciones: [
                     for (final t in _kTablasEspejoF5)
-                      DropdownMenuItem(
-                          value: t, child: Text(_etiquetaTablaF5(t)))
+                      OpcionSelector(t, _etiquetaTablaF5(t))
                   ],
-                  onChanged: (v) => setState(() => _tabla = v ?? 'clientes'),
+                  alCambiar: (v) => setState(() => _tabla = v ?? 'clientes'),
                 ),
                 Align(
                   alignment: Alignment.centerRight,

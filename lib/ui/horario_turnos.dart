@@ -338,18 +338,15 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
               style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),
         ),
         Expanded(
-          child: DropdownButton<String?>(
-            isExpanded: true,
-            value: valor,
-            items: [
-              const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('Sin asignar'),
-              ),
+          child: SelectorIron<String?>(
+            valor: valor,
+            tituloPanel: etiqueta,
+            opciones: [
+              const OpcionSelector<String?>(null, 'Sin asignar'),
               for (final n in _entrenadores)
-                DropdownMenuItem<String?>(value: n, child: Text(n)),
+                OpcionSelector<String?>(n, n),
             ],
-            onChanged: (v) => setState(() => _sel[dia]![franja] = v),
+            alCambiar: (v) => setState(() => _sel[dia]![franja] = v),
           ),
         ),
       ],

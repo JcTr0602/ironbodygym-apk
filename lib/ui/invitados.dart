@@ -898,22 +898,16 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                   ),
                 ),
                 const SizedBox(width: AppEspacio.sm),
-                DropdownButton<String>(
-                  value: _orden,
-                  underline: const SizedBox.shrink(),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'servidor',
-                        child: Text('Orden del servidor')),
-                    DropdownMenuItem(
-                        value: 'nombre', child: Text('Nombre A–Z')),
-                    DropdownMenuItem(
-                        value: 'registro',
-                        child: Text('Registro reciente')),
-                    DropdownMenuItem(
-                        value: 'caduca', child: Text('Caduca antes')),
+                SelectorIron<String>(
+                  valor: _orden,
+                  tituloPanel: 'Ordenar por',
+                  opciones: const [
+                    OpcionSelector('servidor', 'Orden del servidor'),
+                    OpcionSelector('nombre', 'Nombre A–Z'),
+                    OpcionSelector('registro', 'Registro reciente'),
+                    OpcionSelector('caduca', 'Caduca antes'),
                   ],
-                  onChanged: (v) =>
+                  alCambiar: (v) =>
                       setState(() => _orden = v ?? 'servidor'),
                 ),
               ],

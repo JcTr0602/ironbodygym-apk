@@ -445,56 +445,34 @@ class _ListaIncidenciasScreenState
                 CrossAxisAlignment.start,
             children: [
               const Text('Tipo:'),
-              DropdownButton<String?>(
-                value: _filtroTipoId,
-                isExpanded: true,
-                hint:
-                    const Text('Todos los tipos'),
-                items: [
-                  const DropdownMenuItem(
-                      value: null,
-                      child:
-                          Text('Todos')),
-                  ..._tipos.map((t) =>
-                      DropdownMenuItem(
-                        value: t.id,
-                        child: Row(
-                          children: [
-                            Icon(t.iconoData,
-                                size: 18,
-                                color: t.colorData),
-                            const SizedBox(width: 8),
-                            Text(t.nombre),
-                          ],
-                        ),
+              SelectorIron<String?>(
+                valor: _filtroTipoId,
+                pista: 'Todos los tipos',
+                tituloPanel: 'Tipo',
+                opciones: [
+                  const OpcionSelector<String?>(null, 'Todos'),
+                  ..._tipos.map((t) => OpcionSelector<String?>(
+                        t.id,
+                        t.nombre,
+                        icono: t.iconoData,
+                        colorIcono: t.colorData,
                       )),
                 ],
-                onChanged: (v) =>
-                    setB(() => _filtroTipoId = v),
+                alCambiar: (v) => setB(() => _filtroTipoId = v),
               ),
               const SizedBox(height: 8),
               const Text('Prioridad:'),
-              DropdownButton<String?>(
-                value: _filtroPrioridad,
-                isExpanded: true,
-                hint: const Text(
-                    'Todas las prioridades'),
-                items: const [
-                  DropdownMenuItem(
-                      value: null,
-                      child: Text('Todas')),
-                  DropdownMenuItem(
-                      value: 'alta',
-                      child: Text('Alta')),
-                  DropdownMenuItem(
-                      value: 'media',
-                      child: Text('Media')),
-                  DropdownMenuItem(
-                      value: 'baja',
-                      child: Text('Baja')),
+              SelectorIron<String?>(
+                valor: _filtroPrioridad,
+                pista: 'Todas las prioridades',
+                tituloPanel: 'Prioridad',
+                opciones: const [
+                  OpcionSelector<String?>(null, 'Todas'),
+                  OpcionSelector<String?>('alta', 'Alta'),
+                  OpcionSelector<String?>('media', 'Media'),
+                  OpcionSelector<String?>('baja', 'Baja'),
                 ],
-                onChanged: (v) =>
-                    setB(() => _filtroPrioridad = v),
+                alCambiar: (v) => setB(() => _filtroPrioridad = v),
               ),
               SwitchListTile(
                 title:

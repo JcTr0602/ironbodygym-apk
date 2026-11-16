@@ -272,31 +272,18 @@ class _EditarIncidenciaScreenState
           padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             // Tipo
-            DropdownButtonFormField<String>(
-              value: _tipoId,
-              decoration:
-                  const InputDecoration(
-                labelText: 'Tipo',
-                border: OutlineInputBorder(),
-              ),
-              items: _tipos
-                  .map((t) =>
-                      DropdownMenuItem(
-                        value: t.id,
-                        child: Row(
-                          children: [
-                            Icon(t.iconoData,
-                                size: 18,
-                                color:
-                                    t.colorData),
-                            const SizedBox(
-                                width: 8),
-                            Text(t.nombre),
-                          ],
-                        ),
+            SelectorIronForm<String>(
+              valorInicial: _tipoId,
+              etiqueta: 'Tipo',
+              opciones: _tipos
+                  .map((t) => OpcionSelector(
+                        t.id,
+                        t.nombre,
+                        icono: t.iconoData,
+                        colorIcono: t.colorData,
                       ))
                   .toList(),
-              onChanged: (v) {
+              alCambiar: (v) {
                 if (v == null) return;
                 // v1.3.2 (Argón): autocompletar descripción desde la
                 // plantilla del tipo. Reemplaza si el campo está vacío
@@ -447,24 +434,22 @@ class _EditarIncidenciaScreenState
             ],
             if (_esDueno && _tipoResponsable == 'entrenador') ...[
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _entrenadores.any((e) =>
+              SelectorIronForm<String>(
+                valorInicial: _entrenadores.any((e) =>
                         e['username'] == _entrenadorUsername)
                     ? _entrenadorUsername
                     : (_entrenadores.isNotEmpty
                         ? _entrenadores.first['username']
                         : null),
-                decoration: const InputDecoration(
-                  labelText: 'Entrenador',
-                  border: OutlineInputBorder(),
-                ),
-                items: [
+                etiqueta: 'Entrenador',
+                opciones: [
                   for (final e in _entrenadores)
-                    DropdownMenuItem(
-                        value: e['username'],
-                        child: Text(e['nombre'] ?? '')),
+                    // La lista solo admite filas con username
+                    // no vacío (ver _cargarEntrenadores).
+                    OpcionSelector(
+                        e['username']!, e['nombre'] ?? ''),
                 ],
-                onChanged: (v) => setState(() {
+                alCambiar: (v) => setState(() {
                   _entrenadorUsername = v;
                   _actualizarResponsable();
                 }),

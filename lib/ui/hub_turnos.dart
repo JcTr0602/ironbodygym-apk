@@ -1285,18 +1285,15 @@ class _DialogoSuplenciaDiaState extends State<_DialogoSuplenciaDia> {
           const SizedBox(height: 14),
           const Text('Quién la trabaja', style: AppTexto.etiqueta),
           const SizedBox(height: 6),
-          DropdownButton<String?>(
-            value: _nombre,
-            isExpanded: true,
-            items: [
-              const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('Sin nadie'),
-              ),
+          SelectorIron<String?>(
+            valor: _nombre,
+            tituloPanel: 'Quién la trabaja',
+            opciones: [
+              const OpcionSelector<String?>(null, 'Sin nadie'),
               for (final n in widget.nombres)
-                DropdownMenuItem<String?>(value: n, child: Text(n)),
+                OpcionSelector<String?>(n, n),
             ],
-            onChanged: (v) => setState(() => _nombre = v),
+            alCambiar: (v) => setState(() => _nombre = v),
           ),
         ],
       ),

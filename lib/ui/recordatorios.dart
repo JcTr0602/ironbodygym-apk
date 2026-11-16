@@ -641,34 +641,27 @@ class _DialogoCrearRecordatorioState
                 decoration: const InputDecoration(
                     labelText: 'Título (p. ej. «Vence esta semana»')),
             const SizedBox(height: 8),
-            DropdownButton<String>(
-              value: _tipo,
-              isExpanded: true,
-              items: const [
-                DropdownMenuItem(
-                    value: 'vencimiento', child: Text('Vencimiento')),
-                DropdownMenuItem(
-                    value: 'cumpleanos', child: Text('Cumpleaños')),
-                DropdownMenuItem(
-                    value: 'personalizado',
-                    child: Text('Personalizado')),
+            SelectorIron<String>(
+              valor: _tipo,
+              tituloPanel: 'Tipo de recordatorio',
+              opciones: const [
+                OpcionSelector('vencimiento', 'Vencimiento'),
+                OpcionSelector('cumpleanos', 'Cumpleaños'),
+                OpcionSelector('personalizado', 'Personalizado'),
               ],
-              onChanged: (v) =>
+              alCambiar: (v) =>
                   setState(() => _tipo = v ?? 'vencimiento'),
             ),
             if (widget.esDueno) ...[
               const SizedBox(height: 8),
-              DropdownButton<String>(
-                value: _alcance,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                      value: 'solo_mio', child: Text('Solo para mí')),
-                  DropdownMenuItem(
-                      value: 'todos',
-                      child: Text('Para todos (masivo)')),
+              SelectorIron<String>(
+                valor: _alcance,
+                tituloPanel: 'Alcance',
+                opciones: const [
+                  OpcionSelector('solo_mio', 'Solo para mí'),
+                  OpcionSelector('todos', 'Para todos (masivo)'),
                 ],
-                onChanged: (v) =>
+                alCambiar: (v) =>
                     setState(() => _alcance = v ?? 'solo_mio'),
               ),
               const Text(
@@ -723,20 +716,15 @@ class _DialogoCrearRecordatorioState
               ),
               const SizedBox(height: 8),
               // F4 (1.20): repetición del personalizado.
-              DropdownButton<String>(
-                value: _frecuencia,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                      value: 'ninguna', child: Text('Solo esa fecha')),
-                  DropdownMenuItem(
-                      value: 'semanal',
-                      child: Text('Cada semana (ese día)')),
-                  DropdownMenuItem(
-                      value: 'mensual',
-                      child: Text('Cada mes (ese día)')),
+              SelectorIron<String>(
+                valor: _frecuencia,
+                tituloPanel: 'Repetición',
+                opciones: const [
+                  OpcionSelector('ninguna', 'Solo esa fecha'),
+                  OpcionSelector('semanal', 'Cada semana (ese día)'),
+                  OpcionSelector('mensual', 'Cada mes (ese día)'),
                 ],
-                onChanged: (v) =>
+                alCambiar: (v) =>
                     setState(() => _frecuencia = v ?? 'ninguna'),
               ),
             ],

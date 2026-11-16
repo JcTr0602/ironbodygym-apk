@@ -440,19 +440,17 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
   Widget _selectorPersona() {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: DropdownButtonFormField<PersonaApk>(
-        initialValue: _persona,
-        isExpanded: true,
-        decoration:
-            const InputDecoration(labelText: 'Persona'),
-        items: [
+      child: SelectorIronForm<PersonaApk>(
+        valorInicial: _persona,
+        etiqueta: 'Persona',
+        opciones: [
           for (final p in _personas)
-            DropdownMenuItem(
-              value: p,
-              child: Text(p.activo ? p.nombre : '${p.nombre} (de baja)'),
+            OpcionSelector(
+              p,
+              p.activo ? p.nombre : '${p.nombre} (de baja)',
             ),
         ],
-        onChanged: (p) async {
+        alCambiar: (p) async {
           setState(() => _persona = p);
           await _cargar();
         },

@@ -729,21 +729,18 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           ],
         ),
         if (_plantillas.isNotEmpty) ...[
-          DropdownButton<String>(
-            isExpanded: true,
-            value: _plantillaSel.isEmpty ||
+          SelectorIron<String>(
+            valor: _plantillaSel.isEmpty ||
                     _plantillas.any((p) => p['nombre'] == _plantillaSel)
                 ? _plantillaSel
                 : '',
-            items: [
-              const DropdownMenuItem(
-                  value: '', child: Text('Texto libre (abajo)')),
+            tituloPanel: 'Plantilla',
+            opciones: [
+              const OpcionSelector('', 'Texto libre (abajo)'),
               for (final p in _plantillas)
-                DropdownMenuItem(
-                    value: '${p['nombre']}',
-                    child: Text('${p['nombre']}')),
+                OpcionSelector('${p['nombre']}', '${p['nombre']}'),
             ],
-            onChanged: (v) => setState(() => _plantillaSel = v ?? ''),
+            alCambiar: (v) => setState(() => _plantillaSel = v ?? ''),
           ),
           const SizedBox(height: 8),
         ],

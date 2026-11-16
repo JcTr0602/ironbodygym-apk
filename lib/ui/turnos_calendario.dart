@@ -212,31 +212,32 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                   Text(franja == 'manana' ? 'Mañana' : 'Tarde',
                       style: AppTexto.subtitulo),
                   const SizedBox(height: 4),
-                  DropdownButtonFormField<String>(
-                    initialValue: sel[franja],
-                    isExpanded: true,
-                    items: [
-                      DropdownMenuItem(
-                        value: '__patron',
-                        child: Text('Según patrón: '
-                            '${_patron[fecha.weekday]?[franja] ?? 'sin nadie'}'),
+                  SelectorIronForm<String>(
+                    valorInicial: sel[franja],
+                    opciones: [
+                      OpcionSelector(
+                        '__patron',
+                        'Según patrón: '
+                            '${_patron[fecha.weekday]?[franja] ?? 'sin nadie'}',
                       ),
                       for (final n in _entrenadores)
-                        DropdownMenuItem(value: n, child: Text(n)),
+                        OpcionSelector(n, n),
                       if (sel[franja] != '__patron' &&
                           sel[franja] != '__nadie' &&
                           !_entrenadores.contains(sel[franja]))
-                        DropdownMenuItem(
-                          value: sel[franja],
-                          child: Text('⚠ ${sel[franja]} (ya no es '
-                              'usuario de la app)'),
+                        OpcionSelector(
+                          // No nulo: el bucle solo recorre las
+                          // franjas recién asignadas arriba.
+                          sel[franja]!,
+                          '⚠ ${sel[franja]} (ya no es '
+                              'usuario de la app)',
                         ),
-                      const DropdownMenuItem(
-                        value: '__nadie',
-                        child: Text('Sin nadie (anular la franja)'),
+                      const OpcionSelector(
+                        '__nadie',
+                        'Sin nadie (anular la franja)',
                       ),
                     ],
-                    onChanged: pasado
+                    alCambiar: pasado
                         ? null
                         : (v) => setLocal(() => sel[franja] = v!),
                   ),
