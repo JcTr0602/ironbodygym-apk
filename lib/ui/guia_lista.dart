@@ -644,7 +644,15 @@ class _GuiaScreenState extends State<GuiaScreen> {
       for (final e in _equipos)
         if (e['activo'] == true) '${e['equipoId']}',
     ]);
-    return ListView(
+    // SL-10 G13-6: el alta va en el sitio de la casa —
+    // el FAB extendido abajo a la derecha, como en
+    // Incidencias, Plantillas, Anuncios y Avisos (la
+    // Guía era la excepción con un botón en la fila de
+    // cabecera). La pantalla es un cuerpo embebido sin
+    // Scaffold propio: el FAB se ancla sobre la lista.
+    return Stack(
+      children: [
+        ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
       children: [
         Row(
@@ -654,14 +662,6 @@ class _GuiaScreenState extends State<GuiaScreen> {
                 onPressed: _sincronizando ? null : _sincronizar,
                 icon: const Icon(Icons.sync_rounded),
                 label: const Text('Actualizar'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _abrirEditor(),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Nueva ficha'),
               ),
             ),
           ],
@@ -923,6 +923,17 @@ class _GuiaScreenState extends State<GuiaScreen> {
           'Publicar y retirar se aplica al sincronizar.',
           style: AppTexto.metadato.copyWith(
                   color: AppColores.textoSecundario(context)),
+        ),
+      ],
+        ),
+        Positioned(
+          right: AppEspacio.lg,
+          bottom: AppEspacio.lg,
+          child: FloatingActionButton.extended(
+            onPressed: () => _abrirEditor(),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Nueva ficha'),
+          ),
         ),
       ],
     );
