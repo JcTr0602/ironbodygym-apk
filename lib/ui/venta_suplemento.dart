@@ -22,6 +22,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_log.dart';
+import '../errores_sync.dart';
 import '../fotos.dart';
 
 import '../localdb.dart';
@@ -544,10 +546,14 @@ class _VentaSuplementoScreenState
       }
     } catch (e) {
       // v1.3.1: si falla el registro, avisar y NO cerrar (evita duplicado).
+      // SL-6 (G05-1): a pantalla va SOLO el mensaje amable de
+      // la casa; el detalle técnico queda en la bitácora
+      // (antes salía crudo: «Inténtalo de nuevo. ($e)»).
+      AppLog.error('venta_suplemento', 'registrar_venta_fallo', d: '$e');
       if (mounted) {
         await DialogoApp.confirmar(context,
             titulo: 'No se registró la venta',
-            mensaje: 'Inténtalo de nuevo. ($e)',
+            mensaje: mensajeErrorAmable(e),
             aceptar: 'Entendido',
             cancelar: '');
       }
@@ -928,7 +934,7 @@ class _VentaSuplementoScreenState
             ),
           ],
           const SizedBox(height: AppEspacio.sm),
-          _chipsMoneda(),
+          _selectorMoneda(),
           // v1.3.4 (pedido Jc 2026-10-16): en USD no se muestra el
           // equivalente en CUP ni el campo de tasa — solo tienen sentido
           // si la moneda es CUP.
@@ -1090,13 +1096,10 @@ class _VentaSuplementoScreenState
   /// build solo pinta _fotoMini o el placeholder (P-1: la
   /// decodificación va acotada).
   Widget _miniFotoVenta() {
-    Widget placeholder() => Container(
-          width: 56,
-          height: 56,
-          color: AppColores.fondo(context),
-          child: Icon(Icons.medication_rounded,
-              color: AppColores.textoSecundario(context)),
-        );
+    // SL-6 (G05-13): la marca de «sin foto» es la única de
+    // la casa (PlaceholderSuplemento), no una copia a mano.
+    Widget placeholder() =>
+        const PlaceholderSuplemento(alto: 56);
     return SizedBox(
       width: 56,
       height: 56,
@@ -1185,22 +1188,23 @@ class _VentaSuplementoScreenState
     );
   }
 
-  Widget _chipsMoneda() {
-    return Row(
-      children: [
-        for (final m in ['CUP', 'USD'])
-          Padding(
-            padding:
-                const EdgeInsets.only(right: AppEspacio.sm),
-            child: ChoiceChip(
-              label: Text(m),
-              selected: _moneda == m,
-              selectedColor: AppColores.naranja.withValues(
-                  alpha: 0.2),
-              onSelected: (_) => _cambiarMoneda(m),
-            ),
-          ),
+  // SL-6 (G05-12): la moneda se elige con el SelectorIron
+  // de la casa, como el resto de selectores de la sección
+  // (antes, ChoiceChip a pelo solo en esta pantalla). El
+  // cambio sigue pasando por _cambiarMoneda (relleno del
+  // oficial convertido y fiado apagado en USD, intactos).
+  Widget _selectorMoneda() {
+    return SelectorIron<String>(
+      valor: _moneda,
+      etiqueta: 'Moneda de la venta',
+      tituloPanel: 'Moneda de la venta',
+      opciones: const [
+        OpcionSelector<String>('CUP', 'CUP'),
+        OpcionSelector<String>('USD', 'USD'),
       ],
+      alCambiar: (v) {
+        if (v != null && v != _moneda) _cambiarMoneda(v);
+      },
     );
   }
 

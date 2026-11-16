@@ -740,6 +740,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 
   bool _cabeceraVisible = true;
 
+  // SL-6 (G05-10): la promo nace PLEGADA tras su botón
+  // resumen «Promo · activa/inactiva» (regla anti-regueros
+  // de Jc); el interruptor solo ocupa espacio al desplegar.
+  bool _promoDesplegada = false;
+
   /// El pliegue de la cabecera según el scroll del
   /// catálogo: bajar la pliega; subir la despliega (y
   /// volver arriba ES subir: llega desplegada). Solo
@@ -869,6 +874,37 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     if (!_esDueno && !_promoActiva) {
       return const SizedBox.shrink();
     }
+    // SL-6 (G05-10): plegada, la promo es UNA fila resumen
+    // («Promo · activa/inactiva») que no compite con el
+    // catálogo; desplegada, la tarjeta de siempre con su
+    // interruptor y su chevron para replegar.
+    if (!_promoDesplegada) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+        child: Tarjeta(
+          onTap: () => setState(() => _promoDesplegada = true),
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.md, vertical: AppEspacio.xs),
+          child: Row(
+            children: [
+              Icon(Icons.card_giftcard_rounded,
+                  size: 20,
+                  color: AppColores.textoSecundario(context)),
+              const SizedBox(width: AppEspacio.sm),
+              Expanded(
+                child: Text(
+                    _promoActiva ? 'Promo · activa' : 'Promo · inactiva',
+                    style: AppTexto.secundario),
+              ),
+              Icon(Icons.expand_more_rounded,
+                  size: 20,
+                  color: AppColores.textoSecundario(context)),
+            ],
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
@@ -893,6 +929,12 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               activeThumbColor: AppColores.naranja,
               // v1.2.1: solo el dueño la activa/desactiva.
               onChanged: _esDueno ? _togglePromo : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.expand_less_rounded, size: 20),
+              tooltip: 'Plegar promo',
+              onPressed: () =>
+                  setState(() => _promoDesplegada = false),
             ),
           ],
         ),
@@ -1759,7 +1801,9 @@ class _FotoSuplementoState extends State<_FotoSuplemento> {
               return Image(
                 image: providerFotoAcotada(FileImage(f), ancho: ancho),
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
+                errorBuilder: (_, __, ___) =>
+                      // SL-6 (G05-13): la marca única de la casa.
+                      const PlaceholderSuplemento(alto: null, radio: 0),
               );
             }
             // 1.30 D5 (UI130-18, ALTA-02): sin foto propia, la
@@ -1771,39 +1815,15 @@ class _FotoSuplementoState extends State<_FotoSuplemento> {
                 image:
                     providerFotoAcotada(AssetImage(generica), ancho: ancho),
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const _PlaceholderFoto(),
+                errorBuilder: (_, __, ___) =>
+                      // SL-6 (G05-13): la marca única de la casa.
+                      const PlaceholderSuplemento(alto: null, radio: 0),
               );
             }
-            return const _PlaceholderFoto();
+            return const PlaceholderSuplemento(alto: null, radio: 0);
           },
         );
       },
-    );
-  }
-}
-
-/// Placeholder elegante: gradiente carbón/gris acero + ícono vectorial
-/// a baja opacidad. Cero letras gigantes (decisión Jc).
-class _PlaceholderFoto extends StatelessWidget {
-  const _PlaceholderFoto();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF2B3138), Color(0xFF14171B)],
-        ),
-      ),
-      child: const Center(
-        child: Icon(
-          Icons.fitness_center_rounded,
-          size: 46,
-          color: Color(0x40FFFFFF),
-        ),
-      ),
     );
   }
 }
@@ -1841,7 +1861,7 @@ class _ShimmerFotoState extends State<_ShimmerFoto>
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: Tween<double>(begin: 0.45, end: 0.95).animate(_c),
-      child: const _PlaceholderFoto(),
+      child: const PlaceholderSuplemento(alto: null, radio: 0),
     );
   }
 }

@@ -498,36 +498,20 @@ class _VentaSuplementoInscripcionScreenState
             teclado: TextInputType.phone,
           ),
           const SizedBox(height: AppEspacio.sm),
-          const Text('Sexo', style: AppTexto.secundario),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: AppEspacio.sm,
-            children: [
-              ChoiceChip(
-                label: const Text('Sin especificar'),
-                selected: _sexo == null,
-                selectedColor: AppColores.naranja
-                    .withValues(alpha: 0.2),
-                onSelected: (_) =>
-                    setState(() => _sexo = null),
-              ),
-              ChoiceChip(
-                label: const Text('Masculino'),
-                selected: _sexo == 'M',
-                selectedColor: AppColores.naranja
-                    .withValues(alpha: 0.2),
-                onSelected: (_) =>
-                    setState(() => _sexo = 'M'),
-              ),
-              ChoiceChip(
-                label: const Text('Femenino'),
-                selected: _sexo == 'F',
-                selectedColor: AppColores.naranja
-                    .withValues(alpha: 0.2),
-                onSelected: (_) =>
-                    setState(() => _sexo = 'F'),
-              ),
+          // SL-6 (G05-12): el sexo se elige con el
+          // SelectorIron de la casa (antes, ChoiceChip a
+          // pelo solo en esta pantalla).
+          SelectorIron<String?>(
+            valor: _sexo,
+            etiqueta: 'Sexo',
+            pista: 'Sin especificar',
+            tituloPanel: 'Sexo',
+            opciones: const [
+              OpcionSelector<String?>(null, 'Sin especificar'),
+              OpcionSelector<String?>('M', 'Masculino'),
+              OpcionSelector<String?>('F', 'Femenino'),
             ],
+            alCambiar: (v) => setState(() => _sexo = v),
           ),
           const SizedBox(height: AppEspacio.sm),
           CampoTexto(
@@ -551,26 +535,20 @@ class _VentaSuplementoInscripcionScreenState
               'se cobra aparte, en efectivo.',
               style: AppTexto.secundario),
           const SizedBox(height: 4),
-          Wrap(
-            spacing: AppEspacio.sm,
-            children: [
-              ChoiceChip(
-                label: const Text('Efectivo'),
-                selected: _metodo == 'efectivo',
-                selectedColor: AppColores.naranja
-                    .withValues(alpha: 0.2),
-                onSelected: (_) =>
-                    setState(() => _metodo = 'efectivo'),
-              ),
-              ChoiceChip(
-                label: const Text('Transferencia'),
-                selected: _metodo == 'transferencia',
-                selectedColor: AppColores.naranja
-                    .withValues(alpha: 0.2),
-                onSelected: (_) =>
-                    setState(() => _metodo = 'transferencia'),
-              ),
+          // SL-6 (G05-12): el método, también con
+          // SelectorIron de la casa.
+          SelectorIron<String>(
+            valor: _metodo,
+            etiqueta: 'Método de pago',
+            tituloPanel: 'Método de pago',
+            opciones: const [
+              OpcionSelector<String>('efectivo', 'Efectivo'),
+              OpcionSelector<String>(
+                  'transferencia', 'Transferencia'),
             ],
+            alCambiar: (v) {
+              if (v != null) setState(() => _metodo = v);
+            },
           ),
           const EncabezadoSeccion(
               titulo: 'Mensualidad inicial'),
@@ -698,15 +676,12 @@ class _FotoBandaVentaState extends State<_FotoBandaVenta> {
       builder: (ctx, snap) {
         final f = snap.data;
         if (f == null) {
-          return Container(
+          // SL-6 (G05-13): la marca de «sin foto» es la
+          // única de la casa (PlaceholderSuplemento).
+          return const SizedBox(
             width: 56,
             height: 56,
-            decoration: BoxDecoration(
-              color: AppColores.fondo(ctx),
-              borderRadius: BorderRadius.circular(AppRadio.md),
-            ),
-            child: Icon(Icons.medication_rounded,
-                color: AppColores.textoSecundario(ctx)),
+            child: PlaceholderSuplemento(alto: 56),
           );
         }
         return ClipRRect(
@@ -716,13 +691,8 @@ class _FotoBandaVentaState extends State<_FotoBandaVenta> {
             width: 56,
             height: 56,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
-              width: 56,
-              height: 56,
-              color: AppColores.fondo(ctx),
-              child: Icon(Icons.medication_rounded,
-                  color: AppColores.textoSecundario(ctx)),
-            ),
+            errorBuilder: (_, __, ___) =>
+                const PlaceholderSuplemento(alto: 56),
           ),
         );
       },
