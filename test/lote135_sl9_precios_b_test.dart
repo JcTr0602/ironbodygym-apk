@@ -23,14 +23,20 @@
 ///   corrección A5-D2 de la 1.28, que no se aplicó a la vía
 ///   C6/PreciosMetodoScreen.
 ///
-/// Consecuencia: tras editar «Mensualidad menores» en
-/// PreciosMetodoScreen, la clave plana dice el precio nuevo
-/// pero TODO lo que cobra sigue leyendo el precio viejo del
-/// blob hasta que alguien guarde por la otra vía. Estos tests
-/// lo fijan como caracterización (pasan con el comportamiento
-/// actual): la corrección vive fuera del mapa de SL-9
-/// (panel_resto_caja.dart / bloque2_resto.dart) y se reporta
-/// como ancla fuera de mapa, sin invadir.
+/// Consecuencia (en la base de SL-9): tras editar
+/// «Mensualidad menores» en PreciosMetodoScreen, la clave
+/// plana decía el precio nuevo pero TODO lo que cobra seguía
+/// leyendo el precio viejo del blob hasta que alguien
+/// guardara por la otra vía.
+///
+/// CIERRE DEL LOTE: la pieza B se corrigió en SL-X1 —
+/// `guardarConfigGym` aplica el patrón A5-D2 (espejo del
+/// blob actualizado y op `guardar_tipos_pago` en la misma
+/// transacción) — y el coordinador actualizó la fijación de
+/// abajo al comportamiento corregido: las dos lecturas ya
+/// coinciden tras guardar por la vía PreciosMetodoScreen.
+/// La batería discriminante completa de la corrección vive
+/// en test/lote135_slx1_precios_test.dart.
 library;
 
 import 'dart:convert';
@@ -85,7 +91,7 @@ void main() {
             (call) async => null);
     SharedPreferences.setMockInitialValues({});
     try {
-      await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+      await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
     } catch (_) {}
     final sesion = jsonEncode({
       'access_token': _jwtFalso(),
@@ -123,23 +129,23 @@ void main() {
 
   group('B · divergencia del precio de menores', () {
     test('la vía PreciosMetodoScreen (guardarConfigGym) mueve '
-        'la clave pero NO el blob: las lecturas del cobro '
-        'siguen en el precio viejo', () async {
+        'clave Y blob: las lecturas del cobro coinciden '
+        '(corrección B de SL-X1)', () async {
       await bdConPrecios();
       // Exactamente la llamada de _autoguardar en
       // PreciosMetodoScreen para 'mensualidad_menores'.
       await guardarConfigGym({'mensualidad_menores': 1800.0});
       final aj = await LocalDb.instance.getAjustes();
-      // La clave plana SÍ cambió (lo que la pantalla enseña).
+      // La clave plana cambió (lo que la pantalla enseña)…
       expect(aj['mensualidad_menores'], 1800.0);
-      // Pero la fuente única del cobro lee el blob primero:
-      // sigue devolviendo 1500. DIVERGENCIA REAL.
-      expect(precioMenoresDesdeAjustes(aj), 1500.0,
-          reason: 'el blob tipos_pago manda y guardarConfigGym '
-              'no lo actualizó');
+      // …y desde la corrección B también el blob: la fuente
+      // única del cobro devuelve el precio nuevo.
+      expect(precioMenoresDesdeAjustes(aj), 1800.0,
+          reason: 'guardarConfigGym sincroniza el blob '
+              'tipos_pago (patrón A5-D2)');
       final tipos = await getTiposPago(soloActivos: false, paraMenor: true);
-      expect(tipos.singleWhere((t) => t.id == 'menores').monto, 1500.0,
-          reason: 'el diálogo de cobro cobraría el precio viejo');
+      expect(tipos.singleWhere((t) => t.id == 'menores').monto, 1800.0,
+          reason: 'el diálogo de cobro cobra el precio nuevo');
     });
 
     test('la vía del Panel (aplicarCambiosMontos) SÍ mantiene '
