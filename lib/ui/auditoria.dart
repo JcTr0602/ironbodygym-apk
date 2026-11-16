@@ -19,6 +19,7 @@ import '../tiempo.dart';
 import 'actividad_cliente.dart';
 import 'app_bar.dart';
 import 'auditoria_persona.dart';
+import 'cola.dart' show etiquetaEstadoOp;
 import 'diseno.dart';
 import 'ficha.dart';
 import 'componentes.dart';
@@ -32,6 +33,30 @@ import '../app_log.dart';
 /// propio no ocupa la vista inicial, pero queda a un toque en
 /// «Todo» o «Solo mías».
 enum FiltroAuditoria { otrosYAlertas, todo, soloMias }
+
+/// SL-X2 (G08-7): la etiqueta de estado de una op en la
+/// Auditoría. Las cuatro conocidas de esta pantalla
+/// conservan su texto; TODAS las demás pasan por el
+/// traductor de la casa ([etiquetaEstadoOp], en cola.dart)
+/// — antes la rama por defecto devolvía la clave cruda
+/// (`enviada`, `necesita_revision` salían tal cual a
+/// pantalla). Lo que ni el traductor conoce se lee
+/// «Estado registrado», nunca la clave.
+String etiquetaEstadoAuditoria(String estado) {
+  switch (estado) {
+    case 'aplicada':
+      return 'Sincronizada';
+    case 'pendiente':
+      return 'Pendiente de sync';
+    case 'rechazada':
+      return 'Rechazada por el servidor';
+    case 'error':
+      return 'Error al subir';
+    default:
+      final traducida = etiquetaEstadoOp(estado);
+      return traducida == estado ? 'Estado registrado' : traducida;
+  }
+}
 
 /// Decodifica el payload (JSON) de una op de la cola local.
 Map<String, dynamic> payloadDeOp(Map<String, dynamic> op) {
@@ -1152,20 +1177,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     );
   }
 
-  String _etiquetaEstado(String estado) {
-    switch (estado) {
-      case 'aplicada':
-        return 'Sincronizada';
-      case 'pendiente':
-        return 'Pendiente de sync';
-      case 'rechazada':
-        return 'Rechazada por el servidor';
-      case 'error':
-        return 'Error al subir';
-      default:
-        return estado;
-    }
-  }
+  String _etiquetaEstado(String estado) =>
+      etiquetaEstadoAuditoria(estado);
 
   Color _colorEstado(String estado) {
     switch (estado) {

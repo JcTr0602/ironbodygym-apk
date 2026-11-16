@@ -386,17 +386,15 @@ Future<void> mostrarDetalleVentaServicio(
                 ),
               ],
             ),
-            if (enCola || yaReversada || esCasa) ...[
+            // SL-X2 (G06-5): el chip de sync del detalle
+            // SALE — la sync se dice una sola vez (el icono
+            // de cabecera), no por venta. Quedan los
+            // estados de la venta misma.
+            if (yaReversada || esCasa) ...[
               const SizedBox(height: AppEspacio.xs),
               Wrap(
                 spacing: AppEspacio.sm,
                 children: [
-                  if (enCola)
-                    const ChipEstado.semantico(
-                      texto: 'Por sincronizar',
-                      significado: SignificadoChip.info,
-                      icono: Icons.sync_rounded,
-                    ),
                   if (yaReversada && !esReverso)
                     const ChipEstado.semantico(
                       texto: 'Revertida',

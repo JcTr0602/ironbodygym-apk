@@ -119,6 +119,14 @@ class CabeceraMarco extends StatelessWidget {
   /// de ~48 dp en cada pantalla, para siempre).
   final bool plegada;
 
+  /// SL-X2 (G01-10): hay desplazamiento en el pilar activo
+  /// (la Home lo rastrea con su sensor de scroll). Con
+  /// scroll, la sombra de la cabecera CRECE para despegarla
+  /// del contenido que pasa por debajo; sin scroll, la
+  /// elevación base de siempre. Antes la elevación era una
+  /// constante con o sin scroll.
+  final bool conScroll;
+
   /// Acción del menú de perfil: perfil | auditoria | respaldo |
   /// diagnostico | ayuda | tema | salir.
   final void Function(String accion) onAccionPerfil;
@@ -131,6 +139,7 @@ class CabeceraMarco extends StatelessWidget {
     required this.onLupa,
     required this.onAccionPerfil,
     this.plegada = false,
+    this.conScroll = false,
   });
 
   Widget _interruptorSol(BuildContext context) {
@@ -328,7 +337,8 @@ class CabeceraMarco extends StatelessWidget {
     // bajar (plegada) antes de apretar a los iconos.
     return Material(
       color: Theme.of(context).colorScheme.surface,
-      elevation: 1,
+      // SL-X2 (G01-10): la sombra crece con el scroll.
+      elevation: conScroll ? 4 : 1,
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: AppEspacio.md, vertical: AppEspacio.xs),

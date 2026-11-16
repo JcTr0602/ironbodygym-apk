@@ -26,6 +26,7 @@ import 'diagnostico_espejo_card.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
+import 'hoja_accion.dart';
 import 'pago_diario.dart';
 import 'preview_cobro.dart';
 import 'suplementos.dart';
@@ -93,6 +94,13 @@ class _BuscarScreenState extends State<BuscarScreen>
   // en vez de gritar «sin bajar cambios» a secas.
   DateTime? _ultimoPullParcial;
   bool _bajadaCortadaPorPresupuesto = false;
+  // SL-X2 (G02-2): la última corrida de sync dejó un error
+  // VIGENTE (posterior a la última bajada buena, o sin
+  // ninguna bajada buena): el espejo vacío de este teléfono
+  // no prueba que no haya clientes — puede ser una sync
+  // fallida, y el vacío no debe invitar a inscribir
+  // duplicados.
+  bool _syncFalloVigente = false;
   String _swipeDer = 'cobrar';
   String _swipeIzq = 'ninguna';
   // B1 (estéticas 1.19): aviso único del gesto deslizar.
@@ -240,6 +248,13 @@ class _BuscarScreenState extends State<BuscarScreen>
             errCodigo == 'presupuesto_agotado' &&
                 errEn != null &&
                 (real == null || errEn.isAfter(real));
+        // SL-X2 (G02-2): cualquier error de corrida vigente
+        // (no solo el de presupuesto) marca la lista como no
+        // verificada a efectos del estado vacío.
+        _syncFalloVigente = errCodigo != null &&
+            errCodigo.isNotEmpty &&
+            errEn != null &&
+            (real == null || errEn.isAfter(real));
       });
     } catch (_) {}
   }
@@ -515,9 +530,36 @@ class _BuscarScreenState extends State<BuscarScreen>
   /// antes todo vacío culpaba a la búsqueda («prueba con
   /// otro nombre») aunque lo causara un filtro o un espejo
   /// aún sin clientes, y no ofrecía salida.
+  /// SL-X2 (G02-2): la lista no está verificada si nunca
+  /// bajó una sync completa o si la última corrida dejó un
+  /// error vigente: el espejo vacío puede ser una sync
+  /// fallida, no un gym sin clientes.
+  bool get _sinVerificar => _ultimoPull == null || _syncFalloVigente;
+
   Widget _vacioBuscar() {
     final totalEspejo = _conteos['todos'] ?? 0;
     final conFiltros = _filtro != 'todos' || _rangoEdad != 'todas';
+    if (_busco &&
+        totalEspejo == 0 &&
+        !conFiltros &&
+        _q.text.trim().isEmpty &&
+        _sinVerificar) {
+      // SL-X2 (G02-2): sin verificar NO se invita a
+      // inscribir (duplicaría clientes que sí existen en
+      // el servidor): se dice la verdad y la salida es
+      // reintentar la verificación.
+      return EstadoVacio(
+        icono: Icons.cloud_off_rounded,
+        titulo: 'Lista sin verificar',
+        subtitulo:
+            'Este teléfono aún no ha podido bajar la lista del servidor: puede haber clientes que aquí no se ven. Revisa la conexión y reinténtalo antes de inscribir a nadie.',
+        textoAccion: 'Reintentar',
+        onAccion: () {
+          unawaited(_refrescarSello());
+          _buscar();
+        },
+      );
+    }
     if (_busco &&
         totalEspejo == 0 &&
         !conFiltros &&
@@ -1467,16 +1509,23 @@ class _BuscarScreenState extends State<BuscarScreen>
     if (esVistaProtegida(c)) return;
     // 1.29 (FB-01): teléfono efectivo (movil primero).
     final telOk = telefonoEfectivoWa(c).isNotEmpty;
-    final accion = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
+    // SL-X2 (G02-3, familia UI-12): el menú rápido se
+    // presenta con la hoja de la casa (showHojaIron), como
+    // unificó SL-3 en listas.dart — antes era una hoja
+    // cruda con SafeArea propio. El contrato de retorno
+    // no cambia.
+    final accion = await showHojaIron<String>(
+      context,
+      titulo: '${c['nombre'] ?? 'Cliente'}',
+      icono: Icons.touch_app_rounded,
+      cuerpo: Builder(
+        builder: (ctx) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              title: Text('${c['nombre'] ?? 'Cliente'}',
-                  style: AppTexto.subtitulo),
-              subtitle: const Text('Acciones rápidas'),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Acciones rápidas',
+                  style: AppTexto.secundario),
             ),
             ListTile(
               leading: const Icon(Icons.payments_rounded),
@@ -1671,56 +1720,64 @@ class _BuscarScreenState extends State<BuscarScreen>
               : d == 0
                   ? 'Vence hoy'
                   : 'Vence en $d día(s)';
+      // SL-X2 (G02-3, familia UI-12): la presentación es la
+      // hoja de la casa (HojaAccion). LÍMITE documentado:
+      // showHojaIron no expone isDismissible, y esta pasada
+      // guiada DEBE seguir siendo no-descartable (tocar
+      // fuera o volver atrás no la cierra: cada paso se
+      // resuelve con un botón) — así que la HojaAccion se
+      // compone sobre el mismo showModalBottomSheet con
+      // isDismissible: false, conservando la descartabilidad
+      // intacta y unificando solo la presentación visual.
+      // La X de la hoja equivale a «Terminar avisos» ('fin').
       final r = await showModalBottomSheet<String>(
         context: context,
         isDismissible: false,
-        builder: (ctx) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(AppEspacio.lg),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Aviso ${i + 1} de ${conTel.length}',
-                    style: AppTexto.metadato),
-                const SizedBox(height: 4),
-                Text('${c['nombre'] ?? 'Cliente'}',
-                    style: AppTexto.subtitulo),
-                Text(detalle, style: AppTexto.secundario),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.chat_rounded),
-                    label: const Text('Abrir WhatsApp'),
-                    onPressed: () => Navigator.pop(ctx, 'abrir'),
-                  ),
+        isScrollControlled: true,
+        builder: (ctx) => HojaAccion(
+          titulo: 'Aviso ${i + 1} de ${conTel.length}',
+          icono: Icons.chat_rounded,
+          onCerrar: () => Navigator.pop(ctx, 'fin'),
+          cuerpo: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${c['nombre'] ?? 'Cliente'}',
+                  style: AppTexto.subtitulo),
+              Text(detalle, style: AppTexto.secundario),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.chat_rounded),
+                  label: const Text('Abrir WhatsApp'),
+                  onPressed: () => Navigator.pop(ctx, 'abrir'),
                 ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, 'avise'),
-                        child: const Text('Ya avisé · Siguiente'),
-                      ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'avise'),
+                      child: const Text('Ya avisé · Siguiente'),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, 'saltar'),
-                        child: const Text('Saltar'),
-                      ),
-                    ),
-                  ],
-                ),
-                Center(
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(ctx, 'fin'),
-                    child: const Text('Terminar avisos'),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'saltar'),
+                      child: const Text('Saltar'),
+                    ),
+                  ),
+                ],
+              ),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'fin'),
+                  child: const Text('Terminar avisos'),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );

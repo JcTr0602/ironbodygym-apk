@@ -410,7 +410,10 @@ class PlusDetalle {
     this.historial = const [],
   });
   factory PlusDetalle.fromJson(Map<String, dynamic> j) {
-    final hist = (j['historial'] as List?) ?? const [];
+    // SL-X2 (BG-01 residual): guarda de tipo real — un
+    // historial que no sea List cae en vacío, no lanza.
+    final histRaw = j['historial'];
+    final hist = histRaw is List ? histRaw : const [];
     return PlusDetalle(
       estado: '${j['estado'] ?? 'nunca'}',
       activo: j['activo'] == true,
@@ -497,7 +500,9 @@ class ResultadoLote {
     this.repetida = false,
   });
   factory ResultadoLote.fromJson(Map<String, dynamic> j) {
-    final items = (j['items'] as List?) ?? const [];
+    // SL-X2 (BG-01 residual): guarda de tipo real.
+    final itemsRaw = j['items'];
+    final items = itemsRaw is List ? itemsRaw : const [];
     return ResultadoLote(
       accion: '${j['accion'] ?? ''}',
       aplicados: (j['aplicados'] as num?)?.toInt() ?? 0,
@@ -618,13 +623,19 @@ class InvitadoDetalle {
   });
 
   factory InvitadoDetalle.fromJson(Map<String, dynamic> j) {
-    final inv = (j['invitado'] as Map?) ?? const {};
+    // SL-X2 (BG-01 residual): guarda de tipo real también
+    // para el mapa del invitado.
+    final invRaw = j['invitado'];
+    final inv = invRaw is Map ? invRaw : const {};
     final invM = inv.map((k, v) => MapEntry('$k', v));
-    final meds = (j['mediciones'] as List?) ?? const [];
+    // SL-X2 (BG-01 residual): guardas de tipo reales.
+    final medsRaw = j['mediciones'];
+    final meds = medsRaw is List ? medsRaw : const [];
     final sol = j['solicitud'];
     final conv = j['conversion_preparada'];
     final plusJ = j['plus'];
-    final staff = (j['staff_acciones'] as List?) ?? const [];
+    final staffRaw = j['staff_acciones'];
+    final staff = staffRaw is List ? staffRaw : const [];
     return InvitadoDetalle(
       id: '${invM['id'] ?? ''}',
       nombre: '${invM['nombre'] ?? ''}',
@@ -1452,7 +1463,7 @@ class InvitadosService {
     // 1.28 (M4-A11): fila a fila con red de seguridad — una
     // fila sucia se salta; la lista sobrevive.
     return [
-      for (final j in (lista as List? ?? const []))
+      for (final j in (lista is List ? lista : const []))
         ..._resumenSeguro(j),
     ];
   }
@@ -1563,7 +1574,9 @@ class InvitadosService {
       final raw = await LocalDb.instance.getMeta(_cacheKey);
       if (raw == null || raw.isEmpty) return null;
       final j = jsonDecode(raw) as Map<String, dynamic>;
-      final listaJ = (j['lista'] as List?) ?? const [];
+      // SL-X2 (BG-01 residual): guarda de tipo real.
+      final listaJRaw = j['lista'];
+      final listaJ = listaJRaw is List ? listaJRaw : const [];
       final resJ = j['resumen'];
       return (
         resumen: resJ is Map
@@ -1712,7 +1725,9 @@ class InvitadosService {
           'RED', 'Respuesta inesperada del servidor.');
     }
     final m = res.map((k, v) => MapEntry('$k', v));
-    final prefill = (m['prefill'] as Map?) ?? const {};
+    // SL-X2 (BG-01 residual): guarda de tipo real.
+    final prefillRaw = m['prefill'];
+    final prefill = prefillRaw is Map ? prefillRaw : const {};
     final pf = prefill.map((k, v) => MapEntry('$k', v));
     final datos = DatosConversionInvitado(
       invitadoId: detalle.id,

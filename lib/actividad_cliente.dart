@@ -119,12 +119,50 @@ String tituloActividadCliente(ActividadCliente a) {
       return 'Turno manual borrado';
     case 'sesion_subida':
       return 'Sesión de entreno subida';
+    // SL-X2 (G12-7, residual): la familia plus_* no tenía
+    // mapa y caía a la rama por defecto, que devolvía la
+    // clave transformada («plus quitar») — semi-cruda a
+    // pantalla.
+    case 'plus_quitar':
+      return 'Plus retirado';
+    case 'plus_otorgar':
+      return 'Plus otorgado';
+    case 'plus_cortesia':
+      return 'Plus de cortesía otorgado';
+    case 'plus_confirmar':
+    case 'plus_confirmar_reporte':
+      return 'Reporte de Plus confirmado';
+    case 'plus_rechazar':
+    case 'plus_rechazar_reporte':
+      return 'Reporte de Plus rechazado';
+    case 'plus_reportar':
+      return 'Plus reportado por el cliente';
+    case 'plus_extender':
+      return 'Plus extendido';
+    case 'vida_extender':
+      return 'Vida de invitado extendida';
     default:
       if (a.accion.startsWith('vale_')) {
-        return 'Vale de premio: '
-            '${a.accion.substring(5).replaceAll('_', ' ')}';
+        // El detalle del vale solo se pinta si es una
+        // palabra conocida y ya humana; un sufijo futuro
+        // no se escupe transformado.
+        const detallesVale = {
+          'canjeado',
+          'emitido',
+          'anulado',
+          'creado',
+          'reclamado',
+          'vencido',
+        };
+        final sub = a.accion.substring(5);
+        return detallesVale.contains(sub)
+            ? 'Vale de premio: $sub'
+            : 'Vale de premio registrado';
       }
-      return a.accion.replaceAll('_', ' ');
+      // SL-X2 (G12-7): defecto de la casa — «Acción
+      // registrada», nunca la clave (como el traductor
+      // de SL-1).
+      return 'Acción registrada';
   }
 }
 
