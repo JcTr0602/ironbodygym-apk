@@ -1863,6 +1863,13 @@ class InvitadosService {
   Future<ConversionInvitado> reconciliarPreparadaObsoleta(
       InvitadoDetalle detalle, ConversionInvitado local) async {
     if (local.estado != EstadoConversion.preparada) return local;
+    // Lote 1.35 (SL-1 · A-12): una preparación NACIDA OFFLINE
+    // no existe en el servidor por definición — que el detalle
+    // no la vea no es obsolescencia, es lo esperado hasta que
+    // la verificación la prepare allá y adopte su uuid. Sin
+    // esta exención, la reconciliación cancelaba preparaciones
+    // locales legítimas recién creadas sin conexión.
+    if (local.nacidaOffline) return local;
     if (vigenciaPreparada(local, detalle.conversionPreparada) ==
         VigenciaConversionPreparada.vigente) {
       return local;
