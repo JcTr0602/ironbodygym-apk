@@ -751,8 +751,28 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       color:
                           _deudaEntrante > 0 ? AppColores.error : null),
                   const Divider(),
-                  _linea('NETO ESTIMADO', fmtMonto(_neto),
-                      negrita: true, color: colorCifraNomina(_neto)),
+                  // SL-5 G07-11: el NETO ESTIMADO se asienta
+                  // contando hasta su cifra (MontoAnimado),
+                  // no salta de golpe al recalcular.
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text('NETO ESTIMADO',
+                              style: AppTexto.cuerpo),
+                        ),
+                        MontoAnimado(
+                          valor: _neto,
+                          formato: (v) => fmtMonto(v),
+                          style: AppTexto.cuerpo.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: colorCifraNomina(_neto)),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: AppEspacio.sm),
                   // N2 (estéticas 1.19): el neto como barra
                   // de composición. 1.25 T25: la pieza es
