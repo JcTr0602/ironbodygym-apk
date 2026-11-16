@@ -35,6 +35,11 @@ class _ComparativaEntrenadoresScreenState
 
   late DateTime _mes;
   bool _cargando = true;
+  // Hy4 G#37: generación de carga — al mover el mes dos
+  // veces seguidas, la carga del mes intermedio podía
+  // terminar última y dejar sus filas bajo el título del
+  // mes nuevo.
+  int _genCarga = 0;
   List<Map<String, dynamic>> _filas = [];
 
   @override
@@ -67,9 +72,10 @@ class _ComparativaEntrenadoresScreenState
   }
 
   Future<void> _cargarDatos() async {
+    final gen = ++_genCarga;
     setState(() => _cargando = true);
     final filas = await comparativaEntrenadores(_prefijo);
-    if (!mounted) return;
+    if (!mounted || gen != _genCarga) return;
     setState(() {
       _filas = filas;
       _cargando = false;
