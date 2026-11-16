@@ -1641,16 +1641,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
-  /// Franja compacta del día en Vender: dosis vendidas,
-  /// efectivo neto y ventas por sincronizar — SIN saldos de
-  /// pomos (pomo ciego también aquí). Tocarla lleva a Día.
+  /// Franja compacta del día en Vender: dosis vendidas y
+  /// efectivo neto — SIN saldos de pomos (pomo ciego
+  /// también aquí). Tocarla lleva a Día. SL-X2 (G06-5):
+  /// la franja conserva SOLO el dato del día; el conteo
+  /// de ops pendientes de subir sale de la franja (la
+  /// sync se dice una sola vez, en la cabecera). El
+  /// resumen puro sigue calculándolo para quien lo
+  /// necesite como dato, no como franja.
   Widget _franjaDelDia() {
-    final (dosis, efectivo, porSincronizar) =
+    final (dosis, efectivo, _) =
         resumenFranjaDelDia(_ventasHoy);
     final texto = _ventasHoy.isEmpty
         ? 'Hoy: sin ventas todavía'
-        : 'Hoy: $dosis dosis · ${fmtMonto(efectivo)} CUP en efectivo'
-            '${porSincronizar > 0 ? ' · $porSincronizar por sincronizar' : ''}';
+        : 'Hoy: $dosis dosis · ${fmtMonto(efectivo)} CUP en efectivo';
     return Tarjeta(
       onTap: () => setState(() {
         _zona = 1;
@@ -2610,22 +2614,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ),
         // 1.28 (M3-C5): el título lleva los chips de estado —
         // el método ya viaja en el subtítulo y la Casa con su
-        // estrella; aquí van los estados que antes no se
-        // veían: por sincronizar y revertida.
+        // estrella; aquí va el estado que antes no se veía:
+        // revertida. SL-X2 (G06-5): el chip de sync por
+        // fila SALE — la sync se dice UNA sola vez (el
+        // icono de cabecera), no en cada venta.
         title: Row(
           children: [
             Flexible(
               child: Text(esReverso ? 'Reverso · $tipoTxt' : tipoTxt,
                   overflow: TextOverflow.ellipsis),
             ),
-            if (enCola) ...[
-              const SizedBox(width: 6),
-              const ChipEstado.semantico(
-                texto: 'Por sincronizar',
-                significado: SignificadoChip.info,
-                icono: Icons.sync_rounded,
-              ),
-            ],
             if (yaReversada && !esReverso) ...[
               const SizedBox(width: 6),
               const ChipEstado.semantico(
