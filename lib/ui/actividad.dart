@@ -25,6 +25,7 @@ import 'ficha.dart';
 import 'historial_ventas.dart';
 import 'servicios.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 /// Feed de actividad reciente (v1.0.15).
 ///
@@ -423,6 +424,12 @@ List<MapEntry<String, List<Map<String, dynamic>>>>
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
+  // SL-8 (G08-2): error de carga VISIBLE. El catch de
+  // _cargar solo dejaba bitácora y la pantalla caía en
+  // «Sin actividad reciente»: un «no se pudo leer» se
+  // pintaba como «no hay». Con _errorCarga la pantalla
+  // distingue error de vacío (EstadoError + Reintentar).
+  String? _errorCarga;
   // Mejora Actividad 6: true si el feed del servidor llegó al tope.
   bool _feedRecortado = false;
   // v1.3.3: 6 filtros de categoría (diseño Argón).
@@ -480,10 +487,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      _errorCarga = null;
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // G08-2: y además se VE — error ≠ vacío.
+      _errorCarga = mensajeErrorAmable(e);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -2005,15 +2015,25 @@ class _ActividadScreenState extends State<ActividadScreen> {
             child: CruceEstados(
               estado: _cargando && _items.isEmpty
                   ? 'cargando'
-                  : filtrados.isEmpty
-                      ? 'vacio'
-                      : 'contenido',
+                  // G08-2: el error es un estado propio,
+                  // no el vacío.
+                  : _errorCarga != null && _items.isEmpty
+                      ? 'error'
+                      : filtrados.isEmpty
+                          ? 'vacio'
+                          : 'contenido',
               child: _cargando && _items.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.all(AppEspacio.lg),
                       child: SkeletonLista(items: 5),
                     )
-                  : filtrados.isEmpty
+                  : _errorCarga != null && _items.isEmpty
+                    ? EstadoError(
+                        titulo: 'No se pudo cargar la actividad',
+                        detalle: _errorCarga,
+                        onReintentar: _cargar,
+                      )
+                    : filtrados.isEmpty
                     // v1.3.5 (Fase 1, F1): distinguir "sin datos" de
                     // "filtros sin resultados".
                     ? (_items.isEmpty
