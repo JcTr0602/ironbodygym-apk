@@ -43,6 +43,12 @@ String? validarNuevoUsuarioApk(String nombre, String password) {
   return null;
 }
 
+/// SL-9 (G09-7): etiqueta legible de un rol de usuario APK —
+/// la que leen las personas («Administrador»/«Entrenador»),
+/// nunca el id crudo que viaja en la op («admin»/«entrenador»).
+String etiquetaRolUsuario(String rol) =>
+    rol == 'admin' ? 'Administrador' : 'Entrenador';
+
 /// 1.15 P6: la contraseña de un usuario nuevo se normaliza con
 /// trim ANTES de validar, encolar y compartir: una clave de 6
 /// caracteres que tras trim queda en menos debe rechazarse, y la
@@ -377,9 +383,13 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     final ok = await DialogoApp.confirmar(
       context,
       titulo: 'Cambiar rol',
-      mensaje: '"$username" pasará de "$rolActual" a "$nuevoRol".\n\n'
+      // SL-9 (G09-7): el confirmador habla con las etiquetas
+      // de la casa, no con los ids crudos de la op.
+      mensaje:
+          '"$username" pasará de "${etiquetaRolUsuario(rolActual)}" '
+          'a "${etiquetaRolUsuario(nuevoRol)}".\n\n'
           '${nuevoRol == 'admin' ? 'Tendrá acceso a Administración, finanzas y auditoría.' : 'Solo verá las funciones de entrenador.'}',
-      aceptar: 'Cambiar a $nuevoRol',
+      aceptar: 'Cambiar a ${etiquetaRolUsuario(nuevoRol)}',
       icono: Icons.manage_accounts_rounded,
     );
     if (ok == true && mounted) {
@@ -708,6 +718,8 @@ class _DialogoNuevaContrasena extends StatefulWidget {
 class _DialogoNuevaContrasenaState
     extends State<_DialogoNuevaContrasena> {
   final _ctrl = TextEditingController();
+  // SL-9 (G09-12): el error vive dentro del diálogo.
+  String? _error;
 
   @override
   void dispose() {
@@ -720,17 +732,39 @@ class _DialogoNuevaContrasenaState
     return DialogoApp(
       titulo: 'Nueva contraseña para ${widget.username}',
       iconoTitulo: Icons.key_rounded,
-      contenido: CampoTexto(
-        controller: _ctrl,
-        etiqueta: 'Contraseña (mín. 6)',
-        obscure: true,
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CampoTexto(
+            controller: _ctrl,
+            etiqueta: 'Contraseña (mín. 6)',
+            obscure: true,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!,
+                style: AppTexto.cuerpo
+                    .copyWith(color: AppColores.error)),
+          ],
+        ],
       ),
       acciones: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-            onPressed: () => Navigator.pop(context, _ctrl.text),
+            onPressed: () {
+              // SL-9 (G09-12): validar ANTES de cerrar — antes
+              // el aviso salía tras el pop, en la pantalla de
+              // fondo, y la contraseña tecleada se perdía.
+              if (_ctrl.text.length < 6) {
+                setState(() => _error =
+                    'Contraseña muy corta (mín. 6 caracteres)');
+                return;
+              }
+              Navigator.pop(context, _ctrl.text);
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
               shape: RoundedRectangleBorder(
@@ -760,6 +794,8 @@ class _DialogoCrearUsuario extends StatefulWidget {
 class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
   final _nombreCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  // SL-9 (G09-12): el error vive dentro del diálogo.
+  String? _error;
 
   @override
   void dispose() {
@@ -775,6 +811,7 @@ class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
       iconoTitulo: Icons.person_add_rounded,
       contenido: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           CampoTexto(
               controller: _nombreCtrl,
@@ -784,6 +821,12 @@ class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
               controller: _passCtrl,
               etiqueta: 'Contraseña (mín. 6)',
               obscure: true),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!,
+                style: AppTexto.cuerpo
+                    .copyWith(color: AppColores.error)),
+          ],
         ],
       ),
       acciones: [
@@ -791,8 +834,22 @@ class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-            onPressed: () => Navigator.pop(context,
-                (nombre: _nombreCtrl.text, pass: _passCtrl.text)),
+            onPressed: () {
+              // SL-9 (G09-12): la misma validación del llamador
+              // (validarNuevoUsuarioApk sobre la contraseña ya
+              // normalizada, P6) pero ANTES de cerrar: si falla,
+              // el error se pinta dentro y lo tecleado se
+              // conserva; antes salía tras el pop y se perdía.
+              final error = validarNuevoUsuarioApk(
+                  _nombreCtrl.text,
+                  normalizarPasswordNuevoUsuario(_passCtrl.text));
+              if (error != null) {
+                setState(() => _error = error);
+                return;
+              }
+              Navigator.pop(context,
+                  (nombre: _nombreCtrl.text, pass: _passCtrl.text));
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
               shape: RoundedRectangleBorder(
