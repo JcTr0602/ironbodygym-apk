@@ -332,6 +332,13 @@ class _GuiaScreenState extends State<GuiaScreen> {
     await _cargar();
   }
 
+  /// SL-10 G13-4: el nombre VISIBLE de un borrador en
+  /// los listados del lote — su título, nunca el slug.
+  String _nombreBorrador(Map<String, dynamic> b) {
+    final t = '${_docBorrador(b)['titulo'] ?? ''}'.trim();
+    return t.isEmpty ? 'Ficha sin título' : t;
+  }
+
   Future<void> _publicarLote() async {
     // 1.22 GY-02: publicar en lote es solo del dueño.
     if (!AuthService().isOwner) return;
@@ -350,19 +357,19 @@ class _GuiaScreenState extends State<GuiaScreen> {
       // cola): no se vuelve a encolar.
       if (_enCola.contains('${b['slug']}')) {
         motivos.add(
-            '${b['slug']}: ya está en cola de publicación.');
+            '${_nombreBorrador(b)}: ya está en cola de publicación.');
         continue;
       }
       if (_obsoleto(b)) {
         motivos.add(
-            '${b['slug']}: obsoleto (hay una versión publicada más reciente).');
+            '${_nombreBorrador(b)}: obsoleto (hay una versión publicada más reciente).');
         continue;
       }
       final doc = _docBorrador(b);
       final errores = GuiaValidacion.validar(doc,
           equiposVigentes: _equiposVigentes);
       if (errores.isNotEmpty) {
-        motivos.add('${doc['id']}: ${errores.first}');
+        motivos.add('${_nombreBorrador(b)}: ${errores.first}');
         continue;
       }
       candidatos.add(b);
@@ -453,14 +460,14 @@ class _GuiaScreenState extends State<GuiaScreen> {
         // 1.22 GY-04: en cola de publicación no se re-encola.
         if (_enCola.contains('${b['slug']}')) {
           fallos.add(
-              '${b['slug']}: ya está en cola de publicación.');
+              '${_nombreBorrador(b)}: ya está en cola de publicación.');
           continue;
         }
         // Argón P2#13: un borrador obsoleto no se encola ni pierde
         // su imagen local; queda en fallos para revisarlo.
         if (_obsoleto(b)) {
           fallos.add(
-              '${b['slug']}: borrador obsoleto (hay una versión publicada más reciente).');
+              '${_nombreBorrador(b)}: borrador obsoleto (hay una versión publicada más reciente).');
           continue;
         }
         final doc = _docBorrador(b);
@@ -468,7 +475,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         final errores = GuiaValidacion.validar(doc,
             equiposVigentes: _equiposVigentes);
         if (errores.isNotEmpty) {
-          fallos.add('$slug: ${errores.first}');
+          fallos.add('${_nombreBorrador(b)}: ${errores.first}');
           continue;
         }
         final tieneImagen = b['tiene_imagen'] == 1 || b['tiene_imagen'] == true;
@@ -490,7 +497,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         }
         if (cambioImagen && tieneImagen && local.isNotEmpty) {
           if (!await _subirImagen(slug, local, revPub + 1)) {
-            fallos.add('$slug: la imagen no se pudo subir.');
+            fallos.add('${_nombreBorrador(b)}: la imagen no se pudo subir.');
             continue;
           }
         }
@@ -537,7 +544,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
           // qué quedó encolado. Ahora la ficha entra en
           // fallos con el motivo y el lote sigue.
           AppLog.error('ui', 'guia_lote_fallo', d: '$e');
-          fallos.add('${b['slug']}: error al publicar ($e).');
+          fallos.add('${_nombreBorrador(b)}: error al publicar.');
         }
       }
     } finally {
@@ -783,8 +790,11 @@ class _GuiaScreenState extends State<GuiaScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
                 subtitle: Text(
+                    // SL-10 G13-10: la silueta por su
+                    // NOMBRE (como en las publicadas), no
+                    // su id crudo.
                     '${_nombreEquipo('${_docBorrador(b)['equipoId'] ?? ''}')}'
-                    ' · ${_docBorrador(b)['siluetaId'] ?? ''}'),
+                    ' · ${GuiaValidacion.nombreSilueta['${_docBorrador(b)['siluetaId'] ?? ''}'] ?? ''}'),
                 trailing: _obsoleto(b)
                     ? const Tooltip(
                         message:
