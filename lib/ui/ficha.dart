@@ -2681,7 +2681,10 @@ class _FichaScreenState extends State<FichaScreen> {
         double.tryParse(datos['monto']!.replaceAll(',', '.'));
     final fecha = datos['fecha']!.trim();
     final motivo = (datos['motivo'] ?? '').trim();
-    final fechaOk = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(fecha);
+    // SL-2 G03-9: la validación es la del selector (fecha
+    // real de calendario vía fechaIsoEstricta), no un
+    // RegExp de forma sobre texto tecleado.
+    final fechaOk = fechaIsoEstricta(fecha) != null;
     if (monto == null || monto <= 0 || !fechaOk) {
       mostrarSnack(context, 'Monto o fecha inválidos', significado: SignificadoChip.alerta);
       return;
@@ -5271,7 +5274,10 @@ class _DialogoEditarPagoFicha extends StatefulWidget {
 
 class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
   late final TextEditingController _montoCtrl;
-  late final TextEditingController _fechaCtrl;
+  // SL-2 G03-9: la fecha ya NO se teclea en ISO: vive como
+  // DateTime y la elige el CampoFecha de la casa (su
+  // validación es la del selector, no un RegExp).
+  late DateTime? _fecha;
   late final TextEditingController _motivoCtrl;
   late String _metodo;
 
@@ -5279,7 +5285,7 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
   void initState() {
     super.initState();
     _montoCtrl = TextEditingController(text: widget.montoInicial);
-    _fechaCtrl = TextEditingController(text: widget.fechaInicial);
+    _fecha = DateTime.tryParse(widget.fechaInicial);
     _motivoCtrl = TextEditingController();
     _metodo = widget.metodoInicial;
   }
@@ -5287,9 +5293,17 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
   @override
   void dispose() {
     _montoCtrl.dispose();
-    _fechaCtrl.dispose();
     _motivoCtrl.dispose();
     super.dispose();
+  }
+
+  /// La fecha elegida en ISO (AAAA-MM-DD), el formato que
+  /// viaja en la op; '' si el selector quedó sin fecha.
+  String get _fechaIso {
+    final f = _fecha;
+    if (f == null) return '';
+    String dos(int n) => n.toString().padLeft(2, '0');
+    return '${f.year.toString().padLeft(4, '0')}-${dos(f.month)}-${dos(f.day)}';
   }
 
   @override
@@ -5320,12 +5334,12 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
             },
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _fechaCtrl,
-            keyboardType: TextInputType.datetime,
-            decoration: const InputDecoration(
-                labelText: 'Fecha (AAAA-MM-DD)',
-                border: OutlineInputBorder()),
+          // SL-2 G03-9: selector de la casa, no ISO tecleado.
+          CampoFecha(
+            valor: _fecha,
+            limpiable: false,
+            etiqueta: 'Fecha',
+            onCambio: (f) => setState(() => _fecha = f),
           ),
           const SizedBox(height: 8),
           Row(
@@ -5360,7 +5374,7 @@ class _DialogoEditarPagoFichaState extends State<_DialogoEditarPagoFicha> {
         ElevatedButton(
             onPressed: () => Navigator.pop(context, {
                   'monto': _montoCtrl.text,
-                  'fecha': _fechaCtrl.text,
+                  'fecha': _fechaIso,
                   'metodo': _metodo,
                   'motivo': _motivoCtrl.text,
                 }),
