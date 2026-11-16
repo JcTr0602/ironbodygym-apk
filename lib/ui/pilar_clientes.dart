@@ -238,6 +238,9 @@ class _PilarClientesState extends State<PilarClientes> {
         _epochBuscar++; // BuscarScreen lee «filtroInicial» al nacer
       }
     });
+    // E3 (C5-02): un salto de destino también es un cambio
+    // de contexto: la insignia se recuenta al aplicarlo.
+    _contarUrgencia();
   }
 
   void _ir(Widget pantalla) {
@@ -251,6 +254,11 @@ class _PilarClientesState extends State<PilarClientes> {
           key: ValueKey('pilar-listas-$_epochListas'),
           embebida: true,
           inicial: _tabListas,
+          // E3 (C5-02): marcar avisado, cobrar o volver de
+          // la ficha recuentan la insignia al momento.
+          alCambiarDatos: () {
+            _contarUrgencia();
+          },
         );
       case 'invitados':
         return const InvitadosScreen(embebido: true);
@@ -337,6 +345,12 @@ class _PilarClientesState extends State<PilarClientes> {
                   _segmento = s.first;
                   _visitados.add(s.first);
                 });
+                // E3 (C5-02): al volver a un segmento la
+                // insignia se recuenta: marcar avisado es
+                // local y cobrar desde la ficha no pasa por
+                // la sync — sin este recuento la insignia
+                // prometía trabajo ya hecho.
+                _contarUrgencia();
               },
             ),
           ),
