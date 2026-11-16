@@ -141,7 +141,7 @@ void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     _mockAppLinks();
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   testWidgets('G13-8 · el editor se titula con el título de la '
