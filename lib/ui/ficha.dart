@@ -4853,6 +4853,8 @@ typedef _DatosEditarCliente = ({
 /// dispose). v1.10.0 (Bloque 2, Argón ajuste 4): edita SOLO
 /// datos BÁSICOS (nombre, teléfono, carnet, sexo). 1.30
 /// FICHA-10: el campo de teléfono enseña el EFECTIVO.
+/// 1.35 (CAMPO-2): la presentación se rehizo con los
+/// campos de la casa (ver el build del State).
 class _DialogoEditarCliente extends StatefulWidget {
   const _DialogoEditarCliente({
     required this.nombreInicial,
@@ -4899,77 +4901,88 @@ class _DialogoEditarClienteState extends State<_DialogoEditarCliente> {
 
   @override
   Widget build(BuildContext context) {
+    // 1.35 (CAMPO-2, corrección de la reconciliación §3.2):
+    // la presentación se rehace con el patrón de campos de
+    // la casa — el mismo de Inscribir — corrigiendo los
+    // cuatro defectos de campo de Jc sobre la 1.34:
+    // etiquetas montadas sobre el borde y recortadas
+    // (TextField crudo → CampoTexto/CampoTelefono de la
+    // casa), el teléfono más estrecho que los demás con el
+    // icono de contactos flotando fuera (la acción pasa a
+    // sufijo DENTRO del campo, a ancho completo), el sexo
+    // como dos pastillas sueltas (etiqueta encima y la
+    // fila de chips con su icono, como en Inscribir) y el
+    // ritmo de espacios roto (SizedBox de 8 sueltos → el
+    // ritmo AppEspacio de los formularios). SOLO cambia la
+    // presentación: mismos campos, mismas validaciones (el
+    // aviso del carnet intacto; la validación de guardado
+    // sigue en _editar) y el mismo resultado
+    // (_DatosEditarCliente con los textos de siempre; el
+    // teléfono vuelve en dígitos y quien llama lo
+    // sanitiza, como hasta hoy).
     return DialogoApp(
       titulo: 'Editar cliente',
       iconoTitulo: Icons.edit_rounded,
       contenido: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-                controller: _nombreCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'Nombre', border: OutlineInputBorder())),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                      controller: _telefonoCtrl,
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                          labelText: 'Teléfono (8 dígitos)',
-                          border: OutlineInputBorder())),
-                ),
-                const SizedBox(width: 8),
-                // Elegir de los contactos del teléfono (v1.0.11)
-                IconButton(
-                  tooltip: 'Elegir de contactos',
-                  icon: Icon(Icons.contacts_rounded,
-                      color: AppColores.textoSecundario(context)),
-                  onPressed: () async {
-                    final tel = await widget.alElegirDeContactos(context);
-                    if (tel != null && tel.isNotEmpty) {
-                      setState(() => _telefonoCtrl.text = tel);
-                    }
-                  },
-                ),
-              ],
+            CampoTexto(
+              controller: _nombreCtrl,
+              etiqueta: 'Nombre',
             ),
-            const SizedBox(height: 8),
-            TextField(
-                controller: _carnetCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (v) =>
-                    setState(() => _carnetInvalido = carnetFechaInvalida(v)),
-                decoration: const InputDecoration(
-                    labelText: 'Carnet (6–11 dígitos)',
-                    border: OutlineInputBorder())),
+            const SizedBox(height: AppEspacio.md),
+            CampoTelefono(
+              controller: _telefonoCtrl,
+              etiqueta: 'Teléfono (8 dígitos)',
+              sufijo: IconButton(
+                tooltip: 'Elegir de contactos',
+                icon: Icon(Icons.contacts_rounded,
+                    color: AppColores.textoSecundario(context)),
+                onPressed: () async {
+                  final tel = await widget.alElegirDeContactos(context);
+                  if (tel != null && tel.isNotEmpty) {
+                    setState(() => _telefonoCtrl.text = tel);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: AppEspacio.md),
+            CampoTexto(
+              controller: _carnetCtrl,
+              etiqueta: 'Carnet (6–11 dígitos)',
+              icono: Icons.badge_rounded,
+              teclado: TextInputType.number,
+              formateadores: [FilteringTextInputFormatter.digitsOnly],
+              onChanged: (v) =>
+                  setState(() => _carnetInvalido = carnetFechaInvalida(v)),
+            ),
             // v1.5.0 (Bloque G): aviso sin bloquear el guardado.
             if (_carnetInvalido) const AvisoFechaCarnet(),
-            const SizedBox(height: 8),
-            // Jornada 1 de la 1.34: la fila era un Row y a
-            // ancho de teléfono desbordaba 20 px (la palabra
-            // entera de T117 no cabe junto a la etiqueta en
-            // el ancho del diálogo): Wrap la deja fluir a
-            // una segunda línea sin recortar el chip.
+            const SizedBox(height: AppEspacio.md),
+            const Text('Sexo:', style: AppTexto.cuerpo),
+            const SizedBox(height: AppEspacio.sm),
+            // 1.25 T117 (F1-48): la palabra entera — «M»/«F»
+            // obligaban a saber el código. El valor
+            // guardado no cambia ('M'/'F'). Wrap y no la
+            // Row de Inscribir: el diálogo es más estrecho
+            // que la pantalla de inscribir y la fila
+            // desbordaba (Jornada 1 de la 1.34); con la
+            // etiqueta encima y el mismo ritmo, los chips
+            // fluyen sin recortarse cuando no caben.
             Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppEspacio.sm,
+              runSpacing: AppEspacio.sm,
               children: [
-                const Text('Sexo: '),
-                // 1.25 T117 (F1-48): la palabra entera — «M»/«F»
-                // obligaban a saber el código. El valor
-                // guardado no cambia ('M'/'F').
                 ChoiceChip(
                     label: const Text('Masculino'),
+                    avatar: const Icon(Icons.male_rounded, size: 18),
                     selected: _sexo == 'M',
                     onSelected: (_) => setState(() => _sexo = 'M')),
                 ChoiceChip(
                     label: const Text('Femenino'),
+                    avatar: const Icon(Icons.female_rounded, size: 18),
                     selected: _sexo == 'F',
                     onSelected: (_) => setState(() => _sexo = 'F')),
               ],
