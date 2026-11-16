@@ -16,7 +16,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
@@ -192,8 +194,13 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         Navigator.of(context).pop();
       }
     } catch (e) {
+      // SL-11 (G12-8): nada crudo a pantalla — mensaje amable
+      // de la casa y la excepción a la bitácora.
+      AppLog.error('horario_turnos', 'guardar_patron_fallo', d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo guardar el horario: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);

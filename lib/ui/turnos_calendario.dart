@@ -14,7 +14,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
 import '../turnos_resolucion.dart';
@@ -61,6 +63,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
   ];
 
   bool _cargando = true;
+  // SL-11 (G12-1): la carga fallida se DICE con EstadoError:
+  // antes el catch mudo dejaba patrón y excepciones vacíos y
+  // el mes se pintaba como si nadie trabajara nunca.
+  bool _errorCarga = false;
   bool _guardando = false;
   late DateTime _mes;
   Map<int, Map<String, String?>> _patron = {};
@@ -133,7 +139,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         }
         _aperturasPorDia = porDia;
       } catch (_) {}
-    } catch (_) {}
+      if (mounted) setState(() => _errorCarga = false);
+    } catch (_) {
+      if (mounted) setState(() => _errorCarga = true);
+    }
     if (mounted) setState(() => _cargando = false);
   }
 
@@ -160,8 +169,14 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
         mostrarSnack(context, 'Excepciones guardadas (se sincronizarán)', significado: SignificadoChip.exito);
       }
     } catch (e) {
+      // SL-11 (G12-8): nada crudo a pantalla — mensaje amable
+      // de la casa y la excepción a la bitácora.
+      AppLog.error('turnos_calendario', 'guardar_excepciones_fallo',
+          d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudieron guardar las excepciones: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -342,7 +357,16 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando calendario…')
-          : ListView(
+          : _errorCarga
+              ? EstadoError(
+                  detalle: 'No se pudo cargar el patrón ni las '
+                      'excepciones de turnos.',
+                  onReintentar: () {
+                    setState(() => _cargando = true);
+                    _cargar();
+                  },
+                )
+              : ListView(
               padding: const EdgeInsets.all(AppEspacio.md),
               children: [
                 const Text(
