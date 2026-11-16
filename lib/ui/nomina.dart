@@ -1657,20 +1657,18 @@ class _NominaScreenState extends State<NominaScreen> {
                 const SizedBox(height: 8),
                 const Text('Sale de la gaveta de:',
                     style: AppTexto.metadato),
-                DropdownButton<String>(
-                  value: fotoPersonas.containsKey(gaveta)
+                SelectorIron<String>(
+                  valor: fotoPersonas.containsKey(gaveta)
                       ? gaveta
                       : (fotoPersonas.keys.isNotEmpty
                           ? fotoPersonas.keys.first
                           : gaveta),
-                  isExpanded: true,
-                  items: [
+                  tituloPanel: 'Sale de la gaveta de',
+                  opciones: [
                     for (final entry in fotoPersonas.entries)
-                      DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value.nombre)),
+                      OpcionSelector(entry.key, entry.value.nombre),
                   ],
-                  onChanged: (v) =>
+                  alCambiar: (v) =>
                       setLocal(() => gaveta = v ?? gaveta),
                 ),
                 Text(
@@ -2042,15 +2040,14 @@ class _DialogoRegistrarAdelantoState
               const SizedBox(height: 8),
               const Text('Sale de la gaveta de:',
                   style: AppTexto.metadato),
-              DropdownButton<String>(
-                value: _gaveta,
-                isExpanded: true,
-                items: [
+              SelectorIron<String>(
+                valor: _gaveta,
+                tituloPanel: 'Sale de la gaveta de',
+                opciones: [
                   for (final g in widget.gavetas)
-                    DropdownMenuItem(
-                        value: g.username, child: Text(g.nombre)),
+                    OpcionSelector(g.username, g.nombre),
                 ],
-                onChanged: (v) =>
+                alCambiar: (v) =>
                     setState(() => _gaveta = v ?? widget.gavetaInicial),
               ),
               const Text(
@@ -2174,21 +2171,15 @@ class _HojaAgregarBonoState extends State<HojaAgregarBono> {
         children: [
           // Selector de entrenador (el mismo del
           // formulario en línea).
-          DropdownButtonFormField<String>(
-            value: _entrenador,
-            decoration: const InputDecoration(
-              labelText: 'Para',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(
-                  value: 'ambos', child: Text('Ambos')),
-              DropdownMenuItem(
-                  value: 'duany', child: Text('Duany')),
-              DropdownMenuItem(
-                  value: 'gabriel', child: Text('Gabriel')),
+          SelectorIronForm<String>(
+            valorInicial: _entrenador,
+            etiqueta: 'Para',
+            opciones: const [
+              OpcionSelector('ambos', 'Ambos'),
+              OpcionSelector('duany', 'Duany'),
+              OpcionSelector('gabriel', 'Gabriel'),
             ],
-            onChanged: (v) =>
+            alCambiar: (v) =>
                 setState(() => _entrenador = v ?? 'ambos'),
           ),
           const SizedBox(height: 8),
