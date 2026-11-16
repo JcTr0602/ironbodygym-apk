@@ -981,8 +981,20 @@ class _AjustesScreenState extends State<AjustesScreen> {
     try {
       final (path, _) =
           await AppLog.exportar(versionApp: AppConfig.appVersion);
-      await Share.shareXFiles([XFile(path)],
+      final res = await Share.shareXFiles([XFile(path)],
           text: 'Bitácora Iron Body Gym');
+      // G#29 (Hy4): el reinicio solo corre si la
+      // compartición se COMPLETÓ — antes se borraba la
+      // bitácora aunque el dueño cancelara el compartir
+      // (la exportación se perdía y el registro también).
+      // La hermana de novedades ya exigía el éxito.
+      if (res.status != ShareResultStatus.success) {
+        if (mounted) {
+          _msg('Compartición cancelada: la bitácora NO se '
+              'reinició (sigue completa en el teléfono).');
+        }
+        return;
+      }
       final r = await AppLog.reiniciar();
       if (mounted) {
         _msg('Bitácora reiniciada: se borraron '
