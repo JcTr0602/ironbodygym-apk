@@ -148,33 +148,38 @@ void main() {
     expect(precioMenoresDesdeAjustes(aj), 1500.0);
   });
 
-  test('B · la op encolada lleva el blob junto a la clave '
-      '(misma operación)', () async {
+  test('B · el guardado encola la op de config Y la op '
+      'guardar_tipos_pago con el blob (patrón A5-D2, misma '
+      'transacción)', () async {
     await bdConPrecios();
     await guardarConfigGym({'mensualidad_menores': 1800.0});
     final ops = await LocalDb.instance.pendingOps();
+    Map<String, dynamic> payloadDe(Map<String, dynamic> o) =>
+        o['payload'] is String
+            ? jsonDecode(o['payload'] as String) as Map<String, dynamic>
+            : Map<String, dynamic>.from(o['payload'] as Map);
+    // La op de config lleva la clave plana, como siempre.
     final deConfig = ops
         .where((o) => '${o['tipo']}' == kTipoOpActualizarConfigGym)
         .toList();
     expect(deConfig, isNotEmpty);
-    var llevaBlob = false;
-    for (final o in deConfig) {
-      final payload = o['payload'] is String
-          ? jsonDecode(o['payload'] as String) as Map<String, dynamic>
-          : Map<String, dynamic>.from(o['payload'] as Map);
-      final config = payload['config'];
-      if (config is Map && config['tipos_pago'] is List) {
-        final menores = (config['tipos_pago'] as List)
-            .whereType<Map>()
-            .where((t) => '${t['id']}' == 'menores');
-        if (menores.isNotEmpty &&
-            (menores.first['monto'] as num).toDouble() == 1800.0) {
-          llevaBlob = true;
-        }
-      }
-    }
-    expect(llevaBlob, isTrue,
-        reason: 'la op actualizar_config_gym debe llevar el blob '
-            'actualizado para que los demás teléfonos no diverjan');
+    final config = payloadDe(deConfig.first)['config'];
+    expect(config is Map && config['mensualidad_menores'] == 1800.0,
+        isTrue);
+    // Y la op guardar_tipos_pago (la que el servidor SÍ
+    // aplica al blob; dentro de `config` la clave tipos_pago
+    // sería ignorada por _op_actualizar_config_gym) lleva el
+    // blob con el precio nuevo.
+    final deTipos = ops
+        .where((o) => '${o['tipo']}' == 'guardar_tipos_pago')
+        .toList();
+    expect(deTipos, isNotEmpty,
+        reason: 'sin op guardar_tipos_pago el blob no baja a '
+            'los demás teléfonos');
+    final tipos = payloadDe(deTipos.first)['tipos'] as List;
+    final menores = tipos
+        .whereType<Map>()
+        .singleWhere((t) => '${t['id']}' == 'menores');
+    expect((menores['monto'] as num).toDouble(), 1800.0);
   });
 }
