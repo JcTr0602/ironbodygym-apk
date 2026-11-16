@@ -506,7 +506,9 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
                             '${((f['monto'] as num?)?.toDouble() ?? 0).toStringAsFixed(0)} CUP',
                             style: AppTexto.cuerpo),
                         subtitle: Text(
-                            '${f['fecha'] ?? ''} · mes nómina: '
+                            // SL-5 G07-5: fecha habanera con
+                            // fmtFecha, no el ISO crudo.
+                            '${fmtFecha('${f['fecha'] ?? ''}')} · mes nómina: '
                             '${f['mes_nomina'] ?? ''}'
                             '${f['pendiente'] == 1 ? ' · aún sin subir' : ''}'
                             '${f['nota'] != null && '${f['nota']}'.isNotEmpty ? ' · ${f['nota']}' : ''}',

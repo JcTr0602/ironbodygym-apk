@@ -257,21 +257,13 @@ class _LiquidacionesHistorialScreenState
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(width: AppEspacio.sm),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppEspacio.sm, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: (parcial
-                            ? AppColores.alerta
-                            : Colors.green)
-                        .withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(AppRadio.md),
-                  ),
-                  child: Text(
-                    parcial ? 'Parcial' : 'Liquidado',
-                    style: AppTexto.metadato
-                        .copyWith(fontWeight: FontWeight.w600),
-                  ),
+                // SL-5 G07-8: chip de estado de la casa
+                // (ChipEstado), no un Container a mano.
+                ChipEstado.semantico(
+                  texto: parcial ? 'Parcial' : 'Liquidado',
+                  significado: parcial
+                      ? SignificadoChip.alerta
+                      : SignificadoChip.exito,
                 ),
               ],
             ),
