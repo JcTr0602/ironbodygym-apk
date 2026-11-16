@@ -1038,7 +1038,17 @@ class _DialogoReciboWaState extends State<_DialogoReciboWa> {
     final url = Uri.parse(
         'https://wa.me/$num?text=${Uri.encodeComponent(widget.texto)}');
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      // SL-4 · BG-06: un `false` de launchUrl (sin app que
+      // abra el enlace) NO lanza: hay que mirarlo o el
+      // envío moría sin ningún aviso.
+      final abierto =
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (!abierto) {
+        if (mounted) {
+          mostrarSnack(context, 'No se pudo abrir WhatsApp',
+              significado: SignificadoChip.error);
+        }
+      }
     } catch (_) {
       if (mounted) {
         mostrarSnack(context, 'No se pudo abrir WhatsApp',
