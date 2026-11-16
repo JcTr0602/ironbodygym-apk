@@ -983,6 +983,26 @@ int topeSaltoWatermark({
 /// Supabase: mismo rango con count=exact → 206; sin count → 200.
 /// El body de un 206 ES la página y su Content-Range trae el
 /// total, que H-03 ya parsea aguas abajo.
+/// SL-8 (BG-10a): validación de `creado_en` al bajar los
+/// HIJOS de una incidencia (comentarios y fotos), con el
+/// criterio del Fix #24 que la clase padre (Incidencia) ya
+/// aplica: una fecha ausente o inválida es NULL — jamás se
+/// inventa «ahora». Los hijos no lo aplicaban: el pull
+/// insertaba el null crudo (la columna es NOT NULL: la
+/// inserción reventaba y la pasada se congelaba) o un ''
+/// en fotos, y el lector del comentario
+/// (IncidenciaComentario.fromMap: tryParse ?? ahoraHabana())
+/// leía esa ausencia como «hoy». Devuelve el texto ISO si
+/// parsea como fecha; null en cualquier otro caso (el
+/// llamador descarta la fila CON REGISTRO y avanza el
+/// watermark, como los demás descartes del pull).
+String? creadoEnHijoValido(dynamic v) {
+  if (v == null) return null;
+  final s = '$v'.trim();
+  if (s.isEmpty) return null;
+  return DateTime.tryParse(s) != null ? s : null;
+}
+
 bool esPaginaPullValida(int statusCode) =>
     statusCode == 200 || statusCode == 206;
 
@@ -10940,6 +10960,21 @@ class SyncEngine {
             ret.anotarRetencion('${m['id']}', seq, 'padre_ausente');
             continue;
           }
+          // BG-10a: creado_en validado con el criterio del
+          // Fix #24 (ver creadoEnHijoValido). Sin fecha
+          // válida la fila se descarta CON REGISTRO y el
+          // watermark avanza (mismo patrón que el descarte
+          // de privadas de arriba): guardarla era romper la
+          // inserción (columna NOT NULL) o dejar que el
+          // lector la leyera como «hoy».
+          final creadoEnOk = creadoEnHijoValido(m['creado_en']);
+          if (creadoEnOk == null) {
+            AppLog.error('sync', 'pull_hijo_sin_fecha',
+                d: 'tabla=incidencias_comentarios '
+                    'id=${m['id']} creado_en=${m['creado_en']}');
+            if (!huboHuerfanoCorrida && seq > maxSeq) maxSeq = seq;
+            continue;
+          }
           if (!huboHuerfanoCorrida && seq > maxSeq) maxSeq = seq;
           await txn.insert(
             'incidencias_comentarios',
@@ -10949,7 +10984,7 @@ class SyncEngine {
                   m['incidencia_id'],
               'texto': m['texto'],
               'creado_por': m['creado_por'],
-              'creado_en': m['creado_en'],
+              'creado_en': creadoEnOk,
               'sync_estado': 'synced',
             },
             conflictAlgorithm:
@@ -11085,6 +11120,20 @@ class SyncEngine {
             ret.anotarRetencion('${m['id']}', seq, 'padre_ausente');
             continue;
           }
+          // BG-10a: mismo criterio que en comentarios —
+          // el `?? ''` histórico guardaba una fecha vacía
+          // que los lectores trataban como «sin fecha =
+          // hoy». Sin fecha válida: descarte con registro
+          // y el watermark avanza.
+          final creadoEnFotoOk =
+              creadoEnHijoValido(m['creado_en'] ?? m['creada_en']);
+          if (creadoEnFotoOk == null) {
+            AppLog.error('sync', 'pull_hijo_sin_fecha',
+                d: 'tabla=incidencias_fotos '
+                    'id=${m['id']} creado_en=${m['creado_en']}');
+            if (!huboHuerfanoCorrida && seq > maxSeq) maxSeq = seq;
+            continue;
+          }
           if (!huboHuerfanoCorrida && seq > maxSeq) maxSeq = seq;
           await txn.insert(
             'incidencias_fotos',
@@ -11095,9 +11144,7 @@ class SyncEngine {
               'storage_path': m['storage_path'],
               'tipo': m['tipo'] ?? 'evidencia',
               'sync_estado': 'synced',
-              'creado_en': m['creado_en'] ??
-                  m['creada_en'] ??
-                  '',
+              'creado_en': creadoEnFotoOk,
             },
             conflictAlgorithm: ConflictAlgorithm.ignore,
           );
