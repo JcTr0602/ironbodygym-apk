@@ -1089,6 +1089,32 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     ];
   }
 
+  /// SL-11 (G12-2): el botón de cierre del turno, en la
+  /// barra inferior FIJA de la pantalla (antes era el último
+  /// elemento de la lista: la acción de salida del
+  /// entrenador quedaba tras todo el scroll).
+  /// v1.1.1: cierre real por turno, sin requerir pagos diarios.
+  Widget _botonCierreTurno() {
+    return SizedBox(
+      width: double.infinity,
+      child: _cerrado
+          ? OutlinedButton.icon(
+              icon: const Icon(Icons.check_circle_rounded,
+                  color: AppColores.exito),
+              label: Text(
+                  'Turno cerrado (${_turnoActual().toLowerCase()})'),
+              // 1.15-turnos (#3): un turno cerrado no se
+              // vuelve a cerrar (botón deshabilitado).
+              onPressed: null,
+            )
+          : ElevatedButton.icon(
+              icon: const Icon(Icons.done_all_rounded),
+              label: const Text('Cerrar mi turno'),
+              onPressed: _cierreTurno,
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // v1.0.16: para el dueño es "Mis cobros" (no trabaja turnos);
@@ -1098,6 +1124,18 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     final esDueno = _auth.isOwner;
     return Scaffold(
       appBar: appBarIron(context, esDueno ? 'Mis cobros' : 'Mi turno'),
+      // SL-11 (G12-2): cierre en posición fija y alcanzable
+      // sin scroll (solo entrenador, con la carga ya asentada
+      // y sin error: cerrar exige los datos reales del día).
+      bottomNavigationBar: (esDueno || _cargando || _errorCarga)
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                    AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+                child: _botonCierreTurno(),
+              ),
+            ),
       body: Column(
         children: [
           const SyncBanner(),
@@ -1467,30 +1505,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                           ],
                         ),
                     ),
-                    const SizedBox(height: 12),
-                    // v1.0.16: cierre de turno (idea 1)
-                    // v1.1.1: cierre real por turno, sin requerir pagos diarios
-                    SizedBox(
-                      width: double.infinity,
-                      child: _cerrado
-                          ? OutlinedButton.icon(
-                              icon: const Icon(
-                                  Icons.check_circle_rounded,
-                                  color: AppColores.exito),
-                              label: Text(
-                                  'Turno cerrado (${_turnoActual().toLowerCase()})'),
-                              // 1.15-turnos (#3): un turno cerrado no
-                              // se vuelve a cerrar (botón deshabilitado).
-                              onPressed: null,
-                            )
-                          : ElevatedButton.icon(
-                              icon:
-                                  const Icon(Icons.done_all_rounded),
-                              label: const Text(
-                                  'Cerrar mi turno'),
-                              onPressed: _cierreTurno,
-                            ),
-                    ),
+                    // SL-11 (G12-2): el cierre ya NO vive aquí,
+                    // al final del scroll — es la acción de
+                    // salida del entrenador y va en la barra
+                    // inferior fija de la pantalla
+                    // (_botonCierreTurno en bottomNavigationBar).
                   ],
                   const SizedBox(height: 12),
                   Tarjeta(
