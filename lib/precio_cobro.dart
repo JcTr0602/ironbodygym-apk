@@ -281,6 +281,7 @@ Map<String, dynamic> payloadBasico({
   required int clienteId,
   String? nombre,
   String? telefono,
+  String? movil,
   String? carnet,
   String? sexo,
   String? notas,
@@ -293,6 +294,14 @@ Map<String, dynamic> payloadBasico({
   // puede colarse a la op ni al espejo).
   if (telefono != null) {
     p['telefono'] = telefono.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+  // G#5 (Hy4): en los clientes migrados el número efectivo
+  // vive en `movil` (el lector efectivo lo prefiere) y el
+  // servidor lo acepta en editar_cliente: cuando la ficha
+  // edita ESE número, `movil` viaja también o la edición
+  // no cambia el número que de verdad se usa.
+  if (movil != null) {
+    p['movil'] = movil.replaceAll(RegExp(r'[^0-9]'), '');
   }
   if (carnet != null) p['carnet'] = carnet;
   if (sexo != null) p['sexo'] = sexo;
