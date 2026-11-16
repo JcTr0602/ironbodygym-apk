@@ -186,6 +186,12 @@ class _ReporteMensualDiariosScreenState
         (_datos['porDia'] as Map<String, dynamic>?) ?? {};
     final total = (_datos['total'] as num?)?.toDouble() ?? 0;
     final diasConRegistro = porDia.keys.toList()..sort();
+    // SL-5B G07-4: los turnos sin importe no se generan
+    // (en cero no aparecen, regla de Jc).
+    final turnosVisibles = [
+      for (final t in ['mañana', 'tarde'])
+        if (((porTurno[t]?['total'] as num?)?.toDouble() ?? 0) > 0) t,
+    ];
 
     return Scaffold(
       appBar: appBarIron(context, 'Pagos diarios del mes'),
@@ -271,11 +277,11 @@ class _ReporteMensualDiariosScreenState
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    for (final t in ['mañana', 'tarde'])
+                    for (var i = 0; i < turnosVisibles.length; i++)
                       Expanded(
                         child: Padding(
                           padding: EdgeInsets.only(
-                              right: t == 'mañana'
+                              right: i < turnosVisibles.length - 1
                                   ? 8
                                   : 0),
                           child: Tarjeta(
@@ -285,17 +291,17 @@ class _ReporteMensualDiariosScreenState
                                       .start,
                               children: [
                                 Text(
-                                    t == 'mañana'
+                                    turnosVisibles[i] == 'mañana'
                                         ? 'Mañana'
                                         : 'Tarde',
                                     style: AppTexto
                                         .secundario),
                                 Text(
-                                  '${fmtMonto((porTurno[t]?['total'] as num?)?.toDouble() ?? 0)} CUP',
+                                  '${fmtMonto((porTurno[turnosVisibles[i]]?['total'] as num?)?.toDouble() ?? 0)} CUP',
                                   style: AppTexto.titulo,
                                 ),
                                 Text(
-                                    '${((porTurno[t]?['cantidad'] as num?)?.toDouble() ?? 0).toInt()} pagos'),
+                                    '${((porTurno[turnosVisibles[i]]?['cantidad'] as num?)?.toDouble() ?? 0).toInt()} pagos'),
                               ],
                             ),
                           ),
