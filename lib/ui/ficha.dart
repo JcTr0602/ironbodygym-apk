@@ -513,12 +513,20 @@ class _FichaScreenState extends State<FichaScreen> {
     final gen = ++_cargaGen;
     final c = await clientePorId(widget.clienteId);
     final pagos = await pagosDe(widget.clienteId);
+    // G#16 (Hy4): el último pago real y la transferencia
+    // por conciliar se buscan en la lista COMPLETA, no en
+    // el recorte de 10 que pinta el historial: con más de
+    // 10 pagos, una transferencia accionable más atrás
+    // quedaba fuera y el botón Conciliar desaparecía de
+    // la ficha aunque hubiera algo que conciliar.
+    final pagosCompletos =
+        await pagosDe(widget.clienteId, limit: 100000);
     // 1.25 T14: totales de por vida (sin el recorte de 10).
     final totalesVida = await totalesPagosCliente(widget.clienteId);
     // 1.25 T15: último pago real (la lista viene ordenada
     // por fecha descendente: el primero que no es cortesía).
     Map<String, dynamic>? ultimoReal;
-    for (final p in pagos) {
+    for (final p in pagosCompletos) {
       if (p['metodo'] != 'cortesia') {
         ultimoReal = p;
         break;
@@ -528,7 +536,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // conciliar más reciente (la lista ya viene por
     // fecha descendente).
     final ultimaTransfPorConciliar =
-        ultimaTransferenciaPorConciliar(pagos);
+        ultimaTransferenciaPorConciliar(pagosCompletos);
     final suplementos = await _suplementosDe(widget.clienteId);
     final serviciosHist = await servicios_svc
         .historialServiciosCliente(widget.clienteId);
