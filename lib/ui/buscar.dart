@@ -767,9 +767,16 @@ class _BuscarScreenState extends State<BuscarScreen>
             // estrecha y buscador con las acciones en la misma fila
             // (embudo = búsqueda avanzada, orden, densidad y
             // selección múltiple). La lista gana ~90 px de alto.
-            const SliverToBoxAdapter(
-              child: SyncBanner(compact: true),
-            ),
+            // 1.35 (campo nº 13): embebida en el pilar, el
+            // estado de sync lo dice UNA sola vez la
+            // píldora de la cabecera de la app — la banda
+            // no se repite aquí. Suelta (ruta propia, sin
+            // cabecera del marco) la banda se queda: es su
+            // única voz de sync.
+            if (!widget.embebida)
+              const SliverToBoxAdapter(
+                child: SyncBanner(compact: true),
+              ),
             SliverToBoxAdapter(
               child:           Padding(
             padding: const EdgeInsets.fromLTRB(AppEspacio.md,

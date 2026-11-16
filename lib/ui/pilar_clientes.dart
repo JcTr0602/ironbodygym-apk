@@ -72,6 +72,78 @@ Future<int> conteoInsigniaVencimientos() async {
   return hoy.where(visible).length + atrasadosSinAvisar;
 }
 
+/// 1.35 (campo nº 13): la fila de acciones del pilar
+/// (Inscribir · Control de Acceso · Papelera) como bloque
+/// plegable: al bajar por la vista, colapsa a cero con el
+/// mismo gesto que la identidad de la cabecera (UI-22) y
+/// la lista gana su alto entero; al volver arriba,
+/// regresa. Los segmentos NO se pliegan: son la navegación
+/// del pilar y quedarse sin ellos a mitad de lista
+/// dejaría al usuario sin cambio de vista.
+class AccionesPilarClientes extends StatelessWidget {
+  final bool esDueno;
+  final bool plegadas;
+  final VoidCallback onInscribir;
+  final VoidCallback onAcceso;
+  final VoidCallback onPapelera;
+
+  const AccionesPilarClientes({
+    super.key,
+    required this.esDueno,
+    required this.plegadas,
+    required this.onInscribir,
+    required this.onAcceso,
+    required this.onPapelera,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final reducido = MediaQuery.disableAnimationsOf(context);
+    return AnimatedSize(
+      duration: reducido ? Duration.zero : AppMovimiento.media,
+      curve: AppMovimiento.curvaSuave,
+      alignment: Alignment.topCenter,
+      child: plegadas
+          ? const SizedBox.shrink(
+              key: ValueKey('clientes-acciones-plegadas'))
+          : Padding(
+              key: const ValueKey('clientes-acciones-plenas'),
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const ValueKey('clientes-inscribir'),
+                      onPressed: onInscribir,
+                      icon: const Icon(Icons.person_add_rounded,
+                          size: 19),
+                      label: const Text('Inscribir'),
+                    ),
+                  ),
+                  const SizedBox(width: AppEspacio.sm),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('clientes-acceso'),
+                      onPressed: onAcceso,
+                      icon: const Icon(Icons.badge_rounded, size: 19),
+                      label: const Text('Control de Acceso'),
+                    ),
+                  ),
+                  if (esDueno)
+                    IconButton(
+                      key: const ValueKey('clientes-papelera'),
+                      tooltip: 'Papelera',
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      onPressed: onPapelera,
+                    ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
 class _PilarClientesState extends State<PilarClientes> {
   String _segmento = 'directorio';
   int _tabListas = 0;
@@ -79,6 +151,26 @@ class _PilarClientesState extends State<PilarClientes> {
   String? _filtroBuscar;
   int _epochBuscar = 0;
   final Set<String> _visitados = {'directorio'};
+
+  /// 1.35 (campo nº 13): las acciones del pilar se
+  /// pliegan al bajar (histéresis 140/60, la de UI-22) —
+  /// la cabecera del Directorio dejaba de comerse media
+  /// pantalla solo en Vencimientos; ahora el pilar entero
+  /// respira igual.
+  bool _accionesPlegadas = false;
+
+  bool _alDesplazar(ScrollNotification n) {
+    if (n is ScrollUpdateNotification &&
+        n.metrics.axis == Axis.vertical) {
+      final p = n.metrics.pixels;
+      if (p > 140 && !_accionesPlegadas) {
+        setState(() => _accionesPlegadas = true);
+      } else if (p < 60 && _accionesPlegadas) {
+        setState(() => _accionesPlegadas = false);
+      }
+    }
+    return false;
+  }
 
   /// 1.35 (UI-08): cifra de la insignia de Vencimientos.
   /// Null = aún sin leer (o lectura fallida): no se pinta
@@ -177,49 +269,27 @@ class _PilarClientesState extends State<PilarClientes> {
   @override
   Widget build(BuildContext context) {
     final segmentos = _segmentos;
-    return Column(
+    return NotificationListener<ScrollNotification>(
+      onNotification: _alDesplazar,
+      child: Column(
       key: const ValueKey('pilar-clientes'),
       children: [
         // Acciones del pilar (G-73): inscribir y pase diario /
         // control de acceso a 1 toque; papelera del dueño.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  key: const ValueKey('clientes-inscribir'),
-                  onPressed: () async {
-                    if (await permisoOperativoOkConRefresco(
-                        context,
-                        () => PermisosEntrenador().canInscribirClientes,
-                        'inscribir clientes')) {
-                      _ir(const InscribirScreen());
-                    }
-                  },
-                  icon: const Icon(Icons.person_add_rounded, size: 19),
-                  label: const Text('Inscribir'),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: const ValueKey('clientes-acceso'),
-                  onPressed: () => _ir(const ControlAccesoScreen()),
-                  icon: const Icon(Icons.badge_rounded, size: 19),
-                  label: const Text('Control de Acceso'),
-                ),
-              ),
-              if (widget.esDueno)
-                IconButton(
-                  key: const ValueKey('clientes-papelera'),
-                  tooltip: 'Papelera',
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  onPressed: () => _ir(const PapeleraScreen()),
-                ),
-            ],
-          ),
+        // 1.35 (campo nº 13): se pliegan al bajar.
+        AccionesPilarClientes(
+          esDueno: widget.esDueno,
+          plegadas: _accionesPlegadas,
+          onInscribir: () async {
+            if (await permisoOperativoOkConRefresco(
+                context,
+                () => PermisosEntrenador().canInscribirClientes,
+                'inscribir clientes')) {
+              _ir(const InscribirScreen());
+            }
+          },
+          onAcceso: () => _ir(const ControlAccesoScreen()),
+          onPapelera: () => _ir(const PapeleraScreen()),
         ),
         // Segmentos del pilar.
         Padding(
@@ -290,6 +360,7 @@ class _PilarClientesState extends State<PilarClientes> {
           ),
         ),
       ],
+      ),
     );
   }
 }

@@ -802,7 +802,10 @@ class _ListasScreenState extends State<ListasScreen>
           // en la fila del buscador como menú de orden
           // (los mismos 3 órdenes y la misma semántica
           // F1-24: la elección manual manda).
-          const SyncBanner(compact: true),
+          // 1.35 (campo nº 13): embebida, la banda no se
+          // pinta — el estado de sync lo dice una sola vez
+          // la píldora de la cabecera de la app.
+          if (!widget.embebida) const SyncBanner(compact: true),
           // 16/25: buscador (nombre o teléfono, en las 5 pestañas).
           Padding(
             padding:

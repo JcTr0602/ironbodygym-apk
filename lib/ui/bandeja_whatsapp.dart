@@ -539,7 +539,10 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       ),
       body: Column(
         children: [
-          const SyncBanner(),
+          // 1.35 (campo nº 13): embebida en el pilar, sin
+          // banda — el estado de sync lo dice una sola vez
+          // la píldora de la cabecera de la app.
+          if (!widget.embebida) const SyncBanner(),
           // v1.13.0: barra de progreso REAL (SQLite) + filtros +
           // modo lote.
           if (!_cargando && AuthService().isOwner && _avisos.isNotEmpty)

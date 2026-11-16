@@ -782,7 +782,10 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
     final esAdmin = AuthService().isAdmin;
     final cuerpo = Column(
       children: [
-        const SyncBanner(compact: true),
+        // 1.35 (campo nº 13): embebida en el pilar, sin
+        // banda — el estado de sync lo dice una sola vez
+        // la píldora de la cabecera de la app.
+        if (!widget.embebido) const SyncBanner(compact: true),
         if (_offline)
           Container(
             width: double.infinity,
