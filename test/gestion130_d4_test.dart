@@ -82,8 +82,11 @@ void main() {
       expect(find.byKey(const ValueKey('seg-vencidos')),
           findsOneWidget);
       // La leyenda rotula la PARTICIÓN (96, no el «al día»
-      // amplio del conteo de la tarjeta).
-      expect(find.text('96 al día'), findsOneWidget);
+      // amplio del conteo de la tarjeta) y lo dice con SU
+      // nombre: «sin vencer» (E3, C6-02 — la pantalla no
+      // puede decir «al día» con dos cifras distintas).
+      expect(find.text('96 sin vencer'), findsOneWidget);
+      expect(find.text('96 al día'), findsNothing);
       expect(find.text('19 por vencer'), findsOneWidget);
       expect(find.text('13 vencidos'), findsOneWidget);
       // Las proporciones mandan: el segmento al día es el
@@ -114,7 +117,7 @@ void main() {
           findsOneWidget);
       expect(find.byKey(const ValueKey('seg-al-dia')),
           findsNothing);
-      expect(find.text('0 al día'), findsOneWidget);
+      expect(find.text('0 sin vencer'), findsOneWidget);
       expect(find.text('0 por vencer'), findsOneWidget);
       expect(find.text('0 vencidos'), findsOneWidget);
     });
