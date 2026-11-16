@@ -417,6 +417,66 @@ class FotosColaService {
         debugPrint('DEBUG encolarFoto: variante ${entry.key} rowId=$rowId');
         n++;
       }
+      // G#12 (Hy4): el vínculo al espejo (foto_uuid +
+      // foto_local, en clientes y en suplementos) se
+      // escribe DENTRO de esta misma transacción — antes
+      // iba tras el commit, con un catch que solo
+      // logueaba: si esa escritura fallaba, la cola
+      // quedaba con la foto nueva y el espejo con el
+      // foto_uuid VIEJO, un caso que la autocura SP-01 no
+      // cubre (la foto nueva podía completar como
+      // «superada» sin llegar a vincularse). Ahora el
+      // encolado es atómico: o queda todo (cola +
+      // vínculo) o no queda nada y el llamador ve el
+      // fallo en vez de un verde a medias.
+      if (clienteId != null) {
+        final rows = await txn.query(
+          'clientes',
+          columns: ['data'],
+          where: 'id = ?',
+          whereArgs: [clienteId],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          final raw = rows.first['data'];
+          final data = Map<String, dynamic>.from(
+              raw is String ? jsonDecode(raw) : raw as Map);
+          data['foto_uuid'] = opUuid;
+          data['foto_local'] = variantes['display'] ??
+              variantes['thumb'] ??
+              variantes['original'];
+          await txn.update(
+            'clientes',
+            {'data': jsonEncode(data)},
+            where: 'id = ?',
+            whereArgs: [clienteId],
+          );
+        }
+      }
+      if (suplementoId != null) {
+        final rows = await txn.query(
+          'suplementos',
+          columns: ['data'],
+          where: 'id = ?',
+          whereArgs: [suplementoId],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          final raw = rows.first['data'];
+          final data = Map<String, dynamic>.from(
+              raw is String ? jsonDecode(raw) : raw as Map);
+          data['foto_uuid'] = opUuid;
+          data['foto_local'] = variantes['display'] ??
+              variantes['thumb'] ??
+              variantes['original'];
+          await txn.update(
+            'suplementos',
+            {'data': jsonEncode(data)},
+            where: 'id = ?',
+            whereArgs: [suplementoId],
+          );
+        }
+      }
     });
     // B-21: commit hecho — ahora sí se borran los archivos de
     // las variantes invalidadas. Si la transacción lanzó, esta
@@ -437,84 +497,8 @@ class FotosColaService {
     }
     // n ya cuenta los inserts individuales exitosos.
 
-    // v1.2.9 (nota Gemini): persistir foto_uuid en el cliente al encolar,
-    // para que _actualizarMirrorFoto pueda verificar precedencia.
-    // 1.28 (M4-A7/R2M4-H4): también foto_local, como en
-    // suplementos — sin ella la foto nueva desaparecía de la
-    // ficha al recargar hasta que subía y bajaba por sync.
-    // El pull reemplaza data y la clave desaparece sola.
-    if (clienteId != null) {
-      try {
-        final rows = await db.query(
-          'clientes',
-          columns: ['data'],
-          where: 'id = ?',
-          whereArgs: [clienteId],
-          limit: 1,
-        );
-        if (rows.isNotEmpty) {
-          Map<String, dynamic> data;
-          final raw = rows.first['data'];
-          data = Map<String, dynamic>.from(
-              raw is String ? jsonDecode(raw) : raw as Map);
-          data['foto_uuid'] = opUuid;
-          data['foto_local'] = variantes['display'] ??
-              variantes['thumb'] ??
-              variantes['original'];
-          await db.update(
-            'clientes',
-            {'data': jsonEncode(data)},
-            where: 'id = ?',
-            whereArgs: [clienteId],
-          );
-        }
-      } catch (e) {
-        // Yunque B (YB-TRA-07): el vínculo foto↔cliente no
-        // se persistió: la ficha pierde la vista local hasta
-        // sincronizar y la próxima foto puede no invalidar
-        // esta. Antes el catch era mudo y la bitácora
-        // asentaba «encolada» en verde igual.
-        AppLog.error('fotos', 'vinculo_espejo_cliente_fallo',
-            d: '$e');
-      }
-    }
-    // v1.3.3 (Argón): persistir foto_uuid y foto_local en el suplemento
-    // al encolar (igual que se hace con clientes arriba):
-    // - foto_uuid: para que _vincularEnTransaccion verifique precedencia.
-    // - foto_local: para que la lista muestre la foto al instante (offline).
-    // Se guarda fuera del loop de variantes (una sola ruta preferida).
-    // El pull del servidor reemplaza data y limpia foto_local solo.
-    if (suplementoId != null) {
-      try {
-        final rows = await db.query(
-          'suplementos',
-          columns: ['data'],
-          where: 'id = ?',
-          whereArgs: [suplementoId],
-          limit: 1,
-        );
-        if (rows.isNotEmpty) {
-          Map<String, dynamic> data;
-          final raw = rows.first['data'];
-          data = Map<String, dynamic>.from(
-              raw is String ? jsonDecode(raw) : raw as Map);
-          data['foto_uuid'] = opUuid;
-          data['foto_local'] = variantes['display'] ??
-              variantes['thumb'] ??
-              variantes['original'];
-          await db.update(
-            'suplementos',
-            {'data': jsonEncode(data)},
-            where: 'id = ?',
-            whereArgs: [suplementoId],
-          );
-        }
-      } catch (e) {
-        // Yunque B (YB-TRA-07): idem vínculo de clientes.
-        AppLog.error('fotos', 'vinculo_espejo_suplemento_fallo',
-            d: '$e');
-      }
-    }
+    // (El vínculo al espejo se escribe dentro de la
+    // transacción desde G#12 — ver arriba.)
     // v1.2.9+46 (AppLog): bitácora de encolado.
     AppLog.info('fotos', 'encolada',
         d: 'op=$opUuid variantes=$n cliente=$clienteId supl=$suplementoId');
