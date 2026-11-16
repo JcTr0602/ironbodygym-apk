@@ -1585,7 +1585,9 @@ class _HomeScreenState extends State<HomeScreen>
         // 1.35 (M-7): el Dock se recoge al bajar y
         // reaparece al subir o al volver arriba.
         AnimatedSize(
-          duration: const Duration(milliseconds: 200),
+          // 1.35 (UI-13, corrección de la reconciliación):
+          // duración por el token de la casa.
+          duration: AppMovimiento.media,
           curve: Curves.easeOutCubic,
           alignment: Alignment.bottomCenter,
           child: !_dockVisible
@@ -2163,7 +2165,9 @@ class _HomeScreenState extends State<HomeScreen>
     final ctx = _clavePorDecidir.currentContext;
     if (ctx != null) {
       Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 450),
+          // 1.35 (UI-13, corrección de la reconciliación):
+          // el desplazamiento largo tiene su token.
+          duration: AppMovimiento.desplazamiento,
           curve: Curves.easeOutCubic,
           alignment: 0.08);
       return;
@@ -2178,7 +2182,9 @@ class _HomeScreenState extends State<HomeScreen>
       final c2 = _clavePorDecidir.currentContext;
       if (c2 != null) {
         Scrollable.ensureVisible(c2,
-            duration: const Duration(milliseconds: 300),
+            // 1.35 (UI-13, corrección de la reconciliación):
+            // duración por el token de la casa.
+            duration: AppMovimiento.larga,
             curve: Curves.easeOutCubic,
             alignment: 0.08);
       }
@@ -2284,7 +2290,9 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
           AnimatedSize(
-            duration: const Duration(milliseconds: 250),
+            // 1.35 (UI-13, corrección de la reconciliación):
+            // duración por el token de la casa.
+            duration: AppMovimiento.media,
             curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
             child: !_informeAbierto
