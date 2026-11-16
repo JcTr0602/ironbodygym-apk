@@ -107,7 +107,37 @@ class SenalAtencion {
   /// Reportes App Plus pendientes de confirmar.
   final int reportesPlus;
 
-  const SenalAtencion({this.solicitudes = 0, this.reportesPlus = 0});
+  /// SL-3 (G01-2): la consulta de solicitudes FALLÓ en el
+  /// último pase: su conteo no es un cero verificado, es un
+  /// «sin verificar». El cero solo se afirma con lectura
+  /// buena (misma disciplina que Por Decidir y que el
+  /// BandejaSwr del Panel).
+  final bool solicitudesSinVerificar;
+
+  /// SL-3 (G01-2): ídem para la consulta de reportes Plus.
+  final bool reportesSinVerificar;
+
+  const SenalAtencion({
+    this.solicitudes = 0,
+    this.reportesPlus = 0,
+    this.solicitudesSinVerificar = false,
+    this.reportesSinVerificar = false,
+  });
+
+  /// ¿Alguna de las dos consultas quedó sin verificar?
+  bool get sinVerificar =>
+      solicitudesSinVerificar || reportesSinVerificar;
+
+  /// Qué quedó sin verificar, en palabras («inscripciones
+  /// por confirmar · reportes App Plus»); '' si todo se
+  /// pudo leer.
+  String get textoSinVerificar {
+    final partes = <String>[
+      if (solicitudesSinVerificar) 'inscripciones por confirmar',
+      if (reportesSinVerificar) 'reportes App Plus',
+    ];
+    return partes.join(' · ');
+  }
 
   static int _sano(int n) => n < 0 ? 0 : n;
 
@@ -1202,27 +1232,75 @@ class _HomeScreenState extends State<HomeScreen>
   /// «Necesita tu atención» del Panel del dueño
   /// (InvitadosService.solicitudesPendientes + la bandeja
   /// plus_reportes_listar vía PlusReportesService.pendientes).
-  /// Fail-silent POR FUENTE, como el Panel: si una RPC falla (sin
-  /// conexión), su conteo queda en 0 y la señal simplemente no suma
-  /// esa parte; Home sigue offline-first. La generación descarta
-  /// resultados de refrescos ya superados.
+  /// Por fuente, como el Panel: si una RPC falla (sin
+  /// conexión), su conteo conserva el último valor bueno y la
+  /// fuente queda marcada «sin verificar» (SL-3 G01-2: antes
+  /// el fallo dejaba un 0 silencioso); Home sigue
+  /// offline-first. La generación descarta resultados de
+  /// refrescos ya superados.
   Future<void> _cargarAtencionDueno() async {
     final gen = ++_atencionGen;
-    var solicitudes = 0;
-    var reportes = 0;
+    // SL-3 (G01-2): POR FUENTE — un fallo conserva el último
+    // conteo bueno de ESA fuente y marca su «sin verificar»;
+    // jamás deja el contador en un cero que parezca leído
+    // (antes el catch vacío apagaba la señal en silencio y
+    // el dueño podía no enterarse nunca).
+    var solicitudes = _atencion.solicitudes;
+    var reportes = _atencion.reportesPlus;
+    var solicitudesSinVerificar = _atencion.solicitudesSinVerificar;
+    var reportesSinVerificar = _atencion.reportesSinVerificar;
     try {
       solicitudes = (await invitados_svc.InvitadosService()
               .solicitudesPendientes())
           .length;
-    } catch (_) {}
+      solicitudesSinVerificar = false;
+    } catch (_) {
+      solicitudesSinVerificar = true;
+    }
     try {
       reportes = (await PlusReportesService().pendientes()).length;
-    } catch (_) {}
+      reportesSinVerificar = false;
+    } catch (_) {
+      reportesSinVerificar = true;
+    }
     if (!mounted || gen != _atencionGen) return;
     setState(() {
-      _atencion =
-          SenalAtencion(solicitudes: solicitudes, reportesPlus: reportes);
+      _atencion = SenalAtencion(
+        solicitudes: solicitudes,
+        reportesPlus: reportes,
+        solicitudesSinVerificar: solicitudesSinVerificar,
+        reportesSinVerificar: reportesSinVerificar,
+      );
     });
+  }
+
+  /// SL-3 (G01-2): el aviso «sin verificar» de la atención
+  /// en el Mostrador — solo existe si alguna consulta del
+  /// segundo pase falló (con todo leído no ocupa, regla de
+  /// Jc). No afirma conteos: dice qué no se pudo consultar.
+  Widget _bannerAtencionSinVerificar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+      child: Tarjeta(
+        color: AppColores.alerta.withValues(alpha: 0.12),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off_rounded, color: AppColores.alerta),
+            const SizedBox(width: AppEspacio.sm),
+            Expanded(
+              child: Text(
+                'Atención sin verificar: no se pudieron consultar '
+                '${_atencion.textoSinVerificar}. Puede haber '
+                'personas esperando que esta pantalla no está '
+                'viendo.',
+                style: AppTexto.secundario,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 1.29 (Oleada 5, FB-12): segundo pase del buzón del
@@ -1547,6 +1625,12 @@ class _HomeScreenState extends State<HomeScreen>
             child: _bannerFalloBase()),
       KeyedSubtree(
           key: const ValueKey('home-banner'), child: _bannerSync()),
+      // SL-3 (G01-2): la atención del dueño sin verificar se
+      // nombra aquí — no se apaga en un cero silencioso.
+      if (_atencion.sinVerificar)
+        KeyedSubtree(
+            key: const ValueKey('home-atencion-sin-verificar'),
+            child: _bannerAtencionSinVerificar()),
       const TarjetaDiagnosticoEspejo(key: ValueKey('home-diagnostico')),
       // 1.35 (UI-23): la línea de contexto abre el
       // contenido, sobre el Pulso: día, fecha y turno en
@@ -1560,6 +1644,28 @@ class _HomeScreenState extends State<HomeScreen>
               child: Text(_lineaContexto,
                   style: AppTexto.secundario),
             )),
+      // SL-3 (G01-1): la entrada al editor de la estación
+      // diaria, permanente y discreta (un solo icono en la
+      // cabecera del Mostrador). Antes «Personalizar mi día»
+      // solo existía dentro del bloque de vacío de las
+      // vistas de Hoy: con bloques presentes no se podía
+      // personalizar. Se mantiene también donde ya estaba.
+      KeyedSubtree(
+        key: const ValueKey('home-personalizar'),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppEspacio.lg, AppEspacio.xs, AppEspacio.lg, 0),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(
+              key: const ValueKey('mostrador-personalizar'),
+              tooltip: 'Personalizar mi día',
+              icon: const Icon(Icons.tune_rounded, size: 20),
+              onPressed: _personalizarEstacion,
+            ),
+          ),
+        ),
+      ),
       ..._seccionesMostrador(esDueno),
     ];
     return Column(
