@@ -504,6 +504,23 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     }
   }
 
+  // SL-8 (G08-6): el suplemento se nombra desde el espejo,
+  // nunca por su ID crudo («ID suplemento: 5» no dice nada
+  // al decidir). Si no se resuelve, la fila no sale.
+  Future<String?> nombreSuplemento(dynamic id) async {
+    final sid = int.tryParse('$id');
+    if (sid == null) return null;
+    try {
+      final filas =
+          await LocalDb.instance.mirrorPorIds('suplementos', [sid]);
+      if (filas.isEmpty) return null;
+      final n = '${filas.first['nombre'] ?? ''}'.trim();
+      return n.isEmpty ? null : n;
+    } catch (_) {
+      return null;
+    }
+  }
+
   final tipo = '${op['tipo']}';
   if (tipo == 'foto') {
     final n = await nombreCliente(payload['cliente_id']);
@@ -521,7 +538,8 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
       detalles.add('Método: $m');
     }
     if (payload['fecha'] != null) {
-      detalles.add('Fecha: ${payload['fecha']}');
+      // G08-6: fecha legible de la casa, no el ISO crudo.
+      detalles.add('Fecha: ${fmtFecha('${payload['fecha']}')}');
     }
   } else if (tipo == 'inscribir') {
     if (payload['nombre'] != null) {
@@ -606,7 +624,9 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     final p = payload['precio_oficial'] ?? payload['precio'];
     if (p != null) detalles.add('Precio: $p USD');
   } else if (tipo == 'eliminar_suplemento') {
-    detalles.add('ID suplemento: ${payload['suplemento_id'] ?? '—'}');
+    // G08-6: por su nombre del espejo (o sin la fila).
+    final n = await nombreSuplemento(payload['suplemento_id']);
+    if (n != null) detalles.add('Suplemento: $n');
     detalles.add('Acción: Eliminar');
   } else if (tipo == 'incidencia' || tipo == 'incidencia_estado') {
     if (payload['descripcion'] != null) {
@@ -623,7 +643,8 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     }
   } else if (tipo == 'cierre_turno') {
     if (payload['fecha'] != null) {
-      detalles.add('Fecha: ${payload['fecha']}');
+      // G08-6: fecha legible de la casa, no el ISO crudo.
+      detalles.add('Fecha: ${fmtFecha('${payload['fecha']}')}');
     }
     if (payload['turno'] != null) {
       detalles.add('Turno: ${payload['turno']}');
@@ -631,9 +652,9 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     final tc = payload['total_cobrado'] ?? payload['total'];
     if (tc != null) detalles.add('Total cobrado: ${fmtMonto(tc)} CUP');
   } else if (tipo == 'foto_suplemento') {
-    if (payload['suplemento_id'] != null) {
-      detalles.add('Suplemento ID: ${payload['suplemento_id']}');
-    }
+    // G08-6: por su nombre del espejo (o sin la fila).
+    final n = await nombreSuplemento(payload['suplemento_id']);
+    if (n != null) detalles.add('Suplemento: $n');
   }
   return detalles;
 }
@@ -2715,8 +2736,11 @@ class _ColaScreenState extends State<ColaScreen> {
   void _verDetalle(Map<String, dynamic> op) async {
     final tipo = tituloDeOp(op);
     final estado = '${op['estado']}';
-    final fecha =
-        fechaCorta(op['creada_ts'], 16).replaceAll('T', ' ');
+    // SL-8 (G08-6): la fecha del detalle en hora de La
+    // Habana y legible (fechaAbsoluta de la casa); antes
+    // era el ISO cortado a 16 caracteres EN UTC: la hora
+    // del servidor pintada como si fuera la local.
+    final fecha = fechaAbsoluta(parseFecha('${op['creada_ts'] ?? ''}'));
     final error = '${op['error'] ?? ''}';
     // 1.28 (M1-C5): UNA sola traducción en lenguaje llano
     // (explicacionOp), la misma que enseñan la fila y el
