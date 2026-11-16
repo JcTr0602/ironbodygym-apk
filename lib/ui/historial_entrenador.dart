@@ -55,6 +55,11 @@ class HistorialEntrenadorScreen extends StatefulWidget {
 class _HistorialEntrenadorScreenState
     extends State<HistorialEntrenadorScreen> {
   bool _cargando = true;
+  // Hy4 G#36: generación de carga — una carga vieja que
+  // termina después que la del mes nuevo NO publica
+  // (enseñaba las cifras del mes anterior bajo el título
+  // del nuevo).
+  int _genCarga = 0;
   List<Map<String, dynamic>> _datos = [];
   // 1.25 T119 (F3-17): selector de mes (antes solo el mes
   // actual, a diferencia de la Comparativa). El pendiente por
@@ -109,6 +114,7 @@ class _HistorialEntrenadorScreenState
   }
 
   Future<void> _cargarDatos() async {
+    final gen = ++_genCarga;
     final pref = _prefSel;
 
     // Pagos del mes agrupados por entrenador (por nombre),
@@ -160,7 +166,9 @@ class _HistorialEntrenadorScreenState
     datos.sort((a, b) =>
         ((b['cobrado'] as double)).compareTo(a['cobrado'] as double));
 
-    if (mounted) {
+    // Hy4 G#36: si el mes cambió mientras esta carga
+    // leía, su resultado ya no es el de la pantalla.
+    if (mounted && gen == _genCarga) {
       setState(() {
         _datos = datos;
         _sinIdentificarPagos = sinPagos;
