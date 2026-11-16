@@ -204,7 +204,7 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
         Row(
           children: [
             Expanded(
-              child: Text('${m['fecha_medicion']}',
+              child: Text(fmtFecha(m['fecha_medicion'] as String?),
                   style: AppTexto.cuerpo
                       .copyWith(fontWeight: FontWeight.w600)),
             ),
@@ -218,7 +218,9 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
           (m['medidas'] as Map<String, dynamic>).entries.map((e) {
             final spec = kMetricasMedicion[e.key];
             final unidad = spec?.unidad ?? '';
-            return '${e.key.replaceAll('_', ' ')}: ${e.value} $unidad';
+            final v = (e.value as num?)?.toDouble();
+            return '${nombreMetrica(e.key)}: '
+                '${v == null ? '${e.value}' : _fmtMedida(v)} $unidad';
           }).join(' · '),
           style: AppTexto.cuerpo,
         ),
