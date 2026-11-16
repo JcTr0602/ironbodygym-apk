@@ -121,7 +121,7 @@ void main() {
     ui_inv.conteoReportesPlusParaTest = null;
   });
 
-  Future<void> _abrirBandejaCaducados(WidgetTester tester) async {
+  Future<void> abrirBandejaCaducados(WidgetTester tester) async {
     await _fijarSesion(tester, 'jctr0602@ironbody.gym');
     ui_inv.servicioInvitadosParaTest = InvitadosService(
       rpc: (nombre, params) async {
@@ -156,7 +156,7 @@ void main() {
   testWidgets(
       'A-18: el diálogo de purga confirma el TOTAL del '
       'servidor (7), no la página visible (3)', (tester) async {
-    await _abrirBandejaCaducados(tester);
+    await abrirBandejaCaducados(tester);
     await tester.tap(find.textContaining('Limpiar caducados'));
     await _drenar(tester, vueltas: 6);
     expect(find.text('Limpiar caducados'), findsWidgets);
@@ -176,7 +176,7 @@ void main() {
   testWidgets(
       'A-18: con búsqueda activa, el diálogo avisa de que la '
       'purga es global', (tester) async {
-    await _abrirBandejaCaducados(tester);
+    await abrirBandejaCaducados(tester);
     // Búsqueda que deja 1 visible de los 3 cargados.
     await tester.enterText(
         find.byType(TextField).first, 'Caducado Uno');
