@@ -2467,8 +2467,15 @@ Future<String> cerrarBoteServicio({required int boteId}) async {
 /// PURO. La pista de auditoría completa sigue viva en ServiciosScreen
 /// (fila original + fila «Reverso»).
 List<Map<String, dynamic>> ventasServicioSinReversos(
-    List<Map<String, dynamic>> ventas) {
+    List<Map<String, dynamic>> ventas,
+    {Set<int> reversadasExtra = const {}}) {
   final reversadas = <int>{
+    // G#21 (Hy4): las reversiones aún en la cola de este
+    // teléfono (sin espejar) también retiran su venta —
+    // Servicios e Historial ya fusionaban
+    // reversosPendientesVentaIds(); quien llame sin el
+    // conjunto extra conserva el comportamiento anterior.
+    ...reversadasExtra,
     for (final v in ventas)
       if ((v['reverso_de'] as num?) != null)
         (v['reverso_de'] as num).toInt(),
