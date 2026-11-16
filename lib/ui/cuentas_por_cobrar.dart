@@ -364,7 +364,11 @@ class _CuentasPorCobrarScreenState
       body: Column(
         children: [
           const SyncBanner(compact: true),
-          _tarjetaTotal(),
+          // SL-5 G04-10: la tarjeta de totales en CERO no se
+          // pinta (regla de filas en cero de Jc): sin fiados
+          // no hay «0 fiado(s) pendiente(s) · 0.00 CUP»
+          // ocupando la pantalla; el vacío lo dice _cuerpo.
+          if (!_cargando && _fiados.isNotEmpty) _tarjetaTotal(),
           Expanded(child: _cuerpo()),
         ],
       ),
