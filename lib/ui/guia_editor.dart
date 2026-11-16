@@ -911,27 +911,22 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              // initialValue + clave por valor: si el borrador se
+            SelectorIronForm<String>(
+              // valorInicial + clave por valor: si el borrador se
               // recarga (obsoleto), el campo se reconstruye con el
               // nuevo valor en vez de quedarse con el viejo.
               key: ValueKey('equipo_${_equipoId ?? ''}'),
-              initialValue:
+              valorInicial:
                   _equipos.any((e) => '${e['equipoId']}' == _equipoId)
                       ? _equipoId
                       : null,
-              decoration: const InputDecoration(
-                labelText: 'Equipo (nunca texto libre)',
-                border: OutlineInputBorder(),
-              ),
-              items: [
+              etiqueta: 'Equipo (nunca texto libre)',
+              opciones: [
                 for (final e in _equipos)
-                  DropdownMenuItem(
-                    value: '${e['equipoId']}',
-                    child: Text('${e['equipoNombre']}'),
-                  ),
+                  OpcionSelector(
+                      '${e['equipoId']}', '${e['equipoNombre']}'),
               ],
-              onChanged: (v) => setState(() => _equipoId = v),
+              alCambiar: (v) => setState(() => _equipoId = v),
             ),
             const SizedBox(height: 12),
             Row(
@@ -971,24 +966,18 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
                 ayuda: 'Separados por comas (1–6).'),
             _campo(_muscSec, 'Músculos secundarios',
                 ayuda: 'Separados por comas (0–6).'),
-            DropdownButtonFormField<String>(
+            SelectorIronForm<String>(
               key: ValueKey('silueta_$_silueta'),
-              initialValue: GuiaValidacion.siluetas.contains(_silueta)
+              valorInicial: GuiaValidacion.siluetas.contains(_silueta)
                   ? _silueta
                   : null,
-              decoration: const InputDecoration(
-                labelText: 'Silueta',
-                border: OutlineInputBorder(),
-              ),
-              items: [
+              etiqueta: 'Silueta',
+              opciones: [
                 for (final s in GuiaValidacion.siluetas)
-                  DropdownMenuItem(
-                    value: s,
-                    child: Text(
-                        GuiaValidacion.nombreSilueta[s] ?? s),
-                  ),
+                  OpcionSelector(
+                      s, GuiaValidacion.nombreSilueta[s] ?? s),
               ],
-              onChanged: (v) => setState(() => _silueta = v ?? 'pecho'),
+              alCambiar: (v) => setState(() => _silueta = v ?? 'pecho'),
             ),
           ]),
           _seccion('Esencial', [

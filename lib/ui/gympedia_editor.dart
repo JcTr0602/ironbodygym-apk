@@ -933,42 +933,31 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _categoria,
-                        decoration: const InputDecoration(
-                            labelText: 'Categoría',
-                            border: OutlineInputBorder()),
-                        items: [
+                      child: SelectorIronForm<String>(
+                        valorInicial: _categoria,
+                        etiqueta: 'Categoría',
+                        opciones: [
                           for (final c in GympediaValidacion.categorias)
-                            DropdownMenuItem(
-                                value: c,
-                                child: Text(GympediaValidacion
-                                        .nombreCategoria[c] ??
-                                    c)),
+                            OpcionSelector(
+                                c,
+                                GympediaValidacion.nombreCategoria[c] ??
+                                    c),
                         ],
-                        onChanged: (v) =>
+                        alCambiar: (v) =>
                             setState(() => _categoria = v ?? _categoria),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _sello,
-                        decoration: const InputDecoration(
-                            labelText: 'Sello de respaldo',
-                            border: OutlineInputBorder()),
-                        items: const [
-                          DropdownMenuItem(
-                              value: 'verde',
-                              child: Text('🟢 Respaldo sólido')),
-                          DropdownMenuItem(
-                              value: 'amarillo',
-                              child: Text('🟡 Con matices')),
-                          DropdownMenuItem(
-                              value: 'gris',
-                              child: Text('⚪ Sin respaldo')),
+                      child: SelectorIronForm<String>(
+                        valorInicial: _sello,
+                        etiqueta: 'Sello de respaldo',
+                        opciones: const [
+                          OpcionSelector('verde', '🟢 Respaldo sólido'),
+                          OpcionSelector('amarillo', '🟡 Con matices'),
+                          OpcionSelector('gris', '⚪ Sin respaldo'),
                         ],
-                        onChanged: (v) =>
+                        alCambiar: (v) =>
                             setState(() => _sello = v ?? _sello),
                       ),
                     ),
@@ -976,23 +965,17 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
                 ),
                 const SizedBox(height: 12),
                 // v1.7.0 (A++): nivel de acceso del artículo.
-                DropdownButtonFormField<String>(
-                  initialValue: _nivel,
-                  decoration: const InputDecoration(
-                      labelText: 'Nivel de acceso (App Plus)',
-                      border: OutlineInputBorder(),
-                      helperText: 'Esencial: gratis para invitados · '
-                          'Plus: solo App Plus o clientes con '
-                          'mensualidad activa'),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'esencial',
-                        child: Text('Esencial (gratis)')),
-                    DropdownMenuItem(
-                        value: 'plus',
-                        child: Text('Plus (de pago)')),
+                SelectorIronForm<String>(
+                  valorInicial: _nivel,
+                  etiqueta: 'Nivel de acceso (App Plus)',
+                  textoAyuda: 'Esencial: gratis para invitados · '
+                      'Plus: solo App Plus o clientes con '
+                      'mensualidad activa',
+                  opciones: const [
+                    OpcionSelector('esencial', 'Esencial (gratis)'),
+                    OpcionSelector('plus', 'Plus (de pago)'),
                   ],
-                  onChanged: (v) =>
+                  alCambiar: (v) =>
                       setState(() => _nivel = v ?? _nivel),
                 ),
                 const SizedBox(height: 12),
