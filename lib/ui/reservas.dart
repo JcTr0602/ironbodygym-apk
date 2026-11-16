@@ -168,13 +168,10 @@ BandejaReservas construirBandeja(
       id: _entero(r['id']),
       clienteId: _entero(r['cliente_id']),
       clienteNombre:
-          nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente sin nombre',
+          nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente #${r['cliente_id']}',
       suplementoId: sid,
-      // SL-X1 (familia G06-4): sin nombre en el espejo, el
-      // fallback es legible («Suplemento sin nombre», la
-      // corrección de SL-7 en Servicios), nunca el #id.
       suplementoNombre:
-          supl?['nombre']?.toString() ?? 'Suplemento sin nombre',
+          supl?['nombre']?.toString() ?? 'Suplemento #$sid',
       cantidad: _entero(r['cantidad']),
       precioUnitario: _doble(r['precio_unitario']),
       // v1.4.6: moneda snapshot que trae la propia reserva.
