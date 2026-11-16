@@ -28,6 +28,7 @@ import 'permisos_ui.dart';
 import '../servicios.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'aviso_duplicado.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -523,54 +524,44 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
               icono: Icons.sticky_note_2_rounded,
               onChanged: (_) => setState(() {}),
             ),
-            const SizedBox(height: AppEspacio.md),
-            _barraTotal(),
           ],
         ),
       ),
+      // SL-6 (G05-5/G05-7): total y confirmar viven en la
+      // barra inferior FIJA del diálogo (las acciones de
+      // DialogoApp no ruedan con el contenido ni las tapa
+      // el teclado, como pasaba con el total dentro del
+      // scroll), y «Confirmar venta» es el BotonPrimario de
+      // la casa, igual que en la venta completa.
       acciones: [
+        _totalFijoRapida(),
         TextButton(
           onPressed:
               _guardando ? null : () => Navigator.pop(context, false),
           child: const Text('Cancelar'),
         ),
-        ElevatedButton(
+        BotonPrimario(
+          texto: _guardando ? 'Registrando…' : 'Confirmar venta',
+          expandido: false,
           onPressed: _puedeConfirmar ? _confirmar : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColores.naranja,
-          ),
-          child: Text(_guardando ? 'Registrando…' : 'Confirmar venta'),
         ),
       ],
     );
   }
 
-  /// 1.25 T91: el total SIEMPRE visible y en vivo
-  /// (cantidad × precio), como pide el diseño de la
-  /// venta única: antes la rápida no mostraba ningún
-  /// total hasta registrar.
-  Widget _barraTotal() {
+  /// SL-6 (G05-5): el total de la rápida en su barra fija:
+  /// compacto (etiqueta + importe en vivo), sin la tarjeta
+  /// que antes rodaba dentro del scroll.
+  Widget _totalFijoRapida() {
     final p = _precioVenta;
-    return Tarjeta(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-      child: Row(
-        children: [
-          const Text('Total', style: AppTexto.subtitulo),
-          const Spacer(),
-          if (p != null)
-            Text(
-              '$_cantidad × ${p.toStringAsFixed(2)} = ',
-              style: AppTexto.secundario,
-            ),
-          Text(
-            p == null
-                ? '—'
-                : '${(p * _cantidad).toStringAsFixed(2)} $_monedaSup',
-            style: AppTexto.subtitulo
-                .copyWith(color: AppColores.naranja),
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.only(right: AppEspacio.sm),
+      child: Text(
+        p == null
+            ? 'Total: —'
+            : 'Total: ${(p * _cantidad).toStringAsFixed(2)} $_monedaSup',
+        style: AppTexto.subtitulo
+            .copyWith(color: AppColores.naranja),
       ),
     );
   }
@@ -579,24 +570,34 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
     return Tarjeta(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
         children: [
-          IconButton(
-            icon: const Icon(Icons.remove_circle_outline_rounded),
-            onPressed: _cantidad > 1 && !_guardando
-                ? () => setState(() => _cantidad--)
-                : null,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline_rounded),
+                onPressed: _cantidad > 1 && !_guardando
+                    ? () => setState(() => _cantidad--)
+                    : null,
+              ),
+              Text('$_cantidad', style: AppTexto.displayPequeno),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline_rounded),
+                onPressed: _cantidad < widget.stock && !_guardando
+                    ? () => setState(() => _cantidad++)
+                    : null,
+              ),
+              const SizedBox(width: AppEspacio.sm),
+              Text('de ${widget.stock} disp.', style: AppTexto.secundario),
+            ],
           ),
-          Text('$_cantidad', style: AppTexto.displayPequeno),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded),
-            onPressed: _cantidad < widget.stock && !_guardando
-                ? () => setState(() => _cantidad++)
-                : null,
+          // SL-6 (G05-14): la misma frase de la venta
+          // completa — el stock que quedará tras vender.
+          Text(
+            'Quedan ${widget.stock - _cantidad} unidades tras esta venta',
+            style: AppTexto.minuscula,
           ),
-          const SizedBox(width: AppEspacio.sm),
-          Text('de ${widget.stock} disp.', style: AppTexto.secundario),
         ],
       ),
     );
@@ -880,10 +881,13 @@ class DetalleSuplementoScreen extends StatelessWidget {
     final presentacion = textoPresentacion(suplemento);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(nombre,
-            overflow: TextOverflow.ellipsis),
-        actions: [
+      // SL-6 (G05-8): la barra de la casa (appBarIron), como
+      // la de su sección — antes esta ficha armaba una
+      // AppBar directa, la única de Suplementos.
+      appBar: appBarIron(
+        context,
+        nombre,
+        acciones: [
           IconButton(
             icon: const Icon(Icons.share_rounded),
             tooltip: 'Compartir por WhatsApp',
@@ -1477,6 +1481,9 @@ class _MovimientosStock extends StatefulWidget {
 class _MovimientosStockState extends State<_MovimientosStock> {
   List<Map<String, dynamic>> _movs = [];
   bool _listo = false;
+  // SL-6 (G05-11): el fallo de lectura es un estado
+  // propio, no un vacío más.
+  bool _error = false;
 
   @override
   void initState() {
@@ -1495,16 +1502,43 @@ class _MovimientosStockState extends State<_MovimientosStock> {
           .toList()
         ..sort((a, b) =>
             '${b['fecha'] ?? ''}'.compareTo('${a['fecha'] ?? ''}'));
-    } catch (_) {}
+    } catch (e) {
+      // SL-6 (G05-11): antes el catch mudo dejaba la lista
+      // vacía y la pantalla decía «Sin movimientos
+      // registrados» — un error disfrazado de vacío. El
+      // detalle va a la bitácora y la pantalla enseña
+      // EstadoError con Reintentar.
+      AppLog.error('detalle_suplemento', 'movimientos_fallo', d: '$e');
+      if (!mounted) return;
+      setState(() {
+        _error = true;
+        _listo = true;
+      });
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _movs = filas;
+      _error = false;
       _listo = true;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_error) {
+      return EstadoError(
+        titulo: 'No se pudieron cargar los movimientos',
+        detalle: 'Revisa el teléfono e inténtalo de nuevo.',
+        onReintentar: () {
+          setState(() {
+            _error = false;
+            _listo = false;
+          });
+          _cargar();
+        },
+      );
+    }
     if (!_listo) return const SizedBox.shrink();
     if (_movs.isEmpty) {
       return const Text('Sin movimientos registrados.',
