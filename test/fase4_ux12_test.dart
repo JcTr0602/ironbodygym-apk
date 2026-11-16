@@ -75,9 +75,11 @@ void main() {
         home: Scaffold(body: SkeletonDashboard())));
     await tester.pump();
     expect(tester.takeException(), isNull);
-    // La banda de ingresos es UNA tarjeta: en todo el
-    // esqueleto solo hay DOS Tarjeta (la del héroe y la
-    // banda); la forma vieja sumaba tres más en fila.
-    expect(find.byType(Tarjeta), findsNWidgets(2));
+    // La banda de ingresos es UNA tarjeta con tres
+    // líneas: el esqueleto entero suma CUATRO Tarjeta
+    // (héroe, banda y las dos de secciones); la forma
+    // vieja sumaba SEIS (la fila de ingresos eran tres
+    // tarjetas sueltas).
+    expect(find.byType(Tarjeta), findsNWidgets(4));
   });
 }
