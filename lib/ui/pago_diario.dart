@@ -251,7 +251,10 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // reemplaza la barra anterior en vez de encolarla.
     // 1.24 Bloque 5: con controlador (patrón de Servicios) para
     // cerrarla en dispose — el Deshacer muere con su pantalla.
-    _ctrlDeshacer = mostrarSnackControladoEnMessenger(
+    // SL-X1 (G10-12): variante con cuenta atrás del helper
+    // central — los segundos que quedan para deshacer se ven
+    // en la propia barra; duración y acción intactas.
+    _ctrlDeshacer = mostrarSnackControladoConCuentaAtrasEnMessenger(
         ScaffoldMessenger.of(context), cantidad == 1 ? '1 pago guardado' : '$cantidad pagos guardados',
         significado: SignificadoChip.exito,
         // v1.2.7 (A3): se descarta solo a los 4s, no obliga a interactuar.
