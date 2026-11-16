@@ -823,7 +823,7 @@ class _PanelPermisosState extends State<PanelPermisos> {
                   children: [
                     // SL-9 (G09-14): el estado va en el chip de
                     // la casa y con sus tokens, no en un texto
-                    // con Colors.green/red a pelo.
+                    // con colores crudos a pelo.
                     ChipEstado.semantico(
                       texto: ent.activo ? 'ACTIVO' : 'SUSPENDIDO',
                       significado: ent.activo

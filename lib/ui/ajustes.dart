@@ -560,7 +560,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   // SL-9 (G09-6): los selectores de Ajustes (horas de aviso,
   // deslizables de Buscar y bloqueo automático) ya no abren
-  // un SimpleDialog propio: son el SelectorIron de la casa,
+  // un diálogo simple propio: son el SelectorIron de la casa,
   // en línea, con su icono — y participan del buscador de
   // ajustes como las demás filas (coincideBusquedaAjuste).
 
@@ -1595,7 +1595,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
 
   /// SL-9 (G09-6): fila de Ajustes con el SelectorIron de la
   /// casa en línea (icono + selector con su etiqueta), en vez
-  /// de una fila que abría un SimpleDialog propio. Participa
+  /// de una fila que abría un diálogo simple propio. Participa
   /// del buscador de ajustes como _opcion y _switch.
   Widget _selectorAjuste<T>({
     required IconData icono,
