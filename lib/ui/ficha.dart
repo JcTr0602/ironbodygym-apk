@@ -3366,6 +3366,15 @@ class _FichaScreenState extends State<FichaScreen> {
                                     '${_c?['pagado_hasta'] ?? ''}',
                               )?.frac,
                         periodoPausado: pausado,
+                        // 1.35 (UX-04): la tira de datos
+                        // clave de la credencial — el mismo
+                        // «pagado hasta» que la Membresía
+                        // enseña debajo (fmtFecha; la Casa
+                        // no vence).
+                        pagadoHastaTexto: esCasa
+                            ? 'Sin vencimiento'
+                            : fmtFecha(
+                                c['pagado_hasta'] as String?),
                         ),
                       ),
                       const SizedBox(

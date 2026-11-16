@@ -21,19 +21,32 @@ import 'conciliacion.dart';
 import 'diseno.dart';
 import 'estado_cuenta.dart';
 
-/// Diseño Bloque 2 Paso 2 (B1): la cabecera NUEVA de la
-/// ficha — foto grande a la izquierda con su anillo de
-/// estado, y a la derecha la jerarquía que importa: nombre,
-/// insignia de estado (o el distintivo dorado de Casa) y el
-/// acceso a cambiar la foto. El botón de cobrar NO va aquí:
-/// sigue fijo abajo, siempre visible. Vista tonta: la
-/// ficha calcula color/días y pasa los callbacks.
+/// Diseño Bloque 2 Paso 2 (B1): la cabecera de la ficha.
+/// 1.35 (UX-04): la cabecera se recompone como
+/// CREDENCIAL del gym — la foto manda en una banda
+/// superior de ancho completo con el nombre y la
+/// insignia de estado sobre el velo grafito del pie, y
+/// una tira de datos clave (pagado hasta · días que
+/// quedan) cerrando la credencial. Sin foto, la banda es
+/// el arte del rayo con las iniciales grandes. Se
+/// conserva TODO lo que la cabecera hacía: el Hero de la
+/// foto, el toque para verla en grande, la insignia con
+/// sus textos exactos, el botón de foto con sus tres
+/// estados (sin permiso con candado, en curso con
+/// indicador) y el progreso del período — que deja de
+/// ser el anillo del avatar y pasa a ser la barra del
+/// pie de la banda, con la misma animación y el mismo
+/// color de estado (gris en pausa). La forma plegada al
+/// bajar, las pestañas y el orden de secciones no
+/// cambian (viven en la ficha, no aquí).
 class CabeceraFicha extends StatelessWidget {
   final String nombre;
   final File? foto;
 
-  /// Color del anillo de estado (verde al día, ámbar por
-  /// vencer o Casa, rojo vencido) — lo calcula la ficha.
+  /// Color de estado (verde al día, ámbar por vencer o
+  /// Casa, rojo vencido) — lo calcula la ficha. En la
+  /// credencial tiñe la barra del período y la línea de
+  /// estado del pie de la banda.
   final Color colorMarco;
   final bool esCasa;
 
@@ -63,14 +76,20 @@ class CabeceraFicha extends StatelessWidget {
   final bool fotoOcupada;
 
   /// 1.25 T53: fracción transcurrida del período pagado
-  /// (0–1) para el anillo de progreso del avatar, que
-  /// absorbe la barra del mes. Null = sin período (el
-  /// anillo queda el plano del semáforo, como siempre).
+  /// (0–1) para la barra de progreso del pie de la banda,
+  /// que hereda el papel del anillo del avatar (que a su
+  /// vez absorbió la barra del mes). Null = sin período
+  /// (el pie enseña la línea plana del color de estado).
   final double? fraccionPeriodo;
 
-  /// 1.25 T53: período en pausa (congelado): el anillo se
-  /// pinta en gris, como hacía la barra.
+  /// 1.25 T53: período en pausa (congelado): la barra se
+  /// pinta en gris, como hacía el anillo.
   final bool periodoPausado;
+
+  /// 1.35 (UX-04): el «pagado hasta» ya formateado para
+  /// la tira de datos clave («05/12/2026»; la ficha pasa
+  /// «Sin vencimiento» para la Casa). Null = «—».
+  final String? pagadoHastaTexto;
 
   const CabeceraFicha(
       {super.key,
@@ -86,176 +105,274 @@ class CabeceraFicha extends StatelessWidget {
       this.puedeCambiarFoto = true,
       this.fotoOcupada = false,
       this.fraccionPeriodo,
-      this.periodoPausado = false});
+      this.periodoPausado = false,
+      this.pagadoHastaTexto});
+
+  String get _iniciales {
+    final partes =
+        nombre.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+    if (partes.isEmpty) return '?';
+    var ini = partes.first[0].toUpperCase();
+    if (partes.length > 1) ini += partes.last[0].toUpperCase();
+    return ini;
+  }
+
+  /// La insignia de estado, con los textos de siempre.
+  Widget _insignia(BuildContext context) {
+    // Argón Clientes #3: con Casa manda el chip dorado;
+    // la insignia de días no se pinta. Yunque de cambios
+    // 1.31 (M1): `congelado` aquí es la fusión que pasa
+    // la ficha (congelado viejo O pausa nueva en curso):
+    // la insignia sigue diciendo «CONGELADO».
+    if (!esCasa && congelado) {
+      return const BadgeEstado(
+          estado: EstadoMembresia.congelado, texto: 'CONGELADO');
+    }
+    if (!esCasa && dias == null) {
+      return const BadgeEstado(
+          estado: EstadoMembresia.sinPagos, texto: 'SIN PAGOS');
+    }
+    if (!esCasa) return BadgeEstado.desdeDias(dias!);
+    // Casa en dorado SOBRE el velo grafito de la banda:
+    // el ámbar brillante (en la cabecera vieja, sobre
+    // superficie clara, mandaba el par de tinta de D-15;
+    // sobre el velo oscuro el brillante es el que lee).
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppEspacio.md, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColores.alerta.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(AppRadio.circular),
+        border: Border.all(
+            color: AppColores.alerta.withValues(alpha: 0.75)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.home_rounded,
+              size: 15, color: AppColores.alerta),
+          const SizedBox(width: 8),
+          Text('Cuenta a la Casa',
+              style: AppTexto.etiqueta.copyWith(
+                  color: AppColores.alerta,
+                  fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  /// El botón de la foto, como pastilla sobre la banda:
+  /// mismo texto («Añadir foto» / «Cambiar foto»), mismo
+  /// candado sin permiso y mismo indicador en curso.
+  Widget _botonFoto() {
+    return Material(
+      color: AppColores.grafitoTactico.withValues(alpha: 0.62),
+      borderRadius: BorderRadius.circular(AppRadio.circular),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadio.circular),
+        onTap: (puedeCambiarFoto && !fotoOcupada)
+            ? onCambiarFoto
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (fotoOcupada)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColores.textoSobreOscuro),
+                )
+              else
+                Icon(
+                    puedeCambiarFoto
+                        ? Icons.photo_camera_rounded
+                        : Icons.lock_rounded,
+                    size: 18,
+                    color: AppColores.textoSobreOscuro),
+              const SizedBox(width: 8),
+              Text(foto == null ? 'Añadir foto' : 'Cambiar foto',
+                  style: AppTexto.etiqueta.copyWith(
+                      color: AppColores.textoSobreOscuro,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Una celda de la tira de datos clave.
+  Widget _datoTira(BuildContext context, String etiqueta, String valor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(etiqueta,
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.textoSecundario(context))),
+        const SizedBox(height: 2),
+        Text(valor,
+            style: AppTexto.cuerpo
+                .copyWith(fontWeight: FontWeight.w700),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis),
+      ],
+    );
+  }
+
+  String get _diasTexto {
+    if (esCasa) return 'Sin vencimiento';
+    if (congelado) return 'En pausa';
+    final d = dias;
+    if (d == null) return 'Sin pagos';
+    if (d == 0) return 'Vence hoy';
+    if (d > 0) return d == 1 ? 'Queda 1 día' : 'Quedan $d días';
+    return d == -1 ? 'Vencido hace 1 día' : 'Vencido hace ${-d} días';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(AppEspacio.md),
       decoration: BoxDecoration(
-        // 1.25 T54: el degradado se tiñe del color del
-        // estado (el marco que la ficha ya calcula): el
-        // estado se lee antes que el nombre. Casa conserva
-        // su dorado vía colorMarco.
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            colorMarco.withValues(alpha: 0.13),
-            colorMarco.withValues(alpha: 0.0),
-          ],
-        ),
+        color: AppColores.superficie(context),
         borderRadius: BorderRadius.circular(AppRadio.lg),
+        border: Border.all(color: AppColores.borde(context)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GestureDetector(
-            onTap: onFotoTap,
-            child: fraccionPeriodo == null
-                ? AvatarCliente(
-                    nombre: nombre,
-                    foto: foto,
-                    tamano: TamanoAvatar.perfil,
-                    colorBorde: colorMarco,
-                    grosorBorde: 3,
-                    heroTag: heroTag,
+          // La banda de la credencial.
+          SizedBox(
+            height: 196,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (foto != null)
+                  GestureDetector(
+                    onTap: onFotoTap,
+                    child: heroTag == null
+                        ? Image(
+                            image: providerFotoAcotada(
+                                FileImage(foto!), ancho: 720),
+                            fit: BoxFit.cover)
+                        : Hero(
+                            tag: heroTag!,
+                            child: Image(
+                                image: providerFotoAcotada(
+                                    FileImage(foto!), ancho: 720),
+                                fit: BoxFit.cover),
+                          ),
                   )
-                : SizedBox(
-                    width: 128,
-                    height: 128,
-                    // 1.25 T59: el anillo se ANIMA hasta su
-                    // valor — al abrir la ficha y, sobre
-                    // todo, al volver de un cobro: el arco
-                    // crece hasta el nuevo período y la
-                    // insignia ya pinta el estado nuevo; es
-                    // la confirmación visual de que el cobro
-                    // cuajó, sin un diálogo más.
-                    child: TweenAnimationBuilder<double>(
-                      // 1.30 (Oleada D6, UI130-32): duración
-                      // y curva a los tokens de movimiento.
-                      duration: AppMovimiento.larga,
-                      curve: AppMovimiento.curvaSuave,
-                      tween: Tween<double>(
-                          end: fraccionPeriodo!.clamp(0.0, 1.0)),
-                      builder: (context, valor, hijo) => CustomPaint(
-                        painter: _AnilloPeriodoPainter(
-                          fraccion: valor,
-                          color: periodoPausado
-                              ? AppColores.bannerGrisB
-                              : colorMarco,
-                        ),
-                        child: hijo,
-                      ),
-                      child: Center(
-                        child: AvatarCliente(
-                          nombre: nombre,
-                          foto: foto,
-                          tamano: TamanoAvatar.perfil,
-                          heroTag: heroTag,
-                        ),
+                else ...[
+                  Image.asset('assets/arte_marca_rayo.jpg',
+                      fit: BoxFit.cover),
+                  Container(
+                      color: AppColores.grafitoTactico
+                          .withValues(alpha: 0.45)),
+                  Center(
+                    child: Text(_iniciales,
+                        style: AppTexto.display.copyWith(
+                            fontSize: 64,
+                            color: AppColores.textoSobreOscuro)),
+                  ),
+                ],
+                // El velo grafito del pie: nombre e insignia
+                // se leen sobre él, no sobre la foto cruda.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 118,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          AppColores.grafitoTactico
+                              .withValues(alpha: 0),
+                          AppColores.grafitoTactico
+                              .withValues(alpha: 0.88),
+                        ],
                       ),
                     ),
                   ),
-          ),
-          const SizedBox(width: AppEspacio.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(nombre,
-                    style: AppTexto.displayPequeno,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis),
-                const SizedBox(height: AppEspacio.sm),
-                // Argón Clientes #3: con Casa manda el chip
-                // dorado; la insignia de días no se pinta.
-                // Yunque de cambios 1.31 (M1): `congelado` aquí
-                // es la fusión que pasa la ficha (congelado
-                // viejo O pausa nueva en curso): la insignia
-                // sigue diciendo «CONGELADO» (la T13 de la 1.25
-                // lo fija) — lo que se corrige es que la pausa
-                // nueva LLEGUE a esta rama y no caiga a la de
-                // días («VENCIDO N DÍAS»).
-                if (!esCasa && congelado)
-                  const BadgeEstado(
-                      estado: EstadoMembresia.congelado,
-                      texto: 'CONGELADO')
-                else if (!esCasa && dias == null)
-                  const BadgeEstado(
-                      estado: EstadoMembresia.sinPagos,
-                      texto: 'SIN PAGOS')
-                else if (!esCasa)
-                  BadgeEstado.desdeDias(dias!)
-                else
-                  // 1.29 (D-15): la insignia de Casa se pinta con
-                  // los roles de la fundación — el par de tinta
-                  // alertaTexto resuelto por tema sobre su propio
-                  // tinte. Con el ámbar brillante crudo en ambos
-                  // temas, en claro el texto se lavaba y la
-                  // insignia se leía mal.
-                  Builder(builder: (_) {
-                    final tinta = AppColores.alertaTexto(context);
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.md, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: tinta.withValues(alpha: 0.13),
-                        borderRadius:
-                            BorderRadius.circular(AppRadio.circular),
-                        border: Border.all(
-                            color: tinta.withValues(alpha: 0.6)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.home_rounded,
-                              size: 15, color: tinta),
-                          const SizedBox(width: 8),
-                          Text('Cuenta a la Casa',
-                              style: AppTexto.etiqueta.copyWith(
-                                  color: tinta,
-                                  fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    );
-                  }),
-                const SizedBox(height: AppEspacio.xs),
-                // 1.25 T117 (F1-47): sin foto, el botón dice
-                // «Añadir foto» (la pista que faltaba); sin
-                // permiso, candado y deshabilitado.
-                TextButton.icon(
-                  icon: fotoOcupada
-                      // 1.34 (G-1): indicador de apertura
-                      // mientras el flujo de foto vive.
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2),
-                        )
-                      : Icon(
-                          puedeCambiarFoto
-                              // 1.29 (D-15): icono canónico de foto de
-                              // la tabla D-07 (photo_camera_rounded);
-                              // camera_alt_rounded se extingue.
-                              ? Icons.photo_camera_rounded
-                              : Icons.lock_rounded,
-                          size: 18),
-                  label: Text(
-                      foto == null ? 'Añadir foto' : 'Cambiar foto'),
-                  onPressed: (puedeCambiarFoto && !fotoOcupada)
-                      ? onCambiarFoto
-                      : null,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppEspacio.sm),
-                    minimumSize: Size.zero,
-                    tapTargetSize:
-                        MaterialTapTargetSize.shrinkWrap,
+                ),
+                Positioned(
+                  left: AppEspacio.md,
+                  right: AppEspacio.md,
+                  bottom: AppEspacio.md,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(nombre,
+                          style: AppTexto.displayPequeno.copyWith(
+                              color: AppColores.textoSobreOscuro),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: AppEspacio.sm),
+                      _insignia(context),
+                    ],
                   ),
                 ),
+                Positioned(
+                  top: AppEspacio.sm,
+                  right: AppEspacio.sm,
+                  child: _botonFoto(),
+                ),
+                // El progreso del período, al pie de la
+                // banda (hereda el anillo): animado hasta
+                // su valor, como el anillo al volver de un
+                // cobro. Sin período, la línea plana del
+                // color de estado (el viejo anillo plano).
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: fraccionPeriodo == null
+                      ? Container(height: 3, color: colorMarco)
+                      : TweenAnimationBuilder<double>(
+                          duration: AppMovimiento.larga,
+                          curve: AppMovimiento.curvaSuave,
+                          tween: Tween<double>(
+                              end: fraccionPeriodo!.clamp(0.0, 1.0)),
+                          builder: (context, valor, _) => SizedBox(
+                            height: 4,
+                            child: LinearProgressIndicator(
+                              value: valor,
+                              backgroundColor: AppColores
+                                  .grafitoTactico
+                                  .withValues(alpha: 0.35),
+                              valueColor: AlwaysStoppedAnimation(
+                                  periodoPausado
+                                      ? AppColores.bannerGrisB
+                                      : colorMarco),
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+          // La tira de datos clave que cierra la
+          // credencial.
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.md, vertical: AppEspacio.sm),
+            child: Row(
+              children: [
+                Expanded(
+                    child: _datoTira(context, 'Pagado hasta',
+                        pagadoHastaTexto ?? '—')),
+                Expanded(
+                    child: _datoTira(
+                        context, 'Días que quedan', _diasTexto)),
               ],
             ),
           ),
@@ -1202,42 +1319,6 @@ class LineaPeriodoFicha extends StatelessWidget {
   }
 }
 
-/// 1.25 T53: pintor del anillo de progreso del avatar —
-/// arco de fondo completo y arco de avance desde arriba,
-/// en el color del estado (o gris en pausa).
-class _AnilloPeriodoPainter extends CustomPainter {
-  final double fraccion;
-  final Color color;
-
-  const _AnilloPeriodoPainter(
-      {required this.fraccion, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final centro = Offset(size.width / 2, size.height / 2);
-    final radio = (size.shortestSide / 2) - 3;
-    final trazo = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
-      ..strokeCap = StrokeCap.round;
-    trazo.color = color.withValues(alpha: 0.22);
-    canvas.drawCircle(centro, radio, trazo);
-    if (fraccion > 0) {
-      trazo.color = color;
-      canvas.drawArc(
-        Rect.fromCircle(center: centro, radius: radio),
-        -1.5708,
-        6.2832 * fraccion,
-        false,
-        trazo,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_AnilloPeriodoPainter old) =>
-      old.fraccion != fraccion || old.color != color;
-}
 
 /// 1.25 T56: agrupa las entradas del historial por mes
 /// (clave AAAA-MM de su fecha), en el orden en que llegan
