@@ -72,6 +72,9 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   // 1.28 (M3-B2): la comprobación de cierres a demanda va en
   // curso (deshabilita el botón y enseña su progreso).
   bool _comprobando = false;
+  // SL-11 (G12-6): la tarjeta de contingencia «¿Un cierre no
+  // baja?» nace PLEGADA; este es su estado de despliegue.
+  bool _ayudaCierreAbierta = false;
   // 1.28 (M3-A7): aperturas resueltas por día de la semana
   // visible (clave: fecha ISO), para que el mapa de calor
   // cuente lo que de verdad pasó CADA día y no solo lo de hoy.
@@ -976,44 +979,68 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   // PLEGADA (regla anti-regueros de Jc). El
                   // título resume su estado y al desplegar
                   // el «Comprobar» sigue accesible.
+                  // Plegado propio (Align heightFactor 0 +
+                  // ClipRect), no ExpansionTile: el contenido
+                  // queda en el árbol con alto pintado CERO y
+                  // sin recibir toques (contrato M3-B2/C2:
+                  // «Comprobar» vive en el hub), pero no
+                  // ocupa espacio permanente.
                   Tarjeta(
                     padding: EdgeInsets.zero,
-                    child: ExpansionTile(
-                      title: const Text('¿Un cierre no baja?',
-                          style: AppTexto.cuerpo),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                              AppEspacio.lg, 0, AppEspacio.lg,
-                              AppEspacio.md),
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Compruébalo con el servidor. '
-                                'Si el servidor no responde, lo '
-                                'de este teléfono no cambia.',
-                                style: AppTexto.cuerpo,
+                        ListTile(
+                          title: const Text('¿Un cierre no baja?',
+                              style: AppTexto.cuerpo),
+                          trailing: Icon(_ayudaCierreAbierta
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded),
+                          onTap: () => setState(() =>
+                              _ayudaCierreAbierta =
+                                  !_ayudaCierreAbierta),
+                        ),
+                        ClipRect(
+                          child: Align(
+                            heightFactor:
+                                _ayudaCierreAbierta ? 1 : 0,
+                            alignment: Alignment.topCenter,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                  AppEspacio.lg, 0, AppEspacio.lg,
+                                  AppEspacio.md),
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Compruébalo con el servidor. '
+                                    'Si el servidor no responde, '
+                                    'lo de este teléfono no '
+                                    'cambia.',
+                                    style: AppTexto.cuerpo,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    icon: _comprobando
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child:
+                                                CircularProgressIndicator(
+                                                    strokeWidth:
+                                                        2),
+                                          )
+                                        : const Icon(Icons
+                                            .cloud_sync_rounded),
+                                    label: const Text('Comprobar'),
+                                    onPressed: _comprobando
+                                        ? null
+                                        : _comprobarCierres,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 8),
-                              OutlinedButton.icon(
-                                icon: _comprobando
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child:
-                                            CircularProgressIndicator(
-                                                strokeWidth: 2),
-                                      )
-                                    : const Icon(
-                                        Icons.cloud_sync_rounded),
-                                label: const Text('Comprobar'),
-                                onPressed: _comprobando
-                                    ? null
-                                    : _comprobarCierres,
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ],
