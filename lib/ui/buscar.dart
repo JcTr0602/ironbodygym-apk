@@ -1522,7 +1522,7 @@ class _BuscarScreenState extends State<BuscarScreen>
         builder: (ctx) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Align(
+            const Align(
               alignment: Alignment.centerLeft,
               child: Text('Acciones rápidas',
                   style: AppTexto.secundario),
