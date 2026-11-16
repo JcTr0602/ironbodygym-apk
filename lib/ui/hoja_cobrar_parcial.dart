@@ -9,6 +9,7 @@ import '../cobro_parcial.dart';
 import '../negocio.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'hoja_accion.dart';
 import 'primitivas.dart';
 
 /// 1.26.1: hoja de «Cobrar parcial» — el dueño escribe
@@ -59,30 +60,19 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-          left: AppEspacio.lg,
-          right: AppEspacio.lg,
-          top: AppEspacio.md,
-          bottom: MediaQuery.of(context).viewInsets.bottom +
-              AppEspacio.lg),
-      child: Column(
+    // SL-X1 (G10-3): la hoja se compone sobre la jerarquía
+    // de la casa (HojaAccion, la raíz de showHojaIron y de
+    // las hojas con estado propio como HojaLiquidar): asa,
+    // cabecera con título y cerrar, cuerpo desplazable y pie
+    // fijo los da el esqueleto; aquí solo vive el contenido
+    // del cobro parcial, con el mismo comportamiento.
+    return HojaAccion(
+      titulo: 'Cobrar parcial — ${widget.nombre}',
+      icono: Icons.payments_rounded,
+      cuerpo: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text('Cobrar parcial — ${widget.nombre}',
-                    style: AppTexto.subtitulo
-                        .copyWith(fontWeight: FontWeight.bold)),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close_rounded),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
           Text('Pendiente total: ${fmtMonto(widget.total)} CUP',
               style: AppTexto.secundario),
           const SizedBox(height: AppEspacio.md),
@@ -141,25 +131,24 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
                   : 'Se aplica ${widget.arrastre > 0.01 ? 'primero al saldo de cobros parciales y luego ' : ''}a los pagos más viejos primero. Quedan pendientes ${fmtMonto(widget.total - _monto!)} CUP.',
               style: AppTexto.secundario,
             ),
-          const SizedBox(height: AppEspacio.md),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancelar'),
-                ),
-              ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: BotonPrimario(
-                  texto: 'Confirmar cobro',
-                  onPressed: _valido
-                      ? () => Navigator.pop(context, _monto)
-                      : null,
-                ),
-              ),
-            ],
+        ],
+      ),
+      pie: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(
+            child: BotonPrimario(
+              texto: 'Confirmar cobro',
+              onPressed: _valido
+                  ? () => Navigator.pop(context, _monto)
+                  : null,
+            ),
           ),
         ],
       ),

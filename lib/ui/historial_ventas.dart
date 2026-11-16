@@ -733,27 +733,21 @@ class _HistorialVentasScreenState
           crossAxisAlignment:
               CrossAxisAlignment.start,
           children: [
+            // SL-X1 (G05-4): la fila desbordaba 110 px a la
+            // derecha a 360 dp con nombre largo + 3 chips + 2
+            // botones de dueño en la misma Row. El nombre va
+            // con ellipsis en la fila del título (solo quedan
+            // los botones, de ancho fijo) y los chips bajan a
+            // una segunda línea flexible (Wrap): no se quita
+            // información, solo se reparte.
             Row(
               children: [
                 Expanded(
                   child: Text(nombreProd,
-                      style: AppTexto.subtitulo),
+                      style: AppTexto.subtitulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                 ),
-                if (viaInscripcion)
-                  const ChipEstado(
-                      texto: 'Inscripción + venta',
-                      color: AppColores.naranja,
-                      icono: Icons.person_add_rounded),
-                if (difiere && !ventaProtegida)
-                  const ChipEstado(
-                      texto: 'Precio diferente',
-                      color: AppColores.alerta,
-                      icono: Icons.warning_amber_rounded),
-                if ((v['es_fiado'] == 1 || v['es_fiado'] == true) &&
-                    !ventaProtegida)
-                  const ChipEstado.semantico(
-                      texto: 'Fiado',
-                      significado: SignificadoChip.alerta),
                 // v1.2.1: anular es acción del dueño. Con la
                 // anulación ya en cola el botón sobra.
                 if (AuthService().isOwner &&
@@ -776,6 +770,33 @@ class _HistorialVentasScreenState
                   ),
               ],
             ),
+            if (viaInscripcion ||
+                (difiere && !ventaProtegida) ||
+                ((v['es_fiado'] == 1 || v['es_fiado'] == true) &&
+                    !ventaProtegida)) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: AppEspacio.xs,
+                runSpacing: AppEspacio.xs,
+                children: [
+                  if (viaInscripcion)
+                    const ChipEstado(
+                        texto: 'Inscripción + venta',
+                        color: AppColores.naranja,
+                        icono: Icons.person_add_rounded),
+                  if (difiere && !ventaProtegida)
+                    const ChipEstado(
+                        texto: 'Precio diferente',
+                        color: AppColores.alerta,
+                        icono: Icons.warning_amber_rounded),
+                  if ((v['es_fiado'] == 1 || v['es_fiado'] == true) &&
+                      !ventaProtegida)
+                    const ChipEstado.semantico(
+                        texto: 'Fiado',
+                        significado: SignificadoChip.alerta),
+                ],
+              ),
+            ],
             if (_anuladasPendientes.contains(idVenta)) ...[
               const SizedBox(height: 4),
               const ChipEstado.semantico(
@@ -1301,7 +1322,9 @@ class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
                     icon:
                         const Icon(Icons.calendar_today_rounded, size: 16),
                     label: Text(
-                        _desde == null ? 'Desde…' : 'Desde $_desde'),
+                        _desde == null
+                            ? 'Desde…'
+                            : 'Desde ${fmtFecha(_desde)}'),
                     onPressed: () => _elegirFecha(esDesde: true),
                   ),
                 ),
@@ -1311,7 +1334,9 @@ class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
                     icon:
                         const Icon(Icons.calendar_today_rounded, size: 16),
                     label: Text(
-                        _hasta == null ? 'Hasta…' : 'Hasta $_hasta'),
+                        _hasta == null
+                            ? 'Hasta…'
+                            : 'Hasta ${fmtFecha(_hasta)}'),
                     onPressed: () => _elegirFecha(esDesde: false),
                   ),
                 ),
