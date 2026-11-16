@@ -215,10 +215,25 @@ class _SolicitudesAdelantoScreenState
                         color: AppColores.alerta),
                     const SizedBox(width: AppEspacio.sm),
                     Expanded(
-                      child: Text(
-                        '${pendientes.length} solicitud${pendientes.length == 1 ? '' : 'es'} '
-                        'por decidir · ${fmtMonto(totalPendiente)} CUP pedidos',
-                        style: AppTexto.cuerpo,
+                      // SL-5B G07-11: el total pedido se
+                      // asienta con MontoAnimado, no salta
+                      // en el Text crudo de la cabecera.
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '${pendientes.length} solicitud${pendientes.length == 1 ? '' : 'es'} '
+                              'por decidir · ',
+                              style: AppTexto.cuerpo,
+                            ),
+                          ),
+                          MontoAnimado(
+                            valor: totalPendiente,
+                            formato: (v) =>
+                                '${fmtMonto(v)} CUP pedidos',
+                            style: AppTexto.cuerpo,
+                          ),
+                        ],
                       ),
                     ),
                   ],

@@ -82,10 +82,14 @@ class _PorCobrarScreenState extends State<PorCobrarScreen>
                     style: AppTexto.secundario
                         .copyWith(color: Colors.white70),
                   ),
-                  Text(
-                    cargando
+                  // SL-5B G04-12: la cifra se asienta con
+                  // MontoAnimado (la pieza de la casa), no
+                  // salta de «…» a la cifra en un Text crudo.
+                  MontoAnimado(
+                    valor: cargando ? 0 : combinadoCup,
+                    formato: (v) => cargando
                         ? '…'
-                        : '${fmtMonto(combinadoCup)} CUP'
+                        : '${fmtMonto(v)} CUP'
                             '${(_fiadosUsd ?? 0) > 0 ? ' · ${fmtMonto(_fiadosUsd!)} USD' : ''}',
                     style: AppTexto.display
                         .copyWith(color: AppColores.naranja),
