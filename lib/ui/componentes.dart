@@ -4112,6 +4112,83 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
   );
 }
 
+/// SL-X1 (G10-12): variante CON CUENTA ATRÁS del helper
+/// central, para las barras cuya ventana para actuar se
+/// agota (el Deshacer del flujo de cobro): los segundos
+/// restantes se pintan DENTRO del contenido de la barra y
+/// bajan en vivo, con la misma política de prioridades
+/// P1/P2, la misma duración y la misma acción que daría
+/// [mostrarSnackControladoEnMessenger]. La cuenta vive en
+/// el helper (widget privado [_TextoSnackCuentaAtras]):
+/// ninguna pantalla construye su SnackBar directo ni su
+/// temporizador para esto.
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
+    mostrarSnackControladoConCuentaAtrasEnMessenger(
+  ScaffoldMessengerState messenger,
+  String mensaje, {
+  SignificadoChip significado = SignificadoChip.neutral,
+  String? accion,
+  VoidCallback? alAccion,
+  required Duration duracion,
+  OrigenAviso origen = OrigenAviso.usuario,
+}) {
+  return _mostrarSnackEn(
+    messenger,
+    mensaje,
+    significado: significado,
+    accion: accion,
+    alAccion: alAccion,
+    duracion: duracion,
+    origen: origen,
+    cuentaAtras: true,
+  );
+}
+
+/// Contenido vivo de la variante con cuenta atrás: el
+/// mensaje seguido de los segundos que quedan de la
+/// duración de la barra, descontando uno por segundo
+/// hasta 0. El temporizador muere con el widget (la barra
+/// se cierra por acción, descarte o vencimiento y el
+/// contenido se desmonta con ella).
+class _TextoSnackCuentaAtras extends StatefulWidget {
+  final String mensaje;
+  final Duration duracion;
+  const _TextoSnackCuentaAtras({
+    required this.mensaje,
+    required this.duracion,
+  });
+
+  @override
+  State<_TextoSnackCuentaAtras> createState() =>
+      _TextoSnackCuentaAtrasState();
+}
+
+class _TextoSnackCuentaAtrasState
+    extends State<_TextoSnackCuentaAtras> {
+  late int _restantes = widget.duracion.inSeconds;
+  Timer? _reloj;
+
+  @override
+  void initState() {
+    super.initState();
+    _reloj = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_restantes > 0) setState(() => _restantes--);
+    });
+  }
+
+  @override
+  void dispose() {
+    _reloj?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text('${widget.mensaje} (quedan $_restantes s)');
+  }
+}
+
 ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
     _mostrarSnackEn(
   ScaffoldMessengerState messenger,
@@ -4121,6 +4198,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
   VoidCallback? alAccion,
   Duration? duracion,
   required OrigenAviso origen,
+  bool cuentaAtras = false,
 }) {
   final (icono, color) = switch (significado) {
     SignificadoChip.exito => (Icons.check_circle_rounded, AppColores.exito),
@@ -4168,7 +4246,12 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
         children: [
           Icon(icono, color: color, size: 20),
           const SizedBox(width: AppEspacio.sm),
-          Expanded(child: Text(mensaje)),
+          Expanded(
+              child: cuentaAtras
+                  ? _TextoSnackCuentaAtras(
+                      mensaje: mensaje,
+                      duracion: duracion ?? duracionAviso(significado))
+                  : Text(mensaje)),
         ],
       ),
       action: conAccion
