@@ -78,35 +78,41 @@ const kUsosSyncBannerPillListaBlanca = <String>{
   'test/yunque3_banner_test.dart',
 };
 
+/// La anotación que pega a una clase, con los literales
+/// concatenados ya unidos (la frase de la regla puede
+/// vivir en un literal o repartida en varios).
+String _anotacionPegada(String src, String clase) {
+  final i = src.indexOf('class $clase extends');
+  if (i <= 0) return '';
+  final antes = src.substring(0, i);
+  if (!antes.trimRight().endsWith(')')) return '';
+  final inicio = antes.lastIndexOf('@Deprecated');
+  if (inicio < 0) return '';
+  return antes
+      .substring(inicio)
+      .replaceAll(RegExp(r"'\s*'"), '')
+      .replaceAll(RegExp(r'\s+'), ' ');
+}
+
 void main() {
   group('GC-2 · marca de retirada', () {
     final src = File('lib/ui/widgets.dart').readAsStringSync();
 
     test('SyncBanner lleva @Deprecated con el texto de la regla', () {
-      final i = src.indexOf('class SyncBanner extends');
-      expect(i, greaterThan(0));
-      final antes = src.substring(0, i);
-      expect(antes.trimRight().endsWith(')'), isTrue,
+      final anotacion = _anotacionPegada(src, 'SyncBanner');
+      expect(anotacion, isNotEmpty,
           reason: 'la anotación @Deprecated(...) debe cerrar '
               'justo antes de la clase SyncBanner');
-      final inicioAnotacion = antes.lastIndexOf('@Deprecated');
-      expect(inicioAnotacion, greaterThan(0));
-      final anotacion = antes.substring(inicioAnotacion);
       expect(anotacion,
           contains('la sync se dice una sola vez, con el icono de cabecera'),
           reason: 'el texto de la marca es el de la regla de Jc');
     });
 
     test('SyncPill lleva @Deprecated con el texto de la regla', () {
-      final i = src.indexOf('class SyncPill extends');
-      expect(i, greaterThan(0));
-      final antes = src.substring(0, i);
-      expect(antes.trimRight().endsWith(')'), isTrue,
+      final anotacion = _anotacionPegada(src, 'SyncPill');
+      expect(anotacion, isNotEmpty,
           reason: 'la anotación @Deprecated(...) debe cerrar '
               'justo antes de la clase SyncPill');
-      final inicioAnotacion = antes.lastIndexOf('@Deprecated');
-      expect(inicioAnotacion, greaterThan(0));
-      final anotacion = antes.substring(inicioAnotacion);
       expect(anotacion,
           contains('la sync se dice una sola vez, con el icono de cabecera'),
           reason: 'el texto de la marca es el de la regla de Jc');

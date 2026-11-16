@@ -156,9 +156,10 @@ Color colorEstadoBanner(VarianteBanner v) {
 /// sus acciones. Toca para sincronizar (en reposo) o
 /// para ver el desglose (en curso). La píldora de la
 /// cabecera es el nivel 1 y la Cola el nivel 3.
-@Deprecated('retirada: la sync se dice una sola vez, con el icono '
-    'de cabecera (IconoSyncCabecera). No usar en pantallas nuevas; '
-    'los usos vivos se retiran en los lotes de cada pantalla (GC-2).')
+@Deprecated('retirada: la sync se dice una sola vez, con el icono de cabecera. '
+    'La superficie vigente es IconoSyncCabecera; no usar en '
+    'pantallas nuevas. Los usos vivos se retiran en los lotes '
+    'de cada pantalla (GC-2).')
 class SyncBanner extends StatefulWidget {
   /// Variante compacta de una línea para formularios.
   final bool compact;
@@ -881,9 +882,10 @@ class _IconoSyncCabeceraState extends State<IconoSyncCabecera>
 // (o el resumen del ciclo durante 30 s). Siempre visible.
 // ---------------------------------------------------------------------------
 
-@Deprecated('retirada: la sync se dice una sola vez, con el icono '
-    'de cabecera (IconoSyncCabecera). No usar en pantallas nuevas; '
-    'los usos vivos se retiran en los lotes de cada pantalla (GC-2).')
+@Deprecated('retirada: la sync se dice una sola vez, con el icono de cabecera. '
+    'La superficie vigente es IconoSyncCabecera; no usar en '
+    'pantallas nuevas. Los usos vivos se retiran en los lotes '
+    'de cada pantalla (GC-2).')
 class SyncPill extends StatefulWidget {
   final VoidCallback onTap;
 
