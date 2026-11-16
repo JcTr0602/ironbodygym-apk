@@ -25,6 +25,12 @@ class MiDiaScreen extends StatefulWidget {
 
 class _MiDiaScreenState extends State<MiDiaScreen> {
   bool _cargando = true;
+  // SL-3 (G01-3): la carga principal falló. Sin esta bandera,
+  // el catch solo registraba y las listas vacías pintaban
+  // «Nadie vence hoy. Todo al día.»: una calma inventada
+  // sobre una lectura rota. Con fallo se pinta EstadoError
+  // con Reintentar; la calma solo se afirma con carga buena.
+  bool _falloCarga = false;
   List<Map<String, dynamic>> _cobrados = [];
   List<Map<String, dynamic>> _porCobrar = [];
   double _totalHoy = 0;
@@ -76,10 +82,18 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      // SL-3 (G01-3): una carga buena retira la marca de
+      // fallo (el Reintentar de EstadoError la relanza).
+      if (mounted && _falloCarga) {
+        setState(() => _falloCarga = false);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // SL-3 (G01-3): y se NOMBRA en pantalla — las listas
+      // vacías tras el fallo no son «todo al día».
+      if (mounted) setState(() => _falloCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -365,7 +379,16 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando mi día…')
-          : Column(
+          : _falloCarga
+              ? EstadoError(
+                  titulo: 'No se pudo cargar tu día',
+                  detalle: 'La lectura de este teléfono falló: '
+                      'los cobros y vencimientos de hoy no se '
+                      'pudieron comprobar, así que no se afirma '
+                      'que todo esté al día.',
+                  onReintentar: _cargar,
+                )
+              : Column(
               children: [
                 // v1.3.3: selector Hoy / Mes.
                 Padding(

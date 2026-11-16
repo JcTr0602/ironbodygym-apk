@@ -578,41 +578,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final total =
         efectivo + transferencia + diario + suplementos + servicios;
     if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(titulo, style: AppTexto.titulo),
-            const SizedBox(height: 12),
-            // 1.29 (Oleada 2, D-11): las filas de método
-            // llevan su punto categórico junto a la palabra
-            // (efectivo dorado, transferencia azul).
-            _filaDetalle('Efectivo', efectivo,
-                punto: AppColores.metodoEfectivo),
-            _filaDetalle('Transferencia', transferencia,
-                punto: AppColores.metodoTransferencia),
-            if (diario > 0) _filaDetalle('Pago diario', diario),
-            if (suplementos > 0)
-              _filaDetalle('Suplementos', suplementos),
-            if (servicios > 0) _filaDetalle('Servicios', servicios),
-            const Divider(),
-            // 1.29 (Oleada 2, D-19): el total cuenta hasta
-            // su cifra (MontoAnimado) en vez de texto plano.
-            _filaDetalle('Total', total, negrita: true, animado: true),
-            const SizedBox(height: 8),
-            Text('${pagos.length} movimientos registrados',
-                style: AppTexto.secundario.copyWith(
-                    color: AppColores.textoSecundario(ctx))),
-            const SizedBox(height: 16),
-          ],
-        ),
+    // SL-3 (G01-5): la hoja de la casa (showHojaIron, la
+    // misma de _detalleDia), no showModalBottomSheet crudo.
+    // Mismo contenido y comportamiento: filas por origen,
+    // total animado y conteo de movimientos.
+    showHojaIron(
+      context,
+      titulo: titulo,
+      icono: Icons.payments_rounded,
+      cuerpo: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1.29 (Oleada 2, D-11): las filas de método
+          // llevan su punto categórico junto a la palabra
+          // (efectivo dorado, transferencia azul).
+          _filaDetalle('Efectivo', efectivo,
+              punto: AppColores.metodoEfectivo),
+          _filaDetalle('Transferencia', transferencia,
+              punto: AppColores.metodoTransferencia),
+          if (diario > 0) _filaDetalle('Pago diario', diario),
+          if (suplementos > 0)
+            _filaDetalle('Suplementos', suplementos),
+          if (servicios > 0) _filaDetalle('Servicios', servicios),
+          const Divider(),
+          // 1.29 (Oleada 2, D-19): el total cuenta hasta
+          // su cifra (MontoAnimado) en vez de texto plano.
+          _filaDetalle('Total', total, negrita: true, animado: true),
+          const SizedBox(height: 8),
+          Text('${pagos.length} movimientos registrados',
+              style: AppTexto.secundario.copyWith(
+                  color: AppColores.textoSecundario(context))),
+        ],
       ),
     );
   }
@@ -1458,6 +1455,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// SL-3 (G01-7): ¿hay algo urgente que pintar? Las MISMAS
+  /// fuentes que alimentan las filas de [_bloqueHoyHayQue]:
+  /// sin ninguna, ni la tarjeta ni su encabezado se pintan.
+  bool get _hayUrgencias =>
+      _pend.isNotEmpty ||
+      _vencenHoy > 0 ||
+      _cumpleHoy > 0 ||
+      _porComprobar > 0 ||
+      _diferenciasAbiertas > 0 ||
+      _stockBajo.isNotEmpty ||
+      _turnosOlvidados.isNotEmpty;
+
   /// Dashboard 1.19 (H1 + Q1 Argón): bloque «Hoy hay que…» del
   /// dueño. El pendiente a entregar va con su multimoneda CUP+USD
   /// y abre DetallePendienteScreen (NO Arqueo genérico); vencen
@@ -1550,11 +1559,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ));
     }
     if (filas.isEmpty && _turnosOlvidados.isEmpty) {
-      return Tarjeta(
-        child: Text('Nada urgente hoy.',
-            style: TextStyle(
-                color: AppColores.textoSecundario(context))),
-      );
+      // SL-3 (G01-7, decisión de Jc): sin nada urgente la
+      // tarjeta NO se pinta — la regla de que lo en cero no
+      // ocupa manda sobre la vieja «fila honesta» («Nada
+      // urgente hoy.» en una tarjeta entera).
+      return const SizedBox.shrink();
     }
     return Tarjeta(
       child: Column(
@@ -1661,8 +1670,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _tarjetaHeroe(),
                   const SizedBox(height: 16),
                   // H1 (Argón): el bloque de urgencias abre el panel.
-                  const EncabezadoSeccion(titulo: 'Hoy hay que…'),
-                  _bloqueHoyHayQue(),
+                  // SL-3 (G01-7): sin urgencias, ni encabezado
+                  // ni tarjeta (lo en cero no ocupa).
+                  if (_hayUrgencias) ...[
+                    const EncabezadoSeccion(titulo: 'Hoy hay que…'),
+                    _bloqueHoyHayQue(),
+                  ],
                   const EncabezadoSeccion(titulo: 'Ingresos'),
                   // 1.35 (UX-12): las tres cifras de ingreso
                   // pasan a UNA banda segmentada, con «hoy»
