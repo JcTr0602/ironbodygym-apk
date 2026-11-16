@@ -173,11 +173,14 @@ void main() {
     });
   });
 
-  group('SL-5 · G07-7/G07-8 historial de liquidaciones', () {
+  group('SL-5 · G07-8 historial de liquidaciones', () {
+    // G07-7 (SelectorIron en el filtro de mes) quedó
+    // BLOQUEADA por contrato existente: el test
+    // diseno_134_plegados G-04 fija el botón «Mes · Todos»
+    // y su hoja (diseño C-48); no se toca ese contrato.
     testWidgets(
-        'el filtro de mes es SelectorIron (sin radios '
-        'propios) y el estado va con ChipEstado',
-        (tester) async {
+        'el estado de cada liquidación va con ChipEstado '
+        'de la casa', (tester) async {
       await jornadaPreparar(tester);
       await jornadaSesionDueno(tester);
       await tester.runAsync(() async {
@@ -199,10 +202,9 @@ void main() {
       });
       await _montar(tester, const LiquidacionesHistorialScreen());
       await jornadaEsperar(tester, find.text('Gabriel'));
-      expect(find.byType(SelectorIron<String>), findsOneWidget,
-          reason: 'el selector de meses es el de la casa');
-      expect(find.byType(RadioListTile<String>), findsNothing);
-      expect(find.byType(ChipEstado), findsWidgets);
+      expect(find.byType(ChipEstado), findsWidgets,
+          reason: 'Parcial/Liquidado con el chip de la '
+              'casa, no con un Container armado a mano');
       await jornadaCerrarCascara(tester);
     });
   });
