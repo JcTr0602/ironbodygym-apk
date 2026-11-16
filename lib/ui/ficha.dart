@@ -1854,10 +1854,22 @@ class _FichaScreenState extends State<FichaScreen> {
         return;
       }
     }
+    // G#5 (Hy4): si el teléfono efectivo de este cliente
+    // vive en `movil` (migrados: el lector efectivo mira
+    // `movil` primero y `telefono` puede traer el carnet
+    // u otro dato), la edición escribe TAMBIÉN `movil` —
+    // en la op y en el espejo — o el número que la app
+    // usa de verdad no cambia aunque el diálogo confirme.
+    final movilEfectivoWa =
+        normalizarTelefonoWaMe('${orig['movil'] ?? ''}');
+    final editaMovil = nuevoTel != null &&
+        movilEfectivoWa.isNotEmpty &&
+        telefonoEfectivoWa(orig) == movilEfectivoWa;
     final payload = payloadBasico(
       clienteId: widget.clienteId,
       nombre: nuevoNombre,
       telefono: nuevoTel,
+      movil: editaMovil ? nuevoTel : null,
       carnet: nuevoCar,
       sexo: sexo,
     );
@@ -1875,6 +1887,10 @@ class _FichaScreenState extends State<FichaScreen> {
     await LocalDb.instance.updateMirrorBasico(widget.clienteId, {
       'nombre': nuevoNombre,
       'telefono': nuevoTel,
+      // G#5 (Hy4): el espejo también: si el efectivo vive
+      // en `movil`, ahí es donde el lector lo seguirá
+      // buscando tras la edición.
+      if (editaMovil) 'movil': nuevoTel,
       'carnet': nuevoCar,
       'sexo': sexo,
     });
