@@ -333,6 +333,12 @@ class AppColores {
   static const superficieElevadaOscuro = Color(0xFF2A2A2A);
   static const superficieHundidaOscuro = Color(0xFF121212);
 
+  /// 1.35 (UX-09): la detección de alto contraste, pública
+  /// para los componentes que se eximen de los efectos de
+  /// profundidad (la tarjeta y el fondo del marco).
+  static bool esAltoContraste(BuildContext context) =>
+      _altoContraste(context);
+
   /// Detecta el tema de alto contraste (Argón 1.20): [AppTema] fija
   /// `outline` a negro/blanco puro solo en alto contraste, así que el
   /// borde del tema lo delata en ambos brillos.

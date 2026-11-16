@@ -644,13 +644,37 @@ class Tarjeta extends StatelessWidget {
     // 1.29 D-18: la sombra conserva EXACTO el valor que daba la
     // clase deprecada de sombras (negro/gris según el brillo),
     // escrito en el propio componente.
+    // 1.35 (UX-09): profundidad sin cambiar un solo color —
+    // en Modo Sol la sombra de papel se marca más (la
+    // tarjeta se despega del fondo claro) y en oscuro cada
+    // tarjeta lleva la línea de luz de 1 dp en su borde
+    // superior, como una pieza apoyada. El alto contraste
+    // queda exento y plano, como siempre.
     final oscuro = Theme.of(context).brightness == Brightness.dark;
-    final sombra = BoxShadow(
-      color: (oscuro ? Colors.black : Colors.grey)
-          .withValues(alpha: oscuro ? 0.4 : 0.12),
-      blurRadius: 8,
-      offset: const Offset(0, 2),
-    );
+    final altoContraste = AppColores.esAltoContraste(context);
+    final sombra = altoContraste || oscuro
+        ? BoxShadow(
+            color: (oscuro ? Colors.black : Colors.grey)
+                .withValues(alpha: oscuro ? 0.4 : 0.12),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          )
+        : BoxShadow(
+            color: Colors.grey.withValues(alpha: 0.18),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          );
+    final lineaLuz = oscuro && !altoContraste
+        ? Positioned(
+            top: 0,
+            left: AppRadio.lg,
+            right: AppRadio.lg,
+            child: Container(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.07),
+            ),
+          )
+        : null;
     final radio = BorderRadius.circular(AppRadio.lg);
     if (onTap == null) {
       return Container(
@@ -669,9 +693,14 @@ class Tarjeta extends StatelessWidget {
         // pintaba su onda sobre el Material de la pantalla en
         // vez de dentro de la tarjeta. Transparente: ni un
         // píxel del diseño cambia.
-        child: Material(
-          type: MaterialType.transparency,
-          child: Padding(padding: padding, child: child),
+        child: Stack(
+          children: [
+            Material(
+              type: MaterialType.transparency,
+              child: Padding(padding: padding, child: child),
+            ),
+            if (lineaLuz != null) lineaLuz,
+          ],
         ),
       );
     }
@@ -700,10 +729,71 @@ class Tarjeta extends StatelessWidget {
               borderRadius: radio,
               border: Border.all(color: AppColores.borde(context)),
             ),
-            child: Padding(padding: padding, child: child),
+            // 1.35 (UX-09): la misma línea de luz de la
+            // rama sin toque, bajo la onda del InkWell.
+            child: Stack(
+              children: [
+                Padding(padding: padding, child: child),
+                if (lineaLuz != null) lineaLuz,
+              ],
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 1.35 (UX-09): el fondo con profundidad del marco —
+/// en oscuro, un degradado grafito suave con el
+/// resplandor de marca (un radial naranja casi
+/// invisible) tras la zona superior; en Modo Sol, el
+/// papel frío plano de siempre (la profundidad la dan
+/// las sombras de las tarjetas). Degradado FIJO, sin
+/// movimiento ni efectos en vivo. El alto contraste
+/// queda exento: fondo plano del tema.
+class FondoProfundidad extends StatelessWidget {
+  const FondoProfundidad({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    if (AppColores.esAltoContraste(context)) {
+      return ColoredBox(
+          color: Theme.of(context).scaffoldBackgroundColor);
+    }
+    if (Theme.of(context).brightness == Brightness.light) {
+      return const ColoredBox(color: AppColores.papelFrio);
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF10161E), AppColores.pizarra],
+              stops: [0, 0.55],
+            ),
+          ),
+        ),
+        Positioned(
+          top: -140,
+          left: -60,
+          right: -60,
+          height: 300,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                colors: [
+                  AppColores.naranja.withValues(alpha: 0.055),
+                  AppColores.naranja.withValues(alpha: 0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3867,6 +3957,13 @@ class GraficoBarrasDiarias extends StatelessWidget {
       );
     }
     final reducir = MediaQuery.of(context).disableAnimations;
+    // 1.35 (UX-08): lenguaje propio — las barras van en
+    // degradado grafito tranquilo y la ÚLTIMA (hoy, en
+    // las series por fecha) va «encendida»: degradado
+    // naranja pleno con su cifra encima. En los
+    // histogramas con etiquetas propias (por hora) no
+    // hay «hoy» que encender: todas tranquilas.
+    final hayHoy = etiquetaPrimera == null && datos.length > 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -3884,26 +3981,69 @@ class GraficoBarrasDiarias extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                for (final d in datos)
+                for (var i = 0; i < datos.length; i++)
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 1),
-                      child: FractionallySizedBox(
-                        // Cero = sin barra (panel T4).
-                        heightFactor:
-                            ((d['total'] as num?)?.toInt() ?? 0) <= 0
-                                ? 0.0
-                                : ((((d['total'] as num).toDouble()) /
-                                            maximo)
-                                        .clamp(0.03, 1.0) *
-                                    t),
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            color: AppColores.naranja,
-                            borderRadius: BorderRadius.vertical(
-                                top: Radius.circular(2)),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          // La cifra de hoy: las demás
+                          // celdas reservan su mismo alto
+                          // (invisible) para que la
+                          // proporción de las barras no
+                          // se tuerza.
+                          if (hayHoy) ...[
+                            Opacity(
+                              opacity:
+                                  i == datos.length - 1 ? 1 : 0,
+                              child: Text(
+                                '${(datos[i]['total'] as num?)?.toInt() ?? 0}',
+                                style: AppTexto.minuscula.copyWith(
+                                    color: AppColores.naranja,
+                                    fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                          ],
+                          Expanded(
+                            child: FractionallySizedBox(
+                              alignment: Alignment.bottomCenter,
+                              // Cero = sin barra (panel T4).
+                              heightFactor:
+                                  ((datos[i]['total'] as num?)?.toInt() ??
+                                              0) <=
+                                          0
+                                      ? 0.0
+                                      : ((((datos[i]['total'] as num)
+                                                  .toDouble()) /
+                                              maximo)
+                                          .clamp(0.03, 1.0) *
+                                      t),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: hayHoy &&
+                                            i == datos.length - 1
+                                        ? const [
+                                            AppColores.naranjaOscuro,
+                                            AppColores.naranja,
+                                          ]
+                                        : const [
+                                            AppColores.grafitoTactico,
+                                            Color(0xFF3A4552),
+                                          ],
+                                  ),
+                                  borderRadius:
+                                      const BorderRadius.vertical(
+                                          top: Radius.circular(2)),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ),

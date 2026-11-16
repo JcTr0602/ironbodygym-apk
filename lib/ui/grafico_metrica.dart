@@ -85,12 +85,21 @@ class GraficoMetricaGestion extends StatefulWidget {
   final List<PuntoSerie> puntos;
   final Color color;
 
+  /// 1.35 (UX-08): el objetivo de la métrica (p. ej. el
+  /// peso objetivo), si el llamador lo tiene: el gráfico
+  /// lo marca con su banda y su palabra. Hoy NINGÚN
+  /// llamador lo pasa — el modelo no guarda un objetivo
+  /// por métrica — y la banda queda lista para cuando
+  /// el dato exista, sin inventarlo.
+  final double? objetivo;
+
   const GraficoMetricaGestion({
     super.key,
     required this.titulo,
     required this.unidad,
     required this.puntos,
     this.color = AppColores.naranja,
+    this.objetivo,
   });
 
   @override
@@ -199,6 +208,7 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
                         min: min,
                         prom: prom,
                         color: widget.color,
+                        objetivo: widget.objetivo,
                         seleccion: selValido ? _sel : null,
                         progreso:
                             AppMovimiento.curvaSuave.transform(_trazo.value),
@@ -249,6 +259,10 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
   final double min;
   final double prom;
   final Color color;
+
+  /// 1.35 (UX-08): el objetivo a marcar con su banda
+  /// (null = sin banda: ningún llamador lo trae hoy).
+  final double? objetivo;
   final int? seleccion;
 
   /// 1.35 (UI-03): fracción 0..1 del trazado de entrada —
@@ -264,6 +278,7 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
     required this.min,
     required this.prom,
     required this.color,
+    this.objetivo,
     this.seleccion,
     this.progreso = 1,
   });
@@ -298,6 +313,40 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
       _rotuloGuia(canvas, rotulo, Offset(2, y - 4), size);
     }
 
+    // 1.35 (UX-08): la banda del objetivo, con su
+    // palabra — una franja naranja suave centrada en el
+    // valor objetivo y su rótulo a la derecha. Solo se
+    // pinta si el objetivo cae dentro del lienzo.
+    if (objetivo != null) {
+      final yObj = yDe(objetivo!);
+      if (yObj >= 0 && yObj <= size.height) {
+        final semibanda = altoUtil * 0.035;
+        canvas.drawRect(
+          Rect.fromLTRB(0, yObj - semibanda, size.width, yObj + semibanda),
+          Paint()..color = AppColores.naranja.withValues(alpha: 0.13),
+        );
+        _lineaPunteada(
+          canvas,
+          Offset(0, yObj),
+          Offset(size.width, yObj),
+          Paint()
+            ..color = AppColores.naranja.withValues(alpha: 0.55)
+            ..strokeWidth = 1
+            ..style = PaintingStyle.stroke,
+        );
+        final tp = TextPainter(
+          text: TextSpan(
+            text: 'objetivo ${objetivo!.toStringAsFixed(1)}',
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.naranja, fontWeight: FontWeight.w700),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(
+            canvas, Offset(size.width - tp.width - 2, yObj - semibanda - tp.height - 1));
+      }
+    }
+
     // 2. Área con gradiente.
     canvas.save();
     canvas.clipRect(
@@ -317,7 +366,9 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        color.withValues(alpha: 0.25),
+        // 1.35 (UX-08): el velo bajo la curva se hace
+        // un punto más presente (0.25 → 0.30).
+        color.withValues(alpha: 0.30),
         color.withValues(alpha: 0.0),
       ],
     );
@@ -422,6 +473,7 @@ class _GraficoMetricaGestionPainter extends CustomPainter {
       old.min != min ||
       old.prom != prom ||
       old.color != color ||
+      old.objetivo != objetivo ||
       old.seleccion != seleccion ||
       old.progreso != progreso;
 }
