@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
+import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../turnos_resolucion.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
@@ -258,9 +260,14 @@ class _HorarioGymState extends State<HorarioGym> {
     try {
       prefs = await SharedPreferences.getInstance();
     } catch (e) {
+      // SL-X2 (G12-8): nada crudo a pantalla — mensaje
+      // amable y la excepción a la bitácora, como SL-11 en
+      // las otras dos pantallas de horarios.
+      AppLog.error('ui', 'horario_gym_cargar', d: '$e');
       if (mounted) {
         setState(() => _cargando = false);
-        mostrarSnack(context, 'Error: $e',
+        mostrarSnack(context,
+            'No se pudo cargar el horario: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
       }
       return;
@@ -316,9 +323,13 @@ class _HorarioGymState extends State<HorarioGym> {
         setState(() => _cargando = false);
       }
     } catch (e) {
+      // SL-X2 (G12-8): mensaje amable + bitácora.
+      AppLog.error('ui', 'horario_gym_cargar', d: '$e');
       if (mounted && _dias.isEmpty) {
         setState(() => _cargando = false);
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo cargar el horario: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
       }
     }
   }
@@ -396,8 +407,12 @@ class _HorarioGymState extends State<HorarioGym> {
         Navigator.of(context).pop();
       }
     } catch (e) {
+      // SL-X2 (G12-8): mensaje amable + bitácora.
+      AppLog.error('ui', 'horario_gym_guardar', d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo guardar el horario: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) {
@@ -618,15 +633,11 @@ class _HorarioGymState extends State<HorarioGym> {
                       dia.apertura2,
                       () => _editarHora(
                           dia, 'apertura2'),
-                      onLongPress: () {
-                        setState(() {
-                          dia.apertura2 = null;
-                          dia.cierre2 = null;
-                        });
-                        mostrarSnack(context, 'Turno 2 eliminado',
-                            duracion:
-                                const Duration(seconds: 1));
-                      },
+                      // SL-X2 (G12-10): SIN borrado por
+                      // pulsación larga — era un gesto
+                      // destructivo oculto y duplicado; la
+                      // única vía de quitar el Turno 2 es el
+                      // botón visible «Quitar turno 2».
                     ),
                   ),
                   const Padding(
@@ -641,12 +652,9 @@ class _HorarioGymState extends State<HorarioGym> {
                       dia.cierre2,
                       () => _editarHora(
                           dia, 'cierre2'),
-                      onLongPress: () {
-                        setState(() {
-                          dia.apertura2 = null;
-                          dia.cierre2 = null;
-                        });
-                      },
+                      // SL-X2 (G12-10): SIN borrado por
+                      // pulsación larga (aquí ni snack
+                      // había); queda solo el botón visible.
                     ),
                   ),
                 ],
