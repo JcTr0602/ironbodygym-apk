@@ -189,13 +189,142 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
     );
   }
 
+  /// 1.35 (SP-10): «Sincronizar ahora» significa lo mismo
+  /// aquí que en la Cola: forzado de verdad (cancela el
+  /// backoff de reintentos) y, al volver, el resumen del
+  /// desenlace de ESTA corrida. Antes este botón corría
+  /// sin forzar y en silencio: el mismo gesto producía
+  /// dos resultados distintos según la pantalla desde la
+  /// que se tocara.
   void _sincronizarAhora() {
     unawaited(() async {
+      SyncResultado? res;
       try {
-        await SyncEngine.instance.run();
-      } catch (_) {}
-      if (mounted) await _cargar();
+        res = await SyncEngine.instance.run(forzar: true);
+      } catch (_) {
+        res = null;
+      }
+      if (!mounted) return;
+      await _cargar();
+      if (mounted) await _mostrarResumenSync(res);
     }());
+  }
+
+  /// El resumen de desenlace, con el mismo veredicto que
+  /// enseña la Cola (SyncResultado.resumenCorto y sus
+  /// conteos): si el ciclo no corrió, jamás se dice éxito.
+  Future<void> _mostrarResumenSync(SyncResultado? res) async {
+    if (!mounted) return;
+    if (res == null || !res.corrio) {
+      final enCurso =
+          res != null && res.motivoNoCorrio == SyncMotivoNoCorrio.enCurso;
+      await showDialog(
+        context: context,
+        builder: (ctx) => DialogoApp(
+          titulo:
+              enCurso ? 'Sincronización en curso' : 'No se pudo sincronizar',
+          iconoTitulo: Icons.sync_rounded,
+          contenido: Text(
+            enCurso
+                ? 'Ya hay una sincronización en curso en este '
+                    'teléfono. Espera unos segundos y vuelve a '
+                    'intentarlo.'
+                : res == null
+                    ? 'La sincronización no se pudo completar. '
+                        'Inténtalo de nuevo.'
+                    : 'No hay una sesión activa para sincronizar. '
+                        'Entra de nuevo e inténtalo.',
+            style: AppTexto.cuerpo.copyWith(height: 1.4),
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final error = res.error;
+    await showDialog(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: res.resumenCorto,
+        iconoTitulo: error != null && error.isNotEmpty
+            ? Icons.error_outline_rounded
+            : Icons.sync_rounded,
+        contenido: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _filaResumenSync(
+                Icons.upload_rounded, 'Subidos', '${res.subidos}'),
+            const SizedBox(height: 8),
+            _filaResumenSync(
+                Icons.download_rounded, 'Bajados', '${res.bajados}'),
+            if (res.reactivadas > 0) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Se reintentaron ${res.reactivadas} operaciones '
+                'que estaban atascadas.',
+                style: AppTexto.secundario,
+              ),
+            ],
+            if (error != null && error.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                error,
+                style: AppTexto.secundario
+                    .copyWith(color: AppColores.error),
+              ),
+            ],
+            if (res.pendientesRestantes > 0 ||
+                res.conteoIndeterminado) ...[
+              const SizedBox(height: 12),
+              Text(res.textoPendientes, style: AppTexto.secundario),
+            ],
+            if (res.subidos == 0 &&
+                res.bajados == 0 &&
+                res.pendientesRestantes == 0 &&
+                !res.conteoIndeterminado &&
+                (error == null || error.isEmpty))
+              const Padding(
+                padding: EdgeInsets.only(top: AppEspacio.md),
+                child: Text(
+                  'Todo estaba al día: no había nada nuevo que '
+                  'subir ni bajar.',
+                  style: AppTexto.secundario,
+                ),
+              ),
+          ],
+        ),
+        acciones: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filaResumenSync(IconData icono, String etiqueta, String valor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(icono,
+                size: 20,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(etiqueta, style: AppTexto.titulo),
+          ],
+        ),
+        Text(valor, style: AppTexto.titulo),
+      ],
+    );
   }
 
   void _ir(Widget pantalla) {
