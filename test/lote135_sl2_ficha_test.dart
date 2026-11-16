@@ -27,7 +27,7 @@ void main() {
   // Supabase inicializado aunque no haya sesión.
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   group('G03-4 sexo traducido', () {
