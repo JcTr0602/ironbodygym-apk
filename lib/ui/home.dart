@@ -267,6 +267,26 @@ class _HomeScreenState extends State<HomeScreen>
   /// nace al primer toque y nunca se destruye, para no
   /// perder su estado ni su scroll — PageStorageKey).
   int _pilarActivo = 0;
+
+  /// 1.35 (UI-22): la fila de identidad de la cabecera
+  /// se pliega al bajar por un pilar (histéresis 140/60
+  /// dp para que no parpadee en el borde) y se despliega
+  /// al volver arriba. La píldora de sync nunca se
+  /// pliega.
+  bool _cabeceraPlegada = false;
+
+  bool _alDesplazar(ScrollNotification n) {
+    if (n is ScrollUpdateNotification &&
+        n.metrics.axis == Axis.vertical) {
+      final p = n.metrics.pixels;
+      if (p > 140 && !_cabeceraPlegada) {
+        setState(() => _cabeceraPlegada = true);
+      } else if (p < 60 && _cabeceraPlegada) {
+        setState(() => _cabeceraPlegada = false);
+      }
+    }
+    return false;
+  }
   final Set<int> _pilaresVisitados = {0};
 
   /// 1.34 Campo 2 (P-2): cuerpos de pilar memoizados y
@@ -1323,12 +1343,16 @@ class _HomeScreenState extends State<HomeScreen>
               onSyncTap: () => _ir(const ColaScreen()),
               onLupa: () => _ir(const LupaUniversalScreen()),
               onAccionPerfil: _accionPerfilMarco,
+              // 1.35 (UI-22): plegado por scroll.
+              plegada: _cabeceraPlegada,
             ),
             Expanded(
-              // 1.35 (UI-01): fundido corto al cambiar de
-              // pilar, sin remontar el stack (los pilares y
-              // su estado quedan intactos).
-              child: FundidoAlCambiar(
+              // 1.35 (UI-22): el sensor de desplazamiento
+              // de los pilares (las notificaciones suben
+              // desde cualquier lista vertical del pilar).
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _alDesplazar,
+                child: FundidoAlCambiar(
                 indice: _pilarActivo,
                 child: IndexedStack(
                 index: _pilarActivo,
@@ -1349,6 +1373,7 @@ class _HomeScreenState extends State<HomeScreen>
                     else
                       SizedBox.shrink(key: ValueKey('pilar-vacio-$i')),
                 ],
+                ),
                 ),
               ),
             ),

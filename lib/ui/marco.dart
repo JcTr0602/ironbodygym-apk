@@ -173,6 +173,16 @@ class CabeceraMarco extends StatelessWidget {
   final VoidCallback onSyncTap;
   final VoidCallback onLupa;
 
+  /// 1.35 (UI-22): con la lista bajada, la fila de
+  /// identidad se pliega del todo y queda solo la píldora
+  /// de sync — la píldora NUNCA se oculta; al volver
+  /// arriba, la identidad regresa. (La variante «barra
+  /// fina» con las acciones conservadas no ahorraba ni
+  /// un dp: las acciones miden 48 de área tocable y
+  /// dominaban el alto de la fila en los dos estados —
+  /// lo cazó el test de la pieza.)
+  final bool plegada;
+
   /// Acción del menú de perfil: perfil | auditoria | respaldo |
   /// diagnostico | ayuda | tema | salir.
   final void Function(String accion) onAccionPerfil;
@@ -184,6 +194,7 @@ class CabeceraMarco extends StatelessWidget {
     required this.onSyncTap,
     required this.onLupa,
     required this.onAccionPerfil,
+    this.plegada = false,
   });
 
   Widget _interruptorSol(BuildContext context) {
@@ -361,6 +372,12 @@ class CabeceraMarco extends StatelessWidget {
       onTap: onSyncTap,
       anchoCompleto: true,
     );
+    // 1.35 (UI-22): la fila de identidad (con su hueco
+    // hasta la píldora) vive dentro del AnimatedSize:
+    // plegada, su alto va a cero y queda solo la píldora;
+    // desplegada, vuelve entera. Con «reducir movimiento»
+    // el cambio es instantáneo.
+    final reducido = MediaQuery.disableAnimationsOf(context);
     return Material(
       color: Theme.of(context).colorScheme.surface,
       elevation: 1,
@@ -370,11 +387,27 @@ class CabeceraMarco extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(children: [
-              Expanded(child: identidad),
-              acciones,
-            ]),
-            const SizedBox(height: AppEspacio.xs),
+            AnimatedSize(
+              duration:
+                  reducido ? Duration.zero : AppMovimiento.media,
+              curve: AppMovimiento.curvaSuave,
+              alignment: Alignment.topCenter,
+              child: plegada
+                  ? const SizedBox.shrink(
+                      key: ValueKey('cabecera-plegada'))
+                  : Column(
+                      key: const ValueKey('cabecera-plena'),
+                      crossAxisAlignment:
+                          CrossAxisAlignment.stretch,
+                      children: [
+                        Row(children: [
+                          Expanded(child: identidad),
+                          acciones,
+                        ]),
+                        const SizedBox(height: AppEspacio.xs),
+                      ],
+                    ),
+            ),
             pildora,
           ],
         ),
