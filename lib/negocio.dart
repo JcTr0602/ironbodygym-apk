@@ -1596,6 +1596,9 @@ Future<double> adelantosEnPendiente(int? telegramId,
 Future<double> pendienteEntrega(int? telegramId,
     {Set<String>? cubiertosPre}) async {
   if (telegramId == null) return 0;
+  // CAMPO-15: el dueño no se entrega efectivo a sí mismo:
+  // su pendiente es 0 por regla, nazca como nazca su fila.
+  if (AuthService.esDelDueno(telegramId)) return 0;
   double total = 0;
   // H2 (Argón caja): excluir lo ya liquidado en los 4 bucles
   // espejo, igual que hace pendienteArqueo. Sin esto, en la
@@ -1763,6 +1766,8 @@ Future<double> pendienteEntrega(int? telegramId,
 Future<double> pendienteEntregaUsd(int? telegramId,
     {Set<String>? cubiertosPre}) async {
   if (telegramId == null) return 0;
+  // CAMPO-15: el dueño tampoco se debe USD a sí mismo.
+  if (AuthService.esDelDueno(telegramId)) return 0;
   double total = 0;
   // H2 (Argón caja): misma regla que en CUP: excluir lo ya
   // liquidado y sumar el arrastre de parciales USD.
@@ -2088,6 +2093,11 @@ Future<double> contribucionLibroC1(int? telegramId,
 Future<({double cup, double usd})> pendienteArqueo(int? telegramId,
     {Set<String>? cubiertosPre}) async {
   if (telegramId == null) return (cup: 0.0, usd: 0.0);
+  // CAMPO-15: sin arqueo del dueño — la hoja «Liquidar
+  // Arqueo» nunca tiene nada suyo que confirmar.
+  if (AuthService.esDelDueno(telegramId)) {
+    return (cup: 0.0, usd: 0.0);
+  }
   final cubiertos = cubiertosPre ?? await idsLiquidados(telegramId);
   // 1.23 (auditoría extra #6): lo anulado no entra al arqueo.
   final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
@@ -2218,6 +2228,10 @@ Future<Map<int, ({double total, String nombre})>>
     final tid =
         LocalDb.normalizarTelegramId(l['entrenador_telegram_id']);
     if (tid == null) continue;
+    // CAMPO-15: el arrastre del dueño no crea entrada (su
+    // efectivo nunca fue pendiente; una parcial histórica
+    // suya no lo resucita como deudor).
+    if (AuthService.esDelDueno(tid)) continue;
     if ((l['estado'] as String?) != 'parcial') continue;
     // (M2-A A9) moneda por el normalizador canónico.
     if (LocalDb.monedaDe(l) == 'USD') continue;
@@ -2242,6 +2256,8 @@ Future<Map<int, ({double total, String nombre})>>
 /// entrega. Es la materia prima del compositor puro
 /// (lib/cobro_parcial.dart).
 Future<List<FilaCobro>> filasPendientesCupFifo(int telegramId) async {
+  // CAMPO-15: el dueño no tiene filas cobrables a sí mismo.
+  if (AuthService.esDelDueno(telegramId)) return [];
   final cubiertos = await idsLiquidados(telegramId);
   final cubiertosLibro = await idsCubiertosLibroC1(telegramId);
   final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
@@ -2411,6 +2427,8 @@ Future<Map<String, List<int>>> idsPendienteArqueo(int? telegramId,
     'adelantos': [], // v1.8.0: la liquidación los saca del pendiente
   };
   if (telegramId == null) return res;
+  // CAMPO-15: al dueño no se le ofrecen ids para liquidar.
+  if (AuthService.esDelDueno(telegramId)) return res;
   final cubiertos = cubiertosPre ?? await idsLiquidados(telegramId);
   // 1.15-turnos (#2): ids ya cubiertos por el libro C1.
   final cubiertosLibro = await idsCubiertosLibroC1(telegramId);
@@ -2574,6 +2592,10 @@ Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
     final tid = LocalDb.normalizarTelegramId(l['entrenador_telegram_id']);
     if (tid != null) tids.add(tid);
   }
+  // CAMPO-15: el dueño nunca es una fila de esta lista (la
+  // que alimenta la hoja «Liquidar Arqueo»): su fila «Jc»
+  // con pendiente fue el defecto de campo.
+  tids.remove(AuthService.telegramIdDueno);
   // Nombre de cada entrenador (del primer pago/venta que aparezca).
   for (final tid in tids) {
     // 1.15 (Panel A1): nombres también desde diarios, suplementos
@@ -2652,6 +2674,13 @@ Future<String> crearLiquidacion({
 }) async {
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar caja');
+  }
+  // CAMPO-15: ni el propio dueño puede liquidarse a sí
+  // mismo — su efectivo nunca fue pendiente a entregar.
+  if (AuthService.esDelDueno(entrenadorTelegramId)) {
+    throw Exception('El dueño no se liquida a sí mismo: '
+        'el efectivo que él recoge no es pendiente a '
+        'entregar.');
   }
   // Autoauditoría 1.22 #2 (D2-08): NaN no es < 0 ni supera lo
   // esperado (comparaciones falsas): sin el chequeo de finito,
@@ -4997,7 +5026,8 @@ Future<
   // sin esta cuarta lista, el desglose de Mi Turno/Pendiente
   // nunca cuadraba con su propio encabezado.
   final suplementos = <Map<String, dynamic>>[];
-  if (telegramId == null) {
+  // CAMPO-15: el desglose del dueño es vacío por regla.
+  if (telegramId == null || AuthService.esDelDueno(telegramId)) {
     return (mens, diarios, servicios, suplementos);
   }
   // Argón 1.21 AR-01: excluir lo ya absorbido por una
@@ -5785,6 +5815,8 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDiaEntrenador(
 /// - diario: {diario_id, fecha, turno, cantidad, total, nota}
 Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
     int tid) async {
+  // CAMPO-15: el dueño no tiene detalle de pendiente.
+  if (AuthService.esDelDueno(tid)) return [];
   final items = <Map<String, dynamic>>[];
   // Autoauditoría 1.22 #1: fuera los ítems ya cubiertos por
   // una liquidación/arqueo C1 (idsLiquidados, la misma fuente
@@ -5921,6 +5953,11 @@ Future<List<Map<String, dynamic>>> detallePendienteEntrenador(
 Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     {int? excluirTid}) async {
   final lista = <Map<String, dynamic>>[];
+  // CAMPO-15: el dueño queda fuera SIEMPRE, además del
+  // excluirTid del llamador — su efectivo no es pendiente
+  // a entregar y sus filas no se listan para liquidar.
+  bool excluido(int tid) =>
+      tid == excluirTid || AuthService.esDelDueno(tid);
   // 1.23 S2-2: las mismas guardas de liquidados que
   // detallePendienteEntrenador — tras un arqueo C1 offline, la
   // vista agrupada revivía cobros ya liquidados porque aquí
@@ -5961,7 +5998,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     if (esPagoAnulado(p, anuladosCola)) continue;
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await liquidadosDe(tid)).contains('pagos:${p['id']}')) {
       continue;
     }
@@ -5986,7 +6023,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     if (!esPagoDiarioEfectivo(d)) continue;
     final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await liquidadosDe(tid))
         .contains('pagos_diarios:${d['id']}')) {
       continue;
@@ -6012,7 +6049,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
     if (_esFiadoSinSaldar(s)) continue; // B-05 (1.21): fiado ≠ entregable
     final tid = LocalDb.normalizarTelegramId(s['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await liquidadosDe(tid))
         .contains('ventas_suplementos:${s['id']}')) {
       continue;
@@ -6050,7 +6087,7 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
         LocalDb.normalizarTelegramId(s['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(s['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await liquidadosDe(tid))
         .contains('servicio_ventas:${s['id']}')) {
       continue;
@@ -6235,6 +6272,11 @@ Future<void> confirmarEntregaPorIds({
 /// los dólares pendientes de cada entrenador, solo el total global.
 Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     {int? excluirTid}) async {
+  // CAMPO-15: el dueño queda fuera SIEMPRE, además del
+  // excluirTid del llamador — nunca es una fila de
+  // «pendiente a recoger» (no se recoge a sí mismo).
+  bool excluido(int tid) =>
+      tid == excluirTid || AuthService.esDelDueno(tid);
   final mapa = <int, Map<String, dynamic>>{};
   Map<String, dynamic> entrada(int id, String nombre) =>
       mapa.putIfAbsent(id, () => {
@@ -6298,7 +6340,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (esPagoAnulado(p, anuladosCola)) continue;
     final tid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await cubiertosDe(tid)).contains('pagos:${p['id']}')) continue;
     registraFecha(tid, p['fecha']);
     suma(tid, '${p['registrado_por'] ?? 'Entrenador $tid'}',
@@ -6311,7 +6353,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (!esPagoDiarioEfectivo(d)) continue;
     final tid = LocalDb.normalizarTelegramId(d['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await cubiertosDe(tid)).contains('pagos_diarios:${d['id']}')) {
       continue;
     }
@@ -6324,7 +6366,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (!esPendiente(v['entregado'])) continue;
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await cubiertosDe(tid))
         .contains('ventas_suplementos:${v['id']}')) {
       continue;
@@ -6340,7 +6382,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (!esPendiente(v['entregado'])) continue;
     final tid = LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await cubiertosDe(tid))
         .contains('ventas_suplementos:${v['id']}')) {
       continue;
@@ -6362,7 +6404,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid == null) continue;
-    if (excluirTid != null && tid == excluirTid) continue;
+    if (excluido(tid)) continue;
     if ((await cubiertosDe(tid)).contains('servicio_ventas:${v['id']}')) {
       continue;
     }
@@ -6393,6 +6435,8 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
   // liquidación parcial y solo arrastre desaparecía del panel.
   for (final entry in arrastrePorTid.entries) {
     if (entry.value.cup == 0 && entry.value.usd == 0) continue;
+    // CAMPO-15: ni por arrastre entra el dueño al mapa.
+    if (excluido(entry.key)) continue;
     entrada(entry.key, 'Entrenador ${entry.key}');
   }
   for (final e in mapa.values) {
@@ -6745,6 +6789,16 @@ Future<List<Map<String, dynamic>>> turnosAbiertosAyer() async {
 Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
     List<int> servicios, List<int> adelantos})>
     idsPendientesEntrega({int? trainerId}) async {
+  // CAMPO-15: para el dueño no hay ids que confirmar.
+  if (AuthService.esDelDueno(trainerId)) {
+    return (
+      pagos: <int>[],
+      diarios: <int>[],
+      suplementos: <int>[],
+      servicios: <int>[],
+      adelantos: <int>[]
+    );
+  }
   final pagoIds = <int>[];
   final diarioIds = <int>[];
   final suplementoIds = <int>[];

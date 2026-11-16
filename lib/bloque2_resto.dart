@@ -272,6 +272,14 @@ Future<String> _registrarEntregaEfectivoImpl({
   if (!AuthService().isOwner) {
     throw Exception('Solo el dueño puede liquidar entregas de efectivo');
   }
+  // CAMPO-15: el dueño no se entrega efectivo a sí mismo
+  // (tampoco por la vía anticipada): su pendiente es 0
+  // por regla y esta op no existe para él.
+  if (AuthService.esDelDueno(entrenadorTelegramId)) {
+    throw Exception('El dueño no se liquida a sí mismo: '
+        'el efectivo que él recoge no es pendiente a '
+        'entregar.');
+  }
   // H8 (Argón caja): el autor debe ser el Telegram ID real
   // del dueño. Los llamadores pasan `telegramId ?? 0`: con
   // sesión incompleta, el 0 llegaba al servidor, que lo
