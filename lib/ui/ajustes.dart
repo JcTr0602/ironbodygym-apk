@@ -1719,7 +1719,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
       appBar: appBarIron(context, 'Ajustes'),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-9 (G09-5): fuera la banda de sync repetida — la
+          // sync se dice una sola vez, en la cabecera de la app.
           // 1.25 T113: buscador de ajustes en la cabecera.
           Padding(
             padding: const EdgeInsets.fromLTRB(
