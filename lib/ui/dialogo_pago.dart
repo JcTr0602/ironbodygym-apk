@@ -1180,32 +1180,38 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                   label: const Text(
                       'Adjuntar foto del comprobante'),
                   onPressed: () async {
+                    // SL-4 · G10-4: el origen se elige con el
+                    // diálogo de la casa (DialogoApp, el mismo
+                    // de la foto de la ficha), no con un
+                    // SimpleDialog crudo. Mismo comportamiento:
+                    // devuelve 'camera' o 'gallery'.
                     final origen = await showDialog<String>(
                       context: context,
-                      builder: (c2) => SimpleDialog(
-                        title:
-                            const Text('Foto del comprobante'),
-                        children: [
-                          SimpleDialogOption(
-                            onPressed: () =>
-                                Navigator.pop(c2, 'camera'),
-                            child: const ListTile(
-                              leading: Icon(
-                                  Icons.photo_camera_rounded),
-                              title: Text('Tomar foto'),
+                      builder: (c2) => DialogoApp(
+                        titulo: 'Foto del comprobante',
+                        iconoTitulo: Icons.photo_camera_rounded,
+                        contenido: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ListTile(
+                              leading: const Icon(
+                                  Icons.photo_camera_rounded,
+                                  size: 24),
+                              title: const Text('Tomar foto'),
+                              onTap: () =>
+                                  Navigator.pop(c2, 'camera'),
                             ),
-                          ),
-                          SimpleDialogOption(
-                            onPressed: () =>
-                                Navigator.pop(c2, 'gallery'),
-                            child: const ListTile(
-                              leading: Icon(Icons
-                                  .photo_library_rounded),
-                              title: Text(
+                            ListTile(
+                              leading: const Icon(
+                                  Icons.photo_library_rounded,
+                                  size: 24),
+                              title: const Text(
                                   'Elegir de la galería'),
+                              onTap: () =>
+                                  Navigator.pop(c2, 'gallery'),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     );
                     if (origen == null) return;
