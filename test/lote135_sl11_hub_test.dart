@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/hub_turnos.dart';
 import 'package:ironbody_gym/ui/turnos_hub.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -170,23 +171,29 @@ void main() {
     await tester.scrollUntilVisible(titulo, 200,
         scrollable: find.byType(Scrollable).first);
     await tester.pump(const Duration(milliseconds: 300));
-    // Plegada: el botón de la contingencia no ocupa espacio
-    // (su alto pintado es cero) aunque exista en el árbol.
+    // Plegada: la tarjeta de la contingencia ocupa solo su
+    // título (el contenido existe en el árbol — contrato
+    // M3-B2/C2 — pero con alto pintado cero).
     final comprobar = find.text('Comprobar');
     expect(comprobar, findsOneWidget);
-    expect(tester.getRect(comprobar).height, lessThan(1),
+    final tarjeta = find.ancestor(
+        of: comprobar, matching: find.byType(Tarjeta));
+    expect(tarjeta, findsOneWidget);
+    final altoPlegada = tester.getSize(tarjeta).height;
+    expect(altoPlegada, lessThan(90),
         reason: 'G12-6: plegada, la tarjeta no ocupa espacio '
-            'permanente');
+            'permanente (solo el título que resume su estado)');
     // El control la despliega y el contenido queda usable.
     await tester.tap(titulo);
+    await tester.pump(const Duration(milliseconds: 300));
     expect(
         await _esperar(
             tester,
-            () => tester.getRect(comprobar).height > 1,
+            () => tester.getSize(tarjeta).height > altoPlegada + 40,
             intentos: 12),
         isTrue,
-        reason: 'G12-6: al desplegar, «Comprobar» se ve y '
-            'se puede usar');
+        reason: 'G12-6: al desplegar, el contenido de la '
+            'contingencia se hace visible');
     expect(tester.takeException(), isNull);
   });
 
