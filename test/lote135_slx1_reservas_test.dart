@@ -2,17 +2,20 @@
 /// familia G06-4 — ningún id interno en los textos de
 /// mostrador de Reservas.
 ///
-/// - G06-4: el fallback cuando falta el nombre del
-///   suplemento era «Suplemento #<id>»; pasa a «Suplemento
-///   sin nombre» (la corrección que SL-7 aplicó en
-///   Servicios). Mismo hueco en el nombre del cliente:
-///   «Cliente sin nombre».
 /// - G13-10: los snacks de confirmar/rechazar/cancelar/
 ///   cobrar decían «reserva #<id> encolada»; la reserva se
 ///   nombra por su dato legible (cliente × suplemento).
 ///
-/// Discriminantes: en la base los textos llevan «#42» /
-/// «#99» (ROJO); corregidos, ningún texto contiene el id.
+/// - G06-4 (fallback «Suplemento #<id>»): BLOQUEADA por
+///   contrato existente — test/reservas_test.dart:61-66
+///   («construirBandeja sin joins: nombres de respaldo…»)
+///   fija 'Cliente #99' y 'Suplemento #88' como los
+///   fallbacks esperados. La corrección se revirtió por la
+///   disciplina del lote y queda reportada en el informe
+///   de SL-X1 para adjudicación del orquestador.
+///
+/// Discriminante G13-10: en la base los snacks llevan
+/// «#42» (ROJO); corregidos, ningún texto contiene el id.
 library;
 
 import 'dart:io';
@@ -47,28 +50,6 @@ void main() {
 
   setUpAll(() async {
     await jornadaSetUpAll();
-  });
-
-  test('G06-4 · sin suplemento en el espejo, el nombre es '
-      '«Suplemento sin nombre» (sin #id)', () {
-    final b = construirBandeja([_reserva()], [
-      {'id': 7, 'nombre': 'Ana'},
-    ], []);
-    final v = b.solicitadas.single;
-    expect(v.suplementoNombre, 'Suplemento sin nombre');
-    expect(v.suplementoNombre, isNot(contains('#')));
-    expect(v.clienteNombre, 'Ana');
-  });
-
-  test('G06-4 · sin cliente en el espejo, el nombre no lleva '
-      'el #id', () {
-    final b = construirBandeja([_reserva()], [], [
-      {'id': 99, 'nombre': 'Creatina'},
-    ]);
-    final v = b.solicitadas.single;
-    expect(v.clienteNombre, isNot(contains('#')));
-    expect(v.clienteNombre, isNot(contains('42')));
-    expect(v.suplementoNombre, 'Creatina');
   });
 
   testWidgets('G13-10 · el snack de confirmación nombra la '
