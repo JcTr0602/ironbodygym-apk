@@ -32,7 +32,12 @@ import 'diseno.dart';
 ///   clientes a propósito); pone el testigo a 0 con
 ///   confirmación y la tarjeta no vuelve.
 class TarjetaDiagnosticoEspejo extends StatefulWidget {
-  const TarjetaDiagnosticoEspejo({super.key});
+  const TarjetaDiagnosticoEspejo({super.key, this.cicloSyncParaTest});
+
+  /// Costura de test (G08-3): sustituye el ciclo de sync
+  /// que dispara «Sincronizar ahora». En producción es
+  /// null y corre el ciclo completo del motor.
+  final Future<void> Function()? cicloSyncParaTest;
 
   @override
   State<TarjetaDiagnosticoEspejo> createState() =>
@@ -73,7 +78,16 @@ class _TarjetaDiagnosticoEspejoState
   Future<void> _sincronizar() async {
     setState(() => _sincronizando = true);
     try {
-      await SyncEngine.instance.push();
+      // G08-3: el problema de esta tarjeta es un espejo
+      // vacío que necesita BAJADA — el botón corría solo el
+      // push y jamás traía un cliente. Ahora corre el ciclo
+      // COMPLETO del motor (subida y bajada).
+      final ciclo = widget.cicloSyncParaTest;
+      if (ciclo != null) {
+        await ciclo();
+      } else {
+        await SyncEngine.instance.run(forzar: true);
+      }
     } catch (_) {
       // El motor ya registra y clasifica sus fallos; aquí solo
       // importa re-evaluar el espejo tras el intento.
@@ -82,9 +96,24 @@ class _TarjetaDiagnosticoEspejoState
     setState(() => _sincronizando = false);
     await _evaluar();
     if (!mounted) return;
-    if (_diag == null) {
+    // G08-3: el aviso de recuperación solo se dice tras
+    // COMPROBAR que el espejo ya tiene filas. Antes se
+    // afirmaba «Datos recuperados» por el solo hecho de
+    // que el diagnóstico se apagara, sin mirar el espejo.
+    var filas = 0;
+    try {
+      filas = await LocalDb.instance.contar('clientes');
+    } catch (_) {}
+    if (!mounted) return;
+    if (filas > 0) {
       mostrarSnack(context, 'Datos recuperados. Ya se ven los clientes.',
           significado: SignificadoChip.exito);
+    } else {
+      mostrarSnack(
+          context,
+          'La sincronización terminó, pero la lista de '
+          'clientes sigue vacía.',
+          significado: SignificadoChip.alerta);
     }
   }
 
