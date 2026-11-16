@@ -124,27 +124,39 @@ class _ReporteMensualDiariosScreenState
               for (var i = 0; i < serie.length; i++)
                 Expanded(
                   child: GestureDetector(
+                    // SL-5B G07-9: el objetivo de toque de
+                    // cada barra es la zona completa de
+                    // 64 dp (≥44 dp de la casa), no la
+                    // barra visual — con 31 columnas a
+                    // 360 dp la barra sola medía ~8 dp.
+                    behavior: HitTestBehavior.opaque,
                     onTap: () =>
                         setState(() => _diaSel = i + 1),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 1),
-                      child: Container(
-                        height: 8 +
-                            (maximo > 0
-                                ? serie[i] / maximo * 56
-                                : 0),
-                        decoration: BoxDecoration(
-                          color: i == mejor
-                              ? AppColores.naranja
-                              : sel == i + 1
+                      child: SizedBox(
+                        height: 64,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            height: 8 +
+                                (maximo > 0
+                                    ? serie[i] / maximo * 56
+                                    : 0),
+                            decoration: BoxDecoration(
+                              color: i == mejor
                                   ? AppColores.naranja
-                                      .withValues(alpha: 0.85)
-                                  : AppColores.naranja
-                                      .withValues(alpha: 0.35),
-                          borderRadius:
-                              const BorderRadius.vertical(
-                                  top: Radius.circular(2)),
+                                  : sel == i + 1
+                                      ? AppColores.naranja
+                                          .withValues(alpha: 0.85)
+                                      : AppColores.naranja
+                                          .withValues(alpha: 0.35),
+                              borderRadius:
+                                  const BorderRadius.vertical(
+                                      top: Radius.circular(2)),
+                            ),
+                          ),
                         ),
                       ),
                     ),
