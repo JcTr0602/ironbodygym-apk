@@ -4296,11 +4296,26 @@ Future<List<Map<String, dynamic>>> cumpleanosDelMes() async {
 }
 
 /// Posibles duplicados al inscribir (nombre parecido, carnet o teléfono igual).
+///
+/// 1.35 (DEC-2, decisión de Jc): con [incluirNoActivos] el
+/// barrido mira también el padrón inactivo y el congelado, no
+/// solo el activo — inscribir a alguien que ya existe dormido
+/// creaba un cliente gemelo. La edición de la ficha NO lo
+/// activa: su bloqueo sigue mirando solo activos, como hoy.
 Future<List<Map<String, dynamic>>> posiblesDuplicados(
     {required String nombre,
     String? carnet,
-    String? telefono}) async {
-  final rows = await _activos();
+    String? telefono,
+    bool incluirNoActivos = false}) async {
+  final rows = incluirNoActivos
+      ? <Map<String, dynamic>>[
+          ...await _activos(),
+          ...await LocalDb.instance
+              .mirrorPorEstado('clientes', 'inactivo'),
+          ...await LocalDb.instance
+              .mirrorPorEstado('clientes', 'congelado'),
+        ]
+      : await _activos();
   final nn = _norm(nombre);
   final dc = (carnet ?? '').replaceAll(RegExp(r'[^0-9]'), '');
   final dt = (telefono ?? '').replaceAll(RegExp(r'[^0-9]'), '');
@@ -4339,6 +4354,19 @@ Future<List<Map<String, dynamic>>> posiblesDuplicados(
     }
   }
   return res;
+}
+
+/// 1.35 (DEC-2): coletilla de estado para el aviso de
+/// duplicado — un duplicado dormido se dice dormido, para
+/// que quien inscribe sepa que ese cliente ya existe aunque
+/// no esté activo.
+String coletillaEstadoDuplicado(Map<String, dynamic> fila) {
+  final e = (fila['estado'] as String?) ?? 'activo';
+  return switch (e) {
+    'inactivo' => ' · está inactivo',
+    'congelado' => ' · está congelado',
+    _ => '',
+  };
 }
 
 /// Decisión de bloqueo al editar (panel Luna sobre #7B-3):

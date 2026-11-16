@@ -514,7 +514,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
     final dups = await posiblesDuplicados(
         nombre: nombre,
         carnet: carnet.isEmpty ? null : carnet,
-        telefono: tel.isEmpty ? null : tel);
+        telefono: tel.isEmpty ? null : tel,
+        incluirNoActivos: true);
     final carnetDigitos = carnet.replaceAll(RegExp(r'[^0-9]'), '');
     final carnetDuplicado = carnetDigitos.length == 11 &&
         dups.any((d) => d['_motivo'] == 'mismo carnet');
@@ -527,7 +528,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
           titulo: 'Carnet duplicado',
           iconoTitulo: Icons.badge_rounded,
           contenido: Text(
-              'El carnet $carnet ya pertenece a "${dueno['nombre']}".\n'
+              'El carnet $carnet ya pertenece a "${dueno['nombre']}"'
+              '${coletillaEstadoDuplicado(dueno)}.\n'
               'Cada carnet corresponde a un solo cliente: no se puede '
               'inscribir de nuevo.'),
           acciones: [
@@ -557,7 +559,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
                   'Ya existe(n) cliente(s) parecido(s):'),
               const SizedBox(height: 8),
               for (final d in dups)
-                Text('• ${d['nombre']} (${d['_motivo']})'),
+                Text('• ${d['nombre']} (${d['_motivo']}'
+                    '${coletillaEstadoDuplicado(d)})'),
               const SizedBox(height: 8),
               const Text('¿Seguro que es un cliente nuevo?'),
             ],

@@ -229,7 +229,8 @@ class _VentaSuplementoInscripcionScreenState
     final dups = await posiblesDuplicados(
         nombre: nombre,
         carnet: carnet.isEmpty ? null : carnet,
-        telefono: tel.isEmpty ? null : tel);
+        telefono: tel.isEmpty ? null : tel,
+        incluirNoActivos: true);
     if (!mounted) return;
     final carnetDigitos = carnet.replaceAll(RegExp(r'[^0-9]'), '');
     final carnetDuplicado = carnetDigitos.length == 11 &&
@@ -240,7 +241,8 @@ class _VentaSuplementoInscripcionScreenState
       await DialogoApp.confirmar(context,
           titulo: 'Carnet duplicado',
           mensaje: 'El carnet $carnet ya pertenece a '
-              '"${dueno['nombre']}". Cada carnet corresponde a '
+              '"${dueno['nombre']}"${coletillaEstadoDuplicado(dueno)}. '
+              'Cada carnet corresponde a '
               'un solo cliente: no se puede inscribir de nuevo.',
           aceptar: 'Entendido',
           cancelar: '');
@@ -259,7 +261,8 @@ class _VentaSuplementoInscripcionScreenState
               const Text('Ya existe(n) cliente(s) parecido(s):'),
               const SizedBox(height: 8),
               for (final d in dups)
-                Text('• ${d['nombre']} (${d['_motivo']})'),
+                Text('• ${d['nombre']} (${d['_motivo']}'
+                    '${coletillaEstadoDuplicado(d)})'),
               const SizedBox(height: 8),
               const Text('¿Seguro que es un cliente nuevo?'),
             ],
