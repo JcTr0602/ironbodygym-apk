@@ -304,6 +304,11 @@ class _HomeScreenState extends State<HomeScreen>
   /// pliega.
   bool _cabeceraPlegada = false;
 
+  /// SL-X2 (G01-10): hay desplazamiento en el pilar activo
+  /// (lo alimenta el mismo sensor que pliega la cabecera):
+  /// la CabeceraMarco lo recibe para crecer su sombra.
+  bool _cabeceraConScroll = false;
+
   bool _alDesplazar(ScrollNotification n) {
     if (n is ScrollUpdateNotification &&
         n.metrics.axis == Axis.vertical) {
@@ -312,6 +317,12 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() => _cabeceraPlegada = true);
       } else if (p < 60 && _cabeceraPlegada) {
         setState(() => _cabeceraPlegada = false);
+      }
+      // SL-X2 (G01-10): el estado de scroll de la cabecera
+      // (solo este cableado: la sombra vive en marco.dart).
+      final hayScroll = p > 0;
+      if (hayScroll != _cabeceraConScroll) {
+        setState(() => _cabeceraConScroll = hayScroll);
       }
     }
     return false;
@@ -1546,6 +1557,8 @@ class _HomeScreenState extends State<HomeScreen>
               onAccionPerfil: _accionPerfilMarco,
               // 1.35 (UI-22): plegado por scroll.
               plegada: _cabeceraPlegada,
+              // SL-X2 (G01-10): sombra según scroll.
+              conScroll: _cabeceraConScroll,
             ),
             Expanded(
               // 1.35 (UI-22): el sensor de desplazamiento
