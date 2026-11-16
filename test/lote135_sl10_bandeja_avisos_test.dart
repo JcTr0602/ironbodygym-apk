@@ -102,7 +102,7 @@ void main() {
         .setMockMethodCallHandler(
             const MethodChannel('com.llfbandit.app_links/messages'),
             (call) async => null);
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
   });
 
   testWidgets('G04-5 · la Bandeja nace con los controles '
