@@ -60,8 +60,23 @@ class _AvisosScreenState extends State<AvisosScreen> {
     }
   }
 
-  Future<void> _guardar(String clave, bool valor) async {
-    await LocalDb.instance.setMeta(clave, valor ? '1' : '0');
+  /// SL-10 G04-8: el interruptor solo cambia en
+  /// pantalla cuando el guardado ATERRIZA; si setMeta
+  /// falla, el estado visible no se mueve y se avisa
+  /// (antes quedaba «activado» sin estarlo, en silencio).
+  Future<void> _guardar(
+      String clave, bool valor, void Function(bool) aplicar) async {
+    try {
+      await LocalDb.instance.setMeta(clave, valor ? '1' : '0');
+      if (mounted) setState(() => aplicar(valor));
+    } catch (e) {
+      AppLog.error('avisos', 'guardar_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(
+            context, 'No se pudo guardar el cambio. Inténtalo de nuevo.',
+            significado: SignificadoChip.error);
+      }
+    }
   }
 
   @override
@@ -89,10 +104,9 @@ class _AvisosScreenState extends State<AvisosScreen> {
                         subtitle: const Text(
                             'Avisar cuando haya clientes por vencer o vencidos'),
                         value: _vencimientos,
-                        onChanged: (v) {
-                          setState(() => _vencimientos = v);
-                          _guardar('aviso_vencimientos', v);
-                        },
+                        onChanged: (v) => _guardar(
+                            'aviso_vencimientos', v,
+                            (nv) => _vencimientos = nv),
                       ),
                       const Divider(),
                       SwitchListTile(
@@ -101,10 +115,9 @@ class _AvisosScreenState extends State<AvisosScreen> {
                         subtitle: const Text(
                             'Avisar de los cumpleaños del mes'),
                         value: _cumpleanos,
-                        onChanged: (v) {
-                          setState(() => _cumpleanos = v);
-                          _guardar('aviso_cumpleanos', v);
-                        },
+                        onChanged: (v) => _guardar(
+                            'aviso_cumpleanos', v,
+                            (nv) => _cumpleanos = nv),
                       ),
                       const Divider(),
                       SwitchListTile(
@@ -113,10 +126,8 @@ class _AvisosScreenState extends State<AvisosScreen> {
                         subtitle: const Text(
                             'Avisar cuando haya pendientes por sincronizar'),
                         value: _sync,
-                        onChanged: (v) {
-                          setState(() => _sync = v);
-                          _guardar('aviso_sync', v);
-                        },
+                        onChanged: (v) => _guardar(
+                            'aviso_sync', v, (nv) => _sync = nv),
                       ),
                     ],
                   ),
