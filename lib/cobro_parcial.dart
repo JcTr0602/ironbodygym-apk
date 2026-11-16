@@ -102,12 +102,20 @@ CobroParcialCompuesto? componerCobroParcial({
   if (!monto.isFinite || monto <= 0) return null;
   final total =
       arrastre + filasFifo.fold(0.0, (a, f) => a + f.monto);
-  if (monto - total > 0.01) return null;
+  // SL-4 · BG-02: SIN tolerancia hacia arriba — la misma
+  // regla del servidor. La tolerancia de 0.01 solo vale por
+  // debajo (redondeos al teclear de menos); con monto =
+  // total + 0.01 el compositor entregaba MÁS que el
+  // esperado y el «restante» salía negativo. La comparación
+  // va redondeada a 2 decimales: el ruido de float
+  // (100.01 - 100 = 0.010000000000005) no puede decidir.
+  final meta = _redondear2(monto);
+  if (meta > _redondear2(total)) return null;
   final cubiertas = <FilaCobro>[];
   var acumulado = arrastre;
-  if (monto > arrastre + 0.01) {
+  if (meta > _redondear2(arrastre)) {
     var n = 0;
-    while (n < filasFifo.length && acumulado < monto - 0.01) {
+    while (n < filasFifo.length && acumulado < meta) {
       cubiertas.add(filasFifo[n]);
       acumulado += filasFifo[n].monto;
       n++;
@@ -146,7 +154,7 @@ CobroParcialCompuesto? componerCobroParcial({
         }
         extendido = true;
       }
-      while (acumulado < monto - 0.01 && n < filasFifo.length) {
+      while (acumulado < meta && n < filasFifo.length) {
         cubiertas.add(filasFifo[n]);
         acumulado += filasFifo[n].monto;
         n++;
