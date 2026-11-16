@@ -15,7 +15,6 @@ import 'diseno.dart';
 import 'logros_premio_ui.dart';
 import 'panel_premios.dart';
 import 'skeleton.dart';
-import 'widgets.dart';
 
 /// Premios (1.27, S3/G3): pestaña «Clientes» del hub —
 /// buscador sobre el espejo local y, por cliente, el
@@ -640,11 +639,9 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
               style: AppTexto.subtitulo),
           subtitle: const Text('Premios y logros'),
         ),
-        // H-04 (Argón 1.27): al terminar el sync, el
-        // detalle se recarga solo (patrón de la Bandeja):
-        // el «⏳ Anulación en curso (sincronizando)» se
-        // resuelve con la foto fresca sin salir y volver.
-        SyncBanner(alTerminarSync: _recargarDetalle),
+        // SL-10 G13-2 (sync-una-vez): sin banda de sync
+        // en el detalle de Premios — el estado lo dice
+        // una sola vez el icono de la cabecera de la app.
         Expanded(
           child: _cargandoDetalle
               // 1.28 (M5-C3): esqueleto con la forma del
