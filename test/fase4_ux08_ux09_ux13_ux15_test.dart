@@ -199,7 +199,10 @@ void main() {
       ));
       await tester.pump();
       expect(find.text('Así quedó tu turno'), findsOneWidget);
-      expect(find.text('Pagos del turno'), findsOneWidget);
+      // E3 (C4-01): la cifra es conteoPagosDia — el rótulo
+      // dice «del día», no «del turno».
+      expect(find.text('Pagos del día'), findsOneWidget);
+      expect(find.text('Pagos del turno'), findsNothing);
       expect(find.text('7'), findsOneWidget);
       // En cero: la fila no aparece (regla de Jc).
       expect(find.text('Pendientes sin sincronizar'),
