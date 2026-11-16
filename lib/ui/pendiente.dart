@@ -783,7 +783,10 @@ class _PendienteScreenState extends State<PendienteScreen> {
             ),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-5B G04-1: embebida en Mi Caja, la sync ya la
+          // dice la cabecera del marco — el banner solo va
+          // suelto (patrón de Bandeja WhatsApp).
+          if (!widget.embebida) const SyncBanner(),
           if (!_cargando) _tarjetaTotal(),
           Expanded(
             child: CruceEstados(
