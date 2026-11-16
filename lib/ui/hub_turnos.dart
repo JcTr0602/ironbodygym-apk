@@ -36,7 +36,6 @@ import 'horario_turnos.dart';
 import 'turnos_calendario.dart'
     show CalendarioTurnosScreen, colorChipEntrenador;
 import 'turno_abrir.dart';
-import 'turnos_hub.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
 
@@ -518,31 +517,44 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
           ),
           const SizedBox(height: 10),
           // 1.28 (M3-C2): la leyenda del doble lenguaje.
-          Row(
+          // SL-11 (G12-9): en Wrap, no en Row rígido — a
+          // 360 dp la fila desbordaba (37 px medidos).
+          Wrap(
+            spacing: AppEspacio.md,
+            runSpacing: AppEspacio.xs,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: AppColores.naranja.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(3),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: AppColores.naranja.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text('Lo que pasó', style: AppTexto.metadato),
+                ],
               ),
-              const SizedBox(width: 6),
-              const Text('Lo que pasó', style: AppTexto.metadato),
-              const SizedBox(width: 16),
-              Container(
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(3),
-                  border: Border.all(
-                      color: AppColores.naranja, width: 1.5),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(
+                          color: AppColores.naranja, width: 1.5),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text('Lo programado', style: AppTexto.metadato),
+                ],
               ),
-              const SizedBox(width: 6),
-              const Text('Lo programado', style: AppTexto.metadato),
-              const Spacer(),
               Text('Toca un día para verlo',
                   style: AppTexto.metadato.copyWith(
                       color: AppColores.textoSecundario(context))),
@@ -959,30 +971,50 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 // segundo plano y su efecto era invisible).
                 if (!_soyDueno) ...[
                   const SizedBox(height: 8),
+                  // SL-11 (G12-6): la comprobación es
+                  // CONTINGENCIA, no contenido diario: va
+                  // PLEGADA (regla anti-regueros de Jc). El
+                  // título resume su estado y al desplegar
+                  // el «Comprobar» sigue accesible.
                   Tarjeta(
-                    child: Row(
+                    padding: EdgeInsets.zero,
+                    child: ExpansionTile(
+                      title: const Text('¿Un cierre no baja?',
+                          style: AppTexto.cuerpo),
                       children: [
-                        const Expanded(
-                          child: Text(
-                            '¿Un cierre no baja? Compruébalo '
-                            'con el servidor.',
-                            style: AppTexto.cuerpo,
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                              AppEspacio.lg, 0, AppEspacio.lg,
+                              AppEspacio.md),
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Compruébalo con el servidor. '
+                                'Si el servidor no responde, lo '
+                                'de este teléfono no cambia.',
+                                style: AppTexto.cuerpo,
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                icon: _comprobando
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child:
+                                            CircularProgressIndicator(
+                                                strokeWidth: 2),
+                                      )
+                                    : const Icon(
+                                        Icons.cloud_sync_rounded),
+                                label: const Text('Comprobar'),
+                                onPressed: _comprobando
+                                    ? null
+                                    : _comprobarCierres,
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          icon: _comprobando
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
-                                )
-                              : const Icon(
-                                  Icons.cloud_sync_rounded),
-                          label: const Text('Comprobar'),
-                          onPressed:
-                              _comprobando ? null : _comprobarCierres,
                         ),
                       ],
                     ),
@@ -1131,28 +1163,15 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   const SizedBox(height: 12),
                 ],
                 const SizedBox(height: 12),
-                if (_soyDueno)
-                  Tarjeta(
-                    child: InkWell(
-                      onTap: () => Navigator.of(context).push(
-                        RutaIron(
-                          builder: (_) => const TurnosHubScreen(),
-                        ),
-                      ),
-                      child: const Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Horario y turnos (patrón y calendario)',
-                              style: AppTexto.subtitulo,
-                            ),
-                          ),
-                          Icon(Icons.chevron_right_rounded,
-                              color: Colors.grey, size: 18),
-                        ],
-                      ),
-                    ),
-                  ),
+                // SL-11 (G12-4): fuera la tarjeta que abría el
+                // otro hub («Horario y turnos (patrón y
+                // calendario)»): era una SEGUNDA puerta al
+                // mismo calendario desde este hub (ese hub
+                // trae la suya) y con la de abajo sumaban dos
+                // caminos duplicados. Aquí queda UNA sola
+                // puerta al calendario: la de «Plan y ajustes»
+                // de abajo. El hub de configuración sigue
+                // alcanzable desde Administración.
                 // T3 (estéticas 1.19): explicación del hub,
                 // 1.25 T80: el dueño configura SIN salir
                 // del hub — el plan y los ajustes viven
@@ -1213,15 +1232,18 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                     Padding(
                       padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
                       child: Text(
-                        'Arriba ves quién está de turno hoy: lo '
-                        'programado en el patrón, y si otro abrió '
-                        'el turno, se muestra a él mientras siga '
-                        'abierto (cubriendo). Abrir y Cerrar son '
-                        'tu turno del día; al cerrar se liquida '
-                        'el pendiente. «Pendiente a entregar» es '
-                        'el efectivo que falta por entregar de la '
-                        'caja. El patrón y el calendario se '
-                        'configuran en «Horario y turnos».',
+                        // SL-11 (G12-4): sin re-explicar la
+                        // precedencia (programado vs apertura
+                        // real): esa explicación vive UNA sola
+                        // vez, en el hub de configuración.
+                        'Arriba ves quién está de turno hoy en '
+                        'cada franja. Abrir y Cerrar son tu '
+                        'turno del día; al cerrar se liquida el '
+                        'pendiente. «Pendiente a entregar» es el '
+                        'efectivo que falta por entregar de la '
+                        'caja. El patrón semanal y el calendario '
+                        'de excepciones se configuran abajo, en '
+                        '«Plan y ajustes de turnos».',
                         style: AppTexto.cuerpo,
                       ),
                     ),
