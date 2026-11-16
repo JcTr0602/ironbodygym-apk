@@ -898,17 +898,26 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
                   ),
                 ),
                 const SizedBox(width: AppEspacio.sm),
-                SelectorIron<String>(
-                  valor: _orden,
-                  tituloPanel: 'Ordenar por',
-                  opciones: const [
-                    OpcionSelector('servidor', 'Orden del servidor'),
-                    OpcionSelector('nombre', 'Nombre A–Z'),
-                    OpcionSelector('registro', 'Registro reciente'),
-                    OpcionSelector('caduca', 'Caduca antes'),
-                  ],
-                  alCambiar: (v) =>
-                      setState(() => _orden = v ?? 'servidor'),
+                // DIS-05 (corrección): el botón del SDK se
+                // medía por su contenido; el campo cerrado de
+                // la casa (InputDecorator) exige ancho finito
+                // dentro de un Row — se acota al ancho de su
+                // etiqueta más larga («Orden del servidor»)
+                // junto al buscador expandido.
+                SizedBox(
+                  width: 184,
+                  child: SelectorIron<String>(
+                    valor: _orden,
+                    tituloPanel: 'Ordenar por',
+                    opciones: const [
+                      OpcionSelector('servidor', 'Orden del servidor'),
+                      OpcionSelector('nombre', 'Nombre A–Z'),
+                      OpcionSelector('registro', 'Registro reciente'),
+                      OpcionSelector('caduca', 'Caduca antes'),
+                    ],
+                    alCambiar: (v) =>
+                        setState(() => _orden = v ?? 'servidor'),
+                  ),
                 ),
               ],
             ),
