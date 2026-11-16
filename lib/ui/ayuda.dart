@@ -14,7 +14,6 @@ import '../novedades.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'widgets.dart';
 
 class AyudaScreen extends StatefulWidget {
   const AyudaScreen({super.key});
@@ -108,7 +107,9 @@ class _AyudaScreenState extends State<AyudaScreen> {
       appBar: appBarIron(context, 'Ayuda'),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-10 G13-2 (sync-una-vez): sin banda de sync
+          // en Ayuda — el estado lo dice una sola vez el
+          // icono de la cabecera de la app.
           // 1.30 (Oleada D6, UI130-21): buscador en vivo
           // (título y cuerpo, sin acentos) con las
           // coincidencias auto-expandidas y su conteo;
