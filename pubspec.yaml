@@ -29,6 +29,9 @@ dependencies:
   flutter_foreground_task: ^8.0.0
   # v1.4.4 (v33): vista previa Markdown del editor GymPedia.
   flutter_markdown: ^0.7.7+1
+  # 1.35 (HZ-2): voto único al arranque por la tasa de refresco
+  # alta del panel (lib/refresco.dart); la plataforma decide.
+  flutter_displaymode: ^0.7.0
 
 dev_dependencies:
   flutter_test:

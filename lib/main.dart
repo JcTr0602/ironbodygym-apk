@@ -19,6 +19,7 @@ import 'invitados.dart';
 import 'localdb.dart';
 import 'notificaciones_recordatorios.dart';
 import 'recordatorios.dart';
+import 'refresco.dart';
 import 'sync.dart';
 import 'tarifa_especial.dart';
 import 'fotos_foreground.dart';
@@ -240,6 +241,12 @@ Future<void> _pasoArranqueDegradable(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 1.35 (HZ-2): la tasa de refresco alta se pide UNA
+  // sola vez, aquí, tras el binding — nunca por
+  // pantalla (un cambio de modo en mitad de la
+  // navegación parpadea). Sin await: no retrasa el
+  // primer frame y su fallo va tragado dentro.
+  unawaited(pedirAltaTasaDeRefresco());
   // v1.3.0 (AppLog v2.0, Gemini #3): interceptores globales.
   FlutterError.onError = (details) {
     FlutterError.presentError(details);

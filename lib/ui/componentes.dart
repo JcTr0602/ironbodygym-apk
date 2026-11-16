@@ -34,9 +34,11 @@ import 'diseno.dart';
 /// «glow» de ClampingScrollPhysics, pero la notificación de
 /// overscroll sigue llegando y el refresco dispara igual.
 ///
-/// 90/120 Hz: nada en el código (ni Dart ni nativo) limita la
-/// tasa de refresco — Flutter dibuja a la tasa que dé el panel
-/// del teléfono. No hace falta código nativo para esto.
+/// 90/120 Hz: la app VOTA una vez al arranque por la tasa
+/// más alta del panel (`pedirAltaTasaDeRefresco` en
+/// lib/refresco.dart, llamada única en main); la plataforma
+/// decide si la concede, y en paneles LTPO manda el sistema.
+/// Nada limita la tasa por pantalla ni por ruta.
 class ComportamientoScrollSuave extends MaterialScrollBehavior {
   const ComportamientoScrollSuave();
 
