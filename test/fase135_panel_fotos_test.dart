@@ -196,6 +196,14 @@ void main() {
           fraseErrorFoto('La vinculación de la foto no pudo '
               'completarse: DatabaseException(...)'),
           'Llegó al servidor pero no pudo enlazarse');
+      // E3 (C2-03): el texto REAL que SP-01 escribe a las
+      // 24 h sin espejo (fotos_cola.dart) también es de la
+      // clase vinculación — en la base caía al genérico
+      // «No pudo subirse», falso (los bytes sí subieron).
+      expect(
+          fraseErrorFoto('La foto no pudo enlazarse: el '
+              'cliente no aparece en este teléfono'),
+          'Llegó al servidor pero no pudo enlazarse');
       expect(fraseErrorFoto('El archivo no existe en disco'),
           'El archivo ya no está en este teléfono');
       expect(
