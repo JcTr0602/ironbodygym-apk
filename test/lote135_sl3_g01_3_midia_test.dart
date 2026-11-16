@@ -52,7 +52,7 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfiNoIsolate;
     SharedPreferences.setMockInitialValues({});
-    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+    await Supabase.initialize(url: 'http://127.0.0.1:9', publishableKey: 'dummy');
     final docs = await Directory.systemTemp.createTemp('sl3_g013_docs');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
