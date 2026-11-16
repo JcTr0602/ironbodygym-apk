@@ -446,7 +446,23 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   /// nº 14 de Clientes) sin conexión se convierte con el
   /// detalle en caché y preparación local.
   Future<void> _convertirDesdeLista(InvitadoResumen inv) async {
+    // Lote 1.35 (SL-1 · A-17, BLOQUEANTE): la guarda se activa
+    // en la PRIMERA línea, antes de cualquier await y del
+    // diálogo. Antes solo se activaba tras el diálogo y la
+    // lectura de caché de la rama offline: dos toques rápidos
+    // pasaban la guarda (aún null), abrían dos flujos y nacían
+    // dos conversiones del mismo invitado. La liberación va en
+    // finally: ningún camino de salida la deja puesta.
     if (_convirtiendoId != null) return;
+    setState(() => _convirtiendoId = inv.id);
+    try {
+      await _convertirDesdeListaFlujo(inv);
+    } finally {
+      if (mounted) setState(() => _convirtiendoId = null);
+    }
+  }
+
+  Future<void> _convertirDesdeListaFlujo(InvitadoResumen inv) async {
     // 1.35 (campo nº 14 de Clientes): sin conexión también
     // se convierte, con el detalle guardado en caché (el
     // mismo flujo sin red del detalle). Sin caché no hay
@@ -482,17 +498,14 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         icono: Icons.person_add_rounded,
       );
       if (ok != true || !mounted) return;
-      setState(() => _convirtiendoId = inv.id);
-      try {
-        final datos = await _svc.prepararConversionLocal(det);
-        if (!mounted) return;
-        await Navigator.of(context).push(RutaIron(
-          builder: (_) => InscribirScreen(conversion: datos),
-        ));
-        await _cargar();
-      } finally {
-        if (mounted) setState(() => _convirtiendoId = null);
-      }
+      // A-17: sin setState propio — la guarda ya la activó
+      // _convertirDesdeLista al entrar y la libera su finally.
+      final datos = await _svc.prepararConversionLocal(det);
+      if (!mounted) return;
+      await Navigator.of(context).push(RutaIron(
+        builder: (_) => InscribirScreen(conversion: datos),
+      ));
+      await _cargar();
       return;
     }
     if (inv.caducado) {
@@ -503,7 +516,7 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           significado: SignificadoChip.alerta);
       return;
     }
-    setState(() => _convirtiendoId = inv.id);
+    // A-17: la guarda ya va activa desde _convertirDesdeLista.
     try {
       final detalle = await _svc.detalle(inv.id);
       if (!mounted) return;
@@ -533,9 +546,9 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             'Revisa la conexión.',
             significado: SignificadoChip.error);
       }
-    } finally {
-      if (mounted) setState(() => _convirtiendoId = null);
     }
+    // A-17: la guarda la libera el finally de
+    // _convertirDesdeLista, único dueño del ciclo.
   }
 
   /// Barra inferior del modo selección: SOLO las tres acciones de
