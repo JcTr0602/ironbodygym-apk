@@ -168,10 +168,13 @@ BandejaReservas construirBandeja(
       id: _entero(r['id']),
       clienteId: _entero(r['cliente_id']),
       clienteNombre:
-          nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente #${r['cliente_id']}',
+          nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente sin nombre',
       suplementoId: sid,
+      // SL-X1 (familia G06-4): sin nombre en el espejo, el
+      // fallback es legible («Suplemento sin nombre», la
+      // corrección de SL-7 en Servicios), nunca el #id.
       suplementoNombre:
-          supl?['nombre']?.toString() ?? 'Suplemento #$sid',
+          supl?['nombre']?.toString() ?? 'Suplemento sin nombre',
       cantidad: _entero(r['cantidad']),
       precioUnitario: _doble(r['precio_unitario']),
       // v1.4.6: moneda snapshot que trae la propia reserva.
@@ -626,7 +629,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
     );
     if (ok && mounted) {
       await _encolar('confirmar_reserva', {'reserva_id': r.id},
-          'Confirmación de la reserva #${r.id} encolada');
+          'Confirmación de la reserva de ${r.clienteNombre} '
+          '(${r.cantidad} × ${r.suplementoNombre}) encolada');
     }
   }
 
@@ -650,7 +654,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
       await _encolar(
           'rechazar_reserva',
           {'reserva_id': r.id, if (nota.isNotEmpty) 'nota': nota},
-          'Rechazo de la reserva #${r.id} encolado');
+          'Rechazo de la reserva de ${r.clienteNombre} '
+              '(${r.cantidad} × ${r.suplementoNombre}) encolado');
     }
   }
 
@@ -668,7 +673,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
     );
     if (ok && mounted) {
       await _encolar('cancelar_reserva', {'reserva_id': r.id},
-          'Cancelación de la reserva #${r.id} encolada');
+          'Cancelación de la reserva de ${r.clienteNombre} '
+          '(${r.cantidad} × ${r.suplementoNombre}) encolada');
     }
   }
 
@@ -760,7 +766,9 @@ class _ReservasScreenState extends State<ReservasScreen> {
       await _encolar(
           'cobrar_reserva',
           {'reserva_id': r.id, 'metodo': metodo},
-          'Cobro de la reserva #${r.id} encolado — se sincroniza ahora');
+          'Cobro de la reserva de ${r.clienteNombre} '
+              '(${r.cantidad} × ${r.suplementoNombre}) encolado — '
+              'se sincroniza ahora');
     }
   }
 
