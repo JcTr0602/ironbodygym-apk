@@ -40,11 +40,18 @@ class FilaCobro {
   final double monto;
   final DateTime fecha;
 
+  /// Solo en filas `servicio_ventas` que son reverso:
+  /// el id de la venta que revierten. El compositor lo
+  /// usa para no cerrar un cobro dejando el reverso
+  /// fuera de su pareja (G#4 de la auditoría Hy4).
+  final int? reversoDe;
+
   const FilaCobro({
     required this.tabla,
     required this.id,
     required this.monto,
     required this.fecha,
+    this.reversoDe,
   });
 
   String get tipoCrudo => switch (tabla) {
@@ -99,10 +106,52 @@ CobroParcialCompuesto? componerCobroParcial({
   final cubiertas = <FilaCobro>[];
   var acumulado = arrastre;
   if (monto > arrastre + 0.01) {
-    for (final f in filasFifo) {
-      if (acumulado >= monto - 0.01) break;
-      cubiertas.add(f);
-      acumulado += f.monto;
+    var n = 0;
+    while (n < filasFifo.length && acumulado < monto - 0.01) {
+      cubiertas.add(filasFifo[n]);
+      acumulado += filasFifo[n].monto;
+      n++;
+    }
+    // G#4 (auditoría Hy4): cierre de neteo. Si fuera del
+    // prefijo queda el reverso de una venta ya consumida,
+    // cerrar sin él deja el reverso huérfano restando en
+    // la foto para siempre y un arrastre fantasma (el
+    // servidor acepta: su esperado es la suma de los ids
+    // incluidos). El prefijo se extiende en orden FIFO
+    // hasta ese reverso y, si al netear baja de la meta,
+    // sigue consumiendo hasta cubrir el monto otra vez;
+    // la pareja venta+reverso siempre viaja junta.
+    var extendido = true;
+    while (extendido && n < filasFifo.length) {
+      extendido = false;
+      final idsConsumidos = <int>{
+        for (final f in cubiertas)
+          if (f.tabla == 'servicio_ventas') f.id,
+      };
+      var hasta = -1;
+      for (var i = n; i < filasFifo.length; i++) {
+        final f = filasFifo[i];
+        if (f.tabla == 'servicio_ventas' &&
+            f.reversoDe != null &&
+            idsConsumidos.contains(f.reversoDe)) {
+          hasta = i;
+          break;
+        }
+      }
+      if (hasta >= 0) {
+        while (n <= hasta) {
+          cubiertas.add(filasFifo[n]);
+          acumulado += filasFifo[n].monto;
+          n++;
+        }
+        extendido = true;
+      }
+      while (acumulado < monto - 0.01 && n < filasFifo.length) {
+        cubiertas.add(filasFifo[n]);
+        acumulado += filasFifo[n].monto;
+        n++;
+        extendido = true;
+      }
     }
   }
   final esperado = _redondear2(
