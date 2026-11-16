@@ -512,15 +512,21 @@ class _FichaScreenState extends State<FichaScreen> {
   Future<void> _cargar() async {
     final gen = ++_cargaGen;
     final c = await clientePorId(widget.clienteId);
-    final pagos = await pagosDe(widget.clienteId);
-    // G#16 (Hy4): el último pago real y la transferencia
-    // por conciliar se buscan en la lista COMPLETA, no en
-    // el recorte de 10 que pinta el historial: con más de
-    // 10 pagos, una transferencia accionable más atrás
-    // quedaba fuera y el botón Conciliar desaparecía de
-    // la ficha aunque hubiera algo que conciliar.
+    // G#16 (Hy4): UNA sola lectura de pagos, sin recorte:
+    // el historial pinta los 10 primeros de esta misma
+    // lista (pagosDe aplica el tope al final, tras
+    // ordenar: el recorte de 10 es take(10) de la lista
+    // completa, idéntico) y el último pago real y la
+    // transferencia por conciliar se buscan en la lista
+    // COMPLETA — con más de 10 pagos, una transferencia
+    // accionable más atrás quedaba fuera del recorte y
+    // el botón Conciliar desaparecía de la ficha aunque
+    // hubiera algo que conciliar. (Dos lecturas hacían
+    // el mismo escaneo completo: pagosDe no limita en
+    // SQL desde 1.32 H-NULL-2.)
     final pagosCompletos =
         await pagosDe(widget.clienteId, limit: 100000);
+    final pagos = pagosCompletos.take(10).toList();
     // 1.25 T14: totales de por vida (sin el recorte de 10).
     final totalesVida = await totalesPagosCliente(widget.clienteId);
     // 1.25 T15: último pago real (la lista viene ordenada
