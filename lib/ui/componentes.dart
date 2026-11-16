@@ -16,6 +16,7 @@ import '../sync.dart';
 import '../tiempo.dart';
 
 import 'diseno.dart';
+import 'hoja_accion.dart';
 
 // ---------------------------------------------------------------------------
 // Scroll global (1.23 T8 — física de gama alta)
@@ -1813,6 +1814,390 @@ class _CampoFechaState extends State<CampoFecha> {
       ),
     );
   }
+}
+
+/// Opción de un [SelectorIron]: el par (valor, etiqueta) del
+/// diseño DIS-05 — la etiqueta es lo que la persona lee; el
+/// valor es lo que viaja; la etiqueta NUNCA es el id.
+/// [icono]/[colorIcono] son metadato de presentación que
+/// algunos sitios ya pintan junto a la etiqueta (el tipo de
+/// incidencia con su icono de color): sin ellos, texto plano.
+class OpcionSelector<T> {
+  final T valor;
+  final String etiqueta;
+  final IconData? icono;
+  final Color? colorIcono;
+
+  const OpcionSelector(this.valor, this.etiqueta,
+      {this.icono, this.colorIcono});
+}
+
+/// Envoltorio del resultado del panel de selección: distingue
+/// «eligió la opción cuyo valor es null» (p. ej. «Todos») de
+/// «cerró sin elegir» (el futuro devuelve null a secas).
+class _EleccionSelector<T> {
+  final T valor;
+  const _EleccionSelector(this.valor);
+}
+
+/// Panel compartido de los dos sabores de [SelectorIron]:
+/// hoja inferior de la casa (el esqueleto [HojaAccion], el de
+/// [showHojaIron]) con una fila por opción — radio a la
+/// izquierda, la elegida en naranja de marca — y título = la
+/// etiqueta del campo. En pantallas anchas (≥600 dp) la misma
+/// hoja va centrada en un diálogo. Tocar cualquier fila
+/// cierra y devuelve su valor (como el menú del SDK, que
+/// también dispara al re-elegir la opción actual); cerrar con
+/// la X o tocando fuera devuelve null = sin cambio. La hoja
+/// sube con el teclado (relleno inferior = `viewInsets`, ver
+/// la llamada) y la lista se desplaza si no cabe.
+Future<_EleccionSelector<T>?> _elegirOpcionSelector<T>(
+  BuildContext context, {
+  required String? titulo,
+  required T? valorActual,
+  required List<OpcionSelector<T>> opciones,
+}) {
+  Widget filas() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final op in opciones)
+          Builder(builder: (ctxFila) {
+            final elegida = op.valor == valorActual;
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                elegida
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: elegida
+                    ? AppColores.naranja
+                    : AppColores.textoSecundario(ctxFila),
+              ),
+              title: Row(
+                children: [
+                  if (op.icono != null) ...[
+                    Icon(op.icono, size: 18, color: op.colorIcono),
+                    const SizedBox(width: AppEspacio.sm),
+                  ],
+                  Expanded(
+                    child: Text(op.etiqueta,
+                        style: AppTexto.cuerpo.copyWith(
+                            fontWeight: elegida
+                                ? FontWeight.w700
+                                : FontWeight.w400)),
+                  ),
+                ],
+              ),
+              onTap: () => Navigator.of(ctxFila)
+                  .pop(_EleccionSelector<T>(op.valor)),
+            );
+          }),
+      ],
+    );
+  }
+
+  if (MediaQuery.of(context).size.width >= 600) {
+    return showDialog<_EleccionSelector<T>>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadio.xl)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: HojaAccion(
+            titulo: titulo ?? 'Seleccionar',
+            cuerpo: filas(),
+          ),
+        ),
+      ),
+    );
+  }
+  // La hoja va envuelta en el relleno del teclado: con el
+  // teclado abierto (un formulario donde el selector es el
+  // campo inferior), la hoja entera queda SOBRE el teclado,
+  // no bajo él (punto de prueba DIS-05 del Y2). Sin teclado
+  // el relleno es 0 y la hoja es la de showHojaIron tal cual.
+  return showModalBottomSheet<_EleccionSelector<T>>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+      child: HojaAccion(
+        titulo: titulo ?? 'Seleccionar',
+        cuerpo: filas(),
+      ),
+    ),
+  );
+}
+
+/// El campo cerrado que comparten los dos sabores de
+/// [SelectorIron]: la piel ÚNICA del kit ([_decoracionCampo])
+/// con el chevron de marca (`expand_more_rounded`, el de los
+/// plegables de la casa) y la etiqueta de la opción vigente —
+/// o la pista si no hay selección. El objetivo táctil es el
+/// del campo de la casa (≥48 dp con el relleno del kit).
+class _CampoSelectorCerrado extends StatefulWidget {
+  final String? etiqueta;
+  final String? pista;
+  final IconData? icono;
+  final String? textoSeleccion;
+  final IconData? iconoSeleccion;
+  final Color? colorIconoSeleccion;
+  final String? errorText;
+  final bool habilitado;
+  final Future<void> Function()? alTocar;
+
+  const _CampoSelectorCerrado({
+    required this.etiqueta,
+    required this.pista,
+    required this.icono,
+    required this.textoSeleccion,
+    required this.iconoSeleccion,
+    required this.colorIconoSeleccion,
+    required this.errorText,
+    required this.habilitado,
+    required this.alTocar,
+  });
+
+  @override
+  State<_CampoSelectorCerrado> createState() =>
+      _CampoSelectorCerradoState();
+}
+
+class _CampoSelectorCerradoState
+    extends State<_CampoSelectorCerrado> {
+  final _foco = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _foco.addListener(_alCambiarFoco);
+  }
+
+  void _alCambiarFoco() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _foco.removeListener(_alCambiarFoco);
+    _foco.dispose();
+    super.dispose();
+  }
+
+  Future<void> _abrir() async {
+    final alTocar = widget.alTocar;
+    if (alTocar == null) return;
+    _foco.requestFocus();
+    try {
+      await alTocar();
+    } finally {
+      if (mounted) _foco.unfocus();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decoracion = _decoracionCampo(
+      context,
+      etiqueta: widget.etiqueta,
+      hint: widget.pista,
+      errorText: widget.errorText,
+      icono: widget.icono,
+      suffixIcon: Icon(Icons.expand_more_rounded,
+          color: AppColores.textoSecundario(context)),
+    ).copyWith(enabled: widget.habilitado);
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: widget.habilitado ? _abrir : null,
+        borderRadius: BorderRadius.circular(AppRadio.md),
+        child: Focus(
+          focusNode: _foco,
+          child: InputDecorator(
+            decoration: decoracion,
+            isEmpty: widget.textoSeleccion == null,
+            isFocused: _foco.hasFocus,
+            child: Row(
+              children: [
+                if (widget.iconoSeleccion != null) ...[
+                  Icon(widget.iconoSeleccion,
+                      size: 18, color: widget.colorIconoSeleccion),
+                  const SizedBox(width: AppEspacio.sm),
+                ],
+                Expanded(
+                  child: Text(
+                    widget.textoSeleccion ?? '',
+                    style: widget.habilitado
+                        ? AppTexto.cuerpo
+                        : AppTexto.cuerpo.copyWith(
+                            color:
+                                AppColores.textoSecundario(context)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Selector de la casa (1.35 DIS-05): sustituye a los
+/// `DropdownButton` crudos del SDK, cuyo panel desplegado no
+/// admite radio, sombra ni animación de tema (Y2 DIS-05). El
+/// campo cerrado es el campo de la casa; el panel es la hoja
+/// de la casa con radios (ver [_elegirOpcionSelector]).
+///
+/// Contrato (diseño §2.2): [valor] inicial obligatorio y
+/// explícito — preselecciona EXACTAMENTE lo que preseleccionaba
+/// el campo sustituido —; [opciones] son pares valor/etiqueta
+/// (la etiqueta nunca es el id); [alCambiar] en null = campo
+/// deshabilitado, como en el SDK. Un [valor] no nulo fuera de
+/// [opciones] se señala con una aserción en debug y en release
+/// se enseña la primera opción: nunca revienta (el SDK sí).
+/// Un [valor] null con tipo nullable es «sin selección» y
+/// enseña la [pista], como hoy.
+class SelectorIron<T> extends StatelessWidget {
+  final T valor;
+  final List<OpcionSelector<T>> opciones;
+  final ValueChanged<T>? alCambiar;
+  final String? etiqueta;
+  final String? pista;
+  final IconData? icono;
+  final String? tituloPanel;
+
+  const SelectorIron({
+    super.key,
+    required this.valor,
+    required this.opciones,
+    required this.alCambiar,
+    this.etiqueta,
+    this.pista,
+    this.icono,
+    this.tituloPanel,
+  });
+
+  OpcionSelector<T>? get _seleccionada {
+    for (final op in opciones) {
+      if (op.valor == valor) return op;
+    }
+    return null;
+  }
+
+  String? get _textoSeleccion {
+    final sel = _seleccionada;
+    if (sel != null) return sel.etiqueta;
+    if (valor == null) return null; // sin selección: manda la pista
+    assert(false,
+        'SelectorIron: el valor ($valor) no está entre las opciones');
+    return opciones.isEmpty ? null : opciones.first.etiqueta;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sel = _seleccionada;
+    final alCambiar = this.alCambiar;
+    return _CampoSelectorCerrado(
+      etiqueta: etiqueta,
+      pista: pista,
+      icono: icono,
+      textoSeleccion: _textoSeleccion,
+      iconoSeleccion: sel?.icono,
+      colorIconoSeleccion: sel?.colorIcono,
+      errorText: null,
+      habilitado: alCambiar != null,
+      alTocar: alCambiar == null
+          ? null
+          : () async {
+              final eleccion = await _elegirOpcionSelector<T>(
+                context,
+                titulo: tituloPanel ?? etiqueta,
+                valorActual: valor,
+                opciones: opciones,
+              );
+              if (eleccion != null) alCambiar(eleccion.valor);
+            },
+    );
+  }
+}
+
+/// El sabor de formulario de [SelectorIron]: ES un
+/// `FormField<T>` — conserva validación, `onSaved`, marco y
+/// texto de error del contrato que hoy dan los
+/// `DropdownButtonFormField` (los 29 sitios de formulario no
+/// pueden perderlo: diseño DIS-05 §2.2). Comparte campo
+/// cerrado y panel con [SelectorIron], y la misma semántica
+/// de valor: [valorInicial] explícito, null = sin selección,
+/// fuera de la lista = aserción en debug y primera opción en
+/// release, nunca un crash.
+class SelectorIronForm<T> extends FormField<T> {
+  SelectorIronForm({
+    super.key,
+    required T? valorInicial,
+    required List<OpcionSelector<T>> opciones,
+    required ValueChanged<T>? alCambiar,
+    String? etiqueta,
+    String? pista,
+    IconData? icono,
+    String? tituloPanel,
+    bool habilitado = true,
+    FormFieldValidator<T>? validador,
+    FormFieldSetter<T>? alGuardar,
+    super.autovalidateMode,
+  }) : super(
+          initialValue: valorInicial,
+          enabled: habilitado,
+          validator: validador,
+          onSaved: alGuardar,
+          builder: (estado) {
+            final valorActual = estado.value;
+            OpcionSelector<T>? seleccionada;
+            for (final op in opciones) {
+              if (op.valor == valorActual) {
+                seleccionada = op;
+                break;
+              }
+            }
+            String? texto = seleccionada?.etiqueta;
+            if (texto == null && valorActual != null) {
+              assert(false,
+                  'SelectorIronForm: el valor ($valorActual) no está entre las opciones');
+              texto = opciones.isEmpty ? null : opciones.first.etiqueta;
+            }
+            final activo = habilitado && alCambiar != null;
+            return _CampoSelectorCerrado(
+              etiqueta: etiqueta,
+              pista: pista,
+              icono: icono,
+              textoSeleccion: texto,
+              iconoSeleccion: seleccionada?.icono,
+              colorIconoSeleccion: seleccionada?.colorIcono,
+              errorText: estado.errorText,
+              habilitado: activo,
+              alTocar: !activo
+                  ? null
+                  : () async {
+                      final eleccion = await _elegirOpcionSelector<T>(
+                        estado.context,
+                        titulo: tituloPanel ?? etiqueta,
+                        valorActual: valorActual,
+                        opciones: opciones,
+                      );
+                      if (eleccion != null) {
+                        estado.didChange(eleccion.valor);
+                        alCambiar(eleccion.valor);
+                      }
+                    },
+            );
+          },
+        );
 }
 
 /// Sección de un [FormularioIron]: encabezado con icono y
