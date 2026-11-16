@@ -20,6 +20,28 @@ import 'componentes.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
 
+/// SL-2 G03-12: etiquetas de las acciones de auditoría de
+/// acceso CONOCIDAS. Una clave nueva del servidor (la que
+/// añada mañana) NO se pinta cruda: [etiquetaAccionAcceso]
+/// cae a «Acción registrada».
+const Map<String, String> kEtiquetasAccionAcceso = {
+  'resetear_pin': 'PIN reseteado',
+  'bloquear': 'Bloqueo',
+  'desbloquear': 'Desbloqueo',
+  'revocar': 'Acceso revocado',
+  'reactivar': 'Acceso reactivado',
+  'forzar_cambio_pin': 'Cambio de PIN forzado',
+  'cerrar_sesion': 'Sesión cerrada',
+  'cambiar_telefono': 'Teléfono cambiado',
+  'generar_acceso': 'Acceso generado',
+  'auto_activacion': 'Auto-activación del cliente',
+};
+
+/// SL-2 G03-12: traductor de la clave de acción de la
+/// auditoría de acceso, con rama por defecto genérica.
+String etiquetaAccionAcceso(Object? accion) =>
+    kEtiquetasAccionAcceso['$accion'] ?? 'Acción registrada';
+
 class FichaAccesoScreen extends StatefulWidget {
   final int clienteId;
   const FichaAccesoScreen({super.key, required this.clienteId});
@@ -533,18 +555,6 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
   }
 
   Widget _seccionAuditoria() {
-    const nombres = {
-      'resetear_pin': 'PIN reseteado',
-      'bloquear': 'Bloqueo',
-      'desbloquear': 'Desbloqueo',
-      'revocar': 'Acceso revocado',
-      'reactivar': 'Acceso reactivado',
-      'forzar_cambio_pin': 'Cambio de PIN forzado',
-      'cerrar_sesion': 'Sesión cerrada',
-      'cambiar_telefono': 'Teléfono cambiado',
-      'generar_acceso': 'Acceso generado',
-      'auto_activacion': 'Auto-activación del cliente',
-    };
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppEspacio.lg),
@@ -562,8 +572,8 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.history_rounded, size: 18),
-                title: Text(nombres['${(u as Map)['accion']}'] ??
-                    '${u['accion']}'),
+                title: Text(
+                    etiquetaAccionAcceso((u as Map)['accion'])),
                 subtitle: Text(
                   '${u['actor'] ?? 'sistema'} · ${_fmtFecha(u['creado_en'])}',
                   style: AppTexto.secundario,
