@@ -93,6 +93,13 @@ class _BuscarScreenState extends State<BuscarScreen>
   // en vez de gritar «sin bajar cambios» a secas.
   DateTime? _ultimoPullParcial;
   bool _bajadaCortadaPorPresupuesto = false;
+  // SL-X2 (G02-2): la última corrida de sync dejó un error
+  // VIGENTE (posterior a la última bajada buena, o sin
+  // ninguna bajada buena): el espejo vacío de este teléfono
+  // no prueba que no haya clientes — puede ser una sync
+  // fallida, y el vacío no debe invitar a inscribir
+  // duplicados.
+  bool _syncFalloVigente = false;
   String _swipeDer = 'cobrar';
   String _swipeIzq = 'ninguna';
   // B1 (estéticas 1.19): aviso único del gesto deslizar.
@@ -240,6 +247,13 @@ class _BuscarScreenState extends State<BuscarScreen>
             errCodigo == 'presupuesto_agotado' &&
                 errEn != null &&
                 (real == null || errEn.isAfter(real));
+        // SL-X2 (G02-2): cualquier error de corrida vigente
+        // (no solo el de presupuesto) marca la lista como no
+        // verificada a efectos del estado vacío.
+        _syncFalloVigente = errCodigo != null &&
+            errCodigo.isNotEmpty &&
+            errEn != null &&
+            (real == null || errEn.isAfter(real));
       });
     } catch (_) {}
   }
@@ -515,9 +529,36 @@ class _BuscarScreenState extends State<BuscarScreen>
   /// antes todo vacío culpaba a la búsqueda («prueba con
   /// otro nombre») aunque lo causara un filtro o un espejo
   /// aún sin clientes, y no ofrecía salida.
+  /// SL-X2 (G02-2): la lista no está verificada si nunca
+  /// bajó una sync completa o si la última corrida dejó un
+  /// error vigente: el espejo vacío puede ser una sync
+  /// fallida, no un gym sin clientes.
+  bool get _sinVerificar => _ultimoPull == null || _syncFalloVigente;
+
   Widget _vacioBuscar() {
     final totalEspejo = _conteos['todos'] ?? 0;
     final conFiltros = _filtro != 'todos' || _rangoEdad != 'todas';
+    if (_busco &&
+        totalEspejo == 0 &&
+        !conFiltros &&
+        _q.text.trim().isEmpty &&
+        _sinVerificar) {
+      // SL-X2 (G02-2): sin verificar NO se invita a
+      // inscribir (duplicaría clientes que sí existen en
+      // el servidor): se dice la verdad y la salida es
+      // reintentar la verificación.
+      return EstadoVacio(
+        icono: Icons.cloud_off_rounded,
+        titulo: 'Lista sin verificar',
+        subtitulo:
+            'Este teléfono aún no ha podido bajar la lista del servidor: puede haber clientes que aquí no se ven. Revisa la conexión y reinténtalo antes de inscribir a nadie.',
+        textoAccion: 'Reintentar',
+        onAccion: () {
+          unawaited(_refrescarSello());
+          _buscar();
+        },
+      );
+    }
     if (_busco &&
         totalEspejo == 0 &&
         !conFiltros &&
