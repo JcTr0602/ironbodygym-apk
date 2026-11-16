@@ -3915,7 +3915,17 @@ class SyncEngine {
       var pullVerificado = false;
       try {
         bajados = await _doPull(silencioso: true);
-        pullVerificado = !_sinSesionEnCorrida;
+        // G#39 (Hy4): «verificado» exige el server_seq
+        // confirmado EN ESTA corrida, el mismo estándar
+        // positivo de run()/cicloCompleto — un pull que
+        // vuelve sin confirmar el cursor (p. ej. la
+        // lectura de sync_estado vacía) no se da por
+        // verificado aunque no haya lanzado ni falte
+        // sesión: la subida confirma las ops, pero la
+        // bajada no puede anunciarse como confirmada.
+        pullVerificado = !_sinSesionEnCorrida &&
+            _serverSeqConfirmadoEnCorrida != null &&
+            _serverSeqConfirmadoEnCorrida! > 0;
       } catch (e) {
         AppLog.error('sync', 'push_pull_silencioso_fallo', d: '$e');
         try {
@@ -3956,7 +3966,10 @@ class SyncEngine {
         await _subirFotosIncidenciasConGuarda();
       }
       // v1.5.0 (Bloque G): push exitoso → gancho de fin de sync.
-      if (_ultimoPushLimpio) _avisarSyncExitoso();
+      // G#39: el gancho (conversiones y republicación en
+      // main vía _trasSyncExitosa) tampoco suena sin la
+      // bajada verificada con el cursor confirmado.
+      if (_ultimoPushLimpio && pullVerificado) _avisarSyncExitoso();
       // 1.32 (O2F2S, M1): veredicto de la corrida de push —
       // con la sesión muerta el pull silencioso no pudo
       // confirmar nada: la corrida queda parcial con su
@@ -3967,9 +3980,16 @@ class SyncEngine {
             bajados: bajados,
             motivo: mensajeSesionInvalida,
             error: mensajeSesionInvalida);
-      } else if (_ultimoPushLimpio) {
+      } else if (_ultimoPushLimpio && pullVerificado) {
         _diarioVeredicto(EstadoCorrida.completa,
             subidos: subidos, bajados: bajados);
+      } else if (_ultimoPushLimpio) {
+        // G#39: subida limpia pero bajada sin confirmar
+        // el cursor: la corrida es parcial, no completa.
+        _diarioVeredicto(EstadoCorrida.parcial,
+            subidos: subidos,
+            bajados: bajados,
+            motivo: 'La bajada no confirmó el cursor del servidor');
       } else {
         _diarioVeredicto(
             subidos == 0 && bajados == 0
