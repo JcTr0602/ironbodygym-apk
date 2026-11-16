@@ -779,6 +779,12 @@ class _IconoSyncCabeceraState extends State<IconoSyncCabecera>
   ]).animate(_pulso);
   late final AnimationController _giro = AnimationController(
     vsync: this,
+    // 1.35 (UI-13): período del giro en bucle, no una
+    // transición: fuera de los tokens a propósito. Es el
+    // SEGUNDO giro con este período (el primero es el del
+    // banner, arriba en este archivo) y el sexto literal
+    // superviviente del contrato — documentado aquí y en
+    // su test en la corrección de la reconciliación.
     duration: const Duration(seconds: 2),
   );
   StreamSubscription<SyncStatus>? _sub;
