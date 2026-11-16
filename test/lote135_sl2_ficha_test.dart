@@ -8,6 +8,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:ironbody_gym/ui/ficha.dart' show etiquetaSexoFicha, etiquetaMetodoPagoFicha;
 import 'package:ironbody_gym/ui/medidas_cliente.dart';
 import 'package:ironbody_gym/ui/auditoria_persona.dart' show fechaLegibleAuditoria;
@@ -20,6 +22,14 @@ import 'package:ironbody_gym/ui/ficha_acceso_app.dart';
 String _src(String p) => File(p).readAsStringSync();
 
 void main() {
+  // Arnés mínimo de la casa (patrón argon_125_126): los
+  // widgets de la ficha consultan AuthService, que exige
+  // Supabase inicializado aunque no haya sesión.
+  setUpAll(() async {
+    SharedPreferences.setMockInitialValues({});
+    await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'dummy');
+  });
+
   group('G03-4 sexo traducido', () {
     test('M → Masculino, F → Femenino, nunca la clave cruda', () {
       expect(etiquetaSexoFicha('M'), 'Masculino');
