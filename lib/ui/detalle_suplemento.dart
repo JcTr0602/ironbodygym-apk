@@ -972,20 +972,33 @@ class DetalleSuplementoScreen extends StatelessWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(AppEspacio.lg),
+        // 1.35 (UX-13): sin padding global — la portada
+        // va a todo ancho; el resto recupera su margen
+        // en la columna acolchada tras ella.
+        padding: EdgeInsets.zero,
         children: [
-          const SyncBanner(compact: true),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.lg, AppEspacio.lg, 0),
+            child: SyncBanner(compact: true),
+          ),
           const SizedBox(height: AppEspacio.md),
           // Foto grande.
           // v1.3.3: foto local recién tomada (offline) tiene prioridad
           // sobre la remota (aún no subida o sin descargar).
+          // 1.35 (UX-13): la foto abre como PORTADA a todo
+          // ancho (300 de alto, sin radio): el vuelo del
+          // Hero aterriza en ella y el velo del pie lleva
+          // el nombre y el precio. Sin foto propia, el
+          // marcador genérico recibe el mismo escenario.
+          Stack(
+            children: [
           if (archivoLocal != null)
             Hero(
               tag: tagHeroSuplemento(suplemento['id']),
               flightShuttleBuilder: shuttleHeroFoto,
               child: ClipRRect(
-              borderRadius:
-                  BorderRadius.circular(AppRadio.lg),
+              borderRadius: BorderRadius.zero,
               // 1.25 T120 (F4-06): la foto del escaparate crece
               // (200 → 264) y se amplía al toque.
               child: GestureDetector(
@@ -994,14 +1007,14 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   image: providerFotoAcotada(
                       FileImage(archivoLocal),
                       ancho: 1080),
-                  height: 264,
+                  height: 300,
                   width: double.infinity,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) =>
                       // 1.35 (UI-14): placeholder compartido.
                       const PlaceholderSuplemento(
-                    alto: 264,
-                    radio: AppRadio.lg,
+                    alto: 300,
+                    radio: 0,
                     tamanoIcono: 72,
                   )),
                 ),
@@ -1025,20 +1038,19 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   if (f == null) {
                     // 1.35 (UI-14): placeholder compartido.
                     return const PlaceholderSuplemento(
-                      alto: 264,
-                      radio: AppRadio.lg,
+                      alto: 300,
+                      radio: 0,
                       tamanoIcono: 72,
                     );
                   }
                   return ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(AppRadio.lg),
+                    borderRadius: BorderRadius.zero,
                     child: GestureDetector(
                       onTap: () => _verFotoGrande(context, f),
                       child: Image(
                           image: providerFotoAcotada(FileImage(f),
                               ancho: 1080),
-                          height: 264,
+                          height: 300,
                           width: double.infinity,
                           fit: BoxFit.cover),
                     ),
@@ -1046,6 +1058,69 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 },
               ),
             ),
+              // El velo de la portada: nombre y precio
+              // compuestos sobre la foto (sin bloquear el
+              // toque de ampliarla).
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          AppColores.grafitoTactico
+                              .withValues(alpha: 0),
+                          AppColores.grafitoTactico
+                              .withValues(alpha: 0.9),
+                        ],
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          AppEspacio.lg,
+                          AppEspacio.xl,
+                          AppEspacio.lg,
+                          AppEspacio.md),
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          Text(nombre,
+                              style: AppTexto.titulo.copyWith(
+                                  color: AppColores
+                                      .textoSobreOscuro),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 2),
+                          Text(
+                              '${precio.toStringAsFixed(2)} $monedaSup',
+                              style: AppTexto.displayPequeno
+                                  .copyWith(
+                                      color: AppColores
+                                          .textoSobreOscuro)),
+                          if (cup != null)
+                            Text(cup,
+                                style: AppTexto.cuerpo.copyWith(
+                                    color: AppColores.naranja,
+                                    fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           // Rediseño 1.20: foto_local presente = foto nueva
           // aún no confirmada por el servidor (el pull la
           // limpia); se avisa sin bloquear nada.
@@ -1056,18 +1131,16 @@ class DetalleSuplementoScreen extends StatelessWidget {
                 significado: SignificadoChip.alerta),
           ],
           const SizedBox(height: AppEspacio.md),
-          Row(
-            children: [
-              Expanded(
-                child: Text(nombre,
-                    style: AppTexto.titulo),
-              ),
-              if (inactivo)
-                const ChipEstado.semantico(
-                    texto: 'Inactivo',
-                    significado: SignificadoChip.neutral),
-            ],
-          ),
+          // 1.35 (UX-13): el nombre vive en el velo de
+          // la portada; de esta fila solo queda el chip
+          // de inactivo, en su sitio de siempre.
+          if (inactivo)
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: ChipEstado.semantico(
+                  texto: 'Inactivo',
+                  significado: SignificadoChip.neutral),
+            ),
           const SizedBox(height: AppEspacio.xs),
           ChipEstado(
               texto: categoriaNombre,
@@ -1081,12 +1154,14 @@ class DetalleSuplementoScreen extends StatelessWidget {
             Text('Presentación: $presentacion', style: AppTexto.cuerpo),
           ],
           const SizedBox(height: AppEspacio.md),
-          // Precio (moneda del suplemento) + equivalente CUP
-          // si es USD + stock.
+          // 1.35 (UX-13): cuánto queda — el precio y su
+          // equivalente CUP viven en el velo de la
+          // portada; esta tarjeta queda para el stock,
+          // que es lo primero del «resto».
           Tarjeta(
             child: Row(
               children: [
-                Icon(Icons.payments_rounded,
+                Icon(Icons.inventory_2_rounded,
                     color: AppColores.textoSecundario(context), size: 32),
                 const SizedBox(width: AppEspacio.md),
                 Expanded(
@@ -1094,15 +1169,11 @@ class DetalleSuplementoScreen extends StatelessWidget {
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     children: [
-                      Text(
-                          '${precio.toStringAsFixed(2)} $monedaSup',
-                          style: AppTexto.displayPequeno),
-                      if (cup != null)
-                        Text(cup,
-                            style: AppTexto.cuerpo.copyWith(
-                                color: AppColores.naranja,
-                                fontWeight:
-                                    FontWeight.bold)),
+                      Text('Cuánto queda',
+                          style: AppTexto.metadato.copyWith(
+                              color: AppColores.textoSecundario(
+                                  context))),
+                      const SizedBox(height: 4),
                       ChipEstado.semantico(
                         texto: textoEstadoStock(suplemento),
                         significado:
@@ -1201,6 +1272,9 @@ class DetalleSuplementoScreen extends StatelessWidget {
           _MovimientosStock(
               suplementoId:
                   (suplemento['id'] as num?)?.toInt() ?? 0),
+              ],
+            ),
+          ),
         ],
       ),
       // Rediseño 1.20: barra de venta FIJA — la acción
