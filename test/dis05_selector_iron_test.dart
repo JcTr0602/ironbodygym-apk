@@ -58,8 +58,9 @@ class _ArnesState extends State<_Arnes> {
               etiqueta: 'Nivel',
               alCambiar: (v) {
                 llamadas++;
-                widget.alCambiarExtra?.call(v);
-                setState(() => _valor = v);
+                final nv = v!;
+                widget.alCambiarExtra?.call(nv);
+                setState(() => _valor = nv);
               },
             ),
             const SizedBox(height: 8),

@@ -1416,6 +1416,7 @@ InputDecoration _decoracionCampo(
   String? etiqueta,
   String? hint,
   String? errorText,
+  String? ayuda,
   IconData? icono,
   String? prefixText,
   String? suffixText,
@@ -1425,6 +1426,7 @@ InputDecoration _decoracionCampo(
     labelText: etiqueta,
     hintText: hint,
     errorText: errorText,
+    helperText: ayuda,
     prefixIcon: icono != null ? Icon(icono) : null,
     prefixText: prefixText,
     suffixText: suffixText,
@@ -1942,6 +1944,7 @@ Future<_EleccionSelector<T>?> _elegirOpcionSelector<T>(
 class _CampoSelectorCerrado extends StatefulWidget {
   final String? etiqueta;
   final String? pista;
+  final String? textoAyuda;
   final IconData? icono;
   final String? textoSeleccion;
   final IconData? iconoSeleccion;
@@ -1953,6 +1956,7 @@ class _CampoSelectorCerrado extends StatefulWidget {
   const _CampoSelectorCerrado({
     required this.etiqueta,
     required this.pista,
+    required this.textoAyuda,
     required this.icono,
     required this.textoSeleccion,
     required this.iconoSeleccion,
@@ -2006,6 +2010,7 @@ class _CampoSelectorCerradoState
       etiqueta: widget.etiqueta,
       hint: widget.pista,
       errorText: widget.errorText,
+      ayuda: widget.textoAyuda,
       icono: widget.icono,
       suffixIcon: Icon(Icons.expand_more_rounded,
           color: AppColores.textoSecundario(context)),
@@ -2067,9 +2072,13 @@ class _CampoSelectorCerradoState
 class SelectorIron<T> extends StatelessWidget {
   final T valor;
   final List<OpcionSelector<T>> opciones;
-  final ValueChanged<T>? alCambiar;
+  // Como en el SDK (`DropdownButton.onChanged`), el valor
+  // entregado es T?: el contrato de llamada no cambia en
+  // ningún sitio migrado (sus `??` de guarda siguen vivos).
+  final ValueChanged<T?>? alCambiar;
   final String? etiqueta;
   final String? pista;
+  final String? textoAyuda;
   final IconData? icono;
   final String? tituloPanel;
 
@@ -2080,6 +2089,7 @@ class SelectorIron<T> extends StatelessWidget {
     required this.alCambiar,
     this.etiqueta,
     this.pista,
+    this.textoAyuda,
     this.icono,
     this.tituloPanel,
   });
@@ -2107,6 +2117,7 @@ class SelectorIron<T> extends StatelessWidget {
     return _CampoSelectorCerrado(
       etiqueta: etiqueta,
       pista: pista,
+      textoAyuda: textoAyuda,
       icono: icono,
       textoSeleccion: _textoSeleccion,
       iconoSeleccion: sel?.icono,
@@ -2138,13 +2149,20 @@ class SelectorIron<T> extends StatelessWidget {
 /// fuera de la lista = aserción en debug y primera opción en
 /// release, nunca un crash.
 class SelectorIronForm<T> extends FormField<T> {
+  /// El valor que manda el padre en ESTA construcción. Se
+  /// guarda como campo (además de pasar a `initialValue`)
+  /// porque el estado lo compara entre construcciones: ver
+  /// [_SelectorIronFormState.didUpdateWidget].
+  final T? valorInicial;
+
   SelectorIronForm({
     super.key,
-    required T? valorInicial,
+    required this.valorInicial,
     required List<OpcionSelector<T>> opciones,
-    required ValueChanged<T>? alCambiar,
+    required ValueChanged<T?>? alCambiar,
     String? etiqueta,
     String? pista,
+    String? textoAyuda,
     IconData? icono,
     String? tituloPanel,
     bool habilitado = true,
@@ -2175,6 +2193,7 @@ class SelectorIronForm<T> extends FormField<T> {
             return _CampoSelectorCerrado(
               etiqueta: etiqueta,
               pista: pista,
+              textoAyuda: textoAyuda,
               icono: icono,
               textoSeleccion: texto,
               iconoSeleccion: seleccionada?.icono,
@@ -2198,6 +2217,34 @@ class SelectorIronForm<T> extends FormField<T> {
             );
           },
         );
+
+  @override
+  FormFieldState<T> createState() => _SelectorIronFormState<T>();
+}
+
+/// Estado de [SelectorIronForm]: reproduce la semántica viva
+/// del `DropdownButtonFormField` del SDK — cuando el padre
+/// reconstruye con otro [SelectorIronForm.valorInicial] (p.
+/// ej. la lista de opciones termina de cargar y el valor
+/// preseleccionado pasa de null al valor real: el campo
+/// Equipo de la Guía al abrir una ficha), el campo SIGUE al
+/// nuevo valor en vez de quedarse con el inicial de la
+/// primera construcción. Sin esto, ese campo nacía vacío y
+/// se quedaba vacío (contraste medido contra la base
+/// `b9ae47a`: con el widget del SDK enseña el valor en cuanto
+/// la lista llega).
+class _SelectorIronFormState<T> extends FormFieldState<T> {
+  @override
+  SelectorIronForm<T> get widget =>
+      super.widget as SelectorIronForm<T>;
+
+  @override
+  void didUpdateWidget(SelectorIronForm<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.valorInicial != widget.valorInicial) {
+      setValue(widget.valorInicial);
+    }
+  }
 }
 
 /// Sección de un [FormularioIron]: encabezado con icono y
