@@ -29,7 +29,6 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:sqflite/sqflite.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import 'acceso_bloqueo.dart';
@@ -1682,23 +1681,25 @@ class SyncEngine {
   /// original: un fallo de red nunca expulsa al login.
   Future<http.Response> _reqAuth(
       Future<http.Response> Function(String token) hacer) async {
-    var r = await hacer(_auth.session?.accessToken ?? '');
+    final tokenInicial = _auth.session?.accessToken ?? '';
+    var r = await hacer(tokenInicial);
     if (r.statusCode != 401) return r;
-    String nuevo;
-    try {
-      // Yunque 1.34 (C3-1): timeout — era la ÚNICA llamada de
-      // red del motor sin él; un refresco colgado (red hostil
-      // que acepta y no responde) dejaba la corrida pegada
-      // para siempre con el candado renovándose. El catch de
-      // abajo ya devuelve la respuesta original ante el fallo.
-      final res = await Supabase.instance.client.auth
-          .refreshSession()
-          .timeout(const Duration(seconds: 20));
-      nuevo = res.session?.accessToken ?? '';
-    } catch (_) {
-      return r; // sin red para refrescar: no es vencimiento real
+    // 1.35 (campo 1.34 nº 7): el refresco va por el pipeline
+    // de sesión (AuthService.tokenTras401): serializado,
+    // adopción de la persistida primero y sin re-presentar
+    // a ciegas el mismo token tras un corte (C3-1
+    // endurecido; el timeout de 20 s vive ahora en el
+    // pipeline). Y en un isolate de fondo el pipeline NUNCA
+    // refresca: devuelve null y aquí se conserva la
+    // respuesta original — la corrida se difiere, como ante
+    // un refresco sin red. Antes este método llamaba a
+    // refreshSession() directamente y un isolate de fondo
+    // podía ROTAR el token compartido a espaldas del
+    // principal: la guerra de rotación del campo nº 7.
+    final nuevo = await _auth.tokenTras401(tokenInicial);
+    if (nuevo == null || nuevo.isEmpty) {
+      return r; // sin refresco posible: no es vencimiento real
     }
-    if (nuevo.isEmpty) return r;
     // Yunque 2.34 (A-2): el REINTENTO va FUERA del try. Dentro,
     // su propio timeout caía en el catch y se devolvía el 401
     // original disfrazado: un corte de transporte se leía como
@@ -7074,26 +7075,34 @@ class SyncEngine {
     final ses = _auth.session;
     if (ses == null) return false;
     if (!ses.isExpired) return true;
-    try {
-      // Yunque 1.34 (C3-1): timeout como en _reqAuth — el
-      // TimeoutException cae en el catch genérico y queda
-      // marcado como transporte, jamás como sesión muerta.
-      final res = await Supabase.instance.client.auth
-          .refreshSession()
-          .timeout(const Duration(seconds: 20));
-      // El servidor respondió: si concedió sesión, el token
-      // vale (su juicio manda sobre el reloj del teléfono).
-      return res.session != null;
-    } on AuthApiException {
-      // El servidor de auth RECHAZÓ el refresco: sesión
-      // muerta de verdad (refresh rotado/revocado).
-      return false;
-    } catch (_) {
-      // Sin respuesta: no hay confirmación posible, pero
-      // tampoco hay rechazo — queda marcado como transporte
-      // para que la guarda no lo vista de sesión muerta.
-      _jwtFalloFueTransporte = true;
-      return false;
+    // 1.35 (campo 1.34 nº 7): el refresco va por el pipeline
+    // de sesión (AuthService.asegurarSesion): serializado,
+    // adopción de la persistida primero y sin re-presentar
+    // a ciegas tras un corte (C3-1 endurecido; el timeout
+    // de 20 s vive en el pipeline). El desenlace juzga la
+    // RESPUESTA DEL SERVIDOR, no el reloj del teléfono: si
+    // concedió sesión, el token vale. Y en un isolate de
+    // fondo el pipeline no refresca jamás: su «diferida» se
+    // clasifica como transporte (la bajada se difiere; la
+    // sesión no se toca).
+    final r = await _auth.asegurarSesion();
+    switch (r) {
+      case ResultadoRefresco.vigente:
+      case ResultadoRefresco.renovada:
+        return true;
+      case ResultadoRefresco.rechazada:
+        // El servidor de auth RECHAZÓ el refresco: sesión
+        // muerta de verdad (refresh rotado/revocado).
+        return false;
+      case ResultadoRefresco.transporte:
+      case ResultadoRefresco.diferida:
+      case ResultadoRefresco.sinSesion:
+        // Sin respuesta: no hay confirmación posible, pero
+        // tampoco hay rechazo — queda marcado como
+        // transporte para que la guarda no lo vista de
+        // sesión muerta.
+        _jwtFalloFueTransporte = true;
+        return false;
     }
   }
 

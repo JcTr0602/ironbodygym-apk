@@ -94,6 +94,12 @@ Future<void> _trasSyncExitosa() async {
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     try {
+      // 1.35 (campo 1.34 nº 7): este isolate es de FONDO y
+      // no es dueño del refresco — el pipeline de sesión
+      // (AuthService) solo constatará la sesión persistida
+      // y diferirá la tarea si venció, sin rotar jamás el
+      // token compartido a espaldas del principal.
+      AuthService.esIsolateDeFondo = true;
       WidgetsFlutterBinding.ensureInitialized();
       // AP-5 (forma condicionada de F-5): con la sesión
       // persistida caducada, este isolate NO inicializa ni
@@ -364,27 +370,48 @@ class _IronBodyAppState extends State<IronBodyApp>
         unawaited(programarOneOffSyncSiPendientes());
       }
     } else if (state == AppLifecycleState.resumed) {
-      // 1.32 (O2F2S, AP-5): antes de rearmar nada, adoptar
-      // la sesión persistida si un isolate de fondo la
-      // refrescó y rotó el token (ver
-      // AuthService.releerSesionPersistida).
-      unawaited(AuthService().releerSesionPersistida());
-      _iniciarTimers();
-      // v1.5.0 (Bloque G): al volver a primer plano se verifican
-      // las conversiones pendientes aunque el ciclo de sync aún
-      // no haya corrido (barato: sin conversiones en curso no
-      // toca la red).
-      if (_auth.loggedIn) {
-        unawaited(_verificarConversionesInvitados());
-        // 1.23 (pieza que faltaba, sello de Argón): push
-        // INMEDIATO al volver si hay reclamables — antes solo
-        // se rearmaban los timers y lo pendiente podía esperar
-        // hasta 60 min con la app abierta.
-        unawaited(_pushSiReclamablesAlVolver());
-        // 1.23: el aviso de pendientes que el cortacircuitos
-        // del FGS hubiera dejado marcado se muestra ahora.
-        unawaited(AvisoPendientesSync.mostrarSiPendiente());
-      }
+      unawaited(_alVolverPrimerPlano());
+    }
+  }
+
+  /// 1.35 (campo 1.34 nº 7): vuelta a primer plano
+  /// SERIALIZADA. La 1.32 (AP-5) ya adoptaba la sesión
+  /// persistida al volver, pero la disparaba `unawaited` y
+  /// rearmaba timers y pushes en el mismo gesto: un
+  /// refresco del motor podía presentar el refresh token
+  /// viejo de memoria antes de que la adopción lo
+  /// corrigiera — la carrera que el diagnóstico del campo
+  /// nº 7 dejó señalada. Ahora el orden es garantizado
+  /// para todo el código propio: PRIMERO el pipeline de
+  /// sesión (adoptar la persistida si trae otro token y
+  /// refrescar si venció) y SOLO DESPUÉS timers,
+  /// verificaciones y push. El pipeline nunca lanza; la
+  /// cota de 25 s es por la red hostil: vencida, se rearman
+  /// los timers igual y el pipeline sigue su curso
+  /// serializado detrás (ninguna pasada posterior se le
+  /// adelanta).
+  Future<void> _alVolverPrimerPlano() async {
+    try {
+      await AuthService()
+          .asegurarSesion()
+          .timeout(const Duration(seconds: 25));
+    } catch (_) {}
+    if (!mounted) return;
+    _iniciarTimers();
+    // v1.5.0 (Bloque G): al volver a primer plano se verifican
+    // las conversiones pendientes aunque el ciclo de sync aún
+    // no haya corrido (barato: sin conversiones en curso no
+    // toca la red).
+    if (_auth.loggedIn) {
+      unawaited(_verificarConversionesInvitados());
+      // 1.23 (pieza que faltaba, sello de Argón): push
+      // INMEDIATO al volver si hay reclamables — antes solo
+      // se rearmaban los timers y lo pendiente podía esperar
+      // hasta 60 min con la app abierta.
+      unawaited(_pushSiReclamablesAlVolver());
+      // 1.23: el aviso de pendientes que el cortacircuitos
+      // del FGS hubiera dejado marcado se muestra ahora.
+      unawaited(AvisoPendientesSync.mostrarSiPendiente());
     }
   }
 
