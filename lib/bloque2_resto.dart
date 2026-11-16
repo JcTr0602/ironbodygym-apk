@@ -61,6 +61,8 @@ import 'negocio.dart'
         totalVentaCup;
 import 'invitados.dart' as invitados_svc;
 import 'sync.dart' show SyncEngine;
+import 'tipos_pago.dart'
+    show blobTiposConPrecioMenores, montoAjusteTolerante;
 import 'tiempo.dart';
 
 // ---------------------------------------------------------------------------
@@ -720,6 +722,80 @@ void validarCambiosConfigFinitos(Map<String, dynamic> cambios) {
   }
 }
 
+/// SL-X1 (ficha B): correspondencia entre las claves planas
+/// de precio de C6 y el tipo del blob `tipos_pago` que las
+/// respalda. Las demás claves de [kClavesPreciosC6]
+/// (transferencia, pago_diario, precio_app_plus, tasa_usd) no
+/// tienen tipo en el blob: su única fuente es la clave plana.
+const kTipoBlobPorClavePrecio = <String, String>{
+  'mensualidad': 'mensual',
+  'mensualidad_menores': 'menores',
+  'pago_semanal': 'semanal',
+  'pago_quincenal': 'quincenal',
+};
+
+/// SL-X1 (ficha B), PURO: el blob `tipos_pago` resultante de
+/// aplicar [cambios] sobre los ajustes YA fusionados
+/// [nuevos], o null si ningún cambio toca un precio con tipo
+/// en el blob. Es el patrón A5-D2 (el del Panel,
+/// aplicarCambiosMontos) llevado a esta vía: la clave plana
+/// y el blob se mueven juntos o el cobro —que lee el blob
+/// primero (precioMenoresDesdeAjustes)— sigue cobrando el
+/// precio viejo mientras la pantalla enseña el nuevo.
+/// - Para 'menores' se reutiliza [blobTiposConPrecioMenores]
+///   (materializa el blob por defecto si no lo hay e inserta
+///   el tipo tras 'mensual' si falta).
+/// - Para los demás tipos: si el blob no existe, se
+///   materializa primero el por defecto (vía el helper de
+///   menores con su precio vigente) y después se fijan los
+///   montos pedidos; si el tipo falta en un blob existente,
+///   se inserta con su nombre y duración canónicos.
+List<Map<String, dynamic>>? blobTiposTrasCambiosPrecios(
+    Map<String, dynamic> nuevos, Map<String, dynamic> cambios) {
+  final pedidos = <String, double>{};
+  for (final e in kTipoBlobPorClavePrecio.entries) {
+    if (!cambios.containsKey(e.key)) continue;
+    final monto = montoAjusteTolerante(cambios[e.key]);
+    if (monto != null && monto > 0) pedidos[e.value] = monto;
+  }
+  if (pedidos.isEmpty) return null;
+  // Base: el blob vigente o el materializado por defecto.
+  var lista = blobTiposConPrecioMenores(
+      nuevos, montoAjusteTolerante(nuevos['mensualidad_menores']) ?? 1500);
+  const canon = <String, ({String nombre, int dias, bool soloMenores})>{
+    'mensual': (nombre: 'Mensualidad', dias: 30, soloMenores: false),
+    'menores': (
+      nombre: 'Mensualidad menores',
+      dias: 30,
+      soloMenores: true
+    ),
+    'semanal': (nombre: 'Semana', dias: 7, soloMenores: false),
+    'quincenal': (nombre: 'Quincena', dias: 15, soloMenores: false),
+  };
+  for (final e in pedidos.entries) {
+    final i = lista.indexWhere((t) => '${t['id']}' == e.key);
+    if (i >= 0) {
+      lista[i]['monto'] = e.value;
+    } else {
+      final c = canon[e.key]!;
+      final fila = <String, dynamic>{
+        'id': e.key,
+        'nombre': c.nombre,
+        'monto': e.value,
+        'dias': c.dias,
+        'activo': true,
+        if (c.soloMenores) 'solo_menores': true,
+      };
+      final iMensual =
+          lista.indexWhere((t) => '${t['id']}' == 'mensual');
+      lista.insert(
+          e.key == 'menores' && iMensual >= 0 ? iMensual + 1 : lista.length,
+          fila);
+    }
+  }
+  return lista;
+}
+
 /// Guarda un mapa de precios/ajustes en la meta local y encola la op
 /// `actualizar_config_gym` para que el cambio baje a los teléfonos de
 /// los entrenadores. Solo el dueño. [cambios] se fusiona con lo
@@ -734,6 +810,19 @@ Future<void> guardarConfigGym(Map<String, dynamic> cambios) async {
   final db = LocalDb.instance;
   final actuales = await db.getAjustes();
   final nuevos = {...actuales, ...cambios};
+  // SL-X1 (ficha B, patrón A5-D2): si el cambio toca un
+  // precio con tipo en el blob `tipos_pago`, el blob se
+  // actualiza EN LA MISMA operación — espejo local y clave
+  // 'tipos_pago' dentro del mismo payload `config` — porque
+  // el cobro lee el blob primero: guardar solo la clave
+  // plana dejaba la pantalla enseñando el precio nuevo y el
+  // cobro aplicando el viejo (divergencia probada por SL-9).
+  final blob = blobTiposTrasCambiosPrecios(nuevos, cambios);
+  final cambiosEfectivos = {...cambios};
+  if (blob != null) {
+    nuevos['tipos_pago'] = blob;
+    cambiosEfectivos['tipos_pago'] = blob;
+  }
   // Atómico (misma auditoría): ajustes locales + op en UNA
   // transacción; si el proceso muere entre ambos, no queda ni
   // precio local sin op ni op sin precio local.
@@ -744,7 +833,7 @@ Future<void> guardarConfigGym(Map<String, dynamic> cambios) async {
       opUuid: const Uuid().v4(),
       tipo: kTipoOpActualizarConfigGym,
       payload: {
-        'config': cambios,
+        'config': cambiosEfectivos,
         'fecha_hora_havana': isoHabana(ahoraHabana()),
         'autor_dueno_id': AuthService().telegramId,
       },
