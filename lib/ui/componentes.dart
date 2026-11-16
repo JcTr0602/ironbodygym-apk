@@ -1005,8 +1005,10 @@ class DialogoApp extends StatelessWidget {
 /// 'conservar' o null si se cancela. Ambos modos son irreversibles
 /// y el diálogo lo dice; cada modo trae su explicación de una
 /// línea. [avisoFiado] (si el cliente debe un fiado) se muestra
-/// junto a la opción de conservar: al conservar, la deuda se da
-/// por incobrable (candado 3 de Argón).
+/// SIEMPRE, con cualquier modo elegido (SL-X1 · A2, letra de
+/// P11: la confirmación informada va siempre que haya fiados;
+/// al conservar, la deuda se da por incobrable — candado 3 de
+/// Argón — y al eliminar todo se pierde con el resto).
 Future<String?> elegirModoEliminacion(
   BuildContext context, {
   required String titulo,
@@ -1070,7 +1072,7 @@ Future<String?> elegirModoEliminacion(
                 'La persona desaparece; sus pagos y ventas quedan '
                     'anónimos y las estadísticas y la nómina no cambian.',
                 setState),
-            if (avisoFiado != null && modo == 'conservar')
+            if (avisoFiado != null)
               Padding(
                 padding: const EdgeInsets.only(left: AppEspacio.xxl, bottom: AppEspacio.xs),
                 child: Text(
