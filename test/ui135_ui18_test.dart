@@ -14,8 +14,16 @@ import 'package:ironbody_gym/ui/cierre_nomina_imagen.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
 
 void main() {
+  // ADJUDICACIÓN (corrección de la reconciliación, §3.5):
+  // este test nació esperando la cabecera con el
+  // gradiente naranja → naranjaOscuro, y UX-07 (posterior
+  // y aprobado) rediseñó la imagen con la plantilla única
+  // «tarjeta Iron Body»: fondo grafitoTactico y cabecera
+  // grafito (pizarra) con la línea de luz naranja al pie.
+  // El código manda; el test se pone al día y fija el
+  // diseño UX-07.
   testWidgets('la imagen del cierre de nómina se pinta '
-      'con el gradiente de marca', (t) async {
+      'con la plantilla única de UX-07', (t) async {
     await t.pumpWidget(const MaterialApp(
       home: Scaffold(
         body: ImagenCierreNomina(
@@ -38,20 +46,31 @@ void main() {
     ));
     await t.pump();
     expect(find.text('Duany'), findsOneWidget);
-    // El contenedor de la cabecera lleva el gradiente.
-    var gradienteOk = false;
+    // El fondo de la imagen es el grafito de la plantilla
+    // y la cabecera es grafito con la línea naranja al pie;
+    // ningún degradado sobrevive (UX-07 lo retiró).
+    var fondoOk = false;
+    var cabeceraOk = false;
     for (final c in t.widgetList<Container>(find.byType(Container))) {
       final d = c.decoration;
-      if (d is BoxDecoration && d.gradient is LinearGradient) {
-        final g = d.gradient as LinearGradient;
-        if (g.colors.contains(AppColores.naranja) &&
-            g.colors.contains(AppColores.naranjaOscuro)) {
-          gradienteOk = true;
+      if (d is BoxDecoration) {
+        expect(d.gradient, isNull,
+            reason: 'UX-07: la imagen no lleva degradado');
+        if (d.color == AppColores.grafitoTactico) fondoOk = true;
+        final borde = d.border;
+        if (d.color == AppColores.pizarra &&
+            borde is Border &&
+            borde.bottom.color == AppColores.naranja &&
+            borde.bottom.width == 2) {
+          cabeceraOk = true;
         }
       }
     }
-    expect(gradienteOk, isTrue,
-        reason: 'la cabecera usa naranja → naranjaOscuro');
+    expect(fondoOk, isTrue,
+        reason: 'el fondo es AppColores.grafitoTactico');
+    expect(cabeceraOk, isTrue,
+        reason: 'la cabecera es pizarra con la línea '
+            'naranja de 2 dp de la plantilla');
   });
 
   test('contrato: sin naranjas viejos en el código', () {
