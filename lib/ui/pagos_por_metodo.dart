@@ -7,6 +7,7 @@ import '../estadisticas_servicios.dart' show esCasaTolerante;
 import '../negocio.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
+import '../errores_sync.dart' show mensajeErrorAmable;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -288,7 +289,9 @@ class _PagosPorMetodoState
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        // SL-5 G07-5: nada crudo a pantalla — el aviso usa
+        // el mensaje amable de la casa, no la excepción.
+        mostrarSnack(context, mensajeErrorAmable(e), significado: SignificadoChip.error);
       }
     }
   }
