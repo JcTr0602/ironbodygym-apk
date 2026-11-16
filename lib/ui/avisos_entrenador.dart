@@ -96,7 +96,12 @@ class _AvisosEntrenadorScreenState
         titulo: titulo,
         mensaje: mensaje,
         modo: datos.modo,
-        activo: true,
+        // G#30 (Hy4): editar NO reactiva — un aviso
+        // inactivo conserva su estado al guardarlo (antes
+        // todo guardado nacía activo: true y un aviso
+        // desactivado volvía a salir en silencio). Solo
+        // un aviso NUEVO nace activo.
+        activo: actual?.activo ?? true,
         vigenteDesde: datos.desde,
         vigenteHasta: datos.hasta,
         destinatarioTelegramId: datos.destinatario,
