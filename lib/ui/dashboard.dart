@@ -1890,9 +1890,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 /// para la barra de Clientes del Dashboard. El «al día» del
 /// conteo de la tarjeta es activos − vencidos (incluye a
 /// los por vencer, y esa cifra NO cambia); el segmento
-/// «al día» de la barra es el resto tras quitar por vencer
-/// y vencidos, como en el mockup aprobado (128 = 96 al
-/// día + 19 por vencer + 13 vencidos). Con las
+/// verde de la barra es el resto tras quitar por vencer
+/// y vencidos, como en el mockup aprobado (128 = 96 +
+/// 19 por vencer + 13 vencidos). Corrección E3 (C6-02):
+/// ese segmento se rotula «Sin vencer», NO «al día» — la
+/// misma pantalla decía «al día» con dos cifras distintas
+/// (115 en la tarjeta, 96 en la leyenda). Con las
 /// acotaciones, los tres segmentos suman SIEMPRE el
 /// total de activos y ninguno sale negativo aunque un
 /// conteo venga desfasado.
@@ -1908,7 +1911,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 /// (1.30 D4 · UI130-11) Barra apilada de tres segmentos
-/// de la tarjeta de Clientes: al día (verde), por vencer
+/// de la tarjeta de Clientes: sin vencer (verde), por vencer
 /// (naranja) y vencidos (rojo), con su leyenda de conteos
 /// debajo. Cada segmento es tocable a su lista, como ya
 /// lo son los conteos de la tarjeta. Con 0 activos,
@@ -1990,7 +1993,7 @@ class BarraClientesSegmentos extends StatelessWidget {
                   children: [
                     if (seg.alDia > 0)
                       _segmento('seg-al-dia', seg.alDia,
-                          AppColores.exito, 'Al día', onAlDia),
+                          AppColores.exito, 'Sin vencer', onAlDia),
                     if (seg.porVencer > 0)
                       _segmento('seg-por-vencer', seg.porVencer,
                           AppColores.naranja, 'Por vencer',
@@ -2008,7 +2011,7 @@ class BarraClientesSegmentos extends StatelessWidget {
           spacing: 12,
           children: [
             _leyenda(context, AppColores.exito,
-                '${seg.alDia} al día'),
+                '${seg.alDia} sin vencer'),
             _leyenda(context, AppColores.naranja,
                 '${seg.porVencer} por vencer'),
             _leyenda(context, AppColores.error,
