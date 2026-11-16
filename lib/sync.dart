@@ -4832,19 +4832,18 @@ class SyncEngine {
       // ultimo_pull_detalle_ts quedaron JUBILADAS con M1 —
       // el desglose por tabla vive en el diario de corridas;
       // ultimo_pull_ts se conserva como sello estricto.)
-      if (resDownload.fallidas == 0) {
-        // 1.24.2: ultimo_pull_ts SOLO con la bajada limpia —
-        // es el sello que Buscar presenta como «Actualizado»;
-        // sellarlo con filas fallidas mentía (M3-H03).
-        // 1.35 (SP-00): los ciclos SILENCIOSOS también
-        // sellan — bajan cambios a diario dentro del push y
-        // sin sello el cartel del Directorio gritaba «24 h
-        // sin bajar cambios» con la bajada de hace un rato
-        // hecha. La condición sigue siendo la estricta:
-        // bajada completa y limpia (fallidas == 0); una
-        // corrida silenciosa que no bajó limpio no sella.
-        await _db.setMeta('ultimo_pull_ts', isoHabana(ahoraHabana()));
-      } else if (resDownload.aplicadas > 0) {
+      // 1.35 (corrección E3, C1-02): el sello ESTRICTO
+      // (ultimo_pull_ts) YA NO se escribe aquí. La bajada
+      // principal limpia no basta: la pasada de incidencias
+      // va DESPUÉS de este punto y, si fallaba, la frescura
+      // quedaba sellada igual (ultimaBajadaReal toma el
+      // máximo de last_pull_ok y ultimo_pull_ts) con el
+      // canal de incidencias roto — y en 1.35 también sellan
+      // los ciclos silenciosos. El sello estricto se escribe
+      // más abajo, junto a last_pull_ok, con la condición
+      // completa (incidenciasOk && fallidas == 0). Aquí solo
+      // queda el sello parcial de la bajada principal.
+      if (resDownload.fallidas > 0 && resDownload.aplicadas > 0) {
         // 1.35 (SP-00): bajada PARCIAL con filas aplicadas:
         // se sella aparte (ultimo_pull_parcial_ts) para que
         // el cartel diga la verdad entera — la última
@@ -4918,6 +4917,14 @@ class SyncEngine {
       if (incidenciasOk && resDownload.fallidas == 0) {
         await _db.setMeta(
             'last_pull_ok', isoHabana(ahoraHabana()));
+        // E3 (C1-02): el sello estricto de frescura vive
+        // AQUÍ, con la condición completa — es el que
+        // Buscar presenta como «Actualizado» (1.24.2) y el
+        // que SP-00 extendió a los ciclos silenciosos:
+        // bajada principal limpia Y pasada de incidencias
+        // sana. Antes se escribía tras la bajada principal,
+        // antes de saber si las incidencias bajaron.
+        await _db.setMeta('ultimo_pull_ts', isoHabana(ahoraHabana()));
         // 1.23 (W1): testigo del diagnóstico de espejo vacío —
         // cuántos clientes dejó esta bajada buena. Una bajada
         // que llega vacía NO lo pisa (registrarTestigoClientes
@@ -4933,6 +4940,17 @@ class SyncEngine {
         } catch (e) {
           AppLog.error('sync', 'w1_testigo_fallo', d: '$e');
         }
+      }
+      // E3 (C1-02): bajada principal limpia pero la pasada
+      // de incidencias falló (o el corte la dejó sin
+      // intentar), con filas aplicadas: sello PARCIAL — la
+      // frescura estricta no avanza, pero el cartel puede
+      // decir que cambios sí bajaron en esta corrida.
+      if (!incidenciasOk &&
+          resDownload.fallidas == 0 &&
+          resDownload.aplicadas > 0) {
+        await _db.setMeta(
+            'ultimo_pull_parcial_ts', isoHabana(ahoraHabana()));
       }
       // v1.13.0 (F4, CONTRATO_F4_20261024): pull del espejo
       // sync_ultimo_sync (una fila por usuario). No bloquea
