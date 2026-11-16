@@ -55,6 +55,12 @@ class HistorialEntrenadorScreen extends StatefulWidget {
 class _HistorialEntrenadorScreenState
     extends State<HistorialEntrenadorScreen> {
   bool _cargando = true;
+  // SL-X2 (G12-1, 3ª superficie): la carga falló — la
+  // pantalla pinta EstadoError con Reintentar, no el
+  // «Sin actividad» de un mes vacío (un fallo no es un
+  // dato). Mismo patrón que SL-11 en Mi Turno y el
+  // calendario.
+  bool _falloCarga = false;
   // Hy4 G#36: generación de carga — una carga vieja que
   // termina después que la del mes nuevo NO publica
   // (enseñaba las cifras del mes anterior bajo el título
@@ -102,10 +108,21 @@ class _HistorialEntrenadorScreenState
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      // SL-X2 (G12-1): una recarga buena limpia la bandera.
+      if (mounted && _falloCarga) {
+        setState(() => _falloCarga = false);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // SL-X2 (G12-1): y además se DICE en pantalla con
+      // EstadoError — antes _datos quedaba [] y la
+      // pantalla pintaba «Sin actividad» como si el mes
+      // estuviera vacío de verdad.
+      if (mounted) {
+        setState(() => _falloCarga = true);
+      }
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -256,7 +273,16 @@ class _HistorialEntrenadorScreenState
           Expanded(
             child: _cargando
                 ? const EstadoCargando(texto: 'Cargando historial…')
-                : _datos.isEmpty && _sinIdentificarPagos == 0 &&
+                : _falloCarga
+                    // SL-X2 (G12-1): el fallo se dice, con
+                    // salida — nunca como «Sin actividad».
+                    ? EstadoError(
+                        titulo: 'No se pudo cargar',
+                        detalle:
+                            'La lectura del historial falló en este teléfono. Tus datos no se han perdido: reinténtalo.',
+                        onReintentar: _cargar,
+                      )
+                    : _datos.isEmpty && _sinIdentificarPagos == 0 &&
                         _sinIdentificarInsc == 0
                     // F3-26: vacío del sistema (antes texto plano).
                     ? const EstadoVacio(
