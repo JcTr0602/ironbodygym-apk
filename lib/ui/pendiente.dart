@@ -787,7 +787,16 @@ class _PendienteScreenState extends State<PendienteScreen> {
           // dice la cabecera del marco — el banner solo va
           // suelto (patrón de Bandeja WhatsApp).
           if (!widget.embebida) const SyncBanner(),
-          if (!_cargando) _tarjetaTotal(),
+          // SL-5B G04-2: la tarjeta total es héroe solo con
+          // pendiente; en cero no se pinta (regla de filas
+          // en cero). La cifra es la autoritativa, la misma
+          // que pinta _tarjetaTotal.
+          if (!_cargando &&
+              ((_totalAutoritativoCup ??
+                          (_esDueno ? _totalDueno : _totalEntrenador)) >
+                      0 ||
+                  _totalUsd > 0))
+            _tarjetaTotal(),
           Expanded(
             child: CruceEstados(
               // Corrección A1-D4: fundido esqueleto→contenido
