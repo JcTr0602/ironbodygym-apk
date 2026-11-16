@@ -3323,7 +3323,16 @@ class _FichaScreenState extends State<FichaScreen> {
                       }
                       return IconButton(
                         key: const ValueKey('ficha-compacta-sync'),
-                        tooltip: 'Sincronizar ahora',
+                        // E3 (C5-01): en error, el toque ya
+                        // no dispara un reintento a ciegas:
+                        // abre la banda real en una hoja (el
+                        // texto del error, «Ver qué quedó» y
+                        // «Ver detalle» sin desplegar la
+                        // cabecera). El resto de variantes
+                        // conserva el toque = sincronizar.
+                        tooltip: variante == VarianteBanner.error
+                            ? 'Ver el error de sincronización'
+                            : 'Sincronizar ahora',
                         icon: Icon(
                           switch (variante) {
                             VarianteBanner.error =>
@@ -3347,8 +3356,23 @@ class _FichaScreenState extends State<FichaScreen> {
                           color: colorEstadoBanner(variante),
                           size: 20,
                         ),
-                        onPressed: () =>
-                            SyncEngine.instance.run().then((_) {}),
+                        onPressed: variante == VarianteBanner.error
+                            ? () => showModalBottomSheet<void>(
+                                  context: ctx,
+                                  builder: (_) => const SafeArea(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: Column(
+                                        mainAxisSize:
+                                            MainAxisSize.min,
+                                        children: [SyncBanner()],
+                                      ),
+                                    ),
+                                  ),
+                                )
+                            : () => SyncEngine.instance
+                                .run()
+                                .then((_) {}),
                       );
                     },
                   ),
