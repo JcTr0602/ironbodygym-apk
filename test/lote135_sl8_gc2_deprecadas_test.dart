@@ -22,14 +22,15 @@ import 'package:flutter_test/flutter_test.dart';
 /// `SyncBanner(` / `SyncPill(` en la base ead3d63
 /// (lib/ui/widgets.dart es la definición y queda fuera).
 const kUsosSyncBannerPillListaBlanca = <String>{
-  // lib/ — pantallas con SyncBanner vivo
-  'lib/ui/admin.dart',
-  'lib/ui/ajustes.dart',
-  'lib/ui/arqueo.dart',
+  // lib/ — pantallas con SyncBanner vivo. Lista ajustada por el
+  // coordinador al cierre del lote siguiente 1.35: refleja los
+  // usos vivos FINALES tras las retiradas del propio lote
+  // (admin, ajustes, arqueo, ayuda, estadisticas_adopcion,
+  // panel_premios, panel_premios_clientes y papelera ya no
+  // montan la banda; pendiente la conserva solo como raíz).
   'lib/ui/auditoria.dart',
   'lib/ui/avisos.dart',
   'lib/ui/avisos_entrenador.dart',
-  'lib/ui/ayuda.dart',
   'lib/ui/bandeja_whatsapp.dart',
   'lib/ui/buscar.dart',
   'lib/ui/categorias_suplemento.dart',
@@ -42,7 +43,6 @@ const kUsosSyncBannerPillListaBlanca = <String>{
   'lib/ui/detalle_entrenador.dart',
   'lib/ui/detalle_pendiente.dart',
   'lib/ui/detalle_suplemento.dart',
-  'lib/ui/estadisticas_adopcion.dart',
   'lib/ui/ficha.dart',
   'lib/ui/historial_entrenador.dart',
   'lib/ui/historial_ventas.dart',
@@ -56,9 +56,6 @@ const kUsosSyncBannerPillListaBlanca = <String>{
   'lib/ui/pagaron_mes.dart',
   'lib/ui/pago.dart',
   'lib/ui/pago_diario.dart',
-  'lib/ui/panel_premios.dart',
-  'lib/ui/panel_premios_clientes.dart',
-  'lib/ui/papelera.dart',
   'lib/ui/pendiente.dart',
   'lib/ui/por_cobrar.dart',
   'lib/ui/ranking_servicios.dart',
@@ -69,7 +66,7 @@ const kUsosSyncBannerPillListaBlanca = <String>{
   'lib/ui/suplementos.dart',
   'lib/ui/venta_suplemento.dart',
   'lib/ui/venta_suplemento_inscripcion.dart',
-  // test/ — usos vivos en la suite de la base
+  // test/ — usos vivos en la suite
   'test/bloque5_t8_b11_test.dart',
   'test/delta_1242_test.dart',
   'test/gestion128_m1bc_test.dart',
@@ -163,7 +160,7 @@ void main() {
       }
       expect(fuera, isEmpty,
           reason: 'usos nuevos de piezas retiradas fuera de '
-              'la lista blanca de ead3d63:\n${fuera.join('\n')}');
+              'la lista blanca final del lote:\n${fuera.join('\n')}');
     });
   });
 }
