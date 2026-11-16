@@ -1949,6 +1949,42 @@ class InvitadosService {
         {'p_clave': clave, 'p_valor': valor});
   }
 
+  /// Lote 1.35 (SL-1 · A-20): guardado EN BLOQUE de la
+  /// información pública. La pantalla guardaba clave a clave
+  /// por RPC inmediata, sin durabilidad: un corte a mitad
+  /// dejaba unas claves nuevas y otras viejas, en silencio.
+  /// Aquí TODAS las claves se marcan primero como pendientes
+  /// (durable, tabla v37) y después se republica el bloque en
+  /// serie: o todo queda aplicado, o lo no aplicado queda
+  /// pendiente y VISIBLE — la función devuelve exactamente
+  /// las claves que no se aplicaron, que son las que la marca
+  /// conserva para el reintento de fin de sync. Nunca lanza
+  /// por red: el desenlace va en el valor devuelto.
+  Future<Map<String, String>> guardarInfoPublicaEnBloque(
+      Map<String, String> cambios) async {
+    var quedan = Map<String, String>.of(cambios);
+    try {
+      await _enSerieInfoPublica(() async {
+        for (final e in cambios.entries) {
+          await LocalDb.instance
+              .marcarInfoPublicaPendiente(e.key, e.value);
+        }
+        await _republicarInfoPublicaPendienteEnSerie();
+        final pendientes =
+            await LocalDb.instance.infoPublicaPendientes();
+        quedan = {
+          for (final e in cambios.entries)
+            if (pendientes.containsKey(e.key))
+              e.key: pendientes[e.key]!,
+        };
+      });
+    } catch (_) {
+      // La marca ya quedó escrita antes del intento de
+      // publicar: lo no aplicado sigue pendiente y visible.
+    }
+    return quedan;
+  }
+
   /// v1.7.0 (panel): guarda una clave de info pública con
   /// REINTENTO DURABLE. Primero deja la pareja (clave, valor)
   /// marcada como pendiente en su fila de la tabla
