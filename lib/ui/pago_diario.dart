@@ -306,6 +306,14 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   /// Botón rápido: registra 1 pago de un toque.
   Future<void> _rapido() async {
     if (_guardando) return;
+    // SL-4 · G10-1 🚩: el atajo pasa por la MISMA comprobación
+    // de permiso que el camino largo (_guardar): sin ella, un
+    // entrenador sin can_cobrar_pagos veía «1 pago guardado»
+    // y la op rebotaba después en el servidor.
+    if (!await permisoOperativoOkConRefresco(
+        context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      return;
+    }
     setState(() => _guardando = true);
     try {
       // 1.23 (Delta Argón 5ª#7): el botón rápido también lleva
@@ -685,7 +693,11 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                           alignment: Alignment.centerRight,
                           child: TextButton(
                             onPressed: _guardando ? null : _rapido,
-                            child: const Text('Registrar solo 1'),
+                            // SL-4 · G10-10: el rótulo dice su
+                            // hecho («Registrar 1 día»); «Cobro
+                            // parcial» queda solo para saldar
+                            // parte de un fiado.
+                            child: const Text('Registrar 1 día'),
                           ),
                         ),
                       // 1.25 T68: el check de confirmación
@@ -903,19 +915,26 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              // Desglose por turno
-              Row(
-                children: [
-                  Expanded(
-                      child: _tarjetaTurno('Mañana',
-                          cantMan, totMan)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: _tarjetaTurno(
-                          'Tarde', cantTar, totTar)),
-                ],
-              ),
-              const SizedBox(height: 12),
+              // Desglose por turno. SL-4 · G10-8 (regla de
+              // Jc: lo que está en cero no se pinta): la
+              // tarjeta de un turno sin cobros no aparece.
+              if (cantMan > 0 || cantTar > 0) ...[
+                Row(
+                  children: [
+                    if (cantMan > 0)
+                      Expanded(
+                          child: _tarjetaTurno('Mañana',
+                              cantMan, totMan)),
+                    if (cantMan > 0 && cantTar > 0)
+                      const SizedBox(width: 8),
+                    if (cantTar > 0)
+                      Expanded(
+                          child: _tarjetaTurno(
+                              'Tarde', cantTar, totTar)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
               // Comparativas
               if (ayerTotal > 0 || prom7 > 0)
                 Tarjeta(
