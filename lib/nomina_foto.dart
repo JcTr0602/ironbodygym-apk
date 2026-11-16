@@ -306,8 +306,13 @@ Future<FotoNominaMes> _armarFotoNominaMes(String pref) async {
       if (username != null) {
         personasAdelantos[username] = (
           id: '${m['id'] ?? ''}',
-          telegramId: (m['telegram_id'] as num?)?.toInt() ??
-              int.tryParse('${m['telegram_id'] ?? ''}'),
+          // G#11 (Hy4): normalizarTelegramId tolera la
+          // forma en TEXTO; el cast `(as num?)` lanzaba
+          // antes del tryParse de respaldo y el try del
+          // bucle descartaba a esta persona y a todas
+          // las siguientes del mapa de adelantos.
+          telegramId:
+              LocalDb.normalizarTelegramId(m['telegram_id']),
           nombre: (m['nombre'] as String?) ?? username,
         );
       }
