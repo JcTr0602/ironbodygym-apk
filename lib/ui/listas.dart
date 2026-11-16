@@ -146,7 +146,20 @@ class ListasScreen extends StatefulWidget {
   /// baja al cuerpo (patrón de ActividadScreen en el Centro
   /// de control).
   final bool embebida;
-  const ListasScreen({super.key, this.inicial = 0, this.embebida = false});
+
+  /// 1.35 (corrección E3, C5-02): aviso de «los datos
+  /// cambiaron» para el contenedor: se invoca tras marcar
+  /// o desmarcar un avisado en local, tras cobrar y al
+  /// volver de la ficha. El pilar lo usa para recontar la
+  /// insignia de Vencimientos al momento — sin esto, la
+  /// insignia seguía prometiendo trabajo ya hecho hasta
+  /// que la sync quedara en reposo.
+  final VoidCallback? alCambiarDatos;
+  const ListasScreen(
+      {super.key,
+      this.inicial = 0,
+      this.embebida = false,
+      this.alCambiarDatos});
   @override
   State<ListasScreen> createState() => _ListasScreenState();
 }
@@ -677,6 +690,9 @@ class _ListasScreenState extends State<ListasScreen>
       _cargar();
     }
     SyncEngine.instance.push();
+    // E3 (C5-02): el cobro saca al cliente de los
+    // atrasados: la insignia del contenedor se recuenta ya.
+    widget.alCambiarDatos?.call();
   }
 
   /// 1.28 (M4-C6): la animación de salida terminó — el
@@ -710,12 +726,17 @@ class _ListasScreenState extends State<ListasScreen>
     await abrirMenuAccesoDesdeLista(
       context,
       clienteId: id,
-      alTerminar: () async => _cargar(),
+      alTerminar: () async {
+        _cargar();
+        // E3 (C5-02): el menú de acceso también muta datos.
+        widget.alCambiarDatos?.call();
+      },
       alAbrirFicha: () async {
         await Navigator.of(context).push(RutaIron(
             builder: (_) =>
                 FichaScreen(clienteId: id, origenHero: 'listas')));
         _cargar();
+        widget.alCambiarDatos?.call();
       },
       alDarAcceso: () async {
         await Navigator.of(context).push(RutaIron(
@@ -724,6 +745,7 @@ class _ListasScreenState extends State<ListasScreen>
                 origenHero: 'listas',
                 irAAccesoAlAbrir: true)));
         _cargar();
+        widget.alCambiarDatos?.call();
       },
     );
   }
@@ -1112,6 +1134,9 @@ class _ListasScreenState extends State<ListasScreen>
       _avisadoEl[id] = ahoraHabana();
       _refrescarConteosAvisados();
     });
+    // E3 (C5-02): la marca es local y la sync no tiene por
+    // qué enterarse: el contenedor recuenta su insignia ya.
+    widget.alCambiarDatos?.call();
     Map<String, dynamic>? siguiente;
     var idxSiguiente = -1;
     if (via == 'whatsapp') {
@@ -1321,7 +1346,13 @@ class _ListasScreenState extends State<ListasScreen>
                 .push(RutaIron(
                     builder: (_) => FichaScreen(
                         clienteId: id, origenHero: 'listas')))
-                .then((_) => _cargar()),
+                .then((_) {
+                  _cargar();
+                  // E3 (C5-02): de la ficha se puede venir
+                  // de cobrar o de avisar: el contenedor
+                  // recuenta su insignia al volver.
+                  widget.alCambiarDatos?.call();
+                }),
             // 1.28 (M4-B1): pulsación larga = menú de
             // acciones de acceso del helper compartido
             // (solo dueño: el dominio de accesos es suyo).
@@ -1355,6 +1386,9 @@ class _ListasScreenState extends State<ListasScreen>
                               _avisados.remove(id);
                               _refrescarConteosAvisados();
                             });
+                            // E3 (C5-02): desmarcar también
+                            // cambia la cifra de la insignia.
+                            widget.alCambiarDatos?.call();
                           }
                         } else {
                           await _avisarEnCadena(listaCadena, iCadena);
