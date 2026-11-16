@@ -119,6 +119,17 @@ String etiquetaSexoFicha(Object? sexo) => switch ('$sexo') {
       _ => '—',
     };
 
+/// SL-2 G03-6: traductor del método de pago del espejo para
+/// el histórico de la ficha. Una clave desconocida (la que
+/// el servidor añada mañana) NO se pinta cruda: «Otro».
+String etiquetaMetodoPagoFicha(Object? metodo) =>
+    switch ('$metodo') {
+      'efectivo' => 'Efectivo',
+      'transferencia' => 'Transferencia',
+      'cortesia' => 'Cortesía',
+      _ => 'Otro',
+    };
+
 /// 1.28 (ítem fijo «ficha perezosa»): caché de secciones de
 /// la ficha por (clave, versión). La lista de la ficha es un
 /// ListView.builder y cada sección se crea SOLO si su versión
@@ -2685,8 +2696,8 @@ class _FichaScreenState extends State<FichaScreen> {
         titulo: 'Confirmar corrección',
         iconoTitulo: Icons.check_circle_rounded,
         contenido: Text(
-            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${p['metodo'] ?? ''}\n'
-            'A: ${fmtMonto(monto)} CUP — $fecha — ${datos['metodo']}\n'
+            'De: ${fmtMonto(p['monto'])} CUP — ${fmtFecha(p['fecha'] as String?)} — ${etiquetaMetodoPagoFicha(p['metodo'])}\n'
+            'A: ${fmtMonto(monto)} CUP — ${fmtFecha(fecha)} — ${etiquetaMetodoPagoFicha(datos['metodo'])}\n'
             'Motivo: $motivo'),
         acciones: [
           TextButton(
@@ -4657,13 +4668,11 @@ class _FichaScreenState extends State<FichaScreen> {
         'tipo': 'pago',
         'fecha': '${p['fecha'] ?? ''}',
         'titulo': metodo == 'cortesia'
-            ? 'Cortesía (regalo)'
-            : metodo == 'transferencia'
-                ? 'Transferencia'
-                : 'Efectivo',
+            ? '${etiquetaMetodoPagoFicha(metodo)} (regalo)'
+            : etiquetaMetodoPagoFicha(metodo),
         'trailing': '${fmtMonto(p['monto'])} CUP',
         'subtitulo':
-            '${fmtFecha(p['fecha'] as String?)} · ${p['periodo'] ?? 'mensual'}'
+            '${fmtFecha(p['fecha'] as String?)} · ${etiquetaPeriodo(p)}'
             '${cobradoPor.isEmpty ? '' : '\n$cobradoPor'}',
         'icono': metodo == 'cortesia'
             ? Icons.card_giftcard_rounded
@@ -4732,7 +4741,7 @@ class _FichaScreenState extends State<FichaScreen> {
           if (casa)
             'Cuenta a la Casa'
           else if ('${s['metodo'] ?? ''}'.isNotEmpty)
-            '${s['metodo']}',
+            etiquetaMetodoPagoFicha(s['metodo']),
           if ('${s['registrado_por_nombre'] ?? ''}'.isNotEmpty)
             '${s['registrado_por_nombre']}',
         ].join(' · '),
