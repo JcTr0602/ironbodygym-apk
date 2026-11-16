@@ -117,4 +117,24 @@ class ConteoBuzon {
   /// adelanto»). Vacío si no hay nada.
   String get textoCompleto =>
       partes.map((p) => p.texto).join(' · ');
+
+  /// 1.35 (corrección E3, C6-01): las partes que la
+  /// PORTADA anuncia desde esta tarjeta: solo las que
+  /// «Por Decidir» no cubre — reservas y conciliaciones.
+  /// Adelantos y rellenos son filas de Por Decidir con
+  /// los mismos conteos: anunciarlos también aquí
+  /// pintaba el mismo número dos veces en la misma
+  /// pantalla. La bandeja del Buzón sigue usando
+  /// [partes] entero; esto es solo la voz de la portada.
+  List<ParteBuzon> get partesPortada => partes
+      .where((p) =>
+          p.destino == DestinoBuzon.reservas ||
+          p.destino == DestinoBuzon.conciliaciones)
+      .toList();
+
+  /// ¿La portada pinta la tarjeta del Buzón? Con solo
+  /// adelantos o rellenos pendientes, NO: su sitio es
+  /// Por Decidir y la tarjeta no aparece (la regla de
+  /// Jc: lo que no aporta, no ocupa).
+  bool get hayPortada => reservas > 0 || conciliaciones > 0;
 }
