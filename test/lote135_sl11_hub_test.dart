@@ -75,9 +75,43 @@ Future<void> _sesionDueno(WidgetTester tester) async {
   });
 }
 
-Future<void> _sinSesion(WidgetTester tester) async {
+/// Sesión de ENTRENADOR (no dueño): las fichas G12-6/G12-9
+/// miran la vista del entrenador. Se fija la sesión en vez
+/// de cerrar la del dueño: signOut contra el servidor dummy
+/// dejaba una AuthUnknownException sin atrapar en el árbol.
+Future<void> _sesionEntrenador(WidgetTester tester) async {
+  String b64(Map<String, dynamic> m) => base64Url
+      .encode(utf8.encode(jsonEncode(m)))
+      .replaceAll('=', '');
+  final jwt =
+      '${b64({'alg': 'HS256', 'typ': 'JWT'})}.${b64({
+            'sub': '00000000-0000-0000-0000-0000000000e7',
+            'aud': 'authenticated',
+            'exp': 4102444800,
+            'iat': 1700000000,
+            'email': 'gabriel@ironbody.local',
+            'role': 'authenticated',
+            'app_metadata': {
+              'telegram_id': 1403501391,
+              'provider': 'email'
+            },
+          })}.firma';
+  final sesion = jsonEncode({
+    'access_token': jwt,
+    'token_type': 'bearer',
+    'expires_in': 3600,
+    'refresh_token': 'refresh-g',
+    'user': {
+      'id': '00000000-0000-0000-0000-0000000000e7',
+      'aud': 'authenticated',
+      'email': 'gabriel@ironbody.local',
+      'app_metadata': {'telegram_id': 1403501391, 'provider': 'email'},
+      'user_metadata': <String, dynamic>{},
+      'created_at': '2024-01-01T00:00:00.000Z',
+    },
+  });
   await tester.runAsync(() async {
-    await Supabase.instance.client.auth.signOut();
+    await Supabase.instance.client.auth.setInitialSession(sesion);
   });
 }
 
@@ -157,7 +191,7 @@ void main() {
     tester.view.physicalSize = const Size(420, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await _sinSesion(tester);
+    await _sesionEntrenador(tester);
     await tester.pumpWidget(const MaterialApp(home: HubTurnosScreen()));
     expect(
         await _esperar(
@@ -202,7 +236,7 @@ void main() {
     tester.view.physicalSize = const Size(360, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await _sinSesion(tester);
+    await _sesionEntrenador(tester);
     await tester.pumpWidget(const MaterialApp(home: HubTurnosScreen()));
     expect(
         await _esperar(
