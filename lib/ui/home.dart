@@ -78,6 +78,7 @@ import 'pendiente.dart';
 import 'pin_lock.dart';
 import '../app_log.dart';
 import '../turno_service.dart';
+import '../turnos_resolucion.dart';
 import '../errores_sync.dart';
 
 /// v1.6.0 (pedido de Jc): clave DURABLE del descarte del aviso de
@@ -470,6 +471,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// Cualquier estado (abierto/cerrado/incidencias): lo que se muestra.
   Map<String, dynamic>? _turnoActual;
 
+  /// 1.35 (UI-23): línea de contexto del Mostrador («sábado
+  /// 14 de noviembre · Turno de Duany hasta las 12:00»),
+  /// compuesta al cargar con la resolución de turnos de la
+  /// casa. Vacía hasta la primera carga: nunca se pinta un
+  /// contexto inventado.
+  String _lineaContexto = '';
+
   /// v1.3.3: turnos abiertos sin resolver (fecha/franja anteriores).
   /// Sección "Turnos pendientes" (auditoría ChatGPT #2).
   List<Map<String, dynamic>> _turnosPendientes = [];
@@ -700,14 +708,91 @@ class _HomeScreenState extends State<HomeScreen>
       final t = await TurnoService.instance.turnoVisible();
       final pendientes =
           await TurnoService.instance.turnosSinResolver();
+      final linea = await _computarLineaContexto(t);
       if (mounted && gen == _genTurno) {
         setState(() {
           _turnoActual = t;
           _turnosPendientes = pendientes;
+          _lineaContexto = linea;
         });
       }
     } catch (_) {}
     _reconciliarTurnosEnFondo(gen);
+  }
+
+  /// 1.35 (UI-23): compone la línea de contexto del
+  /// Mostrador con lecturas LOCALES (ajustes + espejos de
+  /// aperturas/cierres, sin RPC: la regla offline-first de
+  /// la casa) y la resolución única de turnos. Como en el
+  /// hub de Turnos, el turno LOCAL del entrenador se
+  /// superpone al espejo: su apertura viva cuenta aunque
+  /// la sync aún no la traiga, y su cierre de hoy apaga la
+  /// apertura del espejo. Si algo falla, la línea cae a la
+  /// fecha con «Sin turno abierto»: jamás bloquea la
+  /// carga ni inventa un nombre.
+  Future<String> _computarLineaContexto(
+      Map<String, dynamic>? turnoLocal) async {
+    final ahora = ahoraHabana();
+    try {
+      final db = LocalDb.instance;
+      final ajustes = await db.getAjustes();
+      final patron = parsePatronTurnos(ajustes['horario_turnos']);
+      final excepciones =
+          parseExcepcionesTurnos(ajustes['horario_excepciones']);
+      final hoyIso = isoFechaTurno(ahora);
+      final apMirror = await db.allMirror('turnos_apertura');
+      final cierres = [...await db.allMirror('turnos_cierre')];
+      if (turnoLocal != null &&
+          '${turnoLocal['fecha_turno']}' == hoyIso &&
+          '${turnoLocal['estado']}'.startsWith('cerrado')) {
+        cierres.add({
+          'fecha': hoyIso,
+          'turno': '${turnoLocal['turno']}',
+          'entrenador_nombre': _auth.displayName,
+          'telegram_id': _auth.telegramId,
+        });
+      }
+      var aperturas = aperturasHoyConViva(
+          aperturas: apMirror, cierres: cierres, fechaIso: hoyIso);
+      if (turnoLocal != null) {
+        final estado = '${turnoLocal['estado']}';
+        if (estado == 'abierto_local' ||
+            estado == 'abierto_sincronizado') {
+          final en =
+              DateTime.tryParse('${turnoLocal['hora_apertura'] ?? ''}');
+          if (en != null) {
+            final nombre = _auth.displayName;
+            final cubre =
+                '${turnoLocal['cubre_a'] ?? ''}'.trim();
+            aperturas = [
+              for (final a in aperturas)
+                if (normalizarNombreTurno(a.nombre) !=
+                    normalizarNombreTurno(nombre))
+                  a,
+              (
+                nombre: nombre,
+                aperturaEn: en,
+                viva: true,
+                cubreA: cubre.isEmpty ? null : cubre,
+              ),
+            ];
+          }
+        }
+      }
+      return lineaContextoMostrador(
+        ahora: ahora,
+        patron: patron,
+        excepciones: excepciones,
+        aperturas: aperturas,
+      );
+    } catch (_) {
+      return lineaContextoMostrador(
+        ahora: ahora,
+        patron: const {},
+        excepciones: const {},
+        aperturas: const [],
+      );
+    }
   }
 
   /// 1.28 (M3-A5): reconciliación de turnos en segundo plano;
@@ -975,6 +1060,10 @@ class _HomeScreenState extends State<HomeScreen>
           turnosPend = await TurnoService.instance.turnosSinResolver();
         } catch (_) {}
       }
+      // 1.35 (UI-23): la línea de contexto se compone con
+      // la misma carga (para el dueño también: su turno
+      // local es null y manda la resolución del espejo).
+      final lineaContexto = await _computarLineaContexto(turnoAct);
       // v1.3.3 (Argón): el entrenador ve SU cobrado (filtrado por él e
       // incluye su cola offline), no el global del gym (privacidad y
       // cuadre con MiTurnoScreen). El dueño sigue con el total global.
@@ -1031,6 +1120,7 @@ class _HomeScreenState extends State<HomeScreen>
           _turnosSinReporte = turnosSinRep;
           _turnoActual = turnoAct;
           _turnosPendientes = turnosPend;
+          _lineaContexto = lineaContexto;
         });
         // v1.8.0 (bug de campo): la SyncPill se re-suscribe al
         // volver a Home y el stream del motor no tiene replay:
@@ -1422,6 +1512,18 @@ class _HomeScreenState extends State<HomeScreen>
       KeyedSubtree(
           key: const ValueKey('home-banner'), child: _bannerSync()),
       const TarjetaDiagnosticoEspejo(key: ValueKey('home-diagnostico')),
+      // 1.35 (UI-23): la línea de contexto abre el
+      // contenido, sobre el Pulso: día, fecha y turno en
+      // texto secundario, sin tarjeta propia.
+      if (_lineaContexto.isNotEmpty)
+        KeyedSubtree(
+            key: const ValueKey('home-linea-contexto'),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+              child: Text(_lineaContexto,
+                  style: AppTexto.secundario),
+            )),
       ..._seccionesMostrador(esDueno),
     ];
     return Column(

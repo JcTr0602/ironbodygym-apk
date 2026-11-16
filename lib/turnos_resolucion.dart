@@ -628,3 +628,63 @@ List<DetalleFranjaTurno> detalleDiaTurnos({
   }
   return (asignadas: asignadas, total: franjas.length, esReal: yaPaso);
 }
+
+const _diasSemanaContexto = [
+  'lunes',
+  'martes',
+  'miércoles',
+  'jueves',
+  'viernes',
+  'sábado',
+  'domingo',
+];
+
+const _mesesContexto = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+];
+
+/// 1.35 (UI-23), PURO: la línea de contexto del Mostrador
+/// — día y fecha de hoy y quién está de turno ahora,
+/// resuelto con la misma semántica de visualización del
+/// hub (§4: el programado se muestra desde el inicio de
+/// su franja; una apertura ajena viva lo desplaza).
+/// «sábado 14 de noviembre · Turno de Duany hasta las
+/// 12:00»; sin franja en curso o sin nadie mostrado, la
+/// línea lo dice tal cual: «… · Sin turno abierto».
+/// Es contexto, no una sección: la pinta el Mostrador en
+/// texto secundario, sin tarjeta propia.
+String lineaContextoMostrador({
+  required DateTime ahora,
+  required Map<int, Map<String, String?>> patron,
+  required Map<String, Map<String, String?>> excepciones,
+  required List<AperturaTurno> aperturas,
+}) {
+  final fecha = '${_diasSemanaContexto[ahora.weekday - 1]} '
+      '${ahora.day} de ${_mesesContexto[ahora.month - 1]}';
+  final franja = franjaDeInstante(ahora);
+  if (franja == null) return '$fecha · Sin turno abierto';
+  final mostrado = mostradoEn(
+    fecha: ahora,
+    franja: franja,
+    patron: patron,
+    excepciones: excepciones,
+    aperturas: aperturas,
+  );
+  final nombre = (mostrado.nombre ?? '').trim();
+  if (nombre.isEmpty) return '$fecha · Sin turno abierto';
+  final ventana = ventanaFranja(ahora, franja);
+  if (ventana == null) return '$fecha · Turno de $nombre';
+  return '$fecha · Turno de $nombre hasta las '
+      '${horaMinutosLinea(ventana.fin)}';
+}
