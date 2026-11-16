@@ -1422,15 +1422,14 @@ class _DialogoAjustarStockState extends State<_DialogoAjustarStock> {
             teclado: TextInputType.number,
           ),
           const SizedBox(height: AppEspacio.md),
-          DropdownButton<String>(
-            value: _motivo,
-            isExpanded: true,
-            items: [
+          SelectorIron<String>(
+            valor: _motivo,
+            tituloPanel: 'Motivo',
+            opciones: [
               for (final m in kMotivosAjusteStock)
-                DropdownMenuItem(
-                    value: m, child: Text(etiquetaMotivoAjuste(m))),
+                OpcionSelector(m, etiquetaMotivoAjuste(m)),
             ],
-            onChanged: (v) => setState(() => _motivo = v ?? 'merma'),
+            alCambiar: (v) => setState(() => _motivo = v ?? 'merma'),
           ),
           const SizedBox(height: AppEspacio.md),
           CampoTexto(

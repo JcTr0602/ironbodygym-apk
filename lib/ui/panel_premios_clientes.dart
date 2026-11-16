@@ -994,34 +994,29 @@ class _DialogoConcederValeState extends State<_DialogoConcederVale> {
                   .copyWith(color: AppColores.error),
             )
           else
-            DropdownButtonFormField<String>(
-              initialValue: _logroId,
-              isExpanded: true,
-              decoration:
-                  const InputDecoration(labelText: 'Logro'),
-              items: [
+            SelectorIronForm<String>(
+              valorInicial: _logroId,
+              etiqueta: 'Logro',
+              opciones: [
                 for (final e in widget.catalogo)
-                  DropdownMenuItem(
-                    value: e.logroId,
-                    child: Text(
-                      // 1.28 (M5-A8/C-R1M5-H5): cada
-                      // entrada dice su estado (la
-                      // semántica de estadoTexto, en
-                      // corto para que quepa): activo con
-                      // sus días, apagado con sus días o
-                      // sin premio. Conceder a ciegas con
-                      // un logro apagado sorprendía.
-                      e.activo
-                          ? '${e.nombre} · ${e.premioDias} días'
-                          : e.premioDias > 0
-                              ? '${e.nombre} · apagado · '
-                                  '${e.premioDias} días'
-                              : '${e.nombre} · sin premio',
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  OpcionSelector(
+                    e.logroId,
+                    // 1.28 (M5-A8/C-R1M5-H5): cada
+                    // entrada dice su estado (la
+                    // semántica de estadoTexto, en
+                    // corto para que quepa): activo con
+                    // sus días, apagado con sus días o
+                    // sin premio. Conceder a ciegas con
+                    // un logro apagado sorprendía.
+                    e.activo
+                        ? '${e.nombre} · ${e.premioDias} días'
+                        : e.premioDias > 0
+                            ? '${e.nombre} · apagado · '
+                                '${e.premioDias} días'
+                            : '${e.nombre} · sin premio',
                   ),
               ],
-              onChanged: _guardando
+              alCambiar: _guardando
                   ? null
                   : (v) {
                       if (v == null) return;

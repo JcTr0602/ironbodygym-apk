@@ -474,16 +474,15 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 8),
-                DropdownButton<String>(
-                  value: _filtroMes,
-                  isExpanded: true,
-                  items: [
+                SelectorIron<String>(
+                  valor: _filtroMes,
+                  tituloPanel: 'Mes',
+                  opciones: [
                     for (final m in meses)
-                      DropdownMenuItem(
-                          value: m,
-                          child: Text(m == 'todos' ? 'Todos los meses' : m))
+                      OpcionSelector(
+                          m, m == 'todos' ? 'Todos los meses' : m)
                   ],
-                  onChanged: (v) =>
+                  alCambiar: (v) =>
                       setState(() => _filtroMes = v ?? 'todos'),
                 ),
                 const SizedBox(height: 8),
@@ -695,16 +694,15 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 8),
-                DropdownButton<String>(
-                  value: _preset,
-                  isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(value: 'mes', child: Text('Mes en curso')),
-                    DropdownMenuItem(value: 'semana', child: Text('Últimos 7 días')),
-                    DropdownMenuItem(
-                        value: 'quincena', child: Text('Últimos 15 días')),
+                SelectorIron<String>(
+                  valor: _preset,
+                  tituloPanel: 'Período',
+                  opciones: const [
+                    OpcionSelector('mes', 'Mes en curso'),
+                    OpcionSelector('semana', 'Últimos 7 días'),
+                    OpcionSelector('quincena', 'Últimos 15 días'),
                   ],
-                  onChanged: (v) {
+                  alCambiar: (v) {
                     setState(() => _preset = v ?? 'mes');
                     _aplicarPreset();
                   },

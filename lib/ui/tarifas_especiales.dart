@@ -674,20 +674,15 @@ class _DialogoFormularioTarifaState
                 etiqueta:
                     'Monto por transferencia (vacío = sin especial)'),
             const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: _periodo,
-              decoration: const InputDecoration(
-                  labelText: 'Periodo',
-                  border: OutlineInputBorder()),
-              items: const [
-                DropdownMenuItem(
-                    value: 'mensual', child: Text('Mensual')),
-                DropdownMenuItem(
-                    value: 'semanal', child: Text('Semanal')),
-                DropdownMenuItem(
-                    value: 'quincenal', child: Text('Quincenal')),
+            SelectorIronForm<String>(
+              valorInicial: _periodo,
+              etiqueta: 'Periodo',
+              opciones: const [
+                OpcionSelector('mensual', 'Mensual'),
+                OpcionSelector('semanal', 'Semanal'),
+                OpcionSelector('quincenal', 'Quincenal'),
               ],
-              onChanged: (v) async {
+              alCambiar: (v) async {
                 if (v == null) return;
                 setState(() => _periodo = v);
                 await _cargarPrevia();

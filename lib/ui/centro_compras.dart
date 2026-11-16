@@ -847,17 +847,14 @@ class _DialogoRegistrarCompraManualState
               style: AppTexto.secundario,
             ),
             const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: _tipo,
-              decoration: const InputDecoration(
-                  labelText: 'Tipo', border: OutlineInputBorder()),
-              items: const [
-                DropdownMenuItem(
-                    value: 'suplemento', child: Text('Suplemento')),
-                DropdownMenuItem(
-                    value: 'servicio', child: Text('Servicio')),
+            SelectorIronForm<String>(
+              valorInicial: _tipo,
+              etiqueta: 'Tipo',
+              opciones: const [
+                OpcionSelector('suplemento', 'Suplemento'),
+                OpcionSelector('servicio', 'Servicio'),
               ],
-              onChanged: (v) => setState(() => _tipo = v ?? _tipo),
+              alCambiar: (v) => setState(() => _tipo = v ?? _tipo),
             ),
             const SizedBox(height: 8),
             TextField(
