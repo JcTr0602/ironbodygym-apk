@@ -133,6 +133,15 @@ Future<void> _abrirPendiente(WidgetTester tester,
         MaterialApp(home: PendienteScreen(embebida: embebida)));
   });
   await _pumpReal(tester, vueltas: 12);
+  // La carga FFI varía con la máquina: espera acotada a
+  // que la tarjeta del entrenador exista de verdad.
+  if (conPendiente) {
+    for (var i = 0;
+        i < 20 && find.text('Gabriel').evaluate().isEmpty;
+        i++) {
+      await _pumpReal(tester, vueltas: 4);
+    }
+  }
 }
 
 void main() {
@@ -189,6 +198,11 @@ void main() {
       // La tarjeta del entrenador arranca plegada: se abre.
       await tester.tap(find.text('Gabriel'));
       await _pumpReal(tester, vueltas: 6);
+      // La animación de apertura del ExpansionTile corre
+      // en el reloj falso: sin agotarla, su clip deja los
+      // controles de dentro fuera del alcance del toque.
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
       // La principal, visible sin desplegar nada más.
       expect(find.textContaining('Cobrar todo'), findsOneWidget);
       // Las ocasionales NO ocupan espacio permanente.
@@ -202,12 +216,25 @@ void main() {
       await tester.ensureVisible(control);
       await tester.tap(control);
       await _pumpReal(tester, vueltas: 6);
-      // Desplegado: las cinco acciones, ninguna perdida.
-      expect(find.text('Cobrar parcial'), findsOneWidget);
-      expect(find.textContaining('Cobrar todo'), findsOneWidget);
-      expect(find.text('Liquidar con arrastre…'), findsOneWidget);
-      expect(find.text('Liquidar en arqueo…'), findsOneWidget);
-      expect(find.text('Cuadre a WhatsApp'), findsOneWidget);
+      // Desplegado: las cinco acciones, ninguna perdida
+      // (se desplaza la lista hasta cada una: fuera del
+      // viewport la lista perezosa no las construye).
+      for (final etiqueta in [
+        'Cobrar parcial',
+        'Liquidar con arrastre…',
+        'Liquidar en arqueo…',
+        'Cuadre a WhatsApp',
+      ]) {
+        for (var i = 0;
+            i < 8 && find.text(etiqueta).evaluate().isEmpty;
+            i++) {
+          await tester.drag(
+              find.byType(ListView).first, const Offset(0, -200));
+          await _pumpReal(tester, vueltas: 3);
+        }
+        expect(find.text(etiqueta), findsOneWidget);
+      }
+      expect(find.textContaining('Cobrar todo'), findsWidgets);
     });
   });
 }

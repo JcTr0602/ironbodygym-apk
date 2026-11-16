@@ -1387,25 +1387,11 @@ class _EntrenadorCard extends StatelessWidget {
                     colorMonto: AppColores.textoNaranja(context),
                   ),
                 ],
-                if (totalCup > 0 || arrastreCup > 0.01) ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.payments_rounded,
-                          size: 18),
-                      label: const Text('Cobrar parcial'),
-                      onPressed:
-                          confirmando ? null : onCobrarParcial,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor:
-                            AppColores.textoNaranja(context),
-                        side: const BorderSide(
-                            color: AppColores.naranja),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
+                // La acción principal («Cobrar todo»)
+                // queda visible; las ocasionales van
+                // PLEGADAS tras un solo control que las
+                // resume (SL-5B G04-3, regla de Jc: nada
+                // de regueros de opciones sueltas).
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
@@ -1422,48 +1408,70 @@ class _EntrenadorCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                // (M2-BC B6) liquidar con arrastre AQUÍ
-                // mismo: la hoja trae la liquidación
-                // completa (esperado canónico, entregado,
-                // moneda) sin navegar al Arqueo.
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(
-                        Icons.point_of_sale_rounded,
-                        size: 16),
-                    label: const Text('Liquidar con arrastre…'),
-                    onPressed:
-                        confirmando ? null : onLiquidarArrastre,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                // 1.25 T70: Liquidar es el paso final del
-                // flujo en esta misma pantalla: abre el
-                // arqueo de este entrenador (adelantos,
-                // parciales y USD van por esa vía) y al
-                // volver la lista se recarga aquí.
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: const Icon(
-                        Icons.account_balance_wallet_rounded,
-                        size: 16),
-                    label: const Text('Liquidar en arqueo…'),
-                    onPressed: onLiquidar,
-                  ),
-                ),
-                // 1.26.1 (rediseño): el cuadre baja a
-                // acción de texto discreta; los botones
-                // de cobro son los protagonistas.
-                Center(
-                  child: TextButton.icon(
-                    icon:
-                        const Icon(Icons.share_rounded, size: 15),
-                    label: const Text('Cuadre a WhatsApp'),
-                    onPressed: onWhatsApp,
-                  ),
+                _PliegueAcciones(
+                  titulo: 'Más acciones (4)',
+                  children: [
+                    if (totalCup > 0 || arrastreCup > 0.01) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.payments_rounded,
+                              size: 18),
+                          label: const Text('Cobrar parcial'),
+                          onPressed:
+                              confirmando ? null : onCobrarParcial,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor:
+                                AppColores.textoNaranja(context),
+                            side: const BorderSide(
+                                color: AppColores.naranja),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                    // (M2-BC B6) liquidar con arrastre AQUÍ
+                    // mismo: la hoja trae la liquidación
+                    // completa (esperado canónico, entregado,
+                    // moneda) sin navegar al Arqueo.
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(
+                            Icons.point_of_sale_rounded,
+                            size: 16),
+                        label: const Text('Liquidar con arrastre…'),
+                        onPressed:
+                            confirmando ? null : onLiquidarArrastre,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    // 1.25 T70: Liquidar es el paso final del
+                    // flujo en esta misma pantalla: abre el
+                    // arqueo de este entrenador (adelantos,
+                    // parciales y USD van por esa vía) y al
+                    // volver la lista se recarga aquí.
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(
+                            Icons.account_balance_wallet_rounded,
+                            size: 16),
+                        label: const Text('Liquidar en arqueo…'),
+                        onPressed: onLiquidar,
+                      ),
+                    ),
+                    // 1.26.1 (rediseño): el cuadre, acción de
+                    // texto discreta al pie del pliegue.
+                    Center(
+                      child: TextButton.icon(
+                        icon:
+                            const Icon(Icons.share_rounded, size: 15),
+                        label: const Text('Cuadre a WhatsApp'),
+                        onPressed: onWhatsApp,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
               ],
@@ -1471,6 +1479,56 @@ class _EntrenadorCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// (SL-5B G04-3) Pliegue de acciones ocasionales: un
+/// solo control con el resumen («Más acciones (4)») y
+/// las acciones solo existen en el árbol al desplegarlo
+/// — nada de opciones sueltas ocupando espacio
+/// permanente (regla de Jc 2026-11-13).
+class _PliegueAcciones extends StatefulWidget {
+  final String titulo;
+  final List<Widget> children;
+
+  const _PliegueAcciones({required this.titulo, required this.children});
+
+  @override
+  State<_PliegueAcciones> createState() => _PliegueAccionesState();
+}
+
+class _PliegueAccionesState extends State<_PliegueAcciones> {
+  bool _abierto = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _abierto = !_abierto),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(widget.titulo,
+                      style: AppTexto.secundario),
+                ),
+                Icon(
+                  _abierto
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 20,
+                  color: AppColores.textoSecundario(context),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_abierto) ...widget.children,
+      ],
     );
   }
 }
