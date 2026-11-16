@@ -595,15 +595,26 @@ class _CentroSyncScreenState extends State<CentroSyncScreen> {
   }
 }
 
+/// 1.35 (corrección E3, C2-01): ¿la fase del motor es una
+/// corrida EN CURSO? `error` NO corre: es el desenlace de
+/// una corrida que ya falló — contarlo como «corriendo»
+/// pintaba «Sincronizando ahora…» sobre la sync muerta y
+/// dejaba la rama de error del veredicto inalcanzable.
+/// PURA, misma lectura que `estadoSyncCabecera`.
+bool faseSyncEnCurso(SyncPhase fase) =>
+    fase == SyncPhase.uploading ||
+    fase == SyncPhase.downloading ||
+    fase == SyncPhase.photos;
+
 /// 1.35 (UI-19): el veredicto del Centro en lenguaje de
 /// mostrador — UNA frase que responde «¿estoy al día?»
 /// sin saber qué es una corrida ni una cola. PURA.
 /// El orden manda: lo que se puede ACCIONAR va primero
 /// (faltan por subir), el fallo después; «sin verificar»
-/// (enLinea/hayNovedades null) nunca afirma «al día» por
-/// la puerta de atrás: sin conexión comprobada y sin
-/// error, con la cola vacía, el veredicto es «al día»
-/// solo si tampoco hay señal contraria.
+/// (hayNovedades null: la lectura de novedades no se ha
+/// hecho o falló) NUNCA afirma «al día» (corrección E3,
+/// C2-02): sin lectura válida el veredicto dice que no se
+/// pudo comprobar, en neutro.
 String resumenMostradorSync({
   required bool corriendo,
   required int pendientes,
@@ -626,6 +637,9 @@ String resumenMostradorSync({
   }
   if (hayNovedades == true) {
     return 'Hay novedades por bajar del servidor';
+  }
+  if (hayNovedades == null) {
+    return 'Sin verificar: aún no se ha podido comprobar';
   }
   return 'Todo al día';
 }
@@ -873,7 +887,18 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
   @override
   Widget build(BuildContext context) {
     final st = _st;
-    final corriendo = st.phase != SyncPhase.idle;
+    // E3 (C2-01): `error` no es «corriendo» y SÍ es error
+    // aunque la foto no traiga texto de error.
+    final corriendo = faseSyncEnCurso(st.phase);
+    final enError =
+        st.lastError != null || st.phase == SyncPhase.error;
+    // E3 (C2-02): el veredicto «Sin verificar» se pinta en
+    // neutro, nunca con el check verde de «al día».
+    final sinVerificar = !corriendo &&
+        !enError &&
+        st.pending == 0 &&
+        st.enLinea != false &&
+        st.hayNovedades == null;
     // 1.35 (UI-19): el titular de la tarjeta es el
     // veredicto en lenguaje de mostrador; el detalle de
     // la fase queda debajo, como hasta ahora.
@@ -881,7 +906,7 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
       corriendo: corriendo,
       pendientes: st.pending,
       enLinea: st.enLinea,
-      hayError: st.lastError != null,
+      hayError: enError,
       hayNovedades: st.hayNovedades,
     );
     return Tarjeta(
@@ -893,14 +918,18 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
               Icon(
                 corriendo
                     ? Icons.sync_rounded
-                    : st.lastError != null
+                    : enError
                         ? Icons.error_outline_rounded
-                        : Icons.check_circle_rounded,
+                        : sinVerificar
+                            ? Icons.help_outline_rounded
+                            : Icons.check_circle_rounded,
                 color: corriendo
                     ? AppColores.info
-                    : st.lastError != null
+                    : enError
                         ? AppColores.error
-                        : AppColores.exito,
+                        : sinVerificar
+                            ? AppColores.alertaOscuro
+                            : AppColores.exito,
               ),
               const SizedBox(width: 8),
               Expanded(
