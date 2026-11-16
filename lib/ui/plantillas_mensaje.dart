@@ -128,6 +128,22 @@ class _PlantillasScreenState extends State<PlantillasScreen> {
                                             context, p);
                                         _cargar();
                                       } else if (v == 'eliminar') {
+                                        // SL-10 G04-7: una
+                                        // plantilla compartida
+                                        // no se borra de un
+                                        // toque: confirmación
+                                        // estándar de la casa.
+                                        final ok =
+                                            await DialogoApp.confirmar(
+                                          context,
+                                          titulo:
+                                              '¿Eliminar la plantilla?',
+                                          mensaje:
+                                              '«${p['nombre']}» dejará de estar disponible en todos los dispositivos del negocio.',
+                                          aceptar: 'Eliminar',
+                                          peligro: true,
+                                        );
+                                        if (!ok || !mounted) return;
                                         await eliminarPlantilla(
                                             '${p['id']}');
                                         _cargar();
