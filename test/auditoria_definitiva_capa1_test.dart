@@ -360,8 +360,17 @@ void main() {
           contains('if (errorCorrida == null) _avisarSyncExitoso();'),
           reason: 'run() volvió a avisar éxito con la corrida '
               'en error');
-      expect(sync, contains('if (_ultimoPushLimpio) _avisarSyncExitoso();'),
-          reason: 'push() volvió a avisar éxito sin push limpio');
+      // Hy4 G#39 (1.35): el pin se actualiza a la forma
+      // nueva, con la misma intención reforzada — el
+      // gancho exige ADEMÁS la bajada verificada con el
+      // cursor confirmado (antes sonaba con la bajada
+      // sin confirmar y el sello de éxito era falso).
+      expect(
+          sync,
+          contains('if (_ultimoPushLimpio && pullVerificado) '
+              '_avisarSyncExitoso();'),
+          reason: 'push() volvió a avisar éxito sin push '
+              'limpio y bajada verificada (G#39)');
       // 1.32 (O2F2S, adjudicación F-6): la limpieza exige
       // ADEMÁS el pull del mismo ciclo verificado — antes
       // un push horario limpio borraba el error de una
