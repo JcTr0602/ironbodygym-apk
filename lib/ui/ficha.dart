@@ -2931,7 +2931,26 @@ class _FichaScreenState extends State<FichaScreen> {
             ),
       body: Column(
         children: [
-          const SyncBanner(),
+          // 1.35 (CAMPO-1, corrección de la reconciliación):
+          // la banda de sync de la ficha se pliega CON la
+          // cabecera — al bajar, se recoge a cero y el
+          // contenido gana también su alto; al volver arriba
+          // reaparece entera. La regla de CAMPO-13 queda
+          // intacta: con la cabecera desplegada la banda
+          // sigue siendo la voz de sync de esta ruta suelta.
+          // Con la cabecera compacta, su toque vive en el
+          // icono de estado de la barra compacta (ver
+          // _barraCompactaFicha): ninguna función se pierde.
+          AnimatedSize(
+            duration: AppMovimiento.media,
+            curve: AppMovimiento.curvaSuave,
+            alignment: Alignment.topCenter,
+            child: _cabeceraCompacta
+                ? const SizedBox.shrink(
+                    key: ValueKey('ficha-banda-sync-plegada'))
+                : const SyncBanner(
+                    key: ValueKey('ficha-banda-sync')),
+          ),
           Expanded(
             child: c == null && !_cargaLocalTerminada
                 // 1.30 (Oleada D6, UI130-22): la primera
@@ -3280,6 +3299,58 @@ class _FichaScreenState extends State<FichaScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  // 1.35 (CAMPO-1, corrección de la
+                  // reconciliación): con la cabecera
+                  // compacta la banda de sync está plegada
+                  // (ver el AnimatedSize del build); su
+                  // toque vive aquí — un icono con el color
+                  // y la forma del estado, SOLO si el estado
+                  // tiene algo que decir (al día no ocupa
+                  // sitio), que dispara el mismo ciclo que
+                  // tocar la banda. El detalle completo del
+                  // error vuelve al desplegar la cabecera.
+                  StreamBuilder<SyncStatus>(
+                    stream: SyncEngine.instance.statusStream,
+                    initialData:
+                        SyncEngine.instance.currentStatus,
+                    builder: (ctx, snap) {
+                      final s = snap.data!;
+                      final variante = varianteBannerDe(s);
+                      if (nivelBannerDe(variante) ==
+                          NivelBanner.ninguno) {
+                        return const SizedBox.shrink();
+                      }
+                      return IconButton(
+                        key: const ValueKey('ficha-compacta-sync'),
+                        tooltip: 'Sincronizar ahora',
+                        icon: Icon(
+                          switch (variante) {
+                            VarianteBanner.error =>
+                              Icons.sync_problem_rounded,
+                            VarianteBanner.enviando ||
+                            VarianteBanner.fotos =>
+                              Icons.sync_rounded,
+                            VarianteBanner.descargando ||
+                            VarianteBanner.novedades =>
+                              Icons.cloud_download_rounded,
+                            VarianteBanner.pendientes =>
+                              Icons.schedule_rounded,
+                            VarianteBanner.sinConexion ||
+                            VarianteBanner.sinSincronizar =>
+                              Icons.cloud_off_rounded,
+                            VarianteBanner.sinVerificar =>
+                              Icons.help_outline_rounded,
+                            VarianteBanner.alDia =>
+                              Icons.check_circle_outline_rounded,
+                          },
+                          color: colorEstadoBanner(variante),
+                          size: 20,
+                        ),
+                        onPressed: () =>
+                            SyncEngine.instance.run().then((_) {}),
+                      );
+                    },
                   ),
                   // 1.34 (DIS-06): el botón cede espacio
                   // (Flexible + etiqueta recortable) en vez
