@@ -238,6 +238,10 @@ class DiferenciasCajaScreen extends StatefulWidget {
 class _DiferenciasCajaScreenState
     extends State<DiferenciasCajaScreen> {
   bool _cargando = true;
+  // SL-5 G07-1: patrón error≠vacío de la familia (ver
+  // arqueo.dart): si la lectura falla, NO se afirma «No hay
+  // diferencias»: se pinta EstadoError con Reintentar.
+  bool _falloCarga = false;
   List<Map<String, dynamic>> _abiertas = [];
   List<Map<String, dynamic>> _resueltas = [];
 
@@ -250,7 +254,10 @@ class _DiferenciasCajaScreenState
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _falloCarga = false;
+    });
     try {
       final tid = widget.soloEntrenadorTid;
       final filas = tid != null
@@ -269,7 +276,12 @@ class _DiferenciasCajaScreenState
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -353,6 +365,9 @@ class _DiferenciasCajaScreenState
         _filtrada ? 'Mis diferencias de caja' : 'Diferencias de caja',
         acciones: [
           IconButton(
+            // SL-5 G07-3: este botón SOLO relee lo local;
+            // su nombre lo dice (no baja nada del servidor).
+            tooltip: 'Releer',
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
@@ -364,7 +379,15 @@ class _DiferenciasCajaScreenState
         estado: _cargando ? 'cargando' : 'contenido',
         child: _cargando
             ? const EstadoCargando(texto: 'Cargando diferencias…')
-            : RefrescoIron(
+            : _falloCarga
+                // SL-5 G07-1: fallo de lectura con salida.
+                ? EstadoError(
+                    titulo: 'No se pudieron leer las diferencias',
+                    detalle: 'Puede que haya expedientes sin '
+                        'mostrar. Reintenta.',
+                    onReintentar: _cargar,
+                  )
+                : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),
@@ -372,9 +395,14 @@ class _DiferenciasCajaScreenState
                   EncabezadoSeccion(
                       titulo: 'Abiertas (${_abiertas.length})'),
                   if (_abiertas.isEmpty)
-                    const Tarjeta(
-                      child: Text(
-                          'No hay diferencias de caja abiertas.'),
+                    // SL-5 G07-4: en cero NO se pinta una
+                    // tarjeta: el vacío va sin marco, como
+                    // sección, y la calma solo se afirma con
+                    // la lectura hecha (ver _falloCarga).
+                    const EstadoVacio(
+                      sinMarco: true,
+                      icono: Icons.check_circle_outline_rounded,
+                      titulo: 'No hay diferencias de caja abiertas',
                     )
                   else
                     for (final e in _abiertas) _fila(e),
