@@ -72,8 +72,14 @@ class ImagenCierreNomina extends StatelessWidget {
     // está liquidado (ya cobró: no es «a pagar»), el mismo
     // criterio que netoTotalDueno de la foto de nómina.
     final total = totalAPagarCierre(filas);
+    // SL-5B G07-10: el ancho es min(340, pantalla −
+    // márgenes): a 360 dp la imagen medía 340 fijos y
+    // el diálogo la recortaba al prepararla para
+    // compartir; ahora cabe entera con su margen.
+    final ancho =
+        (MediaQuery.sizeOf(context).width - 32).clamp(0.0, 340.0);
     return Container(
-      width: 340,
+      width: ancho,
       decoration: BoxDecoration(
         color: _fondo,
         borderRadius: BorderRadius.circular(AppRadio.lg),
