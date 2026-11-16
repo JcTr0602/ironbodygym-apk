@@ -517,10 +517,16 @@ void main() {
 
     test('totalesCompradoVida: suplementos por moneda y '
         'servicios con el agregado de la casa', () {
+      // Hy4 G#15 (1.35): las filas llevan `cantidad`
+      // como las ventas reales del espejo — el total de
+      // la ficha sale de la regla canónica
+      // totalVentaRegistrado (total, si no precio ×
+      // cantidad); sin cantidad la fila no es una venta
+      // real y su aporte es 0 por esa misma regla.
       final t = totalesCompradoVida([
-        {'precio': 600, 'moneda': 'CUP'},
-        {'precio': 300, 'moneda': 'CUP'},
-        {'precio': 25, 'moneda': 'USD'},
+        {'precio': 600, 'cantidad': 1, 'moneda': 'CUP'},
+        {'precio': 300, 'cantidad': 1, 'moneda': 'CUP'},
+        {'precio': 25, 'cantidad': 1, 'moneda': 'USD'},
       ], [
         // dosis: 2 × 450 = 900
         {
