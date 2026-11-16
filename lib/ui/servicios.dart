@@ -98,25 +98,21 @@ class _HojaSalidaSinVentaState extends State<_HojaSalidaSinVenta> {
       cuerpo: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          DropdownButtonFormField<String>(
-            value: _motivo,
-            decoration: const InputDecoration(labelText: 'Motivo'),
-            items: [
-              const DropdownMenuItem(
-                  value: 'merma', child: Text('Merma / rotura')),
+          SelectorIronForm<String>(
+            valorInicial: _motivo,
+            etiqueta: 'Motivo',
+            opciones: [
+              const OpcionSelector('merma', 'Merma / rotura'),
               if (widget.esDueno) ...[
-                const DropdownMenuItem(
-                    value: 'cortesia',
-                    child: Text('Cortesía (solo dueño)')),
-                const DropdownMenuItem(
-                    value: 'consumo_staff',
-                    child: Text('Consumo del staff (solo dueño)')),
-                const DropdownMenuItem(
-                    value: 'ajuste',
-                    child: Text('Ajuste (solo dueño)')),
+                const OpcionSelector(
+                    'cortesia', 'Cortesía (solo dueño)'),
+                const OpcionSelector('consumo_staff',
+                    'Consumo del staff (solo dueño)'),
+                const OpcionSelector(
+                    'ajuste', 'Ajuste (solo dueño)'),
               ],
             ],
-            onChanged: (v) =>
+            alCambiar: (v) =>
                 setState(() => _motivo = v ?? 'merma'),
           ),
           const SizedBox(height: AppEspacio.md),
@@ -1352,23 +1348,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       // 360-420 dp (o con la fuente escalada)
                       // desbordaba la fila.
                       Expanded(
-                        child: DropdownButton<int>(
-                          value: vendedorSel,
-                          isExpanded: true,
-                          items: [
+                        child: SelectorIron<int?>(
+                          valor: vendedorSel,
+                          tituloPanel: 'A nombre de',
+                          opciones: [
                             if (titularPomoTid != null &&
                                 titularPomoTid != _miTid)
-                              DropdownMenuItem(
-                                  value: titularPomoTid,
-                                  child: Text(
-                                      _personas[titularPomoTid] ??
-                                          'Entrenador')),
+                              OpcionSelector<int?>(
+                                  titularPomoTid,
+                                  _personas[titularPomoTid] ??
+                                      'Entrenador'),
                             if (_miTid != null)
-                              DropdownMenuItem(
-                                  value: _miTid,
-                                  child: const Text('Yo (dueño)')),
+                              OpcionSelector<int?>(_miTid, 'Yo (dueño)'),
                           ],
-                          onChanged: (v) => setD(() {
+                          alCambiar: (v) => setD(() {
                             vendedorSel = v ?? vendedorSel;
                             responsableSel = vendedorSel;
                           }),
@@ -1385,21 +1378,19 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         // B-4: Expanded + isExpanded (ver la
                         // fila «A nombre de»).
                         Expanded(
-                          child: DropdownButton<int>(
-                            value: responsableSel,
-                            isExpanded: true,
-                            items: [
-                              DropdownMenuItem(
-                                  value: vendedorSel,
-                                  child: Text(
-                                      _personas[vendedorSel] ??
-                                          'El vendedor')),
+                          child: SelectorIron<int?>(
+                            valor: responsableSel,
+                            tituloPanel: 'Efectivo lo entrega',
+                            opciones: [
+                              OpcionSelector<int?>(
+                                  vendedorSel,
+                                  _personas[vendedorSel] ??
+                                      'El vendedor'),
                               if (_miTid != null)
-                                DropdownMenuItem(
-                                    value: _miTid,
-                                    child: const Text('Yo (dueño)')),
+                                OpcionSelector<int?>(
+                                    _miTid, 'Yo (dueño)'),
                             ],
-                            onChanged: (v) => setD(() =>
+                            alCambiar: (v) => setD(() =>
                                 responsableSel =
                                     v ?? responsableSel),
                           ),
@@ -1971,35 +1962,29 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ],
             ),
           if (_misPomos.length > 1)
-            DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                isExpanded: true,
-                value: _pomoSel,
-                items: [
-                  for (final l in _misPomos)
-                    DropdownMenuItem(
-                      value: (l['id'] as num).toInt(),
-                      // Ítem 6 (pomo ciego): el entrenador NO ve
-                      // saldos; el dueño ve producto, titular y saldo.
-                      child: Text(
-                        _esDueno
-                            ? '${l['producto_nombre'] ?? 'Pomo'} · '
-                                '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : l['titular_nombre']} '
-                                '(${l['saldo_local']})'
-                            : '${l['producto_nombre'] ?? 'Pomo'}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                // 10/25: al cambiar de pomo, el desglose se trae
-                // de nuevo para ese pomo.
-                onChanged: (v) {
-                  setState(() => _pomoSel = v);
-                  _cargarDesglose();
-                  _cargarEstadoRelleno();
-                },
-              ),
+            SelectorIron<int?>(
+              valor: _pomoSel,
+              tituloPanel: 'Pomo',
+              opciones: [
+                for (final l in _misPomos)
+                  OpcionSelector<int?>(
+                    (l['id'] as num).toInt(),
+                    // Ítem 6 (pomo ciego): el entrenador NO ve
+                    // saldos; el dueño ve producto, titular y saldo.
+                    _esDueno
+                        ? '${l['producto_nombre'] ?? 'Pomo'} · '
+                            '${(l['es_principal'] as num?)?.toInt() == 1 ? 'Principal' : l['titular_nombre']} '
+                            '(${l['saldo_local']})'
+                        : '${l['producto_nombre'] ?? 'Pomo'}',
+                  ),
+              ],
+              // 10/25: al cambiar de pomo, el desglose se trae
+              // de nuevo para ese pomo.
+              alCambiar: (v) {
+                setState(() => _pomoSel = v);
+                _cargarDesglose();
+                _cargarEstadoRelleno();
+              },
             )
           else
             Row(
@@ -3272,29 +3257,25 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
                   // isExpanded — un nombre compuesto largo
                   // desbordaba la fila a 360-420 dp.
                   Expanded(
-                    child: DropdownButton<int>(
-                      value: vendedorSel,
-                      isExpanded: true,
-                      items: [
+                    child: SelectorIron<int?>(
+                      valor: vendedorSel,
+                      tituloPanel: 'A nombre de',
+                      opciones: [
                         if (pomoTitularTid != null &&
                             pomoTitularTid != _miTid)
-                          DropdownMenuItem(
-                              value: pomoTitularTid,
-                              child: Text(_personas[pomoTitularTid] ??
-                                  'Entrenador')),
+                          OpcionSelector<int?>(
+                              pomoTitularTid,
+                              _personas[pomoTitularTid] ??
+                                  'Entrenador'),
                         if (_miTid != null)
-                          DropdownMenuItem(
-                              value: _miTid,
-                              child: const Text('Yo (dueño)')),
+                          OpcionSelector<int?>(_miTid, 'Yo (dueño)'),
                         if (tipo == 'agua_suelta')
                           for (final e in _personas.entries)
                             if (e.key != _miTid &&
                                 e.key != pomoTitularTid)
-                              DropdownMenuItem(
-                                  value: e.key,
-                                  child: Text(e.value)),
+                              OpcionSelector<int?>(e.key, e.value),
                       ],
-                      onChanged: (v) => setState(() {
+                      alCambiar: (v) => setState(() {
                         vendedorSel = v ?? vendedorSel;
                         responsableSel = vendedorSel;
                       }),
@@ -3328,20 +3309,19 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
                     // B-4: Expanded + isExpanded (ver la
                     // fila «A nombre de»).
                     Expanded(
-                      child: DropdownButton<int>(
-                        value: responsableSel,
-                        isExpanded: true,
-                        items: [
-                          DropdownMenuItem(
-                              value: vendedorSel,
-                              child: Text(_personas[vendedorSel] ??
-                                  'El vendedor')),
+                      child: SelectorIron<int?>(
+                        valor: responsableSel,
+                        tituloPanel: 'Efectivo lo entrega',
+                        opciones: [
+                          OpcionSelector<int?>(
+                              vendedorSel,
+                              _personas[vendedorSel] ??
+                                  'El vendedor'),
                           if (_miTid != null)
-                            DropdownMenuItem(
-                                value: _miTid,
-                                child: const Text('Yo (dueño)')),
+                            OpcionSelector<int?>(
+                                _miTid, 'Yo (dueño)'),
                         ],
-                        onChanged: (v) => setState(
+                        alCambiar: (v) => setState(
                             () => responsableSel =
                                 v ?? responsableSel),
                       ),
