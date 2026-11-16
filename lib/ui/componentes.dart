@@ -1618,6 +1618,11 @@ class CampoTelefono extends StatelessWidget {
   final FocusNode? focusNode;
   final void Function(String)? onChanged;
   final String? errorText;
+  // 1.35 (CAMPO-2): acción integrada al final del campo
+  // (el «Elegir de contactos» del diálogo «Editar
+  // cliente» vive DENTRO del campo, no flotando fuera:
+  // el campo conserva el ancho completo de los demás).
+  final Widget? sufijo;
 
   const CampoTelefono({
     super.key,
@@ -1627,6 +1632,7 @@ class CampoTelefono extends StatelessWidget {
     this.focusNode,
     this.onChanged,
     this.errorText,
+    this.sufijo,
   });
 
   @override
@@ -1644,6 +1650,7 @@ class CampoTelefono extends StatelessWidget {
         errorText: errorText,
         icono: icono,
         prefixText: '+53 ',
+        suffixIcon: sufijo,
       ),
     );
   }
@@ -2392,6 +2399,11 @@ class CampoTexto extends StatelessWidget {
   // (validación en vivo que señala el campo culpable).
   final String? errorText;
   final FocusNode? focusNode;
+  // 1.35 (CAMPO-2): formateadores de entrada opcionales
+  // (el carnet del diálogo «Editar cliente» los necesita
+  // para conservar su digitsOnly al pasar al campo de la
+  // casa; sin ellos el campo se comporta como siempre).
+  final List<TextInputFormatter>? formateadores;
 
   const CampoTexto({
     super.key,
@@ -2406,6 +2418,7 @@ class CampoTexto extends StatelessWidget {
     this.maxLineas = 1,
     this.errorText,
     this.focusNode,
+    this.formateadores,
   });
 
   @override
@@ -2415,6 +2428,7 @@ class CampoTexto extends StatelessWidget {
       focusNode: focusNode,
       obscureText: obscure,
       keyboardType: teclado,
+      inputFormatters: formateadores,
       validator: validador,
       onChanged: onChanged,
       maxLines: maxLineas,
