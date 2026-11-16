@@ -721,6 +721,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
           'invitado_id': widget.conversion!.invitadoId,
         if (widget.conversion != null)
           'conversion_uuid': widget.conversion!.conversionUuid,
+        // 1.35 (corrección E3, C10-01): si la conversión
+        // nació sin conexión, la op lo declara: es la única
+        // forma de que una reconstrucción del registro local
+        // desde la cola conserve la marca `nacidaOffline`
+        // (el servidor ignora la clave; no es de su contrato).
+        if (widget.conversion != null &&
+            widget.conversion!.nacidaOffline)
+          'conversion_nacida_offline': true,
         if (widget.conversion != null &&
             widget.conversion!.medidas.isNotEmpty)
           'medidas_invitado': widget.conversion!.medidasPayload,
