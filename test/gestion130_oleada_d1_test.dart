@@ -216,19 +216,20 @@ void main() {
       expect(gym, contains('AppColores.textoNaranja(context)'));
       expect(gym, isNot(contains('color: AppColores.naranja')),
           reason: 'en GymPedia la marca ya no colorea ningún texto');
-      // 1.32 (pin E5): el chip de rol salió de home.dart
-      // con la cabecera clásica y quedó anclado en el
-      // marco (CabeceraMarco, key marco-rol). En la 1.32
-      // se pintaba en COBALTO por decisión del rediseño
-      // táctico; la 1.33 lo pasa a la marca (veredicto de
-      // Jc en campo: el azul plano «parece MSDOS del 95»)
-      // y el pin re-ancla en textoNaranja.
+      // 1.32 (pin E5): el chip de rol quedó anclado en el
+      // marco (CabeceraMarco, key marco-rol) y la 1.33 lo
+      // pasó a la marca. 1.35 (M-6): el chip como pieza
+      // separada DESAPARECE — el rol vive en la cabecera
+      // del menú del avatar (key marco-perfil) — y el pin
+      // se re-ancla: la identidad es el avatar con nombre
+      // y el marco sigue sin pintar nada en cobalto.
       final marco = File('lib/ui/marco.dart').readAsStringSync();
-      expect(marco, contains("ValueKey('marco-rol')"),
-          reason: 'el chip de rol vive en la cabecera del marco');
-      expect(marco, contains('AppColores.textoNaranja(context)'),
-          reason: 'el chip de rol del marco va en la marca '
-              '(1.33: fuera el cobalto del rediseño táctico)');
+      expect(marco, contains("ValueKey('marco-perfil')"),
+          reason: 'la identidad de la cabecera es el avatar '
+              'con el menú que dice nombre y rol');
+      expect(marco, isNot(contains("ValueKey('marco-rol')")),
+          reason: 'M-6: fuera el chip de rol como pieza '
+              'separada de la cabecera');
       expect(marco, isNot(contains('AppColores.cobaltoDe(context)')),
           reason: 'el marco ya no pinta nada en cobalto');
       final ins = File('lib/ui/inscribir.dart').readAsStringSync();

@@ -232,6 +232,11 @@ class AppColores {
   /// grafito, en ambos temas: la barra es de marca).
   static const fantasmaBarra = Color(0xFFA79C8F);
 
+  /// 1.35 (UX-02): sombra de la barra «Grafito» flotante
+  /// y su línea de luz superior (blanco al 24 %).
+  static const sombraBarra = Color(0x59000000);
+  static const luzBarra = Color(0x3DFFFFFF);
+
   /// Superficie 2 del tema táctico oscuro.
   static const acero = Color(0xFF1E2936);
 

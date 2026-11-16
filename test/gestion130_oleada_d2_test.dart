@@ -210,18 +210,26 @@ void main() {
     final home = File('lib/ui/home.dart').readAsStringSync();
 
     test('la fila de estado lleva la píldora a lo ancho', () {
-      expect(marco.contains('anchoCompleto: true'), isTrue,
-          reason: 'la píldora ocupa el ancho de la fila '
-              '(CabeceraMarco, fila 2)');
-      expect(marco.contains('SyncPill('), isTrue);
+      // 1.35 (CAMPO-4 + M-6): la píldora a lo ancho se
+      // jubiló — el estado de sync es UN icono junto a la
+      // lupa (IconoSyncCabecera, key marco-pildora) en la
+      // fila única de la cabecera. El contrato que se
+      // conserva: una sola señal de sync en la cabecera y
+      // la cabecera vieja de home no vuelve.
+      expect(marco.contains('IconoSyncCabecera('), isTrue,
+          reason: 'el icono de sync vive en la cabecera');
+      expect(marco.contains("ValueKey('marco-pildora')"), isTrue,
+          reason: 'la señal de sync conserva su clave');
+      expect(marco.contains('anchoCompleto: true'), isFalse,
+          reason: 'fuera la píldora a lo ancho (CAMPO-4)');
       expect(home.contains('Widget _cabecera()'), isFalse,
           reason: 'la cabecera vieja no vuelve');
     });
 
     test('el botón-icono de sync separado desaparece', () {
       expect(home.contains('_BotonSyncCabecera'), isFalse,
-          reason: 'UI130-07: una sola señal de sync, la '
-              'píldora');
+          reason: 'UI130-07: una sola señal de sync en la '
+              'cabecera (desde 1.35, el IconoSyncCabecera)');
       expect(marco.contains('_BotonSyncCabecera'), isFalse);
     });
 

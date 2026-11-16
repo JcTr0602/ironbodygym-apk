@@ -653,6 +653,208 @@ Future<void> copiar(BuildContext context, String texto) async {
     mostrarSnack(context, 'Copiado');
   }
 }
+
+// ---------------------------------------------------------------------------
+// 1.35 (CAMPO-4 + M-6): el estado de sync como ICONO de
+// cabecera junto a la lupa — la petición literal de Jc
+// («convertirla en algún iconito al lado de la lupa»). La
+// palabra no desaparece: vive en la descripción del icono
+// (tooltip/semántica) y el detalle completo, a un toque.
+// La precedencia de estados es LA MISMA de la píldora
+// (SYNC-12): el error persistido manda sobre el verde, y
+// sin lectura hecha el estado es neutro «Sin verificar»,
+// jamás un verde falso.
+// ---------------------------------------------------------------------------
+
+/// Estado de sync para la cabecera, como función pura:
+/// icono, color, la frase completa y los pendientes.
+({IconData icono, Color color, String texto, int pendientes})
+    estadoSyncCabecera(SyncStatus s, {required DateTime ahora}) {
+  String haceTxt(DateTime? f) {
+    if (f == null) return '';
+    final d = ahora.difference(f);
+    if (d.inMinutes < 1) return 'ahora mismo';
+    if (d.inMinutes < 60) return 'hace ${d.inMinutes} min';
+    if (d.inHours < 24) return 'hace ${d.inHours} h';
+    return 'hace ${d.inDays} d';
+  }
+
+  final enProgreso = s.phase == SyncPhase.uploading ||
+      s.phase == SyncPhase.downloading ||
+      s.phase == SyncPhase.photos;
+  if (s.phase == SyncPhase.error) {
+    return (
+      icono: Icons.error_outline_rounded,
+      color: AppColores.error,
+      texto: 'Error de sincronización',
+      pendientes: 0,
+    );
+  }
+  if (enProgreso) {
+    return (
+      icono: Icons.sync_rounded,
+      color: AppColores.alerta,
+      texto: 'Sincronizando…',
+      pendientes: s.pending,
+    );
+  }
+  if (s.pending > 0) {
+    return (
+      icono: Icons.schedule_rounded,
+      color: AppColores.alerta,
+      texto: '${s.pending} por subir',
+      pendientes: s.pending,
+    );
+  }
+  if (s.avisoSyncCorto != null) {
+    final h = haceTxt(s.avisoSyncTs);
+    return (
+      icono: Icons.sync_problem_rounded,
+      color: AppColores.alerta,
+      texto: h.isEmpty || h == 'nunca'
+          ? s.avisoSyncCorto!
+          : '${s.avisoSyncCorto} · $h',
+      pendientes: 0,
+    );
+  }
+  if (s.hayNovedades == null) {
+    return (
+      icono: Icons.help_outline_rounded,
+      color: AppColores.alertaOscuro,
+      texto: 'Sincronización sin verificar',
+      pendientes: 0,
+    );
+  }
+  final protagonista = resumenBannerProtagonista(
+      resumen: s.ultimoResumen,
+      resumenHora: s.ultimoResumenHora,
+      ahora: ahora);
+  if (protagonista) {
+    return (
+      icono: Icons.check_circle_outline_rounded,
+      color: AppColores.exito,
+      texto: s.ultimoResumen!,
+      pendientes: 0,
+    );
+  }
+  final ultimo = s.ultimoSincronizado ?? s.lastOk;
+  final h = haceTxt(ultimo);
+  return (
+    icono: Icons.check_circle_outline_rounded,
+    color: AppColores.exito,
+    texto: h.isEmpty || h == 'nunca' ? 'Al día' : 'Al día · $h',
+    pendientes: 0,
+  );
+}
+
+/// El icono de estado de sync de la cabecera: pulsa
+/// cuando los pendientes CRECEN (algo se acaba de
+/// guardar, la pieza premium 8 que la píldora llevaba),
+/// gira mientras sincroniza y enseña la cifra de
+/// pendientes como insignia. El toque abre el detalle
+/// (el mismo destino que tenía la píldora).
+class IconoSyncCabecera extends StatefulWidget {
+  final VoidCallback onTap;
+  const IconoSyncCabecera({super.key, required this.onTap});
+
+  @override
+  State<IconoSyncCabecera> createState() => _IconoSyncCabeceraState();
+}
+
+class _IconoSyncCabeceraState extends State<IconoSyncCabecera>
+    with TickerProviderStateMixin {
+  late final AnimationController _pulso = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.larga,
+  );
+  late final Animation<double> _escala = TweenSequence<double>([
+    TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.18)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 40),
+    TweenSequenceItem(
+        tween: Tween(begin: 1.18, end: 1.0)
+            .chain(CurveTween(curve: Curves.elasticOut)),
+        weight: 60),
+  ]).animate(_pulso);
+  late final AnimationController _giro = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  );
+  StreamSubscription<SyncStatus>? _sub;
+  int _pendientesVistos = -1;
+  bool _girando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pendientesVistos = SyncEngine.instance.currentStatus.pending;
+    _sub = SyncEngine.instance.statusStream.listen((s) {
+      if (!mounted) return;
+      if (_pendientesVistos >= 0 && s.pending > _pendientesVistos) {
+        _pulso.forward(from: 0);
+      }
+      _pendientesVistos = s.pending;
+      final gira = s.phase == SyncPhase.uploading ||
+          s.phase == SyncPhase.downloading ||
+          s.phase == SyncPhase.photos;
+      if (gira != _girando) {
+        _girando = gira;
+        if (gira) {
+          _giro.repeat();
+        } else {
+          _giro.stop();
+          _giro.value = 0;
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _pulso.dispose();
+    _giro.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reducido = MediaQuery.disableAnimationsOf(context);
+    return StreamBuilder<SyncStatus>(
+      stream: SyncEngine.instance.statusStream,
+      initialData: SyncEngine.instance.currentStatus,
+      builder: (ctx, snap) {
+        final e = estadoSyncCabecera(snap.data!,
+            ahora: ahoraHabana());
+        // Solo gira el GLIFO de sincronizar (no el botón
+        // ni su insignia).
+        Widget glifo = Icon(e.icono, color: e.color);
+        if (e.icono == Icons.sync_rounded && !reducido) {
+          glifo = RotationTransition(turns: _giro, child: glifo);
+        }
+        Widget icono = glifo;
+        if (e.pendientes > 0) {
+          icono = Badge(
+            isLabelVisible: true,
+            label: Text('${e.pendientes}',
+                style:
+                    AppTexto.conTabulares(AppTexto.minuscula)),
+            child: icono,
+          );
+        }
+        return ScaleTransition(
+          scale: _escala,
+          child: IconButton(
+            tooltip: e.texto,
+            icon: icono,
+            onPressed: widget.onTap,
+          ),
+        );
+      },
+    );
+  }
+}
 // ---------------------------------------------------------------------------
 // Píldora de sincronización para el encabezado (tocable → ColaScreen).
 // 1.30 (Oleada D2, UI130-07): es el nivel 1 del lenguaje

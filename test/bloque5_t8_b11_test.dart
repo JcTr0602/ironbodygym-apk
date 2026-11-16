@@ -146,16 +146,19 @@ void main() {
       // 0.82→1.0) salieron con el rediseño — home.dart ya no
       // contiene ni el dial ni sus curvas. La garantía de
       // fondo (el despliegue con rebote se conserva en la
-      // casa) la hereda el PULSO de la píldora de sync del
-      // marco global: ScaleTransition con easeOut al crecer
-      // y elasticOut al volver (marco.dart, _PildoraSync).
+      // casa) la heredó el PULSO de la señal de sync de la
+      // cabecera: en la 1.35 (CAMPO-4) la píldora se hizo
+      // icono y el pulso vive con él en widgets.dart
+      // (IconoSyncCabecera): ScaleTransition con easeOut al
+      // crecer y elasticOut al volver.
       final home = _fuente('lib/ui/home.dart');
       expect(home.contains('_animsPildoraEscala'), isFalse);
       expect(home.contains('Curves.easeOutBack'), isFalse);
-      final marco = _fuente('lib/ui/marco.dart');
-      expect(marco.contains('ScaleTransition'), isTrue);
-      expect(marco.contains('Curves.easeOut'), isTrue);
-      expect(marco.contains('Curves.elasticOut'), isTrue);
+      final widgets = _fuente('lib/ui/widgets.dart');
+      expect(widgets.contains('class IconoSyncCabecera'), isTrue);
+      expect(widgets.contains('ScaleTransition'), isTrue);
+      expect(widgets.contains('Curves.easeOut'), isTrue);
+      expect(widgets.contains('Curves.elasticOut'), isTrue);
     });
   });
 

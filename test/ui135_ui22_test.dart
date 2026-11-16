@@ -1,12 +1,15 @@
-/// 1.35 (UI-22): la cabecera se pliega al bajar — la
-/// fila de identidad desaparece y queda solo la
-/// píldora de sync, que NUNCA se oculta; al desplegar,
-/// la identidad (chip, lupa, avatar) vuelve entera.
-/// (La primera forma de la pieza — una «barra fina»
-/// con las acciones conservadas — no ahorraba ni un
-/// dp: las acciones miden 48 de área tocable y
-/// dominaban el alto en los dos estados; este test lo
-/// caza fijando el alto exacto de cada estado.)
+/// 1.35 (UI-22 + M-6 + CAMPO-4): la cabecera fina.
+///
+/// Contrato original de UI-22: al bajar, la identidad se
+/// pliega y la señal de sync NUNCA se oculta. M-6 y el
+/// campo nº 4 re-contratan la forma: la cabecera es UNA
+/// fila (~56 dp) — avatar con el nombre dentro de su
+/// toque, lupa, icono de estado de sync junto a la lupa
+/// y Modo Sol — sin chip de rol suelto y sin la fila
+/// entera de la píldora a lo ancho (que medía ~48 dp en
+/// cada pantalla, para siempre: ese es ahora el ahorro,
+/// no el plegado). Al bajar, el nombre se recoge y quedan
+/// el avatar y los iconos; al volver arriba, regresa.
 library;
 
 import 'dart:io';
@@ -45,50 +48,55 @@ Future<double> _alto(WidgetTester t, bool plegada) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('plena: chip de rol y nombre; la píldora '
-      'presente', (t) async {
+  setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
-    await t.runAsync(() async {
-      try {
-        await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'x');
-      } catch (_) {}
-    });
-    final altoPlena = await _alto(t, false);
-    expect(find.byKey(const ValueKey('marco-rol')), findsOneWidget);
+    try {
+      await Supabase.initialize(url: 'http://127.0.0.1:9', anonKey: 'x');
+    } catch (_) {}
+  });
+
+  testWidgets('plena: nombre junto al avatar, icono de '
+      'sync, lupa y perfil; UNA fila fina', (t) async {
+    final alto = await _alto(t, false);
+    expect(find.byKey(const ValueKey('cabecera-nombre-pleno')),
+        findsOneWidget);
+    expect(find.text('Julio César Pérez Ramírez'), findsOneWidget);
     expect(find.byKey(const ValueKey('marco-pildora')),
         findsOneWidget);
     expect(find.byKey(const ValueKey('marco-lupa')), findsOneWidget);
-    expect(altoPlena, greaterThan(0));
+    expect(find.byKey(const ValueKey('marco-perfil')),
+        findsOneWidget);
+    // Sin chip de rol como pieza separada (M-6).
+    expect(find.byType(Chip), findsNothing);
+    // La fila única: la cabecera vieja de dos filas
+    // medía ~108 dp; la fina vive en ~56.
+    expect(alto, lessThanOrEqualTo(64),
+        reason: 'cabecera de una fila: $alto dp');
   });
 
-  testWidgets('plegada: la identidad desaparece, la '
-      'píldora queda y el alto baja una fila entera',
-      (t) async {
+  testWidgets('plegada: el nombre se recoge; el icono de '
+      'sync y los demás iconos quedan', (t) async {
     final altoPlena = await _alto(t, false);
     final altoPlegada = await _alto(t, true);
-    expect(find.byKey(const ValueKey('marco-rol')), findsNothing);
-    expect(find.byKey(const ValueKey('marco-lupa')), findsNothing);
-    expect(find.byKey(const ValueKey('marco-perfil')),
+    expect(find.byKey(const ValueKey('cabecera-nombre-pleno')),
         findsNothing);
     expect(find.byKey(const ValueKey('marco-pildora')),
         findsOneWidget);
-    // La fila plegada mide 48 (área tocable de las
-    // acciones) + su hueco de 4: el ahorro no puede ser
-    // menor que eso.
-    expect(altoPlena - altoPlegada, greaterThanOrEqualTo(48),
-        reason: 'plegar ahorra la fila de identidad '
-            '($altoPlena → $altoPlegada)');
-  });
-
-  testWidgets('al desplegar, la identidad vuelve entera',
-      (t) async {
-    await _alto(t, true);
-    expect(find.byKey(const ValueKey('marco-lupa')), findsNothing);
-    await _alto(t, false);
-    expect(find.byKey(const ValueKey('marco-rol')), findsOneWidget);
     expect(find.byKey(const ValueKey('marco-lupa')), findsOneWidget);
     expect(find.byKey(const ValueKey('marco-perfil')),
         findsOneWidget);
+    // Misma fila: el plegado ya no ahorra alto (el ahorro
+    // fue estructural, la fila de la píldora), ahorra
+    // ancho para los iconos.
+    expect((altoPlena - altoPlegada).abs(), lessThan(8));
+  });
+
+  testWidgets('al desplegar, el nombre vuelve entero',
+      (t) async {
+    await _alto(t, true);
+    expect(find.text('Julio César Pérez Ramírez'), findsNothing);
+    await _alto(t, false);
+    expect(find.text('Julio César Pérez Ramírez'), findsOneWidget);
   });
 
   test('contrato: la cáscara pliega por scroll con '
@@ -98,6 +106,7 @@ void main() {
     expect(home, contains('NotificationListener<ScrollNotification>'));
     expect(home, contains('plegada: _cabeceraPlegada'));
     final marco = File('lib/ui/marco.dart').readAsStringSync();
-    expect(marco, contains('AnimatedSize'));
+    expect(marco, contains('IconoSyncCabecera'));
+    expect(marco, isNot(contains('anchoCompleto')));
   });
 }

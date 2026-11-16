@@ -591,9 +591,11 @@ void main() {
       expect(find.byKey(const ValueKey('home-cabecera')),
           findsNothing);
 
-      // La píldora de sync del marco: única señal y única
-      // puerta a la Cola (contrato UI130-05, heredado).
-      expect(find.byType(SyncPill), findsOneWidget);
+      // La señal de sync del marco: única señal y única
+      // puerta a la Cola (contrato UI130-05, heredado;
+      // 1.35 CAMPO-4: la píldora se hizo icono —
+      // IconoSyncCabecera, misma clave y mismo destino).
+      expect(find.byType(IconoSyncCabecera), findsOneWidget);
       await tester
           .tap(find.byKey(const ValueKey('marco-pildora')));
       await tester.pump(const Duration(milliseconds: 600));

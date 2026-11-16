@@ -94,7 +94,7 @@ class _MarcaArranque extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0xFF0B0F14),
+      color: AppColores.pizarra,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -105,17 +105,17 @@ class _MarcaArranque extends StatelessWidget {
             // wordmark sobre grafito: nunca una caja rota.
             errorBuilder: (_, __, ___) => const SizedBox.shrink(),
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0x590B0F14),
-                  Color(0x260B0F14),
-                  Color(0xE60B0F14),
+                  AppColores.pizarra.withValues(alpha: 0.35),
+                  AppColores.pizarra.withValues(alpha: 0.15),
+                  AppColores.pizarra.withValues(alpha: 0.90),
                 ],
-                stops: [0, 0.45, 1],
+                stops: const [0, 0.45, 1],
               ),
             ),
           ),

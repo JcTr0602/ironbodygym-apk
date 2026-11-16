@@ -8,23 +8,22 @@
 /// ningún destino se pierde, todos viven en un pilar.
 ///
 /// Reglas del plano que este archivo hace cumplir:
-/// - La píldora de sync es el [SyncPill] de la casa envuelto en
-///   el pulso elástico de la pieza premium 8: al guardar algo
-///   nuevo, la píldora SUMA el pendiente con un pulso ámbar; al
-///   subir, el propio SyncPill enseña el resumen en verde. Sin
-///   spinners centrales.
+/// - El estado de sync es UN icono junto a la lupa
+///   ([IconoSyncCabecera], campo nº 4 + M-6 de la 1.35):
+///   la frase completa vive en su descripción y el detalle,
+///   a un toque. Al guardar algo nuevo, el icono pulsa; al
+///   sincronizar, gira. Sin spinners centrales ni fila
+///   entera de píldora robando pantalla.
 /// - El Modo Sol es SOLO manual (1 toque en la cabecera); el
 ///   automático por sensor no existe (guarda del contraste).
-/// - La cabecera vive SIEMPRE en dos filas (identidad y
-///   acciones arriba, píldora a lo ancho debajo): a 420 dp
-///   la fila única desborda, y al 200 % ni se acerca.
+/// - La cabecera vive en UNA fila fina (~56 dp): avatar con
+///   el nombre dentro de su propio toque (el menú dice
+///   nombre y rol), lupa, icono de sync y Modo Sol. El chip
+///   de rol como pieza separada desapareció (M-6).
 library;
-
-import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../sync.dart';
 import '../theme.dart';
 import 'componentes.dart';
 import 'diseno.dart';
@@ -98,74 +97,12 @@ class MarcoNav {
   }
 }
 
-/// Píldora de sync con el pulso elástico de la pieza premium 8:
-/// cuando el pendiente CRECE (algo se acaba de guardar), la
-/// píldora pulsa en ámbar; el contenido y los estados honestos
-/// son los del [SyncPill] de la casa, sin tocar.
-class PildoraSyncPulso extends StatefulWidget {
-  final VoidCallback onTap;
-  final bool anchoCompleto;
-
-  const PildoraSyncPulso(
-      {super.key, required this.onTap, this.anchoCompleto = false});
-
-  @override
-  State<PildoraSyncPulso> createState() => _PildoraSyncPulsoState();
-}
-
-class _PildoraSyncPulsoState extends State<PildoraSyncPulso>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulso = AnimationController(
-    vsync: this,
-    // 1.35 (UI-13): duración por el token.
-    duration: AppMovimiento.larga,
-  );
-  late final Animation<double> _escala = TweenSequence<double>([
-    TweenSequenceItem(
-        tween: Tween(begin: 1.0, end: 1.18)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 40),
-    TweenSequenceItem(
-        tween: Tween(begin: 1.18, end: 1.0)
-            .chain(CurveTween(curve: Curves.elasticOut)),
-        weight: 60),
-  ]).animate(_pulso);
-  StreamSubscription<SyncStatus>? _sub;
-  int _pendientesVistos = -1;
-
-  @override
-  void initState() {
-    super.initState();
-    _pendientesVistos = SyncEngine.instance.currentStatus.pending;
-    _sub = SyncEngine.instance.statusStream.listen((s) {
-      if (!mounted) return;
-      if (_pendientesVistos >= 0 && s.pending > _pendientesVistos) {
-        _pulso.forward(from: 0);
-      }
-      _pendientesVistos = s.pending;
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    _pulso.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _escala,
-      child: SyncPill(onTap: widget.onTap, anchoCompleto: widget.anchoCompleto),
-    );
-  }
-}
-
-/// Cabecera persistente del marco: chip de rol + nombre, píldora
-/// de sync, lupa universal, interruptor del Modo Sol y avatar
-/// con el menú de perfil. Compacta (~56 dp) y sin alturas fijas:
-/// con la fuente por encima del 130 % se apila en dos filas.
+/// Cabecera persistente del marco: avatar con el nombre
+/// (su toque abre el menú de perfil, que dice nombre y
+/// rol), lupa universal, icono de estado de sync e
+/// interruptor del Modo Sol. UNA fila fina (M-6 de la
+/// 1.35): la fila entera de la píldora y el chip de rol
+/// como pieza separada ya no existen.
 class CabeceraMarco extends StatelessWidget {
   /// «Dueño» | «Administrador» | «Entrenador».
   final String rol;
@@ -173,14 +110,13 @@ class CabeceraMarco extends StatelessWidget {
   final VoidCallback onSyncTap;
   final VoidCallback onLupa;
 
-  /// 1.35 (UI-22): con la lista bajada, la fila de
-  /// identidad se pliega del todo y queda solo la píldora
-  /// de sync — la píldora NUNCA se oculta; al volver
-  /// arriba, la identidad regresa. (La variante «barra
-  /// fina» con las acciones conservadas no ahorraba ni
-  /// un dp: las acciones miden 48 de área tocable y
-  /// dominaban el alto de la fila en los dos estados —
-  /// lo cazó el test de la pieza.)
+  /// 1.35 (UI-22, re-contratada con M-6): con la lista
+  /// bajada, el NOMBRE se recoge y quedan el avatar y los
+  /// iconos — el icono de sync NUNCA se oculta; al volver
+  /// arriba, el nombre regresa. El ahorro de alto de la
+  /// pieza ya no viene del plegado: viene de la fila
+  /// única (la píldora a lo ancho medía su propia fila
+  /// de ~48 dp en cada pantalla, para siempre).
   final bool plegada;
 
   /// Acción del menú de perfil: perfil | auditoria | respaldo |
@@ -258,6 +194,10 @@ class CabeceraMarco extends StatelessWidget {
       key: const ValueKey('marco-perfil'),
       tooltip: 'Mi perfil',
       onSelected: onAccionPerfil,
+      // 1.35 (M-6): el menú abre diciendo quién eres —
+      // el rol vive aquí, no en un chip suelto de la
+      // cabecera.
+      // (La cabecera del menú es el primer ítem, inerte.)
       // 1.33 (diseño): cada destino del menú lleva su
       // icono en el chip de marca de la casa, como el
       // resto de filas de la app — antes era texto pelado
@@ -266,6 +206,24 @@ class CabeceraMarco extends StatelessWidget {
       // la transición salen del popupMenuTheme de la casa;
       // «Cerrar sesión» se diferencia en rojo de error.
       itemBuilder: (ctx) => [
+        // 1.35 (M-6): cabecera inerte del menú — nombre
+        // y rol, que salieron de la fila de la cabecera.
+        PopupMenuItem(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(nombre,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTexto.cuerpo
+                      .copyWith(fontWeight: FontWeight.w700)),
+              Text(rol, style: AppTexto.secundario),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
         PopupMenuItem(
             value: 'perfil',
             child: _filaMenu(ctx, Icons.person_rounded,
@@ -301,18 +259,55 @@ class CabeceraMarco extends StatelessWidget {
       // cabecera sin acción. El círculo se queda en 34
       // (visual intacto) y un relleno transparente de 7 dp
       // lleva el área tocable a 48×48.
+      // 1.35 (M-6): el nombre va DENTRO del toque del
+      // avatar (una sola pieza de identidad); plegada la
+      // cabecera, el nombre se recoge y queda el círculo.
       child: Padding(
         padding: const EdgeInsets.all(7),
-        child: CircleAvatar(
-          radius: 17,
-          // 1.33 (diseño): el avatar de identidad va en la
-          // marca (naranja con la inicial en grafito, la
-          // pareja del FAB y de onPrimary), no en cobalto.
-          backgroundColor: AppColores.naranja,
-          child: Text(inicial,
-              style: const TextStyle(
-                  color: AppColores.sobreMarca,
-                  fontWeight: FontWeight.w700)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 17,
+              // 1.33 (diseño): el avatar de identidad va en la
+              // marca (naranja con la inicial en grafito, la
+              // pareja del FAB y de onPrimary), no en cobalto.
+              backgroundColor: AppColores.naranja,
+              child: Text(inicial,
+                  style: const TextStyle(
+                      color: AppColores.sobreMarca,
+                      fontWeight: FontWeight.w700)),
+            ),
+            AnimatedSize(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : AppMovimiento.media,
+              curve: AppMovimiento.curvaSuave,
+              alignment: Alignment.centerLeft,
+              child: plegada
+                  ? const SizedBox.shrink(
+                      key: ValueKey('cabecera-nombre-plegado'))
+                  : Row(
+                      key: const ValueKey('cabecera-nombre-pleno'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: AppEspacio.sm),
+                        ConstrainedBox(
+                          constraints:
+                              const BoxConstraints(maxWidth: 130),
+                          child: Text(
+                            nombre,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTexto.cuerpo.copyWith(
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        const SizedBox(width: AppEspacio.xs),
+                      ],
+                    ),
+            ),
+          ],
         ),
       ),
     );
@@ -320,95 +315,38 @@ class CabeceraMarco extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final identidad = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(
-          child: Chip(
-          key: const ValueKey('marco-rol'),
-          label: Text(rol,
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-          visualDensity: VisualDensity.compact,
-          // 1.33 (diseño): el rol se lee en la marca
-          // (borde y texto en el naranja accesible), no en
-          // el cobalto plano que Jc rechazó en campo.
-          side: BorderSide(color: AppColores.textoNaranja(context)),
-          labelStyle: TextStyle(
-              color: AppColores.textoNaranja(context),
-              fontWeight: FontWeight.w700),
-          ),
-        ),
-        const SizedBox(width: AppEspacio.sm),
-        Flexible(
-          child: Text(
-            nombre,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600),
-          ),
-        ),
-      ],
-    );
-    final acciones = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          key: const ValueKey('marco-lupa'),
-          tooltip: 'Buscar en el gym',
-          icon: const Icon(Icons.search_rounded),
-          onPressed: onLupa,
-        ),
-        _interruptorSol(context),
-        _avatar(context),
-      ],
-    );
-    // Dos filas SIEMPRE: identidad + acciones arriba y la
-    // píldora de sync A LO ANCHO debajo (precedente de la
-    // casa desde UI130-07). A 420 dp — y no digamos con la
-    // letra al 200 % — la fila única no cabe: la costura de
-    // la 1.32 lo cazó con 50 px de desborde.
-    final pildora = PildoraSyncPulso(
-      key: const ValueKey('marco-pildora'),
-      onTap: onSyncTap,
-      anchoCompleto: true,
-    );
-    // 1.35 (UI-22): la fila de identidad (con su hueco
-    // hasta la píldora) vive dentro del AnimatedSize:
-    // plegada, su alto va a cero y queda solo la píldora;
-    // desplegada, vuelve entera. Con «reducir movimiento»
-    // el cambio es instantáneo.
-    final reducido = MediaQuery.disableAnimationsOf(context);
+    // 1.35 (M-6 + CAMPO-4): UNA fila fina. A la izquierda,
+    // la identidad como una sola pieza (avatar + nombre
+    // dentro de su toque); a la derecha, lupa, el icono
+    // de estado de sync (junto a la lupa, como pidió Jc)
+    // y el Modo Sol. Sin chip de rol suelto y sin la fila
+    // entera de la píldora: ~48 dp devueltos a cada
+    // pantalla, para siempre. La fila única de la 1.32
+    // desbordaba porque llevaba el chip Y el nombre Y la
+    // píldora a lo ancho; sin esas dos piezas, cabe — y
+    // el nombre se recorta con elipsis y se recoge al
+    // bajar (plegada) antes de apretar a los iconos.
     return Material(
       color: Theme.of(context).colorScheme.surface,
       elevation: 1,
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: AppEspacio.md, vertical: AppEspacio.xs),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Row(
           children: [
-            AnimatedSize(
-              duration:
-                  reducido ? Duration.zero : AppMovimiento.media,
-              curve: AppMovimiento.curvaSuave,
-              alignment: Alignment.topCenter,
-              child: plegada
-                  ? const SizedBox.shrink(
-                      key: ValueKey('cabecera-plegada'))
-                  : Column(
-                      key: const ValueKey('cabecera-plena'),
-                      crossAxisAlignment:
-                          CrossAxisAlignment.stretch,
-                      children: [
-                        Row(children: [
-                          Expanded(child: identidad),
-                          acciones,
-                        ]),
-                        const SizedBox(height: AppEspacio.xs),
-                      ],
-                    ),
+            Flexible(child: _avatar(context)),
+            const Spacer(),
+            IconButton(
+              key: const ValueKey('marco-lupa'),
+              tooltip: 'Buscar en el gym',
+              icon: const Icon(Icons.search_rounded),
+              onPressed: onLupa,
             ),
-            pildora,
+            IconoSyncCabecera(
+              key: const ValueKey('marco-pildora'),
+              onTap: onSyncTap,
+            ),
+            _interruptorSol(context),
           ],
         ),
       ),
@@ -504,7 +442,7 @@ class BarraPilares extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadio.xl),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x59000000),
+                color: AppColores.sombraBarra,
                 blurRadius: 18,
                 offset: Offset(0, 6),
               ),
@@ -522,9 +460,9 @@ class BarraPilares extends StatelessWidget {
                   height: 1,
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(colors: [
-                      Color(0x00FFFFFF),
-                      Color(0x3DFFFFFF),
-                      Color(0x00FFFFFF),
+                      Colors.transparent,
+                      AppColores.luzBarra,
+                      Colors.transparent,
                     ]),
                   ),
                 ),
@@ -618,7 +556,7 @@ class _DestinoGrafito extends StatelessWidget {
             decoration: BoxDecoration(
               color: activo
                   ? AppColores.naranja
-                  : const Color(0x00000000),
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(AppRadio.lg),
             ),
             padding: const EdgeInsets.symmetric(
