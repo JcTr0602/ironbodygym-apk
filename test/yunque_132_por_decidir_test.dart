@@ -5,9 +5,11 @@
 /// decisiones pendientes» SOLO puede salir si TODAS las
 /// fuentes verificaron (locales leídas y las 4 remotas con
 /// valor). Si una remota devuelve null (sin conexión o
-/// respuesta degradada), la bandeja enseña «sin verificar»
-/// y la línea «bandejas remotas sin verificar (sin
-/// conexión)» — jamás pliega el desconocido a un 0.
+/// respuesta degradada), la bandeja lo dice una sola vez
+/// en la línea «Bandejas sin verificar — sin conexión»
+/// (redacción 1.35 M-3; antes cada fila enseñaba su
+/// «sin verificar» y la línea iba en minúsculas) —
+/// jamás pliega el desconocido a un 0.
 ///
 /// El arnés del dueño con sesión no existe en el banco
 /// (ver cabecera de banco_widget_test): la bandeja se prueba
@@ -106,7 +108,8 @@ void main() {
 
   group('BandejaPorDecidir (widget)', () {
     testWidgets(
-        'remotas caídas: enseña «sin verificar» y nunca el cero alegre',
+        'remotas caídas: la bandeja lo dice una sola vez '
+        '(M-3) y nunca el cero alegre',
         (tester) async {
       await tester.pumpWidget(_envolver(_bandeja(
         remotas: () async => const ConteosRemotosPorDecidir(),
@@ -114,9 +117,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(
-          find.text('bandejas remotas sin verificar (sin conexión)'),
+          find.text('Bandejas sin verificar — sin conexión'),
           findsOneWidget);
-      expect(find.text('sin verificar'), findsWidgets);
+      // M-3: las filas individuales ya no repiten
+      // «sin verificar» — ni una sola fila remota se pinta.
+      expect(find.text('sin verificar'), findsNothing);
+      expect(find.byType(ListTile), findsNothing);
       expect(find.textContaining('Todo al día'), findsNothing);
     });
 
@@ -141,7 +147,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('2 decisiones pendientes'), findsOneWidget);
       expect(
-          find.text('bandejas remotas sin verificar (sin conexión)'),
+          find.text('Bandejas sin verificar — sin conexión'),
           findsOneWidget);
     });
   });

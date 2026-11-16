@@ -101,10 +101,11 @@ void main() {
           findsOneWidget);
       expect(find.text('Todo al día · 0 decisiones pendientes'),
           findsNothing);
-      expect(find.text('bandejas remotas sin verificar (sin conexión)'),
+      expect(find.text('Bandejas sin verificar — sin conexión'),
           findsOneWidget,
           reason: 'sin foto previa y sin verificar, la bandeja '
-              'lo DECLARA en vez de afirmar el cero');
+              'lo DECLARA una sola vez (M-3) en vez de '
+              'afirmar el cero');
       // Ni un minuto de reloj falso después: sigue sin
       // afirmar el cero (la remota sigue colgada).
       for (var i = 0; i < 6; i++) {

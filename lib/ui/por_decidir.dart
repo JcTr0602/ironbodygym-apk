@@ -12,12 +12,13 @@
 ///   de 12 s y guarda de generación; al verificar, la foto
 ///   persistida se renueva.
 /// - Error ≠ vacío, jamás: si una fuente remota devuelve
-///   null (sin conexión o respuesta degradada), su fila dice
-///   «sin verificar» (o enseña su foto con la hora) y la
-///   bandeja muestra la línea «bandejas remotas sin
-///   verificar (sin conexión)». La frase «0 pendientes /
-///   Todo al día» SOLO sale si TODAS las fuentes — locales
-///   y remotas — verificaron y suman 0.
+///   null (sin conexión o respuesta degradada), la bandeja
+///   lo dice UNA vez en su línea «Bandejas sin verificar —
+///   sin conexión» (1.35 M-3: fuera las cuatro filas altas
+///   repitiendo «sin verificar»; con foto, la línea nombra
+///   la foto y cuántas quedan sin verificar). La frase
+///   «0 pendientes / Todo al día» SOLO sale si TODAS las
+///   fuentes — locales y remotas — verificaron y suman 0.
 library;
 
 import 'dart:async';
@@ -362,6 +363,17 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
       remotasEfectivas: efectivas,
       remotasVerificadasAhora: verificadasAhora,
     );
+    // 1.35 (M-3): cuántas remotas quedaron sin verificar
+    // (ni ahora ni en la foto): su fila ya no se pinta;
+    // la línea de la bandeja las nombra en conjunto. Y si
+    // alguna fila SÍ pinta un valor de la foto, la línea
+    // lo dice (la foto manda en su redacción).
+    final sinVerificarRemotas = [vVales, vPlus, vCom, vSol]
+        .where((v) => v.valor == null)
+        .length;
+    final hayValoresDeFoto = [vVales, vPlus, vCom, vSol]
+        .any((v) => v.deFoto && (v.valor ?? 0) > 0);
+    final totalPd = locales + efectivas.sumaVerificada;
 
     Widget fila({
       required IconData icono,
@@ -373,18 +385,21 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
     }) {
       // 1.34 Campo 2 (B-2, regla de Jc 2026-11-14): una
       // fila con CERO verificado NO aparece — ni local ni
-      // remota (antes las remotas pasaban localOk: false
-      // para poder enseñar su «sin verificar» y el cero
-      // verificado se les colaba visible, saturando la
-      // bandeja con entradas sin nada que atender). El
-      // null es otra cosa: «sin verificar» no es un cero,
-      // es un estado por atender, y la Compuerta 1 de la
-      // 1.32 prohíbe disfrazarlo de vacío — esa fila se
-      // queda. El titular ya contaba solo lo accionable
+      // remota. El titular ya contaba solo lo accionable
       // (sumaVerificada trata el null como no-cero
       // verificable y el cero no suma): filas y cabecera
       // dicen ahora lo mismo.
-      if (valor == 0 || (localOk && valor == null)) {
+      // 1.35 (M-3): el null («sin verificar») tampoco
+      // pinta su fila ya: CUATRO filas altas diciendo lo
+      // mismo eran media pantalla para una sola frase.
+      // El estado no se disfraza de cero ni de vacío —
+      // la Compuerta 1 sigue en pie: la bandeja lo dice
+      // UNA vez en su línea «Bandejas sin verificar —
+      // sin conexión» y el titular jamás afirma «Todo al
+      // día» sin verificar. Las lecturas LOCALES fallidas
+      // (congelaciones, catálogo) conservan su línea de
+      // error propia, que es la que queda visible.
+      if (valor == 0 || valor == null) {
         return const SizedBox.shrink();
       }
       return ListTile(
@@ -399,11 +414,10 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
         // verificar» se queda: significa alerta, no adorno.
         leading: IconoModuloBadge.naranja(icono),
         title: Text(titulo, style: AppTexto.cuerpo),
-        trailing: valor == null
-            ? Text('sin verificar',
-                style: AppTexto.metadato
-                    .copyWith(color: AppColores.alerta))
-            : Text(
+        // 1.35 (M-3): el guardián de arriba ya devolvió
+        // shrink con valor null o 0 — aquí valor siempre
+        // es un entero > 0 verificado (de ahora o de foto).
+        trailing: Text(
                 deFoto ? '$valor · foto' : '$valor',
                 style: AppTexto.conTabulares(
                     AppTexto.subtitulo.copyWith(
@@ -434,8 +448,15 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
               ),
             ],
           ),
-          Text(t.titular, style: AppTexto.secundario),
-          const SizedBox(height: AppEspacio.xs),
+          // 1.35 (M-3): fuera el subtítulo que repetía el
+          // título («Por Decidir» / «Por decidir»): la
+          // línea solo vive cuando dice algo que el
+          // título no dice — el conteo de pendientes o el
+          // «Todo al día» verificado.
+          if (t.todoAlDia || totalPd > 0) ...[
+            Text(t.titular, style: AppTexto.secundario),
+            const SizedBox(height: AppEspacio.xs),
+          ],
           // --- Prioridad del dueño (1.32, Fase 3 —
           // Momento 4 del plano): 1º incidencias y
           // conversiones, 2º Plus, 3º congelaciones,
@@ -594,11 +615,21 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
                   const SizedBox(width: AppEspacio.xs),
                   Expanded(
                     child: Text(
-                      _foto == null
-                          ? 'bandejas remotas sin verificar (sin conexión)'
-                          : 'Sin conexión: se enseña la última foto de '
-                              'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
-                              '${_foto!.hora.minute.toString().padLeft(2, '0')}.',
+                      // 1.35 (M-3): la frase única de las
+                      // bandejas sin verificar, con la
+                      // redacción de la pieza. La foto solo
+                      // se nombra cuando alguna fila pinta
+                      // de verdad un valor suyo.
+                      !hayValoresDeFoto
+                          ? 'Bandejas sin verificar — sin conexión'
+                          : sinVerificarRemotas > 0
+                              ? 'Sin conexión: se enseña la última foto de '
+                                  'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
+                                  '${_foto!.hora.minute.toString().padLeft(2, '0')} · '
+                                  '$sinVerificarRemotas sin verificar.'
+                              : 'Sin conexión: se enseña la última foto de '
+                                  'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
+                                  '${_foto!.hora.minute.toString().padLeft(2, '0')}.',
                       style: AppTexto.metadato
                           .copyWith(color: AppColores.alerta),
                     ),

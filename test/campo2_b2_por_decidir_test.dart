@@ -1,9 +1,14 @@
 // 1.34 Campo 2 — B-2: la regla de Jc (2026-11-14) en la
 // bandeja «Por Decidir»: cada fila se muestra SOLO si
 // tiene algo que atender. El cero VERIFICADO — local o
-// remoto — no aparece; el «sin verificar» (null) NO es un
-// cero y su fila se queda (Compuerta 1 de la 1.32: error ≠
-// vacío). El titular cuenta solo lo accionable.
+// remoto — no aparece. El titular cuenta solo lo
+// accionable.
+// 1.35 (M-3) re-contrata el «sin verificar»: el null NO
+// es un cero y la Compuerta 1 sigue en pie (la bandeja
+// jamás afirma «Todo al día» sin verificar), pero las
+// filas individuales ya no repiten «sin verificar» —
+// el estado se dice UNA vez en la línea «Bandejas sin
+// verificar — sin conexión».
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/por_decidir.dart';
@@ -57,17 +62,23 @@ void main() {
   });
 
   testWidgets(
-      'remota sin verificar (null) SÍ pinta su fila: no es '
-      'un cero', (tester) async {
+      'remota sin verificar (null): su fila NO se pinta, '
+      'la bandeja lo dice una sola vez y nunca afirma el '
+      'cero (M-3 sobre B-2)', (tester) async {
     await tester.pumpWidget(_envolver(_bandeja(
       remotas: () async => const ConteosRemotosPorDecidir(
           vales: null, plus: 0, comunidad: 0, solicitudes: 0),
     )));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Vales de premio por aprobar'), findsOneWidget);
-    expect(find.text('sin verificar'), findsWidgets);
+    expect(find.text('Vales de premio por aprobar'), findsNothing);
+    expect(find.text('sin verificar'), findsNothing);
+    expect(find.text('Bandejas sin verificar — sin conexión'),
+        findsOneWidget);
     expect(find.textContaining('Todo al día'), findsNothing);
+    // Y el subtítulo repetido («Por decidir» bajo el
+    // título «Por Decidir») tampoco se pinta (M-3).
+    expect(find.text('Por decidir'), findsNothing);
   });
 
   testWidgets(

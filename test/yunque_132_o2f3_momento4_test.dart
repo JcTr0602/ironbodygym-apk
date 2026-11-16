@@ -144,8 +144,9 @@ void main() {
 
     testWidgets(
         'catálogo en 0: la fila no ocupa; lectura fallida: '
-        'la fila queda «sin verificar» y la bandeja lo '
-        'dice (error ≠ vacío, como las congelaciones)',
+        'la fila no se finge y la línea de error lo dice '
+        '(error ≠ vacío, como las congelaciones; 1.35 M-3: '
+        'la fila «sin verificar» se recoge en la línea)',
         (tester) async {
       await abrir(
           tester,
@@ -162,8 +163,8 @@ void main() {
               catalogo: () async =>
                   throw StateError('espejo roto')));
       expect(find.text('Alertas de catálogo (stock o precio)'),
-          findsOneWidget);
-      expect(find.text('sin verificar'), findsOneWidget);
+          findsNothing);
+      expect(find.text('sin verificar'), findsNothing);
       expect(
           find.text('Catálogo: no se pudo leer el espejo local.'),
           findsOneWidget);
