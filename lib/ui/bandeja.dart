@@ -156,14 +156,16 @@ class _BandejaScreenState extends State<BandejaScreen>
     mostrarSnack(context, texto);
   }
 
+  // SL-X1 (G04-4): sin nombre en el espejo, el fallback es
+  // el genérico legible — el id interno NUNCA va a pantalla.
   String _nombreCliente(dynamic clienteId) {
     final nombre = _clientes['$clienteId'] ?? '';
-    return nombre.isNotEmpty ? nombre : 'Cliente $clienteId';
+    return nombre.isNotEmpty ? nombre : 'Cliente';
   }
 
   String _nombreAutor(dynamic tid) {
     if ('$tid' == '$_miTid') return 'Tú';
-    return _nombresTid['$tid'] ?? 'Entrenador $tid';
+    return _nombresTid['$tid'] ?? 'Entrenador';
   }
 
   String _fecha(String? iso) {
@@ -412,7 +414,7 @@ class _BandejaScreenState extends State<BandejaScreen>
               publicacionEnCola
                   ? 'Publicación en cola · Por subir'
                   : estado == kBandejaPublicada
-                      ? 'Publicada como «${s['articulo_id'] ?? ''}»'
+                      ? 'Publicada'
                           ' · ${_fecha('${s['cerrada_en'] ?? ''}')}'
                       : 'Descartada · ${_fecha('${s['cerrada_en'] ?? ''}')}',
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
