@@ -628,7 +628,15 @@ bool pareceTextoTecnicoCrudo(String t) {
 /// los de desenlace de corrida que fija el motor
 /// (`sesion_invalida`, `espejo_vacio`, `tabla_caida`,
 /// `descarga_incidencias`, `bajada_incompleta`,
-/// `subida_incompleta`).
+/// `subida_incompleta`, `servidor_no_responde`,
+/// `presupuesto_agotado`).
+/// 1.35 (SP-02): `presupuesto_agotado` nació en la 1.34 con
+/// su frase y su persistencia pero SIN registro en este set:
+/// `detalle()` lo trataba como «mensaje humano legado» y la
+/// pantalla pintaba el código crudo. El test de contrato
+/// `fase135_sp02_contrato_codigos_test.dart` recorre los
+/// códigos persistibles (literales del motor + salidas del
+/// clasificador) y exige registro y frase para cada uno.
 const Set<String> codigosErrorSyncConocidos = {
   // De traducirErrorSync (excepciones clasificadas).
   'permiso_camara',
@@ -658,6 +666,9 @@ const Set<String> codigosErrorSyncConocidos = {
   'descarga_incidencias',
   'bajada_incompleta',
   'subida_incompleta',
+  // 1.35 (SP-02): registrado por fin — su frase completa ya
+  // existía en _frasesCompletasErrorSync desde la 1.34.
+  'presupuesto_agotado',
 };
 
 /// ¿Es [v] un código estable de error de corrida (forma
