@@ -21,6 +21,19 @@ import 'widgets.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
 
+/// SL-8 (G08-5): el estado de una incidencia de sync,
+/// traducido para pantalla. La BD guarda el código crudo
+/// ('aprobada', 'descartada') y la tarjeta lo pintaba tal
+/// cual; aquí pasa por el mismo criterio que el resto de
+/// traductores de la casa y un estado desconocido jamás
+/// sale crudo. Top-level para tests.
+String etiquetaEstadoIncidenciaSync(String? estado) => switch (estado) {
+      'pendiente' => 'Pendiente',
+      'aprobada' => 'Aprobada',
+      'descartada' => 'Descartada',
+      _ => 'Estado registrado',
+    };
+
 class IncidenciasSyncScreen extends StatefulWidget {
   const IncidenciasSyncScreen({super.key});
 
@@ -334,7 +347,8 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
     final resumenCompleto = [
       if (resumen.isNotEmpty) resumen,
       if (!pendiente && resueltaPor.isNotEmpty)
-        'Resuelta por $resueltaPor · ${inc['resuelta_en'] ?? ''}',
+        // G08-5: la fecha de resolución también va formateada.
+        'Resuelta por $resueltaPor · ${fmtFecha('${inc['resuelta_en'] ?? ''}')}',
     ].join('\n');
     return Padding(
       padding: const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -345,15 +359,18 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
         // («pago_mensual»).
         titulo: descripcionOp('${inc['tipo'] ?? ''}'),
         chipEstado: ChipEstado.semantico(
-          texto: pendiente ? 'Pendiente' : '${inc['estado']}',
+          // G08-5: estado traducido, nunca el código crudo.
+          texto: etiquetaEstadoIncidenciaSync('${inc['estado'] ?? ''}'),
           significado: pendiente
               ? SignificadoChip.alerta
               : inc['estado'] == 'aprobada'
                   ? SignificadoChip.exito
                   : SignificadoChip.neutral,
         ),
+        // G08-5: la fecha del contexto con fmtFecha, como el
+        // resumen del payload de esta misma tarjeta.
         contexto:
-            '${inc['dispositivo'] ?? '—'} · ${inc['creada_en'] ?? ''}',
+            '${inc['dispositivo'] ?? '—'} · ${fmtFecha('${inc['creada_en'] ?? ''}')}',
         motivo: (inc['error'] as String?)?.isNotEmpty == true
             ? 'Motivo: ${errorSyncLegible('${inc['error']}')}'
             : null,
