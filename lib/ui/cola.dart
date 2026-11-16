@@ -288,7 +288,15 @@ List<GrupoFotoCola> agruparFotosCola(List<Map<String, dynamic>> filas) {
 String fraseErrorFoto(String? ultimoError) {
   final e = (ultimoError ?? '').trim();
   if (e.isEmpty) return 'No pudo subirse';
-  if (e.contains('vinculación')) {
+  // E3 (C2-03): la clase vinculación reconoce TAMBIÉN el
+  // texto real que SP-01 guarda a las 24 h sin espejo
+  // («La foto no pudo enlazarse: el cliente no aparece en
+  // este teléfono», fotos_cola.dart): buscar solo
+  // «vinculación» lo dejaba caer al genérico «No pudo
+  // subirse», que es falso — los bytes SÍ subieron.
+  if (e.contains('vinculación') ||
+      e.contains('enlaz') ||
+      e.contains('no aparece en este teléfono')) {
     return 'Llegó al servidor pero no pudo enlazarse';
   }
   if (e.contains('archivo no existe') ||
