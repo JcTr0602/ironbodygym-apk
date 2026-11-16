@@ -292,7 +292,9 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
             _precioDifiere && notaPrecio.isNotEmpty ? notaPrecio : null,
         // T91: fiado como en la completa (solo con
         // cliente; la función de negocio lo exige).
-        esFiado: _esFiado && _conCliente,
+        // G#22: y solo en CUP (defensa en el consumo,
+        // además de no ofrecer el switch en USD).
+        esFiado: _esFiado && _conCliente && _monedaSup == 'CUP',
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -313,7 +315,8 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   Future<bool> _confirmarConVistaPrevia() async {
     final precio = _precioVenta!;
     final total = precio * _cantidad;
-    final esFiado = _esFiado && _conCliente;
+    // G#22: la vista previa tampoco anuncia fiado en USD.
+    final esFiado = _esFiado && _conCliente && _monedaSup == 'CUP';
     final conPromo = conPromoVentaSuplemento(
       promoActiva: _promoActiva,
       tipoComprador: _conCliente ? 'cliente' : 'externo',
@@ -493,7 +496,13 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
             // 1.25 T91: fiado y nota, como en la venta
             // completa (el fiado exige cliente y apaga
             // la promo, misma regla de negocio).
-            if (_conCliente) ...[
+            // G#22 (Hy4): el fiado SOLO existe en CUP
+            // (regla 1.15 V1 de la venta completa,
+            // mostrarSwitchFiadoVenta): con un suplemento
+            // en USD el switch ni se ofrece — la rápida lo
+            // enseñaba sin mirar la moneda y el servidor
+            // aceptaba el fiado en USD.
+            if (_conCliente && _monedaSup == 'CUP') ...[
               const SizedBox(height: AppEspacio.sm),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
