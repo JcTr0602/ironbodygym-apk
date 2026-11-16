@@ -764,6 +764,11 @@ class _NominaScreenState extends State<NominaScreen> {
             FilaLibro(
               concepto: 'NETO A PAGAR',
               monto: '${fmtMonto(total)} CUP',
+              // SL-5 G07-11: el NETO se asienta contando
+              // hasta su cifra (MontoAnimado vía FilaLibro,
+              // el mismo mecanismo del «Total base»).
+              valorAnimado: total,
+              formatoAnimado: (v) => '${fmtMonto(v)} CUP',
               estiloConcepto: AppTexto.subtitulo,
               estiloMonto: AppTexto.tituloPagina
                   .copyWith(color: colorCifraNomina(total)),
@@ -859,6 +864,11 @@ class _NominaScreenState extends State<NominaScreen> {
     // de dinero de la pantalla morían hasta recrearla.
     try {
       await PerfilService.instance.setPagoEntrenador(tarifa.toInt());
+      // SL-5 BG-03: tras el await real, la pantalla pudo
+      // desmontarse: sin esta guarda el setState de abajo
+      // lanzaba «setState() called after dispose()» (la
+      // guarda vecina solo protegía el snack).
+      if (!mounted) return;
       // Argón Acceso #9: que el cambio viaje ya, no en el próximo
       // evento de sync.
       SyncEngine.instance.push();
@@ -899,7 +909,10 @@ class _NominaScreenState extends State<NominaScreen> {
             ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Actualizar',
+            // SL-5 G07-3: nombre por hecho real — baja los
+            // cambios del alcance de pagos si están viejos y
+            // relee la nómina (no un «Actualizar» genérico).
+            tooltip: 'Bajar cambios',
             onPressed: _actualizarNomina,
           ),
         ],
