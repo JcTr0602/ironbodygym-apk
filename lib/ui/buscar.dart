@@ -26,6 +26,7 @@ import 'diagnostico_espejo_card.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
+import 'hoja_accion.dart';
 import 'pago_diario.dart';
 import 'preview_cobro.dart';
 import 'suplementos.dart';
@@ -1508,16 +1509,23 @@ class _BuscarScreenState extends State<BuscarScreen>
     if (esVistaProtegida(c)) return;
     // 1.29 (FB-01): teléfono efectivo (movil primero).
     final telOk = telefonoEfectivoWa(c).isNotEmpty;
-    final accion = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
+    // SL-X2 (G02-3, familia UI-12): el menú rápido se
+    // presenta con la hoja de la casa (showHojaIron), como
+    // unificó SL-3 en listas.dart — antes era una hoja
+    // cruda con SafeArea propio. El contrato de retorno
+    // no cambia.
+    final accion = await showHojaIron<String>(
+      context,
+      titulo: '${c['nombre'] ?? 'Cliente'}',
+      icono: Icons.touch_app_rounded,
+      cuerpo: Builder(
+        builder: (ctx) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              title: Text('${c['nombre'] ?? 'Cliente'}',
-                  style: AppTexto.subtitulo),
-              subtitle: const Text('Acciones rápidas'),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Acciones rápidas',
+                  style: AppTexto.secundario),
             ),
             ListTile(
               leading: const Icon(Icons.payments_rounded),
@@ -1712,56 +1720,64 @@ class _BuscarScreenState extends State<BuscarScreen>
               : d == 0
                   ? 'Vence hoy'
                   : 'Vence en $d día(s)';
+      // SL-X2 (G02-3, familia UI-12): la presentación es la
+      // hoja de la casa (HojaAccion). LÍMITE documentado:
+      // showHojaIron no expone isDismissible, y esta pasada
+      // guiada DEBE seguir siendo no-descartable (tocar
+      // fuera o volver atrás no la cierra: cada paso se
+      // resuelve con un botón) — así que la HojaAccion se
+      // compone sobre el mismo showModalBottomSheet con
+      // isDismissible: false, conservando la descartabilidad
+      // intacta y unificando solo la presentación visual.
+      // La X de la hoja equivale a «Terminar avisos» ('fin').
       final r = await showModalBottomSheet<String>(
         context: context,
         isDismissible: false,
-        builder: (ctx) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(AppEspacio.lg),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Aviso ${i + 1} de ${conTel.length}',
-                    style: AppTexto.metadato),
-                const SizedBox(height: 4),
-                Text('${c['nombre'] ?? 'Cliente'}',
-                    style: AppTexto.subtitulo),
-                Text(detalle, style: AppTexto.secundario),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.chat_rounded),
-                    label: const Text('Abrir WhatsApp'),
-                    onPressed: () => Navigator.pop(ctx, 'abrir'),
-                  ),
+        isScrollControlled: true,
+        builder: (ctx) => HojaAccion(
+          titulo: 'Aviso ${i + 1} de ${conTel.length}',
+          icono: Icons.chat_rounded,
+          onCerrar: () => Navigator.pop(ctx, 'fin'),
+          cuerpo: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${c['nombre'] ?? 'Cliente'}',
+                  style: AppTexto.subtitulo),
+              Text(detalle, style: AppTexto.secundario),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.chat_rounded),
+                  label: const Text('Abrir WhatsApp'),
+                  onPressed: () => Navigator.pop(ctx, 'abrir'),
                 ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, 'avise'),
-                        child: const Text('Ya avisé · Siguiente'),
-                      ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'avise'),
+                      child: const Text('Ya avisé · Siguiente'),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, 'saltar'),
-                        child: const Text('Saltar'),
-                      ),
-                    ),
-                  ],
-                ),
-                Center(
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(ctx, 'fin'),
-                    child: const Text('Terminar avisos'),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'saltar'),
+                      child: const Text('Saltar'),
+                    ),
+                  ),
+                ],
+              ),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, 'fin'),
+                  child: const Text('Terminar avisos'),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
