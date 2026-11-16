@@ -38,7 +38,6 @@ import 'panel_buscador.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
 import 'importar_respaldo.dart';
-import 'widgets.dart';
 
 /// 1.25 T113: el índice de ajustes por sección — la
 /// reagrupación fijada (Vibración y Alto contraste en
@@ -548,35 +547,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
     );
   }
 
-  // ---------- Notificaciones ----------
-
-  Future<void> _elegirHoras() async {
-    final sel = await showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Avisar si llevo sin sincronizar'),
-        children: [4, 8, 12, 24]
-            .map((h) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, h),
-                  child: Row(
-                    children: [
-                      Text('$h horas'),
-                      const Spacer(),
-                      if (_horasAviso == h)
-                        const Icon(Icons.check_rounded,
-                            color: AppColores.naranja),
-                    ],
-                  ),
-                ))
-            .toList(),
-      ),
-    );
-    if (sel != null) {
-      await _perfil.setHorasAviso(sel);
-      if (mounted) setState(() => _horasAviso = sel);
-    }
-  }
-
   // ---------- Bloque 1: deslizables de Buscar ----------
 
   String _etiquetaSwipe(String v) => switch (v) {
@@ -587,41 +557,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
         _ => 'Ninguna',
       };
 
-  Future<void> _elegirSwipe(bool derecha) async {
-    final actual = derecha ? _swipeDer : _swipeIzq;
-    final sel = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: Text(derecha
-            ? 'Deslizar a la derecha'
-            : 'Deslizar a la izquierda'),
-        children: [
-          for (final v in ['ninguna', 'cobrar', 'diario', 'venta', 'editar'])
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, v),
-              child: Row(
-                children: [
-                  Text(_etiquetaSwipe(v)),
-                  const Spacer(),
-                  if (actual == v)
-                    const Icon(Icons.check_rounded,
-                        color: AppColores.naranja),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-    if (sel != null) {
-      if (derecha) {
-        await _perfil.setSwipeBuscarDer(sel);
-        if (mounted) setState(() => _swipeDer = sel);
-      } else {
-        await _perfil.setSwipeBuscarIzq(sel);
-        if (mounted) setState(() => _swipeIzq = sel);
-      }
-    }
-  }
+  // SL-9 (G09-6): los selectores de Ajustes (horas de aviso,
+  // deslizables de Buscar y bloqueo automático) ya no abren
+  // un diálogo simple propio: son el SelectorIron de la casa,
+  // en línea, con su icono — y participan del buscador de
+  // ajustes como las demás filas (coincideBusquedaAjuste).
 
   // ---------- Seguridad ----------
 
@@ -708,38 +648,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
     if (m <= 0) return 'Nunca';
     if (m == 1) return 'Tras 1 minuto';
     return 'Tras $m minutos';
-  }
-
-  /// Bloqueo automático con PIN (item 14).
-  Future<void> _elegirBloqueo() async {
-    if (!_tienePin) {
-      _msg('Primero configura un PIN rápido');
-      return;
-    }
-    final sel = await showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Bloqueo automático'),
-        children: [0, 1, 5, 15, 30]
-            .map((m) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, m),
-                  child: Row(
-                    children: [
-                      Text(_bloqueoEtiqueta(m)),
-                      const Spacer(),
-                      if (_bloqueoMinutos == m)
-                        const Icon(Icons.check_rounded,
-                            color: AppColores.naranja),
-                    ],
-                  ),
-                ))
-            .toList(),
-      ),
-    );
-    if (sel != null) {
-      await _perfil.setBloqueoMinutos(sel);
-      if (mounted) setState(() => _bloqueoMinutos = sel);
-    }
   }
 
   // ---------- Datos ----------
@@ -1684,6 +1592,46 @@ class _AjustesScreenState extends State<AjustesScreen> {
     );
   }
 
+  /// SL-9 (G09-6): fila de Ajustes con el SelectorIron de la
+  /// casa en línea (icono + selector con su etiqueta), en vez
+  /// de una fila que abría un diálogo simple propio. Participa
+  /// del buscador de ajustes como _opcion y _switch.
+  Widget _selectorAjuste<T>({
+    required IconData icono,
+    required String titulo,
+    required T valor,
+    required List<OpcionSelector<T>> opciones,
+    required ValueChanged<T?>? alCambiar,
+    String? textoAyuda,
+  }) {
+    if (!coincideBusquedaAjuste(titulo, _busquedaAjustes)) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Icon(icono, size: 24),
+          ),
+          const SizedBox(width: AppEspacio.lg),
+          Expanded(
+            child: SelectorIron<T>(
+              valor: valor,
+              opciones: opciones,
+              alCambiar: alCambiar,
+              etiqueta: titulo,
+              textoAyuda: textoAyuda,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _switch({
     required IconData icono,
     required String titulo,
@@ -1719,7 +1667,8 @@ class _AjustesScreenState extends State<AjustesScreen> {
       appBar: appBarIron(context, 'Ajustes'),
       body: Column(
         children: [
-          const SyncBanner(),
+          // SL-9 (G09-5): fuera la banda de sync repetida — la
+          // sync se dice una sola vez, en la cabecera de la app.
           // 1.25 T113: buscador de ajustes en la cabecera.
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -1983,17 +1932,45 @@ class _AjustesScreenState extends State<AjustesScreen> {
                 ),
                 // Bloque 1: acciones al deslizar en Buscar.
                 _seccion('Buscar cliente'),
-                _opcion(
+                _selectorAjuste<String>(
                   icono: Icons.swipe_right_rounded,
                   titulo: 'Deslizar a la derecha',
-                  subtitulo: _etiquetaSwipe(_swipeDer),
-                  onTap: () => _elegirSwipe(true),
+                  valor: _swipeDer,
+                  opciones: [
+                    for (final v in [
+                      'ninguna',
+                      'cobrar',
+                      'diario',
+                      'venta',
+                      'editar'
+                    ])
+                      OpcionSelector(v, _etiquetaSwipe(v)),
+                  ],
+                  alCambiar: (v) async {
+                    if (v == null) return;
+                    await _perfil.setSwipeBuscarDer(v);
+                    if (mounted) setState(() => _swipeDer = v);
+                  },
                 ),
-                _opcion(
+                _selectorAjuste<String>(
                   icono: Icons.swipe_left_rounded,
                   titulo: 'Deslizar a la izquierda',
-                  subtitulo: _etiquetaSwipe(_swipeIzq),
-                  onTap: () => _elegirSwipe(false),
+                  valor: _swipeIzq,
+                  opciones: [
+                    for (final v in [
+                      'ninguna',
+                      'cobrar',
+                      'diario',
+                      'venta',
+                      'editar'
+                    ])
+                      OpcionSelector(v, _etiquetaSwipe(v)),
+                  ],
+                  alCambiar: (v) async {
+                    if (v == null) return;
+                    await _perfil.setSwipeBuscarIzq(v);
+                    if (mounted) setState(() => _swipeIzq = v);
+                  },
                 ),
                 // ----- NOTIFICACIONES -----
                 _seccion('Notificaciones'),
@@ -2022,11 +1999,21 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   },
                 ),
                 if (_recordatorio)
-                  _opcion(
+                  _selectorAjuste<int>(
                     icono: Icons.schedule_rounded,
                     titulo: 'Cada cuánto avisar',
-                    subtitulo: '$_horasAviso horas',
-                    onTap: _elegirHoras,
+                    valor: _horasAviso,
+                    opciones: const [
+                      OpcionSelector(4, '4 horas'),
+                      OpcionSelector(8, '8 horas'),
+                      OpcionSelector(12, '12 horas'),
+                      OpcionSelector(24, '24 horas'),
+                    ],
+                    alCambiar: (v) async {
+                      if (v == null) return;
+                      await _perfil.setHorasAviso(v);
+                      if (mounted) setState(() => _horasAviso = v);
+                    },
                   ),
                 _switch(
                   icono: Icons.sync_problem_rounded,
@@ -2079,12 +2066,28 @@ class _AjustesScreenState extends State<AjustesScreen> {
                       : 'Sin configurar',
                   onTap: _configurarPin,
                 ),
-                _opcion(
+                _selectorAjuste<int>(
                   icono: Icons.timer_rounded,
                   titulo: 'Bloqueo automático',
-                  subtitulo:
-                      '${_bloqueoEtiqueta(_bloqueoMinutos)}${_tienePin ? '' : ' (requiere PIN)'}',
-                  onTap: _elegirBloqueo,
+                  valor: _bloqueoMinutos,
+                  opciones: [
+                    for (final m in [0, 1, 5, 15, 30])
+                      OpcionSelector(m, _bloqueoEtiqueta(m)),
+                  ],
+                  // Sin PIN no se puede elegir (como antes: la
+                  // fila avisaba «primero configura un PIN»); la
+                  // ayuda lo dice en la propia fila.
+                  textoAyuda:
+                      _tienePin ? null : 'Primero configura un PIN rápido',
+                  alCambiar: _tienePin
+                      ? (v) async {
+                          if (v == null) return;
+                          await _perfil.setBloqueoMinutos(v);
+                          if (mounted) {
+                            setState(() => _bloqueoMinutos = v);
+                          }
+                        }
+                      : null,
                 ),
 
                 // ----- DATOS -----

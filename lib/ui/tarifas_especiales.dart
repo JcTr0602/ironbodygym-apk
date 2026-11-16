@@ -415,27 +415,20 @@ Future<void> _formularioTarifa(
   if (datos == null || !context.mounted) return;
   final periodo = datos.periodo;
 
-  // Validación (no bloquea con diálogos crípticos: un aviso claro).
-  String? error;
+  // Validación de respaldo (SL-9 G09-1: la validación VIVE en
+  // el diálogo — ver errorValidacionTarifaEspecial — y esta es
+  // solo la red de seguridad del llamador: si el diálogo ya
+  // validó, aquí nunca debería dispararse).
   final ef = _parseMonto(datos.efectivo);
   final tr = _parseMonto(datos.transfer);
-  if (datos.nombre.trim().isEmpty) {
-    error = 'Falta el nombre de la tarifa.';
-  } else if (ef == null && tr == null) {
-    error = 'Pon al menos un monto (efectivo o transferencia).';
-  } else if ((ef != null && ef <= 0) || (tr != null && tr <= 0)) {
-    error = 'Los montos deben ser mayores que 0.';
-  } else if (datos.motivo.trim().isEmpty) {
-    error = 'Falta el motivo (es obligatorio y queda en el historial).';
-  } else if (DateTime.tryParse(datos.desde.trim()) == null) {
-    error = 'Vigente desde no es una fecha válida (AAAA-MM-DD).';
-  } else if (datos.hasta.trim().isNotEmpty &&
-      DateTime.tryParse(datos.hasta.trim()) == null) {
-    error = 'Vigente hasta no es una fecha válida (AAAA-MM-DD).';
-  } else if (datos.hasta.trim().isNotEmpty &&
-      datos.hasta.trim().compareTo(datos.desde.trim()) < 0) {
-    error = 'Vigente hasta no puede ser antes que vigente desde.';
-  }
+  final error = errorValidacionTarifaEspecial(
+    nombre: datos.nombre,
+    efectivo: datos.efectivo,
+    transfer: datos.transfer,
+    desde: datos.desde,
+    hasta: datos.hasta,
+    motivo: datos.motivo,
+  );
   if (error != null) {
     if (!context.mounted) return;
     mostrarSnack(context, error, significado: SignificadoChip.error);
@@ -494,6 +487,52 @@ Future<void> _formularioTarifa(
   if (!context.mounted) return;
   mostrarSnack(context, 'Tarifa especial guardada', significado: SignificadoChip.exito);
 }
+
+/// SL-9 (G09-1): validación del formulario de tarifa especial,
+/// PURA sobre los textos del diálogo. Vive aquí para que el
+/// propio diálogo la ejecute ANTES de cerrarse (antes validaba
+/// el llamador tras el pop: el error salía en la pantalla de
+/// fondo y el dueño retecleaba todo). Devuelve el mensaje de
+/// error o null si los datos valen. Las fechas llegan en ISO
+/// (aaaa-mm-dd) desde el CampoFecha de la casa: el mensaje
+/// nunca pide un formato de máquina (G09-2).
+String? errorValidacionTarifaEspecial({
+  required String nombre,
+  required String efectivo,
+  required String transfer,
+  required String desde,
+  required String hasta,
+  required String motivo,
+}) {
+  final ef = _parseMonto(efectivo);
+  final tr = _parseMonto(transfer);
+  if (nombre.trim().isEmpty) {
+    return 'Falta el nombre de la tarifa.';
+  } else if (ef == null && tr == null) {
+    return 'Pon al menos un monto (efectivo o transferencia).';
+  } else if ((ef != null && ef <= 0) || (tr != null && tr <= 0)) {
+    return 'Los montos deben ser mayores que 0.';
+  } else if (motivo.trim().isEmpty) {
+    return 'Falta el motivo (es obligatorio y queda en el historial).';
+  } else if (DateTime.tryParse(desde.trim()) == null) {
+    return 'Elige la fecha desde la que rige la tarifa.';
+  } else if (hasta.trim().isNotEmpty &&
+      DateTime.tryParse(hasta.trim()) == null) {
+    return 'La fecha de fin no es válida; elígela de nuevo.';
+  } else if (hasta.trim().isNotEmpty &&
+      hasta.trim().compareTo(desde.trim()) < 0) {
+    return 'Vigente hasta no puede ser antes que vigente desde.';
+  }
+  return null;
+}
+
+/// ISO (aaaa-mm-dd) de una fecha elegida con CampoFecha: el
+/// formato que viaja en el payload de la tarifa, sin que el
+/// dueño tenga que teclearlo (G09-2).
+String _isoFechaTarifa(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
 
 Future<String?> _pedirMotivo(BuildContext context) async {
   return showDialog<String>(
@@ -574,9 +613,14 @@ class _DialogoFormularioTarifaState
   final _nombreCtrl = TextEditingController();
   final _efectivoCtrl = TextEditingController();
   final _transferCtrl = TextEditingController();
-  late final TextEditingController _desdeCtrl;
-  final _hastaCtrl = TextEditingController();
   final _motivoCtrl = TextEditingController();
+  // SL-9 (G09-2): las vigencias son FECHAS elegidas con el
+  // CampoFecha de la casa, no texto tecleado con formato.
+  DateTime? _desde;
+  DateTime? _hasta;
+  // SL-9 (G09-1): el error de validación se pinta DENTRO del
+  // diálogo y el diálogo no se cierra hasta que valga.
+  String? _error;
   var _periodo = 'mensual';
   Map<String, dynamic>? _activaPrevia;
 
@@ -585,7 +629,7 @@ class _DialogoFormularioTarifaState
   @override
   void initState() {
     super.initState();
-    _desdeCtrl = TextEditingController(text: hoyHabanaIso());
+    _desde = DateTime.tryParse(hoyHabanaIso());
     _aplicarPrevia(widget.previaInicial);
   }
 
@@ -594,22 +638,22 @@ class _DialogoFormularioTarifaState
     _nombreCtrl.dispose();
     _efectivoCtrl.dispose();
     _transferCtrl.dispose();
-    _desdeCtrl.dispose();
-    _hastaCtrl.dispose();
     _motivoCtrl.dispose();
     super.dispose();
   }
 
   void _aplicarPrevia(Map<String, dynamic>? previa) {
     _activaPrevia = previa;
+    _error = null;
     if (previa != null) {
       _nombreCtrl.text = '${previa['nombre'] ?? ''}';
       final ef = (previa['monto_efectivo'] as num?)?.toDouble();
       final tr = (previa['monto_transferencia'] as num?)?.toDouble();
       _efectivoCtrl.text = ef == null ? '' : _num(ef);
       _transferCtrl.text = tr == null ? '' : _num(tr);
-      _desdeCtrl.text = '${previa['vigente_desde'] ?? hoyHabanaIso()}';
-      _hastaCtrl.text = '${previa['vigente_hasta'] ?? ''}';
+      _desde = DateTime.tryParse('${previa['vigente_desde'] ?? ''}') ??
+          DateTime.tryParse(hoyHabanaIso());
+      _hasta = DateTime.tryParse('${previa['vigente_hasta'] ?? ''}');
       _motivoCtrl.text = '${previa['motivo'] ?? ''}';
     } else {
       // Corrección panel 1.10 (BAJO): sin previa, el formulario
@@ -619,8 +663,8 @@ class _DialogoFormularioTarifaState
       _nombreCtrl.clear();
       _efectivoCtrl.clear();
       _transferCtrl.clear();
-      _desdeCtrl.text = hoyHabanaIso();
-      _hastaCtrl.clear();
+      _desde = DateTime.tryParse(hoyHabanaIso());
+      _hasta = null;
       _motivoCtrl.clear();
     }
   }
@@ -689,18 +733,39 @@ class _DialogoFormularioTarifaState
               },
             ),
             const SizedBox(height: 8),
-            CampoTexto(
-                controller: _desdeCtrl,
-                etiqueta: 'Vigente desde (AAAA-MM-DD)'),
+            // SL-9 (G09-2): selector de fecha de la casa; el
+            // formato ISO viaja por dentro, nunca se teclea.
+            CampoFecha(
+              valor: _desde,
+              etiqueta: 'Vigente desde',
+              limpiable: false,
+              onCambio: (f) => setState(() {
+                _desde = f;
+                _error = null;
+              }),
+            ),
             const SizedBox(height: 8),
-            CampoTexto(
-                controller: _hastaCtrl,
-                etiqueta: 'Vigente hasta (vacío = sin fin)'),
+            CampoFecha(
+              valor: _hasta,
+              etiqueta: 'Vigente hasta (sin fecha = sin fin)',
+              onCambio: (f) => setState(() {
+                _hasta = f;
+                _error = null;
+              }),
+            ),
             const SizedBox(height: 8),
             CampoTexto(
                 controller: _motivoCtrl,
                 etiqueta: 'Motivo (obligatorio, interno: '
                     'nunca sale en mensajes)'),
+            // SL-9 (G09-1): el error de validación DENTRO del
+            // diálogo, junto a los campos, sin cerrar nada.
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!,
+                  style: AppTexto.cuerpo
+                      .copyWith(color: AppColores.error)),
+            ],
           ],
         ),
       ),
@@ -727,15 +792,34 @@ class _DialogoFormularioTarifaState
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         FilledButton(
-            onPressed: () => Navigator.pop(context, (
-                  nombre: _nombreCtrl.text,
-                  efectivo: _efectivoCtrl.text,
-                  transfer: _transferCtrl.text,
-                  desde: _desdeCtrl.text,
-                  hasta: _hastaCtrl.text,
-                  motivo: _motivoCtrl.text,
-                  periodo: _periodo,
-                )),
+            onPressed: () {
+              // SL-9 (G09-1): validar ANTES de cerrar; si algo
+              // falla, el error se pinta dentro y lo tecleado
+              // se conserva (antes el pop salía primero y el
+              // aviso caía en la pantalla de fondo).
+              final datos = (
+                nombre: _nombreCtrl.text,
+                efectivo: _efectivoCtrl.text,
+                transfer: _transferCtrl.text,
+                desde: _desde == null ? '' : _isoFechaTarifa(_desde!),
+                hasta: _hasta == null ? '' : _isoFechaTarifa(_hasta!),
+                motivo: _motivoCtrl.text,
+                periodo: _periodo,
+              );
+              final error = errorValidacionTarifaEspecial(
+                nombre: datos.nombre,
+                efectivo: datos.efectivo,
+                transfer: datos.transfer,
+                desde: datos.desde,
+                hasta: datos.hasta,
+                motivo: datos.motivo,
+              );
+              if (error != null) {
+                setState(() => _error = error);
+                return;
+              }
+              Navigator.pop(context, datos);
+            },
             child: const Text('Guardar')),
       ],
     );
