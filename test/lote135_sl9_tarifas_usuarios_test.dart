@@ -288,7 +288,12 @@ void main() {
             await _esperarHasta(
                 tester, find.text('Cambiar rol (entrenador ↔ admin)')),
             isTrue);
-        await tester.tap(find.text('Cambiar rol (entrenador ↔ admin)'));
+        await _ciclos(tester, 4);
+        await tester.tap(
+            find.ancestor(
+                of: find.text('Cambiar rol (entrenador ↔ admin)'),
+                matching: find.byType(InkWell)),
+            warnIfMissed: false);
         expect(
             await _esperarHasta(tester, find.textContaining('pasará de')),
             isTrue,
