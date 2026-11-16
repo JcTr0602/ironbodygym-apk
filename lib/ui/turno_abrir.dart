@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import '../turno_service.dart';
 import 'componentes.dart';
@@ -44,9 +45,16 @@ Future<List<String>> nombresOtrosEntrenadores() async {
       }
     }
   } catch (e) {
-    // Yunque de App 1.31 (C1-7): la suplencia se pierde en
-    // silencio si la lectura falla; al menos bitácora.
+    // SL-11 (G12-5): la suplencia NO se pierde en silencio.
+    // Antes el fallo se tragaba (solo bitácora) y la lista
+    // vacía hacía abrir el turno «normal», sin preguntar ni
+    // avisar: el «cubre a…» desaparecía. Ahora la lectura
+    // fallida LANZA un error limpio y quien abre (Home, hub)
+    // lo muestra amable SIN abrir el turno.
     AppLog.aviso('turno_abrir', 'otros_entrenadores_fallo', d: '$e');
+    throw StateError(
+        'No se pudo comprobar a quién podrías cubrir hoy. '
+        'El turno no se abrió; inténtalo de nuevo.');
   }
   return nombres;
 }
@@ -79,6 +87,9 @@ Future<(bool, String?)> elegirCubreA(
 
 /// Abre el turno preguntando antes por la suplencia (si
 /// hay a quién cubrir). Devuelve false si se canceló.
+/// SL-11 (G12-5): si la lectura de entrenadores FALLA, la
+/// excepción sube al llamador (Home/hub la muestran amable)
+/// y el turno NO se abre: nunca un «normal» fingido.
 Future<bool> abrirTurnoConSuplente(BuildContext context) async {
   final nombres = await nombresOtrosEntrenadores();
   if (nombres.isEmpty || !context.mounted) {
@@ -93,7 +104,19 @@ Future<bool> abrirTurnoConSuplente(BuildContext context) async {
 
 /// Marca (o cambia) a quién cubre el turno ya abierto.
 Future<void> marcarCubreA(BuildContext context) async {
-  final nombres = await nombresOtrosEntrenadores();
+  // SL-11 (G12-5): misma regla al remarcar — si la lectura
+  // falla se avisa y no se toca la marca, en silencio no.
+  final List<String> nombres;
+  try {
+    nombres = await nombresOtrosEntrenadores();
+  } catch (e) {
+    if (context.mounted) {
+      mostrarSnack(context,
+          'No se pudo marcar la suplencia: ${mensajeErrorAmable(e)}',
+          significado: SignificadoChip.error);
+    }
+    return;
+  }
   if (nombres.isEmpty) {
     if (context.mounted) {
       mostrarSnack(
