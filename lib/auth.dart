@@ -733,6 +733,25 @@ class AuthService {
     } catch (_) {}
   }
 
+  /// CAMPO-15 (1.35, decisión de Jc 2026-11-16): el
+  /// telegram_id del dueño como DATO de negocio — el mismo
+  /// que `isOwner` reconoce para el alias «julio». Vive
+  /// aquí, una sola vez, porque las cuentas de pendiente
+  /// (negocio.dart) lo necesitan sin sesión: el efectivo
+  /// que el dueño cobra NUNCA es «pendiente a entregar»
+  /// (no se liquida a sí mismo), aunque una fila suya
+  /// nazca con entregado=0 por un camino que no aplicó
+  /// la marca de dueño del servidor (pasó con el pago
+  /// 221, inscripción de Claudia Toledo, 2026-11-15).
+  // nosemgrep: ironbody-telegram-id-dueno-hardcodeado — identidad única del dueño del negocio; CAMPO-15 la necesita como dato en la raíz de las cuentas de pendiente, igual que isOwner la usa para el alias «julio».
+  static const int telegramIdDueno = 735772141;
+
+  /// CAMPO-15: ¿este telegram_id es el del dueño? Su
+  /// efectivo queda fuera de toda piscina de «pendiente
+  /// a entregar» por regla, no por flag.
+  static bool esDelDueno(int? tid) =>
+      tid != null && tid == telegramIdDueno;
+
   /// ¿Es el dueño? Solo Jc tiene acciones restringidas (ej. borrado
   /// definitivo en papelera).
   bool get isOwner {
