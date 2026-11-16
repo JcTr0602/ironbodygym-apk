@@ -194,7 +194,10 @@ class _TarjetaCierreTurnoScreenState
   String get _textoCompartir {
     final b = StringBuffer('Cierre de turno — Iron Body Gym');
     if (_turnoEtiqueta.isNotEmpty) b.write('\n$_turnoEtiqueta');
-    b.write('\nPagos del turno: $_pagos');
+    // E3 (C4-01): la cifra es del DÍA (conteoPagosDia), no
+    // del turno — el rótulo lo dice, como el diálogo del
+    // mismo flujo («Cobrado del día»).
+    b.write('\nPagos del día: $_pagos');
     if (_pendientes > 0) {
       b.write('\nPendientes sin sincronizar: $_pendientes '
           '(${fmtMonto(_pendientesCup)} CUP'
@@ -303,7 +306,7 @@ class _TarjetaCierreTurnoScreenState
                             16, 8, 16, 4),
                         child: Column(
                           children: [
-                            _fila('Pagos del turno', '$_pagos'),
+                            _fila('Pagos del día', '$_pagos'),
                             // Las filas en cero no
                             // aparecen (regla de Jc).
                             if (_pendientes > 0) ...[
