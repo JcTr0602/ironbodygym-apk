@@ -778,9 +778,18 @@ class _GuiaScreenState extends State<GuiaScreen> {
                   color: AppColores.textoSecundario(context)),
           ),
           const SizedBox(height: 8),
+          // SL-10 G13-7: los borradores se construyen
+          // con la pieza de la casa, como las publicadas
+          // de esta misma pantalla — Tarjeta con su
+          // separación, no un Card crudo pegado al
+          // siguiente.
           for (final b in borradoresFiltrados)
-            Card(
-              child: ListTile(
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+              child: Tarjeta(
+                padding: EdgeInsets.zero,
+                onTap: () => _abrirEditor(borrador: b),
+                child: ListTile(
                 leading: Icon(Icons.edit_note_rounded,
                     color: AppColores.textoSecundario(context)),
                 title: Text(
@@ -813,7 +822,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
                                 style: AppTexto.metadato),
                             visualDensity: VisualDensity.compact,
                           ),
-                onTap: () => _abrirEditor(borrador: b),
+                ),
               ),
             ),
           const SizedBox(height: 16),
