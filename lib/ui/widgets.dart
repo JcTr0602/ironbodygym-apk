@@ -797,7 +797,13 @@ class _IconoSyncCabeceraState extends State<IconoSyncCabecera>
     _pendientesVistos = SyncEngine.instance.currentStatus.pending;
     _sub = SyncEngine.instance.statusStream.listen((s) {
       if (!mounted) return;
-      if (_pendientesVistos >= 0 && s.pending > _pendientesVistos) {
+      // E3 (C9-01): con el movimiento reducido (ajuste de
+      // la app o del sistema, ya fusionados en el
+      // MediaQuery de la raíz) el pulso NO se dispara —
+      // el giro ya lo respetaba; la escala, no.
+      if (_pendientesVistos >= 0 &&
+          s.pending > _pendientesVistos &&
+          !MediaQuery.disableAnimationsOf(context)) {
         _pulso.forward(from: 0);
       }
       _pendientesVistos = s.pending;
@@ -849,13 +855,17 @@ class _IconoSyncCabeceraState extends State<IconoSyncCabecera>
             child: icono,
           );
         }
+        final boton = IconButton(
+          tooltip: e.texto,
+          icon: icono,
+          onPressed: widget.onTap,
+        );
+        // E3 (C9-01): sin movimiento, sin ScaleTransition
+        // — el botón se pinta tal cual.
+        if (reducido) return boton;
         return ScaleTransition(
           scale: _escala,
-          child: IconButton(
-            tooltip: e.texto,
-            icon: icono,
-            onPressed: widget.onTap,
-          ),
+          child: boton,
         );
       },
     );
