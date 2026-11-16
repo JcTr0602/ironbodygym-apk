@@ -1241,22 +1241,22 @@ class _HojaFiltrosVentasState extends State<_HojaFiltrosVentas> {
             ),
             const SizedBox(height: AppEspacio.sm),
             const Text('Producto', style: AppTexto.etiqueta),
-            DropdownButton<int?>(
-              value: _productoId,
-              isExpanded: true,
-              hint: const Text('Todos los productos'),
-              items: [
-                const DropdownMenuItem<int?>(
-                  value: null,
-                  child: Text('Todos los productos'),
+            SelectorIron<int?>(
+              valor: _productoId,
+              pista: 'Todos los productos',
+              tituloPanel: 'Producto',
+              opciones: [
+                const OpcionSelector<int?>(
+                  null,
+                  'Todos los productos',
                 ),
                 for (final p in widget.productos)
-                  DropdownMenuItem<int?>(
-                    value: (p['id'] as num?)?.toInt(),
-                    child: Text('${p['nombre'] ?? 'Producto'}'),
+                  OpcionSelector<int?>(
+                    (p['id'] as num?)?.toInt(),
+                    '${p['nombre'] ?? 'Producto'}',
                   ),
               ],
-              onChanged: (v) => setState(() => _productoId = v),
+              alCambiar: (v) => setState(() => _productoId = v),
             ),
             const SizedBox(height: AppEspacio.md),
             const Text('Moneda', style: AppTexto.etiqueta),

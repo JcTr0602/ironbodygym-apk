@@ -2391,25 +2391,21 @@ class _EditarSuplementoScreenState
                 // v1.2.1: selector de categoría.
                 if (_categorias.isNotEmpty) ...[
                   const SizedBox(height: AppEspacio.md),
-                  DropdownButtonFormField<int?>(
-                    initialValue: _categoriaId,
-                    decoration: const InputDecoration(
-                      labelText: 'Categoría',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('Sin categoría'),
+                  SelectorIronForm<int?>(
+                    valorInicial: _categoriaId,
+                    etiqueta: 'Categoría',
+                    opciones: [
+                      const OpcionSelector<int?>(
+                        null,
+                        'Sin categoría',
                       ),
                       for (final c in _categorias)
-                        DropdownMenuItem<int?>(
-                          value: c['id'] as int?,
-                          child: Text(
-                              '${c['nombre']}${(c['activa'] as int?) == 0 ? ' (inactiva)' : ''}'),
+                        OpcionSelector<int?>(
+                          c['id'] as int?,
+                          '${c['nombre']}${(c['activa'] as int?) == 0 ? ' (inactiva)' : ''}',
                         ),
                     ],
-                    onChanged: (v) =>
+                    alCambiar: (v) =>
                         setState(() => _categoriaId = v),
                   ),
                 ],
@@ -2440,33 +2436,27 @@ class _EditarSuplementoScreenState
                     ),
                     const SizedBox(width: AppEspacio.md),
                     Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        initialValue: _pesoUnidad,
-                        decoration: const InputDecoration(
-                          labelText: 'Unidad',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('—'),
+                      child: SelectorIronForm<String?>(
+                        valorInicial: _pesoUnidad,
+                        etiqueta: 'Unidad',
+                        opciones: [
+                          const OpcionSelector<String?>(
+                            null,
+                            '—',
                           ),
                           for (final u in _unidadesEnvase)
-                            DropdownMenuItem<String?>(
-                              value: u,
-                              child: Text(u),
-                            ),
+                            OpcionSelector<String?>(u, u),
                           // Si el dato guardado trae una unidad fuera de
                           // la lista, se incluye para no romper el
-                          // dropdown (mismo arreglo que en Categoría).
+                          // selector (mismo arreglo que en Categoría).
                           if (_pesoUnidad != null &&
                               !_unidadesEnvase.contains(_pesoUnidad))
-                            DropdownMenuItem<String?>(
-                              value: _pesoUnidad,
-                              child: Text(_pesoUnidad!),
+                            OpcionSelector<String?>(
+                              _pesoUnidad,
+                              _pesoUnidad!,
                             ),
                         ],
-                        onChanged: (v) =>
+                        alCambiar: (v) =>
                             setState(() => _pesoUnidad = v),
                       ),
                     ),
@@ -2505,23 +2495,14 @@ class _EditarSuplementoScreenState
                     // v1.4.6: selector de moneda del precio oficial.
                     Expanded(
                       flex: 2,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _moneda,
-                        decoration: const InputDecoration(
-                          labelText: 'Moneda',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem<String>(
-                            value: 'CUP',
-                            child: Text('CUP'),
-                          ),
-                          DropdownMenuItem<String>(
-                            value: 'USD',
-                            child: Text('USD'),
-                          ),
+                      child: SelectorIronForm<String>(
+                        valorInicial: _moneda,
+                        etiqueta: 'Moneda',
+                        opciones: const [
+                          OpcionSelector('CUP', 'CUP'),
+                          OpcionSelector('USD', 'USD'),
                         ],
-                        onChanged: (v) =>
+                        alCambiar: (v) =>
                             setState(() => _moneda = v ?? 'CUP'),
                       ),
                     ),

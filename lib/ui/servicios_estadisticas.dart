@@ -829,16 +829,14 @@ class _ServiciosEstadisticasScreenState
                     'no guarda nada)',
                     style: AppTexto.titulo),
                 const SizedBox(height: 8),
-                DropdownButton<Map<String, dynamic>>(
-                  value: bote,
-                  items: [
+                SelectorIron<Map<String, dynamic>>(
+                  valor: bote,
+                  tituloPanel: 'Bote',
+                  opciones: [
                     for (var i = 0; i < abiertos.length; i++)
-                      DropdownMenuItem(
-                          value: abiertos[i],
-                          child: Text(etiquetasBote[i])),
+                      OpcionSelector(abiertos[i], etiquetasBote[i]),
                   ],
-                  onChanged: (v) =>
-                      setD(() => bote = v ?? bote),
+                  alCambiar: (v) => setD(() => bote = v ?? bote),
                 ),
                 Text(
                   'Costo del bote: ${fmtMonto(costo)} CUP · '
