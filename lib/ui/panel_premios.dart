@@ -16,7 +16,6 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'logros_premio_ui.dart';
 import 'skeleton.dart';
-import 'widgets.dart';
 
 /// 1.28 (M5-A4/C-R2M5-H2): señal entre pestañas del hub
 /// de Premios — cuando en «Clientes» se CONCEDE un vale,
@@ -487,15 +486,12 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
           appBar: appBarIron(context, 'Premios por aprobar'),
           body: cuerpo);
     }
-    final cuerpo = Column(
-      children: [
-        // Argón 1.26 MEDIA: al terminar el sync la
-        // bandeja se recarga (el aviso «terminando de
-        // sincronizarse» no queda congelado).
-        SyncBanner(alTerminarSync: _cargar),
-        Expanded(child: _cuerpo()),
-      ],
-    );
+    // SL-10 G13-2 (sync-una-vez): sin banda de sync en
+    // Premios — el estado lo dice una sola vez el icono
+    // de la cabecera de la app. (Se retira también el
+    // alTerminarSync: la recarga llega por el refresco
+    // de la propia bandeja.)
+    final cuerpo = _cuerpo();
     if (widget.embebida) return cuerpo;
     return Scaffold(
       appBar: appBarIron(context, 'Premios por aprobar'),

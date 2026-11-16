@@ -351,7 +351,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       _aviso('Borrador guardado en este teléfono.');
     } catch (e) {
       AppLog.error('ui', 'guia_borrador_fallo', d: '$e');
-      _aviso('No se pudo guardar el borrador: $e');
+      _aviso('No se pudo guardar el borrador. Inténtalo de nuevo.');
     }
   }
 
@@ -544,7 +544,9 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       // encolar una segunda op condenada a obsoleta. El
       // fallo va a bitácora y el aviso nombra la causa.
       AppLog.error('ui', 'guia_publicar_fallo', d: '$e');
-      _aviso('No se pudo publicar: $e');
+      // SL-10 G13-4: mensaje amable; la excepción queda
+      // en bitácora, no en pantalla.
+      _aviso('No se pudo publicar. Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -708,7 +710,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       // cerraba con try/finally sin catch: un throw era
       // silencio total y el editor creía que «no pasó
       // nada». Error ≠ silencio también aquí.
-      _aviso('No se pudo procesar la imagen ($e). '
+      _aviso('No se pudo procesar la imagen. '
           'Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
@@ -764,7 +766,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     } catch (e) {
       // Yunque R5-M6-6: mismo silencio que en publicar.
       AppLog.error('ui', 'guia_retirar_fallo', d: '$e');
-      _aviso('No se pudo retirar: $e');
+      _aviso('No se pudo retirar. Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -891,7 +893,11 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     return Scaffold(
       appBar: appBarIron(
         context,
-        _slug.text.isEmpty ? 'Nueva ficha' : _slug.text,
+        // SL-10 G13-8: el título de la ficha que se
+        // corrige, no su slug técnico.
+        _titulo.text.trim().isNotEmpty
+            ? _titulo.text.trim()
+            : (_slug.text.isEmpty ? 'Nueva ficha' : 'Ficha'),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),

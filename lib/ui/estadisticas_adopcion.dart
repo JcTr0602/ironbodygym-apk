@@ -12,7 +12,6 @@ import '../auth.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
-import 'widgets.dart';
 
 /// 1.32 (B1-H8): el mensaje de ORIGEN de un error de la
 /// RPC de estadísticas. El `RAISE` del servidor («Solo el
@@ -180,11 +179,9 @@ class _EstadisticasAdopcionScreenState
     return ListView(
       padding: const EdgeInsets.all(AppEspacio.lg),
       children: [
-        // Argón Estadísticas #9: banner de sincronización
-        // como en Dashboard y Estadísticas de Servicios (sin
-        // él, el dueño veía cifras viejas sin advertencia).
-        const SyncBanner(),
-        const SizedBox(height: 12),
+        // SL-10 G13-2 (sync-una-vez): sin banda de sync
+        // en Adopción — el estado lo dice una sola vez el
+        // icono de la cabecera de la app.
         Row(
           children: [
             _tarjetaNumero('Accesos creados', '${_n('generados')}'),

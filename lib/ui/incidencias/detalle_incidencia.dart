@@ -304,10 +304,12 @@ class _DetalleIncidenciaScreenState
             ],
             const SizedBox(height: 12),
             _filaInfo('Creada por', _creadaPorMostrada),
+            // SL-10 G13-3: los mismos humanizadores de
+            // la lista, no las claves crudas.
             _filaInfo('Estado',
-                inc.estado),
+                etiquetaEstadoIncidencia(inc.estado)),
             _filaInfo('Prioridad',
-                inc.prioridad),
+                etiquetaPrioridadIncidencia(inc.prioridad)),
             if (inc.ubicacion != null)
               _filaInfo(
                   'Ubicación', inc.ubicacion!),
@@ -581,7 +583,7 @@ class _DetalleIncidenciaScreenState
             dense: true,
             title: Text(c.texto),
             subtitle: Text(
-                '${_nombreAutor(c.creadoPor)} · ${_fechaCorta(c.creadoEn)}'),
+                '${_nombreAutor(c.creadoPor)} · ${_fechaCorta(c.creadoEn, respaldo: _inc?.creadaEn)}'),
           ),
         Row(
           children: [
@@ -623,16 +625,24 @@ class _DetalleIncidenciaScreenState
                 Icons.history_rounded,
                 size: 18),
             title: Text(
-                '${h.campo}: ${h.valorAnterior ?? '-'} → ${h.valorNuevo ?? '-'}'),
+                // SL-10 G13-3: campo y valores traducidos,
+                // como la lista humaniza estado/prioridad.
+                '${etiquetaCampoIncidencia(h.campo)}: ${valorHistorialIncidencia(h.campo, h.valorAnterior)} → ${valorHistorialIncidencia(h.campo, h.valorNuevo)}'),
             subtitle: Text(
-                '${_nombreAutor(h.cambiadoPor)} · ${_fechaCorta(h.cambiadoEn)}'),
+                '${_nombreAutor(h.cambiadoPor)} · ${_fechaCorta(h.cambiadoEn, respaldo: _inc?.creadaEn)}'),
           ),
       ],
     );
   }
 
-  String _fechaCorta(DateTime d) =>
-      '${d.day}/${d.month} ${d.hour}:${d.minute.toString().padLeft(2, '0')}';
+  /// SL-10 BG-10b: la fecha de un hijo sin `creado_en`
+  /// válido hereda la fecha saneada del padre; si
+  /// tampoco hay, «sin fecha» — nunca «hoy» inventado.
+  String _fechaCorta(DateTime? d, {DateTime? respaldo}) {
+    final f = d ?? respaldo;
+    if (f == null) return 'sin fecha';
+    return '${f.day}/${f.month} ${f.hour}:${f.minute.toString().padLeft(2, '0')}';
+  }
 
   /// 22/25: autor a guardar en filas nuevas (nombre de sesión,
   /// nunca UUID ni 'desconocido').

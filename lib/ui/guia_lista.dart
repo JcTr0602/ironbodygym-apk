@@ -332,6 +332,13 @@ class _GuiaScreenState extends State<GuiaScreen> {
     await _cargar();
   }
 
+  /// SL-10 G13-4: el nombre VISIBLE de un borrador en
+  /// los listados del lote — su título, nunca el slug.
+  String _nombreBorrador(Map<String, dynamic> b) {
+    final t = '${_docBorrador(b)['titulo'] ?? ''}'.trim();
+    return t.isEmpty ? 'Ficha sin título' : t;
+  }
+
   Future<void> _publicarLote() async {
     // 1.22 GY-02: publicar en lote es solo del dueño.
     if (!AuthService().isOwner) return;
@@ -350,19 +357,19 @@ class _GuiaScreenState extends State<GuiaScreen> {
       // cola): no se vuelve a encolar.
       if (_enCola.contains('${b['slug']}')) {
         motivos.add(
-            '${b['slug']}: ya está en cola de publicación.');
+            '${_nombreBorrador(b)}: ya está en cola de publicación.');
         continue;
       }
       if (_obsoleto(b)) {
         motivos.add(
-            '${b['slug']}: obsoleto (hay una versión publicada más reciente).');
+            '${_nombreBorrador(b)}: obsoleto (hay una versión publicada más reciente).');
         continue;
       }
       final doc = _docBorrador(b);
       final errores = GuiaValidacion.validar(doc,
           equiposVigentes: _equiposVigentes);
       if (errores.isNotEmpty) {
-        motivos.add('${doc['id']}: ${errores.first}');
+        motivos.add('${_nombreBorrador(b)}: ${errores.first}');
         continue;
       }
       candidatos.add(b);
@@ -453,14 +460,14 @@ class _GuiaScreenState extends State<GuiaScreen> {
         // 1.22 GY-04: en cola de publicación no se re-encola.
         if (_enCola.contains('${b['slug']}')) {
           fallos.add(
-              '${b['slug']}: ya está en cola de publicación.');
+              '${_nombreBorrador(b)}: ya está en cola de publicación.');
           continue;
         }
         // Argón P2#13: un borrador obsoleto no se encola ni pierde
         // su imagen local; queda en fallos para revisarlo.
         if (_obsoleto(b)) {
           fallos.add(
-              '${b['slug']}: borrador obsoleto (hay una versión publicada más reciente).');
+              '${_nombreBorrador(b)}: borrador obsoleto (hay una versión publicada más reciente).');
           continue;
         }
         final doc = _docBorrador(b);
@@ -468,7 +475,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         final errores = GuiaValidacion.validar(doc,
             equiposVigentes: _equiposVigentes);
         if (errores.isNotEmpty) {
-          fallos.add('$slug: ${errores.first}');
+          fallos.add('${_nombreBorrador(b)}: ${errores.first}');
           continue;
         }
         final tieneImagen = b['tiene_imagen'] == 1 || b['tiene_imagen'] == true;
@@ -490,7 +497,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
         }
         if (cambioImagen && tieneImagen && local.isNotEmpty) {
           if (!await _subirImagen(slug, local, revPub + 1)) {
-            fallos.add('$slug: la imagen no se pudo subir.');
+            fallos.add('${_nombreBorrador(b)}: la imagen no se pudo subir.');
             continue;
           }
         }
@@ -537,7 +544,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
           // qué quedó encolado. Ahora la ficha entra en
           // fallos con el motivo y el lote sigue.
           AppLog.error('ui', 'guia_lote_fallo', d: '$e');
-          fallos.add('${b['slug']}: error al publicar ($e).');
+          fallos.add('${_nombreBorrador(b)}: error al publicar.');
         }
       }
     } finally {
@@ -637,7 +644,15 @@ class _GuiaScreenState extends State<GuiaScreen> {
       for (final e in _equipos)
         if (e['activo'] == true) '${e['equipoId']}',
     ]);
-    return ListView(
+    // SL-10 G13-6: el alta va en el sitio de la casa —
+    // el FAB extendido abajo a la derecha, como en
+    // Incidencias, Plantillas, Anuncios y Avisos (la
+    // Guía era la excepción con un botón en la fila de
+    // cabecera). La pantalla es un cuerpo embebido sin
+    // Scaffold propio: el FAB se ancla sobre la lista.
+    return Stack(
+      children: [
+        ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
       children: [
         Row(
@@ -647,14 +662,6 @@ class _GuiaScreenState extends State<GuiaScreen> {
                 onPressed: _sincronizando ? null : _sincronizar,
                 icon: const Icon(Icons.sync_rounded),
                 label: const Text('Actualizar'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _abrirEditor(),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Nueva ficha'),
               ),
             ),
           ],
@@ -771,9 +778,18 @@ class _GuiaScreenState extends State<GuiaScreen> {
                   color: AppColores.textoSecundario(context)),
           ),
           const SizedBox(height: 8),
+          // SL-10 G13-7: los borradores se construyen
+          // con la pieza de la casa, como las publicadas
+          // de esta misma pantalla — Tarjeta con su
+          // separación, no un Card crudo pegado al
+          // siguiente.
           for (final b in borradoresFiltrados)
-            Card(
-              child: ListTile(
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+              child: Tarjeta(
+                padding: EdgeInsets.zero,
+                onTap: () => _abrirEditor(borrador: b),
+                child: ListTile(
                 leading: Icon(Icons.edit_note_rounded,
                     color: AppColores.textoSecundario(context)),
                 title: Text(
@@ -783,8 +799,11 @@ class _GuiaScreenState extends State<GuiaScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
                 subtitle: Text(
+                    // SL-10 G13-10: la silueta por su
+                    // NOMBRE (como en las publicadas), no
+                    // su id crudo.
                     '${_nombreEquipo('${_docBorrador(b)['equipoId'] ?? ''}')}'
-                    ' · ${_docBorrador(b)['siluetaId'] ?? ''}'),
+                    ' · ${GuiaValidacion.nombreSilueta['${_docBorrador(b)['siluetaId'] ?? ''}'] ?? ''}'),
                 trailing: _obsoleto(b)
                     ? const Tooltip(
                         message:
@@ -803,7 +822,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
                                 style: AppTexto.metadato),
                             visualDensity: VisualDensity.compact,
                           ),
-                onTap: () => _abrirEditor(borrador: b),
+                ),
               ),
             ),
           const SizedBox(height: 16),
@@ -913,6 +932,17 @@ class _GuiaScreenState extends State<GuiaScreen> {
           'Publicar y retirar se aplica al sincronizar.',
           style: AppTexto.metadato.copyWith(
                   color: AppColores.textoSecundario(context)),
+        ),
+      ],
+        ),
+        Positioned(
+          right: AppEspacio.lg,
+          bottom: AppEspacio.lg,
+          child: FloatingActionButton.extended(
+            onPressed: () => _abrirEditor(),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Nueva ficha'),
+          ),
         ),
       ],
     );

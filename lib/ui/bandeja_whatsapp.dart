@@ -105,6 +105,9 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   bool _confirmarEnLote = false;
   // v1.13.0: filtros de la bandeja.
   bool _soloConTelefono = false;
+  // SL-10 G04-5: los controles nacen PLEGADOS tras su
+  // botón resumen; la lista de avisos es la protagonista.
+  bool _controlesAbiertos = false;
   String _busqueda = '';
   final _busquedaCtrl = TextEditingController();
 
@@ -548,31 +551,47 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
           if (!_cargando && AuthService().isOwner && _avisos.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Builder(builder: (_) {
-                    final total = _avisos.length;
-                    final hechos = _avisos
-                        .where((a) => _tocados.contains(_clave(a)))
-                        .length;
-                    final ratio =
-                        total > 0 ? hechos / total : 0.0;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              child: Builder(builder: (_) {
+                final total = _avisos.length;
+                final hechos = _avisos
+                    .where((a) => _tocados.contains(_clave(a)))
+                    .length;
+                final ratio = total > 0 ? hechos / total : 0.0;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // SL-10 G04-5: el botón que RESUME los
+                    // controles (progreso + filtros activos)
+                    // y los despliega solo a petición.
+                    Row(
                       children: [
-                        Text(
-                          '$hechos de $total contactados',
-                          style: AppTexto.secundario.copyWith(
-                              color: AppColores.textoSecundario(context)),
+                        Expanded(
+                          child: Text(
+                            '$hechos de $total contactados'
+                            '${_soloConTelefono ? ' · solo con teléfono' : ''}'
+                            '${_busqueda.isNotEmpty ? ' · «$_busqueda»' : ''}',
+                            style: AppTexto.secundario.copyWith(
+                                color:
+                                    AppColores.textoSecundario(context)),
+                          ),
                         ),
-                        const SizedBox(height: 4),
-                        LinearProgressIndicator(value: ratio),
+                        TextButton.icon(
+                          onPressed: () => setState(() =>
+                              _controlesAbiertos = !_controlesAbiertos),
+                          icon: Icon(
+                              _controlesAbiertos
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              size: 18),
+                          label: const Text('Controles'),
+                        ),
                       ],
-                    );
-                  }),
-                  const SizedBox(height: 8),
-                  Row(
+                    ),
+                    if (_controlesAbiertos) ...[
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(value: ratio),
+                      const SizedBox(height: 8),
+                      Row(
                     children: [
                       Expanded(
                         child: TextField(
@@ -620,16 +639,18 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
                         label: const Text('Resultado por partes'),
                       ),
                     ),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 2),
-                    child: Text(
-                      'Mantén pulsado el botón verde de un aviso '
-                      'para enviar su plantilla sin editar.',
-                      style: AppTexto.minuscula,
-                    ),
-                  ),
-                ],
-              ),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 2),
+                        child: Text(
+                          'Mantén pulsado el botón verde de un aviso '
+                          'para enviar su plantilla sin editar.',
+                          style: AppTexto.minuscula,
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              }),
             ),
           Expanded(
             child: _cargando
@@ -702,28 +723,33 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
   /// v1.3.8 (1C): Vencidos > Vencen hoy > Por vencer > Recibos > Cumpleaños.
   /// v1.13.0: sobre los avisos FILTRADOS (teléfono + búsqueda).
   List<({String tipo, String titulo, IconData icono})> _secciones() {
+    // SL-10 G04-11: UN solo lenguaje de icono en la
+    // bandeja — la familia Material «rounded» de la
+    // casa. Fuera los emojis que duplicaban al icono en
+    // los títulos de sección y el único icono «outline»
+    // (error_outline) entre todos los «rounded».
     const orden = [
       (
         tipo: 'vencido',
-        titulo: '🔴 Vencidos',
-        icono: Icons.error_outline_rounded
+        titulo: 'Vencidos',
+        icono: Icons.error_rounded
       ),
       (
         tipo: 'vence_hoy',
-        titulo: '⏰ Vencen hoy',
+        titulo: 'Vencen hoy',
         icono: Icons.warning_amber_rounded
       ),
       (
         tipo: 'por_vencer',
-        titulo: '📩 Por vencer',
+        titulo: 'Por vencer',
         icono: Icons.schedule_rounded
       ),
       (
         tipo: 'recibo',
-        titulo: '🧾 Recibos de hoy',
+        titulo: 'Recibos de hoy',
         icono: Icons.receipt_long_rounded
       ),
-      (tipo: 'cumple', titulo: '🎂 Cumpleaños hoy', icono: Icons.cake_rounded),
+      (tipo: 'cumple', titulo: 'Cumpleaños hoy', icono: Icons.cake_rounded),
     ];
     return [
       for (final o in orden)

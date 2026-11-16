@@ -440,9 +440,9 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
     if (mounted) _cargar();
   }
 
+  // SL-10 G13-7: el aviso de la casa, no SnackBar crudo.
   void _avisar(String texto) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(texto)));
+    mostrarSnack(context, texto);
   }
 
   @override
@@ -543,82 +543,95 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
     final nuevos = _perfiles
         .where((p) => p.esNuevo(ahoraUtcReal()))
         .length;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'El cliente manda sobre sus datos: '
-                'desde aquí solo puedes ocultar un '
-                'perfil del directorio (y deshacerlo) '
-                'y retirar un Nick inadecuado. '
-                'Lo que cada cliente apagó no se ve '
-                'ni aquí.',
-                style: AppTexto.secundario,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '${conteos.conVitrina} con vitrina '
-                'de $_totalClientes clientes · '
-                '${conteos.visibles} visibles en el directorio · '
-                '${conteos.ocultosPorTi} ocultos por ti',
-                style: AppTexto.secundario
-                    .copyWith(fontWeight: FontWeight.w700),
-              ),
-              if (nuevos > 0) ...[
-                const SizedBox(height: 8),
-                Chip(
-                  avatar: const Icon(
-                      Icons.fiber_new_rounded, size: 18),
-                  label: Text(nuevos == 1
-                      ? '1 perfil nuevo esta semana'
-                      : '$nuevos perfiles nuevos esta semana'),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ],
-              const SizedBox(height: 10),
-              TextField(
-                controller: _busquedaCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Buscar por nombre…',
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  suffixIcon: _consulta.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.clear_rounded),
-                          onPressed: () {
-                            _busquedaCtrl.clear();
-                            setState(() => _consulta = '');
-                          },
-                        ),
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-                onChanged: (v) => setState(() => _consulta = v),
-              ),
-              const SizedBox(height: 4),
-            ],
+    // SL-10 G13-5: la cabecera va INTEGRADA en el scroll
+    // (antes quedaba fija sobre la lista y empujaba la
+    // primera tarjeta muy abajo en pantallas de 360 dp):
+    // al bajar, la cabecera se va con la lista.
+    final cabecera = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'El cliente manda sobre sus datos: '
+            'desde aquí solo puedes ocultar un '
+            'perfil del directorio (y deshacerlo) '
+            'y retirar un Nick inadecuado. '
+            'Lo que cada cliente apagó no se ve '
+            'ni aquí.',
+            style: AppTexto.secundario,
           ),
-        ),
-        Expanded(
-          child: visibles.isEmpty
-              ? _mensaje('Ningún perfil coincide con '
-                  '«$_consulta».')
-              : RefrescoIron(
-                  onRefresh: _refrescarPanel,
-                  child: ListView.builder(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    itemCount: visibles.length,
-                    itemBuilder: (context, i) =>
-                        _tarjeta(visibles[i]),
-                  ),
-                ),
-        ),
-      ],
+          const SizedBox(height: 10),
+          Text(
+            '${conteos.conVitrina} con vitrina '
+            'de $_totalClientes clientes · '
+            '${conteos.visibles} visibles en el directorio · '
+            '${conteos.ocultosPorTi} ocultos por ti',
+            style: AppTexto.secundario
+                .copyWith(fontWeight: FontWeight.w700),
+          ),
+          if (nuevos > 0) ...[
+            const SizedBox(height: 8),
+            Chip(
+              avatar: const Icon(
+                  Icons.fiber_new_rounded, size: 18),
+              label: Text(nuevos == 1
+                  ? '1 perfil nuevo esta semana'
+                  : '$nuevos perfiles nuevos esta semana'),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+          const SizedBox(height: 10),
+          TextField(
+            controller: _busquedaCtrl,
+            decoration: InputDecoration(
+              hintText: 'Buscar por nombre…',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _consulta.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear_rounded),
+                      onPressed: () {
+                        _busquedaCtrl.clear();
+                        setState(() => _consulta = '');
+                      },
+                    ),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (v) => setState(() => _consulta = v),
+          ),
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+    if (visibles.isEmpty) {
+      return Column(
+        children: [
+          cabecera,
+          Expanded(
+            child: _mensaje('Ningún perfil coincide con '
+                '«$_consulta».'),
+          ),
+        ],
+      );
+    }
+    return RefrescoIron(
+      onRefresh: _refrescarPanel,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
+        children: [
+          cabecera,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Column(
+              children: [
+                for (final p in visibles) _tarjeta(p),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -944,14 +957,18 @@ class _VerPerfilComunidadScreenState
       _aplicando = false;
       if (ok) _oculto = !_oculto;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
+    // SL-10 G13-7: el aviso de la casa, no SnackBar crudo.
+    mostrarSnack(
+      context,
+      ok
           ? (_oculto
               ? 'Perfil ocultado del directorio.'
               : 'Perfil visible de nuevo.')
           : 'El servidor no aplicó el cambio. '
-              'Inténtalo de nuevo.'),
-    ));
+              'Inténtalo de nuevo.',
+      significado:
+          ok ? SignificadoChip.exito : SignificadoChip.error,
+    );
   }
 
   String _resumenBloque(String clave, dynamic v) {
@@ -1071,7 +1088,10 @@ class _VerPerfilComunidadScreenState
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           dense: true,
-                          title: Text(e.key),
+                          // SL-10 G13-1: etiqueta humana
+                          // por clave, no la clave cruda.
+                          title: Text(
+                              etiquetaBloqueComunidad(e.key)),
                           subtitle:
                               Text(_resumenBloque(e.key, e.value)),
                         ),
@@ -1084,7 +1104,10 @@ class _VerPerfilComunidadScreenState
                             letterSpacing: 0.6),
                       ),
                       const SizedBox(height: 6),
-                      Text(_apagados.join(', ')),
+                      // SL-10 G13-1: también en humano.
+                      Text(_apagados
+                          .map(etiquetaBloqueComunidad)
+                          .join(', ')),
                     ],
                     const SizedBox(height: 20),
                     FilledButton(
