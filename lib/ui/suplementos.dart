@@ -2178,6 +2178,26 @@ class _EditarSuplementoScreenState
       }
       final umbral =
           int.tryParse(_umbral.text.trim()) ?? 3;
+      // G#6 (Hy4): red al cambiar la moneda de un suplemento
+      // existente — el precio NO se reconvierte solo: unos
+      // 3000 CUP pasarían a ser 3000 USD. Antes de encolar
+      // se confirma en voz alta, con el número que se
+      // conserva y las dos monedas (el aviso breve
+      // post-guardado de v1.4.6 llegaba con la op ya
+      // encolada y sin mencionar el número).
+      if (_editando && _moneda != _monedaIni) {
+        final sigue = await DialogoApp.confirmar(context,
+            titulo: 'Cambiaste la moneda',
+            mensaje:
+                'El precio oficial seguirá siendo '
+                '${fmtMonto(precio)} pero en $_moneda '
+                '(antes era $_monedaIni): el número NO se '
+                'convierte solo. Si también querías cambiar '
+                'el precio, cancela y ajústalo.',
+            aceptar: 'Guardar así',
+            cancelar: 'Cancelar');
+        if (!sigue || !mounted) return;
+      }
       final payload = {
         'nombre': nombre,
         'descripcion': _desc.text.trim(),
