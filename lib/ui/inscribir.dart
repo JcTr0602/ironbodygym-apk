@@ -1287,72 +1287,43 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                 CrossAxisAlignment
                                     .start,
                             children: [
-                              DropdownButtonFormField<
-                                  String>(
-                                initialValue: _periodo ==
+                              SelectorIronForm<String>(
+                                valorInicial: _periodo ==
                                         'mensual'
                                     ? 'mensual:$_meses'
                                     : _periodo,
-                                isExpanded: true,
-                                decoration:
-                                    InputDecoration(
-                                  border:
-                                      OutlineInputBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(
-                                            AppRadio
-                                                .md),
-                                  ),
-                                  contentPadding:
-                                      const EdgeInsets
-                                          .symmetric(
-                                          horizontal:
-                                              AppEspacio
-                                                  .lg,
-                                          vertical:
-                                              AppEspacio
-                                                  .md),
-                                ),
-                                items: [
-                                  DropdownMenuItem(
-                                      value: 'semanal',
-                                      child: Text(
-                                          'Semana (${fmtMonto(pr['semanal'])} CUP)')),
-                                  DropdownMenuItem(
-                                      value:
-                                          'quincenal',
-                                      child: Text(
-                                          'Quincena (${fmtMonto(pr['quincenal'])} CUP)')),
+                                tituloPanel: 'Período',
+                                opciones: [
+                                  OpcionSelector(
+                                      'semanal',
+                                      'Semana (${fmtMonto(pr['semanal'])} CUP)'),
+                                  OpcionSelector(
+                                      'quincenal',
+                                      'Quincena (${fmtMonto(pr['quincenal'])} CUP)'),
                                   for (final m
                                       in [1, 2, 3])
-                                    DropdownMenuItem(
-                                        value:
-                                            'mensual:$m',
-                                        child: Text(
-                                            _esMenor
-                                                ? '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(_precioMenorVal * m)} CUP) — Menor de edad'
-                                                // v1.3.9 (Bug 2): mostrar tarifa según método de pago elegido.
-                                                : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto((_metodoPago == 'transferencia' ? pr['transfer']! : pr['mensual']!) * m)} CUP)')),
+                                    OpcionSelector(
+                                        'mensual:$m',
+                                        _esMenor
+                                            ? '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(_precioMenorVal * m)} CUP) — Menor de edad'
+                                            // v1.3.9 (Bug 2): mostrar tarifa según método de pago elegido.
+                                            : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto((_metodoPago == 'transferencia' ? pr['transfer']! : pr['mensual']!) * m)} CUP)'),
                                   // v1.3.9: tipos personalizados (ej. "Oferta 50%")
                                   for (final t
                                       in _tiposCustom)
-                                    DropdownMenuItem(
-                                        value:
-                                            'tipo:${t.id}',
-                                        child: Text(
-                                            // 1.25 T117 (F1-62): los días
-                                            // del tipo van en la etiqueta:
-                                            // dos ofertas con igual monto
-                                            // y distinta duración ya no se
-                                            // confunden.
-                                            '${t.nombre} · ${t.dias} días · ${fmtMonto(t.monto)} CUP')),
-                                  const DropdownMenuItem(
-                                      value:
-                                          'personalizado',
-                                      child: Text(
-                                          'Personalizado…')),
+                                    OpcionSelector(
+                                        'tipo:${t.id}',
+                                        // 1.25 T117 (F1-62): los días
+                                        // del tipo van en la etiqueta:
+                                        // dos ofertas con igual monto
+                                        // y distinta duración ya no se
+                                        // confunden.
+                                        '${t.nombre} · ${t.dias} días · ${fmtMonto(t.monto)} CUP'),
+                                  const OpcionSelector(
+                                      'personalizado',
+                                      'Personalizado…'),
                                 ],
-                                onChanged: (v) =>
+                                alCambiar: (v) =>
                                     setState(() {
                                   if (v ==
                                           'semanal' ||
