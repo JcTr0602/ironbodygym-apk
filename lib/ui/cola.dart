@@ -188,18 +188,36 @@ String? etiquetaOpAjena(Map<String, dynamic> op,
 /// 1.29 (Oleada 6, FA-06): desglose por autor de las ops
 /// pendientes GLOBALES (el conjunto completo de la BD,
 /// no la lista reciente truncada): cuántas son de la
-/// sesión actual y cuántas de otras cuentas. mias +
-/// deOtros suma el total global de pendientes.
-({int mias, int deOtros}) desglosePendientesPorAutor(
+/// sesión actual y cuántas de otras cuentas.
+/// 1.35 (SP-03 + SP-11): el desglose cubre el MISMO
+/// conjunto que el total de cabecera (pendiente + enviada
+/// + error, el de LocalDb.countPendingOps) — antes solo
+/// contaba 'pendiente' y la línea «N · A tuyas · B de
+/// otros» no cuadraba en cuanto una op entraba en error o
+/// quedaba enviada. Y las ops SIN FIRMA alguna (legadas,
+/// pre-sello de autor) ya no se atribuyen a la sesión
+/// actual: forman una tercera clase, «sin autor conocido»
+/// (esOpMia las daba por «mías» de cualquier sesión).
+/// mias + deOtros + sinAutor == pendientes.length.
+({int mias, int deOtros, int sinAutor}) desglosePendientesPorAutor(
     List<Map<String, dynamic>> pendientes,
     {required String? miActor, required int? miTelegramId}) {
   var mias = 0;
+  var sinAutor = 0;
   for (final o in pendientes) {
-    if (esOpMia(o, miActor: miActor, miTelegramId: miTelegramId)) {
+    final sinFirma = actorIdNumericoDeOp(o) == null &&
+        actorFirmaDeOp(o) == null;
+    if (sinFirma) {
+      sinAutor++;
+    } else if (esOpMia(o, miActor: miActor, miTelegramId: miTelegramId)) {
       mias++;
     }
   }
-  return (mias: mias, deOtros: pendientes.length - mias);
+  return (
+    mias: mias,
+    deOtros: pendientes.length - mias - sinAutor,
+    sinAutor: sinAutor
+  );
 }
 
 /// v1.3.4 (detalle ampliable Bajados/Subidos): utilidades de UI
@@ -546,6 +564,9 @@ class _ColaScreenState extends State<ColaScreen> {
   // ops ajenas sin inventar nombres.
   int _pendientesMias = 0;
   int _pendientesDeOtros = 0;
+  // 1.35 (SP-11): ops del conjunto sin firma de autor
+  // (legadas): tercera clase del desglose, no se atribuyen.
+  int _pendientesSinAutor = 0;
   Map<int, String> _nombresPorTelegram = {};
   // v1.2.9+46: detalle de fotos pendientes/error para gestión.
   List<Map<String, dynamic>> _fotosDetalle = [];
@@ -808,17 +829,22 @@ class _ColaScreenState extends State<ColaScreen> {
     // de 30: el desglose tiene que sumar el total.
     var pendientesMias = 0;
     var pendientesDeOtros = 0;
+    var pendientesSinAutor = 0;
     var nombresPorTelegram = <int, String>{};
     if (_esDueno) {
       try {
         final db = await LocalDb.instance.db;
+        // 1.35 (SP-03): el desglose se lee sobre el MISMO
+        // conjunto que el total (countPendingOps: pendiente
+        // + enviada + error), no solo 'pendiente'.
         final pendientes = await db.query('ops_queue',
             columns: ['op_uuid', 'tipo', 'payload', 'telegram_id'],
-            where: "estado = 'pendiente'");
+            where: "estado IN ('pendiente', 'enviada', 'error')");
         final desg = desglosePendientesPorAutor(pendientes,
             miActor: _miActor, miTelegramId: _miTelegramId);
         pendientesMias = desg.mias;
         pendientesDeOtros = desg.deOtros;
+        pendientesSinAutor = desg.sinAutor;
         final rawDir = await LocalDb.instance.getMeta('usuarios_apk');
         if (rawDir != null && rawDir.isNotEmpty) {
           final dec = jsonDecode(rawDir);
@@ -979,6 +1005,7 @@ class _ColaScreenState extends State<ColaScreen> {
         _masAntiguaIso = masAntiguaIso;
         _pendientesMias = pendientesMias;
         _pendientesDeOtros = pendientesDeOtros;
+        _pendientesSinAutor = pendientesSinAutor;
         _nombresPorTelegram = nombresPorTelegram;
       });
     }
@@ -1368,8 +1395,12 @@ class _ColaScreenState extends State<ColaScreen> {
           if (_esDueno) ...[
             const SizedBox(height: 4),
             Text(
+              // 1.35 (SP-03 + SP-11): desglose y total sobre
+              // el mismo conjunto (mias + deOtros + sinAutor
+              // == total) y las legadas sin firma en su clase.
               '$_totalPendientes pendientes · $_pendientesMias tuyas · '
-              '$_pendientesDeOtros de otros',
+              '$_pendientesDeOtros de otros'
+              '${_pendientesSinAutor > 0 ? ' · $_pendientesSinAutor sin autor conocido' : ''}',
               style: AppTexto.secundario,
             ),
           ],

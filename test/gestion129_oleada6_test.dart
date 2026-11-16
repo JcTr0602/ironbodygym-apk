@@ -400,9 +400,14 @@ void main() {
       ];
       final d = desglosePendientesPorAutor(ops,
           miActor: 'Jc', miTelegramId: 735772141);
-      expect(d.mias, 2);
+      // 1.35 (SP-11): la op sin firma ('{}') ya NO cuenta
+      // como «tuya» de la sesión: es la tercera clase,
+      // «sin autor conocido». mias + deOtros + sinAutor
+      // sigue sumando el total.
+      expect(d.mias, 1);
       expect(d.deOtros, 2);
-      expect(d.mias + d.deOtros, ops.length);
+      expect(d.sinAutor, 1);
+      expect(d.mias + d.deOtros + d.sinAutor, ops.length);
     });
   });
 
