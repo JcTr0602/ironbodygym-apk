@@ -26,6 +26,15 @@ import '../tiempo.dart';
 import 'componentes.dart';
 import 'congelaciones.dart';
 
+/// SL-2 G03-11: mensaje del snack cuando el cierre de la
+/// congelación falla. El error del servidor (res['error'])
+/// NUNCA se pinta crudo — códigos SQL y claves internas no
+/// son texto para el staff —: la rama amable es la misma
+/// para todos los fallos del cierre. El detalle técnico lo
+/// conserva quien llama si lo registra en bitácora.
+String mensajeCierreCongelacionFallido(Object? errorServidor) =>
+    'No se pudo cerrar la congelación. Inténtalo de nuevo.';
+
 String _fmtF(DateTime? d) {
   if (d == null) return '—';
   final dd = d.day.toString().padLeft(2, '0');
@@ -126,7 +135,10 @@ class _SeccionCongelacionFichaState
             : 'Congelación cerrada.');
         await _cargar();
       } else {
-        _snack('${res['error'] ?? 'No se pudo cerrar'}');
+        // SL-2 G03-11: antes esta rama pintaba res['error']
+        // crudo en el snack; ahora pasa por la rama amable,
+        // como el catch de abajo.
+        _snack(mensajeCierreCongelacionFallido(res['error']));
       }
     } catch (e) {
       _snack('No se pudo cerrar: ${mensajeErrorAmable(e)}');
