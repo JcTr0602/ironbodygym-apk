@@ -24,6 +24,7 @@ import 'sync.dart';
 import 'tarifa_especial.dart';
 import 'fotos_foreground.dart';
 import 'theme.dart';
+import 'ui/arranque_marca.dart';
 import 'ui/capa_candado.dart';
 import 'ui/componentes.dart';
 import 'ui/diseno.dart';
@@ -669,7 +670,12 @@ class _RaizSesionState extends State<RaizSesion> {
   }
 
   @override
-  Widget build(BuildContext context) => _logueado
-      ? const HomeScreen()
-      : LoginScreen(aviso: _avisoSesionMuerta);
+  Widget build(BuildContext context) =>
+      // 1.35 (UX-14): momento de marca del arranque montado
+      // sobre la pantalla real (ver arranque_marca.dart).
+      EnvoltorioArranqueMarca(
+        child: _logueado
+            ? const HomeScreen()
+            : LoginScreen(aviso: _avisoSesionMuerta),
+      );
 }
