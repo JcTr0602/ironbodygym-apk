@@ -397,6 +397,7 @@ class LocalDb {
   static Future<void> resetParaTest({bool borrarArchivo = true}) async {
     await instance._db?.close();
     instance._db = null;
+    instance._aperturaEnCurso = null;
     instance._ajustesCache = null;
     _ftsOk = null;
     _ftsReparado = false;
@@ -618,9 +619,26 @@ class LocalDb {
         '(sin borrado).');
   }
 
-  Future<Database> get db async {
+  /// G#8 (Hy4): la apertura en curso se COMPARTE entre
+  /// consumidores concurrentes — sin esto, el arranque
+  /// (tres consumidores `unawaited` a la vez) abría dos o
+  /// tres conexiones: una quedaba huérfana sin cerrar y la
+  /// reparación FTS corría duplicada.
+  Future<Database>? _aperturaEnCurso;
+
+  Future<Database> get db {
     final d = _db;
-    if (d != null) return d;
+    if (d != null) return Future.value(d);
+    final enCurso = _aperturaEnCurso;
+    if (enCurso != null) return enCurso;
+    final f = _abrirDb();
+    _aperturaEnCurso = f;
+    return f.whenComplete(() {
+      if (identical(_aperturaEnCurso, f)) _aperturaEnCurso = null;
+    });
+  }
+
+  Future<Database> _abrirDb() async {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, _nombreArchivoDb),
@@ -13020,6 +13038,7 @@ class LocalDb {
   Future<void> close() async {
     final d = _db;
     _db = null;
+    _aperturaEnCurso = null;
     // v1.3.1: resetear flags FTS para que se reconstruyan al reabrir.
     _ftsReparado = false;
     // 1.23 (Delta Argón 3ª-O4): el archivo puede ser otro tras
