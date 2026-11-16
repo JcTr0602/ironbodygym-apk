@@ -40,6 +40,22 @@ Future<File> _fotoDePrueba() async {
   return f;
 }
 
+/// 1.35 (corrección de la reconciliación, §3.7): la
+/// decodificación de la foto se fuerza en zona asíncrona
+/// REAL (`runAsync` + `precacheImage`). Escribir el
+/// archivo o esperar su decodificación dentro de la zona
+/// fake-async de `testWidgets` colgaba los dos tests con
+/// foto de forma no determinista (TimeoutException a los
+/// 10 min en el barrido completo; cuelgue en +0 en
+/// solitario). La foto se escribe una sola vez en
+/// `setUpAll` y cada test la precarga así antes de
+/// afirmar — la receta que ya usan los demás tests de
+/// foto de la casa.
+Future<void> _precargarFoto(WidgetTester tester, File foto) async {
+  final ctx = tester.element(find.byType(CabeceraFicha));
+  await tester.runAsync(() => precacheImage(FileImage(foto), ctx));
+}
+
 Widget _envolver(Widget w, {double escala = 1.0}) {
   return MaterialApp(
     theme: AppTema.tacticoOscuro(),
@@ -87,10 +103,17 @@ CabeceraFicha _cabecera({
 }
 
 void main() {
+  // §3.7: la foto se escribe en setUpAll (zona real),
+  // nunca dentro de un testWidgets.
+  late final File fotoPrueba;
+  setUpAll(() async {
+    fotoPrueba = await _fotoDePrueba();
+  });
+
   testWidgets('con foto: banda, nombre e insignia sobre '
       'el velo, tira de datos y botón con su texto',
       (tester) async {
-    final foto = await _fotoDePrueba();
+    final foto = fotoPrueba;
     var cambio = false;
     var vioGrande = false;
     await tester.pumpWidget(_envolver(_cabecera(
@@ -98,6 +121,7 @@ void main() {
       onCambiar: () => cambio = true,
       onFotoTap: () => vioGrande = true,
     )));
+    await _precargarFoto(tester, foto);
     await tester.pump();
 
     expect(find.text('Luis Gómez'), findsOneWidget);
@@ -197,10 +221,11 @@ void main() {
 
   testWidgets('el Hero de la foto se conserva y a 200 % '
       'no revienta', (tester) async {
-    final foto = await _fotoDePrueba();
+    final foto = fotoPrueba;
     await tester.pumpWidget(_envolver(
         _cabecera(foto: foto, heroTag: 'foto-credencial'),
         escala: 2.0));
+    await _precargarFoto(tester, foto);
     await tester.pump();
     expect(find.byType(Hero), findsOneWidget);
     expect(find.text('Luis Gómez'), findsOneWidget);
