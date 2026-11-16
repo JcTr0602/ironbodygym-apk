@@ -520,7 +520,8 @@ class _CampanaWaScreenState extends State<CampanaWaScreen> {
           _plantillaSel = '';
         }
       });
-      mostrarSnack(context, 'Plantillas guardadas (se sincronizarán)', significado: SignificadoChip.exito);
+      // SL-10 G04-6: sin el sufijo «(se sincronizarán)».
+      mostrarSnack(context, 'Plantillas guardadas', significado: SignificadoChip.exito);
     }
   }
 
