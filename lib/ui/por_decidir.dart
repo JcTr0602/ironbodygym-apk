@@ -420,7 +420,7 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
         // SL-5B G07-11: la cifra se asienta con
         // MontoAnimado, no salta en un Text crudo.
         trailing: MontoAnimado(
-                valor: (valor ?? 0).toDouble(),
+                valor: valor.toDouble(),
                 formato: (v) =>
                     deFoto ? '${v.toInt()} · foto' : '${v.toInt()}',
                 style: AppTexto.conTabulares(
