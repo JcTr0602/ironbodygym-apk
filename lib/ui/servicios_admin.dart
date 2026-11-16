@@ -15,6 +15,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'iconos_propios.dart';
+import 'servicios_detalle.dart';
 import 'servicios_precios.dart';
 import 'skeleton.dart';
 import '../app_log.dart';
@@ -39,6 +40,10 @@ class ServiciosAdminScreen extends StatefulWidget {
 
 class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   bool _cargando = true;
+  // SL-7 (G06-1): el fallo de carga se VE (EstadoError con
+  // Reintentar, el patrón de la pantalla principal); antes la
+  // pantalla caía en el inventario vacío en silencio.
+  bool _errorCarga = false;
   // 1.28 (M3-A6): guarda de reentrada de los diálogos que
   // MUEVEN dosis/pomos/agua. Un doble toque apilaba dos
   // diálogos idénticos y confirmar ambos movía el doble
@@ -103,11 +108,11 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         return etiquetaDeSuplemento(s, _categorias);
       }
     }
-    return 'Suplemento #$id';
+    return 'Suplemento sin nombre';
   }
 
   String _nombrePersona(int? id) =>
-      _personas[id] ?? 'Persona #$id';
+      _personas[id] ?? 'Persona sin nombre';
 
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
@@ -119,6 +124,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -192,6 +198,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _categorias = mapaCategoriasSuplemento(categorias);
       _personas = personas;
       _cargando = false;
+      _errorCarga = false;
     });
   }
 
@@ -402,17 +409,16 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   Future<void> _salidaPomoInterno(Map<String, dynamic> pomo) async {
     // Ronda 3-9 #10: solo el dueño (ver _guardarGrupoPrecios).
     if (!AuthService().isOwner) return;
-    // 1.29 (Oleada 4, barrido de diálogos): StatefulWidget
-    // dueño de sus controladores (antes se creaban en el
-    // método y NUNCA se disponían). Devuelve los valores por
-    // Navigator.pop; cancelar devuelve null.
-    final res = await showDialog<({int dosis, String motivo, String? nota})>(
+    // SL-7 (G06-2): UNA sola superficie de salida sin venta —
+    // la hoja validada que usa Vender (HojaSalidaSinVenta).
+    // El diálogo propio de Inventario aceptaba la cantidad
+    // con tryParse ?? 0 y cerraba perdiendo lo tecleado si el
+    // servicio rechazaba; la hoja valida dentro y no cierra.
+    final res = await showModalBottomSheet<
+        ({String motivo, int dosis, String? nota})>(
       context: context,
-      builder: (_) => _DialogoSalidaPomo(
-        nombreTitular: _nombrePersona(
-            (pomo['titular_telegram_id'] as num?)?.toInt()),
-        saldoActual: pomo['saldo_local'],
-      ),
+      isScrollControlled: true,
+      builder: (_) => const HojaSalidaSinVenta(esDueno: true),
     );
     if (res == null) return;
     try {
@@ -454,7 +460,13 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         // pantalla de ajustes enseña SU esqueleto
         // (grupos con filas), no el rótulo genérico.
         ? const SkeletonAjustes(grupos: 4)
-        : ListView(
+        : _errorCarga
+            ? EstadoError(
+                titulo: 'No se pudo cargar el inventario',
+                detalle: 'Revisa la conexión o vuelve a intentarlo.',
+                onReintentar: _cargar,
+              )
+            : ListView(
             padding: const EdgeInsets.all(AppEspacio.lg),
             children: [
               _tarjetaIrPrecios(),
@@ -835,7 +847,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                       '${s.entrenadorNombre ?? _nombrePersona(s.entrenadorTelegramId)}'
                       ' · ${s.suplementoNombre ?? _nombreSup(s.suplementoId)}'),
                   subtitle: Text(
-                      'Pidió relleno${s.creadoEn != null ? ' · ${s.creadoEn!.split('T').first}' : ''}'),
+                      'Pidió relleno${s.creadoEn != null ? ' · ${fmtFecha(s.creadoEn)}' : ''}'),
                   trailing: FilledButton.tonal(
                     onPressed: () => _rellenarDesdeSolicitud(s),
                     child: const Text('Rellenar'),
@@ -1165,91 +1177,6 @@ class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
           onPressed: () => Navigator.pop(
               context, int.tryParse(_dosisCtrl.text.trim()) ?? 0),
           child: const Text('Rellenar'),
-        ),
-      ],
-    );
-  }
-}
-
-/// 1.29 (Oleada 4, barrido de diálogos): diálogo de salida
-/// sin venta como StatefulWidget dueño de sus controladores
-/// (antes se creaban en el método llamador y nunca se
-/// disponían). Devuelve (dosis, motivo, nota) por
-/// Navigator.pop; cancelar devuelve null.
-class _DialogoSalidaPomo extends StatefulWidget {
-  final String nombreTitular;
-  final Object? saldoActual;
-
-  const _DialogoSalidaPomo({
-    required this.nombreTitular,
-    required this.saldoActual,
-  });
-
-  @override
-  State<_DialogoSalidaPomo> createState() => _DialogoSalidaPomoState();
-}
-
-class _DialogoSalidaPomoState extends State<_DialogoSalidaPomo> {
-  final _dosisCtrl = TextEditingController(text: '1');
-  final _notaCtrl = TextEditingController();
-  String _motivo = 'merma';
-
-  @override
-  void dispose() {
-    _dosisCtrl.dispose();
-    _notaCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DialogoApp(
-      titulo: 'Salida sin venta · ${widget.nombreTitular}',
-      iconoTitulo: Icons.outbox_rounded,
-      contenido: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Saldo del pomo: ${widget.saldoActual ?? '—'} dosis.',
-            style: AppTexto.cuerpo,
-          ),
-          SelectorIronForm<String>(
-            valorInicial: _motivo,
-            etiqueta: 'Motivo',
-            opciones: const [
-              OpcionSelector('merma', 'Merma / rotura'),
-              OpcionSelector('cortesia', 'Cortesía'),
-              OpcionSelector('consumo_staff', 'Consumo del staff'),
-              OpcionSelector('ajuste', 'Ajuste'),
-            ],
-            alCambiar: (v) => setState(() => _motivo = v ?? 'merma'),
-          ),
-          TextField(
-            controller: _dosisCtrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Dosis'),
-          ),
-          TextField(
-            controller: _notaCtrl,
-            decoration:
-                const InputDecoration(labelText: 'Nota (opcional)'),
-          ),
-        ],
-      ),
-      acciones: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, (
-                dosis: int.tryParse(_dosisCtrl.text.trim()) ?? 0,
-                motivo: _motivo,
-                nota: _notaCtrl.text.trim().isEmpty
-                    ? null
-                    : _notaCtrl.text.trim(),
-              )),
-          child: const Text('Registrar salida'),
         ),
       ],
     );
