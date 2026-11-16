@@ -410,8 +410,13 @@ class _PagoScreenState extends State<PagoScreen> {
         mostrarSnack(context, 'Cobro deshecho',
             significado: SignificadoChip.exito);
       case ResultadoCobro.guardado:
-        mostrarSnack(context, 'Pago de ${c['nombre']} guardado',
-            significado: SignificadoChip.exito);
+        // SL-4 · G10-5/G10-9: SIN snack — la pantalla
+        // «¡Cobro registrado!» ya fue el anuncio final del
+        // cobro (un solo anuncio por cobro, el correcto).
+        // El snack «Pago de … guardado» lo duplicaba al
+        // volver. Los de deshecho/cancelado se quedan: en
+        // su flujo son la única señal.
+        break;
       case ResultadoCobro.cancelado:
         mostrarSnack(context, 'Cobro cancelado',
             significado: SignificadoChip.neutral);
