@@ -11,7 +11,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/permisos_entrenador.dart';
 import 'package:ironbody_gym/ui/pago_diario.dart';
 import 'package:shared_preferences/shared_preferences.dart';
