@@ -1213,21 +1213,16 @@ class _DialogoSalidaPomoState extends State<_DialogoSalidaPomo> {
             'Saldo del pomo: ${widget.saldoActual ?? '—'} dosis.',
             style: AppTexto.cuerpo,
           ),
-          DropdownButtonFormField<String>(
-            value: _motivo,
-            decoration: const InputDecoration(labelText: 'Motivo'),
-            items: const [
-              DropdownMenuItem(
-                  value: 'merma', child: Text('Merma / rotura')),
-              DropdownMenuItem(
-                  value: 'cortesia', child: Text('Cortesía')),
-              DropdownMenuItem(
-                  value: 'consumo_staff',
-                  child: Text('Consumo del staff')),
-              DropdownMenuItem(
-                  value: 'ajuste', child: Text('Ajuste')),
+          SelectorIronForm<String>(
+            valorInicial: _motivo,
+            etiqueta: 'Motivo',
+            opciones: const [
+              OpcionSelector('merma', 'Merma / rotura'),
+              OpcionSelector('cortesia', 'Cortesía'),
+              OpcionSelector('consumo_staff', 'Consumo del staff'),
+              OpcionSelector('ajuste', 'Ajuste'),
             ],
-            onChanged: (v) => setState(() => _motivo = v ?? 'merma'),
+            alCambiar: (v) => setState(() => _motivo = v ?? 'merma'),
           ),
           TextField(
             controller: _dosisCtrl,
@@ -1369,21 +1364,16 @@ class _DialogoSalidaAguaState extends State<_DialogoSalidaAgua> {
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            value: _motivo,
-            decoration: const InputDecoration(labelText: 'Motivo'),
-            items: const [
-              DropdownMenuItem(
-                  value: 'merma', child: Text('Merma / rotura')),
-              DropdownMenuItem(
-                  value: 'cortesia', child: Text('Cortesía')),
-              DropdownMenuItem(
-                  value: 'consumo_staff',
-                  child: Text('Consumo del staff')),
-              DropdownMenuItem(
-                  value: 'ajuste', child: Text('Ajuste')),
+          SelectorIronForm<String>(
+            valorInicial: _motivo,
+            etiqueta: 'Motivo',
+            opciones: const [
+              OpcionSelector('merma', 'Merma / rotura'),
+              OpcionSelector('cortesia', 'Cortesía'),
+              OpcionSelector('consumo_staff', 'Consumo del staff'),
+              OpcionSelector('ajuste', 'Ajuste'),
             ],
-            onChanged: (v) =>
+            alCambiar: (v) =>
                 setState(() => _motivo = v ?? 'merma'),
           ),
           TextField(
@@ -1459,18 +1449,17 @@ class _DialogoAbrirBoteState extends State<_DialogoAbrirBote> {
       contenido: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          DropdownButtonFormField<int>(
-            value: _supId,
-            decoration: const InputDecoration(labelText: 'Producto'),
-            items: [
+          SelectorIronForm<int>(
+            valorInicial: _supId,
+            etiqueta: 'Producto',
+            opciones: [
               for (final s in widget.suplementos)
-                DropdownMenuItem(
-                  value: (s['id'] as num).toInt(),
-                  child:
-                      Text(etiquetaDeSuplemento(s, widget.categorias)),
+                OpcionSelector(
+                  (s['id'] as num).toInt(),
+                  etiquetaDeSuplemento(s, widget.categorias),
                 ),
             ],
-            onChanged: (v) => setState(() => _supId = v ?? _supId),
+            alCambiar: (v) => setState(() => _supId = v ?? _supId),
           ),
           TextField(
             controller: _rendCtrl,
