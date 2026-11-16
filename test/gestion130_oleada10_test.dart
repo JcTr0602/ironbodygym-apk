@@ -42,6 +42,7 @@ import 'package:ironbody_gym/conciliacion.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/tipos_pago.dart';
 import 'package:ironbody_gym/ui/actividad_cliente.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/dialogo_pago.dart';
 import 'package:ironbody_gym/ui/ficha.dart';
 import 'package:ironbody_gym/ui/ficha_secciones.dart';
@@ -602,7 +603,7 @@ void main() {
         ),
       ));
       await _pumps(tester, 20);
-      expect(find.byType(DropdownButtonFormField<int>), findsNothing,
+      expect(find.byType(SelectorIronForm<int>), findsNothing,
           reason: 'desde la ficha la persona ya viene elegida');
       expect(consultado, 11);
       expect(find.text('Activación de la app'), findsOneWidget);

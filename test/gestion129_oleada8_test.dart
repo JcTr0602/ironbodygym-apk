@@ -33,6 +33,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/actividad_cliente.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/ui/actividad_cliente.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/panel_comunidad.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -377,7 +378,7 @@ void main() {
           findsOneWidget);
       expect(find.text('Persona'), findsOneWidget);
 
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
+      await tester.tap(find.byType(SelectorIronForm<int>));
       await _pumps(tester);
       await tester.tap(find.text('Ana Pérez').last);
       await _pumps(tester);
@@ -417,7 +418,7 @@ void main() {
         ),
       ));
       await _pumps(tester);
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
+      await tester.tap(find.byType(SelectorIronForm<int>));
       await _pumps(tester);
       await tester.tap(find.text('Ana Pérez').last);
       await _pumps(tester);
@@ -437,7 +438,7 @@ void main() {
         throw StateError('sin red (simulado)');
       });
       await montar(tester, svc);
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
+      await tester.tap(find.byType(SelectorIronForm<int>));
       await _pumps(tester);
       await tester.tap(find.text('Ana Pérez').last);
       await _pumps(tester);
@@ -453,7 +454,7 @@ void main() {
       final svc =
           ActividadClienteService(rpcParaTest: (p) async => []);
       await montar(tester, svc);
-      await tester.tap(find.byType(DropdownButtonFormField<int>));
+      await tester.tap(find.byType(SelectorIronForm<int>));
       await _pumps(tester);
       await tester.tap(find.text('Beto Ruiz').last);
       await _pumps(tester);
