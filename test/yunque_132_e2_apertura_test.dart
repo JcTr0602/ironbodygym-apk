@@ -28,6 +28,7 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/plus_reportes.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/campana_wa.dart' as campana;
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/panel_resto_caja.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -213,10 +214,10 @@ void main() {
     expect(find.text('Reanudar tanda (0/2)'), findsOneWidget,
         reason: 'la tanda previa de disco está pintada sin '
             'esperar a la red');
-    expect(find.byType(DropdownButton<String>), findsOneWidget,
+    expect(find.byType(SelectorIron<String>), findsOneWidget,
         reason: 'el selector de plantillas locales está '
             'pintado');
-    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.tap(find.byType(SelectorIron<String>));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Plantilla Campo'), findsWidgets);

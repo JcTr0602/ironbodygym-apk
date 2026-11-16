@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/tiempo.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/dialogo_pago.dart';
 import 'package:ironbody_gym/ui/ficha.dart';
 import 'package:ironbody_gym/ui/pago_diario.dart';
@@ -115,8 +116,8 @@ Widget _hostDialogo(
 Future<void> _elegirTipo(WidgetTester tester, ContadorToques toques,
     String fragmento) async {
   await jornadaEsperar(
-      tester, find.byType(DropdownButton<String>));
-  await toques.tap(tester, find.byType(DropdownButton<String>).first);
+      tester, find.byType(SelectorIron<String>));
+  await toques.tap(tester, find.byType(SelectorIron<String>).first);
   await tester.pumpAndSettle();
   await jornadaEsperar(tester, find.textContaining(fragmento));
   await toques.tap(tester, find.textContaining(fragmento).last);

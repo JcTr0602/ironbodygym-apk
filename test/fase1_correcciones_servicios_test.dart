@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
 import 'package:ironbody_gym/ui/servicios.dart';
 import 'package:path/path.dart' as p;
@@ -211,23 +212,32 @@ void main() {
     for (var i = 0; i < 30 && !abierto; i++) {
       await _drenar(tester, vueltas: 2, ms: 60);
       abierto =
-          find.byType(DropdownButton<int>).evaluate().isNotEmpty;
+          find.byType(SelectorIron<int?>).evaluate().isNotEmpty;
     }
     expect(abierto, isTrue,
         reason: 'el diálogo de venta simple se abrió con '
             'sus desplegables de rol');
     expect(find.text('A nombre de:'), findsOneWidget);
     expect(find.text('Efectivo lo entrega:'), findsOneWidget);
+    // DIS-05 (adjudicación): los desplegables de rol son hoy
+    // SelectorIron<int?>; el contrato B-4 que este test
+    // fijaba (Expanded + isExpanded para que un nombre
+    // compuesto no desborde la fila) se conserva como:
+    // cada selector vive dentro de un Expanded y su campo
+    // cerrado trunca la etiqueta con elipsis — y la prueba
+    // de fuego sigue siendo takeException() en null abajo.
     final desplegables =
-        tester.widgetList<DropdownButton<int>>(
-            find.byType(DropdownButton<int>));
+        tester.widgetList<SelectorIron<int?>>(
+            find.byType(SelectorIron<int?>));
     expect(desplegables.length, 2,
         reason: 'los dos desplegables de rol del diálogo');
     for (final d in desplegables) {
-      expect(d.isExpanded, isTrue,
-          reason: 'B-4: cada desplegable ocupa el resto de '
-              'la fila (Expanded + isExpanded) y trunca '
-              'dentro, no desborda');
+      expect(
+          find.ancestor(
+              of: find.byWidget(d), matching: find.byType(Expanded)),
+          findsOneWidget,
+          reason: 'B-4: cada selector ocupa el resto de la '
+              'fila (Expanded) y trunca dentro, no desborda');
     }
     expect(tester.takeException(), isNull,
         reason: 'el diálogo no añade desbordes propios a '

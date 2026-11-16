@@ -19,6 +19,7 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/negocio.dart';
 import 'package:ironbody_gym/servicios.dart';
 import 'package:ironbody_gym/tiempo.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/servicios.dart';
 
 import 'jornada_ayudas.dart';
@@ -290,7 +291,7 @@ void main() {
           toques,
           find.descendant(
               of: find.byType(AlertDialog),
-              matching: find.byType(DropdownButton<int>)));
+              matching: find.byType(SelectorIron<int?>)));
       await tester.pumpAndSettle();
       expect(find.text('Duany'), findsNothing,
           reason: 'en dosis no se puede elegir a otro '
@@ -309,7 +310,7 @@ void main() {
           toques,
           find.descendant(
               of: find.byType(AlertDialog),
-              matching: find.byType(DropdownButton<int>)));
+              matching: find.byType(SelectorIron<int?>)));
       await tester.pumpAndSettle();
       await jornadaEsperar(tester, find.text('Duany'));
       await toques.tap(tester, find.text('Duany').last);
