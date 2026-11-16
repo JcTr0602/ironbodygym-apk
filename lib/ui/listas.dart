@@ -25,6 +25,7 @@ import 'skeleton.dart';
 import 'componentes.dart';
 import 'permisos_ui.dart';
 import 'dialogo_pago.dart';
+import 'hoja_accion.dart';
 import 'preview_cobro.dart';
 import 'diseno.dart';
 import 'ficha.dart';
@@ -1016,11 +1017,19 @@ class _ListasScreenState extends State<ListasScreen>
 
   Future<String?> _elegirAviso(Map<String, dynamic> c) async {
     if (_movilCliente(c) == null) return 'marcar';
-    return showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
+    // SL-3 (G02-3, familia UI-12): la elección del aviso de
+    // WhatsApp se presenta con la hoja de la casa
+    // (showHojaIron), como el resto de la app — antes era un
+    // showModalBottomSheet crudo con SafeArea propio. El
+    // contrato no cambia: 'whatsapp' | 'marcar' | null.
+    // (Las otras dos presentaciones del aviso viven en
+    // buscar.dart, fuera del mapa de este carril.)
+    return showHojaIron<String>(
+      context,
+      titulo: 'Avisar a ${c['nombre'] ?? 'este cliente'}',
+      icono: Icons.chat_rounded,
+      cuerpo: Builder(
+        builder: (ctx) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
