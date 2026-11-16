@@ -2102,6 +2102,11 @@ class SelectorIron<T> extends StatelessWidget {
   }
 
   String? get _textoSeleccion {
+    // Sin selección CON pista: manda la pista (así enseñaban
+    // su «Todos…» los filtros del SDK con hint: el hint gana
+    // al rótulo de la opción de valor null, que sigue
+    // existiendo en el panel para poder reelegirla).
+    if (valor == null && pista != null) return null;
     final sel = _seleccionada;
     if (sel != null) return sel.etiqueta;
     if (valor == null) return null; // sin selección: manda la pista
@@ -2113,15 +2118,16 @@ class SelectorIron<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sel = _seleccionada;
+    final texto = _textoSeleccion;
     final alCambiar = this.alCambiar;
     return _CampoSelectorCerrado(
       etiqueta: etiqueta,
       pista: pista,
       textoAyuda: textoAyuda,
       icono: icono,
-      textoSeleccion: _textoSeleccion,
-      iconoSeleccion: sel?.icono,
-      colorIconoSeleccion: sel?.colorIcono,
+      textoSeleccion: texto,
+      iconoSeleccion: texto == null ? null : sel?.icono,
+      colorIconoSeleccion: texto == null ? null : sel?.colorIcono,
       errorText: null,
       habilitado: alCambiar != null,
       alTocar: alCambiar == null
@@ -2189,6 +2195,10 @@ class SelectorIronForm<T> extends FormField<T> {
                   'SelectorIronForm: el valor ($valorActual) no está entre las opciones');
               texto = opciones.isEmpty ? null : opciones.first.etiqueta;
             }
+            // Sin selección CON pista: manda la pista, como
+            // en el sabor simple (la opción de valor null
+            // sigue en el panel).
+            if (valorActual == null && pista != null) texto = null;
             final activo = habilitado && alCambiar != null;
             return _CampoSelectorCerrado(
               etiqueta: etiqueta,
@@ -2196,8 +2206,9 @@ class SelectorIronForm<T> extends FormField<T> {
               textoAyuda: textoAyuda,
               icono: icono,
               textoSeleccion: texto,
-              iconoSeleccion: seleccionada?.icono,
-              colorIconoSeleccion: seleccionada?.colorIcono,
+              iconoSeleccion: texto == null ? null : seleccionada?.icono,
+              colorIconoSeleccion:
+                  texto == null ? null : seleccionada?.colorIcono,
               errorText: estado.errorText,
               habilitado: activo,
               alTocar: !activo

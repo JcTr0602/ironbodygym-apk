@@ -271,6 +271,51 @@ void main() {
     expect(guardado, 'b');
   });
 
+  testWidgets(
+      'sin selección CON pista: el cerrado enseña la pista y '
+      'la opción de valor null sigue en el panel', (t) async {
+    String? valor;
+    await _montar(t, MaterialApp(
+      theme: AppTema.tacticoOscuro(),
+      home: Scaffold(
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: StatefulBuilder(
+            builder: (ctx, setB) => SelectorIron<String?>(
+              valor: valor,
+              pista: 'Todos los tipos',
+              opciones: const [
+                OpcionSelector<String?>(null, 'Todos'),
+                OpcionSelector<String?>('x', 'Equis'),
+              ],
+              alCambiar: (v) => setB(() => valor = v),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await t.pump();
+    // El cerrado enseña la PISTA (como el hint del SDK), no
+    // el rótulo de la opción null.
+    expect(find.text('Todos los tipos'), findsOneWidget);
+    expect(find.text('Todos'), findsNothing);
+    // En el panel, la opción null existe y se puede reelegir.
+    await t.tap(find.byType(SelectorIron<String?>));
+    await t.pumpAndSettle();
+    expect(find.text('Todos'), findsOneWidget);
+    await t.tap(find.text('Equis'));
+    await t.pumpAndSettle();
+    expect(valor, 'x');
+    expect(find.text('Equis'), findsOneWidget);
+    // Y volviendo a «Todos» (null), el cerrado vuelve a la pista.
+    await t.tap(find.byType(SelectorIron<String?>));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Todos'));
+    await t.pumpAndSettle();
+    expect(valor, isNull);
+    expect(find.text('Todos los tipos'), findsOneWidget);
+  });
+
   testWidgets('la hoja no queda bajo el teclado', (t) async {
     t.view.physicalSize = const Size(360, 800);
     t.view.devicePixelRatio = 1.0;
