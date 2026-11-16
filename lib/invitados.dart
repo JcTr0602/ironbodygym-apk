@@ -814,6 +814,14 @@ class DatosConversionInvitado {
   final String? carnet;
   final List<MedidaInvitado> medidas;
 
+  /// 1.35 (corrección E3, C10-01): la conversión nació SIN
+  /// conexión (preparación local): su uuid es del teléfono y
+  /// el servidor aún no la conoce. Viaja en el payload de la
+  /// op `inscribir` para que una reconstrucción del registro
+  /// desde la cola conserve la marca (ver
+  /// [reconstruccionDesdeOps]).
+  final bool nacidaOffline;
+
   const DatosConversionInvitado({
     required this.invitadoId,
     required this.conversionUuid,
@@ -822,6 +830,7 @@ class DatosConversionInvitado {
     this.fechaNac,
     this.carnet,
     this.medidas = const [],
+    this.nacidaOffline = false,
   });
 
   String? get carnetSugerido => carnetDesdeFechaNac(fechaNac);
@@ -1058,11 +1067,21 @@ class DatosOpConversion {
   final String conversionUuid;
   final String opUuid;
   final String? creadaTs;
+
+  /// 1.35 (corrección E3, C10-01): la op declara si la
+  /// conversión nació sin conexión (clave
+  /// `conversion_nacida_offline` del payload, que solo se
+  /// escribe cuando es cierta). Sin esta marca, un registro
+  /// reconstruido desde la cola repetiría el desenlace del
+  /// bloqueante: confirmar con un uuid que el servidor no
+  /// conoce.
+  final bool nacidaOffline;
   const DatosOpConversion({
     required this.invitadoId,
     required this.conversionUuid,
     required this.opUuid,
     this.creadaTs,
+    this.nacidaOffline = false,
   });
 }
 
@@ -1092,6 +1111,7 @@ DatosOpConversion? datosConversionDeOp(Map<String, dynamic> fila) {
     conversionUuid: conv,
     opUuid: uuid,
     creadaTs: fila['creada_ts'] as String?,
+    nacidaOffline: payload['conversion_nacida_offline'] == true,
   );
 }
 
@@ -1127,6 +1147,11 @@ List<ConversionInvitado> reconstruccionDesdeOps({
         conversionUuid: datos.conversionUuid,
         estado: EstadoConversion.opEncolada,
         opUuid: datos.opUuid,
+        // E3 (C10-01): el registro que NACE de la op hereda
+        // la marca que la op declara; la rama de mutación de
+        // la previa (debajo) la conserva porque no reconstruye
+        // el registro.
+        nacidaOffline: datos.nacidaOffline,
         creadaEn: datos.creadaTs ?? ahora,
         actualizadaEn: ahora,
       ));
@@ -1143,6 +1168,7 @@ List<ConversionInvitado> reconstruccionDesdeOps({
         conversionUuid: datos.conversionUuid,
         estado: EstadoConversion.opEncolada,
         opUuid: datos.opUuid,
+        nacidaOffline: datos.nacidaOffline,
         creadaEn: datos.creadaTs ?? ahora,
         actualizadaEn: ahora,
       ));
@@ -1169,11 +1195,23 @@ Future<void> encolarInscripcionConversion({
   final store = ConversionInvitadoStore();
   final previa = await store.leer(invitadoId);
   final ahoraIso = isoHabana(ahoraHabana());
+  // 1.35 (corrección E3, C10-01 — BLOQUEANTE): el registro
+  // nuevo HEREDA de la previa lo que describe el ORIGEN de
+  // la conversión y su resultado acumulado: `nacidaOffline`
+  // (sin ella, la verificación confirma con el uuid local
+  // que el servidor no conoce y la conversión jamás se
+  // confirma), `creadaEn`, `clienteId` y `resultadoMedidas`.
+  // NO hereda `errorConfirmacion`: es el fallo del intento
+  // anterior y la op nueva nace limpia — la verificación lo
+  // volverá a escribir si este intento también falla.
   await store.guardar(ConversionInvitado(
     invitadoId: invitadoId,
     conversionUuid: conversionUuid,
     estado: EstadoConversion.opEncolada,
     opUuid: opUuid,
+    clienteId: previa?.clienteId,
+    resultadoMedidas: previa?.resultadoMedidas,
+    nacidaOffline: previa?.nacidaOffline ?? false,
     creadaEn: previa?.creadaEn ?? ahoraIso,
     actualizadaEn: ahoraIso,
   ));
@@ -1716,6 +1754,7 @@ class InvitadosService {
       fechaNac: detalle.fechaNac,
       carnet: detalle.carnet,
       medidas: detalle.mediciones,
+      nacidaOffline: true,
     );
     final ahora = isoHabana(ahoraHabana());
     await ConversionInvitadoStore().guardar(ConversionInvitado(
