@@ -75,6 +75,41 @@ class _InscribirScreenState extends State<InscribirScreen> {
   TipoPago? _tipoCustomSel;
   // v1.3.9 (Bug 2): método de pago del período inicial (antes hardcodeado a 'efectivo').
   String _metodoPago = 'efectivo';
+  // 1.35 (CAMPO-8): fecha de inicio elegida («Comenzó el»),
+  // 'AAAA-MM-DD'. null = sin excepción: el inicio es HOY
+  // y el pago se asienta hoy (el defecto que manda, por
+  // decisión de Jc: la fecha distinta es la excepción).
+  // Cuando se elige otra, esa fecha viaja como la
+  // `fecha` de la op: el servidor asienta el pago en SU
+  // día (su caja y su nómina) y la cobertura corre desde
+  // ese día (la cadena canónica apila desde la fecha del
+  // pago).
+  String? _fechaInicioSel;
+
+  /// La fecha de inicio efectiva de esta inscripción.
+  String get _inicioIso => _fechaInicioSel ?? hoyHabanaIso();
+
+  /// ¿Se eligió una fecha de inicio distinta de hoy?
+  bool get _inicioEsExcepcion =>
+      _fechaInicioSel != null && _fechaInicioSel != hoyHabanaIso();
+
+  /// Selector «Comenzó el»: vale pasado y el día
+  /// siguiente (un inicio de mañana se puede dejar
+  /// asentado hoy).
+  Future<void> _elegirFechaInicio() async {
+    final hoy = ahoraHabana();
+    final sel = await showDatePicker(
+      context: context,
+      initialDate: DateTime.tryParse(_inicioIso) ?? hoy,
+      firstDate: DateTime(hoy.year - 1, hoy.month, hoy.day),
+      lastDate: DateTime(hoy.year, hoy.month, hoy.day + 1),
+      helpText: '¿Cuándo comenzó?',
+    );
+    if (sel == null || !mounted) return;
+    String dos(int n) => n.toString().padLeft(2, '0');
+    setState(() => _fechaInicioSel =
+        '${sel.year}-${dos(sel.month)}-${dos(sel.day)}');
+  }
   File? _foto;
   bool _guardando = false;
   bool _esMenor = false;
@@ -339,9 +374,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
               'transfer': 2500.0,
             };
         final dias = _diasPeriodo();
-        final vence = hoyHabanaIso().isEmpty || dias <= 0
+        // 1.35 (CAMPO-8): el vencimiento corre desde la
+        // fecha de inicio efectiva (hoy salvo excepción
+        // elegida), como hará el guardado.
+        final vence = dias <= 0
             ? null
-            : fmtFecha(sumarDiasIso(hoyHabanaIso(), dias));
+            : fmtFecha(sumarDiasIso(_inicioIso, dias));
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(
@@ -354,6 +392,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
             '${_etiquetaPeriodo()} · '
             '${fmtMonto(_montoPeriodo(pr))} CUP · '
             '${_metodoPago == 'transferencia' ? 'Transferencia' : 'Efectivo'}'
+            '${_inicioEsExcepcion ? ' · comenzó el ${fmtFecha(_inicioIso)}' : ''}'
             '${vence != null ? ' · vence el $vence' : ''}',
             style: AppTexto.secundario
                 .copyWith(fontWeight: FontWeight.w700),
@@ -607,7 +646,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
     final precios = await _precios();
     final monto = _montoPeriodo(precios);
     final dias = _diasPeriodo();
-    final hasta = previewHastaDias(null, dias);
+    // 1.35 (CAMPO-8): la cobertura corre desde la fecha
+    // de inicio efectiva (la cadena del servidor apila
+    // desde la fecha del pago, que será esta misma).
+    final hasta = previewHastaDias(null, dias, fechaPago: _inicioIso);
     if (!mounted) return;
     // v1.3.5: diálogo rediseñado (widget dedicado, luz verde de Argón).
     final ok = await DialogoConfirmarInscripcion.mostrar(
@@ -622,7 +664,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
           : null,
       metodoPago: _metodoPago,
       validoHastaTxt: fmtFecha(hasta),
-      desdeTxt: 'Desde hoy, ${fmtFecha(hoyHabanaIso())}',
+      desdeTxt: _inicioEsExcepcion
+          ? 'Desde el ${fmtFecha(_inicioIso)}'
+          : 'Desde hoy, ${fmtFecha(hoyHabanaIso())}',
       telefono: tel,
       carnet: carnet,
       fotoPath: _foto?.path,
@@ -650,7 +694,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
         'telefono': tel.isEmpty ? null : tel,
         'carnet': carnet.isEmpty ? null : carnet,
         // v1.4.0 (Argón §8): fecha de negocio en hora de La Habana.
-        'fecha': hoyHabanaIso(),
+        // 1.35 (CAMPO-8): la fecha de INICIO efectiva —
+        // hoy por defecto (el pago se asienta hoy); si se
+        // eligió otra en «Comenzó el», el servidor asienta
+        // el pago en ese día y la cobertura corre desde él.
+        'fecha': _inicioIso,
         // v1.3.9 (Bug 2): método de pago elegido (antes hardcodeado a 'efectivo').
         'metodo_pago': _metodoPago,
         // v1.2.2: guardar si es menor y el precio aplicado (histórico)
@@ -1414,6 +1462,46 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                   () => _metodoPago = 'transferencia')),
                         ],
                       ),
+                      // 1.35 (CAMPO-8): selector «Comenzó el».
+                      // Por defecto HOY (el pago se asienta
+                      // hoy); elegir otra fecha es la
+                      // excepción: el pago se asienta en ESA
+                      // fecha y la cobertura corre desde ella.
+                      const SizedBox(height: AppEspacio.md),
+                      const Text('Comenzó el:',
+                          style: AppTexto.cuerpo),
+                      const SizedBox(height: AppEspacio.sm),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(
+                                  Icons.calendar_month_rounded,
+                                  size: 18),
+                              label: Text(_inicioEsExcepcion
+                                  ? fmtFecha(_inicioIso)
+                                  : 'Hoy (${fmtFecha(hoyHabanaIso())})'),
+                              onPressed: _elegirFechaInicio,
+                            ),
+                          ),
+                          if (_inicioEsExcepcion)
+                            TextButton(
+                              onPressed: () => setState(
+                                  () => _fechaInicioSel = null),
+                              child: const Text('Volver a hoy'),
+                            ),
+                        ],
+                      ),
+                      if (_inicioEsExcepcion) ...[
+                        const SizedBox(height: AppEspacio.sm),
+                        Text(
+                          'El pago se asentará el '
+                          '${fmtFecha(_inicioIso)} (en la caja y '
+                          'la nómina de ese día) y la cobertura '
+                          'corre desde ese día.',
+                          style: AppTexto.secundario,
+                        ),
+                      ],
                     ],
                   ),
                 ),
