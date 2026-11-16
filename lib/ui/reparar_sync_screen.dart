@@ -11,7 +11,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../reparar_sync.dart';
 import 'app_bar.dart';
 import 'cola.dart';
@@ -19,13 +21,28 @@ import 'componentes.dart';
 import 'diseno.dart';
 
 class RepararSyncScreen extends StatefulWidget {
-  const RepararSyncScreen({super.key});
+  const RepararSyncScreen({
+    super.key,
+    this.diagnosticoParaTest,
+    this.reparacionParaTest,
+  });
+
+  /// Costuras de test (G08-1): sustituyen la foto de
+  /// atascos y la reparación reales. En producción son
+  /// null y corren [capturarAtascos] / [ejecutarReparacion].
+  final Future<FotoAtascos> Function()? diagnosticoParaTest;
+  final Future<
+      ({
+        FotoAtascos antes,
+        FotoAtascos despues,
+        int divergentesManifiesto,
+      })> Function()? reparacionParaTest;
 
   @override
   State<RepararSyncScreen> createState() => _RepararSyncScreenState();
 }
 
-enum _FaseReparar { diagnostico, reparando, resumen }
+enum _FaseReparar { diagnostico, reparando, resumen, error }
 
 class _RepararSyncScreenState extends State<RepararSyncScreen> {
   _FaseReparar _fase = _FaseReparar.diagnostico;
@@ -36,6 +53,13 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
     FotoAtascos despues,
     int divergentesManifiesto,
   })? _resultado;
+  // G08-1: el fallo de diagnóstico/reparación tiene fase
+  // propia (error visible con salida y reintento); antes
+  // una excepción dejaba la pantalla en «reparando» para
+  // siempre: círculo sin mensaje, sin salida y sin
+  // reintento.
+  String? _error;
+  bool _falloDiagnostico = false;
 
   @override
   void initState() {
@@ -44,25 +68,50 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
   }
 
   Future<void> _diagnosticar() async {
-    final foto = await capturarAtascos();
-    if (!mounted) return;
-    setState(() {
-      _foto = foto;
-      _cargando = false;
-      _fase = _FaseReparar.diagnostico;
-      _resultado = null;
-    });
+    try {
+      final foto = await (widget.diagnosticoParaTest?.call() ??
+          capturarAtascos());
+      if (!mounted) return;
+      setState(() {
+        _foto = foto;
+        _cargando = false;
+        _fase = _FaseReparar.diagnostico;
+        _resultado = null;
+        _error = null;
+      });
+    } catch (e) {
+      AppLog.error('sync', 'reparar_diagnostico_fallo', d: '$e');
+      if (!mounted) return;
+      setState(() {
+        _cargando = false;
+        _fase = _FaseReparar.error;
+        _error = mensajeErrorAmable(e);
+        _falloDiagnostico = true;
+      });
+    }
   }
 
   Future<void> _reparar() async {
     setState(() => _fase = _FaseReparar.reparando);
-    final r = await ejecutarReparacion();
-    if (!mounted) return;
-    setState(() {
-      _resultado = r;
-      _foto = r.despues;
-      _fase = _FaseReparar.resumen;
-    });
+    try {
+      final r = await (widget.reparacionParaTest?.call() ??
+          ejecutarReparacion());
+      if (!mounted) return;
+      setState(() {
+        _resultado = r;
+        _foto = r.despues;
+        _fase = _FaseReparar.resumen;
+        _error = null;
+      });
+    } catch (e) {
+      AppLog.error('sync', 'reparar_pantalla_fallo', d: '$e');
+      if (!mounted) return;
+      setState(() {
+        _fase = _FaseReparar.error;
+        _error = mensajeErrorAmable(e);
+        _falloDiagnostico = false;
+      });
+    }
   }
 
   @override
@@ -88,6 +137,7 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
                 _FaseReparar.diagnostico => _vistaDiagnostico(),
                 _FaseReparar.reparando => _vistaReparando(),
                 _FaseReparar.resumen => _vistaResumen(),
+                _FaseReparar.error => _vistaError(),
               },
             ),
     );
@@ -199,6 +249,28 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
           ),
         ),
       ],
+    ];
+  }
+
+  /// G08-1: el fallo se ve, se puede reintentar y se puede
+  /// salir — el giro de «reparando» solo vive mientras la
+  /// reparación vive.
+  List<Widget> _vistaError() {
+    return [
+      EstadoError(
+        titulo: _falloDiagnostico
+            ? 'No se pudo revisar la sincronización'
+            : 'La reparación no se pudo completar',
+        detalle: _error,
+        onReintentar: _falloDiagnostico ? _diagnosticar : _reparar,
+      ),
+      Center(
+        child: TextButton.icon(
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: const Text('Volver'),
+        ),
+      ),
     ];
   }
 

@@ -504,6 +504,23 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     }
   }
 
+  // SL-8 (G08-6): el suplemento se nombra desde el espejo,
+  // nunca por su ID crudo («ID suplemento: 5» no dice nada
+  // al decidir). Si no se resuelve, la fila no sale.
+  Future<String?> nombreSuplemento(dynamic id) async {
+    final sid = int.tryParse('$id');
+    if (sid == null) return null;
+    try {
+      final filas =
+          await LocalDb.instance.mirrorPorIds('suplementos', [sid]);
+      if (filas.isEmpty) return null;
+      final n = '${filas.first['nombre'] ?? ''}'.trim();
+      return n.isEmpty ? null : n;
+    } catch (_) {
+      return null;
+    }
+  }
+
   final tipo = '${op['tipo']}';
   if (tipo == 'foto') {
     final n = await nombreCliente(payload['cliente_id']);
@@ -521,7 +538,8 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
       detalles.add('Método: $m');
     }
     if (payload['fecha'] != null) {
-      detalles.add('Fecha: ${payload['fecha']}');
+      // G08-6: fecha legible de la casa, no el ISO crudo.
+      detalles.add('Fecha: ${fmtFecha('${payload['fecha']}')}');
     }
   } else if (tipo == 'inscribir') {
     if (payload['nombre'] != null) {
@@ -606,7 +624,9 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     final p = payload['precio_oficial'] ?? payload['precio'];
     if (p != null) detalles.add('Precio: $p USD');
   } else if (tipo == 'eliminar_suplemento') {
-    detalles.add('ID suplemento: ${payload['suplemento_id'] ?? '—'}');
+    // G08-6: por su nombre del espejo (o sin la fila).
+    final n = await nombreSuplemento(payload['suplemento_id']);
+    if (n != null) detalles.add('Suplemento: $n');
     detalles.add('Acción: Eliminar');
   } else if (tipo == 'incidencia' || tipo == 'incidencia_estado') {
     if (payload['descripcion'] != null) {
@@ -623,7 +643,8 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     }
   } else if (tipo == 'cierre_turno') {
     if (payload['fecha'] != null) {
-      detalles.add('Fecha: ${payload['fecha']}');
+      // G08-6: fecha legible de la casa, no el ISO crudo.
+      detalles.add('Fecha: ${fmtFecha('${payload['fecha']}')}');
     }
     if (payload['turno'] != null) {
       detalles.add('Turno: ${payload['turno']}');
@@ -631,9 +652,9 @@ Future<List<String>> detallesDeOp(Map<String, dynamic> op) async {
     final tc = payload['total_cobrado'] ?? payload['total'];
     if (tc != null) detalles.add('Total cobrado: ${fmtMonto(tc)} CUP');
   } else if (tipo == 'foto_suplemento') {
-    if (payload['suplemento_id'] != null) {
-      detalles.add('Suplemento ID: ${payload['suplemento_id']}');
-    }
+    // G08-6: por su nombre del espejo (o sin la fila).
+    final n = await nombreSuplemento(payload['suplemento_id']);
+    if (n != null) detalles.add('Suplemento: $n');
   }
   return detalles;
 }
@@ -789,6 +810,33 @@ class _ColaScreenState extends State<ColaScreen> {
   // está acotada a las 30 ops recientes de recentOps).
   Map<String, String> _titulosOp = {};
   bool _sincronizando = false;
+  // SL-8 (G08-4): los bloques auxiliares de la Cola
+  // (estadísticas, resumen, bloqueadas, fotos…) nacen
+  // PLEGADOS tras el control «Resumen y detalle»; la
+  // lista de operaciones es el contenido que manda.
+  bool _auxAbierto = false;
+
+  /// G08-4: la línea que resume el estado de los bloques
+  /// plegados en su control — el estado del héroe y las
+  /// cifras que piden atención, para que plegar no oculte
+  /// nada que haya que atender.
+  String _resumenAuxiliares({
+    required String tituloHeroe,
+    required int totalPendiente,
+    required int totalError,
+  }) {
+    return [
+      tituloHeroe,
+      '↓ ${_det.bajados} · ↑ ${_det.subidos}',
+      if (totalPendiente > 0) '$totalPendiente por subir',
+      if (totalError > 0)
+        '$totalError con error',
+      if (_bloqueadas.isNotEmpty)
+        '${_bloqueadas.length} necesitan revisión',
+      if (_fotosError > 0) '$_fotosError fotos con error',
+    ].join(' · ');
+  }
+
   // v1.4.0: progreso visible de la sincronización manual.
   SyncProgress? _progresoSync;
   int _ultimoProgresoMs = 0;
@@ -2715,8 +2763,11 @@ class _ColaScreenState extends State<ColaScreen> {
   void _verDetalle(Map<String, dynamic> op) async {
     final tipo = tituloDeOp(op);
     final estado = '${op['estado']}';
-    final fecha =
-        fechaCorta(op['creada_ts'], 16).replaceAll('T', ' ');
+    // SL-8 (G08-6): la fecha del detalle en hora de La
+    // Habana y legible (fechaAbsoluta de la casa); antes
+    // era el ISO cortado a 16 caracteres EN UTC: la hora
+    // del servidor pintada como si fuera la local.
+    final fecha = fechaAbsoluta(parseFecha('${op['creada_ts'] ?? ''}'));
     final error = '${op['error'] ?? ''}';
     // 1.28 (M1-C5): UNA sola traducción en lenguaje llano
     // (explicacionOp), la misma que enseñan la fila y el
@@ -3046,83 +3097,6 @@ class _ColaScreenState extends State<ColaScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            // Tarjetas de estadísticas
-            Row(
-              children: [
-                Expanded(
-                  child: _tarjetaStat(
-                    Icons.download_rounded,
-                    'Bajados',
-                    '${_det.bajados}',
-                    // v1.3.1 (E5): acumulado histórico + última sync.
-                    'Total: ${_det.totalBajados} · ${_hora(_det.ultimaPull)}',
-                    AppColores.info,
-                    onTap: _abrirDetalleBajados,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _tarjetaStat(
-                    Icons.upload_rounded,
-                    'Subidos',
-                    '${_det.subidos}',
-                    // v1.3.1 (E5): acumulado histórico + última sync.
-                    'Total: ${_det.totalSubidos} · ${_hora(_det.ultimaPush)}',
-                    AppColores.naranja,
-                    onTap: _abrirDetalleSubidos,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // 1.32 (O2F2S, Pieza 2): puerta al Centro de
-            // Sincronización (historial de corridas, cobertura
-            // por tabla y avisos de vigilancia, desde el
-            // diario M1). La píldora del Mostrador sigue
-            // abriendo ESTA pantalla; el Centro cuelga de aquí.
-            Tarjeta(
-              onTap: () => Navigator.of(context).push(RutaIron(
-                  builder: (_) => const CentroSyncScreen())),
-              child: Row(
-                children: [
-                  // Pasada (Argón): la puerta al Centro va
-                  // con el badge de módulo de la casa
-                  // (naranja), como las demás puertas.
-                  IconoModuloBadge.naranja(Icons.radar_rounded),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Centro de sincronización',
-                            style: AppTexto.subtitulo),
-                        Text(
-                          'Historial de corridas, qué hay en el '
-                          'teléfono por tabla y avisos',
-                          style: AppTexto.minuscula.copyWith(
-                              color: AppColores.textoSecundario(
-                                  context)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right_rounded,
-                      color: AppColores.textoSecundario(context)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // v1.12.0 (E1): la cola en sencillo — cuántas, de qué
-            // y desde cuándo (totales reales, no solo la lista
-            // visible que tiene límite). Sin operaciones, lo dice.
-            _tarjetaColaEnSencillo(),
-            // Yunque B (YB-SYNC-01/02): la bajada atascada o
-            // atrasada, con el nombre de SU tabla.
-            if (_atasco.nombre != null || _tablaAtrasada != null) ...[
-              const SizedBox(height: 16),
-              _tarjetaBajada(),
-            ],
-            const SizedBox(height: 16),
             // Botón sincronizar
             BotonPrimario(
               texto:
@@ -3167,123 +3141,53 @@ class _ColaScreenState extends State<ColaScreen> {
                 ),
               ],
             ],
-            if (_det.error != null && _det.error!.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(AppEspacio.md),
-                decoration: BoxDecoration(
-                  color: AppColores.error
-                      .withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(AppRadio.md),
-                  border: Border.all(
-                      color: AppColores.error
-                          .withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning_amber_rounded,
-                        size: 20,
-                        color: AppColores.error),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        // 1.33: la banda pinta el MISMO
-                        // texto compuesto que el subtítulo
-                        // del héroe (_textoErrorVisible),
-                        // no el error crudo de detalle().
-                        _textoErrorVisible ?? _det.error!,
-                        style: AppTexto.secundario.copyWith(color: AppColores.error),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
             const SizedBox(height: 16),
-            // v1.2.5 (D15): bloqueadas que necesitan revisión manual.
-            if (_bloqueadas.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.all(AppEspacio.lg),
-                decoration: BoxDecoration(
-                  color: AppColores.error.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(AppRadio.lg),
-                  border: Border.all(
-                      color: AppColores.error.withValues(alpha: 0.3)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            // 1.32 (O2F2S, Pieza 2): puerta al Centro de
+            // Sincronización (historial de corridas, cobertura
+            // por tabla y avisos de vigilancia, desde el
+            // diario M1). La píldora del Mostrador sigue
+            // abriendo ESTA pantalla; el Centro cuelga de aquí.
+            Tarjeta(
+              onTap: () => Navigator.of(context).push(RutaIron(
+                  builder: (_) => const CentroSyncScreen())),
+              child: Row(
+                children: [
+                  // Pasada (Argón): la puerta al Centro va
+                  // con el badge de módulo de la casa
+                  // (naranja), como las demás puertas.
+                  IconoModuloBadge.naranja(Icons.radar_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.warning_amber_rounded,
-                            color: AppColores.error),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${_bloqueadas.length} necesitan revisión',
-                            style: AppTexto.titulo.copyWith(
-                                color: AppColores.error),
-                          ),
+                        const Text('Centro de sincronización',
+                            style: AppTexto.subtitulo),
+                        Text(
+                          'Historial de corridas, qué hay en el '
+                          'teléfono por tabla y avisos',
+                          style: AppTexto.minuscula.copyWith(
+                              color: AppColores.textoSecundario(
+                                  context)),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Estas operaciones no se pudieron enviar. '
-                      'No se reintentarán solas.',
-                      style: AppTexto.secundario,
-                    ),
-                    const SizedBox(height: 8),
-                    for (final b in _bloqueadas)
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.block_rounded, size: 20),
-                        title: Text(
-                            '${b['tipo'] ?? ''}',
-                            style: AppTexto.cuerpo),
-                        // 1.28 (M1-C5): antes el subtítulo era el
-                        // código y el error CRUDOS; ahora motivo y
-                        // acción en lenguaje llano (explicacionOp),
-                        // para distinguir de un vistazo «cliente
-                        // borrado» de «sin conexión».
-                        subtitle: Builder(builder: (context) {
-                          final e = explicacionOp(
-                              estado: '${b['estado'] ?? 'rechazada'}',
-                              error: '${b['error'] ?? ''}',
-                              codigoError: '${b['codigo_error'] ?? ''}',
-                              hayInternet: _hayInternet);
-                          return Text(
-                              e.accion.isEmpty
-                                  ? e.motivo
-                                  : '${e.motivo} ${e.accion}',
-                              style: AppTexto.secundario,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis);
-                        }),
-                        trailing: TextButton(
-                          onPressed: () => _reintentarBloqueada(
-                              b['op_uuid'] as String),
-                          child: const Text('Reintentar'),
-                        ),
-                      ),
-                  ],
-                ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      color: AppColores.textoSecundario(context)),
+                ],
               ),
-              const SizedBox(height: 16),
-            ],
-            // v1.2.9+46 (Gemini): visibilidad de la cola de fotos.
-            _tarjetaFotos(context),
-            // H-12 (1.20): fotos de incidencias en error, si hay.
-            if (_fotosIncError.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _tarjetaFotosIncidencias(context),
-            ],
-            if (_compError.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _tarjetaComprobantesError(context),
-            ],
+            ),
             const SizedBox(height: 16),
+            // G08-4: la sección de la lista y el pliegue de
+            // auxiliares son UN solo hijo del ListView (una
+            // Column): el ListView perezoso construye el
+            // hijo entero al entrar en su margen, así el
+            // control de pliegue existe desde el primer
+            // frame aunque la lista venga vacía.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
             const Text(
               'Operaciones recientes',
               style: AppTexto.titulo,
@@ -3467,6 +3371,239 @@ class _ColaScreenState extends State<ColaScreen> {
                   ),
                 );
               }),
+            const SizedBox(height: 16),
+            // SL-8 (G08-4, VIS aprobada por Jc): la LISTA de
+            // la cola manda — estadísticas, resumen en
+            // sencillo, bajada, banda de error, bloqueadas y
+            // tarjetas de fotos/comprobantes van PLEGADOS
+            // tras este único control, que resume su estado
+            // (regla anti-regueros). Nacen plegados; ninguna
+            // función se pierde: todo sigue a un toque, y la
+            // puerta al Centro y el botón de sincronizar
+            // quedan fuera, accesibles.
+            Tarjeta(
+              padding: EdgeInsets.zero,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  InkWell(
+                    onTap: () =>
+                        setState(() => _auxAbierto = !_auxAbierto),
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppEspacio.lg),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                const Text('Resumen y detalle',
+                                    style: AppTexto.subtitulo),
+                                Text(
+                                  _resumenAuxiliares(
+                                      tituloHeroe: titulo,
+                                      totalPendiente: totalPendiente,
+                                      totalError: totalError),
+                                  style: AppTexto.minuscula.copyWith(
+                                      color: AppColores
+                                          .textoSecundario(context)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                              _auxAbierto
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              color: AppColores.textoSecundario(
+                                  context)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  ClipRect(
+                    child: Align(
+                      key: const ValueKey('sl8-auxiliares'),
+                      alignment: Alignment.topCenter,
+                      heightFactor: _auxAbierto ? 1.0 : 0.0,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppEspacio.lg,
+                            0,
+                            AppEspacio.lg,
+                            AppEspacio.lg),
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.stretch,
+                          children: [
+            // Tarjetas de estadísticas
+            Row(
+              children: [
+                Expanded(
+                  child: _tarjetaStat(
+                    Icons.download_rounded,
+                    'Bajados',
+                    '${_det.bajados}',
+                    // v1.3.1 (E5): acumulado histórico + última sync.
+                    'Total: ${_det.totalBajados} · ${_hora(_det.ultimaPull)}',
+                    AppColores.info,
+                    onTap: _abrirDetalleBajados,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _tarjetaStat(
+                    Icons.upload_rounded,
+                    'Subidos',
+                    '${_det.subidos}',
+                    // v1.3.1 (E5): acumulado histórico + última sync.
+                    'Total: ${_det.totalSubidos} · ${_hora(_det.ultimaPush)}',
+                    AppColores.naranja,
+                    onTap: _abrirDetalleSubidos,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // v1.12.0 (E1): la cola en sencillo — cuántas, de qué
+            // y desde cuándo (totales reales, no solo la lista
+            // visible que tiene límite). Sin operaciones, lo dice.
+            _tarjetaColaEnSencillo(),
+            // Yunque B (YB-SYNC-01/02): la bajada atascada o
+            // atrasada, con el nombre de SU tabla.
+            if (_atasco.nombre != null || _tablaAtrasada != null) ...[
+              const SizedBox(height: 16),
+              _tarjetaBajada(),
+            ],
+            const SizedBox(height: 16),
+            if (_det.error != null && _det.error!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(AppEspacio.md),
+                decoration: BoxDecoration(
+                  color: AppColores.error
+                      .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppRadio.md),
+                  border: Border.all(
+                      color: AppColores.error
+                          .withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        size: 20,
+                        color: AppColores.error),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        // 1.33: la banda pinta el MISMO
+                        // texto compuesto que el subtítulo
+                        // del héroe (_textoErrorVisible),
+                        // no el error crudo de detalle().
+                        _textoErrorVisible ?? _det.error!,
+                        style: AppTexto.secundario.copyWith(color: AppColores.error),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            // v1.2.5 (D15): bloqueadas que necesitan revisión manual.
+            if (_bloqueadas.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(AppEspacio.lg),
+                decoration: BoxDecoration(
+                  color: AppColores.error.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(AppRadio.lg),
+                  border: Border.all(
+                      color: AppColores.error.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded,
+                            color: AppColores.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${_bloqueadas.length} necesitan revisión',
+                            style: AppTexto.titulo.copyWith(
+                                color: AppColores.error),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Estas operaciones no se pudieron enviar. '
+                      'No se reintentarán solas.',
+                      style: AppTexto.secundario,
+                    ),
+                    const SizedBox(height: 8),
+                    for (final b in _bloqueadas)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.block_rounded, size: 20),
+                        title: Text(
+                            '${b['tipo'] ?? ''}',
+                            style: AppTexto.cuerpo),
+                        // 1.28 (M1-C5): antes el subtítulo era el
+                        // código y el error CRUDOS; ahora motivo y
+                        // acción en lenguaje llano (explicacionOp),
+                        // para distinguir de un vistazo «cliente
+                        // borrado» de «sin conexión».
+                        subtitle: Builder(builder: (context) {
+                          final e = explicacionOp(
+                              estado: '${b['estado'] ?? 'rechazada'}',
+                              error: '${b['error'] ?? ''}',
+                              codigoError: '${b['codigo_error'] ?? ''}',
+                              hayInternet: _hayInternet);
+                          return Text(
+                              e.accion.isEmpty
+                                  ? e.motivo
+                                  : '${e.motivo} ${e.accion}',
+                              style: AppTexto.secundario,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis);
+                        }),
+                        trailing: TextButton(
+                          onPressed: () => _reintentarBloqueada(
+                              b['op_uuid'] as String),
+                          child: const Text('Reintentar'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            // v1.2.9+46 (Gemini): visibilidad de la cola de fotos.
+            _tarjetaFotos(context),
+            // H-12 (1.20): fotos de incidencias en error, si hay.
+            if (_fotosIncError.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _tarjetaFotosIncidencias(context),
+            ],
+            if (_compError.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _tarjetaComprobantesError(context),
+            ],
+            const SizedBox(height: 16),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+              ],
+            ),
           ],
         ),
       ),
