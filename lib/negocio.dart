@@ -2329,7 +2329,10 @@ Future<List<FilaCobro>> filasPendientesCupFifo(int telegramId) async {
             id: id,
             monto: ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
                 ((v['cantidad'] as num?)?.toDouble() ?? 0),
-            fecha: fechaDe(v)));
+            fecha: fechaDe(v),
+            // G#4 (Hy4): la pareja del reverso, para que
+            // el compositor netee venta+reverso juntas.
+            reversoDe: (v['reverso_de'] as num?)?.toInt()));
       }
     }
   }
