@@ -63,6 +63,12 @@ class TipoIncidencia {
         return Icons.electrical_services_rounded;
       case 'water_drop':
         return Icons.water_drop_rounded;
+      // SL-10 BG-09: los dos casos que el selector del
+      // CRUD ya pintaba y el modelo degradaba a etiqueta.
+      case 'warning':
+        return Icons.warning_amber_rounded;
+      case 'info':
+        return Icons.info_rounded;
       default:
         return Icons.label_rounded;
     }
@@ -248,6 +254,77 @@ class Incidencia {
   }
 }
 
+/// SL-10 G13-3: humanizadores ÚNICOS de estado y
+/// prioridad — los mismos textos que pinta la tarjeta
+/// de la lista; el detalle los consume en vez de las
+/// claves crudas.
+String etiquetaEstadoIncidencia(String estado) {
+  switch (estado) {
+    case 'pendiente':
+      return 'Pendiente';
+    case 'en_proceso':
+      return 'En proceso';
+    case 'bloqueada':
+      return 'Bloqueada';
+    case 'resuelta':
+      return 'Resuelta';
+    default:
+      return estado;
+  }
+}
+
+/// Como la etiqueta de prioridad de la tarjeta: mapa
+/// conocido y capitalización segura (Fix #24).
+String etiquetaPrioridadIncidencia(String p) {
+  const mapa = {
+    'alta': 'Alta',
+    'media': 'Media',
+    'baja': 'Baja',
+  };
+  final v = mapa[p.toLowerCase()];
+  if (v != null) return v;
+  if (p.isEmpty) return 'Sin prioridad';
+  return p[0].toUpperCase() + p.substring(1);
+}
+
+/// SL-10 G13-3: el nombre humano del campo del
+/// historial; un campo nuevo se capitaliza, no se
+/// pinta la clave cruda tal cual.
+String etiquetaCampoIncidencia(String campo) {
+  const mapa = {
+    'estado': 'Estado',
+    'prioridad': 'Prioridad',
+    'descripcion': 'Descripción',
+    'detalle': 'Detalle',
+    'asignado_a': 'Responsable',
+    'fecha_limite': 'Límite',
+    'ubicacion': 'Ubicación',
+    'tipo_id': 'Tipo',
+    'nota_resolucion': 'Nota de resolución',
+  };
+  final v = mapa[campo];
+  if (v != null) return v;
+  if (campo.isEmpty) return 'Cambio';
+  final limpio = campo.replaceAll('_', ' ');
+  return limpio[0].toUpperCase() + limpio.substring(1);
+}
+
+/// SL-10 G13-3: el valor de un cambio del historial,
+/// humanizado cuando el campo tiene vocabulario
+/// (estado/prioridad); el resto va tal cual.
+String valorHistorialIncidencia(String campo, String? valor) {
+  final v = (valor ?? '').trim();
+  if (v.isEmpty) return '-';
+  switch (campo) {
+    case 'estado':
+      return etiquetaEstadoIncidencia(v);
+    case 'prioridad':
+      return etiquetaPrioridadIncidencia(v);
+    default:
+      return v;
+  }
+}
+
 /// Foto de incidencia (offline-first).
 class IncidenciaFoto {
   final String id;
@@ -256,7 +333,10 @@ class IncidenciaFoto {
   final String? storagePath;
   final String tipo; // evidencia | resolucion
   final String syncEstado; // pending | uploading | synced | error
-  final DateTime creadoEn;
+  // SL-10 BG-10b: nullable como el `creadaEn` del padre
+  // (Fix #24): una fecha ausente/ilegible NO se inventa
+  // como «hoy».
+  final DateTime? creadoEn;
 
   const IncidenciaFoto({
     required this.id,
@@ -277,9 +357,7 @@ class IncidenciaFoto {
       storagePath: m['storage_path'] as String?,
       tipo: '${m['tipo'] ?? 'evidencia'}',
       syncEstado: '${m['sync_estado'] ?? 'pending'}',
-      creadoEn: DateTime.tryParse(
-              '${m['creado_en']}') ??
-          ahoraHabana(),
+      creadoEn: DateTime.tryParse('${m['creado_en'] ?? ''}'),
     );
   }
 
@@ -291,7 +369,7 @@ class IncidenciaFoto {
       'storage_path': storagePath,
       'tipo': tipo,
       'sync_estado': syncEstado,
-      'creado_en': creadoEn.toIso8601String(),
+      'creado_en': creadoEn?.toIso8601String(),
     };
   }
 }
@@ -302,7 +380,9 @@ class IncidenciaComentario {
   final String incidenciaId;
   final String texto;
   final String creadoPor;
-  final DateTime creadoEn;
+  // SL-10 BG-10b: nullable (Fix #24 del padre): sin
+  // fecha válida no se inventa «hoy».
+  final DateTime? creadoEn;
   final String syncEstado;
 
   const IncidenciaComentario({
@@ -321,9 +401,7 @@ class IncidenciaComentario {
       incidenciaId: '${m['incidencia_id']}',
       texto: '${m['texto'] ?? ''}',
       creadoPor: '${m['creado_por'] ?? ''}',
-      creadoEn: DateTime.tryParse(
-              '${m['creado_en']}') ??
-          ahoraHabana(),
+      creadoEn: DateTime.tryParse('${m['creado_en'] ?? ''}'),
       syncEstado: '${m['sync_estado'] ?? 'pending'}',
     );
   }
@@ -334,7 +412,7 @@ class IncidenciaComentario {
       'incidencia_id': incidenciaId,
       'texto': texto,
       'creado_por': creadoPor,
-      'creado_en': creadoEn.toIso8601String(),
+      'creado_en': creadoEn?.toIso8601String(),
       'sync_estado': syncEstado,
     };
   }
@@ -348,7 +426,8 @@ class IncidenciaHistorial {
   final String? valorAnterior;
   final String? valorNuevo;
   final String cambiadoPor;
-  final DateTime cambiadoEn;
+  // SL-10 BG-10b: nullable (Fix #24 del padre).
+  final DateTime? cambiadoEn;
 
   const IncidenciaHistorial({
     required this.id,
@@ -370,9 +449,7 @@ class IncidenciaHistorial {
           m['valor_anterior'] as String?,
       valorNuevo: m['valor_nuevo'] as String?,
       cambiadoPor: '${m['cambiado_por']}',
-      cambiadoEn: DateTime.tryParse(
-              '${m['cambiado_en']}') ??
-          ahoraHabana(),
+      cambiadoEn: DateTime.tryParse('${m['cambiado_en'] ?? ''}'),
     );
   }
 }
