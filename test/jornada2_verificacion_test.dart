@@ -101,7 +101,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Editar'));
       await tester.pumpAndSettle();
-      await jornadaEsperar(tester, find.text('Sexo: '));
+      // Jornada 1.35: CAMPO-2 (d13c8fc) rehecho el diálogo
+      // con los campos de la casa y la etiqueta pasó de
+      // «Sexo: » a «Sexo:» — el buscador se actualiza a la
+      // etiqueta vigente; lo protegido (diálogo sin
+      // desborde a 360 dp + 1.3 y chips alcanzables) no
+      // cambia.
+      await jornadaEsperar(tester, find.text('Sexo:'));
       expect(find.text('Masculino'), findsOneWidget);
       expect(find.text('Femenino'), findsOneWidget);
       expect(tester.takeException(), isNull,
@@ -122,7 +128,7 @@ void main() {
               '360 dp + 1.3 (alcanzable, no recortado)');
       await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
-      expect(find.text('Sexo: '), findsNothing,
+      expect(find.text('Sexo:'), findsNothing,
           reason: 'Cancelar cerró el diálogo');
       expect(tester.takeException(), isNull);
       await jornadaCerrarCascara(tester);
