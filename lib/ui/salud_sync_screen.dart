@@ -20,7 +20,6 @@ import '../auth.dart';
 import '../errores_sync.dart';
 import '../salud_sync.dart';
 import '../sync.dart';
-import '../tiempo.dart';
 import '../ultimo_sync.dart';
 import 'admin_secciones.dart';
 import 'app_bar.dart';
@@ -80,6 +79,53 @@ import 'reparar_sync_screen.dart';
   }
 }
 
+/// Yunque Exhaustivo 1.35 (S-02): el veredicto de
+/// «Comprobar ahora», PURO. La re-descarga de las tablas
+/// desfasadas SOLO se afirma si la corrida que debía
+/// hacerla corrió de verdad y no terminó en error (la
+/// misma exigencia que el Centro aplica con `res.corrio`):
+/// si no corrió, fue cortada o falló, el mensaje dice la
+/// verdad — hay tablas desfasadas y la re-descarga NO se
+/// completó — y el chip no es de éxito.
+({String texto, SignificadoChip significado}) mensajeComprobacionSalud({
+  required int divergentes,
+  SyncResultado? redescarga,
+}) {
+  if (divergentes < 0) {
+    return (
+      texto: 'La comprobación no pudo completarse '
+          '(¿sin conexión?)',
+      significado: SignificadoChip.error,
+    );
+  }
+  if (divergentes == 0) {
+    return (
+      texto: 'Comprobación completa: todo coincide',
+      significado: SignificadoChip.exito,
+    );
+  }
+  final sustantivo = divergentes == 1
+      ? 'tabla desfasada'
+      : 'tablas desfasadas';
+  final errorRedescarga = redescarga?.error;
+  final redescargo = redescarga != null &&
+      redescarga.corrio &&
+      !redescarga.cortadoPorLock &&
+      (errorRedescarga == null || errorRedescarga.isEmpty);
+  if (redescargo) {
+    return (
+      texto: 'Se re-descargaron $divergentes $sustantivo',
+      significado: SignificadoChip.exito,
+    );
+  }
+  return (
+    texto: 'Hay $divergentes $sustantivo, pero la '
+        're-descarga no se completó: la sincronización '
+        'lo reintentará sola',
+    significado: SignificadoChip.alerta,
+  );
+}
+
 class SaludSyncScreen extends StatefulWidget {
   const SaludSyncScreen({super.key});
 
@@ -107,12 +153,10 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
     });
   }
 
-  String _fmtFechaHora(DateTime? dt) {
-    if (dt == null) return 'nunca';
-    final h = aHabana(dt);
-    String d2(int n) => n.toString().padLeft(2, '0');
-    return '${fmtFechaHabana(dt)} ${d2(h.hour)}:${d2(h.minute)}';
-  }
+  // S-03: delega en la pura de salud_sync — con la
+  // lectura fallida dice «sin verificar», no «nunca».
+  String _fmtFechaHora(DateTime? dt, {bool sinLeer = false}) =>
+      textoFechaSaludSync(dt, sinLeer: sinLeer);
 
   Future<void> _comprobarAhora() async {
     setState(() => _comprobando = true);
@@ -122,23 +166,24 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
     } catch (_) {}
     // Si hay tablas desfasadas, la sincronización consume
     // las banderas y las re-descarga ahora mismo.
+    // S-02: el resultado de esa corrida se CAPTURA — sin
+    // él no se puede afirmar que la re-descarga ocurrió.
+    SyncResultado? redescarga;
     if (divergentes > 0) {
       try {
-        await SyncEngine.instance.run(forzar: true);
-      } catch (_) {}
+        redescarga = await SyncEngine.instance.run(forzar: true);
+      } catch (_) {
+        redescarga = null;
+      }
     }
     if (!mounted) return;
     setState(() => _comprobando = false);
+    final veredicto = mensajeComprobacionSalud(
+        divergentes: divergentes, redescarga: redescarga);
     mostrarSnack(
       context,
-      divergentes < 0
-          ? 'La comprobación no pudo completarse (¿sin conexión?)'
-          : divergentes == 0
-              ? 'Comprobación completa: todo coincide'
-              : 'Se re-descargaron $divergentes '
-                  '${divergentes == 1 ? 'tabla desfasada' : 'tablas desfasadas'}',
-      significado:
-          divergentes < 0 ? SignificadoChip.error : SignificadoChip.exito,
+      veredicto.texto,
+      significado: veredicto.significado,
     );
     await _cargar();
   }
@@ -219,23 +264,30 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                   seccionAdmin(
                       context, Icons.fact_check_rounded, 'Autocura', [
                     filaAdmin(context, null, 'Última comprobación',
-                        _fmtFechaHora(d.chequeoEn)),
+                        _fmtFechaHora(d.chequeoEn,
+                            sinLeer: d.manifiestoSinLeer)),
                     filaAdmin(context, null, 'Última completa',
-                        _fmtFechaHora(d.completaEn)),
+                        _fmtFechaHora(d.completaEn,
+                            sinLeer: d.manifiestoSinLeer)),
                     filaAdmin(context, null, 'Tablas divergentes',
                         '${d.divergentes}', negrita: d.divergentes > 0),
                     filaAdmin(context, null, 'Sin verificar',
-                        '${d.sinVerificar.length}',
-                        negrita: d.sinVerificar.isNotEmpty),
+                        d.manifiestoSinLeer
+                            ? 'sin verificar'
+                            : '${d.sinVerificar.length}',
+                        negrita: d.manifiestoSinLeer ||
+                            d.sinVerificar.isNotEmpty),
                     // Yunque 3 (K1-4): el modo de diario
                     // efectivo de la BD (meta que LocalDb deja
                     // en cada apertura) por fin tiene lector:
                     // se pinta como dato de la foto y, si no es
                     // 'wal', como aviso con su consecuencia.
                     filaAdmin(context, null, 'Modo de diario (BD)',
-                        d.modoDiarioEfectivo.isEmpty
-                            ? '—'
-                            : d.modoDiarioEfectivo,
+                        d.modoDiarioSinLeer
+                            ? 'sin verificar'
+                            : d.modoDiarioEfectivo.isEmpty
+                                ? '—'
+                                : d.modoDiarioEfectivo,
                         negrita:
                             modoDiarioAnomalo(d.modoDiarioEfectivo)),
                     if (avisoModoDiario(d.modoDiarioEfectivo)
@@ -282,8 +334,16 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                   seccionAdmin(
                       context, Icons.backup_rounded, 'Copia automática', [
                     filaAdmin(context, null, 'Última copia',
-                        _fmtFechaHora(d.copiaUltima)),
-                    if (d.copiaError.isNotEmpty)
+                        _fmtFechaHora(d.copiaUltima,
+                            sinLeer: d.copiaSinLeer)),
+                    if (d.copiaSinLeer)
+                      Text(
+                        'Sin verificar: no se pudo leer el '
+                        'estado de la copia automática.',
+                        style: AppTexto.secundario
+                            .copyWith(color: AppColores.alerta),
+                      )
+                    else if (d.copiaError.isNotEmpty)
                       Text(
                         // Fase 1 (SYNC-10): el error guardado
                         // de la copia es la excepción cruda;
@@ -302,9 +362,18 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                         style: AppTexto.secundario,
                       ),
                   ]),
-                  if (d.telefonos.isNotEmpty)
+                  // S-03: con la lectura fallida la sección
+                  // no desaparece: pinta «Sin verificar».
+                  if (mostrarSeccionTelefonosSalud(
+                      cantidadTelefonos: d.telefonos.length,
+                      telefonosSinLeer: d.telefonosSinLeer))
                     seccionAdmin(context, Icons.phone_android_rounded,
                         'Teléfonos', [
+                      if (d.telefonosSinLeer)
+                        filaAdmin(context, null,
+                            'Estado de los teléfonos',
+                            'Sin verificar',
+                            negrita: true),
                       for (final t in d.telefonos)
                         filaAdmin(
                           context,

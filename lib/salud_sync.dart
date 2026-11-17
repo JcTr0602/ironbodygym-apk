@@ -15,6 +15,7 @@ import 'copia_automatica.dart';
 import 'errores_sync.dart';
 import 'localdb.dart';
 import 'sync.dart';
+import 'tiempo.dart';
 import 'ultimo_sync.dart';
 
 /// Semáforo de una tabla espejo.
@@ -207,6 +208,18 @@ class SaludSyncDatos {
   /// ver el modo sin extraer la BD y consultar meta a mano.
   final String modoDiarioEfectivo;
 
+  /// Yunque Exhaustivo 1.35 (S-03): «leído y ausente» no
+  /// es «no se pudo leer». Cada bloque de metas se lee en
+  /// su propio try y su fallo queda marcado aquí (campos
+  /// aditivos, false = la lectura fue bien): la pantalla
+  /// pinta «sin verificar» en vez del «nunca»/texto
+  /// tranquilo que componían los defaults, y la sección
+  /// Teléfonos no desaparece por un fallo de lectura.
+  final bool manifiestoSinLeer;
+  final bool copiaSinLeer;
+  final bool telefonosSinLeer;
+  final bool modoDiarioSinLeer;
+
   const SaludSyncDatos({
     required this.tablas,
     required this.chequeoEn,
@@ -219,8 +232,34 @@ class SaludSyncDatos {
     this.pendientes,
     this.fallidas,
     this.modoDiarioEfectivo = '',
+    this.manifiestoSinLeer = false,
+    this.copiaSinLeer = false,
+    this.telefonosSinLeer = false,
+    this.modoDiarioSinLeer = false,
   });
 }
+
+/// Yunque Exhaustivo 1.35 (S-03, pura): el texto de una
+/// fecha de Salud. Sin leer se dice «sin verificar»;
+/// leída y ausente se dice «nunca»; leída y presente se
+/// formatea en hora de La Habana.
+String textoFechaSaludSync(DateTime? dt, {bool sinLeer = false}) {
+  if (sinLeer) return 'sin verificar';
+  if (dt == null) return 'nunca';
+  final h = aHabana(dt);
+  String d2(int n) => n.toString().padLeft(2, '0');
+  return '${fmtFechaHabana(dt)} ${d2(h.hour)}:${d2(h.minute)}';
+}
+
+/// Yunque Exhaustivo 1.35 (S-03, pura): la sección
+/// Teléfonos se muestra si hay teléfonos O si su lectura
+/// falló (entonces pinta su estado como no verificado,
+/// en vez de desaparecer como si no existiera).
+bool mostrarSeccionTelefonosSalud({
+  required int cantidadTelefonos,
+  required bool telefonosSinLeer,
+}) =>
+    cantidadTelefonos > 0 || telefonosSinLeer;
 
 /// Yunque 3 (K1-4, pura): ¿el modo de diario efectivo es
 /// anómalo? El esperado es 'wal'; sin constancia ('') o sin
@@ -517,24 +556,53 @@ Future<SaludSyncDatos> cargarSaludSync() async {
   var copiaError = '';
   var modoDiarioEfectivo = '';
   var sinVerificarLista = <String>[];
+  // S-03: cada meta en su PROPIO try — antes un solo bloque
+  // leía las 6 y un fallo en la primera dejaba los defaults
+  // de todas («nunca», texto tranquilo de la copia), como
+  // si se hubieran leído y estuvieran ausentes.
+  var manifiestoSinLeer = false;
+  var copiaSinLeer = false;
+  var modoDiarioSinLeer = false;
   try {
     // Yunque 3 (K1-4): la constancia del modo de diario que
     // LocalDb deja en meta en cada apertura entra en la foto.
     modoDiarioEfectivo =
         await db.getMeta('journal_mode_efectivo') ?? '';
+  } catch (_) {
+    modoDiarioSinLeer = true;
+  }
+  try {
     final c = await db.getMeta('manifiesto_chequeo_en');
     if (c != null) chequeoEn = DateTime.tryParse(c);
+  } catch (_) {
+    manifiestoSinLeer = true;
+  }
+  try {
     final f = await db.getMeta('manifiesto_completa_en');
     if (f != null) completaEn = DateTime.tryParse(f);
-    final u = await db.getMeta(metaCopiaAutoUltima);
-    if (u != null) copiaUltima = DateTime.tryParse(u);
-    copiaError = await db.getMeta(metaCopiaAutoError) ?? '';
+  } catch (_) {
+    manifiestoSinLeer = true;
+  }
+  try {
     final sv = await db.getMeta('manifiesto_sin_verificar');
     if (sv != null && sv.isNotEmpty) {
       sinVerificarLista =
           sv.split(',').where((x) => x.isNotEmpty).toList();
     }
-  } catch (_) {}
+  } catch (_) {
+    manifiestoSinLeer = true;
+  }
+  try {
+    final u = await db.getMeta(metaCopiaAutoUltima);
+    if (u != null) copiaUltima = DateTime.tryParse(u);
+  } catch (_) {
+    copiaSinLeer = true;
+  }
+  try {
+    copiaError = await db.getMeta(metaCopiaAutoError) ?? '';
+  } catch (_) {
+    copiaSinLeer = true;
+  }
 
   var telefonos = const <
       ({
@@ -543,9 +611,14 @@ Future<SaludSyncDatos> cargarSaludSync() async {
         bool enTurno,
         EstadoSyncTelefono estado,
       })>[];
+  var telefonosSinLeer = false;
   try {
     telefonos = await evaluarTelefonosSync();
-  } catch (_) {}
+  } catch (_) {
+    // S-03: la lista vacía por FALLO no es la lista vacía
+    // leída: se marca para que la sección no desaparezca.
+    telefonosSinLeer = true;
+  }
 
   // D-16: la foto de la cola local para el aviso general.
   // SYNC-12 (1.35): un conteo que falla queda null (no 0):
@@ -570,5 +643,9 @@ Future<SaludSyncDatos> cargarSaludSync() async {
     pendientes: pendientes,
     fallidas: fallidas,
     modoDiarioEfectivo: modoDiarioEfectivo,
+    manifiestoSinLeer: manifiestoSinLeer,
+    copiaSinLeer: copiaSinLeer,
+    telefonosSinLeer: telefonosSinLeer,
+    modoDiarioSinLeer: modoDiarioSinLeer,
   );
 }

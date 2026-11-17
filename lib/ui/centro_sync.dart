@@ -621,6 +621,16 @@ String resumenMostradorSync({
   required bool? enLinea,
   required bool hayError,
   required bool? hayNovedades,
+  // Yunque Exhaustivo 1.35 (S-01): el error de corrida
+  // PERSISTIDO (avisoSyncCorto de la foto, p. ej. tras un
+  // reinicio con sesion_invalida) también es un fallo
+  // conocido, aunque la fase ya sea idle y lastError de
+  // memoria sea null. Su rama va tras hayNovedades==true
+  // y antes de hayNovedades==null — el mismo orden que
+  // varianteBannerDe: el error conocido manda sobre el
+  // «sin verificar», pero no sobre pendientes, novedades
+  // ni la falta de conexión, que van antes.
+  bool avisoPersistido = false,
 }) {
   if (corriendo) return 'Sincronizando ahora…';
   if (pendientes > 0) {
@@ -637,6 +647,10 @@ String resumenMostradorSync({
   }
   if (hayNovedades == true) {
     return 'Hay novedades por bajar del servidor';
+  }
+  if (avisoPersistido) {
+    return 'La última sincronización falló: toca '
+        '«Sincronizar ahora»';
   }
   if (hayNovedades == null) {
     return 'Sin verificar: aún no se ha podido comprobar';
@@ -892,10 +906,25 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
     final corriendo = faseSyncEnCurso(st.phase);
     final enError =
         st.lastError != null || st.phase == SyncPhase.error;
+    // Yunque Exhaustivo 1.35 (S-01): el error PERSISTIDO
+    // (avisoSyncCorto) se pinta como error SOLO cuando su
+    // rama es la que manda en el veredicto (no corriendo,
+    // sin pendientes, con línea no descartada y sin
+    // novedades por bajar que vayan antes); en otro caso
+    // mandan el icono/color de la rama ganadora.
+    final avisoPersistidoManda = st.avisoSyncCorto != null &&
+        !corriendo &&
+        st.pending == 0 &&
+        st.enLinea != false &&
+        st.hayNovedades != true;
+    final enErrorVisible = enError || avisoPersistidoManda;
     // E3 (C2-02): el veredicto «Sin verificar» se pinta en
     // neutro, nunca con el check verde de «al día».
+    // S-01: con aviso persistido mandando, el veredicto es
+    // el de error, no el de «sin verificar».
     final sinVerificar = !corriendo &&
         !enError &&
+        !avisoPersistidoManda &&
         st.pending == 0 &&
         st.enLinea != false &&
         st.hayNovedades == null;
@@ -908,6 +937,7 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
       enLinea: st.enLinea,
       hayError: enError,
       hayNovedades: st.hayNovedades,
+      avisoPersistido: st.avisoSyncCorto != null,
     );
     return Tarjeta(
       child: Column(
@@ -918,14 +948,14 @@ class _TarjetaEnVivoSyncState extends State<_TarjetaEnVivoSync> {
               Icon(
                 corriendo
                     ? Icons.sync_rounded
-                    : enError
+                    : enErrorVisible
                         ? Icons.error_outline_rounded
                         : sinVerificar
                             ? Icons.help_outline_rounded
                             : Icons.check_circle_rounded,
                 color: corriendo
                     ? AppColores.info
-                    : enError
+                    : enErrorVisible
                         ? AppColores.error
                         : sinVerificar
                             ? AppColores.alertaOscuro
