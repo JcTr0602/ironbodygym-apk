@@ -60,6 +60,7 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
   // reintento.
   String? _error;
   bool _falloDiagnostico = false;
+  bool _diagnosticando = false;
 
   @override
   void initState() {
@@ -68,6 +69,17 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
   }
 
   Future<void> _diagnosticar() async {
+    // F02-z01_sync_1-3 (r2): sin guarda ni setState previo,
+    // el reintento desde el error no mostraba «reintentando»
+    // y un doble toque lanzaba diagnósticos solapados.
+    if (_diagnosticando) return;
+    _diagnosticando = true;
+    if (mounted && !_cargando) {
+      setState(() {
+        _cargando = true;
+        _fase = _FaseReparar.diagnostico;
+      });
+    }
     try {
       final foto = await (widget.diagnosticoParaTest?.call() ??
           capturarAtascos());
@@ -88,6 +100,8 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
         _error = mensajeErrorAmable(e);
         _falloDiagnostico = true;
       });
+    } finally {
+      _diagnosticando = false;
     }
   }
 

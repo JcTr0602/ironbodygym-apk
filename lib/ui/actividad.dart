@@ -2006,6 +2006,30 @@ class _ActividadScreenState extends State<ActividadScreen> {
                 textAlign: TextAlign.center,
               ),
             ),
+          // F02-z02_sync_2-3: con ítems en caché, un fallo de
+          // recarga NO puede presentarse como contenido
+          // corriente: aviso no bloqueante sobre la lista
+          // (que sigue visible, en estado 'contenido') con
+          // su Reintentar.
+          if (_errorCarga != null && _items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: AvisoEstado(
+                tipo: TipoAviso.error,
+                texto: 'No se pudo actualizar la actividad',
+                detalle: _errorCarga,
+                acciones: [
+                  TextButton.icon(
+                    onPressed: _cargar,
+                    style: TextButton.styleFrom(
+                        foregroundColor: Colors.white),
+                    icon: const Icon(Icons.refresh_rounded,
+                        color: Colors.white, size: 18),
+                    label: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             // 1.22 Diseño Bloque 1 (T7+T4): cruce entre
             // estados con key por TIPO de estado y esqueletos

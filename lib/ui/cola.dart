@@ -833,8 +833,6 @@ class _ColaScreenState extends State<ColaScreen> {
       tituloHeroe,
       '↓ ${_det.bajados} · ↑ ${_det.subidos}',
       if (totalPendiente > 0) '$totalPendiente por subir',
-      if (_bloqueadas.isNotEmpty)
-        '${_bloqueadas.length} necesitan revisión',
     ].join(' · ');
   }
 

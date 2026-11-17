@@ -10972,6 +10972,7 @@ class SyncEngine {
             AppLog.error('sync', 'pull_hijo_sin_fecha',
                 d: 'tabla=incidencias_comentarios '
                     'id=${m['id']} creado_en=${m['creado_en']}');
+            ret.anotarRetencion('${m['id']}', seq, 'sin_fecha');
             if (!huboHuerfanoCorrida && seq > maxSeq) maxSeq = seq;
             continue;
           }
@@ -11131,6 +11132,7 @@ class SyncEngine {
             AppLog.error('sync', 'pull_hijo_sin_fecha',
                 d: 'tabla=incidencias_fotos '
                     'id=${m['id']} creado_en=${m['creado_en']}');
+            ret.anotarRetencion('${m['id']}', seq, 'sin_fecha');
             if (!huboHuerfanoCorrida && seq > maxSeq) maxSeq = seq;
             continue;
           }
