@@ -223,6 +223,52 @@ List<Map<String, dynamic>> blobTiposConPrecioMenores(
   return lista;
 }
 
+/// (Corrección PROPIA-F5-01) Correspondencia tipo del blob →
+/// clave plana de precio: la inversa de `kTipoBlobPorClavePrecio`
+/// (bloque2_resto.dart) y el espejo del `_CLAVE_A_TIPO` del
+/// servidor (ironbody/db/core.py), cuyo `set_tipos_pago` hace
+/// write-through del blob a estas claves al aplicar la op
+/// `guardar_tipos_pago`. Las demás claves de precio
+/// (transferencia, pago_diario) no tienen tipo en el blob: su
+/// única fuente es la clave plana y no se tocan aquí.
+const kClavePlanaPorTipoPrecio = <String, String>{
+  'mensual': 'mensualidad',
+  'menores': 'mensualidad_menores',
+  'semanal': 'pago_semanal',
+  'quincenal': 'pago_quincenal',
+};
+
+/// (Corrección PROPIA-F5-01) PURO: los ajustes tras guardar
+/// [tipos] como blob `tipos_pago`: el blob queda fijado Y las
+/// claves planas de los tipos fijos presentes en la lista se
+/// mueven CON él, en el mismo acto — el write-through local
+/// que el servidor sí hace y el editor de tipos de Admin no
+/// hacía. Sin él conviven dos lectores del mismo precio en el
+/// mismo teléfono: el diálogo de cobro lee el blob (precio
+/// nuevo) y `preciosVigentes()` —renovación rápida de ficha,
+/// cuentas por cobrar, atrasados— lee las claves planas
+/// (precio viejo), mientras el servidor ya asienta con el
+/// nuevo al aplicar la op (que viaja primero en la cola
+/// FIFO): recibo con un precio y asiento con otro.
+/// - Tipo sin correspondencia (personalizados): no toca
+///   ninguna clave; tipo fijo AUSENTE de la lista: su clave
+///   queda como está — igual que `set_tipos_pago`, que solo
+///   escribe las claves de los tipos que la lista trae.
+/// - Es el reverso de [blobTiposTrasCambiosPrecios]: aquella
+///   mueve el blob cuando cambia la clave; esta mueve las
+///   claves cuando cambia el blob.
+Map<String, dynamic> ajustesTrasGuardarTipos(
+    Map<String, dynamic> aj, List<Map<String, dynamic>> tipos) {
+  final nuevos = {...aj, 'tipos_pago': tipos};
+  for (final t in tipos) {
+    final clave = kClavePlanaPorTipoPrecio['${t['id']}'];
+    if (clave == null) continue;
+    final monto = montoAjusteTolerante(t['monto']);
+    if (monto != null) nuevos[clave] = monto;
+  }
+  return nuevos;
+}
+
 /// Lee los tipos de pago de los ajustes sincronizados.
 /// Con `soloActivos=true` filtra los desactivados.
 /// Con `paraMenor=true`: el tipo 'mensual' se reemplaza por 'menores'
