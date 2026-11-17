@@ -40,9 +40,13 @@ class SemaforoVistaPrevia {
 SemaforoVistaPrevia semaforoVistaPrevia(
     String? pagadoHasta, String? fechaServidor,
     {bool esCasa = false}) {
-  const rojo = Color(0xFFEF5350);
-  const ambar = Color(0xFFFFB300);
-  const verde = Color(0xFF66BB6A);
+  // 1.36 (136-263): el semáforo consume los tokens de la
+  // casa — antes duplicaba los semánticos con otros
+  // valores (#EF5350/#FFB300/#66BB6A) y podía divergir
+  // del semáforo real.
+  const rojo = AppColores.error;
+  const ambar = AppColores.alerta;
+  const verde = AppColores.exito;
   // 1.28 (M4-A10/R1M4-M6): la Cuenta a la Casa NO vence —
   // la app de Clientes real la respeta y esta vista previa
   // enseñaba «MEMBRESÍA VENCIDA» o «SIN FECHA REGISTRADA»
@@ -53,7 +57,7 @@ SemaforoVistaPrevia semaforoVistaPrevia(
       titulo: 'CUENTA A LA CASA',
       subtitulo: 'Cliente de la casa: su membresía no vence.',
       badge: 'Casa',
-      color: Color(0xFFB8860B),
+      color: AppColores.casaIcono,
     );
   }
   if (pagadoHasta == null || pagadoHasta.trim().isEmpty) {

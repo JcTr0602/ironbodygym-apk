@@ -271,7 +271,7 @@ class _ConfirmacionOperacionScreenState
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(height: 24),
+                const SizedBox(height: AppEspacio.xl),
                 // Check grande animado (M9/T6): entra escalando en
                 // 350 ms; confirmación visual inmediata.
                 TweenAnimationBuilder<double>(
@@ -302,7 +302,7 @@ class _ConfirmacionOperacionScreenState
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: AppEspacio.xxl),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: AppEspacio.xxl),
                   child: Text(
@@ -312,7 +312,7 @@ class _ConfirmacionOperacionScreenState
                         color: AppColores.texto(context)),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: AppEspacio.xl),
                 // Datos de la operación, como ticket (M3): el
                 // importe arriba y la línea de corte punteada lo
                 // separa del detalle.
@@ -343,7 +343,7 @@ class _ConfirmacionOperacionScreenState
                               16, 10, 16, 0),
                           child: _filaMonto(context),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: AppEspacio.xs),
                         // 1.35 (UX-05): el corte del papel
                         // — línea punteada con las muescas
                         // laterales del ticket rasgado.
@@ -377,7 +377,7 @@ class _ConfirmacionOperacionScreenState
                         // (confirmaciones internas) el
                         // ticket no se firma.
                         if (widget.comprobantePie != null) ...[
-                          const SizedBox(height: 4),
+                          const SizedBox(height: AppEspacio.xs),
                           SizedBox(
                             height: 1.2,
                             width: double.infinity,
@@ -405,7 +405,7 @@ class _ConfirmacionOperacionScreenState
                   ),
                 ),
                 if (widget.comprobanteTexto != null) ...[
-                  const SizedBox(height: 24),
+                  const SizedBox(height: AppEspacio.xl),
                   Padding(
                     padding:
                         const EdgeInsets.symmetric(horizontal: AppEspacio.xxl),
@@ -428,7 +428,7 @@ class _ConfirmacionOperacionScreenState
                                   size: 18,
                                   color: AppColores.textoSecundario(
                                       context)),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: AppEspacio.sm),
                               Text(
                                 widget.comprobanteTitulo ??
                                     'Comprobante',
@@ -437,7 +437,7 @@ class _ConfirmacionOperacionScreenState
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: AppEspacio.sm),
                           Text(widget.comprobanteTexto!,
                               style: AppTexto.cuerpo),
                         ],
@@ -445,7 +445,7 @@ class _ConfirmacionOperacionScreenState
                     ),
                   ),
                 ],
-                const SizedBox(height: 32),
+                const SizedBox(height: AppEspacio.xxl),
                 if (widget.accionExtra != null) ...[
                   Padding(
                     padding:
@@ -459,7 +459,7 @@ class _ConfirmacionOperacionScreenState
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                 ],
                 // 1.31 (Yunque A, Pieza 3): el comprobante en
                 // imagen, junto al envío de texto (wa.me no
@@ -479,7 +479,7 @@ class _ConfirmacionOperacionScreenState
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                 ],
                 if (_puedeDeshacer) ...[
                   Padding(
@@ -522,7 +522,7 @@ class _ConfirmacionOperacionScreenState
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppEspacio.sm),
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 48),
                     child: Text(
@@ -532,7 +532,7 @@ class _ConfirmacionOperacionScreenState
                       style: AppTexto.metadato,
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                 ] else if (_yaSubio) ...[
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 48),
@@ -543,7 +543,7 @@ class _ConfirmacionOperacionScreenState
                       style: AppTexto.metadato,
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                 ],
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 48),
@@ -552,7 +552,7 @@ class _ConfirmacionOperacionScreenState
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: AppEspacio.xl),
               ],
             ),
           ),
@@ -568,7 +568,7 @@ class _ConfirmacionOperacionScreenState
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(etiqueta, style: AppTexto.secundario),
-          const SizedBox(width: 16),
+          const SizedBox(width: AppEspacio.lg),
           Flexible(
             child: Text(
               valor,
@@ -592,7 +592,7 @@ class _ConfirmacionOperacionScreenState
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(widget.etiquetaMonto, style: AppTexto.secundario),
-          const SizedBox(width: 16),
+          const SizedBox(width: AppEspacio.lg),
           Flexible(
             // 1.35 (UX-05): el monto es el protagonista
             // del recibo — sube de métrica a display.

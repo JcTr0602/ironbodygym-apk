@@ -142,7 +142,7 @@ class _AyudaScreenState extends State<AyudaScreen> {
                         style: AppTexto.etiqueta),
                     onPressed: () => _irATema(t.nombre),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppEspacio.sm),
                 ],
               ],
             ),
@@ -196,7 +196,7 @@ class _AyudaScreenState extends State<AyudaScreen> {
                     child: const Icon(Icons.new_releases_rounded,
                         color: AppColores.naranja, size: 24),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppEspacio.md),
                   Expanded(
                     child: Text('Lo Nuevo',
                         style: AppTexto.titulo.copyWith(color: Colors.white)),
@@ -234,7 +234,7 @@ class _AyudaScreenState extends State<AyudaScreen> {
                                 size: 18,
                                 color: AppColores.textoSecundario(context)),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: AppEspacio.sm),
                           Expanded(
                             child: Text(c,
                                 style: AppTexto.cuerpo.copyWith(
@@ -298,7 +298,7 @@ class _AyudaScreenState extends State<AyudaScreen> {
                                         .textoSecundario(
                                             context)),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: AppEspacio.sm),
                               Expanded(
                                 child: Text(c,
                                     style: AppTexto.secundario.copyWith(color: AppColores
@@ -307,12 +307,12 @@ class _AyudaScreenState extends State<AyudaScreen> {
                             ],
                           ),
                         ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppEspacio.sm),
                     ],
                   ],
                 ),
               ),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppEspacio.xs),
           ],
         ),
       ),

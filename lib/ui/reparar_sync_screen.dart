@@ -254,7 +254,7 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
         const SizedBox(height: AppEspacio.sm),
         OutlinedButton.icon(
           onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ColaScreen()),
+            RutaIron(builder: (_) => const ColaScreen()),
           ),
           icon: const Icon(Icons.list_alt_rounded),
           label: const Text('Ver la cola'),
@@ -410,7 +410,7 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
       if (quedanDueno.isNotEmpty)
         OutlinedButton.icon(
           onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ColaScreen()),
+            RutaIron(builder: (_) => const ColaScreen()),
           ),
           icon: const Icon(Icons.list_alt_rounded),
           label: const Text('Ver la cola'),

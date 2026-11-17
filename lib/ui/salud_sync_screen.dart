@@ -316,7 +316,7 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                         ),
                         OutlinedButton.icon(
                           onPressed: () => Navigator.of(context)
-                              .push(MaterialPageRoute(
+                              .push(RutaIron(
                                   builder: (_) =>
                                       const RepararSyncScreen()))
                               .then((_) => _cargar()),
@@ -440,7 +440,7 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
                   ]),
                   OutlinedButton.icon(
                     onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
+                      RutaIron(
                           builder: (_) =>
                               const SeccionDiagnosticoScreen()),
                     ),

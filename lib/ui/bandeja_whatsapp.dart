@@ -732,7 +732,7 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       (
         tipo: 'vencido',
         titulo: 'Vencidos',
-        icono: Icons.error_rounded
+        icono: AppIconos.error, // 1.36 (136-277): glifo canónico de error
       ),
       (
         tipo: 'vence_hoy',

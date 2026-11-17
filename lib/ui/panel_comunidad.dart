@@ -6,7 +6,7 @@ import '../auth.dart';
 import '../comunidad_panel.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
-import 'diseno.dart' show AppEspacio, AppRadio, AppTexto;
+import 'diseno.dart' show AppEspacio, AppRadio, AppTexto, RutaIron;
 import 'componentes.dart';
 import 'ficha.dart';
 
@@ -424,7 +424,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
   }
 
   Future<void> _verComoCliente(PerfilComunidadAdmin p) async {
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(RutaIron(
       builder: (_) => _VerPerfilComunidadScreen(
         perfil: p,
         cargar: widget.verPerfil ?? _verReal,
@@ -571,7 +571,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                 .copyWith(fontWeight: FontWeight.w700),
           ),
           if (nuevos > 0) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppEspacio.sm),
             Chip(
               avatar: const Icon(
                   Icons.fiber_new_rounded, size: 18),
@@ -601,7 +601,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
             ),
             onChanged: (v) => setState(() => _consulta = v),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppEspacio.xs),
         ],
       ),
     );
@@ -645,7 +645,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
       abrir(p.clienteId);
       return;
     }
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(RutaIron(
       builder: (_) => FichaScreen(clienteId: p.clienteId),
     ));
   }
@@ -776,7 +776,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                       : () => _resolver(r, 'descartar'),
                   child: const Text('Descartar'),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: AppEspacio.xs),
                 FilledButton(
                   onPressed: ocupado
                       ? null

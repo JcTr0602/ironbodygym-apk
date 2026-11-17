@@ -6,6 +6,12 @@
 /// números llegan YA calculados de la foto única de la
 /// pantalla de Nómina (misma fuente que pinta la pantalla):
 /// esta imagen no recalcula nada por su cuenta.
+/// 1.36 (136-263): EXCEPCIÓN «salida-imagen» DELIMITADA:
+/// este archivo pinta el lienzo que se COMPARTE como
+/// imagen (papel fijo, no tema de la app): sus literales
+/// son el papel de la imagen y viven SOLO dentro de la
+/// zona de pintado del lienzo. Ningún widget de pantalla
+/// puede nacer aquí ni consumir estos valores fuera.
 library;
 
 import 'package:flutter/material.dart';

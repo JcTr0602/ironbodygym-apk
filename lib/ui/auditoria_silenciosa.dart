@@ -232,16 +232,16 @@ class _AuditoriaSilenciosaScreenState
   void _abrirCaso(_Caso c) {
     if (c.clienteId != null) {
       Navigator.of(context).push(
-        MaterialPageRoute(
+        RutaIron(
             builder: (_) => FichaScreen(clienteId: c.clienteId!)),
       );
     } else if (c.tipo == 'sin_sync') {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const SaludSyncScreen()),
+        RutaIron(builder: (_) => const SaludSyncScreen()),
       );
     } else if (c.telegramId != null) {
       Navigator.of(context).push(
-        MaterialPageRoute(
+        RutaIron(
             builder: (_) => AuditoriaPersonaScreen(
                 telegramIdInicial: c.telegramId)),
       );

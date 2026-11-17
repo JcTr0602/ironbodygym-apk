@@ -351,7 +351,8 @@ class _LoginScreenState extends State<LoginScreen>
                                 width: AppEspacio.sm),
                             Expanded(
                               child: Text(_error!,
-                                  style: AppTexto.secundario.copyWith(color: AppColores.error)),
+                                  // 1.36 (136-290): papel de texto de error (errorTextoOscuro), no el brillante crudo (3,94–4,21)
+                                  style: AppTexto.secundario.copyWith(color: AppColores.errorTextoOscuro)),
                             ),
                           ],
                         ),
@@ -450,8 +451,10 @@ class _LoginScreenState extends State<LoginScreen>
         onSubmitted: onSubmitted,
         decoration: InputDecoration(
           hintText: hint,
+          // 1.36 (136-290): la pista es texto FUNCIONAL —
+          // peldaño Medio (6,0:1), no Tenue (3,56).
           hintStyle:
-              const TextStyle(color: AppColores.textoSobreOscuroTenue),
+              const TextStyle(color: AppColores.textoSobreOscuroMedio),
           prefixIcon:
               Icon(icono, color: AppColores.textoSecundario(context)),
           suffixIcon: suffix,

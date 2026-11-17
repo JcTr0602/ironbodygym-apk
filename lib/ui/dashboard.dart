@@ -442,7 +442,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: Colors.white70,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.1)),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppEspacio.xs),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -460,7 +460,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppEspacio.md),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -482,7 +482,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // dato y su condición son los de siempre (solo
           // con mes anterior > 0).
           if (_mesAnterior > 0) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: AppEspacio.md),
             const Divider(color: Colors.white24, height: 1),
             const SizedBox(height: 10),
             Builder(builder: (context) {
@@ -497,7 +497,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           : Icons.trending_down_rounded,
                       size: 20,
                       color: Colors.white),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppEspacio.sm),
                   Expanded(
                     child: Text(
                       sube
@@ -605,7 +605,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // 1.29 (Oleada 2, D-19): el total cuenta hasta
           // su cifra (MontoAnimado) en vez de texto plano.
           _filaDetalle('Total', total, negrita: true, animado: true),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppEspacio.sm),
           Text('${pagos.length} movimientos registrados',
               style: AppTexto.secundario.copyWith(
                   color: AppColores.textoSecundario(context))),
@@ -677,14 +677,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: const EdgeInsets.all(AppEspacio.lg),
           children: [
             const SyncBanner(),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppEspacio.sm),
             // H5 (Argón): «Hoy en sala» va POR ENCIMA del candado
             // de cifras: no son cifras, y hoy el return temprano
             // lo ocultaba todo.
             if (_salaCargada) ...[
               const EncabezadoSeccion(titulo: 'Hoy en sala'),
               _bloqueHoyEnSala(),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppEspacio.sm),
             ],
             Tarjeta(
               child: Text(
@@ -722,7 +722,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: const [
                 SyncBanner(),
-                SizedBox(height: 8),
+                SizedBox(height: AppEspacio.sm),
                 SkeletonLista(items: 3),
               ],
             )
@@ -732,22 +732,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   const SyncBanner(),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppEspacio.sm),
                   // H5 (Argón): «Hoy en sala» también abre la vista
                   // sin candado, antes de las cifras.
                   if (_salaCargada) ...[
                     const EncabezadoSeccion(titulo: 'Hoy en sala'),
                     _bloqueHoyEnSala(),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: AppEspacio.lg),
                   ],
                   const EncabezadoSeccion(titulo: 'Mis cobros'),
                   Row(
                     children: [
                       _tarjetaSimple('Hoy', _miHoy, Icons.today_rounded),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppEspacio.sm),
                       _tarjetaSimple(
                           '7 días', _miSemana, Icons.date_range_rounded),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppEspacio.sm),
                       _tarjetaSimple('Este mes', _miMes,
                           Icons.calendar_month_rounded),
                     ],
@@ -861,7 +861,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             _miPorTipo['servicios'] ?? 0,
                             _miMes),
                         if (_miMejorPeor.isNotEmpty) ...[
-                          const SizedBox(height: 8),
+                          const SizedBox(height: AppEspacio.sm),
                           Text(
                             'Mi mejor día: ${fmtFecha(_miMejorPeor['mejor']!['dia'] as String?)} '
                             '(${fmtMonto(_miMejorPeor['mejor']!['monto'] as double)} CUP)',
@@ -887,7 +887,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           children: [
             Icon(icono, color: AppColores.textoSecundario(context), size: 24),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppEspacio.sm),
             Text(titulo,
                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
             const SizedBox(height: 2),
@@ -962,7 +962,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ? AppColores.naranja
                       : AppColores.textoSecundario(context),
                   size: 24),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppEspacio.sm),
               Text(titulo,
                   style: AppTexto.metadato.copyWith(
                       color: AppColores.textoSecundario(context))),
@@ -1037,7 +1037,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text('Balance',
                 style:
                     AppTexto.cuerpo.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppEspacio.xs),
             _filaDetalle('Ingresos brutos', _mes),
             _filaDetalle('Gastos', _gastosMes),
             if (_nominaProy != null) ...[
@@ -1071,7 +1071,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
             if (_mejorPeor.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: AppEspacio.sm),
               Text(
                 'Mejor día: ${fmtFecha(_mejorPeor['mejor']!['dia'] as String?)} '
                 '(${fmtMonto(_mejorPeor['mejor']!['monto'] as double)} CUP)',
@@ -1094,7 +1094,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: AppTexto.secundario)),
           Text('${fmtMonto(valor)} CUP',
               style: AppTexto.secundario.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppEspacio.sm),
           Text('${pct.toStringAsFixed(0)}%',
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
         ],
@@ -1289,7 +1289,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppEspacio.xs),
                     Text(
                       etiqueta,
                       style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700),
@@ -1334,7 +1334,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // (M2-BC C2) la burbuja del día tocado, bajo el
         // gráfico.
         if (_diaSel != null) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: AppEspacio.sm),
           _burbujaDia(),
         ],
       ],
@@ -1375,7 +1375,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (servicios > 0) _filaDetalle('Servicios', servicios),
           const Divider(),
           _filaDetalle('Total', total, negrita: true),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppEspacio.sm),
           Text('$n movimientos registrados',
               style: AppTexto.secundario.copyWith(
                   color: AppColores.textoSecundario(context))),
@@ -1432,7 +1432,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               backgroundColor: color.withValues(alpha: 0.15),
               child: Icon(icono, size: 18, color: color),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppEspacio.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1665,10 +1665,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding: const EdgeInsets.all(AppEspacio.lg),
                 children: [
                   const SyncBanner(),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppEspacio.sm),
                   // (M2-BC C1) la foto del mes abre el panel.
                   _tarjetaHeroe(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                   // H1 (Argón): el bloque de urgencias abre el panel.
                   // SL-3 (G01-7): sin urgencias, ni encabezado
                   // ni tarjeta (lo en cero no ocupa).
@@ -1709,7 +1709,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppEspacio.sm),
                   _graficoDias(),
                   const EncabezadoSeccion(titulo: 'Clientes'),
                   Tarjeta(
@@ -1742,7 +1742,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       inicial: _tabVencidos))),
                             ],
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: AppEspacio.md),
                           // (1.30 D4 · UI130-11) barra apilada de
                           // tres segmentos disjuntos con leyenda:
                           // la vieja pintaba todo lo no-«al día»
@@ -1761,7 +1761,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           // v1.0.15: nuevos este mes + inactivos
                           if (_nuevos > 0 || _inactivos > 0) ...[
-                            const SizedBox(height: 8),
+                            const SizedBox(height: AppEspacio.sm),
                             Container(
                               padding: const EdgeInsets.all(AppEspacio.sm),
                               decoration: BoxDecoration(
@@ -1792,12 +1792,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                   // Q2 (Argón): balance y desglose unificados.
                   const EncabezadoSeccion(
                       titulo: 'Balance y desglose del mes'),
                   _desgloses(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppEspacio.lg),
                   // Fila Plus/Casa (propuesta punto 9, solo conteos).
                   // Sin Plus (sin red o sobre el tope) solo Casa.
                   if (_casaActivas > 0 || _plusVigentes != null) ...[
@@ -1812,7 +1812,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: AppTexto.secundario,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: AppEspacio.lg),
                   ],
                   // Q3 (Argón): el ranking degrada a UNA fila
                   // compacta al final, sin trofeos.
@@ -1856,7 +1856,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                               FontWeight.w700)),
                                 ],
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: AppEspacio.xs),
                               Container(
                                 height: 8,
                                 decoration: BoxDecoration(
@@ -1889,7 +1889,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: AppEspacio.lg),
                   ],
                 ],
               ),
@@ -1977,7 +1977,7 @@ class BarraClientesSegmentos extends StatelessWidget {
           decoration: BoxDecoration(
               color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: AppEspacio.xs),
         Text(texto,
             style: AppTexto.metadato.copyWith(
                 color: AppColores.textoSecundario(context))),
@@ -2018,7 +2018,7 @@ class BarraClientesSegmentos extends StatelessWidget {
                   ],
                 ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppEspacio.xs),
         Wrap(
           alignment: WrapAlignment.center,
           spacing: 12,
