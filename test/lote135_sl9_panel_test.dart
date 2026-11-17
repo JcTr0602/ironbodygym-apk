@@ -23,6 +23,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/auth.dart';
 import 'package:ironbody_gym/localdb.dart';
+import 'package:ironbody_gym/perfil.dart';
 import 'package:ironbody_gym/ui/admin.dart';
 import 'package:ironbody_gym/ui/ajustes.dart';
 import 'package:ironbody_gym/ui/papelera.dart';
@@ -223,6 +224,23 @@ void main() {
           reason: 'el diálogo de pago base no abrió');
       final campo = find.descendant(
           of: find.byType(AlertDialog), matching: find.byType(TextField));
+      // Estado ANTES del intento inválido (corrección del
+      // coordinador sobre el endurecimiento F02-HF): la
+      // primera versión de esta comprobación exigía la
+      // config a null «porque la BD nació vacía», pero el
+      // propio recorrido (abrir el módulo y el diálogo) ya
+      // había asentado el valor vigente en la config al
+      // llegar aquí — lo que «sin guardar» debe probar es
+      // que el intento inválido no MUEVE nada respecto a
+      // este antes, no un vacío supuesto.
+      final antesInvalido = await tester.runAsync(() async {
+        final db = await LocalDb.instance.db;
+        final opsCfg = await db.query('ops_queue',
+            where: "tipo = 'actualizar_config_gym'");
+        final cfg = await LocalDb.instance
+            .getConfigNegocio('pago_entrenador_por_cliente');
+        return (opsCfg: opsCfg.length, cfg: cfg);
+      });
       await tester.enterText(campo, '12x');
       await tester.tap(find.widgetWithText(ElevatedButton, 'Guardar'));
       await _ciclos(tester);
@@ -238,6 +256,31 @@ void main() {
           reason: 'el aviso debe salir dentro del diálogo');
       expect(find.text('12x'), findsOneWidget,
           reason: 'lo tecleado se conserva');
+      // F02-HF (z25_sl9_1-1): «sin guardar» se comprueba
+      // contra el estado real, no solo contra el aviso:
+      // ni la config de negocio, ni la cola de ops, ni la
+      // lectura vigente del pago pueden haberse movido
+      // (el valor que rige sigue siendo el de por defecto,
+      // 150, porque la BD nació vacía).
+      final trasInvalido = await tester.runAsync(() async {
+        final db = await LocalDb.instance.db;
+        final opsCfg = await db.query('ops_queue',
+            where: "tipo = 'actualizar_config_gym'");
+        final cfg = await LocalDb.instance
+            .getConfigNegocio('pago_entrenador_por_cliente');
+        final pago = await PerfilService.instance.getPagoEntrenador();
+        return (opsCfg: opsCfg.length, cfg: cfg, pago: pago);
+      });
+      expect(trasInvalido!.opsCfg, antesInvalido!.opsCfg,
+          reason: 'un pago inválido no debe encolar la op '
+              'de configuración');
+      expect(trasInvalido.cfg, antesInvalido.cfg,
+          reason: 'un pago inválido no debe escribir la '
+              'config de negocio (queda como estaba antes '
+              'del intento)');
+      expect(trasInvalido.pago, 150,
+          reason: 'el pago vigente sigue como estaba tras '
+              'el intento inválido');
     });
   });
 
@@ -293,6 +336,31 @@ void main() {
       expect(find.textContaining('→'), findsWidgets,
           reason: 'el diff dice viejo → nuevo');
       expect(find.textContaining('2500'), findsWidgets);
+      // F02-HF (z25_sl9_1-2): el diff «2000 → 2500» debe
+      // vivir DENTRO de un mismo widget del diálogo de
+      // confirmación — no vale la unión de dos diálogos
+      // montados (el «2500» tecleado en el diálogo de
+      // edición aún en animación no prueba el diff).
+      final dialogoConf = find.ancestor(
+          of: find.text('Confirmar cambio de precio'),
+          matching: find.byType(AlertDialog));
+      expect(dialogoConf, findsOneWidget,
+          reason: 'la confirmación es un AlertDialog propio');
+      final textosConf = tester
+          .widgetList<Text>(find.descendant(
+              of: dialogoConf, matching: find.byType(Text)))
+          .map((t) => t.data ?? '')
+          .toList();
+      expect(
+          textosConf.any((t) =>
+              t.contains('2000') &&
+              t.contains('→') &&
+              t.contains('2500') &&
+              t.indexOf('2000') < t.indexOf('2500')),
+          isTrue,
+          reason: 'un mismo texto de la confirmación debe '
+              'contener el diff completo y en orden: '
+              '2000 → 2500 (textos del diálogo: $textosConf)');
       // Cancelar: precio intacto y cero ops.
       await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
       await _ciclos(tester);

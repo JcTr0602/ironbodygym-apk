@@ -72,5 +72,39 @@ void main() {
     expect(llamada.contains('conScroll:'), isTrue,
         reason: 'G01-10: el cableado vive en la llamada de '
             'home.dart a CabeceraMarco');
+    // F02-HF (z31_slx2-1): no basta el token — se afirma el
+    // VALOR en el sitio de la llamada. La ventana se acota
+    // a la llamada COMPLETA (desde «CabeceraMarco(» hasta
+    // su paréntesis de cierre, contando paréntesis) y el
+    // argumento debe ser el estado vivo de la Home
+    // (_cabeceraConScroll): fijarlo a una constante
+    // (conScroll: true/false) debe hacer fallar este test.
+    var profundidad = 0;
+    var fin = -1;
+    for (var j = i; j < src.length; j++) {
+      if (src[j] == '(') profundidad++;
+      if (src[j] == ')') {
+        profundidad--;
+        if (profundidad == 0) {
+          fin = j;
+          break;
+        }
+      }
+    }
+    expect(fin, greaterThan(i),
+        reason: 'la llamada a CabeceraMarco cierra');
+    final llamadaCompleta = src.substring(i, fin + 1);
+    expect(
+        RegExp(r'conScroll\s*:\s*_cabeceraConScroll\b')
+            .hasMatch(llamadaCompleta),
+        isTrue,
+        reason: 'G01-10: home.dart pasa su estado vivo de '
+            'scroll (_cabeceraConScroll), no una constante');
+    expect(
+        RegExp(r'conScroll\s*:\s*(true|false)\b')
+            .hasMatch(llamadaCompleta),
+        isFalse,
+        reason: 'G01-10: conScroll no va fijado a constante '
+            'en la llamada');
   });
 }

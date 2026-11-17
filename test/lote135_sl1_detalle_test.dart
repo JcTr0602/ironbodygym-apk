@@ -260,55 +260,73 @@ void main() {
         scrollable: find.byType(Scrollable).first);
     await _drenar(tester, vueltas: 4);
 
-    int botones(String fragmento) {
-      // Sin ElevatedButton: BotonPrimario lo lleva DENTRO y
-      // se contaría dos veces la misma superficie.
+    // F02-HD (z16_tests_sl1-1 r2): el conteo cubre TAMBIÉN
+    // un ElevatedButton suelto (una superficie duplicada en
+    // ese tipo se escapaba del conteo viejo). BotonPrimario
+    // lleva un ElevatedButton DENTRO: para no contar dos
+    // veces la misma superficie, se cuentan las superficies
+    // RAÍZ — una coincidencia contenida en otra no suma.
+    final tiposBoton = [
+      FilledButton,
+      OutlinedButton,
+      TextButton,
+      ElevatedButton,
+      BotonPrimario,
+    ];
+
+    int superficies(Iterable<Element> candidatos) {
+      final conjunto = candidatos.toSet();
       var n = 0;
-      for (final tipo in [
-        FilledButton,
-        OutlinedButton,
-        TextButton,
-        BotonPrimario,
-      ]) {
-        n += find
-            .widgetWithText(tipo, fragmento, skipOffstage: false)
-            .evaluate()
-            .length;
+      for (final e in conjunto) {
+        var contenida = false;
+        e.visitAncestorElements((ancestro) {
+          if (conjunto.contains(ancestro)) {
+            contenida = true;
+            return false;
+          }
+          return true;
+        });
+        if (!contenida) n++;
       }
       return n;
+    }
+
+    int botones(String fragmento) {
+      return superficies([
+        for (final tipo in tiposBoton)
+          ...find
+              .widgetWithText(tipo, fragmento, skipOffstage: false)
+              .evaluate(),
+      ]);
     }
 
     // Convertir: solo el botón de la tarjeta de conversión.
     expect(botones('Convertir en cliente'), 1,
         reason: 'un solo botón «Convertir en cliente»');
     // WhatsApp: solo un acceso (la tarjeta de acciones).
-    var whats = 0;
-    for (final tipo in [
-      FilledButton,
-      OutlinedButton,
-      TextButton,
-      BotonPrimario,
-    ]) {
-      whats += find
-          .byWidgetPredicate(
-              (w) => w.runtimeType == tipo, skipOffstage: false)
-          .evaluate()
-          .where((e) {
-            var tiene = false;
-            void busca(Element hijo) {
-              if (hijo.widget is Text &&
-                  ((hijo.widget as Text).data ?? '')
-                      .contains('WhatsApp')) {
-                tiene = true;
-              }
-              hijo.visitChildren(busca);
-            }
+    bool contieneWhats(Element e) {
+      var tiene = false;
+      void busca(Element hijo) {
+        if (hijo.widget is Text &&
+            ((hijo.widget as Text).data ?? '')
+                .contains('WhatsApp')) {
+          tiene = true;
+        }
+        hijo.visitChildren(busca);
+      }
 
-            e.visitChildren(busca);
-            return tiene;
-          })
-          .length;
+      e.visitChildren(busca);
+      return tiene;
     }
+
+    final whats = superficies([
+      for (final tipo in tiposBoton)
+        ...find
+            .byWidgetPredicate(
+                (w) => w.runtimeType == tipo, skipOffstage: false)
+            .evaluate()
+            .where(contieneWhats),
+    ]);
     expect(whats, 1, reason: 'un solo acceso de WhatsApp');
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();

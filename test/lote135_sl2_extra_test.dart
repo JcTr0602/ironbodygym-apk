@@ -75,6 +75,13 @@ void main() {
       expect(iPlegable, greaterThan(iOcasionales),
           reason: 'el plegable se construye DESPUÉS de la '
               'lista de ocasionales que contiene');
+      // F02-HD (z17_tests_sl2-6): lo que el título promete —
+      // la principal PRECEDE al plegable en el árbol (orden
+      // de montaje): «Restablecer acceso» no puede vivir
+      // dentro ni debajo del pliegue.
+      expect(iPlegable, greaterThan(iPrincipal),
+          reason: 'G03-2: la acción principal se monta ANTES '
+              'del plegable «Más acciones»');
       final segOcasionales = s.substring(iOcasionales, iPlegable);
       for (final txt in [
         'Forzar cambio de PIN',
@@ -86,6 +93,22 @@ void main() {
         expect(segOcasionales.contains(txt), isTrue,
             reason: '$txt vive en la lista plegada');
       }
+      // F02-HD (z17_tests_sl2-6): el ExpansionTile consume
+      // LA lista de ocasionales construida arriba, no una
+      // copia inline: su segmento declara la lista como
+      // hijas (envuelta en el Wrap del cuerpo del tile).
+      final iTile = s.indexOf('ExpansionTile', iOcasionales);
+      expect(iTile, greaterThan(iPrincipal),
+          reason: 'G03-2: el plegable se monta tras la '
+              'principal y tras construir las ocasionales');
+      expect(
+          s
+              .substring(iTile,
+                  iTile + 1200 > s.length ? s.length : iTile + 1200)
+              .contains('children: ocasionales'),
+          isTrue,
+          reason: 'G03-2: el ExpansionTile pinta la lista '
+              '`ocasionales`, no widgets sueltos');
     });
   });
 

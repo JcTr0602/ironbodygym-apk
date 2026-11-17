@@ -71,7 +71,33 @@ void main() {
     expect(find.byType(SimpleDialog), findsNothing,
         reason: 'el selector crudo de Android no es la casa');
     expect(find.byType(DialogoApp), findsWidgets);
+    // F02-HD (z19_tests_sl4-2): DialogoApp a secas no
+    // discrimina — el diálogo de pago PADRE ya es un
+    // DialogoApp antes del tap. Se acota al selector
+    // concreto (el DialogoApp titulado «Foto del
+    // comprobante») y las opciones viven DENTRO de él.
+    final selector = find.byWidgetPredicate(
+        (w) => w is DialogoApp && w.titulo == 'Foto del comprobante');
+    expect(selector, findsOneWidget,
+        reason: 'G10-4: el selector de origen es SU propio '
+            'DialogoApp, no el del pago que ya estaba abierto');
+    expect(find.byType(DialogoApp), findsNWidgets(2),
+        reason: 'conviven el diálogo de pago (padre) y el '
+            'selector (hijo): contar DialogoApp sin acotar '
+            'se satisfacía solo con el padre');
     expect(find.text('Foto del comprobante'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: selector, matching: find.text('Tomar foto')),
+        findsOneWidget,
+        reason: '«Tomar foto» es una opción DEL selector');
+    expect(
+        find.descendant(
+            of: selector,
+            matching: find.text('Elegir de la galería')),
+        findsOneWidget,
+        reason: '«Elegir de la galería» es una opción DEL '
+            'selector');
     expect(find.text('Tomar foto'), findsOneWidget);
     expect(find.text('Elegir de la galería'), findsOneWidget);
     // El comportamiento se conserva: elegir cierra el diálogo

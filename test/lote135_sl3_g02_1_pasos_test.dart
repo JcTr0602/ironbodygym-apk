@@ -28,22 +28,38 @@ Finder _etiquetaEnBarra(WidgetTester tester, String texto) {
     final f = find.byWidget(e.widget);
     if (tester.getTopLeft(f).dy < 220) return f;
   }
-  return find.text(texto);
+  // F02-HD (z18_tests_sl3-5 r2): SIN fallback sin filtrar —
+  // antes, si la etiqueta de la barra no se localizaba, se
+  // devolvía el Text a pelo y _pasoCompleto leía el Row del
+  // TÍTULO de la sección de abajo (sin check): una barra
+  // completa se podía leer «incompleta» en verde. Ahora se
+  // devuelve un finder vacío y _pasoCompleto exige la
+  // etiqueta en la barra: el ámbito es el del paso, no el
+  // de la sección vecina.
+  return find.byElementPredicate((_) => false);
 }
 
 /// ¿El paso lleva el check de completo en su fila de la
 /// barra? (La fila del paso: círculo + etiqueta.)
 bool _pasoCompleto(WidgetTester tester, String etiqueta) {
+  final enBarra = _etiquetaEnBarra(tester, etiqueta);
+  expect(enBarra, findsOneWidget,
+      reason: 'la etiqueta «$etiqueta» debe localizarse EN '
+          'LA BARRA de pasos; leer el título de la sección '
+          'de abajo no vale');
   final row = find
-      .ancestor(
-          of: _etiquetaEnBarra(tester, etiqueta),
-          matching: find.byType(Row))
+      .ancestor(of: enBarra, matching: find.byType(Row))
       .first;
   return find
       .descendant(of: row, matching: find.byIcon(Icons.check_rounded))
       .evaluate()
       .isNotEmpty;
 }
+
+/// El campo de texto cuya decoración lleva [etiqueta]
+/// («Días», «Monto (CUP)» del personalizado).
+Finder _campoPorEtiqueta(String etiqueta) => find.byWidgetPredicate(
+    (w) => w is TextField && w.decoration?.labelText == etiqueta);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -89,6 +105,60 @@ void main() {
     // Foto es opcional: se marca «opcional», no pendiente.
     expect(find.text('Foto · opcional'), findsOneWidget,
         reason: 'G02-1: el paso opcional se marca «opcional»');
+    await jornadaCerrarCascara(tester);
+  });
+
+  // F02-HD (z18_tests_sl3-4/5 r2): el caso VÁLIDO completo —
+  // el test de arriba solo ejerce el inválido y una barra
+  // siempre incompleta pasaría. Con días y monto válidos la
+  // barra SÍ llega a completo, y el check se lee en la fila
+  // DE LA BARRA (etiquetas cortas: «Datos», «Membresía»),
+  // no en el título homónimo de la sección de abajo.
+  testWidgets(
+      'personalizado VÁLIDO (días y monto): la barra SÍ da '
+      'Membresía por completa, como el guardado', (tester) async {
+    await jornadaPreparar(tester);
+    await jornadaSesionEntrenador(tester);
+    jornadaViewport(tester);
+    await tester.pumpWidget(const MaterialApp(home: InscribirScreen()));
+    await jornadaDrenar(tester);
+    expect(tester.takeException(), isNull);
+
+    await tester.enterText(find.byType(TextField).first, 'Prueba Pasos Valida');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(_pasoCompleto(tester, 'Datos'), isTrue,
+        reason: 'control: con nombre, Datos sí está completo');
+
+    await tester.drag(find.byType(ListView).first, const Offset(0, -320));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.textContaining('mes (').first);
+    await jornadaDrenar(tester, vueltas: 6, ms: 80);
+    await tester.tap(find.text('Personalizado…'));
+    await jornadaDrenar(tester, vueltas: 6, ms: 80);
+
+    // Control del inválido dentro del mismo montaje: recién
+    // elegido el personalizado, aún sin días ni monto, la
+    // barra NO lo da por completo.
+    expect(_pasoCompleto(tester, 'Membresía'), isFalse,
+        reason: 'control: personalizado recién elegido, sin '
+            'días ni monto, sigue incompleto');
+
+    // Los datos que el guardado exige.
+    await tester.ensureVisible(_campoPorEtiqueta('Días'));
+    await tester.enterText(_campoPorEtiqueta('Días'), '30');
+    await tester.enterText(_campoPorEtiqueta('Monto (CUP)'), '2000');
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // La ambigüedad existe de verdad (barra + título de la
+    // sección) y aun así la lectura es la de la barra.
+    expect(find.text('Membresía', skipOffstage: false), findsNWidgets(2),
+        reason: 'control: «Membresía» vive en la barra Y en '
+            'el título de la sección: hay que leer la barra');
+    expect(_pasoCompleto(tester, 'Membresía'), isTrue,
+        reason: 'G02-1: con días y monto válidos, barra y '
+            'guardado coinciden también en positivo — el '
+            'check está en la fila del paso en la barra, no '
+            'se lee «incompleto» desde la sección vecina');
     await jornadaCerrarCascara(tester);
   });
 }

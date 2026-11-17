@@ -9,6 +9,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/ui/confirmacion_cobro.dart';
+import 'package:ironbody_gym/ui/tarjeta_imagen.dart';
 
 Future<ui.Image> _imagenReal() async {
   final recorder = ui.PictureRecorder();
@@ -63,5 +64,36 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('Enviar comprobante'), findsOneWidget);
+    // F02-HD (z19_tests_sl4-3): no basta el botón — el PIE
+    // de recibo va renderizado en el ticket (la imagen que
+    // se comparte): la firma PieTarjetaImagen con su línea
+    // oficial y la de contacto con el 58191577.
+    expect(find.byType(PieTarjetaImagen), findsOneWidget,
+        reason: 'G10-6: con comprobantePie, el ticket pinta '
+            'el pie firmado que viaja DENTRO de la imagen');
+    expect(find.text(lineaOficialTarjetaImagen), findsOneWidget,
+        reason: 'la línea oficial del pie se renderiza');
+    expect(find.text(lineaContactoTarjetaImagen), findsOneWidget,
+        reason: 'la línea de contacto del pie se renderiza');
+    expect(find.textContaining('58191577'), findsWidgets,
+        reason: 'el número de contacto va en la imagen, no '
+            'solo en el texto que acompaña al compartir');
+  });
+
+  testWidgets(
+      'sin comprobantePie: ni botón de comprobante ni pie '
+      'firmado en el ticket', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: ConfirmacionOperacionScreen(
+        titulo: '¡Cobro registrado!',
+        monto: '2 000 CUP',
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Enviar comprobante'), findsNothing);
+    expect(find.byType(PieTarjetaImagen), findsNothing,
+        reason: 'G10-6: el pie firmado solo existe cuando '
+            'la operación lleva comprobante (la puerta es '
+            'comprobantePie != null, en los dos sentidos)');
   });
 }

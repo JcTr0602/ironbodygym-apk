@@ -43,6 +43,42 @@ String _jwtFalso() {
   return '$header.$payload.firma-de-mentira';
 }
 
+String _jwtPara(String email, int telegramId) {
+  String b64(Map<String, dynamic> m) =>
+      base64Url.encode(utf8.encode(jsonEncode(m))).replaceAll('=', '');
+  final header = b64({'alg': 'HS256', 'typ': 'JWT'});
+  final payload = b64({
+    'sub': '00000000-0000-0000-0000-0000000000ee',
+    'aud': 'authenticated',
+    'exp': 4102444800,
+    'iat': 1700000000,
+    'email': email,
+    'role': 'authenticated',
+    'app_metadata': {'telegram_id': telegramId, 'provider': 'email'},
+  });
+  return '$header.$payload.firma-de-mentira';
+}
+
+Future<void> _fijarSesionRestringida(WidgetTester tester) async {
+  final sesion = jsonEncode({
+    'access_token': _jwtPara('gabriel@ironbody.local', 1403501391),
+    'token_type': 'bearer',
+    'expires_in': 3600,
+    'refresh_token': 'refresh-de-mentira',
+    'user': {
+      'id': '00000000-0000-0000-0000-0000000000ee',
+      'aud': 'authenticated',
+      'email': 'gabriel@ironbody.local',
+      'app_metadata': {'telegram_id': 1403501391, 'provider': 'email'},
+      'user_metadata': <String, dynamic>{},
+      'created_at': '2024-01-01T00:00:00.000Z',
+    },
+  });
+  await tester.runAsync(() async {
+    await Supabase.instance.client.auth.setInitialSession(sesion);
+  });
+}
+
 Future<void> _fijarSesionDueno(WidgetTester tester) async {
   final sesion = jsonEncode({
     'access_token': _jwtFalso(),
@@ -135,6 +171,72 @@ void main() {
       await _ciclos(tester, 5);
       expect(find.byType(SelectorIron<int>), findsOneWidget,
           reason: 'el bloqueo automático debe ser SelectorIron');
+    });
+  });
+
+  // F02-HF (z25_sl9_1-6): la cuenta restringida (entrenador)
+  // en Ajustes no solo queda fuera de Permisos/usuarios:
+  // tampoco ve los controles de Administración del dueño.
+  // Se comprueba por el buscador de la propia pantalla:
+  // buscar el título exacto lo traería a la vista si la
+  // puerta de dueño regresara; con la puerta puesta, la
+  // búsqueda no encuentra nada.
+  group('cuenta restringida en Ajustes', () {
+    testWidgets('sin controles de Administración (solo '
+        'dueño) en Ajustes', (tester) async {
+      await tester.runAsync(_bdVacia);
+      await _fijarSesionRestringida(tester);
+      await tester.pumpWidget(
+          const MaterialApp(home: AjustesScreen()));
+      await _ciclos(tester);
+      final buscador =
+          find.widgetWithText(TextField, 'Buscar un ajuste…');
+      expect(buscador, findsOneWidget,
+          reason: 'la pantalla de Ajustes cargó para la '
+              'cuenta restringida');
+      // Control positivo: un ajuste NO restringido sí
+      // aparece al buscarlo (la ausencia de abajo no es
+      // una pantalla vacía ni un buscador roto).
+      // OJO (corrección del coordinador sobre el arnés
+      // F02-HF): find.text también casa el EditableText del
+      // propio buscador con lo tecleado — las filas se
+      // buscan por su ListTile, que es como la pantalla las
+      // pinta, y así el campo queda fuera del ámbito.
+      await tester.enterText(buscador, 'Importar respaldo');
+      await _ciclos(tester, 5);
+      expect(find.widgetWithText(ListTile, 'Importar respaldo'),
+          findsOneWidget,
+          reason: 'el buscador sí encuentra los ajustes '
+              'permitidos de la cuenta restringida');
+      for (final tituloAdmin in [
+        'Exportar respaldo',
+        'Limpiar caché de fotos',
+        'Resincronizar fotos de clientes',
+        'Resincronizar fotos de suplementos',
+        'Exportar bitácora',
+        'Restablecer ajustes',
+      ]) {
+        await tester.enterText(buscador, tituloAdmin);
+        await _ciclos(tester, 5);
+        expect(find.widgetWithText(ListTile, tituloAdmin),
+            findsNothing,
+            reason: '«$tituloAdmin» es un control de '
+                'Administración (solo dueño) y no debe '
+                'existir para la cuenta restringida');
+      }
+      // Y la sección entera de Diagnóstico tampoco existe
+      // (su título vive en la lista, no en el buscador).
+      await tester.enterText(buscador, 'Diagnóstico');
+      await _ciclos(tester, 5);
+      expect(
+          find.descendant(
+              of: find.byType(ListView),
+              matching: find.text('Diagnóstico')),
+          findsNothing,
+          reason: 'la sección Diagnóstico es solo del dueño');
+      expect(find.text('Ningún ajuste coincide'), findsOneWidget,
+          reason: 'buscar un control de dueño devuelve el '
+              'vacío del buscador, no el control');
     });
   });
 

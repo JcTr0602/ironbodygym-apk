@@ -112,6 +112,23 @@ Future<HttpServer> _servidorFake() async {
           }
         ]));
       } else if (req.method == 'GET' &&
+          path.endsWith('/rest/v1/sync_incidencias_fotos')) {
+        // F02-HE (z23_sl8_1-1): la falsa también sirve
+        // FOTOS — antes este GET caía en el genérico `[]`
+        // y la rama de fotos del pull jamás se ejercitaba
+        // (la tabla incidencias_fotos ni se consultaba).
+        res.headers.contentType = ContentType.json;
+        res.write(jsonEncode([
+          {
+            'id': 'foto-con-fecha',
+            'incidencia_id': 'inc-sl8-1',
+            'storage_path': 'incidencias/inc-sl8-1/foto1.jpg',
+            'tipo': 'evidencia',
+            'creado_en': '2026-11-01T11:00:00.000Z',
+            'sync_seq': 5,
+          },
+        ]));
+      } else if (req.method == 'GET' &&
           path.endsWith('/rest/v1/sync_incidencias_comentarios')) {
         res.headers.contentType = ContentType.json;
         res.write(jsonEncode([
@@ -368,6 +385,44 @@ void main() {
       }
       expect(logs, isNotEmpty,
           reason: 'descartada CON registro, no en silencio');
+
+      // F02-HE (z23_sl8_1-1): la foto válida servida por la
+      // falsa ATERRIZA en incidencias_fotos por el camino
+      // real del pull (padre presente, fecha válida).
+      final fotos = await d.query('incidencias_fotos');
+      final idsFotos = fotos.map((f) => '${f['id']}').toList();
+      expect(idsFotos, contains('foto-con-fecha'),
+          reason: 'la rama de fotos del pull se ejercita: '
+              'la foto válida baja a su tabla');
+      final foto = fotos.firstWhere(
+          (f) => '${f['id']}' == 'foto-con-fecha');
+      expect(foto['incidencia_id'], 'inc-sl8-1');
+      expect(foto['storage_path'],
+          'incidencias/inc-sl8-1/foto1.jpg',
+          reason: 'la foto baja con su ruta de storage, '
+              'que es como la pantalla la muestra');
+      expect('${foto['creado_en']}',
+          startsWith('2026-11-01'),
+          reason: 'su fecha válida se guarda tal cual');
+
+      // F02-HE (z23_sl8_1-2): el watermark de cada tabla
+      // avanza hasta el seq servido tras la pasada — en
+      // comentarios hasta el 2 AUNQUE el seq 1 se descartó
+      // por fecha inválida (el descarte no congela el
+      // cursor), y en fotos hasta el 5 servido.
+      expect(
+          await LocalDb.instance
+              .getWatermarkTabla('incidencias_comentarios'),
+          2,
+          reason: 'el watermark de comentarios avanza al '
+              'máximo seq de la pasada, descarte incluido');
+      expect(
+          await LocalDb.instance
+              .getWatermarkTabla('incidencias_fotos'),
+          5,
+          reason: 'el watermark de fotos avanza al seq '
+              'servido: la pasada de fotos también deja '
+              'su cursor puesto');
     }, timeout: const Timeout(Duration(seconds: 120)));
   });
 }

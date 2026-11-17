@@ -42,6 +42,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/bloque2_resto.dart';
@@ -49,6 +50,7 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/tipos_pago.dart';
 import 'package:ironbody_gym/ui/admin.dart';
 import 'package:ironbody_gym/ui/config_precios_bancarios.dart';
+import 'package:ironbody_gym/ui/panel_resto_caja.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -146,6 +148,95 @@ void main() {
       final tipos = await getTiposPago(soloActivos: false, paraMenor: true);
       expect(tipos.singleWhere((t) => t.id == 'menores').monto, 1800.0,
           reason: 'el diálogo de cobro cobra el precio nuevo');
+    });
+
+    // F02-HF (z25_sl9_1-3): la pieza B se prueba DESDE la
+    // pantalla real — se monta PreciosMetodoScreen, se
+    // edita el campo de menores y se le quita el foco; el
+    // cableado de la pantalla (clave, parseo y disparo por
+    // foco) es lo que debe producir la op con el blob.
+    testWidgets('desde PreciosMetodoScreen: editar menores '
+        'y perder el foco encola guardar_tipos_pago con el '
+        'blob actualizado', (tester) async {
+      await tester.runAsync(bdConPrecios);
+      // La pantalla exige dueño también al cargar: se
+      // refija la sesión tras recrear la BD (pauta de los
+      // demás tests de pantalla del lote).
+      final sesion = jsonEncode({
+        'access_token': _jwtFalso(),
+        'token_type': 'bearer',
+        'expires_in': 3600,
+        'refresh_token': 'refresh-de-mentira',
+        'user': {
+          'id': '00000000-0000-0000-0000-0000000000dd',
+          'aud': 'authenticated',
+          'email': 'jc@ironbody.local',
+          'app_metadata': {'telegram_id': 735772141, 'provider': 'email'},
+          'user_metadata': <String, dynamic>{},
+          'created_at': '2024-01-01T00:00:00.000Z',
+        },
+      });
+      await tester.runAsync(() async {
+        await Supabase.instance.client.auth.setInitialSession(sesion);
+      });
+      await tester.pumpWidget(
+          const MaterialApp(home: PreciosMetodoScreen()));
+      // El campo se busca por el TextField INTERNO: en esta
+      // versión de Flutter, TextFormField no expone
+      // `decoration` como getter (corrección del coordinador
+      // sobre el arnés F02-HF: el error de analyze lo cazó).
+      Finder campoPorEtiqueta(String etiqueta) =>
+          find.byWidgetPredicate((w) =>
+              w is TextField &&
+              w.decoration?.labelText == etiqueta);
+      final campoMenores = campoPorEtiqueta('Mensualidad menores');
+      for (var i = 0;
+          i < 40 && campoMenores.evaluate().isEmpty;
+          i++) {
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 200)));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(campoMenores, findsOneWidget,
+          reason: 'la pantalla de precios no cargó el campo '
+              'de menores');
+      await tester.enterText(campoMenores, '1800');
+      // Perder el foco (tocar otro campo) dispara el
+      // autoguardado de la pantalla.
+      await tester.tap(campoPorEtiqueta('Mensualidad (efectivo)'));
+      for (var i = 0; i < 20; i++) {
+        await tester.runAsync(() =>
+            Future<void>.delayed(const Duration(milliseconds: 200)));
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      final aj = (await tester.runAsync(
+          () => LocalDb.instance.getAjustes()))!;
+      expect(aj['mensualidad_menores'], 1800.0,
+          reason: 'la pantalla guarda la clave plana de '
+              'menores con el valor editado');
+      expect(precioMenoresDesdeAjustes(aj), 1800.0,
+          reason: 'tras editar en la pantalla, la fuente '
+              'única del cobro lee el precio nuevo del blob');
+      final ops = (await tester.runAsync(
+          () => LocalDb.instance.pendingOps()))!;
+      Map<String, dynamic> payloadDe(Map<String, dynamic> o) =>
+          o['payload'] is String
+              ? jsonDecode(o['payload'] as String)
+                  as Map<String, dynamic>
+              : Map<String, dynamic>.from(o['payload'] as Map);
+      final deTipos = ops
+          .where((o) => '${o['tipo']}' == 'guardar_tipos_pago')
+          .toList();
+      expect(deTipos, isNotEmpty,
+          reason: 'la edición desde la pantalla debe viajar '
+              'en la op guardar_tipos_pago');
+      final tiposOp = payloadDe(deTipos.first)['tipos'] as List;
+      final menoresOp = tiposOp
+          .whereType<Map>()
+          .singleWhere((t) => '${t['id']}' == 'menores');
+      expect((menoresOp['monto'] as num).toDouble(), 1800.0,
+          reason: 'el blob que viaja en la op lleva el '
+              'precio de menores editado en la pantalla');
     });
 
     test('la vía del Panel (aplicarCambiosMontos) SÍ mantiene '

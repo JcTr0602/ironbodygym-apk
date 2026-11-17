@@ -146,6 +146,25 @@ void main() {
     final blob = aj['tipos_pago'] as List;
     expect(blob.length, _blobBase.length);
     expect(precioMenoresDesdeAjustes(aj), 1500.0);
+    // F02-HF (z30_slx1-4): «no toca el blob» se comprueba
+    // contra el blob COMPLETO, entrada por entrada y campo
+    // por campo — una reconstrucción desde valores por
+    // defecto que conservara el número de entradas y el
+    // precio de menores pero cambiara otro tipo (semanal,
+    // quincenal, solo_menores…) debe fallar aquí.
+    expect(blob.length, _blobBase.length);
+    for (var i = 0; i < _blobBase.length; i++) {
+      final actual = Map<String, dynamic>.from(blob[i] as Map);
+      final esperado = _blobBase[i];
+      expect(actual.keys.toSet(), esperado.keys.toSet(),
+          reason: 'la entrada ${esperado['id']} conserva '
+              'exactamente sus campos');
+      for (final campo in esperado.keys) {
+        expect(actual[campo], esperado[campo],
+            reason: 'el blob no se tocó: ${esperado['id']} '
+                '.$campo sigue siendo ${esperado[campo]}');
+      }
+    }
   });
 
   test('B · el guardado encola la op de config Y la op '

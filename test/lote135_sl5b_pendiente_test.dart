@@ -180,6 +180,28 @@ void main() {
       expect(find.byType(MontoAnimado), findsNothing,
           reason: 'la tarjeta total (su MontoAnimado) no existe en cero');
       expect(find.text('al día, nada que recoger'), findsNothing);
+      // F02-HE (z20_sl5-3): «no hay tarjeta» no se infiere
+      // solo de la ausencia de MontoAnimado: tampoco está
+      // el rótulo de la tarjeta total que el test con
+      // pendiente sí exige — una tarjeta pintada con un
+      // Text crudo «0 CUP» también queda cazada.
+      expect(find.text('por recoger de los entrenadores'),
+          findsNothing,
+          reason: 'sin el rótulo de la tarjeta total: en '
+              'cero la tarjeta no existe en ninguna forma '
+              '(ese subtítulo es el rótulo vigente de la '
+              'tarjeta; «Pendiente a recoger» es el título '
+              'del AppBar y no se niega)');
+      // La negación por tipo Tarjeta a pelo NO vale: la
+      // pantalla pinta otras tarjetas legítimas en cero
+      // (3 en el arnés). La tarjeta TOTAL queda negada por
+      // su rótulo, su MontoAnimado y su cifra (arriba y
+      // abajo) — en ninguna de sus formas, que es lo que
+      // z20_sl5-3 pedía. (Corrección del coordinador sobre
+      // el endurecimiento F02-HE.)
+      expect(find.textContaining('0 CUP'), findsNothing,
+          reason: 'ninguna cifra en cero disfrazada de '
+              'tarjeta con Text crudo');
     });
 
     testWidgets('con pendiente: la tarjeta total existe',
@@ -211,8 +233,14 @@ void main() {
       expect(find.text('Liquidar en arqueo…'), findsNothing);
       expect(find.text('Cuadre a WhatsApp'), findsNothing);
       // El control que las resume, presente.
-      final control = find.textContaining('Más acciones');
-      expect(control, findsOneWidget);
+      // F02-HE (z20_sl5-4): con su texto COMPLETO, incluido
+      // el contador «(4)» que pinta el producto — un
+      // textContaining parcial aceptaba cualquier contador
+      // o ninguno.
+      expect(find.text('Más acciones (4)'), findsOneWidget,
+          reason: 'el control resume las CUATRO acciones '
+              'ocultas y lo dice entero');
+      final control = find.text('Más acciones (4)');
       await tester.ensureVisible(control);
       await tester.tap(control);
       await _pumpReal(tester, vueltas: 6);

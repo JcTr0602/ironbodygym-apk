@@ -80,6 +80,19 @@ void main() {
     expect(find.text('No se pudo abrir WhatsApp'), findsOneWidget,
         reason: 'un false de launchUrl también es un fallo: '
             'se avisa, no muere en silencio');
+    // F02-HD (z19_tests_sl4-1): el aviso es un SnackBar (el
+    // widget de mostrarSnack), no un texto suelto pintado
+    // dentro del diálogo: el texto vive DENTRO del SnackBar.
+    expect(find.byType(SnackBar), findsOneWidget,
+        reason: 'BG-06: el aviso al usuario es el SnackBar '
+            'de la casa, no un rótulo inline del diálogo');
+    expect(
+        find.descendant(
+            of: find.byType(SnackBar),
+            matching: find.text('No se pudo abrir WhatsApp')),
+        findsOneWidget,
+        reason: 'el texto del aviso es el contenido del '
+            'SnackBar');
     Navigator.of(tester.element(find.byType(HistorialVentasScreen)))
         .pop();
     await jornadaDrenar(tester, vueltas: 4);

@@ -99,11 +99,15 @@ void main() {
     await tester.tap(find.textContaining('Desde…'));
     await tester.pumpAndSettle();
     // El DatePicker propone hoy; se acepta con OK.
+    // F02-HF (z30_slx1-1): el OK no es opcional — si el
+    // selector no abrió, no hay rango aplicado y la
+    // negativa de abajo pasaría de vacío.
     final ok = find.text('OK');
-    if (ok.evaluate().isNotEmpty) {
-      await tester.tap(ok);
-      await tester.pumpAndSettle();
-    }
+    expect(ok.evaluate().isNotEmpty, isTrue,
+        reason: 'el selector de fecha debe abrir con su '
+            'OK: sin él no se aplica rango alguno');
+    await tester.tap(ok);
+    await tester.pumpAndSettle();
     // Ningún texto de la hoja contiene una fecha ISO
     // (YYYY-MM-DD): «Desde» debe ir formateado.
     final textos = tester
@@ -113,7 +117,46 @@ void main() {
     expect(RegExp(r'Desde \d{4}-\d{2}-\d{2}').hasMatch(textos), isFalse,
         reason: 'la fecha del filtro no va en ISO crudo');
     expect(textos, contains('Desde '));
+    // El valor que la hoja muestra ya aplicado (formateado
+    // por la propia pantalla) es el que debe PERSISTIR al
+    // reabrir: se captura antes de «Aplicar».
+    final desdeAntes = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.data ?? '')
+        .where((t) => t.startsWith('Desde ') && t != 'Desde…')
+        .toList();
+    expect(desdeAntes, hasLength(1),
+        reason: 'tras el OK, la hoja muestra el «Desde» '
+            'aplicado');
+    expect(
+        RegExp(r'^Desde \d{2}/\d{2}/\d{4}$')
+            .hasMatch(desdeAntes.single),
+        isTrue,
+        reason: 'el «Desde» aplicado va formateado '
+            '(dd/mm/aaaa), no en ISO: ${desdeAntes.single}');
     await tester.tap(find.text('Aplicar'));
     await tester.pumpAndSettle();
+    // F02-HF: la medición manda DESPUÉS de aplicar — se
+    // cierra la hoja, se REABRE y se afirman los valores
+    // persistidos en la hoja reabierta.
+    await tester.tap(find.textContaining('Filtrar'));
+    await tester.pumpAndSettle();
+    expect(find.text('Filtros'), findsOneWidget,
+        reason: 'la hoja de filtros se reabre tras aplicar');
+    final textosReabierta = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.data ?? '')
+        .toList();
+    for (final t in textosReabierta) {
+      if (t.startsWith('Desde') || t.startsWith('Hasta')) {
+        expect(RegExp(r'\d{4}-\d{2}-\d{2}').hasMatch(t), isFalse,
+            reason: 'en la hoja reabierta ninguna fecha va '
+                'en ISO crudo (ni «Desde: aaaa-mm-dd» ni '
+                'variantes): «$t»');
+      }
+    }
+    expect(textosReabierta, contains(desdeAntes.single),
+        reason: 'al reabrir, el «Desde» persistido es el '
+            'mismo que se aplicó: ${desdeAntes.single}');
   });
 }

@@ -153,12 +153,34 @@ void main() {
         isTrue);
     // Un día futuro y laborable del mes visible: se abre el
     // editor del día y se pulsa su Guardar (el del diálogo).
+    // F02-HF (z29_sl11-2): la fecha destino se construye
+    // dejando que el propio constructor de DateTime
+    // normalice el desborde (hoy 28–31 + 4 cae en el mes
+    // siguiente) y el finder usa el día YA normalizado
+    // (`fecha.day`, nunca `hoy.day + 4` en crudo, que los
+    // días 28–31 buscaba un «32»–«35» inexistente). Si el
+    // día normalizado cae en el mes siguiente, se navega
+    // a ese mes con el chevron de la propia pantalla
+    // antes de tocarlo. La intención se conserva: un día
+    // futuro cercano y laborable (no domingo: su celda no
+    // abre editor) del calendario.
     final hoy = DateTime.now();
-    var dia = hoy.day + 4;
-    var fecha = DateTime(hoy.year, hoy.month, dia);
+    var fecha = DateTime(hoy.year, hoy.month, hoy.day + 4);
     if (fecha.weekday == 7) {
-      dia += 1;
-      fecha = DateTime(hoy.year, hoy.month, dia);
+      fecha = DateTime(fecha.year, fecha.month, fecha.day + 1);
+    }
+    final dia = fecha.day;
+    expect(
+        fecha.isAfter(DateTime(hoy.year, hoy.month, hoy.day)),
+        isTrue,
+        reason: 'el día tocado es un día futuro cercano');
+    expect(fecha.weekday, isNot(7),
+        reason: 'el día tocado es laborable (el domingo no '
+            'abre editor)');
+    if (fecha.month != hoy.month || fecha.year != hoy.year) {
+      await tester
+          .tap(find.byIcon(Icons.chevron_right_rounded).first);
+      await tester.pump(const Duration(milliseconds: 300));
     }
     await tester.tap(find.text('$dia'));
     expect(

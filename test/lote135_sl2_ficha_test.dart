@@ -70,6 +70,13 @@ void main() {
       expect(find.text('05/11/2026'), findsWidgets);
       expect(find.textContaining('Peso: 80,0'), findsWidgets);
       expect(find.text('2026-11-05'), findsNothing);
+      // F02-HD (z17_tests_sl2-4): la prohibición cubre la
+      // clase, no solo el Text exacto: ningún texto puede
+      // CONTENER la ISO cruda, ni con prefijo («Inicio:
+      // 2026-11-05») ni con sufijo.
+      expect(find.textContaining('2026-11-05'), findsNothing,
+          reason: 'G03-5: la fecha cruda no se pinta ni '
+              'acompañada: siempre 05/11/2026');
     });
   });
 
@@ -90,6 +97,31 @@ void main() {
     test('la vista previa no pinta el detalle crudo de la excepción', () {
       final s = _src('lib/ui/vista_previa_cliente.dart');
       expect(s.contains('Text(_errorDetalle!'), isFalse);
+    });
+    test('ninguna asignación a _error salta el traductor amable', () {
+      final s = _src('lib/ui/vista_previa_cliente.dart');
+      // F02-HD (z17_tests_sl2-5): la clase entera, no un
+      // literal: la pantalla pinta Text(_error!), así que lo
+      // que hay que fijar es el ORIGEN — _error solo puede
+      // nacer de mensajeErrorAmable, de un literal amable o
+      // de null. Un `_error = e.toString()` o `_error = '$e'`
+      // pintaría el crudo sin contener el literal histórico.
+      final asignaciones =
+          RegExp(r'_error\s*=\s*([^;]+);').allMatches(s);
+      expect(asignaciones, isNotEmpty,
+          reason: 'control: la pantalla sí asigna su error');
+      for (final m in asignaciones) {
+        final rhs = m.group(1)!.trim();
+        expect(
+            rhs == 'null' ||
+                rhs.startsWith("'") ||
+                rhs.startsWith('"') ||
+                rhs.contains('mensajeErrorAmable'),
+            isTrue,
+            reason: 'G03-8: «_error = $rhs» pintaría un error '
+                'crudo: debe pasar por mensajeErrorAmable o '
+                'ser un texto amable literal');
+      }
     });
   });
 
@@ -128,6 +160,28 @@ void main() {
     test('la rama else del cierre no interpola res[error] crudo', () {
       final s = _src('lib/ui/ficha_congelacion.dart');
       expect(s.contains("_snack('\${res['error']"), isFalse);
+    });
+    test('ningún _snack del cierre interpola res[error] sin traductor', () {
+      final s = _src('lib/ui/ficha_congelacion.dart');
+      // F02-HD (z17_tests_sl2-5): la clase entera, no un
+      // literal: CUALQUIER _snack(...) cuyo argumento
+      // mencione res['error'] debe envolverlo en
+      // mensajeCierreCongelacionFallido. Variantes como
+      // _snack('Error: ${res['error']}') quedan cazadas
+      // aunque no contengan el literal histórico, y los
+      // textos amables sembrados no disparan la regla
+      // (no mencionan res['error'] a pelo).
+      final llamadas = RegExp(r'_snack\(([^)]*)\)').allMatches(s);
+      expect(llamadas, isNotEmpty,
+          reason: 'control: la pantalla sí presenta snacks');
+      for (final m in llamadas) {
+        final arg = m.group(1)!;
+        if (arg.contains("res['error']")) {
+          expect(arg, contains('mensajeCierreCongelacionFallido'),
+              reason: 'G03-11: res[error] solo llega al snack '
+                  'traducido, nunca crudo: _snack($arg…)');
+        }
+      }
     });
   });
 

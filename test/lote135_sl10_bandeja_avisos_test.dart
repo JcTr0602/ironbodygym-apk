@@ -147,6 +147,25 @@ void main() {
     expect(find.widgetWithText(FilterChip, 'Con teléfono'),
         findsOneWidget);
     expect(find.textContaining('Enviar en lote'), findsOneWidget);
+    // F02-HF (z27_sl10_1-4): al desplegar también vuelve el
+    // BUSCADOR, presente y funcional: acepta texto y el
+    // filtro sigue aplicándose a la lista.
+    expect(find.byType(TextField), findsOneWidget,
+        reason: 'desplegando, el buscador vuelve junto a '
+            'los demás controles');
+    await tester.enterText(find.byType(TextField), 'Vencido');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Vencido Uno'), findsOneWidget,
+        reason: 'el buscador acepta texto y el contacto '
+            'que coincide sigue visible');
+    await tester.enterText(
+        find.byType(TextField), 'NombreQueNoExiste135');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Vencido Uno'), findsNothing,
+        reason: 'el filtro del buscador sigue aplicado '
+            'tras desplegar: lo que no coincide se oculta');
   });
 
   testWidgets('G04-6 · guardar plantillas de campaña no '
@@ -220,6 +239,35 @@ void main() {
     final quedan = await tester
         .runAsync(() => listarPlantillas());
     expect(quedan!.length, 1);
+    // F02-HF (z27_sl10_1-2): también se ejercita la
+    // CONFIRMACIÓN — un botón de confirmar no-op debe
+    // hacer fallar este test. Se repite el camino entero
+    // y esta vez se confirma: la plantilla desaparece de
+    // la pantalla y del registro.
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await _asentarHasta(
+        tester, () => find.text('Eliminar').evaluate().isNotEmpty);
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.tap(find.text('Eliminar'));
+    await _asentarHasta(
+        tester, () => find.byType(AlertDialog).evaluate().isNotEmpty);
+    expect(find.text('Saludo SL10'), findsOneWidget,
+        reason: 'antes de confirmar, la plantilla sigue ahí');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Eliminar'));
+    await _asentarHasta(tester,
+        () => find.text('Saludo SL10').evaluate().isEmpty);
+    expect(find.text('Saludo SL10'), findsNothing,
+        reason: 'tras confirmar, la plantilla desaparece '
+            'de la lista');
+    final trasConfirmar = await tester
+        .runAsync(() => listarPlantillas());
+    expect(trasConfirmar!.length, 0,
+        reason: 'tras confirmar, el borrado ocurrió en el '
+            'registro, no solo en pantalla');
   });
 
   testWidgets('G04-8 · si setMeta falla, el interruptor de '

@@ -141,6 +141,54 @@ void main() {
     expect(find.text('Sincronizar ahora'), findsOneWidget);
     expect(find.text('Centro de sincronización'), findsOneWidget);
 
+    // F02-HE (z23_sl8_1-7): la op sembrada se VE en la
+    // lista, no solo mueve contadores: su fila se pinta
+    // con el título que el producto deriva de su tipo
+    // («Gasto» para tipo gasto, vía tituloDeOp) y con su
+    // aviso de subida pendiente.
+    expect(find.text('Gasto'), findsOneWidget,
+        reason: 'la fila de la op sembrada «Gasto de '
+            'prueba SL8» está construida y visible en la '
+            'lista que manda');
+    expect(find.text('Se subirá cuando haya conexión'),
+        findsOneWidget,
+        reason: 'la fila es la de la op pendiente sembrada');
+
+    // F02-HE (z23_sl8_1-8): «fuera del pliegue» de verdad,
+    // no por texto: el contenido del pliegue (Align con
+    // heightFactor 0) es encontrable por find.text aunque
+    // esté recortado, así que se comprueba GEOMETRÍA —
+    // ambas acciones tienen altura real (>0), su rect
+    // cae dentro del viewport (420×800) y quedan POR
+    // ENCIMA del pliegue cerrado, cuyo rect tiene
+    // altura ~0 y no las contiene.
+    final pliegueCerrado =
+        find.byKey(const ValueKey('sl8-auxiliares'));
+    expect(tester.getSize(pliegueCerrado).height, 0,
+        reason: 'el pliegue nace cerrado (heightFactor 0)');
+    final rectPliegue = tester.getRect(pliegueCerrado);
+    for (final etiqueta in [
+      'Sincronizar ahora',
+      'Centro de sincronización',
+    ]) {
+      final rect = tester.getRect(find.text(etiqueta));
+      expect(rect.height, greaterThan(0),
+          reason: '«$etiqueta» ocupa espacio real, no está '
+              'recortada por un heightFactor 0');
+      expect(rect.top, greaterThanOrEqualTo(0),
+          reason: '«$etiqueta» entra en el viewport');
+      expect(rect.bottom, lessThanOrEqualTo(800),
+          reason: '«$etiqueta» se ve entera en la primera '
+              'pantalla, no bajo el pliegue');
+      expect(rectPliegue.contains(rect.topLeft), isFalse,
+          reason: '«$etiqueta» no vive dentro del rect del '
+              'pliegue cerrado');
+      expect(find.text(etiqueta).hitTestable(),
+          findsOneWidget,
+          reason: '«$etiqueta» es alcanzable al toque: '
+              'visible de verdad, no solo construida');
+    }
+
     // La lista es lo primero: su cabecera está en la
     // primera pantalla, por encima del control de pliegue.
     final cabecera = find.text('Operaciones recientes');

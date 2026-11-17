@@ -157,4 +157,58 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await _pumps(tester, 4);
   });
+
+  // F02-HE (z23_sl8_1-3): «Volver» no solo se busca: se
+  // PULSA y se afirma el destino — la pantalla montada
+  // sobre una ruta anfitriona vuelve a ella (el pop).
+  testWidgets('«Volver» del error se pulsa y sale a la '
+      'pantalla anterior', (tester) async {
+    tester.view.physicalSize = const Size(420, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await _sesionDueno(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (ctx) => Center(
+            child: ElevatedButton(
+              onPressed: () => Navigator.of(ctx).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => RepararSyncScreen(
+                    diagnosticoParaTest: () async =>
+                        const FotoAtascos(opsError: 1),
+                    reparacionParaTest: () async =>
+                        throw Exception('boom de prueba al reparar'),
+                  ),
+                ),
+              ),
+              child: const Text('Abrir reparar'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await _pumps(tester);
+    await tester.tap(find.text('Abrir reparar'));
+    await _pumps(tester);
+    expect(find.byType(RepararSyncScreen), findsOneWidget,
+        reason: 'la pantalla de reparar se abrió sobre la '
+            'anfitriona');
+    await tester.tap(find.text('Reparar'));
+    await _pumps(tester);
+    expect(find.text('La reparación no se pudo completar'),
+        findsOneWidget);
+    await tester.tap(find.text('Volver'));
+    await _pumps(tester);
+    expect(find.byType(RepararSyncScreen), findsNothing,
+        reason: '«Volver» hace pop: la pantalla de error '
+            'ya no está');
+    expect(find.text('La reparación no se pudo completar'),
+        findsNothing);
+    expect(find.text('Abrir reparar'), findsOneWidget,
+        reason: 'el destino del pop es la pantalla '
+            'anterior, viva');
+    await tester.pumpWidget(const SizedBox());
+    await _pumps(tester, 4);
+  });
 }

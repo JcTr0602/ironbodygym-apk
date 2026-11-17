@@ -153,5 +153,22 @@ void main() {
       reason: 'el total pedido se asienta animado',
     );
     expect(find.textContaining('CUP pedidos'), findsOneWidget);
+    // F02-HE (z20_sl5-2): el total SEMBRADO (5000) se
+    // aserta, no solo la forma: la propiedad `valor` del
+    // MontoAnimado de la cabecera es la cifra sembrada y,
+    // agotada la animación, el texto renderizado la dice
+    // con el formato vigente de la pantalla (fmtMonto no
+    // pone separador de miles: «5000 CUP pedidos»).
+    final animado = tester.widget<MontoAnimado>(
+      find.descendant(
+          of: cabecera, matching: find.byType(MontoAnimado)),
+    );
+    expect(animado.valor, 5000,
+        reason: 'el MontoAnimado lleva el total sembrado, '
+            'no cualquier cifra');
+    await _pumpReal(tester, vueltas: 8);
+    expect(find.text('5000 CUP pedidos'), findsOneWidget,
+        reason: 'el total renderizado es el sembrado: '
+            '5000 CUP pedidos');
   });
 }

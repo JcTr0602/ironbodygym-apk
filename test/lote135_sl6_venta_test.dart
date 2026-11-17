@@ -143,6 +143,26 @@ void main() {
         reason: 'G05-5: el total fuera del scroll');
     expect(find.textContaining('Total'), findsWidgets,
         reason: 'el total se sigue viendo, pero fijo');
+    // F02-HE (z21_sl6-2): lo anterior pasaba en vacío si el
+    // diálogo cambiaba de tipo de scroll (sin
+    // SingleChildScrollView el finder padre es vacío). Se
+    // exige contra CUALQUIER Scrollable ancestro: ningún
+    // widget «Total» del diálogo puede tener un ancestro
+    // desplazable, sea del tipo que sea.
+    final totales = find.textContaining('Total');
+    expect(totales, findsWidgets,
+        reason: 'hay al menos un total que comprobar (la '
+            'negación no pasa en vacío)');
+    for (final e in totales.evaluate()) {
+      final conScrollable = find.ancestor(
+        of: find.byWidget(e.widget),
+        matching: find.byType(Scrollable),
+      );
+      expect(conScrollable, findsNothing,
+          reason: 'G05-5: ningún «Total» vive dentro de un '
+              'Scrollable (ListView, CustomScrollView o el '
+              'que sea): vive en la barra fija del diálogo');
+    }
 
     // Con el teclado abierto (viewInsets simulados), total
     // y confirmar siguen presentes y sin excepción.

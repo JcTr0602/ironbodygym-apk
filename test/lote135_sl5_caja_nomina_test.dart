@@ -124,10 +124,21 @@ void main() {
       expect(find.byTooltip('Bajar cambios del arqueo'),
           findsOneWidget);
       expect(find.byTooltip('Sincronizar arqueo'), findsNothing);
+      // F02-HE (z20_sl5-1): «Actualizar» no solo se prohíbe
+      // en Nómina: tampoco existe en Arqueo.
+      expect(find.byTooltip('Actualizar'), findsNothing,
+          reason: 'ninguna superficie de Caja usa el '
+              '«Actualizar» genérico');
+      expect(find.text('Actualizar'), findsNothing,
+          reason: 'ni como tooltip ni como rótulo visible');
       await _montar(tester, const DiferenciasCajaScreen());
       expect(find.byTooltip('Releer'), findsOneWidget,
           reason: 'ese botón solo relee lo local y su '
               'nombre lo dice');
+      // F02-HE (z20_sl5-1): tampoco en Diferencias.
+      expect(find.byTooltip('Actualizar'), findsNothing,
+          reason: 'Diferencias relee; no «actualiza»');
+      expect(find.text('Actualizar'), findsNothing);
       await _montar(tester, const NominaScreen());
       expect(find.byTooltip('Bajar cambios'), findsOneWidget);
       expect(find.byTooltip('Actualizar'), findsNothing);

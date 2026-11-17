@@ -43,11 +43,18 @@ void main() {
         'aplicado y lo demás queda PENDIENTE visible, nunca '
         'mezcla silenciosa', () async {
       final aplicadas = <String>[];
+      // Sonda F02-HD (z16_tests_sl1-2 r1): el estado de las
+      // marcas EN EL MOMENTO del fallo inyectado, leído desde
+      // dentro del propio callback que falla — no después de
+      // que la función devuelva.
+      Map<String, String>? pendientesAlFallar;
       final svc = InvitadosService(
         rpc: (nombre, params) async {
           if (nombre == 'info_publica_guardar') {
             final clave = '${params?['p_clave']}';
             if (clave == 'direccion') {
+              pendientesAlFallar =
+                  await LocalDb.instance.infoPublicaPendientes();
               throw Exception('la red cae aquí (test)');
             }
             aplicadas.add(clave);
@@ -70,13 +77,41 @@ void main() {
       final pendientes =
           await LocalDb.instance.infoPublicaPendientes();
       expect(pendientes, {'direccion': 'Calle Boca'});
+      // F02-HD (z16_tests_sl1-2 r1): el orden de A-20 se
+      // aserta DENTRO del fallo, no solo en el estado final:
+      // cuando la publicación de «direccion» cae, AMBAS
+      // claves ya estaban marcadas como pendientes (marcar
+      // precede a publicar; una variante que marcara solo la
+      // clave caída al salir del bucle dejaría el mismo
+      // estado final y este test no debe pasarla).
+      expect(pendientesAlFallar, isNotNull,
+          reason: 'la sonda debió capturar las marcas en el '
+              'momento del fallo inyectado');
+      expect(
+          pendientesAlFallar,
+          {
+            'whatsapp_dueno': '58191577',
+            'direccion': 'Calle Boca',
+          },
+          reason: 'A-20: al fallar la segunda clave, la '
+              'primera ya estaba marcada como pendiente '
+              'ANTES de publicarse: el marcado es previo a '
+              'la publicación, no un resto del bucle');
     });
 
     test(
         'con red sana, el bloque aplica todo y no deja '
         'pendientes', () async {
+      // F02-HD (z16_tests_sl1-1 r1): la falsa REGISTRA las
+      // llamadas — «sin pendientes» también era el estado
+      // inicial tras _bdVacia(), así que sin registro el
+      // test pasaba aunque no se publicara nada.
+      final llamadas = <({String nombre, Map<String, dynamic>? params})>[];
       final svc = InvitadosService(
-        rpc: (nombre, params) async => {'ok': true},
+        rpc: (nombre, params) async {
+          llamadas.add((nombre: nombre, params: params));
+          return {'ok': true};
+        },
       );
       final quedan = await svc.guardarInfoPublicaEnBloque({
         'whatsapp_dueno': '58191577',
@@ -85,6 +120,27 @@ void main() {
       expect(quedan, isEmpty);
       expect(await LocalDb.instance.infoPublicaPendientes(),
           isEmpty);
+      // La corrida SÍ publicó: una llamada a
+      // info_publica_guardar por clave, con su valor.
+      final publicaciones = llamadas
+          .where((l) => l.nombre == 'info_publica_guardar')
+          .toList();
+      expect(publicaciones, hasLength(2),
+          reason: 'A-20: con red sana se llama a '
+              'info_publica_guardar una vez por clave del '
+              'bloque; sin llamadas no hay publicación que '
+              'pueda dejar el bloque aplicado');
+      expect(
+          <String, String>{
+            for (final l in publicaciones)
+              '${l.params?['p_clave']}': '${l.params?['p_valor']}',
+          },
+          {
+            'whatsapp_dueno': '58191577',
+            'direccion': 'Calle Boca',
+          },
+          reason: 'cada clave se publica con SU valor, no '
+              'con el de otra ni vacío');
     });
   });
 }

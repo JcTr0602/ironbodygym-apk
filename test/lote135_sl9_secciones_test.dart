@@ -146,6 +146,32 @@ void main() {
       expect(tester.takeException(), isNull,
           reason: 'la fila no debe desbordar: el valor cede '
               'con ellipsis dentro de su flexible');
+      // F02-HF (z26_sl9_2-1): el título promete ELLIPSIS,
+      // no solo ausencia de overflow: se afirma la
+      // propiedad del Text renderizado que pinta el valor
+      // (un cambio a clip, a multilínea o la supresión del
+      // valor debe hacer fallar este test).
+      const valorLargo = 'ValorExtremadamenteLargoQueNoCabeEnLaFila'
+          'NiDeLejosPorqueEsUnaCadenaEnormeSinEspacios'
+          'DeMasDeCienCaracteresSeguidos1234567890';
+      final textosValor = tester
+          .widgetList<Text>(find.byType(Text))
+          .where((t) => t.data == valorLargo)
+          .toList();
+      expect(textosValor, hasLength(1),
+          reason: 'el valor largo sigue pintado en la fila '
+              '(no suprimido)');
+      expect(textosValor.single.overflow, TextOverflow.ellipsis,
+          reason: 'el valor cede con overflow ellipsis, no '
+              'con clip ni visible');
+      // Y el Text del valor va dentro de un Flexible: sin
+      // él, la propiedad existiría pero la fila desbordaría.
+      expect(
+          find.ancestor(
+              of: find.text(valorLargo),
+              matching: find.byType(Flexible)),
+          findsWidgets,
+          reason: 'el valor va acotado por su Flexible');
     });
   });
 

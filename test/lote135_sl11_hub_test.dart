@@ -229,6 +229,43 @@ void main() {
         reason: 'G12-6: al desplegar, el contenido de la '
             'contingencia se hace visible');
     expect(tester.takeException(), isNull);
+    // F02-HF (z29_sl11-3): «queda accesible» no se mide
+    // solo por la altura de la tarjeta: se hace scroll
+    // hasta «Comprobar», su rect debe quedar DENTRO del
+    // viewport del teléfono (420×800) y el toque debe ser
+    // efectivo (sin warnIfMissed silenciado ni excepción
+    // de hit-test).
+    await tester.scrollUntilVisible(comprobar, 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(comprobar, findsOneWidget,
+        reason: 'G12-6: desplegada, «Comprobar» sigue en '
+            'el árbol');
+    final rectComprobar = tester.getRect(comprobar);
+    final viewport = tester.view.physicalSize /
+        tester.view.devicePixelRatio;
+    expect(rectComprobar.top, greaterThanOrEqualTo(0),
+        reason: '«Comprobar» no queda sobre el borde '
+            'superior del viewport');
+    expect(rectComprobar.bottom, lessThanOrEqualTo(viewport.height),
+        reason: '«Comprobar» no queda bajo el borde inferior '
+            'del viewport tras el scroll');
+    expect(rectComprobar.left, greaterThanOrEqualTo(0));
+    expect(rectComprobar.right, lessThanOrEqualTo(viewport.width));
+    await tester.tap(comprobar);
+    await tester.pump(const Duration(milliseconds: 300));
+    // El toque dispara la comprobación contra el servidor
+    // dummy (falla rápido o por su timeout): se drena para
+    // no dejar futuros ni temporizadores colgados.
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 250)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pump(const Duration(seconds: 13));
+    expect(tester.takeException(), isNull,
+        reason: 'el toque sobre «Comprobar» es efectivo '
+            '(alcanza el control, no una capa que lo tapa)');
   });
 
   testWidgets('G12-9: la leyenda del mapa semanal no '

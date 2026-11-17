@@ -61,6 +61,43 @@ void main() {
         reason: 'fmtFecha: 2026-11-03 → 03/11/2026');
     expect(find.textContaining('2026-11-03'), findsNothing,
         reason: 'G05-6: nada de ISO crudo en las filas');
+
+    // F02-HE (z21_sl6-1): el doc promete filas Y detalle —
+    // se toca la primera fila y el diálogo de detalle se
+    // afirma con su contenido clave (también con fmtFecha).
+    await tester.tap(find.byType(ListTile).first);
+    await jornadaDrenar(tester, vueltas: 6);
+    await jornadaEsperar(
+        tester, find.text('Fecha: 03/11/2026'));
+    expect(find.byType(AlertDialog), findsOneWidget,
+        reason: 'tocar la fila abre su detalle '
+            '(DialogoApp se construye sobre AlertDialog)');
+    expect(find.text('Fecha: 03/11/2026'), findsOneWidget,
+        reason: 'G05-6 en el detalle: fmtFecha, no ISO');
+    expect(find.text('Cliente: —'), findsOneWidget,
+        reason: 'la venta sembrada no trae cliente');
+    expect(find.text('Monto: 500 CUP'), findsOneWidget,
+        reason: 'el detalle dice el monto de la compra');
+    expect(find.text('Origen: Venta del turno'),
+        findsOneWidget,
+        reason: 'la venta del turno se distingue de la '
+            'manual en su detalle');
+    expect(find.textContaining('2026-11-03'), findsNothing,
+        reason: 'ni en el detalle aparece ISO crudo');
+    await tester.tap(find.widgetWithText(TextButton, 'Cerrar'));
+    // El pop tarda ciclos reales en el arnés (la animación
+    // de salida del DialogoApp): se sondea la ausencia en
+    // vez de un drenaje fijo (corrección del coordinador
+    // sobre el arnés F02-HE).
+    var cerro = false;
+    for (var i = 0; i < 40 && !cerro; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 80));
+      cerro = find.byType(AlertDialog).evaluate().isEmpty;
+    }
+    expect(cerro, isTrue,
+        reason: 'el detalle se cierra y se vuelve a la lista');
   });
 
   testWidgets(
