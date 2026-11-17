@@ -1383,16 +1383,30 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
   }
 }
 
+/// 1.36 (136-270): el chip de Invitados ES la primitiva
+/// de la casa (ChipEstado), con el frente resuelto por
+/// brillo a los papeles de texto — la pastilla artesanal
+/// anterior ponía el color crudo como texto sobre su
+/// propio tinte y fallaba el contraste en ambos temas
+/// (1,96–3,50 en claro; 2,31–4,08 en oscuro).
 Widget _chip(String texto, Color color) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 3),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Text(texto,
-        style: AppTexto.minuscula.copyWith(color: color, fontWeight: FontWeight.w600)),
-  );
+  return Builder(builder: (context) {
+    final Color frente;
+    if (color == AppColores.alerta || color == AppColores.alertaOscuro) {
+      frente = AppColores.alertaTexto(context);
+    } else if (color == AppColores.exitoOscuro) {
+      frente = AppColores.exitoTexto(context);
+    } else if (color == AppColores.infoOscuro) {
+      frente = AppColores.infoTexto(context);
+    } else if (color == AppColores.error) {
+      frente = AppColores.errorTexto(context);
+    } else if (color == _doradoPlus) {
+      frente = AppColores.textoNaranja(context);
+    } else {
+      frente = color;
+    }
+    return ChipEstado.libre(texto: texto, color: frente);
+  });
 }
 
 String _n(double v) => v == v.roundToDouble() ? '${v.toInt()}' : '$v';

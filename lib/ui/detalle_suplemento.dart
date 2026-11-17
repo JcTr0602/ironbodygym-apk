@@ -1156,7 +1156,7 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   significado: SignificadoChip.neutral),
             ),
           const SizedBox(height: AppEspacio.xs),
-          ChipEstado(
+          ChipEstado.libre(
               texto: categoriaNombre,
               color: AppColores.naranja),
           if (descripcion.isNotEmpty) ...[

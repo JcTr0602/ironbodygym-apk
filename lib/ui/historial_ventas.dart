@@ -791,12 +791,12 @@ class _HistorialVentasScreenState
                 runSpacing: AppEspacio.xs,
                 children: [
                   if (viaInscripcion)
-                    const ChipEstado(
+                    const ChipEstado.libre(
                         texto: 'Inscripción + venta',
                         color: AppColores.naranja,
                         icono: Icons.person_add_rounded),
                   if (difiere && !ventaProtegida)
-                    const ChipEstado(
+                    const ChipEstado.libre(
                         texto: 'Precio diferente',
                         color: AppColores.alerta,
                         icono: Icons.warning_amber_rounded),

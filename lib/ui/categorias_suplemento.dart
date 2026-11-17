@@ -313,7 +313,7 @@ class _CategoriasSuplementoScreenState
                                               style: AppTexto
                                                   .secundario),
                                           if (!activa)
-                                            ChipEstado(
+                                            ChipEstado.libre(
                                                 texto:
                                                     'Inactiva',
                                                 color: AppColores

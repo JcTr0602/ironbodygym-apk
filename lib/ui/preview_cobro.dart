@@ -125,7 +125,7 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
                                     fontWeight: FontWeight.w700)),
                           ),
                           if (widget.selloTexto != null)
-                            ChipEstado(
+                            ChipEstado.libre(
                               texto: widget.selloTexto!,
                               color: AppColores.alerta,
                             ),

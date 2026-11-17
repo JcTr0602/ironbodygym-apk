@@ -125,7 +125,7 @@ class BotonPrimario extends StatelessWidget {
           elevation: 0,
           padding: const EdgeInsets.symmetric(
               vertical: AppEspacio.md, horizontal: AppEspacio.xl),
-          minimumSize: const Size(64, 52),
+          minimumSize: const Size(64, 48), // 1.36 (136-266): la geometría del tema, no otra (era 52)
           shape: RoundedRectangleBorder(borderRadius: radio),
         ),
         child:
@@ -228,7 +228,7 @@ class TarjetaAccionesCliente extends StatelessWidget {
         width: 38,
         height: 38,
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
+          color: color.withValues(alpha: AppOpacidad.tinteSuave),
           borderRadius: BorderRadius.circular(AppRadio.sm),
         ),
         child: Icon(icono, size: 20, color: color),
@@ -261,7 +261,7 @@ class TarjetaAccionesCliente extends StatelessWidget {
                 height: 30,
                 decoration: BoxDecoration(
                   color:
-                      AppColores.naranja.withValues(alpha: 0.12),
+                      AppColores.naranja.withValues(alpha: AppOpacidad.tinteSuave),
                   borderRadius:
                       BorderRadius.circular(AppRadio.sm),
                 ),
@@ -411,11 +411,17 @@ class BotonSecundario extends StatelessWidget {
   final VoidCallback? onPressed;
   final IconData? icono;
 
+  /// 1.36 (136-266): el mismo contrato de estados que sus
+  /// hermanos (normal/deshabilitado/cargando); antes el
+  /// secundario no podía pintar carga.
+  final bool cargando;
+
   const BotonSecundario({
     super.key,
     required this.texto,
     this.onPressed,
     this.icono,
+    this.cargando = false,
   });
 
   @override
@@ -423,13 +429,14 @@ class BotonSecundario extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton(
-        onPressed: onPressed,
+        onPressed: cargando ? null : onPressed,
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(
               vertical: AppEspacio.md, horizontal: AppEspacio.xl),
-          minimumSize: const Size(64, 52),
+          minimumSize: const Size(64, 48),
         ),
-        child: _ContenidoBoton(texto: texto, icono: icono),
+        child: _ContenidoBoton(
+            texto: texto, icono: icono, cargando: cargando),
       ),
     );
   }
@@ -462,7 +469,7 @@ class BotonPeligro extends StatelessWidget {
           side: const BorderSide(color: AppColores.error, width: 1.5),
           padding: const EdgeInsets.symmetric(
               vertical: AppEspacio.md, horizontal: AppEspacio.xl),
-          minimumSize: const Size(64, 52),
+          minimumSize: const Size(64, 48),
         ),
         child: _ContenidoBoton(
             texto: texto, icono: icono, cargando: cargando),
@@ -523,8 +530,10 @@ class _FadeEntradaState extends State<FadeEntrada> {
   void initState() {
     super.initState();
     final i = widget.indice;
-    _animar =
-        FadeEntrada.ventanaActiva && (i == null || i < 10);
+    // 1.36 (136-274): la guarda vive en el sistema — con
+    // «Reducir movimiento» la primitiva nace sin animar,
+    // sin que el llamador tenga que acordarse.
+    _animar = FadeEntrada.ventanaActiva && (i == null || i < 10);
     if (!_animar) {
       _visible = true;
       return;
@@ -545,7 +554,9 @@ class _FadeEntradaState extends State<FadeEntrada> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_animar) return widget.child;
+    if (!_animar || MediaQuery.of(context).disableAnimations) {
+      return widget.child;
+    }
     return AnimatedOpacity(
       opacity: _visible ? 1.0 : 0.0,
       // 1.30 D6 (UI130-32): duración y curva del token.
@@ -577,10 +588,10 @@ class CruceEstados extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 (136-274): con «Reducir movimiento», el cruce es
+    // instantáneo (duración resuelta por el sistema).
     return AnimatedSwitcher(
-      // 1.30 D6 (UI130-32): los valores de siempre, por el
-      // token (220 ms = AppMovimiento.media).
-      duration: AppMovimiento.media,
+      duration: AppMovimiento.resuelta(context, AppMovimiento.media),
       switchInCurve: AppMovimiento.curva,
       switchOutCurve: AppMovimiento.curvaReversa,
       child: KeyedSubtree(key: ValueKey<String>(estado), child: child),
@@ -642,6 +653,11 @@ class Tarjeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 (136-267): Tarjeta CONSUME el tema de tarjeta:
+    // su color por defecto es el del cardTheme instalado
+    // (grafito táctico / blanco Sol / superficie base), no
+    // una superficie paralela.
+    final colorTema = Theme.of(context).cardTheme.color;
     // 1.29 D-18: la sombra conserva EXACTO el valor que daba la
     // clase deprecada de sombras (negro/gris según el brillo),
     // escrito en el propio componente.
@@ -653,18 +669,11 @@ class Tarjeta extends StatelessWidget {
     // queda exento y plano, como siempre.
     final oscuro = Theme.of(context).brightness == Brightness.dark;
     final altoContraste = AppColores.esAltoContraste(context);
-    final sombra = altoContraste || oscuro
-        ? BoxShadow(
-            color: (oscuro ? Colors.black : Colors.grey)
-                .withValues(alpha: oscuro ? 0.4 : 0.12),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          )
-        : BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.18),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          );
+    // 1.36 (136-272): la sombra sale de AppElevacion (nivel
+    // 1 = tarjeta), con su equivalente en oscuro.
+    final sombra = AppElevacion.sombra(context, 1).isEmpty
+        ? const BoxShadow(color: Colors.transparent)
+        : AppElevacion.sombra(context, 1).first;
     final lineaLuz = oscuro && !altoContraste
         ? Positioned(
             top: 0,
@@ -680,7 +689,7 @@ class Tarjeta extends StatelessWidget {
     if (onTap == null) {
       return Container(
         decoration: BoxDecoration(
-          color: color ?? AppColores.superficie(context),
+          color: color ?? colorTema ?? AppColores.superficie(context),
           borderRadius: radio,
           border: Border.all(color: AppColores.borde(context)),
           boxShadow: [sombra],
@@ -720,7 +729,7 @@ class Tarjeta extends StatelessWidget {
         boxShadow: [sombra],
       ),
       child: Material(
-        color: color ?? AppColores.superficie(context),
+        color: color ?? colorTema ?? AppColores.superficie(context),
         borderRadius: radio,
         child: InkWell(
           borderRadius: radio,
@@ -830,17 +839,17 @@ class BadgeEstado extends StatelessWidget {
     // azul brillante que daba 3,68/3,90.
     switch (estado) {
       case EstadoMembresia.alDia:
-        fondo = AppColores.exito.withValues(alpha: 0.15);
+        fondo = AppColores.exito.withValues(alpha: AppOpacidad.tinteFuerte);
         frente = AppColores.exitoTexto(context);
         icono = Icons.check_circle_rounded;
         break;
       case EstadoMembresia.porVencer:
-        fondo = AppColores.alerta.withValues(alpha: 0.15);
+        fondo = AppColores.alerta.withValues(alpha: AppOpacidad.tinteFuerte);
         frente = AppColores.alertaTexto(context);
         icono = Icons.schedule_rounded;
         break;
       case EstadoMembresia.vencido:
-        fondo = AppColores.error.withValues(alpha: 0.15);
+        fondo = AppColores.error.withValues(alpha: AppOpacidad.tinteFuerte);
         frente = AppColores.errorTexto(context);
         icono = Icons.warning_amber_rounded;
         break;
@@ -856,7 +865,7 @@ class BadgeEstado extends StatelessWidget {
       // 1.25 T13: membresía congelada — el estado manda
       // sobre los días (su vencimiento no está corriendo).
       case EstadoMembresia.congelado:
-        fondo = AppColores.info.withValues(alpha: 0.15);
+        fondo = AppColores.info.withValues(alpha: AppOpacidad.tinteFuerte);
         frente = AppColores.infoTexto(context);
         icono = Icons.ac_unit_rounded;
         break;
@@ -944,7 +953,13 @@ class DialogoApp extends StatelessWidget {
           Expanded(child: Text(titulo, style: AppTexto.titulo)),
         ],
       ),
-      content: contenido,
+      // 1.36 (136-282): ancho máximo y contenido con scroll
+      // — la raíz del desborde de 136-128 vive en la
+      // primitiva, no en cada diálogo.
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: SingleChildScrollView(child: contenido),
+      ),
       actions: acciones,
       actionsPadding: const EdgeInsets.fromLTRB(
           AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.lg),
@@ -1383,7 +1398,11 @@ class ErrorInline extends StatelessWidget {
   }
 }
 
-/// v1.2.4: indicador de carga con texto (para esperas no inmediatas).
+/// v1.2.4: indicador de carga con texto.
+/// 1.36 (136-275/282): CONTRATO — solo DENTRO de
+/// componentes (botones, miniaturas, zonas acotadas). La
+/// carga PRINCIPAL de una pantalla es esqueleto, nunca
+/// este spinner con texto.
 class EstadoCargando extends StatelessWidget {
   final String texto;
   const EstadoCargando({super.key, this.texto = 'Cargando…'});
@@ -1501,6 +1520,10 @@ class CampoMoneda extends StatefulWidget {
   final void Function(String)? onSubmitted;
   final String? errorText;
 
+  /// 1.36 (136-282): validador de formulario (antes solo
+  /// lo aceptaban otros campos del kit).
+  final String? Function(String?)? validador;
+
   /// Icono de estado a la derecha (p. ej. el ✓ de guardado
   /// del Centro de Precios), tras el sufijo de moneda.
   final Widget? sufijo;
@@ -1516,6 +1539,7 @@ class CampoMoneda extends StatefulWidget {
     this.onSubmitted,
     this.errorText,
     this.sufijo,
+    this.validador,
   });
 
   @override
@@ -1559,6 +1583,7 @@ class _CampoMonedaState extends State<CampoMoneda> {
           const TextInputType.numberWithOptions(decimal: true),
       inputFormatters: const [FormateadorMoneda()],
       onChanged: widget.onChanged,
+      validator: widget.validador,
       onFieldSubmitted: widget.onSubmitted,
       style: AppTexto.cuerpo,
       decoration: _decoracionCampo(context,
@@ -1620,6 +1645,9 @@ class CampoTelefono extends StatelessWidget {
   final FocusNode? focusNode;
   final void Function(String)? onChanged;
   final String? errorText;
+
+  /// 1.36 (136-282): validador de formulario.
+  final String? Function(String?)? validador;
   // 1.35 (CAMPO-2): acción integrada al final del campo
   // (el «Elegir de contactos» del diálogo «Editar
   // cliente» vive DENTRO del campo, no flotando fuera:
@@ -1635,6 +1663,7 @@ class CampoTelefono extends StatelessWidget {
     this.onChanged,
     this.errorText,
     this.sufijo,
+    this.validador,
   });
 
   @override
@@ -1644,6 +1673,7 @@ class CampoTelefono extends StatelessWidget {
       focusNode: focusNode,
       keyboardType: TextInputType.phone,
       inputFormatters: const [FormateadorTelefono()],
+      validator: validador,
       onChanged: onChanged,
       style: AppTexto.cuerpo,
       decoration: _decoracionCampo(context,
@@ -2091,6 +2121,11 @@ class SelectorIron<T> extends StatelessWidget {
   final IconData? icono;
   final String? tituloPanel;
 
+  /// 1.36 (136-282): el selector simple ya puede pintar
+  /// error (antes errorText iba fijo a null; solo el sabor
+  /// de formulario lo pintaba).
+  final String? errorText;
+
   const SelectorIron({
     super.key,
     required this.valor,
@@ -2101,6 +2136,7 @@ class SelectorIron<T> extends StatelessWidget {
     this.textoAyuda,
     this.icono,
     this.tituloPanel,
+    this.errorText,
   });
 
   OpcionSelector<T>? get _seleccionada {
@@ -2137,7 +2173,7 @@ class SelectorIron<T> extends StatelessWidget {
       textoSeleccion: texto,
       iconoSeleccion: texto == null ? null : sel?.icono,
       colorIconoSeleccion: texto == null ? null : sel?.colorIcono,
-      errorText: null,
+      errorText: errorText,
       habilitado: alCambiar != null,
       alTocar: alCambiar == null
           ? null
@@ -2435,31 +2471,13 @@ class CampoTexto extends StatelessWidget {
       onChanged: onChanged,
       maxLines: maxLineas,
       style: AppTexto.cuerpo,
-      decoration: InputDecoration(
-        labelText: etiqueta,
-        hintText: hint,
-        errorText: errorText,
-        prefixIcon:
-            icono != null ? Icon(icono) : null,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadio.md),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadio.md),
-          borderSide:
-              BorderSide(color: AppColores.borde(context)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadio.md),
-          borderSide: const BorderSide(
-              color: AppColores.naranja, width: 2),
-        ),
-        filled: true,
-        fillColor: AppColores.superficie(context),
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.lg,
-            vertical: AppEspacio.md),
-      ),
+      // 1.36 (136-279): la decoración ÚNICA del kit — antes
+      // CampoTexto duplicaba la receta literal a literal.
+      decoration: _decoracionCampo(context,
+          etiqueta: etiqueta,
+          hint: hint,
+          errorText: errorText,
+          icono: icono),
     );
   }
 }
@@ -2713,24 +2731,11 @@ enum SignificadoChip { exito, info, alerta, error, neutral, agotado }
 /// Color de texto/borde del chip para un significado y un brillo.
 /// En claro se usan las variantes oscuras (legibles sobre fondo
 /// tintado); en oscuro, las variantes claras.
-Color colorSignificadoChip(SignificadoChip s, bool oscuro) {
-  switch (s) {
-    case SignificadoChip.exito:
-      return oscuro ? const Color(0xFF4ADE80) : const Color(0xFF166534);
-    case SignificadoChip.info:
-      return oscuro ? const Color(0xFF60A5FA) : AppColores.infoOscuro;
-    case SignificadoChip.alerta:
-      return oscuro ? const Color(0xFFFBBF24) : const Color(0xFF92400E);
-    case SignificadoChip.error:
-      return oscuro ? const Color(0xFFF87171) : AppColores.errorOscuro;
-    case SignificadoChip.neutral:
-      return oscuro
-          ? AppColores.textoSecundarioOscuro
-          : const Color(0xFF616161);
-    case SignificadoChip.agotado:
-      return oscuro ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563);
-  }
-}
+/// 1.36 (136-269): la tabla vive en [AppColores.chipTexto]
+/// (papeles de chip del sistema); esta función queda como
+/// el adaptador por la enum de la casa. Sin literales.
+Color colorSignificadoChip(SignificadoChip s, bool oscuro) =>
+    AppColores.chipTexto(s.index, oscuro);
 
 /// Chip de estado (V6, Argón 1.20): acepta color directo o significado.
 /// Como constructor nombrado real (const), devuelve [ChipEstado] de
@@ -2742,7 +2747,19 @@ class ChipEstado extends StatelessWidget {
   final Color? color;
   final SignificadoChip? significado;
   final IconData? icono;
+  /// 1.36 (136-283): el constructor PRINCIPAL es el
+  /// CERRADO (por significado): la vía fácil es la del
+  /// sistema. El color libre queda como escape con nombre.
   const ChipEstado(
+      {super.key,
+      required this.texto,
+      required SignificadoChip this.significado,
+      this.icono})
+      : color = null;
+
+  /// Escape con nombre para un color fuera del
+  /// vocabulario de significados (categorías, no estados).
+  const ChipEstado.libre(
       {super.key,
       required this.texto,
       required Color this.color,
@@ -2766,14 +2783,14 @@ class ChipEstado extends StatelessWidget {
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
       decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.14),
+        color: c.withValues(alpha: AppOpacidad.tinte),
         // 1.30 D1 (UI130-09): geometría del vocabulario de
         // chips — circular (AppRadio.chip), no lg: a la
         // altura real del chip, 16 y circular se parecían
         // pero no coincidían en filas mixtas.
         borderRadius: BorderRadius.circular(AppRadio.chip),
         border: Border.all(
-            color: c.withValues(alpha: 0.35)),
+            color: c.withValues(alpha: AppOpacidad.bordeTinte)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2988,7 +3005,7 @@ class ContadorBadge extends StatelessWidget {
           texto,
           style: AppTexto.etiqueta.copyWith(
             fontWeight: FontWeight.bold,
-            color: AppColores.sobreNaranja,
+            color: AppColores.contenidoClaro, // 1.36 (136-286): renombrado desde sobreNaranja
           ),
         ),
       ),

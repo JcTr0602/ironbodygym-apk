@@ -55,7 +55,9 @@ class HojaAccion extends StatelessWidget {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: AppColores.bordeClaro,
+                // 1.36 (136-282): el asa se resuelve por brillo
+                // (antes bordeClaro fijo: invisible en oscuro).
+                color: AppColores.borde(context),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),

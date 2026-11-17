@@ -771,7 +771,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       padding: EdgeInsets.zero,
                       child: ListTile(
                         dense: true,
-                        leading: ChipEstado(
+                        leading: ChipEstado.libre(
                           texto: d['turno'] == 'mañana'
                               ? 'Mañana'
                               : 'Tarde',
@@ -1037,7 +1037,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     padding: EdgeInsets.zero,
                     child: ListTile(
                       dense: true,
-                      leading: ChipEstado(
+                      leading: ChipEstado.libre(
                         texto: d['turno'] == 'mañana'
                             ? 'Mañana'
                             : 'Tarde',

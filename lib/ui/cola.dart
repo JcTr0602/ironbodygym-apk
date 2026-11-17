@@ -716,7 +716,7 @@ Widget chipEstadoOp(String estado) {
     color = AppColores.naranja;
     icono = Icons.schedule_rounded;
   }
-  return ChipEstado(texto: texto, color: color, icono: icono);
+  return ChipEstado.libre(texto: texto, color: color, icono: icono);
 }
 
 class ColaScreen extends StatefulWidget {
