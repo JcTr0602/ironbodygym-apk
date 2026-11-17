@@ -53,7 +53,7 @@ void main() {
 
   group('G03-5 historial de medidas formateado', () {
     testWidgets('fecha legible y valor con nombre y formato', (t) async {
-      await t.pumpWidget(MaterialApp(
+      await t.pumpWidget(const MaterialApp(
         home: Scaffold(
           body: TarjetaMedidas(clienteId: 1, medidasIniciales: [
             {
