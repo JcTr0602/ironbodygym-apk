@@ -154,15 +154,17 @@ void main() {
             tester, 'Buscar cliente, vendedor o tipo'),
         isTrue);
 
-    // Inventario embebido: puerta a Precios + bandeja fija.
+    // Inventario embebido: puerta a Precios. G06-3
+    // (desbloqueo lote 141): sin solicitudes, la bandeja de
+    // relleno NO se dibuja (regla de cero de Jc; fuera la
+    // tarjeta fija «Sin solicitudes de relleno» de la 1.31).
     await tester.tap(find.text('Vender'));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('Inventario'));
     expect(await _esperarTexto(tester, 'Precios y comisión'),
         isTrue);
-    expect(
-        await _esperarTexto(tester, 'Sin solicitudes de relleno'),
-        isTrue);
+    expect(find.text('Sin solicitudes de relleno'), findsNothing);
+    expect(find.text('Solicitudes de relleno'), findsNothing);
 
     // Análisis: las dos tarjetas de entrada.
     await tester.tap(find.text('Análisis'));

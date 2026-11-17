@@ -512,11 +512,19 @@ void main() {
       expect(find.text('Pendiente confirmado: 2500 CUP'),
           findsOneWidget);
       // Vaciar el monto y liquidar: aviso de validación,
-      // sin encolar nada.
+      // sin encolar nada. G07-6 (desbloqueo lote 141): la
+      // confirmación es DESLIZAR (DeslizarConfirmar, la
+      // forma de la casa para dinero), no un toque — el
+      // gesto es el patrón de jornada1_arqueo/yunque_132:
+      // arrastrar el pulgar ≥92 % de la pista.
       await tester.enterText(
           find.widgetWithText(TextField, 'Monto entregado (CUP)'),
           '');
-      await tester.tap(find.text('Liquidar'));
+      expect(find.text('Liquidar'), findsNothing,
+          reason: 'ya no hay botón de un toque para liquidar');
+      await tester.drag(
+          find.byKey(const ValueKey('deslizar-pulgar')),
+          const Offset(1000, 0));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 600));
       expect(find.text('Escribe un monto válido.'),

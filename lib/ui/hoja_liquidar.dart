@@ -20,6 +20,7 @@ import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'hoja_accion.dart';
+import 'primitivas.dart';
 
 /// Lo que la hoja devuelve al liquidar con éxito: lo que
 /// Pendiente necesita para su actualización optimista, su
@@ -294,13 +295,18 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
                 ],
               ],
             ),
+      // G07-6 (desbloqueo lote 141): liquidar se confirma
+      // DESLIZANDO en las tres superficies — esta hoja era
+      // la del toque. La validación sigue en _liquidar:
+      // el control va habilitado (salvo liquidando) para
+      // que deslizar con el monto vacío/erróneo avise,
+      // como avisaba el toque.
       pie: _cargando
           ? null
-          : BotonPrimario(
-              texto: 'Liquidar',
-              icono: Icons.point_of_sale_rounded,
-              cargando: _liquidando,
-              onPressed: _liquidando ? null : _liquidar,
+          : DeslizarConfirmar(
+              texto: 'Desliza para liquidar →',
+              habilitado: !_liquidando,
+              onConfirmar: _liquidar,
             ),
     );
   }

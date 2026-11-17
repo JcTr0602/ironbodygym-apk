@@ -42,6 +42,7 @@ import 'package:ironbody_gym/ui/diseno.dart';
 import 'package:ironbody_gym/ui/hoja_cobrar_parcial.dart';
 import 'package:ironbody_gym/ui/hoja_liquidar.dart';
 import 'package:ironbody_gym/ui/pendiente.dart';
+import 'package:ironbody_gym/ui/primitivas.dart';
 import 'package:ironbody_gym/ui/reservas.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -775,7 +776,13 @@ void main() {
         ));
       });
       await _pumpReal(tester);
-      final boton = find.byType(BotonPrimario);
+      // Yunque Exhaustivo 1.35 (colateral de G07-6 del paquete
+      // de desbloqueo aprobado por Jc): la hoja ya no confirma
+      // con BotonPrimario sino deslizando (DeslizarConfirmar,
+      // la forma de la casa para dinero); la garantía D-12 —
+      // el control de confirmar mide ≥48 — se afirma sobre el
+      // deslizable (56 dp fijos en primitivas.dart).
+      final boton = find.byType(DeslizarConfirmar);
       expect(boton, findsOneWidget);
       expect(tester.getSize(boton).height, greaterThanOrEqualTo(48));
     });

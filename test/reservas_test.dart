@@ -62,8 +62,9 @@ void main() {
       final b = construirBandeja(
           [_reserva(9, cliente: 99, suplemento: 88)], [], []);
       final r = b.solicitadas.single;
-      expect(r.clienteNombre, 'Cliente #99');
-      expect(r.suplementoNombre, 'Suplemento #88');
+      // G06-4 (familia): genéricos sin id crudo a pantalla.
+      expect(r.clienteNombre, 'Cliente sin nombre');
+      expect(r.suplementoNombre, 'Suplemento sin nombre');
       expect(r.precioVigente, isNull);
       expect(r.diferenciaTotal, isNull);
     });

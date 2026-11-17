@@ -156,10 +156,12 @@ void main() {
     expect(find.text('900 CUP'), findsNothing,
         reason: 'G#21: los ingresos no pueden contar una '
             'venta cuya reversión ya está encolada');
+    // G06-5 (desbloqueo lote 141): el sello se retiró —
+    // Estadísticas ya no dice la sync; la venta SIGUE
+    // fuera de las cifras (la aserción de arriba manda).
     expect(find.textContaining('Ya no incluye 1 venta'),
-        findsOneWidget,
-        reason: 'el sello dice que la venta ya salió de '
-            'las cifras por su reversión en cola');
+        findsNothing,
+        reason: 'sin sello de sync en Estadísticas (G06-5)');
     expect(tester.takeException(), isNull);
   });
 

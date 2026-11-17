@@ -609,7 +609,12 @@ void main() {
   });
 
   group('G-04 Liquidaciones', () {
-    testWidgets('el botón «Mes · Todos» abre la hoja de meses '
+    // G07-7 (desbloqueo lote 141): el selector de meses ya
+    // es el SelectorIron de la casa (DIS-05) — el campo
+    // cerrado dice la etiqueta «Mes» y la opción vigente
+    // («Todos» / «Octubre 2026»), y su panel es la hoja de
+    // radios del SelectorIron; fuera el botón «Mes · …».
+    testWidgets('el SelectorIron de meses abre su panel '
         'y tocar un mes lo aplica', (tester) async {
       _telefono(tester);
       await sembrarBase(tester);
@@ -643,15 +648,20 @@ void main() {
         }, 1);
       });
       await montar(tester, const LiquidacionesHistorialScreen());
-      expect(find.text('Mes · Todos'), findsOneWidget);
+      expect(find.text('Mes · Todos'), findsNothing,
+          reason: 'el botón propio C-48 ya no existe');
+      expect(find.text('Todos'), findsOneWidget,
+          reason: 'el campo cerrado del SelectorIron muestra '
+              'la opción vigente');
       expect(find.byType(ChoiceChip), findsNothing);
-      await tester.tap(find.text('Mes · Todos'));
+      await tester.tap(find.text('Todos'));
       await _drenar(tester, vueltas: 6);
-      // La hoja lista los meses en orden inverso (noviembre
+      // El panel lista los meses en orden inverso (noviembre
       // primero): se toca octubre y aplica al cerrar.
       await tester.tap(find.text('Octubre 2026'));
       await _drenar(tester, vueltas: 6);
-      expect(find.text('Mes · Octubre 2026'), findsOneWidget);
+      expect(find.text('Octubre 2026'), findsOneWidget,
+          reason: 'el campo cerrado muestra el mes elegido');
       expect(find.text('Gabriel'), findsWidgets);
       expect(find.text('Duany'), findsNothing,
           reason: 'con el mes de octubre solo queda Gabriel');
@@ -837,8 +847,15 @@ void main() {
           e = tester.takeException();
         }
       }
-      expect(find.text('Salida sin venta'), findsOneWidget,
-          reason: 'la pantalla montó la zona del pomo del dueño');
+      // G06-10 (desbloqueo lote 141): este escenario NO
+      // siembra ninguna salida sin venta, así que el botón
+      // de la tarjeta del pomo NO se dibuja (regla de cero:
+      // solo aparece cuando hay salidas que contar). La
+      // pantalla montó igual — lo prueba la ausencia de
+      // desborde de abajo con la zona del pomo pintada.
+      expect(find.text('Salida sin venta'), findsNothing,
+          reason: 'sin salidas sembradas, el botón no ocupa '
+              'sitio fijo en la tarjeta del pomo');
       expect(excepciones, isEmpty,
           reason: 'con la Roboto real no hay desborde a 360×1.3: '
               'el de 76 px era la fuente de test del arnés B-4');

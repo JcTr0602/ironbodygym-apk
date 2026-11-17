@@ -156,13 +156,16 @@ List<DatoModuloPanel> modulosPanel({
       icono: Icons.bar_chart_rounded,
       tinte: AppColores.moduloControl,
       titulo: 'Control y sistema',
+      // G09-5 (desbloqueo lote 141): la línea de Control ya
+      // no dice la sync — fuera el «N cambio(s) por subir»
+      // (la sync se dice una sola vez, con el icono de
+      // cabecera, como en el resto del Panel). El distintivo
+      // sigue sumando incidencias + cambios (es contador de
+      // Por Revisar, no línea de estado de sync).
       estado: incidencias > 0
           ? _conteo(incidencias, 'incidencia por revisar',
               'incidencias por revisar')
-          : pendientesSubir > 0
-              ? _conteo(pendientesSubir, 'cambio por subir',
-                  'cambios por subir')
-              : 'Sistema al día',
+          : 'Sistema al día',
       badge: badgeControl > 0 ? badgeControl : null,
     ),
   ];

@@ -167,11 +167,15 @@ BandejaReservas construirBandeja(
     return ReservaVista(
       id: _entero(r['id']),
       clienteId: _entero(r['cliente_id']),
+      // G06-4 (familia, desbloqueo lote 141): sin nombre en
+      // el espejo, genérico sin id — ningún id crudo a
+      // pantalla (patrón de servicios_admin: «Suplemento
+      // sin nombre» / «Persona sin nombre»).
       clienteNombre:
-          nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente #${r['cliente_id']}',
+          nombreCliente[_entero(r['cliente_id'])] ?? 'Cliente sin nombre',
       suplementoId: sid,
       suplementoNombre:
-          supl?['nombre']?.toString() ?? 'Suplemento #$sid',
+          supl?['nombre']?.toString() ?? 'Suplemento sin nombre',
       cantidad: _entero(r['cantidad']),
       precioUnitario: _doble(r['precio_unitario']),
       // v1.4.6: moneda snapshot que trae la propia reserva.

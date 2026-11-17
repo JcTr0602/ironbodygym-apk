@@ -16,7 +16,6 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'reporte_margenes.dart';
 import 'servicios_admin.dart';
-import 'widgets.dart';
 import '../app_log.dart';
 
 /// v1.8.0: Estadísticas de servicios (SOLO DUEÑO), diseño 🟢 Argón
@@ -61,12 +60,11 @@ class _ServiciosEstadisticasScreenState
   // por mes; en rango quedaría mezclada y el delta mentiría).
   ({double ingresos, int dosis, double margen, double? neto})? _kpis;
   ({double ingresos, int dosis, double margen, double? neto})? _kpisAnt;
-  // 1.28 (M3-B4): ventas del período aún en la cola de este
-  // teléfono (las estadísticas leen SOLO el espejo).
-  int _ventasColaPeriodo = 0;
-  // G#21: ventas del período ya excluidas de las cifras
-  // por tener su reversión aún en la cola (el sello lo dice).
-  int _reversosColaPeriodo = 0;
+  // G06-5 (desbloqueo lote 141): los conteos de cola ya no
+  // se guardan para pintarlos — Estadísticas no dice la
+  // sync (ni chips ni sello ni banda); la única voz es el
+  // icono de cabecera. El cálculo G#21 (excluir de las
+  // cifras las ventas con reversión en cola) NO cambia.
   Map<String, dynamic> _a = const {}; // 1A rendimiento
   Map<String, dynamic> _b = const {}; // 1B inversión
   // v1.13.0 (Bloque 4): agrupaciones Habana, indicadores por bote
@@ -104,17 +102,6 @@ class _ServiciosEstadisticasScreenState
           dia.compareTo(_hastaRango!) <= 0;
     }
     return fecha.substring(0, 7) == hoyHabanaIso().substring(0, 7);
-  }
-
-  /// Los extremos ISO del período visible (para el sello de
-  /// frescura y el período anterior): 'todo' no acota.
-  ({String? desde, String? hasta}) _extremosPeriodo() {
-    final hoy = hoyHabanaIso();
-    return switch (_periodo) {
-      'todo' => (desde: null, hasta: null),
-      'rango' => (desde: _desdeRango, hasta: _hastaRango),
-      _ => (desde: '${hoy.substring(0, 7)}-01', hasta: hoy),
-    };
   }
 
   // Argón Estadísticas #3: espejos crudos cacheados en el
@@ -265,11 +252,6 @@ class _ServiciosEstadisticasScreenState
     final reversosPend = await reversosPendientesVentaIds();
     final ventasSinReversos = ventasServicioSinReversos(ventas,
         reversadasExtra: reversosPend);
-    final reversosColaPeriodo = ventas
-        .where(enP)
-        .where((v) =>
-            reversosPend.contains((v['id'] as num?)?.toInt()))
-        .length;
     final ventasP = ventasSinReversos.where(enP).toList();
     final salidasP = salidas.where(enP).toList();
 
@@ -569,15 +551,6 @@ class _ServiciosEstadisticasScreenState
             : (aggAnt.b['neto_dueno'] as num?)?.toDouble(),
       );
     }
-    // El sello de frescura: las estadísticas leen solo el
-    // espejo; las ventas del período aún en la cola de este
-    // teléfono NO están en estas cifras y se dice cuántas.
-    final extremos = _extremosPeriodo();
-    final opsEst = await opsPendientesServicios();
-    final ventasColaPeriodo = contarOpsServiciosEnCola(opsEst,
-            desde: extremos.desde, hasta: extremos.hasta)
-        .ventas;
-
     // Argón Servicios #11: el simulador valora el agua al CPP
     // vigente (el mismo de las ventas reales y la tarjeta 1B),
     // no al costo de la última compra.
@@ -610,8 +583,6 @@ class _ServiciosEstadisticasScreenState
       _nombrePomo = nombrePomo;
       _kpis = kpisAct;
       _kpisAnt = kpisAnt;
-      _ventasColaPeriodo = ventasColaPeriodo;
-      _reversosColaPeriodo = reversosColaPeriodo;
       _cargando = false;
       _errorCarga = false;
     });
@@ -650,10 +621,8 @@ class _ServiciosEstadisticasScreenState
               : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
-                // Argón stats MEDIO 2: sin banner, el dueño veía
-                // números viejos sin advertencia de sync pendiente.
-                // Al tocarlo se sincroniza; el refresh recarga.
-                const SyncBanner(),
+                // G06-5: sin SyncBanner — la sync se dice una
+                // sola vez, con el icono de cabecera.
                 // v1.13.0 (H6): pestañas Servicios / Suplementos.
                 // Suplementos reutiliza el reporte de márgenes
                 // existente (no se crea otra pantalla de stats).
@@ -751,38 +720,12 @@ class _ServiciosEstadisticasScreenState
                   ],
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaKpis(),
-                  // 1.28 (M3-B4): el sello de frescura de las
-                  // estadísticas — estas cifras salen SOLO
-                  // del espejo; lo que sigue en la cola de
-                  // este teléfono no está dentro y se dice.
-                  if (_ventasColaPeriodo > 0) ...[
-                    const SizedBox(height: AppEspacio.sm),
-                    ChipEstado.semantico(
-                      texto: 'No incluye $_ventasColaPeriodo '
-                          'venta${_ventasColaPeriodo == 1 ? '' : 's'} '
-                          'por sincronizar: aún '
-                          '${_ventasColaPeriodo == 1 ? 'está' : 'están'} '
-                          'en este teléfono',
-                      significado: SignificadoChip.alerta,
-                      icono: Icons.sync_rounded,
-                    ),
-                  ],
-                  // G#21: el reverso del sello — ventas que
-                  // las cifras YA no cuentan porque su
-                  // reversión está en la cola de este teléfono.
-                  if (_reversosColaPeriodo > 0) ...[
-                    const SizedBox(height: AppEspacio.sm),
-                    ChipEstado.semantico(
-                      texto: 'Ya no incluye $_reversosColaPeriodo '
-                          'venta${_reversosColaPeriodo == 1 ? '' : 's'} '
-                          'con reversión por sincronizar: '
-                          'saldrá${_reversosColaPeriodo == 1 ? '' : 'n'} '
-                          'del espejo al subir',
-                      significado: SignificadoChip.alerta,
-                      icono: Icons.sync_rounded,
-                    ),
-                  ],
-                  const SizedBox(height: AppEspacio.md),
+                  // G06-5 (desbloqueo lote 141): fuera los
+                  // chips/sello de sync («No incluye… por
+                  // sincronizar» y «Ya no incluye… con
+                  // reversión por sincronizar») — las cifras
+                  // siguen excluyendo esas ventas (G#21);
+                  // lo que se retira es decir la sync aquí.
                   _tarjetaRendimiento(),
                   const SizedBox(height: AppEspacio.md),
                   _tarjetaInversion(),

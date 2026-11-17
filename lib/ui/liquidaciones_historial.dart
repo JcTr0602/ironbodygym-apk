@@ -118,100 +118,24 @@ class _LiquidacionesHistorialScreenState
     return '${nombres[m - 1]} ${mes.substring(0, 4)}';
   }
 
-  /// 1.34 (C-48 · G-04): el botón «Mes · …» que sustituye a
-  /// la fila de chips de meses, en la fila del buscador.
-  Widget _botonMes() {
-    return OutlinedButton(
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadio.lg),
-        ),
-      ),
-      onPressed: _abrirHojaMeses,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: Text(
-              // Yunque 2.34 (F-7): el botón usa el nombre
-              // CORTO (nombreMesBoton): con «Septiembre
-              // 2026» entero, el año se elidía.
-              _mes.isEmpty ? 'Mes · Todos' : 'Mes · ${nombreMesBoton(_mes)}',
-              style: AppTexto.metadato,
-              // Yunque 1.34 (C2-5): a 2 líneas, como los demás
-              // botones de filtros plegados (ver Auditoría).
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 4),
-          const Icon(Icons.expand_more_rounded, size: 16),
-        ],
-      ),
+  /// G07-7 (desbloqueo lote 141): el selector de meses es
+  /// el SelectorIron de la casa (patrón DIS-05), en la fila
+  /// del buscador — fuera el botón propio con su hoja de
+  /// radios a mano (C-48). El panel del SelectorIron ya
+  /// trae radio, elegida en marca y cierre al tocar; los
+  /// meses van en el mismo orden descendente de siempre y
+  /// la opción '' se lee «Todos».
+  Widget _selectorMes() {
+    return SelectorIron<String>(
+      valor: _mes,
+      etiqueta: 'Mes',
+      tituloPanel: 'Mes',
+      opciones: [
+        const OpcionSelector('', 'Todos'),
+        for (final m in _meses) OpcionSelector(m, _nombreMes(m)),
+      ],
+      alCambiar: (v) => setState(() => _mes = v ?? ''),
     );
-  }
-
-  /// Hoja con los meses en orden inverso (el mismo orden
-  /// descendente que traían los chips); tocar un mes lo
-  /// aplica y cierra, como hacía el menú de «Por entrenador».
-  Future<void> _abrirHojaMeses() async {
-    final elegido = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(AppRadio.xl)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
-              AppEspacio.md, AppEspacio.lg, AppEspacio.lg),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text('Mes', style: AppTexto.subtitulo),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Cerrar',
-                    onPressed: () => Navigator.of(ctx).pop(),
-                  ),
-                ],
-              ),
-              RadioGroup<String>(
-                groupValue: _mes,
-                onChanged: (v) => Navigator.of(ctx).pop(v),
-                child: Column(
-                  children: [
-                    const RadioListTile<String>(
-                      value: '',
-                      title: Text('Todos'),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    for (final m in _meses)
-                      RadioListTile<String>(
-                        value: m,
-                        title: Text(_nombreMes(m)),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (elegido == null || !mounted) return;
-    setState(() => _mes = elegido);
   }
 
   Widget _fila(Map<String, dynamic> h) {
@@ -321,7 +245,7 @@ class _LiquidacionesHistorialScreenState
                 ),
                 if (_meses.length > 1) ...[
                   const SizedBox(width: AppEspacio.sm),
-                  Flexible(child: _botonMes()),
+                  Flexible(child: _selectorMes()),
                 ],
               ],
             ),

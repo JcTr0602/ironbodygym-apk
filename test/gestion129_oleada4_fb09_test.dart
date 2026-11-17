@@ -550,14 +550,15 @@ void main() {
             Future<void>.delayed(const Duration(milliseconds: 100)));
         await tester.pump(const Duration(milliseconds: 80));
       }
-      // 1.31 (Mejoras · Inventario): la bandeja es FIJA — la
-      // petición atendida se oculta, pero la sección queda
-      // con su estado vacío («Sin solicitudes de relleno»);
-      // antes la sección entera desaparecía.
+      // G06-3 (desbloqueo lote 141): la regla de cero de Jc
+      // supera la bandeja fija de la 1.31 — atendida la
+      // petición, la sección entera desaparece: ni tarjeta
+      // ni «Sin solicitudes de relleno».
       expect(find.widgetWithText(FilledButton, 'Rellenar'),
           findsNothing,
           reason: 'la petición atendida se oculta en la pantalla');
-      expect(find.text('Sin solicitudes de relleno'), findsOneWidget);
+      expect(find.text('Sin solicitudes de relleno'), findsNothing);
+      expect(find.text('Solicitudes de relleno'), findsNothing);
       // Drenaje entrelazado: el ciclo de sync que dispara el
       // relleno mezcla red real (avanza en runAsync),
       // esperas de la zona falsa (avanzan con pump) y el

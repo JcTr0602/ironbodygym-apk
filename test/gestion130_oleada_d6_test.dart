@@ -516,7 +516,11 @@ void main() {
           const FotoPendientesModulos(cambiosPorSubir: 4),
           pendientesSubir: 4);
       expect(soloCambios[5].badge, 4);
-      expect(soloCambios[5].estado, '4 cambios por subir');
+      // G09-5 (desbloqueo lote 141): la línea de Control ya
+      // no dice la sync — sin incidencias dice «Sistema al
+      // día» aunque haya cambios por subir (el distintivo
+      // de arriba sigue contándolos).
+      expect(soloCambios[5].estado, 'Sistema al día');
       final nada = modulosDe(const FotoPendientesModulos());
       expect(nada[5].badge, isNull);
       expect(nada[5].estado, 'Sistema al día');

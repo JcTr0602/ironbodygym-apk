@@ -793,36 +793,11 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         if (!_rellenoAtendidasLocal.contains(s.id)) s,
     ];
     if (visibles.isEmpty) {
-      // 1.31 (Mejoras · Inventario): la bandeja es FIJA — sin
-      // peticiones también se ve (antes la sección entera
-      // desaparecía y «¿dónde caen los pedidos?» no tenía
-      // respuesta en la pantalla).
-      return Column(
-        children: [
-          Tarjeta(
-            padding: const EdgeInsets.all(AppEspacio.md),
-            child: Row(
-              children: [
-                IconoPomo(
-                    tamano: 24, color: AppColores.texto(context)),
-                const SizedBox(width: AppEspacio.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Solicitudes de relleno',
-                          style: AppTexto.titulo),
-                      Text('Sin solicitudes de relleno',
-                          style: AppTexto.secundario),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppEspacio.md),
-        ],
-      );
+      // G06-3 (desbloqueo lote 141): la regla de cero de Jc
+      // (posterior a la decisión 1.31 de bandeja fija) manda
+      // — sin solicitudes, la bandeja NO se dibuja: una fila
+      // en cero no ocupa sitio permanente.
+      return const SizedBox.shrink();
     }
     return Column(
       children: [

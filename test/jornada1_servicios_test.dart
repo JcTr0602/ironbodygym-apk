@@ -154,7 +154,9 @@ Future<void> _elegirClienteVenta(
     WidgetTester tester, ContadorToques toques, String nombre) async {
   await toques.tap(
       tester, find.textContaining('Cliente: sin identificar'));
-  await jornadaEsperar(tester, find.text('Buscar por nombre…'));
+  // G06-9: el hint dice su verdad — también busca por carnet.
+  await jornadaEsperar(
+      tester, find.text('Buscar por nombre o carnet…'));
   await toques.tap(tester, find.text(nombre));
   await jornadaDrenar(tester, vueltas: 4);
 }

@@ -1820,6 +1820,26 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   // 1.15 (decisión Jc 2026-10-26): salida sin venta SOLO dueño,
   // sin importar el motivo. El servidor rechaza además
   // (OPS_SOLO_ADMIN + _require_owner). Compacta, arriba a la derecha.
+  /// G06-10 (desbloqueo lote 141): hay salidas sin venta
+  /// QUE CONTAR en el pomo visible — el desglose cargado
+  /// corresponde a ese pomo y su conteo de salidas (espejo
+  /// + cola, el mismo de «Salidas: N» del pie) es > 0.
+  /// Sin salidas, el botón no se dibuja en esta tarjeta
+  /// (regla de cero); registrar una sigue alcanzable
+  /// siempre desde Inventario (ServiciosAdmin).
+  bool _haySalidasQueContar(Map<String, dynamic>? pomo) {
+    if (pomo == null) return false;
+    final pid = (pomo['id'] as num?)?.toInt();
+    if (pid == null || _desglosePomoId != pid) return false;
+    return desglosePomo(
+          pomo: pomo,
+          ventasEspejo: _desgloseVentas,
+          salidasEspejo: _desgloseSalidas,
+          opsPendientes: _desgloseOps,
+        ).salidas >
+        0;
+  }
+
   Widget _botonSalidaCompacto() {
     return TextButton.icon(
       style: TextButton.styleFrom(
@@ -1851,7 +1871,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     style:
                         AppTexto.metadato),
                 const Spacer(),
-                if (pomo != null && _esDueno) _botonSalidaCompacto(),
+                if (pomo != null && _esDueno && _haySalidasQueContar(pomo))
+                  _botonSalidaCompacto(),
               ],
             ),
           if (_misPomos.length > 1)
@@ -1919,7 +1940,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     ],
                   ),
                 ),
-                if (pomo != null && _esDueno) _botonSalidaCompacto(),
+                if (pomo != null && _esDueno && _haySalidasQueContar(pomo))
+                  _botonSalidaCompacto(),
               ],
             ),
           const SizedBox(height: 8),
@@ -2747,7 +2769,9 @@ class _DialogoClienteState extends State<_DialogoCliente> {
               controller: _ctrl,
               autofocus: true,
               decoration: const InputDecoration(
-                hintText: 'Buscar por nombre…',
+                // G06-9: el buscador también busca por carnet
+                // (D14) — el hint dice su verdad.
+                hintText: 'Buscar por nombre o carnet…',
                 prefixIcon: Icon(Icons.search_rounded),
                 border: OutlineInputBorder(),
                 contentPadding:
