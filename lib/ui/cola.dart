@@ -823,17 +823,18 @@ class _ColaScreenState extends State<ColaScreen> {
   String _resumenAuxiliares({
     required String tituloHeroe,
     required int totalPendiente,
-    required int totalError,
   }) {
+    // Cierre del lote 1.35: el subtítulo NO repite las
+    // cifras de error — la sync se dice una sola vez
+    // (contrato SP-06): el error de ops lo vocean sus
+    // filas y el de fotos, su pastilla. Aquí quedan el
+    // estado del héroe, el flujo y lo por subir.
     return [
       tituloHeroe,
       '↓ ${_det.bajados} · ↑ ${_det.subidos}',
       if (totalPendiente > 0) '$totalPendiente por subir',
-      if (totalError > 0)
-        '$totalError con error',
       if (_bloqueadas.isNotEmpty)
         '${_bloqueadas.length} necesitan revisión',
-      if (_fotosError > 0) '$_fotosError fotos con error',
     ].join(' · ');
   }
 
@@ -3372,15 +3373,30 @@ class _ColaScreenState extends State<ColaScreen> {
                 );
               }),
             const SizedBox(height: 16),
+            // Cierre del lote 1.35: la cola de FOTOS va junto
+            // a la lista y ANTES del pliegue — es una cola de
+            // trabajo (contrato SP-04…SP-09 del panel 1.35),
+            // no un bloque auxiliar: dentro del pliegue sus
+            // filas quedaban tras dos pliegues, inalcanzables.
+            // v1.2.9+46 (Gemini): visibilidad de la cola de fotos.
+            _tarjetaFotos(context),
+            // H-12 (1.20): fotos de incidencias en error, si hay.
+            if (_fotosIncError.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _tarjetaFotosIncidencias(context),
+            ],
+            const SizedBox(height: 16),
             // SL-8 (G08-4, VIS aprobada por Jc): la LISTA de
             // la cola manda — estadísticas, resumen en
             // sencillo, bajada, banda de error, bloqueadas y
-            // tarjetas de fotos/comprobantes van PLEGADOS
-            // tras este único control, que resume su estado
+            // la tarjeta de comprobantes van PLEGADOS tras
+            // este único control, que resume su estado
             // (regla anti-regueros). Nacen plegados; ninguna
             // función se pierde: todo sigue a un toque, y la
             // puerta al Centro y el botón de sincronizar
-            // quedan fuera, accesibles.
+            // quedan fuera, accesibles. La cola de FOTOS va
+            // fuera del pliegue (cierre del lote: contrato
+            // SP-04…SP-09).
             Tarjeta(
               padding: EdgeInsets.zero,
               child: Column(
@@ -3403,8 +3419,7 @@ class _ColaScreenState extends State<ColaScreen> {
                                 Text(
                                   _resumenAuxiliares(
                                       tituloHeroe: titulo,
-                                      totalPendiente: totalPendiente,
-                                      totalError: totalError),
+                                      totalPendiente: totalPendiente),
                                   style: AppTexto.minuscula.copyWith(
                                       color: AppColores
                                           .textoSecundario(context)),
@@ -3581,13 +3596,6 @@ class _ColaScreenState extends State<ColaScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-            ],
-            // v1.2.9+46 (Gemini): visibilidad de la cola de fotos.
-            _tarjetaFotos(context),
-            // H-12 (1.20): fotos de incidencias en error, si hay.
-            if (_fotosIncError.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _tarjetaFotosIncidencias(context),
             ],
             if (_compError.isNotEmpty) ...[
               const SizedBox(height: 16),
