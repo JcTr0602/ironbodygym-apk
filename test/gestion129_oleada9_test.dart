@@ -224,22 +224,14 @@ void main() {
           reason: 'el acento de la primaria va en su icono');
     });
 
-    test('el FAB del dial usa el token propio gradienteDial', () {
-      // 1.32 (pin E5): el speed dial y su FAB se jubilaron
-      // con la Home clásica (ver el pin T8 de bloque5): el
-      // token gradienteDial queda RESERVADO en diseno.dart
-      // con sus extremos de siempre — lo que este pin sigue
-      // fijando es que el literal no reaparece suelto en
-      // home.dart y que el token no cambió de valores.
+    test('el token gradienteDial quedó BORRADO (1.36, 136-281)', () {
+      // El speed dial se jubiló en la 1.32 y el token quedó
+      // «reservado» sin consumidor: la 1.36 lo borra (no se
+      // depreca eternamente). El literal tampoco reaparece.
       final home = File('lib/ui/home.dart').readAsStringSync();
-      expect(home.contains('Color(0xFFFF8A00)'), isFalse,
-          reason: 'el extremo del dial no es un literal '
-              'en home.dart: vive en diseno.dart');
-      expect(AppColores.gradienteDial.colors,
-          const [Color(0xFFFF8A00), Color(0xFFEA580C)],
-          reason: 'los extremos de siempre, sin cambio visual');
-      expect(AppColores.gradienteDial.begin, Alignment.topLeft);
-      expect(AppColores.gradienteDial.end, Alignment.bottomRight);
+      expect(home.contains('Color(0xFFFF8A00)'), isFalse);
+      final diseno = File('lib/ui/diseno.dart').readAsStringSync();
+      expect(diseno.contains('gradienteDial'), isFalse);
     });
   });
 

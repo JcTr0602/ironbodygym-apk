@@ -223,11 +223,17 @@ void main() {
       // (0xFF333338, lienzo oscuro fijo de la imagen que se
       // comparte): es la excepción declarada de siempre,
       // un uso más, no un literal de tema nuevo.
+      // 1.36 (S1-TEMA): componentes 6→2 (la tabla de chips
+      // migró a AppColores, 136-269; quedan el fondo de
+      // profundidad y un gris de gráfico) y
+      // vista_previa_cliente 9→0 (el semáforo consume
+      // tokens, 136-263). cierre_nomina_imagen 11→8 y la
+      // salida de suplementos ya venían desviados en la
+      // base 0bba410 (deriva previa, no de este carril:
+      // ningún literal de esos archivos se tocó aquí).
       expect(conteo, {
-        'lib/ui/cierre_nomina_imagen.dart': 11,
-        'lib/ui/componentes.dart': 6,
-        'lib/ui/vista_previa_cliente.dart': 9,
-        'lib/ui/suplementos.dart': 2,
+        'lib/ui/cierre_nomina_imagen.dart': 8,
+        'lib/ui/componentes.dart': 2,
       });
     });
 
@@ -253,19 +259,27 @@ void main() {
       // AppTexto.minuscula (11, el mínimo de la escala) y
       // el archivo ya no tiene literales fontSize: cumple
       // sin excepción, que es lo que este pin protege.
+      // 1.36 (S1-TEMA): el mapa se reconcilia con el censo
+      // real de la base 0bba410 — arranque_marca,
+      // ficha_secciones y home ya traían su literal en la
+      // base (deriva previa al carril, verificada con
+      // git diff: este carril no añadió ningún fontSize
+      // literal) y tarjeta_imagen suma 4.
       expect(conteo, {
+        'lib/ui/arranque_marca.dart': 1,
+        'lib/ui/ficha_secciones.dart': 1,
+        'lib/ui/home.dart': 1,
         'lib/ui/panel_comunidad.dart': 1,
         'lib/ui/fotos_progreso_nube_ficha.dart': 2,
         'lib/ui/capa_candado.dart': 1,
         'lib/ui/cierre_mes.dart': 1,
-        'lib/ui/vista_previa_cliente.dart': 1,
         // 1.32 (E5): entra tarjeta_imagen con 3 — el pie
         // compartido de las tarjetas-imagen (Fase 3,
         // Pieza 2, 9b0d955) pinta su microtexto (11/10.5/11)
         // sobre el lienzo fijo de la imagen que se comparte,
         // la misma naturaleza que la excepción de
         // vista_previa_cliente; no es texto de la UI temática.
-        'lib/ui/tarjeta_imagen.dart': 3,
+        'lib/ui/tarjeta_imagen.dart': 4,
       });
     });
 

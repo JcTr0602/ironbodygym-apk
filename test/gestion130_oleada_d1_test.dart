@@ -100,9 +100,12 @@ void main() {
   });
 
   group('D1 · UI130-09 geometría de chips', () {
-    test('el vocabulario: chip = circular, tag = md', () {
+    test('el vocabulario: chip = circular (tag borrado, 136-281)', () {
       expect(AppRadio.chip, AppRadio.circular);
-      expect(AppRadio.tag, AppRadio.md);
+      // 1.36 (136-281): AppRadio.tag tenía 0 usos — se
+      // borra, no se depreca.
+      final diseno = File('lib/ui/diseno.dart').readAsStringSync();
+      expect(diseno.contains('static const tag'), isFalse);
     });
 
     testWidgets('ChipEstado pinta con radio circular', (tester) async {
@@ -239,9 +242,12 @@ void main() {
   });
 
   group('D1 · UI130-04 secundario claro', () {
-    test('el token es #6B6B6B y pasa AA en sus tres pares reales', () {
+    test('el token es #5F5F5F y pasa AA en sus tres pares reales', () {
+      // 1.36 (136-278): #6B6B6B daba 4,49 sobre el
+      // grisTecnico del tema INSTALADO (sol); #5F5F5F da
+      // 5,37 y sigue pasando sus tres pares de la 1.30.
       expect(AppColores.textoSecundarioClaro,
-          const Color(0xFF6B6B6B));
+          const Color(0xFF5F5F5F));
       for (final superficie in [
         AppColores.fondoClaro,
         AppColores.superficieClaro,

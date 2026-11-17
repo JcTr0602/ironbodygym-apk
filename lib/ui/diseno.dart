@@ -40,10 +40,19 @@ class AppColores {
   /// 1.35 (UI-16): la escala de texto SOBRE superficie
   /// oscura (login y piezas de marca), como tokens: antes
   /// cada pantalla escribía sus blancos con alfa a mano.
+  // 1.36 (136-290): cada peldaño declara su USO PERMITIDO
+  // y su contraste sobre carbonProfundo (#141414):
+  /// Texto pleno sobre oscuro — 15,4:1. Uso: texto funcional.
   static const textoSobreOscuro = Color(0xFFFFFFFF);
+  /// 60 % — ≈7,1:1. Uso: texto funcional secundario.
   static const textoSobreOscuroSuave = Color(0x99FFFFFF);
+  /// 54 % — ≈6,0:1. Uso: texto funcional grande o etiquetas.
   static const textoSobreOscuroMedio = Color(0x8AFFFFFF);
+  /// 38 % — ≈3,6:1. Uso: SOLO decorativo o texto grande;
+  /// PROHIBIDO para pistas de campo y texto funcional.
   static const textoSobreOscuroTenue = Color(0x61FFFFFF);
+  /// 24 % — ≈2,2:1. Uso: SOLO decorativo (marca de agua,
+  /// versión de la app); PROHIBIDO para texto que se lee.
   static const textoSobreOscuroMinimo = Color(0x3DFFFFFF);
 
   // --- Semánticos ---
@@ -76,7 +85,7 @@ class AppColores {
   //   blanca/fondo/hundida, todo ≥ 4,5 salvo el límite declarado
   //   de exitoTextoClaro sobre hundida (4,40: la hundida no
   //   aloja texto de estado).
-  static const exitoTextoClaro = Color(0xFF15803D);
+  static const exitoTextoClaro = Color(0xFF166534); // 1.36 (136-278): #15803D daba 4,22 sobre grisTecnico instalado; #166534 da 6,00 y 6,26 sobre hundida
   static const exitoTextoOscuro = Color(0xFF22C55E);
   static const alertaTextoClaro = Color(0xFF9C4A0C);
   static const alertaTextoOscuro = Color(0xFFF59E0B);
@@ -104,9 +113,6 @@ class AppColores {
   // alertaOscuro) usan el semántico directamente.
   static const bannerGrisA = Color(0xFF9CA3AF);
   static const bannerGrisB = Color(0xFF6B7280);
-  static const bannerAlertaA = Color(0xFFFBBF24);
-  static const bannerInfoA = Color(0xFF60A5FA);
-  static const bannerInfoB = Color(0xFF2563EB);
 
   // 1.29 (Oleada 5, D-04): los dos pares del banner que
   // NO coincidían con ningún semántico completo dejan de
@@ -116,10 +122,7 @@ class AppColores {
   // error/errorOscuro directamente, como ya hacían el
   // verde (exito) y el ámbar de pendientes (bannerAlertaA
   // + alertaOscuro).
-  static const bannerEnviandoA = Color(0xFFF59E0B);
   static const bannerEnviandoB = Color(0xFFEA580C);
-  static const bannerFotosA = Color(0xFFA855F7);
-  static const bannerFotosB = Color(0xFF7C3AED);
 
   // --- Superficies modo claro ---
   static const fondoClaro = Color(0xFFF5F5F5);
@@ -138,7 +141,7 @@ class AppColores {
   // fondo y ≈5,48 sobre blanco — fijado por test con los
   // tres pares reales del rol (fondo, superficie y hundida).
   // El oscuro (#B0B0B0, 8,64) no se toca.
-  static const textoSecundarioClaro = Color(0xFF6B6B6B);
+  static const textoSecundarioClaro = Color(0xFF5F5F5F); // 1.36 (136-278): #6B6B6B daba 4,49 sobre grisTecnico instalado; #5F5F5F da 5,37
   static const textoOscuro = Color(0xFFF5F5F5);
   static const textoSecundarioOscuro = Color(0xFFB0B0B0);
 
@@ -177,8 +180,15 @@ class AppColores {
           : textoSecundarioClaro;
 
   /// Gradiente naranja (botones primarios, headers).
+  /// 1.36 (136-287): el gradiente de marca nace y muere en
+  /// la marca — antes arrancaba en #F59E0B (el ámbar de
+  /// alerta) y el naranja de la casa no estaba en ningún
+  /// extremo. Regla gradiente/plano: gradiente SOLO en el
+  /// botón primario de la casa ([BotonPrimario]) y en las
+  /// cabeceras de marca; el tema pinta los botones Material
+  /// en plano con el mismo extremo inicial.
   static const gradienteNaranja = LinearGradient(
-    colors: [Color(0xFFF59E0B), naranjaOscuro],
+    colors: [naranja, naranjaOscuro],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -198,16 +208,6 @@ class AppColores {
     colors: [naranja, azulAgua],
     begin: Alignment.centerLeft,
     end: Alignment.centerRight,
-  );
-
-  /// Gradiente RESERVADO del FAB del speed dial (v1.3.6; tokenizado
-  /// en la 1.29 O9 con nombre propio, como mandó la pasada de
-  /// diseño: NO es el gradiente de marca general — sus extremos
-  /// (#FF8A00 → #EA580C) son los del dial y solo los usa él).
-  static const gradienteDial = LinearGradient(
-    colors: [Color(0xFFFF8A00), Color(0xFFEA580C)],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
   );
 
   // --- 1.32 «Mostrador Táctico» (rediseño de Argón, inventario
@@ -291,39 +291,19 @@ class AppColores {
           ? cobalto
           : cobaltoOscuro;
 
-  /// Verde de éxito según el brillo actual.
-  static Color verdeDe(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? esmeralda
-          : verdeBosque;
+  /// 1.36 (136-268): verdeDe ES exitoTexto — un solo juego
+  /// semántico; la familia táctica deja de ser vocabulario
+  /// de estado y queda solo como superficies.
+  static Color verdeDe(BuildContext context) => exitoTexto(context);
 
-  /// Ámbar de urgencia según el brillo actual.
-  static Color ambarDe(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? ambarTactico
-          : ambarTierra;
+  /// 1.36 (136-268): ambarDe ES alertaTexto.
+  static Color ambarDe(BuildContext context) => alertaTexto(context);
 
-  /// Rojo de error según el brillo actual.
-  static Color rojoDe(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark ? coral : carmesi;
+  /// 1.36 (136-268): rojoDe ES errorTexto.
+  static Color rojoDe(BuildContext context) => errorTexto(context);
 
-  /// Cian del estado En Pausa según el brillo actual.
-  static Color cianDe(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? cianHielo
-          : cianProfundo;
 
-  /// Violeta de transferencia/Plus según el brillo actual.
-  static Color violetaDe(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? violetaTactico
-          : indigoTactico;
 
-  /// Dorado EXCLUSIVO de la Cuenta a la Casa según el brillo.
-  static Color doradoDe(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? doradoReal
-          : doradoRealOscuro;
 
   // --- P0 (1.20, paquete de diseño Argón) ---
   // Superficies con jerarquía: elevada flota sobre la tarjeta, hundida
@@ -383,11 +363,68 @@ class AppColores {
         : bordeSutilClaro;
   }
 
+  // --- 1.36 (136-285): papeles que vivían como literales
+  // locales dentro de _tema, ahora con nombre y par ---
+  /// Fondo de control deshabilitado (sobre él va
+  /// [deshabilitadoTexto]; par declarado: legible como
+  /// estado, exento de AA por ser control inactivo pero
+  /// VISIBLE por decisión del tema).
+  static const deshabilitadoFondoClaro = Color(0xFFE6E6E6);
+  static const deshabilitadoFondoOscuro = Color(0xFF2C2C2C);
+  static const deshabilitadoTextoClaro = Color(0xFF757575);
+  static const deshabilitadoTextoOscuro = Color(0xFF9E9E9E);
+  /// Interruptor apagado: pista y pulgar por brillo.
+  static const interruptorPistaClaro = Color(0xFFC9C9C9);
+  static const interruptorPistaOscuro = Color(0xFF555555);
+  static const interruptorPistaDeshabClaro = Color(0xFFE0E0E0);
+  static const interruptorPistaDeshabOscuro = Color(0xFF333333);
+  static const interruptorPulgarClaro = Color(0xFF757575);
+  static const interruptorPulgarOscuro = Color(0xFFD8D8D8);
+  static const interruptorPulgarDeshabClaro = Color(0xFFBDBDBD);
+  static const interruptorPulgarDeshabOscuro = Color(0xFF5A5A5A);
+  static const interruptorBordeClaro = Color(0xFF9E9E9E);
+  static const interruptorBordeOscuro = Color(0xFF7A7A7A);
+  /// Fondo del snack en oscuro (en claro manda carbon).
+  static const snackFondoOscuro = Color(0xFF2E2E2E);
+
+  // --- 1.36 (136-269): papeles de CHIP de estado ---
+  // La tabla de chips vive aquí, no en componentes: texto
+  // de chip por significado y brillo. Reutiliza *Texto
+  // donde el valor coincide y tokeniza donde no.
+  static const chipExitoOscuro = Color(0xFF4ADE80);
+  static const chipInfoOscuro = Color(0xFF60A5FA);
+  static const chipAlertaOscuro = Color(0xFFFBBF24);
+  static const chipErrorOscuro = Color(0xFFF87171);
+  static const chipNeutralClaro = Color(0xFF616161);
+  static const chipAgotadoClaro = Color(0xFF4B5563);
+  static const chipAgotadoOscuro = Color(0xFF9CA3AF);
+
+  /// Color de texto/borde del chip para un significado
+  /// (0=exito 1=info 2=alerta 3=error 4=neutral 5=agotado).
+  /// La enum vive en componentes; aquí el índice es el
+  /// contrato para no crear dependencia circular.
+  static Color chipTexto(int significado, bool oscuro) {
+    switch (significado) {
+      case 0:
+        return oscuro ? chipExitoOscuro : exitoTextoClaro;
+      case 1:
+        return oscuro ? chipInfoOscuro : infoOscuro;
+      case 2:
+        return oscuro ? chipAlertaOscuro : avisoFondo;
+      case 3:
+        return oscuro ? chipErrorOscuro : errorOscuro;
+      case 4:
+        return oscuro ? textoSecundarioOscuro : chipNeutralClaro;
+      default:
+        return oscuro ? chipAgotadoOscuro : chipAgotadoClaro;
+    }
+  }
+
   /// Naranja para texto (Argón 1.20, corrección matemática):
   /// #B45309 pasa AA sobre blanco (5.18:1) Y sobre grises claros
   /// (#F0F0F0: 4.64:1), donde el #C25E00 original se quedaba corto
   /// (4.01:1). Vale también como fondo de badge con texto blanco.
-  static const naranjaTexto = Color(0xFFB45309);
+  static const naranjaTexto = Color(0xFF9A4A08); // 1.36 (136-278): #B45309 daba 4,23 sobre grisTecnico instalado; #9A4A08 da 5,27 (6,26 sobre blanco)
 
   /// Naranja para texto en modo oscuro (el claro se apaga sobre negro).
   static const naranjaTextoOscuro = Color(0xFFFB923C);
@@ -399,7 +436,7 @@ class AppColores {
           : naranjaTexto;
 
   /// Contenido (texto/icono) sobre fondo naranja.
-  static const sobreNaranja = Colors.white;
+  static const contenidoClaro = Colors.white; // 1.36 (136-286): antes «sobreNaranja» — su valor es BLANCO y el nombre invitaba al par prohibido (blanco sobre naranja); se nombra por lo que es
 
   /// Contenido sobre la MARCA (1.29 OG-0, D-01 · GD-01): el
   /// blanco sobre #E8821A da 2,75:1 y falla AA incluso en
@@ -689,6 +726,45 @@ class AppTexto {
   static const minuscula = TextStyle(fontSize: 11, height: 1.4);
 }
 
+/// 1.36 (136-280): escala de PESOS declarada. El desvío
+/// real de la tipografía no era el tamaño sino el peso
+/// (234 copyWith de fontWeight): todo peso nuevo se pide
+/// aquí, no como FontWeight suelto.
+class AppPesos {
+  AppPesos._();
+  static const regular = FontWeight.w400;
+  static const medio = FontWeight.w500;
+  static const semibold = FontWeight.w600;
+  static const bold = FontWeight.w700;
+}
+
+/// 1.36 (136-277): tabla ÚNICA concepto → glifo y regla
+/// de familia. Regla redondeado/contorno (el patrón real
+/// de la app, ahora escrito): INACTIVO = contorno
+/// (`*_outline_rounded` / `*_outlined`), ACTIVO o
+/// protagonista = redondeado pleno (`*_rounded`). Un
+/// concepto = un glifo en toda la app: «Tienda»,
+/// «Suplementos» y «Servicio» ya no comparten
+/// `Icons.science_rounded`.
+class AppIconos {
+  AppIconos._();
+  static const exito = Icons.check_circle_rounded;
+  static const aviso = Icons.warning_amber_rounded;
+  static const error = Icons.error_outline_rounded;
+  static const info = Icons.info_rounded;
+  static const fecha = Icons.calendar_month_rounded;
+  static const persona = Icons.person_rounded;
+  static const personaInactiva = Icons.person_outline_rounded;
+  static const tienda = Icons.storefront_rounded;
+  static const suplementos = Icons.science_rounded;
+  static const servicio = Icons.fitness_center_rounded;
+  static const dinero = Icons.payments_rounded;
+  static const sincronizar = Icons.sync_rounded;
+  static const buscar = Icons.search_rounded;
+  static const casa = Icons.home_rounded;
+  static const casaInactiva = Icons.home_outlined;
+}
+
 /// Espaciado consistente (V2 1.20, retícula 4/8 pt).
 ///
 /// Todos los valores son múltiplos de 4; los escalones habituales
@@ -697,6 +773,14 @@ class AppTexto {
 /// solo estos escalones.
 class AppEspacio {
   AppEspacio._();
+
+  /// 1.36 (136-284): REGLA de alturas con texto — toda
+  /// altura que aloja texto es INTRÍNSECA o MÍNIMA
+  /// (minimumSize / minHeight), nunca fija: con la escala
+  /// conjunta máxima (1,45) una altura fija rompe. Los
+  /// botones del tema y la barra de pilares ya la cumplen;
+  /// una pantalla nueva no escribe `height:` sobre un
+  /// contenedor con texto dentro.
 
   static const xs = 4.0;
   static const sm = 8.0;
@@ -722,8 +806,7 @@ class AppRadio {
   // interactivas. Antes ChipEstado usaba lg y las
   // insignias artesanales inventaban su radio (20): a la
   // altura real de un chip se parecían pero no coincidían.
-  static const chip = circular;
-  static const tag = md;
+  static const chip = circular; // 1.36 (136-281): «tag» se borra: 0 usos
 }
 
 /// Tokens de movimiento (1.30 D1, UI130-32 — la fundación).
@@ -765,12 +848,101 @@ class AppMovimiento {
   /// Curva suave para contadores y fundidos cortos.
   static const curvaSuave = Curves.easeOut;
 
+  /// 1.36 (136-273): familias que el vocabulario no
+  /// cubría y cada archivo declaraba como literal.
+  /// Feedback: cuánto vive un aviso en pantalla.
+  static const avisoCorto = Duration(seconds: 3);
+  static const aviso = Duration(seconds: 4);
+  static const avisoLargo = Duration(seconds: 6);
+  /// Cascada: UN escalón para FadeEntrada e ItemCascada
+  /// (antes 35 y 45 ms para el mismo gesto).
+  static const cascadaPaso = Duration(milliseconds: 40);
+  /// Pulso de atención (píldora de sync, marcadores).
+  static const pulso = Duration(milliseconds: 1200);
+  /// Celebración (cobro, logro): el ciclo completo.
+  static const celebracion = Duration(milliseconds: 950);
+  /// Marca: entrada/salida del momento de marca.
+  static const marcaEntrada = Duration(milliseconds: 450);
+  static const marcaSalida = Duration(milliseconds: 250);
+  /// Curvas que el vocabulario no tenía y dos pantallas
+  /// escribían sueltas.
+  static const curvaSuaveInOut = Curves.easeInOut;
+  static const curvaElastica = Curves.elasticOut;
+
+  /// 1.36 (136-274): la guarda de «Reducir movimiento»
+  /// vive AQUÍ, no en cada llamador: con la bandera activa
+  /// (sistema o ajuste de la app, ya sumadas en la raíz)
+  /// toda duración resuelta es cero.
+  static Duration resuelta(BuildContext context, Duration duracion) =>
+      MediaQuery.of(context).disableAnimations ? Duration.zero : duracion;
+
   /// Curva con rebote para celebraciones breves (el sello
   /// de un cobro, la confirmación de una inscripción).
   /// Nace en D6 (UI130-32) al tokenizar las dos superficies
   /// que ya compartían `Curves.easeOutBack` literal: el
   /// gesto es del sistema, no de cada pantalla.
   static const curvaPop = Curves.easeOutBack;
+}
+
+/// 1.36 (136-271): opacidades con nombre. El «tinte suave»
+/// de un color de estado vale UN paso según el papel:
+/// fondo de chip/insignia, borde de ese tinte, selección.
+class AppOpacidad {
+  AppOpacidad._();
+  /// Fondo tintado estándar (chip, insignia, pastilla).
+  static const tinte = 0.14;
+  /// Tinte suave (fondos grandes, filas).
+  static const tinteSuave = 0.12;
+  /// Tinte fuerte (selección marcada).
+  static const tinteFuerte = 0.16;
+  /// Borde sobre un tinte.
+  static const bordeTinte = 0.35;
+  /// Borde suave sobre un tinte.
+  static const bordeTinteSuave = 0.22;
+  /// Fondo de selección (segmentos, chips elegidos).
+  static const seleccion = 0.20;
+}
+
+/// 1.36 (136-272): elevación con nombre y equivalente en
+/// oscuro. Sustituye a la clase de sombras deprecada
+/// que la 1.36 borró (136-281):
+/// en claro la profundidad es sombra; en oscuro, borde
+/// luminoso + sombra negra marcada (la sombra sola es
+/// invisible sobre el fondo casi negro).
+class AppElevacion {
+  AppElevacion._();
+
+  /// Sombra del nivel (0=plano, 1=tarjeta, 2=flotante).
+  static List<BoxShadow> sombra(BuildContext context, int nivel) {
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    if (AppColores.esAltoContraste(context) || nivel == 0) return const [];
+    if (oscuro) {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: nivel == 1 ? 0.4 : 0.55),
+          blurRadius: nivel == 1 ? 8 : 16,
+          offset: Offset(0, nivel == 1 ? 2 : 6),
+        ),
+      ];
+    }
+    return [
+      BoxShadow(
+        color: Colors.grey.withValues(alpha: nivel == 1 ? 0.18 : 0.28),
+        blurRadius: nivel == 1 ? 14 : 22,
+        offset: Offset(0, nivel == 1 ? 4 : 8),
+      ),
+    ];
+  }
+
+  /// Borde del nivel: en oscuro es la línea de luz que
+  /// despega la superficie; en claro, el borde del tema.
+  static Border borde(BuildContext context, int nivel) {
+    final oscuro = Theme.of(context).brightness == Brightness.dark;
+    if (oscuro && !AppColores.esAltoContraste(context) && nivel > 0) {
+      return Border.all(color: AppColores.luzBarra);
+    }
+    return Border.all(color: AppColores.borde(context));
+  }
 }
 
 /// 1.33 (diseño): el estilo de aparición de los menús
@@ -787,40 +959,6 @@ const estiloAparicionMenu = AnimationStyle(
   curve: AppMovimiento.curvaSuave,
   reverseCurve: AppMovimiento.curvaReversa,
 );
-
-/// Sombras sutiles (gama media: permitidas, sin exagerar).
-///
-/// 1.29 OG-0 (D-18): queda UN solo lenguaje de elevación —
-/// el del tema ([AppTema]: cardTheme y los botones). Esta
-/// clase queda deprecada y sin llamadores; se conserva
-/// solo como referencia histórica de los valores.
-@Deprecated('La elevación manda del tema (AppTema), no de una '
-    'clase paralela. No usar en código nuevo (1.29 D-18).')
-class AppSombra {
-  AppSombra._();
-
-  static List<BoxShadow> tarjeta(BuildContext context) {
-    final oscuro =
-        Theme.of(context).brightness == Brightness.dark;
-    return [
-      BoxShadow(
-        color: (oscuro ? Colors.black : Colors.grey)
-            .withValues(alpha: oscuro ? 0.4 : 0.12),
-        blurRadius: 8,
-        offset: const Offset(0, 2),
-      ),
-    ];
-  }
-
-  static List<BoxShadow> botonPrimario = [
-    BoxShadow(
-      color: AppColores.naranja.withValues(alpha: 0.35),
-      blurRadius: 12,
-      offset: const Offset(0, 4),
-    ),
-  ];
-}
-
 
 /// v1.2.4 (Hark): tema único (claro/oscuro) a partir de los tokens.
 /// Antes estaba duplicado en main.dart. Unifica botones (alto mínimo 48,
@@ -857,17 +995,132 @@ double escalaTextoEfectiva(double escalaApp, double escalaSistema) =>
   );
 }
 
+/// 1.36 (136-262): el esquema EXPLÍCITO y completo del
+/// sistema. Ningún papel lo genera una semilla: cada rol
+/// de ColorScheme se elige aquí, por brillo, variante
+/// táctica y alto contraste, y el test de la fila fija
+/// cada papel. (fromSeed dejaba contenedores, variantes
+/// e inversos al algoritmo de Material: de ahí nacían
+/// los frentes de «azul cobalto» de DIS-04/F-1…F-9.)
+ColorScheme esquemaIron(
+  Brightness b, {
+  bool tactico = false,
+  bool altoContraste = false,
+}) {
+  final oscuro = b == Brightness.dark;
+  if (altoContraste) {
+    return ColorScheme(
+      brightness: b,
+      primary: oscuro ? Colors.white : Colors.black,
+      onPrimary: oscuro ? Colors.black : Colors.white,
+      primaryContainer: oscuro ? Colors.white : Colors.black,
+      onPrimaryContainer: oscuro ? Colors.black : Colors.white,
+      secondary: oscuro ? Colors.white : Colors.black,
+      onSecondary: oscuro ? Colors.black : Colors.white,
+      secondaryContainer: oscuro ? const Color(0xFF2A2A2A) : const Color(0xFFE6E6E6),
+      onSecondaryContainer: oscuro ? Colors.white : Colors.black,
+      tertiary: AppColores.naranja,
+      onTertiary: AppColores.sobreMarca,
+      tertiaryContainer: AppColores.naranja,
+      onTertiaryContainer: AppColores.sobreMarca,
+      error: AppColores.error,
+      onError: Colors.white,
+      errorContainer: AppColores.errorFondo,
+      onErrorContainer: Colors.white,
+      surface: oscuro ? Colors.black : Colors.white,
+      onSurface: oscuro ? Colors.white : Colors.black,
+      surfaceDim: oscuro ? Colors.black : const Color(0xFFE6E6E6),
+      surfaceBright: oscuro ? const Color(0xFF2A2A2A) : Colors.white,
+      surfaceContainerLowest: oscuro ? Colors.black : Colors.white,
+      surfaceContainerLow: oscuro ? const Color(0xFF111111) : const Color(0xFFF7F7F7),
+      surfaceContainer: oscuro ? const Color(0xFF1A1A1A) : const Color(0xFFF0F0F0),
+      surfaceContainerHigh: oscuro ? const Color(0xFF242424) : const Color(0xFFEAEAEA),
+      surfaceContainerHighest: oscuro ? const Color(0xFF2E2E2E) : const Color(0xFFE2E2E2),
+      onSurfaceVariant: oscuro ? Colors.white : Colors.black,
+      outline: oscuro ? Colors.white : Colors.black,
+      outlineVariant: oscuro ? const Color(0xFF8A8A8A) : const Color(0xFF6B6B6B),
+      shadow: Colors.black,
+      scrim: Colors.black,
+      inverseSurface: oscuro ? Colors.white : Colors.black,
+      onInverseSurface: oscuro ? Colors.black : Colors.white,
+      inversePrimary: oscuro ? Colors.black : Colors.white,
+      surfaceTint: Colors.transparent,
+    );
+  }
+  final superficie = tactico
+      ? (oscuro ? AppColores.grafitoTactico : Colors.white)
+      : (oscuro ? AppColores.superficieOscuro : AppColores.superficieClaro);
+  final contenedorAlto = tactico
+      ? (oscuro ? AppColores.acero : AppColores.grisTecnico)
+      : (oscuro ? AppColores.superficieElevadaOscuro : AppColores.superficieHundidaClaro);
+  return ColorScheme(
+    brightness: b,
+    primary: tactico
+        ? (oscuro ? AppColores.cobalto : AppColores.cobaltoOscuro)
+        : AppColores.naranja,
+    onPrimary: tactico ? Colors.white : AppColores.sobreMarca,
+    primaryContainer:
+        oscuro ? const Color(0xFF7A3E08) : const Color(0xFFFFD9AE),
+    onPrimaryContainer:
+        oscuro ? const Color(0xFFFFE3C2) : AppColores.textoClaro,
+    secondary: AppColores.carbon,
+    onSecondary: Colors.white,
+    secondaryContainer: contenedorAlto,
+    onSecondaryContainer:
+        oscuro ? AppColores.textoOscuro : AppColores.textoClaro,
+    tertiary: AppColores.azulAgua,
+    onTertiary: Colors.white,
+    tertiaryContainer: contenedorAlto,
+    onTertiaryContainer:
+        oscuro ? AppColores.textoOscuro : AppColores.textoClaro,
+    error: AppColores.error,
+    onError: Colors.white,
+    errorContainer: AppColores.errorFondo,
+    onErrorContainer: Colors.white,
+    surface: superficie,
+    onSurface: oscuro ? AppColores.textoOscuro : AppColores.textoClaro,
+    surfaceDim: oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro,
+    surfaceBright:
+        oscuro ? AppColores.superficieElevadaOscuro : Colors.white,
+    surfaceContainerLowest: superficie,
+    surfaceContainerLow: contenedorAlto,
+    surfaceContainer: contenedorAlto,
+    surfaceContainerHigh: contenedorAlto,
+    surfaceContainerHighest: contenedorAlto,
+    onSurfaceVariant: oscuro
+        ? AppColores.textoSecundarioOscuro
+        : AppColores.textoSecundarioClaro,
+    outline: oscuro ? AppColores.bordeOscuro : AppColores.bordeClaro,
+    outlineVariant:
+        oscuro ? AppColores.bordeSutilOscuro : AppColores.bordeSutilClaro,
+    shadow: Colors.black,
+    scrim: Colors.black,
+    inverseSurface:
+        oscuro ? AppColores.superficieClaro : AppColores.carbonProfundo,
+    onInverseSurface:
+        oscuro ? AppColores.textoClaro : AppColores.textoOscuro,
+    inversePrimary: AppColores.naranja,
+    surfaceTint: Colors.transparent,
+  );
+}
+
 class AppTema {
   AppTema._();
 
-  static ThemeData claro() => _tema(Brightness.light);
-  static ThemeData oscuro() => _tema(Brightness.dark);
+  /// 1.36 (136-265): claro()/oscuro() dejaron de ser un
+  /// par paralelo que nadie instalaba (los tests de la
+  /// fundación certificaban temas que producción no
+  /// montaba). Queda UN solo par de producción: sol() y
+  /// tacticoOscuro(); estos nombres delegan en él.
+  static ThemeData claro() => sol();
+  static ThemeData oscuro() => tacticoOscuro();
 
-  /// v1.2.5 (3.4): variantes de alto contraste (WCAG AA).
-  static ThemeData claroAltoContraste() =>
-      _tema(Brightness.light, altoContraste: true);
+  /// Alto contraste = variante DEL PAR de producción
+  /// (conserva las superficies tácticas), no un tema
+  /// aparte sin la capa táctica.
+  static ThemeData claroAltoContraste() => sol(altoContraste: true);
   static ThemeData oscuroAltoContraste() =>
-      _tema(Brightness.dark, altoContraste: true);
+      tacticoOscuro(altoContraste: true);
 
   /// 1.32 «Mostrador Táctico» — tema OSCURO del rediseño: fondo
   /// Pizarra, superficies Grafito/Acero y acción principal en
@@ -885,97 +1138,25 @@ class AppTema {
   /// esquema se conserva SOLO como fondo de los controles
   /// Material sin tema propio; ya no pinta ninguna
   /// superficie de navegación ni de lista.
-  static ThemeData tacticoOscuro() {
-    final base = _tema(Brightness.dark);
-    final esquema = base.colorScheme.copyWith(
-      primary: AppColores.cobalto,
-      onPrimary: Colors.white,
-      surface: AppColores.grafitoTactico,
-      surfaceContainerHighest: AppColores.acero,
-      surfaceContainerHigh: AppColores.acero,
-    );
-    return base.copyWith(
-      colorScheme: esquema,
-      scaffoldBackgroundColor: AppColores.pizarra,
-      appBarTheme: base.appBarTheme.copyWith(
-        backgroundColor: AppColores.grafitoTactico,
-      ),
-      cardTheme: base.cardTheme.copyWith(color: AppColores.grafitoTactico),
-      // 1.33 (diseño): los menús flotan sobre la superficie
-      // táctica, como las tarjetas y los diálogos.
-      popupMenuTheme: base.popupMenuTheme.copyWith(
-        color: AppColores.grafitoTactico,
-      ),
-      dialogTheme: base.dialogTheme.copyWith(
-        backgroundColor: AppColores.grafitoTactico,
-      ),
-      bottomSheetTheme: base.bottomSheetTheme.copyWith(
-        backgroundColor: AppColores.grafitoTactico,
-      ),
-      navigationBarTheme: base.navigationBarTheme.copyWith(
-        backgroundColor: AppColores.grafitoTactico,
-        // 1.33 (diseño): el indicador del pilar activo va
-        // en tinte de marca, no en cobalto (era la pastilla
-        // azul al pie de cada pantalla).
-        indicatorColor: AppColores.naranja.withValues(alpha: 0.35),
-      ),
-    );
-  }
+  /// 1.36 (136-262/265): el táctico oscuro ES _tema con
+  /// la variante táctica del esquema explícito — ya no un
+  /// copyWith de primario sobre una semilla naranja.
+  static ThemeData tacticoOscuro({bool altoContraste = false}) =>
+      _tema(Brightness.dark, tactico: true, altoContraste: altoContraste);
 
-  /// 1.32 «Mostrador Táctico» — MODO SOL: el claro táctico de
-  /// Papel Frío para contrarrestar el sol directo del mostrador.
-  /// Se activa SOLO a mano desde la cabecera (guarda del
-  /// contraste de Argón: el automático por sensor queda APAGADO
-  /// por defecto y no se implementa). Bordes definidos de 1,5 dp
-  /// en grafito sobre las tarjetas, como manda el plano §4.1.
-  static ThemeData sol() {
-    final base = _tema(Brightness.light);
-    final esquema = base.colorScheme.copyWith(
-      primary: AppColores.cobaltoOscuro,
-      onPrimary: Colors.white,
-      surface: Colors.white,
-      surfaceContainerHighest: AppColores.grisTecnico,
-      surfaceContainerHigh: AppColores.grisTecnico,
-    );
-    return base.copyWith(
-      colorScheme: esquema,
-      scaffoldBackgroundColor: AppColores.papelFrio,
-      appBarTheme: base.appBarTheme.copyWith(
-        backgroundColor: AppColores.papelFrio,
-        foregroundColor: AppColores.sobreMarca,
-        titleTextStyle: AppTexto.titulo
-            .copyWith(color: AppColores.sobreMarca),
-      ),
-      cardTheme: base.cardTheme.copyWith(
-        color: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadio.md),
-          side: const BorderSide(
-              color: AppColores.sobreMarca, width: 1.5),
-        ),
-      ),
-      dialogTheme: base.dialogTheme.copyWith(backgroundColor: Colors.white),
-      // 1.33 (diseño): menús sobre blanco en el Modo Sol,
-      // como el resto de superficies emergentes.
-      popupMenuTheme: base.popupMenuTheme.copyWith(color: Colors.white),
-      bottomSheetTheme:
-          base.bottomSheetTheme.copyWith(backgroundColor: Colors.white),
-      navigationBarTheme: base.navigationBarTheme.copyWith(
-        backgroundColor: AppColores.papelFrio,
-        // 1.33 (diseño): indicador en tinte de marca,
-        // como en el táctico oscuro.
-        indicatorColor: AppColores.naranja.withValues(alpha: 0.25),
-      ),
-    );
-  }
+  /// 1.36 (136-262/265): Modo Sol = _tema claro táctico.
+  static ThemeData sol({bool altoContraste = false}) =>
+      _tema(Brightness.light, tactico: true, altoContraste: altoContraste);
 
-  static ThemeData _tema(Brightness b, {bool altoContraste = false}) {
+  static ThemeData _tema(Brightness b, {bool altoContraste = false, bool tactico = false}) {
     final oscuro = b == Brightness.dark;
     final superficie = altoContraste
         ? (oscuro ? Colors.black : Colors.white)
-        : (oscuro
-            ? AppColores.superficieOscuro
-            : AppColores.superficieClaro);
+        : tactico
+            ? (oscuro ? AppColores.grafitoTactico : Colors.white)
+            : (oscuro
+                ? AppColores.superficieOscuro
+                : AppColores.superficieClaro);
     final borde = altoContraste
         ? (oscuro ? Colors.white : Colors.black)
         : (oscuro ? AppColores.bordeOscuro : AppColores.bordeClaro);
@@ -985,8 +1166,14 @@ class AppTema {
     final secundario = oscuro
         ? AppColores.textoSecundarioOscuro
         : AppColores.textoSecundarioClaro;
-    final deshabilitadoFondo = oscuro ? const Color(0xFF2C2C2C) : const Color(0xFFE6E6E6);
-    final deshabilitadoTexto = oscuro ? const Color(0xFF7A7A7A) : const Color(0xFF9E9E9E);
+    // 1.36 (136-285): los literales locales del tema son
+    // ahora tokens con nombre de AppColores.
+    final deshabilitadoFondo = oscuro
+        ? AppColores.deshabilitadoFondoOscuro
+        : AppColores.deshabilitadoFondoClaro;
+    final deshabilitadoTexto = oscuro
+        ? AppColores.deshabilitadoTextoOscuro
+        : AppColores.deshabilitadoTextoClaro;
     final forma = RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadio.md));
     const minimo = Size(64, 48);
@@ -1008,21 +1195,13 @@ class AppTema {
           TargetPlatform.fuchsia: TransicionPaginaIron(),
         },
       ),
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColores.naranja,
-        brightness: b,
-        primary: AppColores.naranja,
-        // 1.29 D-01 (GD-01): sobre la marca va el grafito
-        // sobreMarca (6,32:1); el blanco daba 2,75:1.
-        onPrimary: AppColores.sobreMarca,
-        surface: superficie,
-        error: AppColores.error,
-        // Borde del tema (Argón 1.20): igual que antes en modo normal,
-        // negro/blanco puro en alto contraste, para que
-        // AppColores.borde(context) lo respete.
-      ).copyWith(outline: borde),
-      scaffoldBackgroundColor:
-          oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro,
+      // 1.36 (136-262): esquema EXPLÍCITO completo; ningún
+      // papel nace de una semilla.
+      colorScheme: esquemaIron(b,
+          tactico: tactico, altoContraste: altoContraste),
+      scaffoldBackgroundColor: tactico
+          ? (oscuro ? AppColores.pizarra : AppColores.papelFrio)
+          : (oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro),
       // 1.24.2 (reporte de campo de Jc): sin switchTheme, el
       // interruptor APAGADO por defecto de Material 3 casi no
       // contrasta sobre las superficies oscuras de la casa y se
@@ -1033,36 +1212,36 @@ class AppTema {
         trackColor: WidgetStateProperty.resolveWith((estados) {
           if (estados.contains(WidgetState.disabled)) {
             return oscuro
-                ? const Color(0xFF333333)
-                : const Color(0xFFE0E0E0);
+                ? AppColores.interruptorPistaDeshabOscuro
+                : AppColores.interruptorPistaDeshabClaro;
           }
           if (estados.contains(WidgetState.selected)) {
             return AppColores.naranja;
           }
           return oscuro
-              ? const Color(0xFF555555)
-              : const Color(0xFFC9C9C9);
+              ? AppColores.interruptorPistaOscuro
+              : AppColores.interruptorPistaClaro;
         }),
         thumbColor: WidgetStateProperty.resolveWith((estados) {
           if (estados.contains(WidgetState.disabled)) {
             return oscuro
-                ? const Color(0xFF5A5A5A)
-                : const Color(0xFFBDBDBD);
+                ? AppColores.interruptorPulgarDeshabOscuro
+                : AppColores.interruptorPulgarDeshabClaro;
           }
           if (estados.contains(WidgetState.selected)) {
             return Colors.white;
           }
           return oscuro
-              ? const Color(0xFFD8D8D8)
-              : const Color(0xFF757575);
+              ? AppColores.interruptorPulgarOscuro
+              : AppColores.interruptorPulgarClaro;
         }),
         trackOutlineColor: WidgetStateProperty.resolveWith((estados) {
           if (estados.contains(WidgetState.selected)) {
             return AppColores.naranja;
           }
           return oscuro
-              ? const Color(0xFF7A7A7A)
-              : const Color(0xFF9E9E9E);
+              ? AppColores.interruptorBordeOscuro
+              : AppColores.interruptorBordeClaro;
         }),
       ),
       // Yunque 1.34 (DIS-04, decisión con la delegación de
@@ -1214,14 +1393,16 @@ class AppTema {
         }),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor:
-            oscuro ? AppColores.carbonProfundo : AppColores.carbon,
-        foregroundColor: Colors.white,
+        backgroundColor: tactico
+            ? (oscuro ? AppColores.grafitoTactico : AppColores.papelFrio)
+            : (oscuro ? AppColores.carbonProfundo : AppColores.carbon),
+        foregroundColor:
+            (tactico && !oscuro) ? AppColores.sobreMarca : Colors.white,
         elevation: 2,
         scrolledUnderElevation: 3,
         shadowColor: Colors.black.withValues(alpha: 0.35),
         centerTitle: false,
-        titleTextStyle: AppTexto.titulo.copyWith(color: Colors.white),
+        titleTextStyle: AppTexto.titulo.copyWith(color: (tactico && !oscuro) ? AppColores.sobreMarca : Colors.white),
       ),
       cardTheme: CardThemeData(
         color: superficie,
@@ -1234,8 +1415,18 @@ class AppTema {
         surfaceTintColor: Colors.transparent,
         margin: const EdgeInsets.only(bottom: AppEspacio.sm),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadio.lg),
-          side: BorderSide(color: borde),
+          borderRadius: BorderRadius.circular(
+              (tactico && !oscuro) ? AppRadio.md : AppRadio.lg),
+          // 1.36 (136-272): el oscuro táctico gana su borde
+          // luminoso explícito (luzBarra) en vez de heredar
+          // un borde a 1,51:1; el Sol conserva su 1,5 dp de
+          // grafito del plano §4.1.
+          side: tactico
+              ? (oscuro
+                  ? const BorderSide(color: AppColores.luzBarra, width: 1)
+                  : const BorderSide(
+                      color: AppColores.sobreMarca, width: 1.5))
+              : BorderSide(color: borde),
         ),
       ),
       dividerTheme: DividerThemeData(color: borde, thickness: 1, space: 1),
@@ -1259,7 +1450,7 @@ class AppTema {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: oscuro ? const Color(0xFF2E2E2E) : AppColores.carbon,
+        backgroundColor: oscuro ? AppColores.snackFondoOscuro : AppColores.carbon,
         contentTextStyle: AppTexto.cuerpo.copyWith(color: Colors.white),
         actionTextColor: AppColores.naranja,
         shape: RoundedRectangleBorder(
@@ -1412,17 +1603,37 @@ class AppTema {
         // 1.29 D-01: icono grafito sobre la marca.
         foregroundColor: AppColores.sobreMarca,
       ),
+      navigationBarTheme: tactico
+          ? NavigationBarThemeData(
+              backgroundColor: oscuro
+                  ? AppColores.grafitoTactico
+                  : AppColores.papelFrio,
+              indicatorColor: AppColores.naranja
+                  .withValues(alpha: oscuro ? 0.35 : 0.25),
+            )
+          : const NavigationBarThemeData(),
+      // 1.36 (136-280): TextTheme COMPLETO (15 ranuras de
+      // Material, todas desde AppTexto) y bodyMedium vuelve
+      // al cuerpo (14), no al secundario (13). El solape
+      // etiqueta/metadato (ambos 12) se resuelve por PESO y
+      // tracking declarados: etiqueta = w600 + 0,3 de
+      // tracking (rótulo); metadato = regular sin tracking
+      // (dato). Los tamaños de rol los re-nivela S2.
       textTheme: const TextTheme(
         displayLarge: AppTexto.display,
         displayMedium: AppTexto.displayPequeno,
         displaySmall: AppTexto.metrica,
+        headlineLarge: AppTexto.displayPequeno,
         headlineMedium: AppTexto.tituloPagina,
+        headlineSmall: AppTexto.titulo,
         titleLarge: AppTexto.titulo,
         titleMedium: AppTexto.subtitulo,
+        titleSmall: AppTexto.secundario,
         bodyLarge: AppTexto.cuerpo,
-        bodyMedium: AppTexto.secundario,
+        bodyMedium: AppTexto.cuerpo,
         bodySmall: AppTexto.metadato,
         labelLarge: AppTexto.etiqueta,
+        labelMedium: AppTexto.etiqueta,
         labelSmall: AppTexto.minuscula,
       ).apply(bodyColor: texto, displayColor: texto),
     );
@@ -1470,6 +1681,10 @@ class TransicionPaginaIron extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
+    // 1.36 (136-274): la ruta respeta la guarda del
+    // sistema — con «Reducir movimiento» no hay fundido
+    // ni desplazamiento, sin tocar cada llamador.
+    if (MediaQuery.of(context).disableAnimations) return child;
     // 1.30 D1 (UI130-32): curvas del token de movimiento
     // (easeOutCubic/easeInCubic, las de siempre).
     final curva = CurvedAnimation(

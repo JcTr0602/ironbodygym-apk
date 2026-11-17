@@ -117,7 +117,14 @@ void main() {
             AppColores.sobreMarca);
         expect(capturado.floatingActionButtonTheme.foregroundColor,
             AppColores.sobreMarca);
-        expect(capturado.colorScheme.onPrimary, AppColores.sobreMarca);
+        // 1.36 (136-262/265): en el par INSTALADO el
+        // primary del esquema es el cobalto táctico (su
+        // onPrimary es blanco, 6,9:1 sobre cobalto); el
+        // grafito sobre la marca se fija en el esquema
+        // explícito de marca y en los botones/FAB de arriba.
+        expect(
+            esquemaIron(tema.brightness).onPrimary,
+            AppColores.sobreMarca);
       }
     });
 
@@ -193,11 +200,15 @@ void main() {
             greaterThanOrEqualTo(4.5),
             reason: '$rol sobre hundida');
       }
+      // 1.36 (136-278): el «límite declarado» de 4,40
+      // quedó RESUELTO — exitoTextoClaro se oscureció a
+      // #166534 contra las superficies instaladas y ya
+      // pasa AA también sobre la hundida (6,26).
       expect(
           _contraste(AppColores.exitoTextoClaro,
               AppColores.superficieHundidaClaro),
-          inInclusiveRange(4.35, 4.45),
-          reason: 'límite declarado: 4,40');
+          greaterThanOrEqualTo(4.5),
+          reason: 'límite de la 1.29 resuelto en la 1.36');
     });
 
     testWidgets('los helpers resuelven el valor del tema',
@@ -580,8 +591,12 @@ void main() {
   });
 
   group('D-18 · un solo lenguaje de elevación', () {
-    test('la clase de sombras deprecada no tiene llamadores: '
-        'solo vive su definición en diseno.dart', () {
+    test('la clase de sombras no tiene llamadores ni '
+        'definición: borrada en la 1.36 (136-281)', () {
+      // 1.36 (136-281/272): AppSombra se BORRÓ (no se
+      // depreca eternamente); la elevación vive en
+      // AppElevacion y en el tema. Ningún archivo de lib
+      // puede nombrarla.
       final conReferencia = <String>[];
       for (final entidad
           in Directory('lib').listSync(recursive: true)) {
@@ -591,10 +606,7 @@ void main() {
           }
         }
       }
-      expect(conReferencia, ['lib/ui/diseno.dart']);
-      final diseno = File('lib/ui/diseno.dart').readAsStringSync();
-      expect(diseno.contains('@Deprecated'), isTrue,
-          reason: 'la definición queda marcada como deprecada');
+      expect(conReferencia, isEmpty);
     });
   });
 

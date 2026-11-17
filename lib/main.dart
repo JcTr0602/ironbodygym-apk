@@ -577,13 +577,16 @@ class _IronBodyAppState extends State<IronBodyApp>
             // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).
             // 1.32: el claro pasa a ser el táctico de Papel Frío
             // (Modo Sol) y el oscuro el táctico Pizarra/Cobalto.
-            theme: AppTema.sol(),
-            darkTheme: AppTema.tacticoOscuro(),
-            // v1.2.5 (3.4): alto contraste (WCAG AA).
-            highContrastTheme:
-                hc ? AppTema.claroAltoContraste() : null,
-            highContrastDarkTheme:
-                hc ? AppTema.oscuroAltoContraste() : null,
+            // 1.36 (136-265): el alto contraste es variante
+            // DEL PAR de producción y lo aplica la app en su
+            // propio árbol (theme/darkTheme) cuando su ajuste
+            // está activo — ya no por las ranuras de alto
+            // contraste del framework, que Flutter solo honra
+            // si el SISTEMA también lo pide.
+            theme: hc ? AppTema.sol(altoContraste: true) : AppTema.sol(),
+            darkTheme: hc
+                ? AppTema.tacticoOscuro(altoContraste: true)
+                : AppTema.tacticoOscuro(),
             home: const RaizSesion(),
           ),
           ),
