@@ -99,7 +99,8 @@ class MarcoNav {
 
 /// Cabecera persistente del marco: avatar con el nombre
 /// (su toque abre el menú de perfil, que dice nombre y
-/// rol), lupa universal, icono de estado de sync e
+/// rol), botón de actividad reciente junto a la lupa
+/// (CAMPO-16), lupa universal, icono de estado de sync e
 /// interruptor del Modo Sol. UNA fila fina (M-6 de la
 /// 1.35): la fila entera de la píldora y el chip de rol
 /// como pieza separada ya no existen.
@@ -109,6 +110,15 @@ class CabeceraMarco extends StatelessWidget {
   final String nombre;
   final VoidCallback onSyncTap;
   final VoidCallback onLupa;
+
+  /// 1.35 (CAMPO-16, orden de Jc 2026-11-16): la puerta
+  /// a la actividad reciente, pegada a la lupa en la
+  /// cabecera — «como estaba antes», en la pantalla
+  /// principal. Opcional: sin cablear no se pinta (las
+  /// construcciones de tests y previews quedan intactas).
+  /// El destino lo decide quien cablea (Home abre la
+  /// ActividadScreen de siempre); la cabecera no navega.
+  final VoidCallback? onActividad;
 
   /// 1.35 (UI-22, re-contratada con M-6): con la lista
   /// bajada, el NOMBRE se recoge y quedan el avatar y los
@@ -137,6 +147,7 @@ class CabeceraMarco extends StatelessWidget {
     required this.nombre,
     required this.onSyncTap,
     required this.onLupa,
+    this.onActividad,
     required this.onAccionPerfil,
     this.plegada = false,
     this.conScroll = false,
@@ -287,34 +298,49 @@ class CabeceraMarco extends StatelessWidget {
                       color: AppColores.sobreMarca,
                       fontWeight: FontWeight.w700)),
             ),
-            AnimatedSize(
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : AppMovimiento.media,
-              curve: AppMovimiento.curvaSuave,
-              alignment: Alignment.centerLeft,
-              child: plegada
-                  ? const SizedBox.shrink(
-                      key: ValueKey('cabecera-nombre-plegado'))
-                  : Row(
-                      key: const ValueKey('cabecera-nombre-pleno'),
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(width: AppEspacio.sm),
-                        ConstrainedBox(
-                          constraints:
-                              const BoxConstraints(maxWidth: 130),
-                          child: Text(
-                            nombre,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTexto.cuerpo.copyWith(
-                                fontWeight: FontWeight.w600),
+            // 1.35 (CAMPO-16): el nombre es el único
+            // elemento compresible de la cabecera y la
+            // cadena entera cede: AnimatedSize flexible
+            // en la fila del avatar y el texto flexible
+            // en la suya — la elipsis que M-6 promete
+            // («se recorta antes de apretar a los
+            // iconos») ahora puede ocurrir de verdad;
+            // sin esto, un nombre medio con los 4 iconos
+            // desbordaba la fila del avatar (4,8 px a
+            // 420 dp con Roboto real, cáscara del
+            // entrenador de la matriz 1.32).
+            Flexible(
+              child: AnimatedSize(
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : AppMovimiento.media,
+                curve: AppMovimiento.curvaSuave,
+                alignment: Alignment.centerLeft,
+                child: plegada
+                    ? const SizedBox.shrink(
+                        key: ValueKey('cabecera-nombre-plegado'))
+                    : Row(
+                        key: const ValueKey('cabecera-nombre-pleno'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(width: AppEspacio.sm),
+                          Flexible(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                  maxWidth: 130),
+                              child: Text(
+                                nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTexto.cuerpo.copyWith(
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppEspacio.xs),
-                      ],
-                    ),
+                          const SizedBox(width: AppEspacio.xs),
+                        ],
+                      ),
+              ),
             ),
           ],
         ),
@@ -344,8 +370,30 @@ class CabeceraMarco extends StatelessWidget {
             horizontal: AppEspacio.md, vertical: AppEspacio.xs),
         child: Row(
           children: [
-            Flexible(child: _avatar(context)),
-            const Spacer(),
+            // 1.35 (CAMPO-16): el avatar se queda con
+            // TODO el holgado de la fila (Expanded) —
+            // antes un Spacer se llevaba la mitad y el
+            // nombre, sin cadena flexible, desbordaba
+            // al sumar el cuarto icono. El Align deja
+            // el toque del avatar en su tamaño de
+            // siempre: lo que crece es el aire, no el
+            // botón.
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _avatar(context),
+              ),
+            ),
+            // 1.35 (CAMPO-16): la actividad reciente, al
+            // lado de la lupa — a su izquierda, para no
+            // tocar la pareja lupa–sync de CAMPO-4/M-6.
+            if (onActividad != null)
+              IconButton(
+                key: const ValueKey('marco-actividad'),
+                tooltip: 'Actividad reciente',
+                icon: const Icon(Icons.history_rounded),
+                onPressed: onActividad,
+              ),
             IconButton(
               key: const ValueKey('marco-lupa'),
               tooltip: 'Buscar en el gym',

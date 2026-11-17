@@ -1559,6 +1559,13 @@ class _HomeScreenState extends State<HomeScreen>
               plegada: _cabeceraPlegada,
               // SL-X2 (G01-10): sombra según scroll.
               conScroll: _cabeceraConScroll,
+              // 1.35 (CAMPO-16): la actividad reciente
+              // junto a la lupa, como pidió Jc — el mismo
+              // destino de siempre por la vía _ir. (Al
+              // final de la llamada a propósito: la
+              // ventana de lectura del test de G01-10
+              // queda como en la base.)
+              onActividad: () => _ir(const ActividadScreen()),
             ),
             Expanded(
               // 1.35 (UI-22): el sensor de desplazamiento
