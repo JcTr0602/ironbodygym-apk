@@ -169,10 +169,12 @@ void main() {
       await jornadaDescartarDialogos(tester);
 
       // Paso 2 del guión: la acción de cobrar de la ficha es el
-      // botón fijo inferior «Registrar pago» (la barra compacta
-      // que aparece al bajar dice «Cobrar»: misma acción).
-      await jornadaEsperar(tester, find.text('Registrar pago'));
-      await toques.tap(tester, find.text('Registrar pago'));
+      // botón fijo inferior «Cobrar» (G03-1: el pie y la barra
+      // compacta que aparece al bajar dicen lo mismo, «Cobrar»:
+      // misma acción; sin bajar, el único «Cobrar» en pantalla
+      // es el del pie).
+      await jornadaEsperar(tester, find.text('Cobrar'));
+      await toques.tap(tester, find.text('Cobrar'));
       await tester.pumpAndSettle();
       // Pasos 3–4: período mensual y Efectivo vienen por defecto;
       // el monto precargado es el estándar (2000).
@@ -199,7 +201,7 @@ void main() {
           reason: 'el efectivo cobrado por el entrenador entra '
               'a su pendiente a entregar');
       expect(toques.n, 4,
-          reason: 'ficha → Registrar pago → Continuar → '
+          reason: 'ficha → Cobrar → Continuar → '
               'Confirmar → Entendido = 4 toques (objetivo ≤4)');
       await jornadaCerrarCascara(tester);
     });

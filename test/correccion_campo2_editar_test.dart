@@ -220,7 +220,7 @@ void main() {
     await _drenar(tester, vueltas: 8, ms: 60);
     expect(find.byType(DialogoApp), findsNothing,
         reason: 'el diálogo se cierra al guardar');
-    expect(find.text('Cambios guardados (se sincronizarán)'),
+    expect(find.text('Cambios guardados'),
         findsOneWidget);
     await tester.runAsync(() async {
       final espejo = await LocalDb.instance.allMirror('clientes');

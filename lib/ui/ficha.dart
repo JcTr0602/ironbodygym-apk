@@ -1195,8 +1195,8 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     mostrarSnack(context, activar
-            ? 'Cuenta a la Casa activada (se sincronizará)'
-            : 'Cuenta a la Casa retirada (se sincronizará)', significado: SignificadoChip.exito);
+            ? 'Cuenta a la Casa activada'
+            : 'Cuenta a la Casa retirada', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     _cargar();
   }
@@ -1249,8 +1249,8 @@ class _FichaScreenState extends State<FichaScreen> {
     );
     if (!mounted) return;
     mostrarSnack(context, activar
-            ? 'Cliente protegido (se sincronizará)'
-            : 'Protección retirada (se sincronizará)', significado: SignificadoChip.exito);
+            ? 'Cliente protegido'
+            : 'Protección retirada', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
     _cargar();
   }
@@ -1927,7 +1927,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // que disponer (la regresión 2 de la v1.3.1 queda cerrada
     // por construcción).
     if (!mounted) return;
-    mostrarSnack(context, 'Cambios guardados (se sincronizarán)', significado: SignificadoChip.exito);
+    mostrarSnack(context, 'Cambios guardados', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -2098,7 +2098,7 @@ class _FichaScreenState extends State<FichaScreen> {
           widget.clienteId, {'pagado_hasta': null});
     }
     if (!mounted) return;
-    mostrarSnack(context, 'Cambios guardados (se sincronizarán)', significado: SignificadoChip.exito);
+    mostrarSnack(context, 'Cambios guardados', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -2136,7 +2136,7 @@ class _FichaScreenState extends State<FichaScreen> {
       'notas': notaLimpia.isEmpty ? null : notaLimpia,
     });
     if (!mounted) return;
-    mostrarSnack(context, 'Nota guardada (se sincronizará)', significado: SignificadoChip.exito);
+    mostrarSnack(context, 'Nota guardada', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -2292,7 +2292,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // la foto resucitaría.
     LocalDb.marcarFotoEliminadaSesion(widget.clienteId);
     if (!mounted) return;
-    mostrarSnack(context, 'Foto eliminada (se sincronizará)', significado: SignificadoChip.exito);
+    mostrarSnack(context, 'Foto eliminada', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
@@ -2405,7 +2405,7 @@ class _FichaScreenState extends State<FichaScreen> {
       // 1.29 (FB-04): foto recién puesta = verificado con foto.
       _tieneFotoVerificado = true;
     });
-    mostrarSnack(context, 'Foto actualizada (se sincronizará)', significado: SignificadoChip.exito);
+    mostrarSnack(context, 'Foto actualizada', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
   }
 
@@ -2656,7 +2656,7 @@ class _FichaScreenState extends State<FichaScreen> {
         payload: {'pago_id': pagoId, 'motivo': motivo},
       );
       if (!mounted) return;
-      mostrarSnack(context, 'Pago anulado (se sincronizará)', significado: SignificadoChip.exito);
+      mostrarSnack(context, 'Pago anulado', significado: SignificadoChip.exito);
       _cargar();
       SyncEngine.instance.push();
       return;
@@ -2728,7 +2728,7 @@ class _FichaScreenState extends State<FichaScreen> {
       },
     );
     if (!mounted) return;
-    mostrarSnack(context, 'Corrección guardada (se sincronizará)', significado: SignificadoChip.exito);
+    mostrarSnack(context, 'Corrección guardada', significado: SignificadoChip.exito);
     _cargar();
     SyncEngine.instance.push();
   }
@@ -2966,7 +2966,7 @@ class _FichaScreenState extends State<FichaScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: BotonPrimario(
-                              texto: 'Registrar pago',
+                              texto: 'Cobrar',
                               icono: Icons.payments_rounded,
                               onPressed: _pagar,
                             ),

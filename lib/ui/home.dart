@@ -2280,17 +2280,11 @@ class _HomeScreenState extends State<HomeScreen>
                 onPressed: () => _ir(const HubTurnosScreen()),
               ),
             ),
-            // 1.32: la puerta a la Actividad también al pie
-            // de «Mi Turno» (la pantalla se acota sola por
-            // rol y por captura propia).
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                key: const ValueKey('pulso-actividad'),
-                onPressed: () => _ir(const ActividadScreen()),
-                child: const Text('Ver actividad reciente →'),
-              ),
-            ),
+            // 1.35 (CAMPO-16, segunda parte — orden de Jc):
+            // fuera el enlace «Ver actividad reciente» del pie
+            // de «Mi Turno»: la ÚNICA puerta a Actividad es el
+            // botón `marco-actividad` de la cabecera, junto a
+            // la lupa.
           ],
         ),
       );
@@ -2403,8 +2397,9 @@ class _HomeScreenState extends State<HomeScreen>
   /// salud del mes (el anillo «Pagaron el mes») y el pago
   /// de entrenadores viven aquí, cerrados al abrir: lo
   /// ocasional va plegado y el Mostrador respira (regla
-  /// de diseño de Jc). «Ver actividad reciente» se
-  /// conserva al pie del informe.
+  /// de diseño de Jc). (CAMPO-16, segunda parte: el
+  /// informe ya no lleva enlace a Actividad; la única
+  /// puerta es el botón de cabecera `marco-actividad`.)
   bool _informeAbierto = false;
 
   Widget _informeSemanaMes() {
@@ -2477,16 +2472,10 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                         ],
                       ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          key: const ValueKey('pulso-actividad'),
-                          onPressed: () =>
-                              _ir(const ActividadScreen()),
-                          child:
-                              const Text('Ver actividad reciente →'),
-                        ),
-                      ),
+                      // 1.35 (CAMPO-16, segunda parte): sin
+                      // enlace de Actividad al pie del informe —
+                      // la única puerta es `marco-actividad` en
+                      // la cabecera.
                     ],
                   ),
           ),

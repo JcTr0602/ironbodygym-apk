@@ -7,7 +7,7 @@
 /// suelta es la voz de sync) → desplazar el Historial →
 /// la banda se recoge a cero, la barra compacta queda
 /// visible CON el toque de sync (icono de estado) →
-/// «Registrar pago» sigue alcanzable y abre su diálogo →
+/// «Cobrar» (el pie de la ficha) sigue alcanzable y abre su diálogo →
 /// al volver arriba la banda reaparece entera.
 library;
 
@@ -21,6 +21,7 @@ import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/sync.dart';
 import 'package:ironbody_gym/tiempo.dart';
 import 'package:ironbody_gym/ui/diseno.dart';
+import 'package:ironbody_gym/ui/componentes.dart';
 import 'package:ironbody_gym/ui/ficha.dart';
 import 'package:ironbody_gym/ui/widgets.dart';
 import 'package:path/path.dart' as p;
@@ -197,7 +198,11 @@ void main() {
             'icono de estado que dispara el ciclo');
 
     // Cobrar sigue alcanzable y funcional con todo plegado.
-    await tester.tap(find.text('Registrar pago'));
+    // G03-1: el pie se llama «Cobrar», igual que la barra
+    // compacta — el texto ya no es único, así que el toque se
+    // ancla en el botón del PIE (BotonPrimario), que es el
+    // sujeto de esta prueba, no en la barra compacta.
+    await tester.tap(find.widgetWithText(BotonPrimario, 'Cobrar'));
     await _drenar(tester, vueltas: 8, ms: 60);
     expect(find.text('Pago — Ada Aragon Herrera'), findsOneWidget,
         reason: 'el diálogo de cobro abre con la cabecera '

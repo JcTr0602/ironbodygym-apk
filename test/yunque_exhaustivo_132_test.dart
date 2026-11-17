@@ -217,12 +217,28 @@ void main() {
     await _descartarDialogos(tester);
     await _drenar(tester, vueltas: 6);
     // La fila Vencidos/Al día puede nacer bajo el pliegue
-    // (ListView perezoso): se rueda hasta el botón que vive
-    // justo debajo de la fila, único en la pantalla («Al
-    // día» a secas también es el texto de la píldora de
-    // estado de sync y no sirve de ancla: aparece 2 veces).
+    // (ListView perezoso): hay que rodar la lista hasta que
+    // las secciones bajas existan. El ancla histórica era el
+    // enlace «Ver actividad reciente →» al pie de las
+    // tarjetas; CAMPO-16 (segunda parte, orden de Jc) lo
+    // retiró: la ÚNICA puerta a Actividad es el botón de
+    // cabecera `marco-actividad`, junto a la lupa — se
+    // verifica esa puerta única aquí mismo y el scroll se
+    // ancla en la cabecera del informe del dueño
+    // (`hoy-informe-cabecera`), la tarjeta que alojaba el
+    // enlace retirado y la última sección del Mostrador:
+    // rodar hasta ella construye todo lo que va por encima.
+    // («Al día» a secas tampoco servía de ancla: también es
+    // el texto de la píldora de estado de sync.)
+    expect(find.text('Ver actividad reciente →'), findsNothing,
+        reason: 'CAMPO-16 2ª parte: ningún enlace de Actividad '
+            'queda en las tarjetas del Mostrador');
+    expect(find.byKey(const ValueKey('marco-actividad')),
+        findsOneWidget,
+        reason: 'la única puerta a Actividad es el botón de '
+            'cabecera junto a la lupa');
     await tester.scrollUntilVisible(
-        find.text('Ver actividad reciente →'), 200,
+        find.byKey(const ValueKey('hoy-informe-cabecera')), 200,
         scrollable: find
             .descendant(
                 of: find.byType(HomeScreen),

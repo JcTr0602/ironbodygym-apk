@@ -60,7 +60,7 @@ void main() {
 
     test('cobrar sigue en la barra inferior y en la acción '
         'del momento', () {
-      expect(ficha, contains("texto: 'Registrar pago'"));
+      expect(ficha, contains("texto: 'Cobrar'"));
       expect(ficha, contains("'cobrar' => botonMomento("));
     });
   });
