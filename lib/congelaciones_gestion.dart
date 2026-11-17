@@ -14,6 +14,7 @@ library;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'errores_sync.dart';
 import 'localdb.dart';
 
 /// Categorías del motivo (las mismas claves que valida el
@@ -27,6 +28,29 @@ const Map<String, String> kCategoriasCongelacion = {
 
 String etiquetaCategoriaCongelacion(String? clave) =>
     kCategoriasCongelacion[clave] ?? 'Otro';
+
+/// Yunque Exhaustivo P-01: ramas amables ÚNICAS para los
+/// fallos de las RPC de congelaciones en la bandeja. El
+/// error del servidor (res['error']) y las excepciones
+/// NUNCA se pintan crudos — códigos PostgREST/SQL y claves
+/// internas no son texto para el dueño —: la rama amable
+/// es la misma para todos los fallos de cada operación,
+/// con el mismo patrón que mensajeCierreCongelacionFallido
+/// de la ficha (lib/ui/ficha_congelacion.dart, SL-2
+/// G03-11). Viven aquí, en la capa de servicio, porque la
+/// ficha importa la bandeja (congelaciones.dart) y no al
+/// revés: así ambas pantallas pueden usarlas sin ciclo.
+/// El detalle técnico lo conserva quien llama si lo
+/// registra en bitácora (AppLog), nunca la pantalla.
+String mensajeListarCongelacionesFallido(Object? errorServidor) =>
+    'No se pudieron cargar las congelaciones. '
+    'Inténtalo de nuevo.';
+
+String mensajeResolverCongelacionFallido(Object? errorServidor) =>
+    'No se pudo resolver la solicitud. Inténtalo de nuevo.';
+
+String mensajeCerrarCongelacionFallido(Object? errorServidor) =>
+    'No se pudo cerrar la congelación. Inténtalo de nuevo.';
 
 /// Días de un rango cerrado [desde, hasta] contando por
 /// componentes UTC (inmune al DST de La Habana).
@@ -240,6 +264,15 @@ class CongelacionesService {
     return (
       ok: false,
       datos: const <CongelacionGestion>[],
+      // El error del sobre {ok:false} del servidor viaja
+      // tal cual: son mensajes de dominio escritos para
+      // el usuario («Solo el dueño ve las congelaciones.»)
+      // y su paso directo es contrato fijado por
+      // test/congelacion_gestion_test.dart. El saneado
+      // genérico de esta rama quedó probado en el Yunque
+      // Exhaustivo (P-01) y espera decisión en el paquete
+      // de contratos; las EXCEPCIONES de la RPC sí salen
+      // traducidas (ver listarRemoto).
       error: res is Map
           ? '${res['error'] ?? 'Error del servidor'}'
           : 'Error del servidor',
@@ -258,7 +291,17 @@ class CongelacionesService {
           .timeout(_timeout);
       return parsearRespuestaListar(res);
     } catch (e) {
-      return (ok: false, datos: const <CongelacionGestion>[], error: '$e');
+      // P-01: antes aquí salía '$e' — la excepción de la
+      // RPC con su código PostgREST en inglés — y la
+      // bandeja lo pintaba tal cual como subtítulo. Sale
+      // ya traducido por el traductor amable de la casa
+      // (errores_sync.dart, sin ciclo: ese módulo no
+      // importa esta capa ni Supabase).
+      return (
+        ok: false,
+        datos: const <CongelacionGestion>[],
+        error: mensajeErrorAmable(e),
+      );
     }
   }
 

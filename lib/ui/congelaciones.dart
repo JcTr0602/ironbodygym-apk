@@ -211,7 +211,12 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                 forzarExcepcion: true);
           }
         } else {
-          _snack('${res['error'] ?? 'No se pudo resolver'}');
+          // P-01: el error del servidor no se pinta crudo;
+          // el detalle queda en bitácora y a pantalla va
+          // la rama amable única de la capa de servicio.
+          AppLog.error('congelaciones', 'resolver_rechazado_servidor',
+              d: '${res['error'] ?? ''}');
+          _snack(mensajeResolverCongelacionFallido(res['error']));
         }
       }
     } catch (e) {
@@ -260,7 +265,11 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
             : 'Congelación cerrada.');
         await _cargar();
       } else {
-        _snack('${res['error'] ?? 'No se pudo cerrar'}');
+        // P-01: igual que en _resolver — detalle a la
+        // bitácora, rama amable única a pantalla.
+        AppLog.error('congelaciones', 'cerrar_rechazado_servidor',
+            d: '${res['error'] ?? ''}');
+        _snack(mensajeCerrarCongelacionFallido(res['error']));
       }
     } catch (e) {
       AppLog.error('congelaciones', 'cerrar_fallo', d: '$e');
@@ -319,6 +328,10 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                         title: const Text(
                             'Sin conexión con el servidor: se muestra '
                             'lo último sincronizado.'),
+                        // P-01: _errorRemoto ya llega SANEADO
+                        // de listarRemoto()/parsearRespuestaListar
+                        // (rama amable o mensajeErrorAmable),
+                        // nunca la excepción ni el código crudos.
                         subtitle: Text(_errorRemoto!),
                       ),
                     ),
