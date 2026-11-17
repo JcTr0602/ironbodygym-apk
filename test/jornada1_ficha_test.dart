@@ -166,6 +166,23 @@ void main() {
       // más abajo (la comprobación de visibilidad se
       // desplaza hasta él en vez de exigirlo en el primer
       // pantallazo; el flujo de edición no cambia).
+      // Jornada 1.35 (adjudicación del rojo de la corrida
+      // base): recién guardado, el aviso «Cambios guardados»
+      // (4 s) y la actividad de sync posterior tapan la
+      // ventana mínima de la pestaña y los arrastres de
+      // scrollUntilVisible no muerden la lista en TODO su
+      // presupuesto (50) — «Bad state: No element» sin que
+      // el dato falte: con el aviso fuera, el mismo gesto
+      // desplaza y el teléfono se ve (sonda zz_sonda_s14,
+      // corrida 2026-11-17). Se espera a que el aviso salga,
+      // como el dedo de Jc un instante después.
+      for (var i = 0;
+          i < 24 &&
+              find.text('Cambios guardados').evaluate().isNotEmpty;
+          i++) {
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
           find.textContaining('58998877'), 200,
           scrollable: find.byType(Scrollable).first);
