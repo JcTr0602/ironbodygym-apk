@@ -16,6 +16,18 @@ class Novedad {
 }
 
 const novedades = [
+  Novedad('1.35.0', [
+    'Fotos que nunca se pierden en silencio: ninguna foto sale de la cola sin que el servidor confirme que la recibió; si una subida se corta a mitad, la foto queda pendiente y visible en el Centro de Sincronización hasta que suba de verdad',
+    'El estado de la sincronización se dice una sola vez en toda la app: la cabecera del Directorio se pliega y enseña el estado resumido, sin repetir el mismo aviso en cada pantalla',
+    'Inscripciones con «Comenzó el»: al inscribir puedes elegir el día en que el cliente empezó de verdad, y el pago se asienta ese mismo día; solo si eliges otra fecha de inicio, el pago se asienta en esa fecha',
+    'Convertir un invitado en cliente ya funciona también sin conexión: la conversión nace en el teléfono y se completa al volver la señal, sin perder el acceso del cliente a su app ni su Plus vigente',
+    'Las sesiones ya no se cierran solas: un solo proceso renueva la sesión y los trabajos de fondo ya no la pisan —se acabaron los cierres inesperados a mitad del día—',
+    'El efectivo que cobra el dueño ya no aparece como «pendiente a entregar»: ese pendiente es solo del dinero que los entrenadores tienen por entregar; lo tuyo no se liquida contigo mismo',
+    'Precios coherentes al instante: si cambias un precio en Administración, toda la app cobra ya con el precio nuevo —también la renovación rápida de la ficha— sin esperar a que la sincronización complete el ciclo',
+    'El margen de los suplementos se calcula sobre el precio de venta, como se lee en el mostrador: costo 1000 y precio 1500 es un margen del 33,3 %',
+    'El botón de actividad reciente vuelve junto a la lupa de la pantalla principal, y salen los enlaces repetidos de las tarjetas: una sola puerta, siempre en el mismo sitio',
+    'Todos los desplegables de la app se comportan igual —mismo aspecto, mismo toque, mismo tamaño— y el Mostrador suma sus mejoras de lectura y de orden del día a día',
+  ]),
   Novedad('1.34.0', [
     'Las listas se desplazan suaves: las fotos bajan en su tamaño ligero, la sincronización ya no interrumpe el desplazamiento y el trabajo pesado salió de la pantalla —bajar por Clientes, Suplementos o cualquier lista ya no da tirones—',
     'La ficha del cliente respira: fuera la tarjeta flotante de «Dar acceso» que estorbaba encima de la ficha y fuera «Repetir último cobro»; lo importante —el estado del cliente, su pago y su historial— manda en la pantalla',
