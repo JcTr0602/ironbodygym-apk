@@ -402,7 +402,7 @@ class _DiferenciasCajaScreenState
                     const EstadoVacio(
                       sinMarco: true,
                       icono: Icons.check_circle_outline_rounded,
-                      titulo: 'No hay diferencias de caja abiertas',
+                      titulo: 'No hay diferencias de caja abiertas.',
                     )
                   else
                     for (final e in _abiertas) _fila(e),
