@@ -325,7 +325,23 @@ class _PilarClientesState extends State<PilarClientes> {
                       isLabelVisible:
                           _urgenciaVenc != null && _urgenciaVenc! > 0,
                       label: Text('${_urgenciaVenc ?? ''}'),
-                      child: const Text('Vencimientos'),
+                      // Campo 1.35 (2026-11-17): con la
+                      // pastilla visible, el texto reserva
+                      // su sitio a la derecha — la pastilla
+                      // se ancla en la esquina superior del
+                      // hijo y TAPABA la última letra
+                      // («Vencimient…» en la captura de Jc;
+                      // solape medido con sonda: 8 dp a
+                      // 360 dp de ancho). Sin pastilla, la
+                      // reserva desaparece con ella.
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                            right: _urgenciaVenc != null &&
+                                    _urgenciaVenc! > 0
+                                ? 16
+                                : 0),
+                        child: const Text('Vencimientos'),
+                      ),
                     )),
                 const ButtonSegment(
                     value: 'invitados',

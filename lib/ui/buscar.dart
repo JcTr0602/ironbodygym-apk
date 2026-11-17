@@ -2309,6 +2309,83 @@ class _FilaClienteState extends State<_FilaCliente> {
         }
       }
     }
+    // Campo 1.35 (2026-11-17): el chip de estado y el
+    // chip de avisado se arman como locales y comparten
+    // UNA fila en la columna de la fila (ver más abajo):
+    // el avisado ocupaba una línea propia y la fila
+    // crecía solo en los avisados.
+    final Widget elChipEstado = esCasa
+        ? Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.sm,
+                vertical: AppEspacio.xs),
+            decoration: BoxDecoration(
+              color: AppColores.casaFondo,
+              borderRadius:
+                  BorderRadius.circular(AppRadio.circular),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.home_rounded,
+                    size: 16, color: AppColores.casaIcono),
+                const SizedBox(width: 4),
+                // Jornada 1 de la 1.34: el texto
+                // completo desbordaba 3,1 px en la fila
+                // con los dos botones del trailing
+                // (Listas); flexible con elipsis en vez
+                // de recorte seco.
+                Flexible(
+                  child: Text(textoDiasCasa,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.etiqueta.copyWith(
+                          color: AppColores.casaTexto)),
+                ),
+              ],
+            ),
+          )
+        : BadgeEstado(estado: chipFila.estado, texto: chipFila.texto);
+    // 1.25 T116 (F1-26): el chip de avisado en TEXTO,
+    // junto a los días.
+    final Widget? elChipAvisado = widget.avisoChip == null
+        ? null
+        : Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppEspacio.sm,
+                vertical: AppEspacio.xs),
+            decoration: BoxDecoration(
+              color: AppColores.exito.withValues(alpha: 0.14),
+              borderRadius:
+                  BorderRadius.circular(AppRadio.circular),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_rounded,
+                    size: 13,
+                    color: AppColores.exitoTexto(context)),
+                const SizedBox(width: 3),
+                // Campo 1.35 (2026-11-17): flexible con
+                // elipsis — al compartir la fila con el
+                // chip de estado, el avisado también cede
+                // si la columna es estrecha (fila con
+                // acción ancha en el trailing), en vez de
+                // desbordar la fila.
+                Flexible(
+                  child: Text(widget.avisoChip!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.etiqueta.copyWith(
+                          // Pasada (Argón): el texto
+                          // del chip (12 px) va en el
+                          // token resuelto, no en el
+                          // exito de relleno.
+                          color: AppColores.exitoTexto(context),
+                          fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          );
     final filaPrincipal = InkWell(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
@@ -2352,40 +2429,28 @@ class _FilaClienteState extends State<_FilaCliente> {
                   // 1.25 T47: un solo chip de estado con
                   // fecha (Casa: su chip dorado de siempre,
                   // con el texto completo).
-                  if (esCasa)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.sm,
-                          vertical: AppEspacio.xs),
-                      decoration: BoxDecoration(
-                        color: AppColores.casaFondo,
-                        borderRadius: BorderRadius.circular(
-                            AppRadio.circular),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.home_rounded,
-                              size: 16, color: AppColores.casaIcono),
-                          const SizedBox(width: 4),
-                          // Jornada 1 de la 1.34: el texto
-                          // completo desbordaba 3,1 px en la
-                          // fila con los dos botones del
-                          // trailing (Listas); flexible con
-                          // elipsis en vez de recorte seco.
-                          Flexible(
-                            child: Text(textoDiasCasa,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTexto.etiqueta.copyWith(
-                                    color: AppColores.casaTexto)),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    BadgeEstado(
-                        estado: chipFila.estado,
-                        texto: chipFila.texto),
+                  // Campo 1.35 (2026-11-17): el chip de
+                  // avisado comparte ESTA fila, a la
+                  // derecha del de estado (armados arriba
+                  // como locales) — ocupaba una línea
+                  // propia bajo el estado y la fila crecía
+                  // 18 dp solo en los avisados: parte de
+                  // las alturas disparejas del Directorio
+                  // que marcó Jc. El de estado va flexible
+                  // flojo: conserva su tamaño y solo cede
+                  // (con su elipsis interna) si ambos no
+                  // caben.
+                  Row(
+                    children: [
+                      Flexible(
+                          fit: FlexFit.loose, child: elChipEstado),
+                      if (elChipAvisado != null) ...[
+                        const SizedBox(width: AppEspacio.sm),
+                        Flexible(
+                            fit: FlexFit.loose, child: elChipAvisado),
+                      ],
+                    ],
+                  ),
                   if (lineaContacto != null) ...[
                     const SizedBox(height: 2),
                     Text(lineaContacto,
@@ -2393,73 +2458,22 @@ class _FilaClienteState extends State<_FilaCliente> {
                             color: AppColores.textoSecundario(
                                 context))),
                   ],
-                  // 1.25 T52: la próxima acción probable,
-                  // como botón fantasma bajo el estado — la
-                  // lista trabaja como cola, no como
-                  // directorio. No sustituye al WhatsApp del
-                  // trailing ni al gesto: es el atajo visible.
-                  if (widget.accionPrincipal != null) ...[
-                    const SizedBox(height: 2),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        icon: Icon(widget.accionPrincipal!.icono,
-                            size: 16),
-                        label: Text(widget.accionPrincipal!.texto),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: AppEspacio.sm),
-                          // 1.35 (UI-24): la «próxima
-                          // acción» medía 21 dp de alto
-                          // tocable (minimumSize cero +
-                          // shrinkWrap): es el atajo de
-                          // cobrar/avisar de la fila y pasa
-                          // al objetivo de 48 de la casa,
-                          // con el mismo glifo y la misma
-                          // letra — crece la caja, no el
-                          // contenido.
-                          minimumSize: const Size(64, 48),
-                          tapTargetSize:
-                              MaterialTapTargetSize.padded,
-                          foregroundColor: AppColores.naranja,
-                        ),
-                        onPressed: widget.accionPrincipal!.alTocar,
-                      ),
-                    ),
-                  ],
+                  // 1.25 T52: la próxima acción probable
+                  // (avisar/cobrar) — Campo 1.35
+                  // (2026-11-17): ya NO vive aquí como
+                  // botón fantasma bajo el estado: esa
+                  // línea condicional hacía la fila 42 dp
+                  // más alta que sus vecinas (las alturas
+                  // disparejas del Directorio que marcó
+                  // Jc). La acción pasa a la zona trailing
+                  // como pastilla, con su objetivo de 48
+                  // de UI-24 intacto (ver el trailing de
+                  // esta misma fila).
                   // 1.25 T116 (F1-26): el chip de avisado
-                  // en TEXTO, junto a los días.
-                  if (widget.avisoChip != null) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppEspacio.sm,
-                          vertical: AppEspacio.xs),
-                      decoration: BoxDecoration(
-                        color: AppColores.exito
-                            .withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(
-                            AppRadio.circular),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.check_rounded,
-                              size: 13,
-                              color: AppColores.exitoTexto(context)),
-                          const SizedBox(width: 3),
-                          Text(widget.avisoChip!,
-                              style: AppTexto.etiqueta.copyWith(
-                                  // Pasada (Argón): el texto
-                                  // del chip (12 px) va en el
-                                  // token resuelto, no en el
-                                  // exito de relleno.
-                                  color: AppColores.exitoTexto(context),
-                                  fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    ),
-                  ],
+                  // en TEXTO, junto a los días — Campo
+                  // 1.35: junto de verdad, en la fila del
+                  // chip de estado (arriba), no en una
+                  // línea propia.
                 ],
               ),
             ),
@@ -2492,22 +2506,63 @@ class _FilaClienteState extends State<_FilaCliente> {
               ),
             ],
             // Acción rápida, botón de WhatsApp (1.24.2) o chevron.
+            // Campo 1.35 (2026-11-17): la acción principal
+            // (avisar/cobrar, T52) vive AQUÍ como pastilla —
+            // la fila mide lo mismo con acción y sin ella.
+            // Si la acción ES «Avisar», la pastilla ES el
+            // botón de WhatsApp (su alTocar es el mismo
+            // destino que accionWhatsapp en el Directorio):
+            // no se duplica el botón de chat; con otra
+            // acción («Cobrar»), el chat acompaña a la
+            // pastilla. Un trailing explícito del llamador
+            // manda como siempre (Listas no cambia).
             widget.trailing ??
-                (widget.accionWhatsapp != null
-                    ? IconButton(
-                        icon: const Icon(Icons.chat_rounded,
-                            color: AppColores.whatsapp),
-                        tooltip: 'Avisar por WhatsApp',
-                        // 1.35 (UI-24): sin densidad
-                        // compacta — el botón medía 40 dp
-                        // de alto tocable; a densidad
-                        // estándar toca los 48 de la casa
-                        // sin cambiar el glifo ni la fila.
-                        onPressed: widget.accionWhatsapp,
+                (widget.accionPrincipal != null
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton.icon(
+                            icon: Icon(widget.accionPrincipal!.icono,
+                                size: 16),
+                            label: Text(widget.accionPrincipal!.texto),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppEspacio.sm),
+                              // 1.35 (UI-24): el objetivo de
+                              // 48 de la casa, declarado —
+                              // crece la caja, no el contenido.
+                              minimumSize: const Size(64, 48),
+                              tapTargetSize:
+                                  MaterialTapTargetSize.padded,
+                              foregroundColor: AppColores.naranja,
+                            ),
+                            onPressed: widget.accionPrincipal!.alTocar,
+                          ),
+                          if (widget.accionWhatsapp != null &&
+                              widget.accionPrincipal!.texto != 'Avisar')
+                            IconButton(
+                              icon: const Icon(Icons.chat_rounded,
+                                  color: AppColores.whatsapp),
+                              tooltip: 'Avisar por WhatsApp',
+                              onPressed: widget.accionWhatsapp,
+                            ),
+                        ],
                       )
-                    : Icon(Icons.chevron_right_rounded,
-                        color:
-                            AppColores.textoSecundario(context))),
+                    : widget.accionWhatsapp != null
+                        ? IconButton(
+                            icon: const Icon(Icons.chat_rounded,
+                                color: AppColores.whatsapp),
+                            tooltip: 'Avisar por WhatsApp',
+                            // 1.35 (UI-24): sin densidad
+                            // compacta — el botón medía 40 dp
+                            // de alto tocable; a densidad
+                            // estándar toca los 48 de la casa
+                            // sin cambiar el glifo ni la fila.
+                            onPressed: widget.accionWhatsapp,
+                          )
+                        : Icon(Icons.chevron_right_rounded,
+                            color:
+                                AppColores.textoSecundario(context))),
           ],
         ),
       ),
