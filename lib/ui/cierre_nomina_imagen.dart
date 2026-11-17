@@ -131,7 +131,7 @@ class ImagenCierreNomina extends StatelessWidget {
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 17,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                           letterSpacing: 0.6,
                         ),
                       ),
@@ -177,7 +177,7 @@ class ImagenCierreNomina extends StatelessWidget {
                       style: const TextStyle(
                         color: _naranja,
                         fontSize: 21,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],

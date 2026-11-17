@@ -68,7 +68,7 @@ class CabeceraTarjetaIron extends StatelessWidget {
             style: TextStyle(
               color: Colors.white,
               fontSize: 13,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               letterSpacing: 1.4,
             ),
           ),
@@ -112,7 +112,7 @@ class PieTarjetaImagen extends StatelessWidget {
             style: TextStyle(
               color: colorPrincipal,
               fontSize: 11,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               letterSpacing: 1.2,
             ),
           ),
@@ -121,7 +121,7 @@ class PieTarjetaImagen extends StatelessWidget {
         Text(
           lineaOficialTarjetaImagen,
           textAlign: TextAlign.center,
-          style: TextStyle(color: colorSuave, fontSize: 10.5),
+          style: TextStyle(color: colorSuave, fontSize: 11),
         ),
         const SizedBox(height: 2),
         Text(

@@ -3179,7 +3179,7 @@ class _FichaScreenState extends State<FichaScreen> {
               overflow: TextOverflow.ellipsis,
               style: AppTexto.etiqueta.copyWith(
                 fontWeight:
-                    activa ? FontWeight.w800 : FontWeight.w500,
+                    activa ? FontWeight.w700 : FontWeight.w500,
                 color: activa
                     ? AppColores.textoNaranja(context)
                     : AppColores.textoSecundario(context),

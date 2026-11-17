@@ -2359,20 +2359,23 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           Text.rich(
             TextSpan(
-              style: AppTexto.display.copyWith(
-                  fontSize: 25,
-                  color: AppColores.textoSobreOscuro,
-                  height: 1.15),
+              // 1.36 (136-306/309): el 25 huérfano baja al
+              // escalón 24 y cifra y palabra se unen con
+              // espacio duro. PORTAR AL FUNDIR CON CAMPO:
+              // allí el titular grafito ya no existe (zona
+              // «El dinero de hoy» aprobada por Jc).
+              style: AppTexto.displayPequeno.copyWith(
+                  color: AppColores.textoSobreOscuro),
               children: [
                 const TextSpan(text: 'Hoy: '),
                 TextSpan(
-                  text: '${fmtMonto(_cobradoHoy)} cobrados',
+                  text: '${fmtMonto(_cobradoHoy)}\u00A0cobrados',
                   style: const TextStyle(color: AppColores.naranja),
                   recognizer: _tapTitularCobrado,
                 ),
                 const TextSpan(text: ' · '),
                 TextSpan(
-                  text: '${fmtMonto(_porRecoger)} por recoger',
+                  text: '${fmtMonto(_porRecoger)}\u00A0por\u00A0recoger',
                   style: const TextStyle(
                     color: AppColores.naranja,
                     decoration: TextDecoration.underline,

@@ -896,7 +896,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 formato: fmtMonto,
                 style: AppTexto.metrica.copyWith(color: naranja)),
             Text('CUP',
-                style: AppTexto.minuscula.copyWith(color: AppColores.textoSecundario(context))),
+                // 1.36 (136-306): la unidad de la cifra
+                // principal es texto operativo: no va a 11.
+                style: AppTexto.etiqueta.copyWith(color: AppColores.textoSecundario(context))),
           ],
         ),
       ),
@@ -975,7 +977,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ? AppColores.naranja
                           : AppColores.texto(context))),
               Text('CUP',
-                  style: AppTexto.minuscula.copyWith(
+                  // 1.36 (136-306): texto operativo, no a 11.
+                  style: AppTexto.etiqueta.copyWith(
                       color: AppColores.textoSecundario(context))),
             ],
           ),

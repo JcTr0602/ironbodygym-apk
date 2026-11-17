@@ -2073,6 +2073,9 @@ class _CampoSelectorCerradoState
                   const SizedBox(width: AppEspacio.sm),
                 ],
                 Expanded(
+                  // 1.36 (136-307/317): el valor ELEGIDO es
+                  // dato de decisión: no se elide; el campo
+                  // crece a 2 líneas a letra grande.
                   child: Text(
                     widget.textoSeleccion ?? '',
                     style: widget.habilitado
@@ -2080,8 +2083,7 @@ class _CampoSelectorCerradoState
                         : AppTexto.cuerpo.copyWith(
                             color:
                                 AppColores.textoSecundario(context)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
                   ),
                 ),
               ],
@@ -2331,7 +2333,7 @@ class SeccionFormulario extends StatelessWidget {
             ],
             Text(titulo,
                 style: AppTexto.etiqueta
-                    .copyWith(fontWeight: FontWeight.w800)),
+                    .copyWith(fontWeight: FontWeight.w700)),
           ],
         ),
         const SizedBox(height: AppEspacio.md),
@@ -2660,7 +2662,10 @@ class EncabezadoSeccion extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(titulo, style: AppTexto.subtitulo),
+          // 1.36 (136-305/313): la cabecera de sección es
+          // un rol propio (15 negrita con tracking), no el
+          // subtitulo genérico.
+          child: Text(titulo, style: AppTexto.cabeceraSeccion),
         ),
         if (accionTexto != null && onAccion != null)
           TextButton(
@@ -2700,9 +2705,9 @@ class EncabezadoSeccion extends StatelessWidget {
         Expanded(
           child: Text(
             titulo,
-            style: AppTexto.etiqueta.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.6,
+            // 1.36 (136-306/313): el tracking 1.6 vive en
+            // el rol cabeceraPanel, no en sobrescrituras.
+            style: AppTexto.cabeceraPanel.copyWith(
               color: aviso
                   ? AppColores.naranja
                   : AppColores.textoSecundario(context),
@@ -3632,11 +3637,13 @@ class FilaLibro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 (136-296/314): el monto NACE tabular — el rol
+    // cifraFila es el defecto; antes la vía tabular solo
+    // llegaba si el llamador pasaba valorAnimado o un
+    // estilo ya tabular, y dos importes vecinos podían ir
+    // uno tabular y otro no.
     final estiloMontoFinal = estiloMonto ??
-        AppTexto.cuerpo.copyWith(
-          fontWeight: FontWeight.bold,
-          color: colorMonto,
-        );
+        AppTexto.cifraFila.copyWith(color: colorMonto);
     return Padding(
       padding:
           const EdgeInsets.symmetric(vertical: AppEspacio.sm),
@@ -4560,7 +4567,7 @@ class GraficoBarrasDiarias extends StatelessWidget {
                                 '${(datos[i]['total'] as num?)?.toInt() ?? 0}',
                                 style: AppTexto.minuscula.copyWith(
                                     color: AppColores.naranja,
-                                    fontWeight: FontWeight.w800),
+                                    fontWeight: FontWeight.w700),
                               ),
                             ),
                             const SizedBox(height: 2),

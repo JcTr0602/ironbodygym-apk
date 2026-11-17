@@ -504,7 +504,7 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
           child: Column(
             children: [
               Text(valor,
-                  style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w800)),
+                  style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 2),
               Text(etiqueta,
                   textAlign: TextAlign.center,

@@ -2195,7 +2195,7 @@ class _AdminScreenState extends State<AdminScreen> {
             children: [
               Text.rich(
                 TextSpan(
-                  style: AppTexto.displayPequeno.copyWith(fontWeight: FontWeight.w800),
+                  style: AppTexto.displayPequeno.copyWith(fontWeight: FontWeight.w700),
                   children: const [
                     TextSpan(text: 'Panel '),
                     TextSpan(
@@ -2452,7 +2452,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 child: Text(p.boton,
                     style: AppTexto.metadato.copyWith(color: p.primario
                             ? AppColores.sobreNaranjaOscuro
-                            : null, fontWeight: FontWeight.w800)),
+                            : null, fontWeight: FontWeight.w700)),
               ),
             ),
           ],
@@ -2549,7 +2549,7 @@ class _AdminScreenState extends State<AdminScreen> {
             Icon(icono, size: 20, color: fg),
             const SizedBox(width: 8),
             Text(texto,
-                style: AppTexto.cuerpo.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                style: AppTexto.cuerpo.copyWith(color: fg, fontWeight: FontWeight.w700)),
           ],
         ),
       ),
@@ -2685,7 +2685,7 @@ class _AdminScreenState extends State<AdminScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(valor,
-              style: AppTexto.titulo.copyWith(color: color, fontWeight: FontWeight.w800),
+              style: AppTexto.titulo.copyWith(color: color, fontWeight: FontWeight.w700),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
           const SizedBox(height: 2),
@@ -2896,9 +2896,8 @@ class _AdminScreenState extends State<AdminScreen> {
       padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
       child: Text(
         titulo,
-        style: AppTexto.etiqueta.copyWith(
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.6,
+        // 1.36 (136-306/313): rol cabeceraPanel.
+        style: AppTexto.cabeceraPanel.copyWith(
           color: AppColores.textoSecundario(context),
         ),
       ),

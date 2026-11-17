@@ -639,7 +639,7 @@ class _SeccionFotosProgresoNubeState
           const Text(
             'Las que el cliente decidió guardar en la nube. '
             'Solo tú puedes verlas.',
-            style: TextStyle(fontSize: 12.5),
+            style: TextStyle(fontSize: 13),
           ),
           if (enSeleccion) ...[
             const SizedBox(height: 10),
@@ -768,7 +768,7 @@ class _SeccionFotosProgresoNubeState
           Text(
             fmtFecha(f['fecha']?.toString() ?? ''),
             style: const TextStyle(
-                fontSize: 11.5, fontWeight: FontWeight.w700),
+                fontSize: 12, fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -932,7 +932,7 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
                     'Foto del '
                     '${fmtFecha(_foto['fecha']?.toString() ?? '')}',
                     style: AppTexto.subtitulo
-                        .copyWith(fontWeight: FontWeight.w800),
+                        .copyWith(fontWeight: FontWeight.w700),
                   ),
                 ),
                 if (widget.fotos.length > 1)

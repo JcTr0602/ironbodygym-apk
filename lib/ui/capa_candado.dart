@@ -106,9 +106,10 @@ class _CapaCandadoState extends State<CapaCandado> {
                     Text(
                       b.mensaje,
                       textAlign: TextAlign.center,
-                      style: AppTexto.cuerpo.copyWith(
+                      // 1.36 (136-306): el 16 era un escalón
+                      // fantasma; el mensaje va en subtitulo.
+                      style: AppTexto.subtitulo.copyWith(
                         color: Colors.white,
-                        fontSize: 16,
                         height: 1.45,
                       ),
                     ),

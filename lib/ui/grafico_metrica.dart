@@ -176,7 +176,7 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
                   child: Text(
                     widget.titulo.toUpperCase(),
                     style: AppTexto.minuscula.copyWith(
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w700,
                       color: Colors.grey,
                       letterSpacing: 1.0,
                     ),

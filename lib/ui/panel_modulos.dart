@@ -203,7 +203,7 @@ class BadgeModuloPanel extends StatelessWidget {
       child: Text(
         '$valor',
         style: AppTexto.minuscula
-            .copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+            .copyWith(color: Colors.white, fontWeight: FontWeight.w700),
       ),
     );
     if (!pulso || MediaQuery.of(context).disableAnimations) {
@@ -318,9 +318,8 @@ class FranjaPorRevisar extends StatelessWidget {
                   AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
               child: Text(
                 'POR REVISAR',
-                style: AppTexto.etiqueta.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.6,
+                // 1.36 (136-306/313): rol cabeceraPanel.
+                style: AppTexto.cabeceraPanel.copyWith(
                   color: AppColores.errorTexto(context),
                 ),
               ),

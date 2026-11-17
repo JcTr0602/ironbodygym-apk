@@ -827,6 +827,14 @@ String tiempoRelativo(String? iso) {
 /// tal cual en Estadísticas (2026-10-31). Regla: redondeo a centavos
 /// y sin ceros de más (3120, 1133.33, 271.11); los enteros se ven
 /// igual que antes.
+/// 1.36 (136-309/318): compañera de composición de
+/// [fmtMonto] — cifra y moneda unidas con ESPACIO DURO
+/// (U+00A0): en un párrafo que envuelve, el importe y su
+/// moneda nunca se parten entre líneas. Toda cadena de
+/// importe compuesta se compone por aquí.
+String fmtMontoConMoneda(dynamic m, String moneda) =>
+    '${fmtMonto(m)}\u00A0$moneda';
+
 String fmtMonto(dynamic m) {
   if (m == null) return '—';
   // Mini Terra (MEDIO): aceptar texto numérico en vez de reventar

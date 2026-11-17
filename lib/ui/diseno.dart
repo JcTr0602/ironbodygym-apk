@@ -650,6 +650,20 @@ class AppTexto {
   /// por salir de `display`.
   static const familiaDisplay = 'Barlow Condensed';
 
+  /// 1.36 (136-316): RED DE RESCATE declarada de la familia
+  /// de marca: si un glifo no está en el cmap de Barlow
+  /// (→, ✓, ★…), el rescate por glifo cae en esta fuente
+  /// ELEGIDA, no en la que el OEM decida. Frontera de
+  /// familias: Barlow Condensed = titulares grandes, cifras
+  /// protagonistas y el nombre del cliente en su ficha
+  /// (dato «de marca», 136-303); el sistema = cuerpo.
+  static const familiaRespaldo = 'Roboto';
+
+  /// 1.36 (136-316): la familia mono del editor de
+  /// GymPedia vive en la declaración, no en un literal
+  /// suelto de pantalla (136-311).
+  static const familiaCodigo = 'monospace';
+
   /// Números grandes: dinero, conteos, vencimientos.
   /// 1.23 (Delta Argón 6ª, pulido): cifras tabulares — los
   /// dígitos ocupan el mismo ancho y las columnas de dinero
@@ -659,33 +673,43 @@ class AppTexto {
   /// con `tnum` activa).
   static const display = TextStyle(
     fontFamily: familiaDisplay,
+    fontFamilyFallback: [familiaRespaldo],
     fontSize: 32,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.5,
-    height: 1.1,
+    // 1.36 (136-312/318): la línea natural medida de
+    // Barlow es 1,20; por debajo, la «g» desborda su caja.
+    height: 1.2,
     fontFeatures: [FontFeature.tabularFigures()],
   );
 
   static const displayPequeno = TextStyle(
     fontFamily: familiaDisplay,
+    fontFamilyFallback: [familiaRespaldo],
     fontSize: 24,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,
-    height: 1.15,
+    height: 1.2,
     fontFeatures: [FontFeature.tabularFigures()],
   );
 
   /// Título de página (P0 1.20).
   static const tituloPagina = TextStyle(
     fontFamily: familiaDisplay,
+    fontFamilyFallback: [familiaRespaldo],
     fontSize: 20,
     fontWeight: FontWeight.bold,
     height: 1.25,
+    // 1.36 (136-295/314): era el ÚNICO rol Barlow sin
+    // tabulares y es el que pinta los totales en texto
+    // plano (Pagos por método, pendiente, Mi Día).
+    fontFeatures: [FontFeature.tabularFigures()],
   );
 
   /// Métrica destacada (P0 1.20): cifra única protagonista.
   static const metrica = TextStyle(
     fontFamily: familiaDisplay,
+    fontFamilyFallback: [familiaRespaldo],
     fontSize: 22,
     fontWeight: FontWeight.bold,
     letterSpacing: -0.25,
@@ -724,6 +748,62 @@ class AppTexto {
   static const metadato = TextStyle(fontSize: 12, height: 1.4);
 
   static const minuscula = TextStyle(fontSize: 11, height: 1.4);
+
+  /// 1.36 (136-313/314): CIFRA DE FILA — el escalón que le
+  /// faltaba a las filas de informe y de libro: cuerpo 14
+  /// en negrita y SIEMPRE tabular. Todo importe de fila se
+  /// pinta con este rol (o con [conTabulares]); un importe
+  /// con el rol de su rótulo es el defecto 136-300.
+  static const cifraFila = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.bold,
+    height: 1.4,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+
+  /// 1.36 (136-313): cabecera de SECCIÓN como rol propio
+  /// (15, negrita, tracking leve declarado): la escalera
+  /// re-nivelada — pantalla 20 · tarjeta 18 · sección 15.
+  static const cabeceraSeccion = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 0.3,
+    height: 1.3,
+  );
+
+  /// 1.36 (136-306/313): cabecera de PANEL como rol propio:
+  /// su tracking 1.6 era un token practicado en 3 sitios y
+  /// declarado en ninguno; aquí queda declarado UNA vez.
+  /// Peso 700 (136-315: el 800 no existe en la fuente del
+  /// sistema estática).
+  static const cabeceraPanel = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.bold,
+    letterSpacing: 1.6,
+    height: 1.2,
+  );
+
+  /// 1.36 (136-315): uso DECLARADO del SemiBold 600
+  /// empaquetado de Barlow — los dígitos del teclado del
+  /// PIN (antes llegaban al 600 solo como destino
+  /// involuntario de un `normal` sobre displayPequeno).
+  static const pinDigitos = TextStyle(
+    fontFamily: familiaDisplay,
+    fontFamilyFallback: [familiaRespaldo],
+    fontSize: 24,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.25,
+    height: 1.2,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+
+  /// 1.36 (136-311/316): el mono del editor de GymPedia,
+  /// desde la declaración de familias.
+  static const codigo = TextStyle(
+    fontFamily: familiaCodigo,
+    fontSize: 13,
+    height: 1.4,
+  );
 }
 
 /// 1.36 (136-280): escala de PESOS declarada. El desvío
@@ -1180,6 +1260,14 @@ class AppTema {
 
     return ThemeData(
       useMaterial3: true,
+      // 1.36 (136-316): frontera de familias declarada en
+      // el tema — el cuerpo sigue en la fuente del sistema
+      // y su red de rescate es la familia de marca y luego
+      // la elegida, no la del OEM.
+      fontFamilyFallback: const [
+        AppTexto.familiaDisplay,
+        AppTexto.familiaRespaldo,
+      ],
       brightness: b,
       // 1.22 Diseño Bloque 1 (T1): UNA transición del sistema
       // para las 95 rutas (desvanecido + desplazamiento corto,
@@ -1402,7 +1490,9 @@ class AppTema {
         scrolledUnderElevation: 3,
         shadowColor: Colors.black.withValues(alpha: 0.35),
         centerTitle: false,
-        titleTextStyle: AppTexto.titulo.copyWith(color: (tactico && !oscuro) ? AppColores.sobreMarca : Colors.white),
+        // 1.36 (136-305/313): la AppBar titula con el rol
+        // de PÁGINA (20), no con el de tarjeta (18).
+        titleTextStyle: AppTexto.tituloPagina.copyWith(color: (tactico && !oscuro) ? AppColores.sobreMarca : Colors.white),
       ),
       cardTheme: CardThemeData(
         color: superficie,

@@ -1327,7 +1327,7 @@ class _PastillaTipoSerie extends StatelessWidget {
                 info.nombre,
                 maxLines: 1,
                 style: AppTexto.minuscula.copyWith(
-                    fontWeight: FontWeight.w800, color: colores.tinta),
+                    fontWeight: FontWeight.w700, color: colores.tinta),
               ),
             ),
           ),
@@ -2373,7 +2373,7 @@ class _SelectorFichasScreenState extends State<SelectorFichasScreen> {
                                             style: AppTexto.etiqueta
                                                 .copyWith(
                                               fontWeight:
-                                                  FontWeight.w800,
+                                                  FontWeight.w700,
                                               color: elegida
                                                   ? AppColores
                                                       .sobreMarca

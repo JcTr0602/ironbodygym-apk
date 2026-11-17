@@ -362,7 +362,7 @@ class _ComparativaMensualState
             const SizedBox(height: AppEspacio.xs),
             Text(
               fmt(m.actual),
-              style: AppTexto.metrica.copyWith(fontWeight: FontWeight.w900),
+              style: AppTexto.metrica.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppEspacio.xs),
             Row(

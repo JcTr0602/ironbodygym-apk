@@ -395,7 +395,7 @@ class _PagosPorMetodoState
                         ),
                         Text(
                           '${fmtMonto(total)} CUP',
-                          style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w900),
+                          style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w700),
                         ),
                       ],
                     ),
@@ -439,7 +439,7 @@ class _PagosPorMetodoState
                           ),
                           Text(
                             '${fmtMonto(_efectivoUsd + _transferenciaUsd)} USD',
-                            style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w900),
+                            style: AppTexto.tituloPagina.copyWith(color: AppColores.naranja, fontWeight: FontWeight.w700),
                           ),
                         ],
                       ),

@@ -1693,7 +1693,7 @@ class _FilaSalidaCobroState extends State<_FilaSalidaCobro>
                       Text('Cobrado',
                           style: AppTexto.subtitulo.copyWith(
                               color: AppColores.exitoOscuro,
-                              fontWeight: FontWeight.w800)),
+                              fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ),

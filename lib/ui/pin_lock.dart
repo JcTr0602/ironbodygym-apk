@@ -380,8 +380,9 @@ class _PinLockScreenState extends State<PinLockScreen>
               child: icono != null
                   ? Icon(icono, size: 24)
                   : Text(d,
-                      style: AppTexto.displayPequeno.copyWith(
-                          fontWeight: FontWeight.normal)),
+                      // 1.36 (136-315): el 600 de Barlow con
+                      // uso declarado — rol pinDigitos.
+                      style: AppTexto.pinDigitos),
             ),
           ),
         ),

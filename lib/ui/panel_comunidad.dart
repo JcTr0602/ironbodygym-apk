@@ -486,7 +486,7 @@ class _ComunidadPanelScreenState extends State<ComunidadPanelScreen> {
                             '$_reportesPendientes',
                             style: AppTexto.minuscula.copyWith(
                               color: Colors.white,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
@@ -1059,8 +1059,8 @@ class _VerPerfilComunidadScreenState
                     Text(
                       '${_proyeccion['identidad'] ?? p.nombre}',
                       style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 19),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 18),
                     ),
                     Text(
                       'Nombre real: ${p.nombre}'

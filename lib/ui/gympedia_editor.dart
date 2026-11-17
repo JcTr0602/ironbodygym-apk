@@ -783,7 +783,7 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         maxLines: lineas,
         readOnly: soloLectura,
         enabled: !soloLectura,
-        style: mono ? AppTexto.secundario.copyWith(fontFamily: 'monospace') : null,
+        style: mono ? AppTexto.codigo : null,
         decoration: InputDecoration(
           labelText: etiqueta,
           helperText: ayuda,

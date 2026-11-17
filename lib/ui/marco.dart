@@ -630,7 +630,7 @@ class _DestinoGrafito extends StatelessWidget {
                   style: AppTexto.etiqueta.copyWith(
                     color: color,
                     fontWeight: activo
-                        ? FontWeight.w800
+                        ? FontWeight.w700
                         : FontWeight.w600,
                   ),
                   maxLines: 1,

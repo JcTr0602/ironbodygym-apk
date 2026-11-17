@@ -265,7 +265,7 @@ class _LoginScreenState extends State<LoginScreen>
                     RichText(
                       text: TextSpan(
                         style: AppTexto.display.copyWith(
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w700,
                             letterSpacing: 1),
                         children: [
                           TextSpan(

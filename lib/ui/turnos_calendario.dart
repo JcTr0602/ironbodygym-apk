@@ -608,7 +608,7 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
                       Text('$dia',
                           style: AppTexto.metadato.copyWith(color: esHoy
                                   ? AppColores.naranja
-                                  : null, fontWeight: FontWeight.w800)),
+                                  : null, fontWeight: FontWeight.w700)),
                       const Spacer(),
                       // 1.25 T81: la marca de lo REAL en
                       // los días pasados (verde: abrieron

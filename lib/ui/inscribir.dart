@@ -950,7 +950,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                       ? AppColores.textoNaranja(context)
                                       : null,
                                   fontWeight: i == activo
-                                      ? FontWeight.w800
+                                      ? FontWeight.w700
                                       : null)),
                             ],
                           ),

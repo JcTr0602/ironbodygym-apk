@@ -258,7 +258,7 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                 Expanded(
                   child: Text(
                     '${indice + 1}. ${paso.titulo}',
-                    style: AppTexto.titulo.copyWith(fontSize: 16),
+                    style: AppTexto.titulo,
                   ),
                 ),
                 if (paso.esManual)
