@@ -264,6 +264,20 @@ class _BuscarScreenState extends State<BuscarScreen>
   /// Un valor guardado fuera de la lista cerrada se ignora y
   /// vuelve al default (nunca se ejecuta una acción desconocida).
   Future<void> _cargarConfig() async {
+    // Yunque Exhaustivo 1.35 (hallazgo de contraste de suite):
+    // esta carga de preferencias nace sin red desde initState —
+    // si una lectura falla (BD cerrándose, espejo en migración),
+    // el futuro sin catch quedaba como error asíncrono sin
+    // dueño y la pantalla perdía sus defaults en silencio. La
+    // carga es de preferencias: ante cualquier fallo se queda
+    // con los valores por defecto, como hace el método hermano
+    // de arriba (catch vacío deliberado).
+    try {
+      await _cargarConfigInterno();
+    } catch (_) {}
+  }
+
+  Future<void> _cargarConfigInterno() async {
     const cerrada = {'ninguna', 'cobrar', 'diario', 'venta', 'editar'};
     final der = await PerfilService.instance.getSwipeBuscarDer();
     final izq = await PerfilService.instance.getSwipeBuscarIzq();
