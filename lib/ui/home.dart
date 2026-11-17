@@ -1669,7 +1669,9 @@ class _HomeScreenState extends State<HomeScreen>
       // cabecera del Mostrador). Antes «Personalizar mi día»
       // solo existía dentro del bloque de vacío de las
       // vistas de Hoy: con bloques presentes no se podía
-      // personalizar. Se mantiene también donde ya estaba.
+      // personalizar. F02-PB (z06_mostrador-3): es el ÚNICO
+      // acceso también en estado vacío (los TextButton de
+      // las vistas vacías se retiraron).
       KeyedSubtree(
         key: const ValueKey('home-personalizar'),
         child: Padding(
@@ -3448,25 +3450,24 @@ class _VistaHoyDueno extends StatelessWidget {
           ),
         ),
       // Panel 19: si la estación quedó vacía por
-      // elección, se dice y se ofrece reabrir el editor.
+      // elección, se dice. F02-PB (z06_mostrador-3): en
+      // estado vacío queda UN solo acceso a «Personalizar
+      // mi día» — el IconButton permanente de la cabecera
+      // (mostrador-personalizar); el TextButton duplicado
+      // de esta vista se retira.
       if (bloquesHoy.isEmpty)
-        KeyedSubtree(
-          key: const ValueKey('hoy-vacio'),
+        const KeyedSubtree(
+          key: ValueKey('hoy-vacio'),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
             child: Center(
               child: Column(
                 children: [
-                  const Text('Tu día está vacío: ocultaste '
+                  Text('Tu día está vacío: ocultaste '
                       'todos los bloques.',
                       textAlign: TextAlign.center,
                       style: AppTexto.secundario),
-                  TextButton.icon(
-                    onPressed: onPersonalizar,
-                    icon: const Icon(Icons.tune_rounded, size: 18),
-                    label: const Text('Personalizar mi día'),
-                  ),
                 ],
               ),
             ),
@@ -3534,25 +3535,23 @@ class _VistaHoyEntrenador extends StatelessWidget {
             ),
           ),
         ),
-      // Panel 19: estación vacía por elección.
+      // Panel 19: estación vacía por elección. F02-PB
+      // (z06_mostrador-3): sin TextButton duplicado — el
+      // único acceso a «Personalizar mi día» en vacío es
+      // el IconButton permanente de la cabecera.
       if (bloquesHoy.isEmpty)
-        KeyedSubtree(
-          key: const ValueKey('hoy-vacio'),
+        const KeyedSubtree(
+          key: ValueKey('hoy-vacio'),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding: EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.xxl, AppEspacio.lg, 0),
             child: Center(
               child: Column(
                 children: [
-                  const Text('Tu día está vacío: ocultaste '
+                  Text('Tu día está vacío: ocultaste '
                       'todos los bloques.',
                       textAlign: TextAlign.center,
                       style: AppTexto.secundario),
-                  TextButton.icon(
-                    onPressed: onPersonalizar,
-                    icon: const Icon(Icons.tune_rounded, size: 18),
-                    label: const Text('Personalizar mi día'),
-                  ),
                 ],
               ),
             ),

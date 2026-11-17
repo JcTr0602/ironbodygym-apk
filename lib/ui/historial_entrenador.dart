@@ -45,6 +45,17 @@ import '../app_log.dart';
   return (cobrado: cobrado, numPagos: numPagos);
 }
 
+/// F02-PB (z14_turnos-2): decisión PURA de publicar un
+/// cambio de `_falloCarga`: solo si la generación de ESTA
+/// carga sigue siendo la vigente al terminar. Un fallo
+/// tardío de otro mes no tapa un mes que cargó bien, ni un
+/// éxito tardío limpia el error de un mes que falló.
+bool debePublicarFalloCarga({
+  required int genEstaCarga,
+  required int genVigente,
+}) =>
+    genEstaCarga == genVigente;
+
 class HistorialEntrenadorScreen extends StatefulWidget {
   const HistorialEntrenadorScreen({super.key});
   @override
@@ -106,10 +117,21 @@ class _HistorialEntrenadorScreenState
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
+    // F02-PB (z14_turnos-2): la generación de ESTA carga.
+    // _cargarDatos incrementa _genCarga como primer paso
+    // síncrono al ser llamado (sin await entre esta captura
+    // y esa llamada), así que su generación es la previa + 1;
+    // al terminar, solo publica _falloCarga si ninguna carga
+    // más nueva la ha superado.
+    final genEstaCarga = _genCarga + 1;
     try {
       await _cargarDatos();
-      // SL-X2 (G12-1): una recarga buena limpia la bandera.
-      if (mounted && _falloCarga) {
+      // SL-X2 (G12-1): una recarga buena limpia la bandera
+      // (solo si esta carga sigue vigente: F02-PB).
+      if (mounted &&
+          _falloCarga &&
+          debePublicarFalloCarga(
+              genEstaCarga: genEstaCarga, genVigente: _genCarga)) {
         setState(() => _falloCarga = false);
       }
     } catch (e) {
@@ -119,8 +141,11 @@ class _HistorialEntrenadorScreenState
       // SL-X2 (G12-1): y además se DICE en pantalla con
       // EstadoError — antes _datos quedaba [] y la
       // pantalla pintaba «Sin actividad» como si el mes
-      // estuviera vacío de verdad.
-      if (mounted) {
+      // estuviera vacío de verdad. F02-PB: solo si esta
+      // carga sigue vigente.
+      if (mounted &&
+          debePublicarFalloCarga(
+              genEstaCarga: genEstaCarga, genVigente: _genCarga)) {
         setState(() => _falloCarga = true);
       }
     } finally {

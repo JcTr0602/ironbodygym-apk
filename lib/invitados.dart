@@ -1977,12 +1977,17 @@ class InvitadosService {
   /// por red: el desenlace va en el valor devuelto.
   Future<Map<String, String>> guardarInfoPublicaEnBloque(
       Map<String, String> cambios) async {
-    var quedan = Map<String, String>.of(cambios);
+    var quedan = <String, String>{};
+    // F02-PB (z03_invitados-1): solo las claves EFECTIVAMENTE
+    // marcadas son durables; una clave nunca marcada nunca
+    // puede anunciarse como pendiente.
+    final marcadas = <String, String>{};
     try {
       await _enSerieInfoPublica(() async {
         for (final e in cambios.entries) {
           await LocalDb.instance
               .marcarInfoPublicaPendiente(e.key, e.value);
+          marcadas[e.key] = e.value;
         }
         await _republicarInfoPublicaPendienteEnSerie();
         final pendientes =
@@ -1994,8 +1999,23 @@ class InvitadosService {
         };
       });
     } catch (_) {
-      // La marca ya quedó escrita antes del intento de
-      // publicar: lo no aplicado sigue pendiente y visible.
+      // F02-PB: el resultado debe ser veraz también en el
+      // fallo: se recomputa desde la tabla durable
+      // restringido a las marcadas (una ya publicada ya no
+      // está en la tabla; una nunca marcada nunca entra).
+      // Si ni esa lectura es posible, las marcadas son
+      // durables por construcción.
+      try {
+        final pendientes =
+            await LocalDb.instance.infoPublicaPendientes();
+        quedan = {
+          for (final e in marcadas.entries)
+            if (pendientes.containsKey(e.key))
+              e.key: pendientes[e.key]!,
+        };
+      } catch (_) {
+        quedan = Map<String, String>.of(marcadas);
+      }
     }
     return quedan;
   }

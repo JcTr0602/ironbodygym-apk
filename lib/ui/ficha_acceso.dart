@@ -517,6 +517,10 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                     clienteId: widget.clienteId,
                     rpc: 'reactivar_acceso_cliente',
                     mensajeOk: 'Acceso reactivado.',
+                    confirmarAntes: true,
+                    titulo: 'Reactivar acceso',
+                    texto:
+                        'El cliente volverá a poder entrar a la app con su cuenta.',
                     alTerminar: _refrescarTodo,
                   )),
         ),

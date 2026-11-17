@@ -128,6 +128,10 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
       _entrenadores = canon.values.toList();
       // 1.25 T81: las aperturas reales para contrastar
       // programado vs real en los días pasados.
+      // F02-PB (z14_turnos-1): un fallo de aperturas deja
+      // rastro y marca la carga como fallida — nunca se
+      // pinta como calendario normal sin señal.
+      var falloAperturas = false;
       try {
         final aps =
             await LocalDb.instance.allMirror('turnos_apertura');
@@ -138,8 +142,12 @@ class _CalendarioTurnosScreenState extends State<CalendarioTurnosScreen> {
           porDia.putIfAbsent(f, () => []).add(a);
         }
         _aperturasPorDia = porDia;
-      } catch (_) {}
-      if (mounted) setState(() => _errorCarga = false);
+      } catch (e) {
+        falloAperturas = true;
+        AppLog.error('turnos_calendario', 'aperturas_fallo',
+            d: '$e');
+      }
+      if (mounted) setState(() => _errorCarga = falloAperturas);
     } catch (_) {
       if (mounted) setState(() => _errorCarga = true);
     }

@@ -3379,6 +3379,16 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
       // v1.6.0: el horario canónico del sistema (caché local o la
       // misma RPC que usa «Horario del Gym»); [] si no se pudo.
       final horario = await cargarHorarioCanonico();
+      // F02-PB (z03_invitados-2): los pendientes DURABLES se
+      // cargan también al entrar: el banner no puede depender
+      // solo del último _guardar de esta misma visita.
+      Map<String, String> pendientesDurables = {};
+      try {
+        pendientesDurables =
+            await LocalDb.instance.infoPublicaPendientes();
+      } catch (_) {
+        pendientesDurables = {};
+      }
       if (!mounted) return;
       setState(() {
         _originales = info;
@@ -3386,6 +3396,7 @@ class _InfoPublicaScreenState extends State<InfoPublicaScreen> {
           _ctrls[c.clave]!.text = info[c.clave] ?? '';
         }
         _horarioSistema = horario;
+        _pendientesInfo = pendientesDurables;
         _cargando = false;
       });
     } catch (e) {
