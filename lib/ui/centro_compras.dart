@@ -94,6 +94,51 @@ bool filaEnPeriodoExtracto(
   }
 }
 
+/// Yunque Exhaustivo D-01 (PURO): los telegram ids implicados
+/// en las ventas de servicio que el Historial de Servicios va
+/// a mostrar: el vendedor de cada venta (vendedor_id, con
+/// respaldo en registrado_por) y el titular de cada pomo.
+/// SOLO esos ids se resuelven por la vía indexada
+/// (LocalDb.nombresPorTelegramIds); antes _irAVenta barría
+/// TODO el espejo de pagos para armar el mapa de personas.
+Set<int> tidsImplicadosServicios(
+    List<Map<String, dynamic>> ventas,
+    List<Map<String, dynamic>> pomos) {
+  final tids = <int>{};
+  for (final v in ventas) {
+    final tid = LocalDb.normalizarTelegramId(v['vendedor_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    if (tid != null) tids.add(tid);
+  }
+  for (final p in pomos) {
+    final tid = LocalDb.normalizarTelegramId(p['titular_telegram_id']);
+    if (tid != null) tids.add(tid);
+  }
+  return tids;
+}
+
+/// Yunque Exhaustivo D-01 (PURO): el nombre que la PROPIA
+/// venta de servicio trae (registrado_por_nombre), por
+/// vendedor. Es la vía que resuelve al vendedor SIN pagos
+/// registrados: la resolución por ids lo busca en `pagos` y
+/// ese vendedor no aparece ahí; su nombre sí viaja en cada
+/// venta suya. No pisa el nombre resuelto desde pagos (el
+/// llamador lo aplica con putIfAbsent): con pagos, la
+/// pantalla pinta el mismo nombre que pintaba antes.
+Map<int, String> nombresEnVentasServicio(
+    List<Map<String, dynamic>> ventas) {
+  final out = <int, String>{};
+  for (final v in ventas) {
+    final tid = LocalDb.normalizarTelegramId(v['vendedor_id']) ??
+        LocalDb.normalizarTelegramId(v['registrado_por']);
+    final nombre = '${v['registrado_por_nombre'] ?? ''}'.trim();
+    if (tid != null && nombre.isNotEmpty) {
+      out.putIfAbsent(tid, () => nombre);
+    }
+  }
+  return out;
+}
+
 class CentroComprasScreen extends StatefulWidget {
   const CentroComprasScreen({super.key});
   @override
@@ -615,13 +660,20 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       );
       return;
     }
-    final personas = <int, String>{};
-    for (final p in await LocalDb.instance.allMirror('pagos')) {
-      final ptid = LocalDb.normalizarTelegramId(p['telegram_user_id']);
-      final nombre = '${p['registrado_por'] ?? ''}';
-      if (ptid != null && nombre.isNotEmpty) {
-        personas.putIfAbsent(ptid, () => nombre);
-      }
+    // Yunque Exhaustivo D-01: nada de barrer `pagos`. Los
+    // nombres se resuelven SOLO para los telegram ids
+    // implicados en las ventas de servicio a mostrar (y los
+    // titulares de pomos), por la vía indexada que ya usa
+    // Servicios; el vendedor sin pagos registrados se
+    // resuelve con el nombre que trae su propia venta.
+    final ventasServ =
+        await LocalDb.instance.allMirror('servicio_ventas');
+    final pomosServ =
+        await LocalDb.instance.allMirror('servicio_pomos');
+    final personas = await LocalDb.instance.nombresPorTelegramIds(
+        tidsImplicadosServicios(ventasServ, pomosServ));
+    for (final e in nombresEnVentasServicio(ventasServ).entries) {
+      personas.putIfAbsent(e.key, () => e.value);
     }
     if (!mounted) return;
     await Navigator.push(

@@ -73,6 +73,17 @@ import '../app_log.dart';
   return (cup: cup, usd: usd);
 }
 
+/// Yunque Exhaustivo D-05 (PURO): lectura tolerante de
+/// `promo_mes` de una venta de suplementos, con el MISMO
+/// patrón que este archivo usa para `es_fiado`
+/// (`== 1 || == true`). Es el ÚNICO punto de lectura del
+/// flag en la pantalla: antes los tres lectores hacían
+/// `(v['promo_mes'] as int?) == 1` y, si la fila trajera el
+/// flag como bool, el cast lanzaba TypeError y rompía la
+/// fila/el comprobante en vez de degradar.
+bool ventaConPromo(Map<String, dynamic> v) =>
+    v['promo_mes'] == 1 || v['promo_mes'] == true;
+
 /// Autoauditoría 1.22 #2 (D2-10): encola la anulación de una
 /// venta UNA sola vez. Dentro de una transacción re-verifica
 /// que no exista ya una op viva `anular_venta_suplemento` para
@@ -704,7 +715,7 @@ class _HistorialVentasScreenState
     final fecha = '${v['fecha'] ?? ''}'.length >= 10
         ? '${v['fecha']}'.substring(0, 10)
         : '${v['fecha'] ?? ''}';
-    final conPromo = (v['promo_mes'] as int?) == 1;
+    final conPromo = ventaConPromo(v);
     final viaInscripcion =
         (v['via_inscripcion'] as num?)?.toInt() == 1;
     // v1.2.1: nota opcional de la venta (ej: "apartado").
@@ -877,7 +888,7 @@ class _HistorialVentasScreenState
       total: total,
       nombreComprador: '${v['comprador_nombre'] ?? '?'}',
       fechaIso: '${v['fecha'] ?? ''}',
-      conPromo: (v['promo_mes'] as int?) == 1,
+      conPromo: ventaConPromo(v),
       esFiado: v['es_fiado'] == 1 || v['es_fiado'] == true,
       metodo: metodo.isEmpty ? null : metodo,
       vendedor: nombreVendedorVentaSuplemento(v),
@@ -924,7 +935,7 @@ class _HistorialVentasScreenState
         (v['total'] as num?)?.toDouble() ?? precio * cant;
     final prodId = (v['suplemento_id'] as num?)?.toInt();
     final prod = prodId != null ? _productos[prodId] : null;
-    final conPromo = (v['promo_mes'] as int?) == 1;
+    final conPromo = ventaConPromo(v);
     if (!mounted) return;
 
     Widget fila(String e, String valor) => Padding(
