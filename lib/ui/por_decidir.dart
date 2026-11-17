@@ -224,6 +224,21 @@ class BandejaPorDecidir extends StatefulWidget {
   /// locales (stock crítico o precio sin fijar).
   final Future<int> Function()? cargarCatalogo;
 
+  /// Campo 1.35 (2026-11-17): modo embebida — sin
+  /// tarjeta ni cabecera propias: solo las filas, para
+  /// vivir dentro de la tarjeta única de la Zona 2 del
+  /// Mostrador (la acción junta en una sola tarjeta,
+  /// composición aprobada por Jc). Sin nada visible,
+  /// no pinta nada.
+  final bool embebida;
+
+  /// Avisa al contenedor cuando la bandeja pasa a
+  /// tener —o deja de tener— algo visible (filas,
+  /// arqueos, errores de lectura o la línea de «sin
+  /// verificar»), para que la tarjeta que la acoge
+  /// exista solo si hay algo que decir.
+  final ValueChanged<bool>? alCambiarContenido;
+
   const BandejaPorDecidir({
     super.key,
     required this.incidencias,
@@ -234,6 +249,8 @@ class BandejaPorDecidir extends StatefulWidget {
     this.cargarCongelaciones,
     this.cargarArqueos,
     this.cargarCatalogo,
+    this.embebida = false,
+    this.alCambiarContenido,
   });
 
   @override
@@ -249,6 +266,10 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
   int _alertasCatalogo = 0;
   bool _catalogoOk = true;
   List<Map<String, dynamic>> _arqueos = const [];
+  // Campo 1.35: último «hay contenido» reportado al
+  // contenedor (alCambiarContenido), para avisar solo
+  // en los cambios.
+  bool _contenidoReportado = false;
 
   @override
   void initState() {
@@ -431,36 +452,39 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
       );
     }
 
-    return Tarjeta(
-      key: const ValueKey('por-decidir'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    // Campo 1.35 (2026-11-17): cabecera y filas se
+    // arman como dos listas y las comparten la tarjeta
+    // propia (uso suelto y tests) y el modo embebida
+    // (la Zona 2 del Mostrador): mismas filas, dos
+    // envoltorios.
+    final cabeceraBandeja = <Widget>[
+      Row(
         children: [
-          Row(
-            children: [
-              // 1.33 (diseño): la cabecera de la tarjeta
-              // lleva el mismo chip con tinte que las filas
-              // (verde cuando todo está al día, marca en
-              // cuanto algo espera decisión).
-              if (t.todoAlDia)
-                IconoModuloBadge.verde(Icons.check_circle_rounded)
-              else
-                IconoModuloBadge.naranja(Icons.inbox_rounded),
-              const SizedBox(width: AppEspacio.sm),
-              const Expanded(
-                child: Text('Por Decidir', style: AppTexto.titulo),
-              ),
-            ],
+          // 1.33 (diseño): la cabecera de la tarjeta
+          // lleva el mismo chip con tinte que las filas
+          // (verde cuando todo está al día, marca en
+          // cuanto algo espera decisión).
+          if (t.todoAlDia)
+            IconoModuloBadge.verde(Icons.check_circle_rounded)
+          else
+            IconoModuloBadge.naranja(Icons.inbox_rounded),
+          const SizedBox(width: AppEspacio.sm),
+          const Expanded(
+            child: Text('Por Decidir', style: AppTexto.titulo),
           ),
-          // 1.35 (M-3): fuera el subtítulo que repetía el
-          // título («Por Decidir» / «Por decidir»): la
-          // línea solo vive cuando dice algo que el
-          // título no dice — el conteo de pendientes o el
-          // «Todo al día» verificado.
-          if (t.todoAlDia || totalPd > 0) ...[
-            Text(t.titular, style: AppTexto.secundario),
-            const SizedBox(height: AppEspacio.xs),
-          ],
+        ],
+      ),
+      // 1.35 (M-3): fuera el subtítulo que repetía el
+      // título («Por Decidir» / «Por decidir»): la
+      // línea solo vive cuando dice algo que el
+      // título no dice — el conteo de pendientes o el
+      // «Todo al día» verificado.
+      if (t.todoAlDia || totalPd > 0) ...[
+        Text(t.titular, style: AppTexto.secundario),
+        const SizedBox(height: AppEspacio.xs),
+      ],
+    ];
+    final filasBandeja = <Widget>[
           // --- Prioridad del dueño (1.32, Fase 3 —
           // Momento 4 del plano): 1º incidencias y
           // conversiones, 2º Plus, 3º congelaciones,
@@ -641,7 +665,40 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
                 ],
               ),
             ),
-        ],
+    ];
+    // Campo 1.35 (2026-11-17): «hay contenido» =
+    // alguna fila visible (totalPd suma solo valores
+    // verificados > 0), un arqueo por liquidar, una
+    // lectura local fallida que decir o la línea de
+    // «sin verificar». El «Todo al día» verificado y
+    // en cero NO es contenido: en modo embebida la
+    // bandeja desaparece, y la tarjeta de la Zona 2
+    // con ella si tampoco hay atención (regla de Jc:
+    // lo que está en cero no aparece).
+    final hayContenido = totalPd > 0 ||
+        _arqueos.isNotEmpty ||
+        !_congelacionesOk ||
+        !_catalogoOk ||
+        algunaSinVerificar;
+    final reporte = widget.alCambiarContenido;
+    if (reporte != null && hayContenido != _contenidoReportado) {
+      _contenidoReportado = hayContenido;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) reporte(hayContenido);
+      });
+    }
+    if (widget.embebida) {
+      return hayContenido
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: filasBandeja)
+          : const SizedBox.shrink();
+    }
+    return Tarjeta(
+      key: const ValueKey('por-decidir'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [...cabeceraBandeja, ...filasBandeja],
       ),
     );
   }

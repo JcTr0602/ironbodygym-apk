@@ -180,6 +180,26 @@ String textoFrescuraEspejo(DateTime ultimo, DateTime ahora) {
   return 'actualizado el ${p(h.day)}/${p(h.month)} a las $hhmm';
 }
 
+/// Campo 1.35 (2026-11-17): la forma CORTA de la misma
+/// frescura, para la línea de contexto del Mostrador de
+/// la composición aprobada por Jc — la frescura se dice
+/// UNA sola vez en la pantalla y en su rincón: «act.
+/// HH:MM» hoy, «act. ayer HH:MM», «act. dd/MM HH:MM».
+/// Misma pauta de días en hora de La Habana que
+/// [textoFrescuraEspejo]. PURO.
+String textoActCorto(DateTime ultimo, DateTime ahora) {
+  final h = aHabana(ultimo);
+  final hoy = aHabana(ahora);
+  String p(int n) => n.toString().padLeft(2, '0');
+  final hhmm = '${p(h.hour)}:${p(h.minute)}';
+  bool mismoDia(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  if (mismoDia(h, hoy)) return 'act. $hhmm';
+  final ayer = hoy.subtract(const Duration(days: 1));
+  if (mismoDia(h, ayer)) return 'act. ayer $hhmm';
+  return 'act. ${p(h.day)}/${p(h.month)} $hhmm';
+}
+
 /// 1.32 (H-B7-3/B567): fecha corta dd/mm/aaaa de un
 /// INSTANTE crudo del servidor (timestamptz serializado,
 /// p. ej. «2026-11-01T02:00:00+00:00»), pintada en hora de
