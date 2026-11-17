@@ -1,14 +1,19 @@
-/// 1.35 FASE 4 — Mostrador M-1…M-10 sobre la Home real
-/// del dueño, a 360×800 dp (con pagos de hoy sembrados
-/// en el espejo):
+/// 1.35 FASE 4 — Mostrador sobre la Home real del
+/// dueño, a 360×800 dp (con pagos de hoy sembrados en
+/// el espejo). Nació para M-1…M-10; Campo 1.35
+/// (2026-11-17) lo reescribe a la composición aprobada
+/// por Jc:
 ///
-/// - M-8/M-1: el titular del día (grafito, «Hoy: …
-///   cobrados · … por recoger») abre la portada; la
-///   tarjeta «Estadísticas Rápidas» se jubiló.
-/// - M-10: con el informe plegado ABIERTO (semana +
-///   salud del mes + pago), ningún desborde de
-///   RenderFlex a 360 dp (la auditoría midió
-///   «overflowed by 3.0 pixels» en la tarjeta vieja).
+/// - Zona 1 «El dinero de hoy»: la tarjeta
+///   «Estadísticas Rápidas» y el titular grafito están
+///   jubilados; en el estado que el arnés produce (el
+///   cero, porque _cargar no aterriza) la zona no
+///   existe — su semántica con datos se prueba por
+///   funciones en campo135_defectos_test.dart.
+/// - M-10: con la Zona 3 visible (semana + salud del
+///   mes + pago), ningún desborde de RenderFlex a
+///   360 dp (la auditoría midió «overflowed by 3.0
+///   pixels» en la tarjeta vieja).
 ///   ALCANCE: el arnés de la Home ensamblada no
 ///   aterriza los valores de _cargar bajo FakeAsync
 ///   (limitación conocida de la casa: las piezas se
@@ -17,16 +22,17 @@
 ///   sonda de la fase (cobradoHoyPorMetodo = siembra).
 ///   El estado cargado en pantalla se verifica en el
 ///   banco Android real, compuerta posterior.
-/// - M-1: el informe «Tu semana y tu mes» nace cerrado y
-///   abre al tocar su cabecera.
-/// - M-8: la Bandeja de WhatsApp NO pinta fila con 0
-///   avisos (regla de Jc: lo que está en cero no
-///   aparece) y su tarjeta propia se jubiló.
+/// - Zona 3 «Tu semana y tu mes» ARRIBA y ABIERTA: su
+///   contenido se ve sin tocar ninguna cabecera (el
+///   pliegue de M-1 se jubiló por veredicto de Jc).
+/// - La Bandeja de WhatsApp NO pinta fila con 0 avisos
+///   (regla de Jc: lo que está en cero no aparece).
 /// - M-5: la fila fina «Turnos de hoy» del dueño existe.
 /// - M-7: el Dock se recoge al bajar y vuelve al subir.
 /// - Campo nº 5: el aire inferior es de 24 dp, no 96.
-/// - M-4 (contrato de fuente): «por recoger» baja a Por
-///   Decidir por ensureVisible sobre su clave.
+/// - Campo 1.35 (contrato de fuente): «por recoger» es
+///   PUERTA a PendienteScreen (el detalle de entregas
+///   pendientes); el scroll de M-4 se jubiló.
 ///
 /// Harness: el de home_a_entregar_127 (sesión de mentira
 /// + FFI real fuera de FakeAsync).
@@ -159,8 +165,8 @@ void main() {
   });
 
   testWidgets(
-      'dueño: portada M-8 cargada a 360 dp, sin desborde '
-      '(M-10), informe plegado (M-1) y Dock que se recoge '
+      'dueño: portada cargada a 360 dp, sin desborde '
+      '(M-10), Zona 3 abierta y Dock que se recoge '
       '(M-7)', (tester) async {
     await tester.runAsync(() async {
       await _fijarSesionDueno();
@@ -168,18 +174,28 @@ void main() {
     });
     await _abrirHome360(tester);
 
-    // M-8/M-1: el titular abre y la tarjeta vieja murió.
-    final titular = find.byKey(const ValueKey('hoy-titular'));
-    expect(titular, findsOneWidget);
+    // Zona 1: el titular grafito y la tarjeta vieja
+    // murieron. OJO al alcance: como _cargar no
+    // aterriza en este arnés (nota de la cabecera), el
+    // estado visible es el cero — y en cero la Zona 1
+    // NO existe (la regla dura de Jc, que es justo el
+    // defecto de su captura). La Zona 1 CON datos se
+    // prueba por sus funciones en
+    // campo135_defectos_test.dart.
+    expect(find.byKey(const ValueKey('hoy-titular')), findsNothing);
     expect(find.text('Estadísticas Rápidas'), findsNothing);
-    expect(find.textContaining('cobrados'), findsOneWidget);
-    expect(find.textContaining('por recoger'), findsOneWidget);
-    // M-9: la frescura habla en palabras del dueño.
+    expect(find.byKey(const ValueKey('hoy-dinero')), findsNothing);
+    expect(find.byKey(const ValueKey('hoy-por-recoger')),
+        findsNothing);
+    expect(find.textContaining('por recoger'), findsNothing);
+    // La frescura se dice una sola vez: la línea de
+    // contexto («act.»), no al pie de una tarjeta.
+    expect(find.byKey(const ValueKey('home-act')), findsOneWidget);
     expect(find.textContaining('Datos guardados en este teléfono'),
-        findsWidgets);
+        findsNothing);
     expect(find.textContaining('espejo'), findsNothing);
 
-    // M-8: sin avisos de WhatsApp no hay fila ni tarjeta.
+    // Sin avisos de WhatsApp no hay fila.
     expect(find.byKey(const ValueKey('hoy-bandeja')), findsNothing);
     // M-5: la fila fina de Turnos del dueño existe.
     expect(find.byKey(const ValueKey('hoy-turnos')), findsOneWidget);
@@ -192,22 +208,32 @@ void main() {
     // M-10: sin excepción de layout con el estado cargado.
     expect(tester.takeException(), isNull);
 
-    // M-1: el informe nace cerrado; al abrirlo, su
-    // contenido (semana, salud, pago) no desborda.
-    final cabeceraInforme =
-        find.byKey(const ValueKey('hoy-informe-cabecera'));
-    await tester.ensureVisible(cabeceraInforme);
+    // Zona 3 ABIERTA: su contenido (semana, salud del
+    // mes, pago) se alcanza sin tocar cabecera alguna —
+    // el pliegue de M-1 y su llave están jubilados.
+    expect(find.byKey(const ValueKey('hoy-informe-cabecera')),
+        findsNothing);
+    final pulso = find.byKey(const ValueKey('hoy-pulso'));
+    await tester.ensureVisible(pulso);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Pago de entrenadores'), findsNothing);
-    await tester.tap(cabeceraInforme);
-    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Pago de entrenadores'), findsOneWidget);
+    expect(find.text('Pagaron el mes'), findsOneWidget);
+    // (Las barras «Últimos 7 días» piden la serie
+    // aterrizada: sin _cargar en el arnés no se pintan;
+    // su dato se prueba por funciones.)
     expect(tester.takeException(), isNull,
-        reason: 'M-10: el informe abierto a 360 dp no '
+        reason: 'M-10: la Zona 3 visible a 360 dp no '
             'desborda (la tarjeta vieja desbordaba 3 px)');
 
-    // M-7: al bajar, el Dock se recoge; al subir, vuelve.
+    // M-7: al bajar, el Dock se recoge; al subir,
+    // vuelve. Campo 1.35: la portada nueva es más corta
+    // (ese es el punto de la pieza) y en el estado del
+    // arnés ya no desborda un viewport de 800 — el
+    // mecanismo (intacto en esta pieza) se ejercita con
+    // un viewport corto, donde la misma portada sí baja.
     expect(find.byType(DockMostrador), findsOneWidget);
+    tester.view.physicalSize = const Size(1080, 1320);
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pump(const Duration(milliseconds: 350));
     await tester.drag(find.byType(ListView), const Offset(0, -700));
@@ -218,6 +244,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 350));
     expect(find.byType(DockMostrador), findsOneWidget,
         reason: 'M-7: subiendo, el Dock reaparece');
+    tester.view.physicalSize = const Size(1080, 2400);
+    await tester.pump(const Duration(milliseconds: 300));
 
     // Drenaje del harness (contrato de la Home).
     await tester.runAsync(() async {
@@ -226,17 +254,20 @@ void main() {
     await _avanzarTiempo(tester);
   });
 
-  test('M-4 (fuente): «por recoger» baja a Por Decidir '
-      'con ensureVisible sobre la clave del bloque', () {
+  test('Campo 1.35 (fuente): «por recoger» es puerta a '
+      'PendienteScreen; el scroll de M-4 se jubiló', () {
     final home = File('lib/ui/home.dart').readAsStringSync();
     expect(home.contains('_clavePorDecidir'), isTrue);
-    expect(home.contains('Scrollable.ensureVisible'), isTrue);
     expect(home.contains('key: _clavePorDecidir'), isTrue,
-        reason: 'la clave envuelve la BandejaPorDecidir '
-            'en _seccionesMostrador');
-    // M-4: el destino viejo (la pantalla de Pendiente)
-    // ya no cuelga del Mostrador del dueño (ojo:
-    // DetallePendienteScreen, del entrenador, sí vive).
-    expect(home.contains('PendienteScreen())'), isFalse);
+        reason: 'la clave es la de la BandejaPorDecidir '
+            'embebida en la Zona 2 (su GlobalKey conserva '
+            'el estado al aparecer/desaparecer la tarjeta)');
+    // Directiva de campo de Jc (2026-11-17): el importe
+    // «por recoger» abre el detalle de entregas
+    // pendientes por entrenador — M-4 queda sustituida.
+    expect(home.contains('_ir(const PendienteScreen())'), isTrue);
+    expect(home.contains('_bajarAPorDecidir'), isFalse,
+        reason: 'el scroll del titular a Por Decidir '
+            'murió con el titular grafito');
   });
 }

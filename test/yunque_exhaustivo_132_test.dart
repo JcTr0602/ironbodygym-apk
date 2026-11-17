@@ -8,7 +8,9 @@
 ///   cuenta) cuyo chip cuenta OTRO conjunto. La corrección:
 ///   la celda enseña el conteo de `conteosDeBuscar` sobre la
 ///   misma base del Directorio — la cifra y el destino por
-///   fin significan lo mismo.
+///   fin significan lo mismo. (La 1.35 jubiló la celda
+///   entera con M-2; el test guarda desde Campo 1.35 que
+///   ninguna celda «al día» resucite en el Mostrador.)
 /// - Y-2 (BAJA, residuo D-5): el selector de cliente del
 ///   envío de plantillas pintaba el `telefono` CRUDO como
 ///   subtítulo; en un migrado ese campo trae el carnet y el
@@ -175,9 +177,18 @@ void main() {
     await LocalDb.instance.db;
   });
 
+  // ACTUALIZADO (Campo 1.35, 2026-11-17): la celda «Al día»
+  // del Pulso que este test nació vigilando se jubiló en la
+  // PROPIA 1.35 (M-2 retiró la fila «Vencidos / Al día» del
+  // Mostrador; la consulta res[22] se trae sin guardar su
+  // valor) — el test quedó caducado y ya fallaba sobre el
+  // árbol entregado (contraste de base en la carpeta de la
+  // pieza). El invariante Y-1 sigue vivo y es el que se
+  // guarda ahora: NINGUNA celda del Mostrador etiqueta el
+  // total de activos como «Al día» (la celda no existe).
   testWidgets(
-      'Y-1: la celda «Al día» del Pulso cuenta el conjunto de su '
-      'destino (dias>7 + Casa), no el total de activos',
+      'Y-1: ninguna celda «Al día» queda en el Mostrador — el '
+      'total de activos no se disfraza de «al día»',
       (tester) async {
     _telefono(tester);
     // Padrón de 5 activos: 2 al día estrictos (dias > 7),
@@ -216,20 +227,19 @@ void main() {
     await _drenar(tester, vueltas: 10);
     await _descartarDialogos(tester);
     await _drenar(tester, vueltas: 6);
-    // La fila Vencidos/Al día puede nacer bajo el pliegue
-    // (ListView perezoso): hay que rodar la lista hasta que
-    // las secciones bajas existan. El ancla histórica era el
-    // enlace «Ver actividad reciente →» al pie de las
-    // tarjetas; CAMPO-16 (segunda parte, orden de Jc) lo
-    // retiró: la ÚNICA puerta a Actividad es el botón de
-    // cabecera `marco-actividad`, junto a la lupa — se
-    // verifica esa puerta única aquí mismo y el scroll se
-    // ancla en la cabecera del informe del dueño
-    // (`hoy-informe-cabecera`), la tarjeta que alojaba el
-    // enlace retirado y la última sección del Mostrador:
-    // rodar hasta ella construye todo lo que va por encima.
-    // («Al día» a secas tampoco servía de ancla: también es
-    // el texto de la píldora de estado de sync.)
+    // Las secciones bajas nacen perezosas (ListView): hay
+    // que rodar la lista hasta que existan. El ancla
+    // histórica era el enlace «Ver actividad reciente →»
+    // al pie de las tarjetas; CAMPO-16 (segunda parte,
+    // orden de Jc) lo retiró: la ÚNICA puerta a Actividad
+    // es el botón de cabecera `marco-actividad`, junto a
+    // la lupa — se verifica esa puerta única aquí mismo.
+    // El scroll se ancla en la Zona 3 del dueño
+    // (`hoy-informe`), la última sección del Mostrador:
+    // rodar hasta ella construye todo lo que va por
+    // encima. (La cabecera plegable `hoy-informe-cabecera`
+    // se jubiló con la composición de Campo 1.35: la
+    // Zona 3 va abierta.)
     expect(find.text('Ver actividad reciente →'), findsNothing,
         reason: 'CAMPO-16 2ª parte: ningún enlace de Actividad '
             'queda en las tarjetas del Mostrador');
@@ -238,18 +248,18 @@ void main() {
         reason: 'la única puerta a Actividad es el botón de '
             'cabecera junto a la lupa');
     await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('hoy-informe-cabecera')), 200,
+        find.byKey(const ValueKey('hoy-informe')), 200,
         scrollable: find
             .descendant(
                 of: find.byType(HomeScreen),
                 matching: find.byType(Scrollable))
             .first);
     await tester.pump(const Duration(milliseconds: 300));
-    // Compuerta: TODAS las celdas con forma (número, «Al
-    // día») — la píldora de sync no tiene esa forma — deben
-    // valer 3: el conjunto de su destino (Directorio,
-    // filtro aldia: +30 ✓, +10 ✓ y la Casa ✓). El total de
-    // activos es 5 y NO es «al día» bajo ninguna definición.
+    // Compuerta Y-1 actualizada: NO debe existir ninguna
+    // celda con forma (número, «Al día») en el Mostrador —
+    // la del Pulso se jubiló (M-2) y el total de activos
+    // (5) no puede reaparecer disfrazado de «al día» (su
+    // conjunto real sería 3: +30 ✓, +10 ✓ y la Casa ✓).
     final valores = <String>[];
     for (final e in find
         .ancestor(
@@ -274,10 +284,12 @@ void main() {
         }
       }
     }
-    expect(valores, ['3'],
-        reason: 'la celda «Al día» del Pulso debe enseñar el '
-            'conteo de su destino (3), no el total de activos '
-            '(5); candidatas: $valores');
+    expect(valores, isEmpty,
+        reason: 'ninguna celda (número, «Al día») puede '
+            'existir en el Mostrador: la del Pulso se '
+            'jubiló en la 1.35 (M-2) y ni el 3 de su '
+            'conjunto ni el 5 de activos tienen celda '
+            '«al día» aquí; candidatas: $valores');
     await _cerrarCascara(tester);
   });
 

@@ -341,9 +341,9 @@ void main() {
           reason: 'primero sus vencimientos de hoy');
     });
 
-    test('el orden del dueño: finanzas abre (la zona del '
-        'mostrador se jubiló) y la bandeja va sobre las '
-        'alertas', () {
+    test('el orden del dueño: el dinero abre, la acción '
+        'junta va segunda y el pulso cierra (Campo 1.35)',
+        () {
       final ini = home.indexOf('class _VistaHoyDueno');
       final fin = home.indexOf('class _VistaHoyEntrenador', ini);
       final vista = home.substring(ini, fin);
@@ -355,35 +355,39 @@ void main() {
               'un resto pre-pilares (la búsqueda vive en el '
               'Pilar Clientes y en la lupa de la cabecera) y '
               'las acciones rápidas viven en el Dock');
+      // Campo 1.35 (2026-11-17): la composición aprobada
+      // por Jc — Zona 1 «El dinero de hoy» (finanzas) →
+      // buzón → Zona 2 «Requiere tu acción» (hoy-accion:
+      // Por Decidir y Atención hoy en UNA tarjeta) →
+      // Zona 3 «Tu semana y tu mes» (hoy-informe). El
+      // orden ES la clave: dinero → acción → pulso.
+      // (Sustituye al orden de la 1.33/1.35 M-8: finanzas
+      // → Por Decidir → Atención hoy → informe plegado.)
       expect(
           vista.indexOf("ValueKey('hoy-finanzas')") <
-              vista.indexOf("ValueKey('hoy-pordecidir')"),
+              vista.indexOf("ValueKey('hoy-accion')"),
           isTrue,
-          reason: 'la 1.33 (orden de Jc en campo, '
-              '2026-11-12) pone las Estadísticas Rápidas '
-              'PRIMERO — es lo que mira al abrir la app — '
-              'y «Por Decidir» justo debajo con su conteo '
-              'visible; en la 1.32 el orden era el inverso '
-              '(Compuerta 1 del veredicto g132)');
-      // 1.35 (M-8): el orden de la portada del día —
-      // titular → Por Decidir → buzón → Atención hoy →
-      // informe plegado. La Bandeja de WhatsApp ya no es
-      // bloque propio: es una fila DENTRO de Atención hoy
-      // (su clave vive en _tiraAlertas, en home.dart).
+          reason: 'el dinero de hoy abre la portada y la '
+              'acción junta va justo debajo');
       expect(
-          vista.indexOf("ValueKey('hoy-pordecidir')") <
-              vista.indexOf("ValueKey('hoy-alertas')"),
-          isTrue,
-          reason: 'M-8: Por Decidir va sobre Atención hoy');
-      expect(
-          vista.indexOf("ValueKey('hoy-alertas')") <
+          vista.indexOf("ValueKey('hoy-accion')") <
               vista.indexOf("ValueKey('hoy-informe')"),
           isTrue,
-          reason: 'M-8/M-1: el informe plegado cierra la '
-              'portada, tras Atención hoy');
+          reason: 'el pulso cierra las zonas, ya abierto '
+              '(el pliegue de M-1 se jubiló)');
+      expect(vista.contains("ValueKey('hoy-pordecidir')"),
+          isFalse,
+          reason: 'la sección «Por Decidir» como tarjeta '
+              'propia se jubiló: vive embebida en la Zona 2');
+      expect(vista.contains("ValueKey('hoy-alertas')"),
+          isFalse,
+          reason: 'la sección «Atención hoy» del dueño se '
+              'fundió en la Zona 2 (la clave sobrevive '
+              'solo en la vista del entrenador)');
       expect(home.contains("ValueKey('hoy-bandeja')"), isTrue,
-          reason: 'la fila de la Bandeja conserva su clave '
-              'dentro de la tira de alertas (M-8)');
+          reason: 'la fila de la Bandeja de WhatsApp '
+              'conserva su clave, ahora como fila de la '
+              'Zona 2');
     });
 
     test('las claves de sección se conservan', () {
@@ -391,14 +395,19 @@ void main() {
         'hoy-finanzas',
         'hoy-bandeja',
         'hoy-buzon',
-        'hoy-alertas',
+        'hoy-accion',
         'hoy-vacio',
         'hoy-aire',
-        'hoy-pordecidir',
       ]) {
         expect(home.contains("ValueKey('$k')"), isTrue,
             reason: 'clave $k');
       }
+      // Campo 1.35: la clave de la sección «Por Decidir»
+      // se jubiló con su tarjeta (la bandeja conserva su
+      // GlobalKey de estado, _clavePorDecidir, sin
+      // ValueKey de sección).
+      expect(home.contains("ValueKey('hoy-pordecidir')"),
+          isFalse);
     });
   });
 

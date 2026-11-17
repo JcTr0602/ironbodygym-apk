@@ -199,21 +199,29 @@ void main() {
   });
 
   testWidgets(
-      'dueño: el titular del día manda («por recoger», sin '
-      'celda «A entregar»)', (tester) async {
+      'dueño: en doble cero la Zona 1 no ocupa tarjeta '
+      '(Campo 1.35), sin celda «A entregar»', (tester) async {
     await tester.runAsync(() => _fijarSesion(
         email: 'jctr0602@ironbody.gym',
         telegramId: 735772141,
         nombre: 'Jc'));
     await _abrirHome(tester);
 
-    // 1.35 (M-8): la tarjeta «Estadísticas Rápidas» se
-    // jubiló; el dinero del dueño vive en el titular.
-    await _revelar(tester, find.byKey(const ValueKey('hoy-titular')));
-    expect(find.byKey(const ValueKey('hoy-titular')), findsOneWidget);
-    expect(find.textContaining('por recoger'), findsOneWidget);
+    // Campo 1.35 (2026-11-17): sin siembra (hoy en cero
+    // y nada por recoger), la Zona 1 «El dinero de hoy»
+    // NO existe — la regla dura de Jc: lo que está en
+    // cero no ocupa tarjeta. (En la 1.35 este estado
+    // pintaba el titular grafito «Hoy: 0 cobrados · 0
+    // por recoger», el defecto de su captura de campo.)
+    expect(find.byKey(const ValueKey('hoy-dinero')), findsNothing);
+    expect(find.byKey(const ValueKey('hoy-por-recoger')),
+        findsNothing);
+    expect(find.textContaining('por recoger'), findsNothing);
     expect(find.text('A entregar'), findsNothing);
     expect(find.text('Mi Turno Hoy'), findsNothing);
+    // La frescura se dice una sola vez, en la línea de
+    // contexto.
+    expect(find.byKey(const ValueKey('home-act')), findsOneWidget);
     // Drenaje real simétrico al del entrenador: que ningún
     // future FFI de la Home quede vivo al cerrar el archivo.
     await tester.runAsync(() async {
