@@ -839,7 +839,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             child: Text(
               '📴 Sin conexión · datos de hace '
               '${_cacheAt != null ? hace(_cacheAt) : 'un rato'} · '
-              'solo lectura',
+              // Jornada 1.35: también aquí la conversión
+              // vive sin conexión (chip de candidato o el
+              // detalle); la banda lo nombra, como la del
+              // detalle.
+              'solo lectura (conversión disponible)',
               style: AppTexto.secundario.copyWith(
                   color: AppColores.alertaOscuro,
                   fontWeight: FontWeight.w600),
@@ -2229,7 +2233,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
               child: Text(
                 '📴 Sin conexión · datos de '
                 '${_cacheAt != null ? hace(_cacheAt) : 'antes'}'
-                ' · solo lectura (sin acciones)',
+                // Jornada 1.35: «(sin acciones)» era falso
+                // desde el campo nº 14 — esta misma pantalla
+                // convierte sin conexión. La banda nombra la
+                // excepción en vez de negarla.
+                ' · solo lectura (conversión disponible)',
                 style: AppTexto.cuerpo.copyWith(
                     fontWeight: FontWeight.w600),
               ),
