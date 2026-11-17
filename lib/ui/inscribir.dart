@@ -862,8 +862,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
     return Material(
       color: AppColores.superficie(context),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
-            AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
+        // Cierre del lote 1.35: la barra respira a md en los
+        // lados — con la etiqueta «Foto · opcional» de G02-1
+        // la fila desbordaba 11 px en el arnés de la oleada 5
+        // (y en teléfonos estrechos); el contenido no cambia.
+        padding: const EdgeInsets.fromLTRB(AppEspacio.md,
+            AppEspacio.sm, AppEspacio.md, AppEspacio.sm),
         child: Column(
           children: [
             Row(
@@ -903,7 +907,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
                         child: Center(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: AppEspacio.xs,
+                                horizontal: 2,
                                 vertical: AppEspacio.xs),
                             child: Row(
                         mainAxisSize: MainAxisSize.min,
