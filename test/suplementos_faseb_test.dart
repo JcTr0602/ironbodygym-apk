@@ -1,19 +1,31 @@
 /// Tests de Fase B §6.2 (v1.3.7): suplementos — costo, umbral, fiados.
 ///
 /// Verifica la lógica pura (sin BD):
-/// 1. Margen por bote: precio − costo, % sobre costo.
+/// 1. Margen por bote: precio − costo, % SOBRE EL PRECIO DE VENTA
+///    (G05-2, definición de Jc 2026-11-17; antes este contrato fijaba
+///    el % sobre el costo, como el detalle — corregido) y sin costo
+///    válido no hay margen (null), no margen 0 ni inventado.
 /// 2. Detección de stock bajo: stock <= umbral_stock.
 /// 3. _esFiado: campo estructurado tiene prioridad; respaldo por texto
 ///    con \bfiado\b (no captura "confiado").
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/ui/reporte_margenes.dart';
 
-/// Lógica de margen (igual que detalle_suplemento.dart).
-({double margen, double pct}) calcularMargen(double precio, double costo) {
-  if (costo <= 0 || precio <= 0) return (margen: 0, pct: 0);
-  final margen = precio - costo;
-  return (margen: margen, pct: margen / costo * 100);
+/// Lógica de margen: la función ÚNICA de la casa
+/// (margenSuplementoUsd, compartida por reporte y detalle).
+({double? margen, double? pct}) calcularMargen(
+    double precio, double costo) {
+  final m = margenSuplementoUsd(
+    s: {
+      'precio_oficial': precio,
+      'costo': costo,
+      'stock': 1,
+      'moneda': 'USD',
+    },
+  );
+  return (margen: m.margenUnitario, pct: m.pct);
 }
 
 /// Lógica de stock bajo (igual que suplementos.dart).
@@ -34,15 +46,15 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('margen por bote', () {
-    test('precio 25, costo 15 → margen 10 (66.7%)', () {
+    test('precio 25, costo 15 → margen 10 (40% sobre el precio)', () {
       final r = calcularMargen(25, 15);
       expect(r.margen, 10);
-      expect(r.pct, closeTo(66.67, 0.01));
+      expect(r.pct, closeTo(40, 0.01));
     });
-    test('sin costo → margen 0', () {
+    test('sin costo → sin margen (null, no 0 ni inventado)', () {
       final r = calcularMargen(25, 0);
-      expect(r.margen, 0);
-      expect(r.pct, 0);
+      expect(r.margen, isNull);
+      expect(r.pct, isNull);
     });
   });
 

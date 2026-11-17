@@ -33,6 +33,7 @@ import 'aviso_duplicado.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
+import 'reporte_margenes.dart';
 import 'suplementos.dart';
 import 'venta_suplemento.dart';
 import 'widgets.dart';
@@ -1229,13 +1230,14 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   ),
                 );
               }
-              double? precioUsd;
-              if (monedaSup == 'USD') {
-                precioUsd = precio;
-              } else if (tasaUsd != null && tasaUsd! > 1.0) {
-                precioUsd = precio / tasaUsd!;
-              }
-              if (precioUsd == null) {
+              // G05-2 (Jc, 2026-11-17): el margen sale de la
+              // función ÚNICA compartida con el reporte
+              // (margenSuplementoUsd): % SOBRE EL PRECIO DE
+              // VENTA — antes este detalle lo calculaba sobre
+              // el costo y el mismo bote daba dos verdades.
+              final m = margenSuplementoUsd(
+                  s: suplemento, tasaUsd: tasaUsd);
+              if (m.margenUnitario == null || m.pct == null) {
                 return const Padding(
                   padding: EdgeInsets.only(top: AppEspacio.md),
                   child: Text(
@@ -1245,9 +1247,8 @@ class DetalleSuplementoScreen extends StatelessWidget {
                   ),
                 );
               }
-              final margen = precioUsd - costo;
-              final pct =
-                  costo > 0 ? (margen / costo * 100) : 0.0;
+              final margen = m.margenUnitario!;
+              final pct = m.pct!;
               return Column(
                 children: [
                   const SizedBox(height: AppEspacio.md),

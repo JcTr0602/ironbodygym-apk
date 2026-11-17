@@ -14,12 +14,20 @@ import '../app_log.dart';
 /// convierte a USD; si es CUP sin tasa válida, no hay margen en USD
 /// que mostrar (null) en vez de un número falso mezclando CUP con USD.
 /// Si el precio convertible es <= 0, tampoco hay margen. PURO.
+///
+/// G05-2 (definición de Jc, 2026-11-17): el % de margen se calcula
+/// SOBRE EL PRECIO DE VENTA — (precio − costo) / precio × 100; p. ej.
+/// costo 1000 y precio 1500 → 33,3 %, no 50 %. Y SIN costo válido
+/// (null o <= 0) no hay margen que enseñar ni sumar: antes un costo
+/// de 0 se leía como «todo es margen» (100 %) y se sumaba al total.
+/// Esta es la ÚNICA función de margen de suplementos: la usan el
+/// reporte y el detalle del suplemento.
 ({double precioUsd, double? margenUnitario, double? margenPotencial, double? pct}) margenSuplementoUsd({
   required Map<String, dynamic> s,
   double? tasaUsd,
 }) {
   final precioOficial = (s['precio_oficial'] as num?)?.toDouble() ?? 0;
-  final costo = (s['costo'] as num?)?.toDouble() ?? 0;
+  final costo = (s['costo'] as num?)?.toDouble();
   final stock = (s['stock'] as num?)?.toInt() ?? 0;
   final moneda = LocalDb.monedaDe(s);
   double? precioUsd;
@@ -31,6 +39,15 @@ import '../app_log.dart';
   if (precioUsd == null || precioUsd <= 0) {
     return (
       precioUsd: precioUsd ?? 0,
+      margenUnitario: null,
+      margenPotencial: null,
+      pct: null,
+    );
+  }
+  // G05-2: sin costo válido no se inventa margen (ni se suma).
+  if (costo == null || costo <= 0 || !costo.isFinite) {
+    return (
+      precioUsd: precioUsd,
       margenUnitario: null,
       margenPotencial: null,
       pct: null,

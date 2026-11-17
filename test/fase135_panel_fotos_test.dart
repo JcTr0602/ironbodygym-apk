@@ -88,6 +88,20 @@ Future<void> _pumps(WidgetTester tester, [int n = 12]) async {
   }
 }
 
+/// Tocar la fila «Fotos» del panel: nace bajo el pliegue de
+/// la superficie de test y el toque a secas caía fuera de
+/// pantalla (Offset y≈836 en 800×600) — 2 tests SP salían
+/// rojos por el arnés con el producto intacto. Patrón de la
+/// casa (fotos_nube_ficha_test.dart): ensureVisible + pump
+/// antes del tap.
+Future<void> _tocarFilaFotos(WidgetTester tester) async {
+  final fila = find.text('Fotos');
+  await tester.ensureVisible(fila);
+  await tester.pump();
+  await tester.tap(fila);
+  await _pumps(tester);
+}
+
 /// La tarjeta de Fotos nace bajo el pliegue de la lista
 /// perezosa: se arrastra hasta que el buscado exista
 /// (la pauta de la oleada 6).
@@ -304,8 +318,7 @@ void main() {
       expect(find.text('1 pendientes · 0 subiendo'), findsOneWidget);
       // CAMPO-9: expandir Fotos enseña UNA fila, la foto
       // identificada por su cliente.
-      await tester.tap(find.text('Fotos'));
-      await _pumps(tester);
+      await _tocarFilaFotos(tester);
       expect(find.text('Foto de Claudia Prueba'), findsOneWidget);
       expect(find.textContaining('2 versiones'), findsOneWidget);
       await tester.pump(const Duration(seconds: 31));
@@ -340,8 +353,7 @@ void main() {
       expect(find.textContaining('1 con error'), findsOneWidget);
       // La línea plegada también (por foto).
       expect(find.textContaining('1 foto falló'), findsOneWidget);
-      await tester.tap(find.text('Fotos'));
-      await _pumps(tester);
+      await _tocarFilaFotos(tester);
       // SP-08: la fila traduce; el crudo no aparece.
       expect(find.text('La conexión falló al subirla'), findsOneWidget);
       expect(find.textContaining('SocketException'), findsNothing);
