@@ -353,7 +353,7 @@ void main() {
       for (final f in filas) {
         final c = IncidenciaComentario.fromMap(f);
         expect('${f['creado_en']}'.trim(), isNotEmpty);
-        expect(c.creadoEn.toIso8601String(),
+        expect(c.creadoEn!.toIso8601String(),
             startsWith('2026-11-01'));
       }
       // El descarte queda registrado en la bitácora (el
