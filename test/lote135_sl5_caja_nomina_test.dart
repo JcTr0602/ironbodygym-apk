@@ -69,7 +69,7 @@ void main() {
       await jornadaSesionDueno(tester);
       await _drop(tester, 'diferencias_caja');
       await _montar(tester, const DiferenciasCajaScreen());
-      expect(find.text('No hay diferencias de caja abiertas'),
+      expect(find.text('No hay diferencias de caja abiertas.'),
           findsNothing);
       expect(find.byType(EstadoError), findsOneWidget);
       expect(find.text('Reintentar'), findsOneWidget);
@@ -104,7 +104,7 @@ void main() {
       await jornadaPreparar(tester);
       await jornadaSesionDueno(tester);
       await _montar(tester, const DiferenciasCajaScreen());
-      expect(find.text('No hay diferencias de caja abiertas'),
+      expect(find.text('No hay diferencias de caja abiertas.'),
           findsOneWidget);
       expect(find.byType(Tarjeta), findsNothing,
           reason: 'el vacío va sin marco: ninguna tarjeta '
