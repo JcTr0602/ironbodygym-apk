@@ -224,6 +224,16 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
           _cargando = false;
           _error = null;
         });
+        // Jornada 2 · 1.35: las visitas son dato LOCAL
+        // (tabla visitas_invitados + umbral en meta): el
+        // conteo de candidato también corre sobre la lista
+        // en caché. Sin esta llamada, el chip de candidato
+        // —la conversión que la banda offline de la lista
+        // promete— no se pintaba jamás sin conexión y la
+        // rama offline de _convertirDesdeLista era código
+        // inalcanzable: la banda decía «conversión
+        // disponible» y desde la lista no se podía.
+        _cargarVisitasLista(cache.lista);
       }
     }
     try {
@@ -318,6 +328,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
             _cargando = false;
             _error = null;
           });
+          // Jornada 2 · 1.35: la misma carga local de
+          // visitas que en la pintura de primer frame —
+          // el chip de candidato también vive en esta
+          // vía de caché.
+          _cargarVisitasLista(cache.lista);
           return;
         }
       }
