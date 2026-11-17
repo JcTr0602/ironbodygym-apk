@@ -1581,17 +1581,29 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _persistirTiposImpl() async {
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'guardar_tipos_pago',
-      payload: {
-        'tipos': [for (final t in _tipos) t.toJson()],
-      },
-    );
+    final tiposJson = [for (final t in _tipos) t.toJson()];
     // v1.3.1: optimismo local (tipos visibles al instante al cobrar).
+    // Corrección PROPIA-F5-01: el optimismo cubre TAMBIÉN las
+    // claves planas de precio (ajustesTrasGuardarTipos: el
+    // write-through que el servidor hace en set_tipos_pago).
+    // Sin él, la renovación rápida de ficha —que cotiza desde
+    // preciosVigentes(), lector de las claves planas— seguía
+    // cobrando el precio viejo mientras el diálogo (lector
+    // del blob) y el servidor aplicaban el nuevo. Op y
+    // ajustes en UNA transacción, como aplicarCambiosMontos:
+    // ni precio local sin op ni op sin precio local.
     final aj = await LocalDb.instance.getAjustes();
-    aj['tipos_pago'] = [for (final t in _tipos) t.toJson()];
-    await LocalDb.instance.setAjustes(aj);
+    final nuevos = ajustesTrasGuardarTipos(aj, tiposJson);
+    final conn = await LocalDb.instance.db;
+    await conn.transaction((txn) async {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'guardar_tipos_pago',
+        payload: {'tipos': tiposJson},
+        txn: txn,
+      );
+      await LocalDb.instance.setAjustes(nuevos, executor: txn);
+    });
     SyncEngine.instance.push();
   }
 
@@ -1778,13 +1790,27 @@ class _AdminScreenState extends State<AdminScreen> {
       icono: Icons.payments_rounded,
     );
     if (ok != true || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'guardar_tipos_pago',
-      payload: {
-        'tipos': [for (final t in _tipos) t.toJson()],
-      },
-    );
+    final tiposJson = [for (final t in _tipos) t.toJson()];
+    // Corrección PROPIA-F5-01: esta vía SOLO encolaba la op —
+    // ni el blob ni las claves planas se movían en local, así
+    // que TODO lector local seguía con el precio anterior
+    // mientras el servidor, al aplicar la op, asentaba con el
+    // guardado (y hacía su write-through a las claves). El
+    // guardado local es ahora el mismo acto que la op: blob +
+    // claves planas (ajustesTrasGuardarTipos), en una
+    // transacción, con el payload de siempre.
+    final aj = await LocalDb.instance.getAjustes();
+    final nuevos = ajustesTrasGuardarTipos(aj, tiposJson);
+    final conn = await LocalDb.instance.db;
+    await conn.transaction((txn) async {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'guardar_tipos_pago',
+        payload: {'tipos': tiposJson},
+        txn: txn,
+      );
+      await LocalDb.instance.setAjustes(nuevos, executor: txn);
+    });
     if (!mounted) return;
     mostrarSnack(context, 'Tipos guardados (se sincronizarán)', significado: SignificadoChip.exito);
     SyncEngine.instance.push();
