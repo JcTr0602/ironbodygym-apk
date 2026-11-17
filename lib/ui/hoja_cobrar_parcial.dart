@@ -74,7 +74,8 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Pendiente total: ${fmtMonto(widget.total)} CUP',
-              style: AppTexto.secundario),
+              // 1.36 (136-296/314): importe tabular.
+              style: AppTexto.conTabulares(AppTexto.secundario)),
           const SizedBox(height: AppEspacio.md),
           // 1.32 (O2F2, Pieza 4): la hoja del cobro parcial
           // compone el importe con el PAD empotrado (antes

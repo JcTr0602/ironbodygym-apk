@@ -74,6 +74,17 @@ class ImagenCierreNomina extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 (136-307/317): la imagen que sale por WhatsApp
+    // se compone IGUAL en cualquier teléfono: el lienzo
+    // aísla el TextScaler del sistema.
+    return MediaQuery(
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: TextScaler.noScaling),
+      child: Builder(builder: _contenido),
+    );
+  }
+
+  Widget _contenido(BuildContext context) {
     // Yunque R5-M8-2: «TOTAL A PAGAR» suma solo a quien NO
     // está liquidado (ya cobró: no es «a pagar»), el mismo
     // criterio que netoTotalDueno de la foto de nómina.

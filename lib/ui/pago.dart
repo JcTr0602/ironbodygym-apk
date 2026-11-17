@@ -718,9 +718,9 @@ class _PagoScreenState extends State<PagoScreen> {
                         '${c.esLocal && c.estadoOp == 'enviada' ? ' · subiendo' : ''}',
                         style: AppTexto.etiqueta.copyWith(
                             color: cs.onSurfaceVariant)),
+                    // 1.36 (136-296/314): importe tabular.
                     trailing: Text('${fmtMonto(c.monto)} CUP',
-                        style: AppTexto.cuerpo.copyWith(
-                            fontWeight: FontWeight.bold,
+                        style: AppTexto.cifraFila.copyWith(
                             color: AppColores.naranja)),
                   );
                 }).toList(),

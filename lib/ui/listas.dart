@@ -785,6 +785,11 @@ class _ListasScreenState extends State<ListasScreen>
   /// en el Pilar 2).
   TabBar _barraPestanas() => TabBar(
           controller: _tab,
+          // 1.36 (136-307/317): las pestañas no heredan la
+          // ranura del framework: etiqueta fijada a la
+          // escala de la casa.
+          labelStyle: AppTexto.subtitulo,
+          unselectedLabelStyle: AppTexto.secundario,
           isScrollable: true,
           tabs: [
             // L1 (estéticas 1.19): cada pestaña lleva su color

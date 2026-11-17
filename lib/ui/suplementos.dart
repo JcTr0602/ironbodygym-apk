@@ -1308,7 +1308,7 @@ double altoCeldaCatalogo(double anchoVista, TextScaler escala) {
   final cuerpo = AppEspacio.sm +
       linea(13, 1.4) + // nombre (secundario)
       4 +
-      linea(15, 1.3) + // precio (subtitulo)
+      2 * linea(15, 1.3) + // precio: 2 líneas (136-308)
       linea(11, 1.4) + // presentación (minuscula)
       4 +
       chip +
@@ -1629,7 +1629,10 @@ class _TarjetaSuplemento extends StatelessWidget {
                             .copyWith(fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 4),
-                      _precioTexto(context, maxLines: 1),
+                      // 1.36 (136-308/317): 2 líneas — con 1, la elipsis
+                      // se comía el equivalente en CUP (el dato
+                      // de decisión).
+                      _precioTexto(context, maxLines: 2),
                       if (presentacion.isNotEmpty)
                         Text(
                           presentacion,

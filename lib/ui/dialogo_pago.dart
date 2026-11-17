@@ -1274,12 +1274,13 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
             // encabezado «Período:» ya vive sobre el
             // desplegable; repetirlo aquí duplicaba la
             // etiqueta sin añadir nada).
-            const Text('Resumen',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Resumen', style: AppTexto.subtitulo),
             Text(_etiquetaPeriodo(s)),
+            // 1.36 (136-301/314): el monto del resumen iba
+            // con un TextStyle desnudo que resolvía a 13,
+            // bajo el cuerpo: ahora es cifraFila.
             Text('Monto: ${fmtMonto(s.monto)} CUP',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold)),
+                style: AppTexto.cifraFila),
             // v1.10.0 (Bloque 2, D6): chip + avisos del escalón
             // que decidió el precio (no bloquean, informan).
             // 1.25 T117 (F1-84): el chip sale para TODO escalón
@@ -1310,8 +1311,8 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                         .copyWith(color: AppColores.textoNaranja(context))),
               ),
             Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold)),
+                // 1.36 (136-301): mismo defecto que el monto.
+                style: AppTexto.cifraFila),
           ],
         ),
       ),

@@ -582,21 +582,21 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
             else ...[
               if (base != null)
                 Text('Base: ${fmtMonto(base)} CUP',
-                    style: AppTexto.cuerpo),
+                    style: AppTexto.conTabulares(AppTexto.cuerpo)),
               if (bonos != null && bonos > 0)
                 Text('Bonos: ${fmtMonto(bonos)} CUP',
-                    style: AppTexto.cuerpo),
+                    style: AppTexto.conTabulares(AppTexto.cuerpo)),
               if (comisiones != null && comisiones > 0)
                 Text('Comisión por dosis: '
                     '${fmtMonto(comisiones)} CUP',
-                    style: AppTexto.cuerpo),
+                    style: AppTexto.conTabulares(AppTexto.cuerpo)),
               if (adelantos != null && adelantos > 0)
                 Text('Adelantos: −${fmtMonto(adelantos)} CUP',
-                    style: AppTexto.cuerpo),
+                    style: AppTexto.conTabulares(AppTexto.cuerpo)),
               if (deuda != null && deuda > 0)
                 Text('Deuda del mes anterior: '
                     '−${fmtMonto(deuda)} CUP',
-                    style: AppTexto.cuerpo),
+                    style: AppTexto.conTabulares(AppTexto.cuerpo)),
               if (neto != null)
                 Padding(
                   padding:

@@ -2475,11 +2475,11 @@ class _FilaClienteState extends State<_FilaCliente> {
                 children: [
                   Text(
                     widget.importeTexto!,
-                    style: AppTexto.subtitulo.copyWith(
-                      fontFeatures: const [
-                        FontFeature.tabularFigures(),
-                      ],
-                    ),
+                    // 1.36 (136-310/314): en la fila el dinero
+                    // MANDA — mismo escalón que el nombre pero
+                    // negrita y tabular (antes Δ peso = 0).
+                    style: AppTexto.conTabulares(AppTexto.subtitulo
+                        .copyWith(fontWeight: FontWeight.bold)),
                   ),
                   if (widget.importeEtiqueta != null)
                     Text(

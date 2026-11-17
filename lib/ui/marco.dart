@@ -625,16 +625,21 @@ class _DestinoGrafito extends StatelessWidget {
               children: [
                 iconoW,
                 const SizedBox(height: 2),
-                Text(
-                  etiqueta,
-                  style: AppTexto.etiqueta.copyWith(
-                    color: color,
-                    fontWeight: activo
-                        ? FontWeight.w700
-                        : FontWeight.w600,
+                // 1.36 (136-307/317): la etiqueta del pilar
+                // («Vencimientos») se ENCOGE como en el Dock,
+                // no se elide a letra grande.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    etiqueta,
+                    style: AppTexto.etiqueta.copyWith(
+                      color: color,
+                      fontWeight: activo
+                          ? FontWeight.w700
+                          : FontWeight.w600,
+                    ),
+                    maxLines: 1,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

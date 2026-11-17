@@ -1069,7 +1069,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const Text('Ritmo de cierre estimado',
                       style: AppTexto.secundario),
                   Text('${fmtMonto(_proyeccion.round())} CUP',
-                      style: AppTexto.secundario.copyWith(color: naranja, fontWeight: FontWeight.bold)),
+                      // 1.36 (136-296/314): importe tabular.
+                      style: AppTexto.conTabulares(AppTexto.secundario.copyWith(color: naranja, fontWeight: FontWeight.bold))),
                 ],
               ),
             ],
@@ -1096,7 +1097,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Text(etiqueta,
                   style: AppTexto.secundario)),
           Text('${fmtMonto(valor)} CUP',
-              style: AppTexto.secundario.copyWith(fontWeight: FontWeight.bold)),
+              // 1.36 (136-296/314): importe tabular.
+              style: AppTexto.conTabulares(AppTexto.secundario.copyWith(fontWeight: FontWeight.bold))),
           const SizedBox(width: AppEspacio.sm),
           Text('${pct.toStringAsFixed(0)}%',
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),

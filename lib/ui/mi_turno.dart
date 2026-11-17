@@ -743,9 +743,15 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
             Text(fmtFecha(_hoy())),
             Text(_turnoActual()),
             const Divider(),
-            Text('Cobrado hoy: ${fmtMonto(_cobrado)} CUP'),
-            Text('   Efectivo: ${fmtMonto(_efectivoHoy)} CUP'),
-            Text('   Transferencia: ${fmtMonto(_transferHoy)} CUP'),
+            Text('Cobrado hoy: ${fmtMonto(_cobrado)} CUP',
+                // 1.36 (136-296/314): importe tabular.
+                style: AppTexto.conTabulares(AppTexto.cuerpo)),
+            Text('   Efectivo: ${fmtMonto(_efectivoHoy)} CUP',
+                // 1.36 (136-296/314): importe tabular.
+                style: AppTexto.conTabulares(AppTexto.cuerpo)),
+            Text('   Transferencia: ${fmtMonto(_transferHoy)} CUP',
+                // 1.36 (136-296/314): importe tabular.
+                style: AppTexto.conTabulares(AppTexto.cuerpo)),
             Text('   Operaciones: $nOps'),
             // 1.28 (M3-B7): los servicios del turno, con su
             // efectivo ya dentro del pendiente de abajo.

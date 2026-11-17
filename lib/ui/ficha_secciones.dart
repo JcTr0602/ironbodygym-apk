@@ -215,11 +215,12 @@ class CabeceraFicha extends StatelessWidget {
             style: AppTexto.metadato.copyWith(
                 color: AppColores.textoSecundario(context))),
         const SizedBox(height: 2),
+        // 1.36 (136-307/317): el dato de la tira (p. ej. la
+        // fecha de «Pagado hasta») no se elide: crece.
         Text(valor,
             style: AppTexto.cuerpo
                 .copyWith(fontWeight: FontWeight.w700),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis),
+            maxLines: 2),
       ],
     );
   }

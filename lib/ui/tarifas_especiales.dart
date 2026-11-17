@@ -250,7 +250,8 @@ class _TarifasScreenState extends State<TarifasScreen> {
         child: Row(
           children: [
             Expanded(child: Text(etiqueta, style: AppTexto.cuerpo)),
-            Text('${fmtMonto(monto)} CUP', style: AppTexto.cuerpo),
+            // 1.36 (136-300/314): el monto es cifraFila
+          Text('${fmtMonto(monto)} CUP', style: AppTexto.cifraFila),
           ],
         ),
       );

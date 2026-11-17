@@ -8,7 +8,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../negocio.dart' show fmtMonto;
+import '../negocio.dart' show fmtMonto, fmtMontoConMoneda;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'cuentas_cobrar.dart';
@@ -87,10 +87,14 @@ class _PorCobrarScreenState extends State<PorCobrarScreen>
                   // salta de «…» a la cifra en un Text crudo.
                   MontoAnimado(
                     valor: cargando ? 0 : combinadoCup,
+                    // 1.36 (136-309/318): cifra y moneda con
+                    // espacio duro (fmtMontoConMoneda).
                     formato: (v) => cargando
                         ? '…'
-                        : '${fmtMonto(v)} CUP'
-                            '${(_fiadosUsd ?? 0) > 0 ? ' · ${fmtMonto(_fiadosUsd!)} USD' : ''}',
+                        : fmtMontoConMoneda(v, 'CUP') +
+                            ((_fiadosUsd ?? 0) > 0
+                                ? ' · ${fmtMontoConMoneda(_fiadosUsd!, 'USD')}'
+                                : ''),
                     style: AppTexto.display
                         .copyWith(color: AppColores.naranja),
                   ),

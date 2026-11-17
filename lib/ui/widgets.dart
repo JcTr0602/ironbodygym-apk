@@ -415,10 +415,12 @@ class _SyncBannerState extends State<SyncBanner>
                         ),
                         const SizedBox(width: 8),
                         Flexible(
+                          // 1.36 (136-307/317): la palabra de
+                          // estado no se elide por ancho.
                           child: Text(titulo,
                               style: AppTexto.metadato.copyWith(
                                   fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis),
+                              maxLines: 2),
                         ),
                         if (pct != null) ...[
                           const SizedBox(width: 8),
@@ -1053,10 +1055,12 @@ class _SyncPillState extends State<SyncPill> {
                     ),
                     const SizedBox(width: 6),
                     Flexible(
+                      // 1.36 (136-307/317): la palabra de
+                      // estado no se elide por ancho.
                       child: Text(texto,
                           style: AppTexto.metadato.copyWith(
                               color: color, fontWeight: FontWeight.w700),
-                          overflow: TextOverflow.ellipsis),
+                          maxLines: 2),
                     ),
                   ],
                 ),

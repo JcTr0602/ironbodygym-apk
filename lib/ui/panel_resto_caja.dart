@@ -358,7 +358,7 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
           Expanded(
             child: Text(etiqueta, style: AppTexto.cuerpo),
           ),
-          Text('${fmtMonto(monto)} CUP', style: AppTexto.cuerpo),
+          Text('${fmtMonto(monto)} CUP', style: AppTexto.cifraFila),
         ],
       ),
     );

@@ -2684,10 +2684,11 @@ class _AdminScreenState extends State<AdminScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 1.36 (136-307/317): el VALOR del KPI es el dato
+          // de decisión: no se elide a letra grande.
           Text(valor,
               style: AppTexto.titulo.copyWith(color: color, fontWeight: FontWeight.w700),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
+              maxLines: 2),
           const SizedBox(height: 2),
           Text(etiqueta,
               style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
