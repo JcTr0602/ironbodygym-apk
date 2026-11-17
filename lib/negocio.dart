@@ -231,16 +231,46 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   final tienePrefijoMovil =
       (digitos.startsWith('5') || digitos.startsWith('6')) &&
           digitos.length >= 4;
-  if (esSoloDigitos || tienePrefijoMovil) {
+  final esNumerica = esSoloDigitos || tienePrefijoMovil;
+  if (esNumerica) {
     final ids = await db.buscarClientesFtsIds(digitos, porTelefono: true);
     await cargarPorIds(ids);
-    final porTel =
-        porId.values.where((c) => c['estado'] == 'activo').toList();
+    // Yunque Exhaustivo 1.35 (C-1): la vía telefónica casa por la
+    // columna FTS `telefonos`, un dato invisible para el entrenador:
+    // un protegido jamás sale por esta vía para un no-dueño
+    // (esVistaProtegida devuelve false para el dueño: su búsqueda
+    // no cambia). Antes, teclear el número de un protegido en el
+    // Directorio confirmaba a qué cliente pertenece.
+    final porTel = porId.values
+        .where((c) => c['estado'] == 'activo' && !esVistaProtegida(c))
+        .toList();
     if (porTel.isNotEmpty) {
       porTel.sort(compararPorNombre);
       return porTel;
     }
-    // Sin match por teléfono, se sigue a la búsqueda por nombre.
+    // Sin match por teléfono, se sigue a la vía por carnet.
+  }
+  // Yunque Exhaustivo 1.35 (C-4): vía por carnet. El Directorio
+  // promete «Nombre, carnet o teléfono» pero el índice FTS no tiene
+  // columna de carnet: un carnet completo devolvía «Sin resultados»
+  // con salida a inscribir (riesgo de duplicado). Coincidencia
+  // EXACTA sobre los dígitos normalizados del carnet guardado —
+  // nada de prefijos: los 6 primeros dígitos son la fecha de
+  // nacimiento y casarían con medio padrón. El carnet es un
+  // identificador invisible para el entrenador: el protegido
+  // tampoco sale por esta vía para un no-dueño.
+  if (digitos.length >= 6) {
+    final porCarnet = (await _activos())
+        .where((c) =>
+            '${c['carnet'] ?? ''}'.replaceAll(RegExp(r'[^0-9]'), '') ==
+                digitos &&
+            !esVistaProtegida(c))
+        .toList();
+    if (porCarnet.isNotEmpty) {
+      porCarnet.sort(compararPorNombre);
+      return porCarnet;
+    }
+    // Sin match por carnet, se sigue a la búsqueda por nombre.
   }
   // Vía rápida por FTS5 (índice SQLite, no bloquea la UI).
   final ftsIds = await db.buscarClientesFtsIds(nq);
@@ -253,6 +283,18 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
       resultado.add(c);
       vistos.add(id);
     }
+  }
+  // Yunque Exhaustivo 1.35 (C-1, puerta trasera): en una consulta
+  // NUMÉRICA, el MATCH FTS de la vía por nombre no filtra por
+  // columna y un token de dígitos puede casar la columna
+  // `telefonos`: el protegido se filtra también del resultado de
+  // esta vía. (El fallback LIKE de nombre solo mira palabras del
+  // nombre y no puede casar teléfonos; el filtro es inofensivo
+  // sobre él y mantiene una sola regla.) En consultas NO
+  // numéricas el comportamiento no cambia: la fila protegida por
+  // nombre es el diseño del Directorio.
+  if (esNumerica) {
+    resultado.removeWhere((c) => esVistaProtegida(c));
   }
   if (resultado.length >= 5) {
     resultado.sort(compararPorNombre);
@@ -285,6 +327,9 @@ Future<List<Map<String, dynamic>>> buscarClientes(String q) async {
   ]
       .whereType<Map<String, dynamic>>()
       .where((c) => c['estado'] == 'activo')
+      // C-1: la tolerancia a typos también es vía por nombre: en
+      // consulta numérica el protegido no entra por ella.
+      .where((c) => !esNumerica || !esVistaProtegida(c))
       .toList();
   return [...resultado, ...resto];
 }
@@ -4250,6 +4295,34 @@ DateTime proximoCumple(int mesNac, int diaNac, DateTime hoyDia) {
   return proximo;
 }
 
+/// Yunque Exhaustivo 1.35 (C-5): fecha de nacimiento de una fila
+/// del espejo de clientes, con precedencia: 'fecha_nacimiento'
+/// (la clave de la proyección del servidor) → 'fecha_nac' (la que
+/// ya leía esCumpleanosHoy en bloque2_resto) → carnet. Parseo
+/// ESTRICTO de las claves de fecha: debe ser 'YYYY-MM-DD' con una
+/// fecha real (round-trip por DateTime, como fechaNacDeCarnet) y
+/// con año, porque el llamador calcula '_cumple' con él. Una
+/// clave presente pero inválida NO tapa a la siguiente fuente:
+/// se cae al carnet, que es el comportamiento de siempre. Con
+/// solo carnet, el resultado es idéntico al anterior.
+DateTime? fechaNacDeFila(Map<String, dynamic> c) {
+  for (final clave in const ['fecha_nacimiento', 'fecha_nac']) {
+    final v = '${c[clave] ?? ''}'.trim();
+    if (v.length < 10) continue;
+    final f = DateTime.tryParse(v.substring(0, 10));
+    if (f == null) continue;
+    // Round-trip: DateTime.tryParse normaliza fechas imposibles
+    // (2026-02-31 → marzo); una fecha que no vuelve igual no es
+    // una fecha real y no sirve.
+    final iso = '${f.year.toString().padLeft(4, '0')}-'
+        '${f.month.toString().padLeft(2, '0')}-'
+        '${f.day.toString().padLeft(2, '0')}';
+    if (iso != v.substring(0, 10)) continue;
+    return f;
+  }
+  return fechaNacDeCarnet('${c['carnet'] ?? ''}');
+}
+
 /// Clientes que cumplen años en los próximos [dias] (incluye hoy).
 /// Cada mapa trae '_dias_para' (días que faltan) y '_cumple' (edad que cumple).
 Future<List<Map<String, dynamic>>> cumpleanosProximos(
@@ -4262,7 +4335,9 @@ Future<List<Map<String, dynamic>>> cumpleanosProximos(
   final rows = activosPre ?? await _activos();
   final res = <Map<String, dynamic>>[];
   for (final c in rows) {
-    final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
+    // C-5: la fecha sale del helper único (proyección del
+    // servidor primero, carnet al final), no solo del carnet.
+    final nac = fechaNacDeFila(c);
     if (nac == null) continue;
     final proximo = proximoCumple(nac.month, nac.day, hoyDia);
     final falta = proximo.difference(hoyDia).inDays;
@@ -4307,7 +4382,8 @@ Future<List<Map<String, dynamic>>> cumpleanosDelMes() async {
   final rows = await _activos();
   final res = <Map<String, dynamic>>[];
   for (final c in rows) {
-    final nac = fechaNacDeCarnet('${c['carnet'] ?? ''}');
+    // C-5: mismo helper único que cumpleanosProximos.
+    final nac = fechaNacDeFila(c);
     if (nac == null) continue;
     final celeb = mesDiaCumple(nac.month, nac.day, hoy.year);
     final mesCumple = celeb.mes;

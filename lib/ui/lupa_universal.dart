@@ -77,6 +77,37 @@ import 'suplementos.dart';
 import 'turnos_hub.dart';
 import 'usuarios.dart';
 
+/// Yunque Exhaustivo 1.35 (C-2): destinos del resolvedor que son
+/// SOLO del dueño (pantallas que se autoprotegen o cuyo contenido
+/// es del dueño: las dos de congelaciones y el Control de
+/// Acceso). [abrirFuncionLupa] no navega a ellos con una sesión
+/// que no sea la del dueño, aunque el id llegue por un reciente
+/// guardado por otra sesión en el mismo aparato.
+const destinosSoloDuenoLupa = <String>{
+  'congelaciones',
+  'congeladas',
+  'usuarios',
+};
+
+/// ¿El destino [id] de la Lupa es solo del dueño?
+bool destinoLupaEsSoloDueno(String id) =>
+    destinosSoloDuenoLupa.contains(id);
+
+/// Yunque Exhaustivo 1.35 (C-2): los recientes de FUNCIONES de
+/// la Lupa, con la MISMA puerta de rol que la búsqueda de
+/// herramientas (en build, las funciones solo se buscan si
+/// esDueno): para un no-dueño la lista es vacía, así un reciente
+/// guardado por la sesión del dueño (la clave lupa_recientes_v1
+/// no se limpia al cerrar sesión) no se ofrece a la sesión del
+/// entrenador. PURO: [esDueno] entra como dato para fijarlo en
+/// tests sin sesión.
+List<FuncionPanel> recientesFuncionesLupa(List<String> recientes,
+    {required bool esDueno}) {
+  if (!esDueno) return const [];
+  return recientesPanel(
+      recientes.where((r) => !r.startsWith('cliente:')).toList());
+}
+
 const _kRecientesLupa = 'lupa_recientes_v1';
 // 1.35 (UI-06): la fila de recientes enseña hasta 5
 // destinos (antes 3), como el Directorio.
@@ -101,6 +132,19 @@ const _kMaxRecientesLupa = 5;
 /// en los saltos de pilar completa de inmediato.
 Future<void> abrirFuncionLupa(BuildContext context, String id,
     {bool cerrarActual = true}) {
+  // Yunque Exhaustivo 1.35 (C-2): puerta de rol del resolvedor —
+  // a un destino solo-dueño no se navega con otra sesión, venga
+  // el id de donde venga (recientes incluidos). Sin sesión
+  // resoluble se falla CERRADO, como esVistaProtegida.
+  if (destinoLupaEsSoloDueno(id)) {
+    var dueno = false;
+    try {
+      dueno = AuthService().isOwner;
+    } catch (_) {
+      dueno = false;
+    }
+    if (!dueno) return Future<void>.value();
+  }
   var navegacion = Future<void>.value();
   void ir(Widget pantalla) {
     if (cerrarActual) Navigator.of(context).pop();
@@ -332,6 +376,11 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
   }
 
   void _abrirFuncion(FuncionPanel f) {
+    // Yunque Exhaustivo 1.35 (C-2): la misma puerta que la
+    // búsqueda de herramientas — las funciones del Panel solo
+    // se ofrecen (y solo se abren) con la sesión del dueño; un
+    // toque sobre un reciente de otra sesión no navega.
+    if (!_auth.isOwner) return;
     _registrarReciente(f.id);
     abrirFuncionLupa(context, f.id);
   }
@@ -431,8 +480,11 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
         ),
       );
     }
-    final funciones = recientesPanel(
-        _recientes.where((r) => !r.startsWith('cliente:')).toList());
+    // C-2: los recientes de funciones pasan por la puerta de
+    // rol (recientesFuncionesLupa); los de cliente se pintan
+    // abajo con la vista protegida del rol vigente, como antes.
+    final funciones =
+        recientesFuncionesLupa(_recientes, esDueno: _auth.isOwner);
     final porId = {for (final c in _clientes) '${c['id']}': c};
     return ListView(
       key: const ValueKey('lupa-recientes'),

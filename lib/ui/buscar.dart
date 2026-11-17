@@ -2650,6 +2650,15 @@ bool clienteSinFotoBuscar(Map<String, dynamic> c) {
 Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base,
     {Set<int> congelados = const {}}) {
   final conteos = <String, int>{
+    // Yunque Exhaustivo 1.35 (C-7, solo comentario): «todos» es
+    // el tamaño de la lista TAL CUAL se pinta, protegidos
+    // incluidos — en «Todos» el protegido SÍ aparece como fila
+    // protegida (foto y nombre). Los contadores de ESTADO de
+    // abajo son los que excluyen protegidos, porque su estado
+    // de pago no es visible para el rol; por eso la suma de los
+    // chips de estado puede ser menor que «todos» para un
+    // entrenador, y es correcto: no falta ningún cliente
+    // visible, faltan los estados que no puede ver.
     'todos': base.length,
     'aldia': 0,
     'porvencer': 0,
@@ -2658,7 +2667,9 @@ Map<String, int> conteosDeBuscar(List<Map<String, dynamic>> base,
   };
   for (final c in base) {
     // Cliente protegido (2026-10-26, Protegido 2 H2): su estado
-    // de pago no alimenta los contadores (revelaría si pagó).
+    // de pago no alimenta los contadores DE ESTADO (revelaría si
+    // pagó); sí cuenta en «todos», como la fila protegida que la
+    // lista enseña (ver la nota de C-7 sobre 'todos').
     if (!esVistaProtegida(c)) {
       // FIN-28 de Argón (1.20): una Cuenta a la Casa nunca
       // vence — cuenta como al día (como clientesAlDia()).

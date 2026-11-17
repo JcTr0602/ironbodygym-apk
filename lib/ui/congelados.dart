@@ -34,7 +34,10 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
   @override
   void initState() {
     super.initState();
-    _cargar();
+    // Yunque Exhaustivo 1.35 (C-2): pantalla solo del dueño —
+    // sin su sesión ni siquiera se dispara la carga (la lista
+    // enseña quién está congelado y hasta cuándo).
+    if (AuthService().isOwner) _cargar();
   }
 
   Future<void> _cargar() async {
@@ -73,6 +76,25 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Yunque Exhaustivo 1.35 (C-2): autoprotección en el build,
+    // como CongelacionesScreen — sin dueño, texto explicativo y
+    // ningún dato, llegue la navegación de donde llegue (los
+    // recientes de la Lupa eran la vía real).
+    if (!AuthService().isOwner) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Congelados'),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'La lista de membresías congeladas solo la ve el '
+              'dueño.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: appBarIron(context, 'Congelados'),
       body: _cargando
