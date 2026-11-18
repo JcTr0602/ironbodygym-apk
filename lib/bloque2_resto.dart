@@ -899,8 +899,15 @@ bool puedeDispararMasivo({
   required bool esTelefonoDueno,
   required String? disparadoEnFechaHabana,
   required String hoyHabana,
+  // 1.36 H-C3 (136-1076, GF-115): el log LOCAL de hoy también
+  // bloquea, como exige la documentación de esta función
+  // (antes solo miraba el estado sincronizado: un masivo
+  // disparado offline, aún no sincronizado, se podía
+  // repetir el mismo día).
+  bool logLocalHoy = false,
 }) {
   if (!esTelefonoDueno) return false;
+  if (logLocalHoy) return false;
   if (disparadoEnFechaHabana == hoyHabana) return false;
   return true;
 }

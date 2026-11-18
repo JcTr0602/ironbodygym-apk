@@ -5,6 +5,7 @@
 /// se agrupan por día con encabezados.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../actividad_cliente.dart' show ActividadClienteService;
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -348,6 +350,10 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
   final _busquedaCtrl = TextEditingController();
   String _busqueda = '';
 
+  /// 1.36 H-C3 (136-1023, GF-058): debounce de la búsqueda
+  /// (antes cada tecla reconstruía la lista entera).
+  Timer? _busquedaDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -356,9 +362,15 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
 
   @override
   void dispose() {
+    _busquedaDebounce?.cancel();
     _busquedaCtrl.dispose();
     super.dispose();
   }
+
+  /// 1.36 H-C3 (136-1016, GF-051): el último fallo de
+  /// carga, VISIBLE (antes solo bitácora: la pantalla se
+  /// quedaba con «Sin operaciones» o datos viejos mudos).
+  String? _falloCarga;
 
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
@@ -366,10 +378,12 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      _falloCarga = null;
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      _falloCarga = mensajeErrorAmable(e);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -397,6 +411,13 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
     } catch (_) {
       _esDueno = false;
     }
+    // 1.36 H-C3 (136-1021, GF-056): cada carga limpia
+    // TAMBIÉN nombres y fotos (antes solo los protegidos:
+    // un cliente renombrado o con foto nueva seguía con el
+    // dato viejo toda la sesión).
+    _nombres.clear();
+    _fotos.clear();
+    _fotosExisten.clear();
     // Precargar nombres y fotos de clientes mencionados
     final clientes = await LocalDb.instance.allMirror('clientes');
     _porId = <int, Map<String, dynamic>>{
@@ -515,13 +536,18 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       payloadDeOp(op);
 
   int? _clienteId(Map<String, dynamic> p, String tipo) {
-    for (final k in ['cliente_id', 'id', 'cliente']) {
-      final v = p[k];
-      if (v is int) return v;
-      if (v is String) {
-        final n = int.tryParse(v);
-        if (n != null) return n;
-      }
+    // 1.36 H-C3 (136-1018, GF-053): el id sale de
+    // `cliente_id`; las claves genéricas ('id', 'cliente')
+    // solo valen si el id EXISTE en el espejo de clientes
+    // (antes cualquier 'id' de un payload — p. ej. el de un
+    // suplemento — abría la ficha de un cliente equivocado).
+    int? de(dynamic v) =>
+        v is num ? v.toInt() : (v is String ? int.tryParse(v) : null);
+    final directo = de(p['cliente_id']);
+    if (directo != null) return directo;
+    for (final k in ['id', 'cliente']) {
+      final n = de(p[k]);
+      if (n != null && _porId.containsKey(n)) return n;
     }
     return null;
   }
@@ -571,9 +597,11 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         final metodo = p['metodo'] ?? 'efectivo';
         final etiqueta =
             tipo == 'pago_mensual' ? 'mensualidad' : 'pago diario';
+        // 1.36 H-C3 (136-1022, GF-057): monto formateado
+        // con fmtMonto (antes el número crudo: «2000.0»).
         return nombre != null
-            ? '$nombre pagó $etiqueta: ${monto ?? '?'} CUP ($metodo)'
-            : 'Pago de $etiqueta: ${monto ?? '?'} CUP ($metodo)';
+            ? '$nombre pagó $etiqueta: ${monto == null ? '?' : fmtMonto(monto)} CUP ($metodo)'
+            : 'Pago de $etiqueta: ${monto == null ? '?' : fmtMonto(monto)} CUP ($metodo)';
       case 'inscribir':
         final n = '${p['nombre'] ?? nombre ?? ''}'.trim();
         if (n.isEmpty) return 'Nueva inscripción';
@@ -593,7 +621,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         final monto = p['monto'];
         final quien = '${p['entrenador'] ?? p['nombre'] ?? ''}';
         return quien.isNotEmpty
-            ? 'Entrega de $quien confirmada${monto != null ? ': $monto CUP' : ''}'
+            ? 'Entrega de $quien confirmada${monto != null ? ': ${fmtMonto(monto)} CUP' : ''}'
             : 'Entrega de efectivo confirmada';
       case 'liquidar_caja':
         final quien = '${p['entrenador_nombre'] ?? ''}';
@@ -601,7 +629,8 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
             ? 'Caja de $quien liquidada (arqueo)'
             : 'Caja liquidada (arqueo)';
       case 'gasto':
-        return 'Gasto: ${p['concepto'] ?? '—'} (${p['monto'] ?? '?'} CUP)';
+        // 1.36 H-C3 (136-1022, GF-057): fmtMonto.
+        return 'Gasto: ${p['concepto'] ?? '—'} (${p['monto'] == null ? '?' : fmtMonto(p['monto'])} CUP)';
       case 'venta_suplemento':
         final prod = '${p['suplemento'] ?? p['nombre'] ?? ''}';
         return nombre != null && prod.isNotEmpty
@@ -661,7 +690,12 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       );
 
   Widget _botonFiltrosAuditoria(bool esDueno) {
-    return OutlinedButton.icon(
+    // 1.36 H-C3 (136-1022, GF-057): tooltip con el resumen
+    // COMPLETO de filtros (la etiqueta admite 2 líneas y
+    // puede elidir la cola).
+    return Tooltip(
+      message: _resumenFiltrosAuditoria(),
+      child: OutlinedButton.icon(
       icon: const Icon(Icons.filter_list_rounded, size: 16),
       // Yunque 1.34 (C2-5): la etiqueta-resumen admite 2
       // líneas en los seis botones de filtros plegados — a
@@ -679,6 +713,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
         ),
       ),
       onPressed: () => _abrirFiltrosAuditoria(esDueno),
+      ),
     );
   }
 
@@ -828,6 +863,7 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                       : IconButton(
                           icon: const Icon(Icons.clear_rounded),
                           onPressed: () {
+                            _busquedaDebounce?.cancel();
                             _busquedaCtrl.clear();
                             setState(() => _busqueda = '');
                           },
@@ -835,7 +871,15 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
                   border: const OutlineInputBorder(),
                   isDense: true,
                 ),
-                onChanged: (v) => setState(() => _busqueda = v),
+                // 1.36 H-C3 (136-1023, GF-058): con
+                // debounce de 300 ms.
+                onChanged: (v) {
+                  _busquedaDebounce?.cancel();
+                  _busquedaDebounce =
+                      Timer(const Duration(milliseconds: 300), () {
+                    if (mounted) setState(() => _busqueda = v);
+                  });
+                },
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1044,6 +1088,16 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
           child: SkeletonLista(items: 4));
     }
     if (_ops.isEmpty) {
+      // 1.36 H-C3 (136-1016, GF-051): si la carga FALLÓ, el
+      // vacío es un EstadoError con reintento, no un
+      // «sin operaciones» falso.
+      if (_falloCarga != null) {
+        return EstadoError(
+          titulo: 'No se pudo cargar la auditoría',
+          detalle: _falloCarga,
+          onReintentar: _cargar,
+        );
+      }
       return EstadoVacio(
         icono: Icons.fact_check_rounded,
         titulo: 'Sin operaciones registradas',
@@ -1052,6 +1106,25 @@ class _AuditoriaScreenState extends State<AuditoriaScreen> {
       );
     }
     final esDueno = _esDueno;
+    // 1.36 H-C3 (136-1023, GF-058): con más bloques por
+    // cargar, el vacío por filtro también ofrece «Ver más
+    // antiguas» (antes solo la rama con filas lo tenía y un
+    // filtro sin resultados en el primer bloque era un
+    // callejón sin salida).
+    if (_hayMas) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          EstadoVacio(
+            icono: Icons.filter_alt_off_rounded,
+            titulo: 'Nada con este filtro',
+            subtitulo: 'Hay operaciones más antiguas por cargar.',
+            textoAccion: 'Ver más antiguas',
+            onAccion: _verMas,
+          ),
+        ],
+      );
+    }
     return EstadoVacio(
       icono: Icons.filter_alt_off_rounded,
       titulo: 'Nada con este filtro',
@@ -1564,9 +1637,14 @@ FiltroAuditoria alcanceAlElegirActor({
   required String? actorElegido,
   required String? miActor,
 }) {
+  // 1.36 H-C3 (136-1020, GF-055): la comparación va
+  // NORMALIZADA con normalizarActor, igual que esOpMia
+  // (antes «Duany» vs «duany » se trataban como actores
+  // distintos y el alcance saltaba a Todo sin serlo).
   if (actorElegido != null &&
       actorElegido.isNotEmpty &&
-      actorElegido != miActor &&
+      (miActor == null ||
+          normalizarActor(actorElegido) != normalizarActor(miActor)) &&
       alcance == FiltroAuditoria.soloMias) {
     return FiltroAuditoria.todo;
   }
@@ -1584,10 +1662,12 @@ FiltroAuditoria alcanceAlElegirActor({
   required String? actorElegido,
   required String? miActor,
 }) {
+  // 1.36 H-C3 (136-1020, GF-055): comparación normalizada.
   if (nuevoAlcance == FiltroAuditoria.soloMias &&
       actorElegido != null &&
       actorElegido.isNotEmpty &&
-      actorElegido != miActor) {
+      (miActor == null ||
+          normalizarActor(actorElegido) != normalizarActor(miActor))) {
     return (alcance: nuevoAlcance, actor: null);
   }
   return (alcance: nuevoAlcance, actor: actorElegido);

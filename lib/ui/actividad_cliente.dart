@@ -324,10 +324,22 @@ class _SeccionActividadAppClientesState
           if (_clienteId != null) ...[
             const SizedBox(height: AppEspacio.md),
             if (_errorServidor)
-              const AvisoEstado(
+              AvisoEstado(
                 tipo: TipoAviso.error,
                 texto: 'No se pudo actualizar la actividad. '
                     'Inténtalo de nuevo.',
+                // 1.36 H-C3 (136-1006, GF-040): el aviso de
+                // fallo ofrece Reintentar en el propio aviso.
+                acciones: [
+                  TextButton(
+                    onPressed: () {
+                      if (_clienteId != null) {
+                        _consultar(++_generacion);
+                      }
+                    },
+                    child: const Text('Reintentar'),
+                  ),
+                ],
               )
             else if (_sinConexion && _descargadoEn != null)
               AvisoEstado(
@@ -350,9 +362,20 @@ class _SeccionActividadAppClientesState
                 style: AppTexto.secundario,
               ),
             if (_consultando && _filas.isNotEmpty)
+              // 1.36 H-C3 (136-1001, GF-035): al cambiar de
+              // rango se ROTULA «Actualizando rango» (las
+              // filas previas se atenúan abajo).
               const Padding(
                 padding: EdgeInsets.only(top: AppEspacio.sm),
-                child: LinearProgressIndicator(minHeight: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: LinearProgressIndicator(minHeight: 2)),
+                    SizedBox(width: AppEspacio.sm),
+                    Text('Actualizando rango…',
+                        style: AppTexto.secundario),
+                  ],
+                ),
               ),
             const SizedBox(height: AppEspacio.sm),
             if (!_consultando && !_sinConexion && _filas.isEmpty)
@@ -365,7 +388,22 @@ class _SeccionActividadAppClientesState
                 style: AppTexto.secundario,
               )
             else
-              for (final f in _filas) _fila(f),
+              // 1.36 H-C3 (136-1001/1006, GF-035/GF-040):
+              // filas previas ATENUADAS mientras se consulta
+              // el rango nuevo, y separadores consistentes
+              // entre filas.
+              Opacity(
+                opacity: _consultando ? 0.5 : 1,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < _filas.length; i++) ...[
+                      if (i > 0) const Divider(height: 1),
+                      _fila(_filas[i]),
+                    ],
+                  ],
+                ),
+              ),
           ],
         ],
       ),

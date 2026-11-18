@@ -568,6 +568,10 @@ class AvisosEntrenadorService {
       tipo: kTipoOpMarcarAvisoVisto,
       payload: {'aviso_id': aviso.id, 'descartado': descartado},
     );
+    // 1.36 H-C3 (136-1080, GF-120): push inmediato, como en
+    // pedir (antes el acuse esperaba al ciclo del motor).
+    unawaited(SyncEngine.instance.push().then((_) {},
+        onError: (_) {}));
   }
 
   /// Crear o editar un aviso (SOLO dueño; el servidor lo refuerza).
@@ -606,6 +610,11 @@ class AvisosEntrenadorService {
       ..['creada_ts'] = isoHabana(ahoraHabana());
     await LocalDb.instance
         .actualizarMirrorTextoOptimista('avisos_entrenadores', id, fila);
+    // 1.36 H-C3 (136-1080, GF-120): push inmediato tras
+    // encolar el aviso (otros teléfonos lo ven sin esperar
+    // al ciclo del motor).
+    unawaited(SyncEngine.instance.push().then((_) {},
+        onError: (_) {}));
   }
 
   /// Desactivar un aviso (no se borra: queda el registro).
@@ -656,6 +665,20 @@ extension CopiaAviso on AvisoEntrenador {
 // ---------------------------------------------------------------------------
 // F3: solicitudes de adelanto (tabla SEPARADA de adelantos)
 // ---------------------------------------------------------------------------
+
+/// 1.36 H-C3 (136-1078, GF-118): etiqueta LEGIBLE del estado
+/// de una solicitud (adelanto o relleno): la UI no debe
+/// pintar el código crudo («por_enviar», «atendida» salían
+/// tal cual en las listas). PURA.
+String etiquetaEstadoSolicitud(String estado) => switch (estado) {
+      'pendiente' => 'Pendiente',
+      'por_enviar' => 'Por enviar',
+      'aprobado' => 'Aprobado',
+      'rechazado' => 'Rechazado',
+      'atendida' => 'Atendida',
+      'cerrada' => 'Cerrada',
+      _ => 'Pendiente',
+    };
 
 /// Solicitud tal como baja por el espejo `solicitudes_adelanto`
 /// (contrato servidor 59f2ffd: SIN columna entrenador_id; la
@@ -892,6 +915,23 @@ class SolicitudesAdelantoService {
       throw Exception('El monto debe ser en pesos enteros');
     }
     if (motivo.trim().isEmpty) throw Exception('Escribe el motivo');
+    // 1.36 H-C3 (136-1079, GF-119): idempotencia EN EL
+    // SERVICIO al pedir: si ya hay una op idéntica viva en
+    // la cola (doble toque), no se encola otra — la
+    // deduplicación previa de la UI no era atómica.
+    try {
+      for (final op in await LocalDb.instance.pendingOpsLectura()) {
+        if ('${op['tipo']}' != kTipoOpSolicitarAdelanto) continue;
+        try {
+          final pl = jsonDecode(op['payload'] as String)
+              as Map<String, dynamic>;
+          if ((pl['monto'] as num?)?.toInt() == monto.toInt() &&
+              '${pl['motivo'] ?? ''}'.trim() == motivo.trim()) {
+            return;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: kTipoOpSolicitarAdelanto,
@@ -1053,6 +1093,10 @@ class SolicitudesAdelantoService {
     if (aprobar) fila['destino_resolucion'] = destinoEfectivo;
     await LocalDb.instance.actualizarMirrorTextoOptimista(
         'solicitudes_adelanto', solicitud.id, fila);
+    // 1.36 H-C3 (136-1080, GF-120): push inmediato tras
+    // encolar la resolución.
+    unawaited(SyncEngine.instance.push().then((_) {},
+        onError: (_) {}));
   }
 }
 
@@ -1200,6 +1244,21 @@ class SolicitudesRellenoService {
     if (dosisAlPedir < 0) {
       throw Exception('Saldo no válido');
     }
+    // 1.36 H-C3 (136-1079, GF-119): idempotencia en el
+    // servicio: una petición viva del mismo suplemento en
+    // la cola basta (doble toque = una sola op).
+    try {
+      for (final op in await LocalDb.instance.pendingOpsLectura()) {
+        if ('${op['tipo']}' != kTipoOpSolicitarRelleno) continue;
+        try {
+          final pl = jsonDecode(op['payload'] as String)
+              as Map<String, dynamic>;
+          if ((pl['suplemento_id'] as num?)?.toInt() == suplementoId) {
+            return;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
     await LocalDb.instance.queueOp(
       opUuid: const Uuid().v4(),
       tipo: kTipoOpSolicitarRelleno,

@@ -195,14 +195,20 @@ String detalleActividadCliente(ActividadCliente a) {
   if (dias != null) {
     partes.add(dias == 1 ? 'Premio: 1 día' : 'Premio: $dias días');
   }
-  agrega('Fecha', d['fecha']);
-  // 1.32 (B1-H9): las filas de SESIÓN de la RPC viva
-  // emiten la fecha como `fecha_sesion`; sin leerla, la
-  // sesión salía sin fecha en su detalle. Solo una de las
-  // dos claves vendrá no vacía por fuente.
-  agrega('Fecha', d['fecha_sesion']);
+  // 1.36 H-C3 (136-1002, GF-036): UNA sola línea de fecha,
+  // con prioridad de `fecha_sesion` (la de la sesión) sobre
+  // `fecha` (antes, si venían las dos, salían dos «Fecha:»).
+  final fechaSesion = '${d['fecha_sesion'] ?? ''}'.trim();
+  if (fechaSesion.isNotEmpty && fechaSesion != 'null') {
+    partes.add('Fecha: $fechaSesion');
+  } else {
+    agrega('Fecha', d['fecha']);
+  }
   agrega('Turno', d['turno']);
-  agrega('Entrenador', d['entrenador_id']);
+  // 1.36 H-C3 (136-1002, GF-036): el entrenador va por
+  // NOMBRE; si solo hay id, se omite (el id crudo no le
+  // dice nada a quien lee el detalle).
+  agrega('Entrenador', d['entrenador_nombre']);
   agrega('Nota', d['nota']);
   final actor = (a.actor ?? '').trim();
   if (actor.isNotEmpty) partes.add('Por: $actor');

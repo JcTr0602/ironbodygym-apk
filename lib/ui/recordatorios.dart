@@ -62,6 +62,11 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
   /// alarmas se programan pero Android no las muestra).
   bool _sinPermisoNotif = false;
 
+  /// 1.36 H-C3 (136-989, GF-021): el permiso no se pudo
+  /// COMPROBAR (canal roto): aviso no bloqueante con
+  /// reintento, distinto del denegado.
+  bool _permisoDesconocido = false;
+
   bool get _soyDueno => AuthService().isOwner;
   int? get _yo => AuthService().telegramId;
 
@@ -125,6 +130,7 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
           _horaAvisos = hora;
           _sinPermisoNotif =
               permiso == 'denegado' || denegadoPersistente;
+          _permisoDesconocido = permiso == 'desconocido';
           _empujePendiente = empujeFallo;
           _cargando = false;
           _falloCarga = false;
@@ -249,9 +255,16 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             if (telWa.isNotEmpty)
-              TextButton(
-                onPressed: () => _avisarWhatsApp(d),
-                child: const Text('WhatsApp'),
+              // 1.36 H-C3 (136-983, GF-014): la acción lo
+              // aclara — abrir el chat NO marca el aviso;
+              // asentar es «Disparar».
+              Tooltip(
+                message: 'Abre el chat: no marca el aviso; '
+                    'usa «Disparar» para asentarlo',
+                child: TextButton(
+                  onPressed: () => _avisarWhatsApp(d),
+                  child: const Text('WhatsApp'),
+                ),
               ),
             if (d.puedoDisparar)
               TextButton(
@@ -501,6 +514,32 @@ class _RecordatoriosScreenState extends State<RecordatoriosScreen> {
                 // 1.25 T122 (F6-18): sin nada hoy NI
                 // configurado, un solo EstadoVacio de
                 // pantalla en vez de dos textos planos.
+                // 1.36 H-C3 (136-989, GF-021): permiso no
+                // comprobado: aviso NO bloqueante con
+                // reintento (no es un denegado).
+                if (_permisoDesconocido && !_sinPermisoNotif) ...[
+                  Tarjeta(
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(
+                          Icons.notifications_rounded,
+                          color: AppColores.naranja),
+                      title: const Text(
+                          'Permiso de avisos sin comprobar',
+                          style: AppTexto.cuerpo),
+                      subtitle: const Text(
+                          'No se pudo comprobar el permiso de '
+                          'notificaciones en este teléfono; los '
+                          'avisos podrían no verse.',
+                          style: AppTexto.secundario),
+                      trailing: TextButton(
+                        onPressed: _cargar,
+                        child: const Text('Reintentar'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (_debidos.isEmpty && _configs.isEmpty)
                   const EstadoVacio(
                     icono: Icons.notifications_rounded,

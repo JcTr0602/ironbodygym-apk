@@ -1023,9 +1023,13 @@ String textoComprobanteCompra({
   String? metodo,
   String? vendedor,
 }) {
+  // 1.36 H-C3 (136-1048, GF-084): fecha validada con
+  // fechaIsoEstricta/fmtFecha; una fecha vacía, corta o
+  // inválida cae a «—» (antes substring(0,10) reventaba
+  // con fechas cortas y el comprobante entero se perdía).
   String fechaBonita(String iso) {
-    final p = iso.substring(0, 10).split('-');
-    return p.length == 3 ? '${p[2]}/${p[1]}/${p[0]}' : iso;
+    final d = fechaIsoEstricta(iso);
+    return d == null ? '—' : fmtFecha(iso);
   }
 
   final buf = StringBuffer()
@@ -2702,10 +2706,13 @@ Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
         LocalDb.normalizarTelegramId(v['responsable_efectivo_id']) ??
             LocalDb.normalizarTelegramId(v['registrado_por']);
     if (tid != null) tids.add(tid);
-    final tidReg = LocalDb.normalizarTelegramId(v['registrado_por']);
     final n = v['registrado_por_nombre'] as String?;
-    if (tidReg != null && n != null && n.isNotEmpty) {
-      nombresServ.putIfAbsent(tidReg, () => n);
+    // 1.36 H-C3 (136-1055, GF-092): el nombre se guarda bajo
+    // el tid RESPONSABLE del efectivo (la clave con la que
+    // la fila se busca abajo), no bajo el de quien registró:
+    // con vendedor ≠ responsable el nombre se perdía.
+    if (tid != null && n != null && n.isNotEmpty) {
+      nombresServ.putIfAbsent(tid, () => n);
     }
   }
   for (final l in await LocalDb.instance.allMirror('liquidaciones_caja')) {
@@ -3103,7 +3110,11 @@ Future<List<Map<String, dynamic>>> listaClientes([String q = '']) async {
     res = rows;
   } else {
     res = rows.where((c) {
-      final norm = (c['nombre_norm'] as String?) ?? _norm('${c['nombre']}');
+      // 1.36 H-C3 (136-1049, GF-086): se filtra por el
+      // _norm(nombre) CALCULADO: el nombre_norm cacheado
+      // podía quedar obsoleto al renombrar y el cliente
+      // renombrado no aparecía por su nombre nuevo.
+      final norm = _norm('${c['nombre'] ?? ''}');
       if (nq.isNotEmpty && norm.contains(nq)) return true;
       // Cliente protegido (2026-10-26, Protegido 2 H1): al
       // protegido solo se llega por nombre; los dígitos (carnet,
@@ -3219,7 +3230,9 @@ String mensajeWaSinFecha(String nombre) =>
 /// El mensaje de aviso que corresponde al estado del cliente:
 /// sin fecha (nunca pagó), vencido, vence hoy o por vencer.
 String mensajeWaSegunEstado(Map<String, dynamic> c) {
-  final nombre = '${c['nombre'] ?? 'Cliente'}'.trim();
+  // 1.36 H-C3 (136-1050, GF-087): nombre VISIBLE de la casa
+  // (nunca '' ni el literal 'null' al cliente).
+  final nombre = nombreVisibleCliente(c);
   final d = diasRestantes(c['pagado_hasta'] as String?);
   if (d == null) return mensajeWaSinFecha(nombre);
   if (d < 0) return mensajeWaVencido(nombre);
@@ -3272,7 +3285,7 @@ String mensajeWaValeAprobado({
 }) {
   final nom = nombre.trim().isEmpty ? 'Cliente' : nombre.trim();
   final hasta = (nuevoHastaIso ?? '').trim();
-  return '🎉 ¡Felicidades, $nom! Tu premio de $premioDias días '
+  return '🎉 ¡Felicidades, $nom! Tu premio de $premioDias día${premioDias == 1 ? '' : 's'} '
       'de mensualidad gratis ya se aplicó en Iron Body Gym.'
       '${hasta.isEmpty ? '' : ' Tu nuevo vencimiento es el ${fmtFecha(hasta)}.'}'
       '$lineaMensajeAutomatico';
@@ -3286,9 +3299,12 @@ String mensajeWaValeRechazado({
   required String motivo,
 }) {
   final nom = nombre.trim().isEmpty ? 'Cliente' : nombre.trim();
+  // 1.36 H-C3 (136-1057, GF-094): sin motivo no se pinta
+  // «Motivo:» vacío.
+  final mot = motivo.trim();
   return 'Hola, $nom. Revisamos tu vale de premio en '
-      'Iron Body Gym y no pudimos aprobarlo. '
-      'Motivo: ${motivo.trim()}'
+      'Iron Body Gym y no pudimos aprobarlo.'
+      '${mot.isEmpty ? '' : ' Motivo: $mot'}'
       '$lineaMensajeAutomatico';
 }
 
@@ -3334,8 +3350,8 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
   final congeladosHoy = await CongelacionesService.instance
       .idsCongeladosEnCurso(ahoraHabana());
 
-  String nombreDe(Map<String, dynamic> c) =>
-      '${c['nombre'] ?? 'Cliente'}'.trim();
+  // 1.36 H-C3 (136-1050, GF-087): nombre visible de la casa.
+  String nombreDe(Map<String, dynamic> c) => nombreVisibleCliente(c);
   // 1.32 (H-CAMPO-1, familia teléfono efectivo): el teléfono
   // del aviso es el EFECTIVO (movil primero, regla FB-01): con
   // el crudo, el cliente migrado (carnet en `telefono`, número
@@ -3670,11 +3686,16 @@ String textoReciboPago({
   required String cobradoPor,
   String? vigenteHastaIso,
 }) {
+  // 1.36 H-C3 (136-1057, GF-094): un método desconocido se
+  // rotula «Otros», no «Efectivo» (un recibo no puede
+  // afirmar un método que no fue).
   final metodoTxt = metodo == 'transferencia'
       ? 'Transferencia'
       : metodo == 'cortesia'
           ? 'Cortesía (regalo)'
-          : 'Efectivo';
+          : metodo == 'efectivo'
+              ? 'Efectivo'
+              : 'Otros';
   final vigente = (vigenteHastaIso ?? '').trim();
   final lineaVigente = vigente.isEmpty
       ? ''
@@ -3835,7 +3856,10 @@ Future<List<Map<String, dynamic>>> comparativaEntrenadores(
     final monto = (v['total'] as num?)?.toDouble() ??
         ((v['precio'] as num?)?.toDouble() ?? 0) *
             ((v['cantidad'] as num?)?.toDouble() ?? 0);
-    if ('${v['moneda'] ?? 'CUP'}' == 'USD') {
+    // 1.36 H-C3 (136-1056, GF-093): moneda normalizada con
+    // LocalDb.monedaDe, no igualdad cruda ('usd'/' USD' se
+    // contaban como CUP).
+    if (LocalDb.monedaDe(v) == 'USD') {
       f['ventas_usd'] = (f['ventas_usd'] as double) + monto;
     } else {
       f['ventas_cup'] = (f['ventas_cup'] as double) + monto;
@@ -3934,7 +3958,7 @@ String textoEstadoCuenta({
 }) {
   final b = StringBuffer()
     ..writeln('*Iron Body Gym* — Estado de cuenta')
-    ..writeln('Cliente: ${cliente['nombre'] ?? ''}')
+    ..writeln('Cliente: ${nombreVisibleCliente(cliente)}')
     ..writeln('Fecha: ${fmtFecha(hoyIso)}')
     ..writeln()
     ..writeln('*Vigencia*');
@@ -4000,9 +4024,12 @@ String textoEstadoCuenta({
     return copia;
   }
 
-  final pagosOrd = recientes(pagos)
-      .where((p) => '${p['metodo'] ?? ''}' != 'cortesia')
-      .toList();
+  // 1.36 H-C3 (136-1060, GF-097): la cortesía SÍ aparece en
+  // el estado de cuenta, rotulada «Cortesía» (antes se
+  // filtraba fuera y el mes gratis no dejaba rastro en el
+  // texto que recibe el cliente; su monto es 0 y no altera
+  // el total).
+  final pagosOrd = recientes(pagos).toList();
   b
     ..writeln()
     ..writeln('*Pagos* (${pagosOrd.length})');
@@ -4019,6 +4046,7 @@ String textoEstadoCuenta({
       final metodo = switch ('${p['metodo'] ?? ''}') {
         'transferencia' => 'Transferencia',
         'promo' => 'Promoción',
+        'cortesia' => 'Cortesía',
         _ => 'Efectivo',
       };
       b.writeln('• ${fmtFecha(p['fecha'] as String?)} · '
@@ -4276,7 +4304,12 @@ Map<String, dynamic> antesEdicionCliente(
   final antes = <String, dynamic>{};
   for (final c in campos) {
     if (!payload.containsKey(c)) continue;
-    if ('${anterior[c] ?? ''}' != '${payload[c] ?? ''}') {
+    // 1.36 H-C3 (136-1069, GF-108): null y '' NO se funden:
+    // se compara con containsKey + valor crudo, para que
+    // «antes no tenía» y «antes tenía vacío» no se
+    // confundan en el historial de la edición.
+    final tenia = anterior.containsKey(c);
+    if (!tenia || '${anterior[c]}' != '${payload[c]}') {
       antes[c] = anterior[c];
     }
   }
@@ -4544,7 +4577,15 @@ Future<List<Map<String, dynamic>>> cumpleanosDelMes() async {
       '_paso': dia < hoy.day,
     });
   }
-  res.sort((a, b) => (a['_dia'] as int).compareTo(b['_dia'] as int));
+  // 1.36 H-C3 (136-1072, GF-111): próximos primero y
+  // pasados AL FINAL (antes el orden por día enterraba los
+  // que vienen tras los que ya pasaron).
+  res.sort((a, b) {
+    final pa = a['_paso'] == true ? 1 : 0;
+    final pb = b['_paso'] == true ? 1 : 0;
+    if (pa != pb) return pa.compareTo(pb);
+    return (a['_dia'] as int).compareTo(b['_dia'] as int);
+  });
   return res;
 }
 
@@ -4633,7 +4674,9 @@ String coletillaEstadoDuplicado(Map<String, dynamic> fila) {
 /// nacidas el mismo día comparten AAMMDD).
 String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
     String carnetDigitos, String telDigitos) {
-  if (fila['id'] == clienteId) return null;
+  // 1.36 H-C3 (136-1069, GF-108): comparación de ids
+  // normalizada (la fila puede traer el id como texto).
+  if ((fila['id'] as num?)?.toInt() == clienteId) return null;
   if (telDigitos.isNotEmpty &&
       ((fila['telefono'] as String? ?? '')
                   .replaceAll(RegExp(r'[^0-9]'), '') ==
@@ -4688,6 +4731,13 @@ String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
         "${d['fecha']}|$hora|${d['turno']}|${d['cantidad']}|${d['registrado_por']}");
   }
   final pr = await preciosVigentes();
+  // 1.36 H-C3 (136-1061, GF-098): «Tú» solo si la op es del
+  // usuario ACTUAL (antes toda op sin nombre se rotulaba
+  // «Tú» también en la vista del dueño sobre ops ajenas) y
+  // los payloads ilegibles se bitacoran con contador (antes
+  // el catch los descartaba en silencio).
+  final miTidOverlay = AuthService().telegramId;
+  var ilegiblesOverlay = 0;
   for (final op in opsPendientes) {
     try {
       final payload =
@@ -4722,14 +4772,25 @@ String? motivoBloqueoEdicion(Map<String, dynamic> fila, int clienteId,
       payload['op_uuid'] = op['op_uuid'];
       payload['es_optimista'] = true;
       // Normalizar campos que la UI espera del mirror
-      payload['registrado_por_nombre'] ??= 'Tú';
+      if (payload['registrado_por_nombre'] == null &&
+          miTidOverlay != null &&
+          LocalDb.normalizarTelegramId(payload['registrado_por']) ==
+              miTidOverlay) {
+        payload['registrado_por_nombre'] = 'Tú';
+      }
       // v1.3.1: calcular total si no viene en el payload.
       if (payload['total'] == null) {
         final cant = (payload['cantidad'] as num?)?.toInt() ?? 0;
         payload['total'] = cant * (pr['diario'] ?? 200);
       }
       res.add(payload);
-    } catch (_) {}
+    } catch (_) {
+      ilegiblesOverlay++;
+    }
+  }
+  if (ilegiblesOverlay > 0) {
+    AppLog.error('negocio', 'overlay_diarios_ilegibles',
+        d: 'n=$ilegiblesOverlay fecha=$fechaIso');
   }
 
   }
@@ -4760,8 +4821,7 @@ Future<List<Map<String, dynamic>>> diariosDeHoy(
 
   await _overlayDiariosPendientes(res, hoy,
       soloTelegramId: soloTelegramId);
-  res.sort((a, b) =>
-      '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
+  res.sort(compararDiarios);
   return res;
 }
 
@@ -4784,9 +4844,24 @@ Future<List<Map<String, dynamic>>> diariosDeFecha(
   }).toList();
   await _overlayDiariosPendientes(res, fechaIso,
       soloTelegramId: soloTelegramId);
-  res.sort((a, b) =>
-      '${b['registrado_por_nombre']}'.compareTo('${a['registrado_por_nombre']}'));
+  res.sort(compararDiarios);
   return res;
+}
+
+/// Orden de la lista de diarios (1.36 H-C3, 136-1071,
+/// GF-110): por nombre y, a igual nombre, desempate por
+/// hora y op_uuid — el orden es estable entre recargas y
+/// dos pagos del mismo entrenador no saltan de sitio.
+/// PURO.
+int compararDiarios(Map<String, dynamic> a, Map<String, dynamic> b) {
+  final n = '${b['registrado_por_nombre']}'
+      .compareTo('${a['registrado_por_nombre']}');
+  if (n != 0) return n;
+  final ha = '${a['hora'] ?? a['creado_en'] ?? a['creada_ts'] ?? ''}';
+  final hb = '${b['hora'] ?? b['creado_en'] ?? b['creada_ts'] ?? ''}';
+  final h = ha.compareTo(hb);
+  if (h != 0) return h;
+  return '${a['op_uuid'] ?? ''}'.compareTo('${b['op_uuid'] ?? ''}');
 }
 
 /// v1.3.2: resumen mensual de pagos diarios.
@@ -4801,6 +4876,35 @@ Future<Map<String, dynamic>> resumenMensualDiarios(
       ? await LocalDb.instance.allMirror('pagos_diarios')
       : await LocalDb.instance.mirrorFiltrado(
           'pagos_diarios', {'registrado_por': soloTelegramId});
+  // 1.36 H-C3 (136-1066, GF-105): el resumen mensual aplica
+  // el MISMO overlay de diarios pendientes que diariosDeHoy
+  // (antes leía solo el espejo y un diario offline no salía
+  // en su mes hasta sincronizar). Se aplica por día sobre
+  // las filas del mes y las filas optimistas se agregan a la
+  // misma agregación.
+  final filasMes = <Map<String, dynamic>>[...todos];
+  {
+    final porDiaFilas = <String, List<Map<String, dynamic>>>{};
+    for (final d in filasMes) {
+      final dia = fechaNegocioHabana(d['fecha']);
+      if (dia.isEmpty) continue;
+      final partes = dia.split('-');
+      if (partes.length < 3) continue;
+      if (int.tryParse(partes[0]) != year ||
+          int.tryParse(partes[1]) != month) {
+        continue;
+      }
+      porDiaFilas.putIfAbsent(dia, () => []).add(d);
+    }
+    for (final e in porDiaFilas.entries) {
+      final antes = e.value.length;
+      await _overlayDiariosPendientes(e.value, e.key,
+          soloTelegramId: soloTelegramId);
+      for (var i = antes; i < e.value.length; i++) {
+        filasMes.add(e.value[i]);
+      }
+    }
+  }
   final porTurno = {
     'mañana': {'cantidad': 0.0, 'total': 0.0},
     'tarde': {'cantidad': 0.0, 'total': 0.0},
@@ -4808,7 +4912,7 @@ Future<Map<String, dynamic>> resumenMensualDiarios(
   };
   final porEntrenador = <String, Map<String, double>>{};
   final porDia = <String, double>{};
-  for (final d in todos) {
+  for (final d in filasMes) {
     // v1.3.6 (Argón): verificación de normalización post-SQL. El
     // mirrorFiltrado compara el valor crudo del JSON; si registrado_por
     // viene como String y soloTelegramId es int (o viceversa), el SQL
@@ -4884,6 +4988,16 @@ Future<List<String>> turnosSinReporte(String fechaIso,
   try {
     final cierres = await LocalDb.instance.allMirror('turnos_cierre');
     for (final c in cierres) {
+      // 1.36 H-C3 (136-1062, GF-099): con filtro de
+      // entrenador, un cierre AJENO no marca su turno como
+      // reportado (misma normalización de
+      // registrado_por/telegram_id que el resto).
+      if (soloTelegramId != null &&
+          LocalDb.normalizarTelegramId(
+                  c['registrado_por'] ?? c['telegram_id']) !=
+              soloTelegramId) {
+        continue;
+      }
       if (fechaNegocioHabana(c['fecha']) == fechaIso) {
         turnos.add('${c['turno'] ?? ''}'
             .toLowerCase()
@@ -4961,13 +5075,14 @@ Future<List<Map<String, dynamic>>> totalesDiariosUltimos(
           (porFecha[dia] ?? 0) + ((d['total'] as num?)?.toDouble() ?? 0);
     }
   }
-  final hoy = ahoraHabana();
+  // 1.36 H-C3 (136-1064, GF-102): días por aritmética de
+  // fecha pura (sumarDiasIso), no subtract(Duration) sobre
+  // la pared Habana (un cambio de hora oficial desplazaba
+  // el día calculado).
+  final hoyIso = _hoyIso();
   final res = <Map<String, dynamic>>[];
-  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
-      '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
   for (var i = dias - 1; i >= 0; i--) {
-    final fecha = iso(hoy.subtract(Duration(days: i)));
+    final fecha = sumarDiasIso(hoyIso, -i);
     res.add({'fecha': fecha, 'total': porFecha[fecha] ?? 0.0});
   }
   return res;
@@ -4989,8 +5104,16 @@ int _noCalculadasCaja = 0;
 /// Ops no calculadas por la última suma de caja del día.
 int get noCalculadasCaja => _noCalculadasCaja;
 
+/// 1.36 H-C3 (136-1067, GF-106): conteos por ORIGEN: un
+/// cálculo ya no sobrescribe el aviso de otro (antes un
+/// global único dejaba solo el último y una suma incompleta
+/// quedaba tapada por la siguiente completa).
+final _noCalculadasPorOrigen = <String, int>{};
+
 void _registrarNoCalculadasCaja(int n, String origen) {
-  _noCalculadasCaja = n;
+  _noCalculadasPorOrigen[origen] = n;
+  _noCalculadasCaja =
+      _noCalculadasPorOrigen.values.fold(0, (a, b) => a + b);
   if (n > 0) {
     AppLog.error('negocio', 'suma_caja_incompleta',
         d: '$origen n=$n');
@@ -5320,7 +5443,9 @@ Future<List<Map<String, dynamic>>> historialTurno(int? telegramId,
   if (telegramId == null) return [];
   final nombres = <int, String>{};
   for (final c in await LocalDb.instance.allMirror('clientes')) {
-    final id = c['id'] as int?;
+    // 1.36 H-C3 (136-1069, GF-108): id normalizado con
+    // (num?)?.toInt() (un id texto/double tumbaba el cast).
+    final id = (c['id'] as num?)?.toInt();
     if (id != null) nombres[id] = '${c['nombre'] ?? ''}';
   }
   final porDia = <String, Map<String, dynamic>>{};
@@ -5656,8 +5781,10 @@ Future<Map<String, dynamic>> resumenSemanal() async {
   var nuevos = 0;
   for (final c in await LocalDb.instance.allMirror('clientes')) {
     if (esClienteEliminado(c)) continue; // v1.8.0: no es persona
-    final f = '${c['fecha_inscripcion'] ?? ''}';
-    if (f.length >= 10 && f.substring(0, 10).compareTo(inicio) >= 0) {
+    // 1.36 H-C3 (136-1065, GF-104): fuente canónica única
+    // de alta (fechaAltaCliente), la misma de nuevosEsteMes.
+    final f = fechaAltaCliente(c);
+    if (f.isNotEmpty && f.compareTo(inicio) >= 0) {
       nuevos++;
     }
   }
@@ -6397,7 +6524,11 @@ Future<List<Map<String, dynamic>>> pagosPendientesDetalle(
 /// Fix #14 (Sol): confirmar entrega actualiza los mirrors en BD
 /// (no solo listas en memoria) en la misma transacción que encola la op.
 /// Así el optimismo persiste al salir/volver a la pantalla.
-Future<void> confirmarEntregaPorIds({
+/// 1.36 H-C3 (136-1072, GF-111): devuelve los ids EFECTIVAMENTE
+/// marcados por categoría, para que la UI pueda decir qué se
+/// confirmó (antes Future<void>: la pantalla no sabía el
+/// resultado de su propia confirmación).
+Future<Map<String, List<int>>> confirmarEntregaPorIds({
   required List<int> mensualIds,
   required List<int> diarioIds,
   List<int> suplementoIds = const [],
@@ -6418,12 +6549,14 @@ Future<void> confirmarEntregaPorIds({
 
   /// Marca como entregado actualizando el JSON data (las tablas espejo
   /// solo tienen id, data, sync_seq — no hay columna 'entregado').
+  final marcados = <String, List<int>>{};
   Future<void> marcarEntregados(
       Transaction txn, String tabla, List<int> ids) async {
     for (final id in ids) {
       final rows = await txn.query(tabla,
           columns: ['data'], where: 'id = ?', whereArgs: [id], limit: 1);
       if (rows.isEmpty) continue;
+      (marcados[tabla] ??= []).add(id);
       final data =
           Map<String, dynamic>.from(jsonDecode(rows.first['data'] as String));
       data['entregado'] = 1;
@@ -6520,6 +6653,7 @@ Future<void> confirmarEntregaPorIds({
       'telegram_id': AuthService().telegramId,
     });
   });
+  return marcados;
 }
 
 /// Pendiente de entregar por entrenador (vista del dueño).
@@ -6562,6 +6696,29 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     e['total_usd'] = (e['total_usd'] as double) + monto;
     e['n'] = (e['n'] as int) + 1;
   }
+
+  // 1.36 H-C3 (136-1070, GF-109): MISMA resolución de nombre
+  // que el detalle (pagosPendientesDetalle): directorio
+  // usuarios_apk por tid primero; el nombre de la fila solo
+  // como respaldo y nunca el id crudo como «nombre» de las
+  // mensualidades (antes salía «123456»).
+  final nombresPorTid = <int, String>{};
+  try {
+    final rawApk = await LocalDb.instance.getMeta('usuarios_apk');
+    if (rawApk != null && rawApk.isNotEmpty) {
+      for (final u in jsonDecode(rawApk) as List) {
+        final m = Map<String, dynamic>.from(u as Map);
+        final t = LocalDb.normalizarTelegramId(m['telegram_id']);
+        final nom = '${m['nombre'] ?? m['username'] ?? ''}';
+        if (t != null && nom.isNotEmpty) nombresPorTid[t] = nom;
+      }
+    }
+  } catch (_) {}
+  String nombrePend(int tid, Map<String, dynamic> fila) =>
+      nombresPorTid[tid] ??
+      (('${fila['registrado_por_nombre'] ?? ''}'.isNotEmpty)
+          ? '${fila['registrado_por_nombre']}'
+          : 'Entrenador $tid');
 
   // (M2-BC B3) fecha (día de calendario) del ítem pendiente
   // más viejo por entrenador: la alerta de pendiente
@@ -6608,7 +6765,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
     if (excluido(tid)) continue;
     if ((await cubiertosDe(tid)).contains('pagos:${p['id']}')) continue;
     registraFecha(tid, p['fecha']);
-    suma(tid, '${p['registrado_por'] ?? 'Entrenador $tid'}',
+    suma(tid, nombrePend(tid, p),
         (p['monto'] as num?)?.toDouble() ?? 0);
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -6623,7 +6780,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
       continue;
     }
     registraFecha(tid, d['fecha']);
-    suma(tid, '${d['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+    suma(tid, nombrePend(tid, d),
         (d['total'] as num?)?.toDouble() ?? 0);
   }
   // Gemini: incluir ventas de suplementos en CUP pendientes.
@@ -6637,7 +6794,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
       continue;
     }
     registraFecha(tid, v['creada_en']);
-    suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+    suma(tid, nombrePend(tid, v),
         totalVentaCup(v));
   }
   // USD: misma regla que pendienteEntregaUsd sobre el espejo
@@ -6653,7 +6810,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
       continue;
     }
     registraFecha(tid, v['creada_en']);
-    sumaUsd(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+    sumaUsd(tid, nombrePend(tid, v),
         totalVentaUsd(v));
   }
   // post-1.8.0 (ítem 10): servicios en efectivo pendientes, por
@@ -6674,7 +6831,7 @@ Future<List<Map<String, dynamic>>> pendientePorEntrenador(
       continue;
     }
     registraFecha(tid, v['fecha']);
-    suma(tid, '${v['registrado_por_nombre'] ?? 'Entrenador $tid'}',
+    suma(tid, nombrePend(tid, v),
         ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
             ((v['cantidad'] as num?)?.toDouble() ?? 0));
   }
@@ -6968,7 +7125,8 @@ String textoEstadoStock(Map<String, dynamic> s) {
     EstadoStockSuplemento.inactivo => 'Inactivo',
     EstadoStockSuplemento.agotado => 'Sin stock',
     EstadoStockSuplemento.bajo => 'Stock bajo · $stock',
-    EstadoStockSuplemento.disponible => '$stock disponibles',
+    EstadoStockSuplemento.disponible =>
+        stock == 1 ? '1 disponible' : '$stock disponibles',
   };
 }
 
@@ -7074,7 +7232,13 @@ Future<({List<int> pagos, List<int> diarios, List<int> suplementos,
   // porque si no, el próximo cobro los vuelve a descontar
   // (doble descuento del mismo adelanto).
   final adelantoIds = <int>[];
-  bool mismo(int? tid) => trainerId == null || tid == trainerId;
+  // 1.36 H-C3 (136-1063, GF-100): CAMPO-15 también sin
+  // trainerId: el efectivo del dueño nunca es pendiente
+  // a entregar, llame quien llame sin filtro.
+  bool mismo(int? tid) =>
+      tid != null &&
+      !AuthService.esDelDueno(tid) &&
+      (trainerId == null || tid == trainerId);
   final liqPorTid = <int, Set<String>>{};
   Future<Set<String>> liq(int tid) async {
     var s = liqPorTid[tid];
@@ -7440,6 +7604,14 @@ Future<Map<String, Map<String, dynamic>>> mejorPeorDia() async {
 }
 
 /// v1.0.15: clientes nuevos este mes.
+/// 1.36 H-C3 (136-1065, GF-104): fuente CANÓNICA de la fecha
+/// de alta de un cliente para todas las KPI de «clientes
+/// nuevos»: `creado` (sello de creación) con respaldo en
+/// `fecha_inscripcion`, normalizada a día de negocio Habana.
+/// '' si la fila no trae ninguna legible. PURA.
+String fechaAltaCliente(Map<String, dynamic> c) =>
+    fechaNegocioHabana('${c['creado'] ?? c['fecha_inscripcion'] ?? ''}');
+
 Future<int> nuevosEsteMes() async {
   final n = ahoraHabana();
   final pref = '${n.year.toString().padLeft(4, '0')}-'
@@ -7447,8 +7619,8 @@ Future<int> nuevosEsteMes() async {
   int c = 0;
   for (final cl in await LocalDb.instance.allMirror('clientes')) {
     if (esClienteEliminado(cl)) continue; // v1.8.0: no es persona
-    final f = '${cl['creado'] ?? cl['fecha_inscripcion'] ?? ''}';
-    if (fechaNegocioHabana(f).startsWith(pref)) c++;
+    // 1.36 H-C3 (136-1065, GF-104): fuente canónica única.
+    if (fechaAltaCliente(cl).startsWith(pref)) c++;
   }
   return c;
 }
@@ -8170,18 +8342,15 @@ Future<List<Map<String, dynamic>>> pagosDelPeriodo(
 /// 30 días ya la traía).
 /// v1.0.16: usa ingresosPorDia() centralizado (incluye pagos diarios).
 Future<List<Map<String, dynamic>>> ingresosUltimos7Dias() async {
-  final hoy = ahoraHabana();
-  String iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
-      '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
+  // 1.36 H-C3 (136-1064, GF-102): sumarDiasIso, no Duration.
+  final hoyIso = _hoyIso();
   const diasSem = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   final porDia = await ingresosPorDia(
-      desdeIso: iso(hoy.subtract(const Duration(days: 6))),
-      hastaIso: iso(hoy));
+      desdeIso: sumarDiasIso(hoyIso, -6), hastaIso: hoyIso);
   final resultado = <Map<String, dynamic>>[];
   for (int i = 6; i >= 0; i--) {
-    final d = hoy.subtract(Duration(days: i));
-    final diaIso = iso(d);
+    final diaIso = sumarDiasIso(hoyIso, -i);
+    final d = fechaIsoEstricta(diaIso)!;
     resultado.add({
       'dia': diasSem[d.weekday - 1],
       'fecha': diaIso,
@@ -8476,7 +8645,12 @@ Future<List<Map<String, dynamic>>> gastosTodos() async {
 /// Total de gastos de un día (fecha ISO yyyy-MM-dd).
 Future<double> gastosDe(String fechaIso) async {
   double t = 0;
+  // 1.36 H-C3 (136-1073, GF-112): el espejo también pasa
+  // por espejoEsMio (antes solo la cola): un entrenador
+  // sumaba gastos ajenos en su día y su neto.
+  final filtroG = await _filtroGastos();
   for (final g in await LocalDb.instance.allMirror('gastos')) {
+    if (!filtroG.espejoEsMio(g)) continue;
     if ('${g['fecha'] ?? ''}'.length >= 10 &&
         fechaNegocioHabana(g['fecha']) == fechaIso) {
       t += _montoGastoTolerante(g['monto']);
@@ -8497,7 +8671,10 @@ Future<double> gastosDe(String fechaIso) async {
 /// «Neto del mes (CUP)» del dashboard (ingresos − gastos).
 Future<double> gastosDelMes(String pref) async {
   double t = 0;
+  // 1.36 H-C3 (136-1073, GF-112): espejoEsMio también aquí.
+  final filtroG = await _filtroGastos();
   for (final g in await LocalDb.instance.allMirror('gastos')) {
+    if (!filtroG.espejoEsMio(g)) continue;
     if (fechaNegocioHabana(g['fecha']).startsWith(pref)) {
       t += _montoGastoTolerante(g['monto']);
     }

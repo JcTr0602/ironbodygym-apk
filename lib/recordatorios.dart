@@ -410,7 +410,9 @@ class RecordatoriosService {
                   esTelefonoDueno: _soyDueno,
                   disparadoEnFechaHabana:
                       cfg['disparado_en_fecha_habana'] as String?,
-                  hoyHabana: hoy)
+                  hoyHabana: hoy,
+                  // 136-1076: el log local de disparos de hoy.
+                  logLocalHoy: disparosHoy.contains('$id|todos'))
               : !ya,
         ));
         continue;

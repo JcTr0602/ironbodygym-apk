@@ -439,6 +439,10 @@ List<MapEntry<String, List<Map<String, dynamic>>>>
 class _ActividadScreenState extends State<ActividadScreen> {
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
+
+  /// 1.36 H-C3 (136-993, GF-025): la caché local de
+  /// actividad no se pudo leer en la última carga.
+  bool _cacheIlegible = false;
   // SL-8 (G08-2): error de carga VISIBLE. El catch de
   // _cargar solo dejaba bitácora y la pantalla caía en
   // «Sin actividad reciente»: un «no se pudo leer» se
@@ -527,13 +531,22 @@ class _ActividadScreenState extends State<ActividadScreen> {
     }
     final raw = await LocalDb.instance.getMeta('sync_estado_actividad');
     final lista = <Map<String, dynamic>>[];
+    var cacheIlegible = false;
     if (raw != null && raw.isNotEmpty) {
       try {
         for (final a in jsonDecode(raw) as List) {
           lista.add(Map<String, dynamic>.from(a as Map));
         }
-      } catch (_) {}
+      } catch (e) {
+        // 1.36 H-C3 (136-993, GF-025): caché ilegible se
+        // BITACORA y se avisa (bandera del vacío), no se
+        // disfraza de «sin actividad».
+        cacheIlegible = true;
+        AppLog.error('actividad', 'cache_actividad_ilegible',
+            d: '$e');
+      }
     }
+    _cacheIlegible = cacheIlegible;
     // Mejora Actividad 6: el servidor ya manda hasta 500 (antes 50).
     // Si vienen 500, el feed puede estar cortado: se avisa en la UI.
     final nMeta = lista.length;
@@ -965,7 +978,10 @@ class _ActividadScreenState extends State<ActividadScreen> {
       // v1.2.1: filtro por fecha
       if (_filtroFecha != 'todo') {
         final ts = '${a['ts'] ?? ''}';
-        final dia = ts.length >= 10 ? ts.substring(0, 10) : '';
+        // 1.36 H-C3 (136-990, GF-022): el día es el de
+        // NEGOCIO Habana del ts, no su substring crudo (un
+        // ts en UTC caía en el día equivocado).
+        final dia = fechaNegocioHabana(ts);
         // P2#11 (Argón): hoy/ayer/7 días/mes en hora Habana.
         final ahora = ahoraHabana();
         final hoyStr = _isoDia(ahora);
@@ -1324,6 +1340,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (!mounted) return;
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
             top: Radius.circular(AppRadio.xl)),
@@ -1331,7 +1348,13 @@ class _ActividadScreenState extends State<ActividadScreen> {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-          child: Column(
+          // 1.36 H-C3 (136-994, GF-026): detalle con scroll
+          // ACOTADO (un detalle largo desbordaba la hoja).
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.85),
+            child: SingleChildScrollView(
+              child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1448,6 +1471,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
                 ),
               ],
             ],
+            ),
+            ),
           ),
         ),
       ),
@@ -1554,6 +1579,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (accion.contains('suplemento') || accion.contains('categoria')) {
       return Icons.medication_rounded;
     }
+    // 1.36 H-C3 (136-1003, GF-037): «servicios» con icono
+    // propio (antes caía al genérico de asignación).
+    if (accion.contains('servicio')) {
+      return Icons.room_service_rounded;
+    }
     if (accion.contains('entrega')) return Icons.delivery_dining_rounded;
     if (accion.contains('incidencia')) return Icons.report_problem_rounded;
     if (accion.contains('foto')) return Icons.photo_camera_rounded;
@@ -1573,6 +1603,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (accion.contains('suplemento') || accion.contains('categoria')) {
       return AppColores.info;
     }
+    // 1.36 H-C3 (136-1003, GF-037): color propio de servicios.
+    if (accion.contains('servicio')) return AppColores.info;
     if (accion.contains('entrega')) return AppColores.exito;
     if (accion.contains('regalo_cumpleanos') ||
         accion.contains('regalar_mes')) {
@@ -1674,17 +1706,26 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   /// v1.3.5 (Fase 1, C4): micro-indicador de sync, 14px.
   Widget _indicadorSync(bool pendiente) {
-    return Icon(
-      pendiente ? Icons.schedule_rounded : Icons.check_rounded,
-      size: 14,
-      color: pendiente
-          ? AppColores.alerta
-          : AppColores.exito.withValues(alpha: 0.55),
+    // 1.36 H-C3 (136-1003, GF-037): el icono de sync lleva
+    // su Semantics («pendiente de subir» suena a rutina,
+    // nunca a error).
+    return Semantics(
+      label: pendiente ? 'Pendiente de subir' : 'Sincronizado',
+      child: Icon(
+        pendiente ? Icons.schedule_rounded : Icons.check_rounded,
+        size: 14,
+        color: pendiente
+            ? AppColores.alerta
+            : AppColores.exito.withValues(alpha: 0.55),
+      ),
     );
   }
 
   /// v1.3.5 (Fase 1, F1): resetea todos los filtros.
   void _limpiarFiltros() {
+    // 1.36 H-C3 (136-992, GF-024): cancelar la búsqueda en
+    // vuelo ANTES de limpiar (reaplicaba el texto viejo).
+    _busquedaDebounce?.cancel();
     _busquedaCtrl.clear();
     setState(() {
       _filtro = 'todo';
@@ -1778,6 +1819,17 @@ class _ActividadScreenState extends State<ActividadScreen> {
             const EdgeInsets.symmetric(horizontal: AppEspacio.md, vertical: AppEspacio.sm),
         child: Row(
           children: [
+            // 1.36 H-C3 (136-1005, GF-039): el estado
+            // «Siempre» (sin filtro de fecha) también es un
+            // chip VISIBLE, no solo la ausencia de los otros.
+            ChoiceChip(
+              label: const Text('Siempre',
+                  style: AppTexto.metadato),
+              selected: _filtroFecha == 'todo',
+              onSelected: (_) =>
+                  setState(() => _filtroFecha = 'todo'),
+            ),
+            const SizedBox(width: 8),
             _chipFechaRapida('hoy', 'Hoy'),
             const SizedBox(width: 8),
             _chipFechaRapida('ayer', 'Ayer'),
@@ -1928,6 +1980,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
           await _persistirGuardados();
         },
         alGuardarActuales: _guardarFiltroActual,
+        tasaDisponible: _tasaUsd > 0,
       ),
     );
     if (r == null || !mounted) return;
@@ -1960,9 +2013,19 @@ class _ActividadScreenState extends State<ActividadScreen> {
         'Actividad reciente',
         acciones: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            // 1.36 H-C3 (136-1004, GF-038): durante la
+            // carga, el refresco se deshabilita y muestra
+            // el giro en curso.
+            icon: _cargando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
-            onPressed: _cargar,
+            onPressed: _cargando ? null : _cargar,
           ),
         ],
       ),
@@ -2082,11 +2145,19 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     // v1.3.5 (Fase 1, F1): distinguir "sin datos" de
                     // "filtros sin resultados".
                     ? (_items.isEmpty
-                        ? const EstadoVacio(
+                        ? EstadoVacio(
                             icono: Icons.history_rounded,
                             titulo: 'Sin actividad reciente',
-                            subtitulo:
-                                'Sincroniza para actualizar.',
+                            // 136-993/1004: la caché ilegible
+                            // se DICE y el vacío ofrece la
+                            // acción de sincronizar.
+                            subtitulo: _cacheIlegible
+                                ? 'La copia local de la actividad '
+                                    'no se pudo leer. Sincroniza '
+                                    'para reconstruirla.'
+                                : 'Sincroniza para actualizar.',
+                            textoAccion: 'Sincronizar',
+                            onAccion: _cargar,
                           )
                         : EstadoVacio(
                             icono: Icons.search_off_rounded,
@@ -2824,6 +2895,9 @@ class _HojaFiltrosActividad extends StatefulWidget {
     required this.alAplicarGuardado,
     required this.alBorrarGuardado,
     required this.alGuardarActuales,
+    // 1.36 H-C3 (136-999, GF-032): ¿hay tasa USD para
+    // comparar montos en el filtro?
+    this.tasaDisponible = true,
   });
 
   final String tipo;
@@ -2840,6 +2914,7 @@ class _HojaFiltrosActividad extends StatefulWidget {
   final void Function(Map<String, dynamic>) alAplicarGuardado;
   final Future<void> Function(Map<String, dynamic>) alBorrarGuardado;
   final Future<void> Function() alGuardarActuales;
+  final bool tasaDisponible;
 
   @override
   State<_HojaFiltrosActividad> createState() =>
@@ -2847,6 +2922,9 @@ class _HojaFiltrosActividad extends StatefulWidget {
 }
 
 class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
+  /// 1.36 H-C3 (136-999, GF-032): error de validación del
+  /// rango de monto, visible en la propia hoja.
+  String? _errorRango;
   late String fTipo;
   late String fFecha;
   late String fActor;
@@ -2944,7 +3022,10 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
 
           return SafeArea(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              // 1.36 H-C3 (136-994, GF-026): hueco del
+              // teclado reservado (viewInsets).
+              padding: EdgeInsets.fromLTRB(16, 12, 16,
+                  16 + MediaQuery.viewInsetsOf(context).bottom),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -3000,11 +3081,26 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
                           size: 18),
                       label: const Text('Guardar filtros actuales'),
                       onPressed: () async {
-                        Navigator.of(context).pop();
+                        // 1.36 H-C3 (136-1005, GF-039): la
+                        // hoja NO se cierra antes del diálogo
+                        // de guardar: si se cancela, la hoja
+                        // sigue abierta con los filtros.
                         await widget.alGuardarActuales();
                       },
                     ),
                   ),
+                  // 1.36 H-C3 (136-999, GF-032): si el
+                  // filtro de monto está activo y no hay tasa
+                  // USD, los montos en dólares no se pueden
+                  // comparar: se AVISA en la hoja.
+                  if (fMonto != 'todo' && !widget.tasaDisponible) ...[
+                    Text(
+                        'Tasa USD no disponible: los montos en '
+                        'dólares no se comparan en este filtro.',
+                        style: AppTexto.secundario.copyWith(
+                            color: AppColores.alerta)),
+                    const SizedBox(height: 8),
+                  ],
                   seccion('Tipo de operación', [
                     chipSel('Todo', fTipo == 'todo',
                         () => fTipo = 'todo'),
@@ -3141,6 +3237,12 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
                             const Text('Limpiar todo'),
                       ),
                       const Spacer(),
+                      if (_errorRango != null)
+                        Expanded(
+                          child: Text(_errorRango!,
+                              style: AppTexto.secundario.copyWith(
+                                  color: AppColores.error)),
+                        ),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
@@ -3159,7 +3261,20 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
                                 minCtrl.text.trim());
                             mMax = double.tryParse(
                                 maxCtrl.text.trim());
+                            // 1.36 H-C3 (136-999, GF-032):
+                            // rango invertido se AVISA y no
+                            // se aplica (antes filtraba todo
+                            // en silencio).
+                            if (mMin != null &&
+                                mMax != null &&
+                                mMin! > mMax!) {
+                              setState(() => _errorRango =
+                                  'El mínimo no puede ser mayor '
+                                  'que el máximo');
+                              return;
+                            }
                           }
+                          setState(() => _errorRango = null);
                           Navigator.of(context).pop((
                             tipo: fTipo,
                             fecha: fFecha,

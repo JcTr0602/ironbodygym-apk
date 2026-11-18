@@ -82,7 +82,12 @@ String? textoAdvertenciaImportacion(ConteoSinSubirImportacion c) {
         ? '1 foto en cola sin subir'
         : '${c.fotos} fotos en cola sin subir');
   }
-  var texto = 'Este teléfono tiene ${partes.join(', ')}. '
+  // 1.36 H-C3 (136-1046, GF-082): la enumeración se une
+  // con «y» al final, como se lee en español.
+  final enumeracion = partes.length < 2
+      ? (partes.isEmpty ? '' : partes.first)
+      : '${partes.sublist(0, partes.length - 1).join(', ')} y ${partes.last}';
+  var texto = 'Este teléfono tiene $enumeracion. '
       'Importar reemplazará TODOS sus datos con el respaldo '
       'elegido y ese material se PERDERÁ: nunca llegó al '
       'servidor. Si puedes, sincroniza antes de importar.';
@@ -116,11 +121,17 @@ Future<ConteoSinSubirImportacion> conteoSinSubirParaImportar({
     }
   }
 
-  final ops = await contar(contarOps ?? LocalDb.instance.countPendingOps);
-  final comprobantes = await contar(
-      contarComprobantes ?? LocalDb.instance.contarComprobantesSinSubir);
-  final fotos =
-      await contar(contarFotos ?? LocalDb.instance.contarFotosSinSubir);
+  // 1.36 H-C3 (136-1046, GF-082): los tres conteos corren
+  // EN PARALELO (antes en serie: tres esperas seguidas).
+  final r = await Future.wait([
+    contar(contarOps ?? LocalDb.instance.countPendingOps),
+    contar(
+        contarComprobantes ?? LocalDb.instance.contarComprobantesSinSubir),
+    contar(contarFotos ?? LocalDb.instance.contarFotosSinSubir),
+  ]);
+  final ops = r[0];
+  final comprobantes = r[1];
+  final fotos = r[2];
   return (
     ops: ops,
     comprobantes: comprobantes,

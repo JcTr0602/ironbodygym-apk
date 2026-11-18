@@ -44,13 +44,20 @@ import 'tiempo.dart';
 /// próximo»…), sin datos del cliente.
 ({String titulo, String texto}) textoAvisoRecordatorio(
     RecordatorioDebido d) {
+  // 1.36 H-C3 (136-985, GF-017): el título NATIVO es FIJO
+  // por tipo, nunca el título libre de la config (editable
+  // por el usuario: la pantalla de bloqueo no debe mostrar
+  // un texto arbitrario como si fuera del sistema).
   switch (d.tipo) {
     case 'cumpleanos':
-      return (titulo: d.titulo, texto: 'Un cliente cumple años hoy');
+      return (titulo: 'Cumpleaños hoy', texto: 'Un cliente cumple años hoy');
     case 'vencimiento':
-      return (titulo: d.titulo, texto: 'Una mensualidad vence pronto');
+      return (
+        titulo: 'Vencimiento próximo',
+        texto: 'Una mensualidad vence pronto'
+      );
     default:
-      return (titulo: d.titulo, texto: 'Recordatorio para hoy');
+      return (titulo: 'Recordatorio', texto: 'Recordatorio para hoy');
   }
 }
 
@@ -246,6 +253,14 @@ class AvisosRecordatorios {
           if (sigue == false) {
             await LocalDb.instance
                 .setMeta('notif_permiso_denegado', '1');
+          } else if (sigue == true) {
+            // 1.36 H-C3 (136-987, GF-019): concedido TRAS
+            // pedirlo limpia la marca de denegado, igual que
+            // la rama de permiso ya concedido (antes la marca
+            // vieja sobrevivía y la pantalla seguía avisando
+            // «sin permiso» con el permiso ya dado).
+            await LocalDb.instance
+                .setMeta('notif_permiso_denegado', '');
           }
         } else {
           await LocalDb.instance.setMeta('notif_permiso_denegado', '');

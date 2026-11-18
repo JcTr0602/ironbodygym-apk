@@ -80,8 +80,14 @@ class _EditarIncidenciaScreenState
     return '${username[0].toUpperCase()}${username.substring(1)}';
   }
 
+  /// 1.36 H-C3 (136-1015, GF-050): la lista de
+  /// entrenadores no se pudo LEER (no es lo mismo que
+  /// «no hay meta»): se dice en pantalla.
+  bool _entrenadoresNoLeidos = false;
+
   Future<void> _cargarEntrenadores() async {
     final lista = <Map<String, String>>[];
+    var falloLectura = false;
     try {
       final raw = await LocalDb.instance.getMeta('usuarios_apk');
       if (raw != null && raw.isNotEmpty) {
@@ -95,7 +101,14 @@ class _EditarIncidenciaScreenState
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // 1.36 H-C3 (136-1015, GF-050): el fallo se registra
+      // y se DICE (bandera de pantalla), no se cae a la
+      // lista fija en silencio.
+      falloLectura = true;
+      AppLog.error('incidencias', 'cargar_entrenadores_fallo',
+          d: '$e');
+    }
     // Respaldo solo si el meta falta: hoy solo existen Duany y
     // Gabriel en campo; sin meta no se puede inventar la lista.
     if (lista.isEmpty) {
@@ -106,6 +119,7 @@ class _EditarIncidenciaScreenState
     }
     if (!mounted) return;
     setState(() {
+      _entrenadoresNoLeidos = falloLectura;
       _entrenadores = lista;
       // Validar el responsable restaurado contra la lista viva.
       if (_tipoResponsable == 'entrenador' &&
@@ -236,6 +250,18 @@ class _EditarIncidenciaScreenState
     final d = await LocalDb.instance.db;
     final rows = await d.query('incidencias_tipos',
         where: 'activo = 1', orderBy: 'orden');
+    // 1.36 H-C3 (136-1014, GF-049): al EDITAR, el tipo
+    // GUARDADO se conserva aunque esté inactivo (se suma a
+    // la lista marcado como inactivo): antes la pantalla lo
+    // sustituía en silencio por el primer activo y guardar
+    // reasignaba la incidencia sin decirlo.
+    final guardadoId = widget.existente?.tipoId;
+    if (guardadoId != null &&
+        !rows.any((r) => '${r['id']}' == guardadoId)) {
+      final extra = await d.query('incidencias_tipos',
+          where: 'id = ?', whereArgs: [guardadoId], limit: 1);
+      rows.addAll(extra);
+    }
     if (mounted) {
       setState(() {
         _tipos = rows
@@ -278,7 +304,9 @@ class _EditarIncidenciaScreenState
               opciones: _tipos
                   .map((t) => OpcionSelector(
                         t.id,
-                        t.nombre,
+                        // 136-1014: el tipo inactivo se
+                        // MUESTRA como tal.
+                        t.activo ? t.nombre : '${t.nombre} (inactivo)',
                         icono: t.iconoData,
                         colorIcono: t.colorData,
                       ))
@@ -434,6 +462,18 @@ class _EditarIncidenciaScreenState
             ],
             if (_esDueno && _tipoResponsable == 'entrenador') ...[
               const SizedBox(height: 8),
+              // 1.36 H-C3 (136-1015, GF-050): aviso en
+              // pantalla si la lista no se pudo leer.
+              if (_entrenadoresNoLeidos)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                      'No se pudo leer la lista de entrenadores; '
+                      'se muestran los de siempre. Sincroniza y '
+                      'reintenta si falta alguien.',
+                      style: AppTexto.secundario.copyWith(
+                          color: AppColores.alerta)),
+                ),
               SelectorIronForm<String>(
                 valorInicial: _entrenadores.any((e) =>
                         e['username'] == _entrenadorUsername)

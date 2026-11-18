@@ -6,8 +6,14 @@ library;
 
 /// Fecha de un envío para la lista (PURO): '2026-10-30T21:14:00' →
 /// '30/10 21:14'. Si el formato no es ISO, se devuelve tal cual.
+/// 1.36 H-C3 (136-1045, GF-081): la fecha se VALIDA con
+/// DateTime.tryParse antes de recortar por índices (antes
+/// cualquier cadena de ≥16 caracteres se formateaba como si
+/// fuera una fecha, con días/meses inventados). Lo no
+/// parseable vuelve tal cual.
 String textoFechaEnvio(String iso) {
-  if (iso.length < 16) return iso;
+  final d = DateTime.tryParse(iso);
+  if (d == null || iso.length < 16) return iso;
   return '${iso.substring(8, 10)}/${iso.substring(5, 7)} '
       '${iso.substring(11, 16)}';
 }

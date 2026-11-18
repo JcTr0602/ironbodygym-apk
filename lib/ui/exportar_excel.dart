@@ -34,10 +34,16 @@ import 'historial_ventas.dart' show nombreVendedorVentaSuplemento;
 String csvDeExportacion(List<String> cabecera, List<List<String>> filas) {
   String esc(String s) {
     var v = s;
-    if (v.startsWith('=') ||
-        v.startsWith('+') ||
-        v.startsWith('-') ||
-        v.startsWith('@')) {
+    // 1.36 H-C3 (136-1037, GF-073): la neutralización es
+    // solo para celdas de TEXTO: un número negativo
+    // («-50») es un dato, no una fórmula, y salía como
+    // texto en la hoja.
+    final esNumero = num.tryParse(v) != null;
+    if (!esNumero &&
+        (v.startsWith('=') ||
+            v.startsWith('+') ||
+            v.startsWith('-') ||
+            v.startsWith('@'))) {
       v = "'$v";
     }
     if (v.contains(',') ||
@@ -221,7 +227,8 @@ Future<bool> exportarExcel() async {
     final pagos = await LocalDb.instance.pagosDelMes(pref);
     final nombreCliente = <int, String>{
       for (final c in clientes)
-        if (c['id'] is int) c['id'] as int: '${c['nombre'] ?? ''}'
+        if ((c['id'] as num?)?.toInt() != null)
+          (c['id'] as num).toInt(): '${c['nombre'] ?? ''}'
     };
     final pagosMes =
         pagos.where((p) => '${p['fecha'] ?? ''}'.startsWith(pref)).toList();
@@ -237,7 +244,7 @@ Future<bool> exportarExcel() async {
               pagoExportable(p, casas, anuladosCola))
           [
             '${p['fecha'] ?? ''}',
-            nombreCliente[p['cliente_id'] as int?] ?? '',
+            nombreCliente[(p['cliente_id'] as num?)?.toInt()] ?? '',
             '${p['monto'] ?? ''}',
             '${p['metodo'] ?? ''}',
           ]

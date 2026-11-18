@@ -56,6 +56,12 @@ class _DetalleIncidenciaScreenState
   String? _errorCarga;
   final _ctrlComentario = TextEditingController();
 
+  /// 1.36 H-C3 (136-1008, GF-042): mutación en curso
+  /// (comentario o cambio de estado): los controles se
+  /// deshabilitan durante el await para no encolar dos
+  /// veces el mismo gesto.
+  bool _mutando = false;
+
   @override
   void initState() {
     super.initState();
@@ -261,9 +267,17 @@ class _DetalleIncidenciaScreenState
                   onReintentar: _cargar,
                 )
               : inc == null
-              ? const Center(
-                  child:
-                      Text('No encontrada'))
+              // 1.36 H-C3 (136-1009, GF-043): vacío de la
+              // casa con acción Volver (antes un Text
+              // centrado sin salida).
+              ? EstadoVacio(
+                  icono: Icons.search_off_rounded,
+                  titulo: 'No encontrada',
+                  subtitulo:
+                      'La incidencia ya no está en este teléfono.',
+                  textoAccion: 'Volver',
+                  onAccion: () => Navigator.of(context).pop(),
+                )
               : ListView(
                   padding:
                       const EdgeInsets.all(AppEspacio.lg),
@@ -379,7 +393,10 @@ class _DetalleIncidenciaScreenState
     final clienteId = esCliente
         ? int.tryParse(a.split(':').elementAtOrNull(1) ?? '')
         : null;
-    return Padding(
+    // 1.36 H-C3 (136-1013, GF-047): cuando lleva a la
+    // ficha, TODA la fila es tocable (48 dp) con su
+    // Semantics — antes solo el texto subrayado.
+    final fila = Padding(
       padding: const EdgeInsets.symmetric(
           vertical: 2),
       child: Row(
@@ -420,6 +437,29 @@ class _DetalleIncidenciaScreenState
         ],
       ),
     );
+    if (esCliente && clienteId != null) {
+      return Semantics(
+        button: true,
+        label: 'Abrir ficha de $nombre',
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              RutaIron(
+                builder: (_) =>
+                    FichaScreen(clienteId: clienteId),
+              ),
+            );
+          },
+          child: ConstrainedBox(
+            constraints:
+                const BoxConstraints(minHeight: 48),
+            child: fila,
+          ),
+        ),
+      );
+    }
+    return fila;
   }
 
   Widget _seccionFotos() {
@@ -462,6 +502,18 @@ class _DetalleIncidenciaScreenState
                       width: 100,
                       height: 100,
                       fit: BoxFit.cover,
+                      // 1.36 H-C3 (136-1012, GF-046): una
+                      // foto local ilegible se dice, no
+                      // queda un hueco mudo.
+                      errorBuilder: (ctx, e, st) => Container(
+                        width: 100,
+                        height: 100,
+                        color: Theme.of(ctx)
+                            .colorScheme
+                            .surfaceContainerHighest,
+                        child: const Icon(
+                            Icons.broken_image_rounded),
+                      ),
                       // 1.34 Campo 2 (P-1): acotada a su
                       // hueco de 100 dp.
                       cacheWidth: (100 *
@@ -484,19 +536,46 @@ class _DetalleIncidenciaScreenState
                                     .round(),
                               );
                             }
+                            if (snap.connectionState ==
+                                ConnectionState.waiting) {
+                              return Container(
+                                width: 100,
+                                height: 100,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                child: const Center(
+                                    child:
+                                        CircularProgressIndicator()),
+                              );
+                            }
+                            // 1.36 H-C3 (136-1012, GF-046):
+                            // foto remota fallida: motivo y
+                            // Reintentar (suelta el future
+                            // memoizado y recarga).
                             return Container(
                               width: 100,
                               height: 100,
                               color: Theme.of(context)
                                   .colorScheme
                                   .surfaceContainerHighest,
-                              child: snap.connectionState ==
-                                      ConnectionState.waiting
-                                  ? const Center(
-                                      child:
-                                          CircularProgressIndicator())
-                                  : const Icon(
-                                      Icons.broken_image_rounded),
+                              child: Column(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons
+                                      .broken_image_rounded),
+                                  TextButton(
+                                    onPressed: () {
+                                      _futurasRemotas.remove(
+                                          f.storagePath);
+                                      _cargar();
+                                    },
+                                    child:
+                                        const Text('Reintentar'),
+                                  ),
+                                ],
+                              ),
                             );
                           },
                         )
@@ -584,6 +663,11 @@ class _DetalleIncidenciaScreenState
             style: TextStyle(
                 fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
+        // 1.36 H-C3 (136-1009, GF-043): vacío nombrado.
+        if (_comentarios.isEmpty)
+          Text('Sin comentarios',
+              style: TextStyle(
+                  color: AppColores.textoSecundario(context))),
         for (final c in _comentarios)
           ListTile(
             dense: true,
@@ -607,7 +691,9 @@ class _DetalleIncidenciaScreenState
             ),
             IconButton(
               icon: const Icon(Icons.send_rounded),
-              onPressed: _enviarComentario,
+              // 1.36 H-C3 (136-1008, GF-042): deshabilitado
+              // mientras la mutación está en vuelo.
+              onPressed: _mutando ? null : _enviarComentario,
             ),
           ],
         ),
@@ -624,6 +710,11 @@ class _DetalleIncidenciaScreenState
             style: TextStyle(
                 fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
+        // 1.36 H-C3 (136-1009, GF-043): vacío nombrado.
+        if (_historial.isEmpty)
+          Text('Sin cambios',
+              style: TextStyle(
+                  color: AppColores.textoSecundario(context))),
         for (final h in _historial)
           ListTile(
             dense: true,
@@ -679,12 +770,17 @@ class _DetalleIncidenciaScreenState
 
   Future<void> _enviarComentario() async {
     final texto = _ctrlComentario.text.trim();
-    if (texto.isEmpty) return;
+    if (texto.isEmpty || _mutando) return;
+    setState(() => _mutando = true);
     // Yunque de App 1.31 (familia B-15, rama escritura): un
     // fallo de la mutación se DICE (bitácora + snack); el
     // texto se conserva en el campo para reintentar.
     try {
       await _enviarComentarioDatos(texto);
+      // 1.36 H-C3 (136-1008, GF-042): éxito dicho.
+      if (mounted) {
+        mostrarSnack(context, 'Comentario agregado');
+      }
     } catch (e) {
       AppLog.error('incidencias', 'comentario_fallo', d: '$e');
       if (mounted) {
@@ -693,6 +789,8 @@ class _DetalleIncidenciaScreenState
             '${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
       }
+    } finally {
+      if (mounted) setState(() => _mutando = false);
     }
   }
 
@@ -730,12 +828,19 @@ class _DetalleIncidenciaScreenState
   }
 
   Future<void> _cambiarEstado(String nuevo) async {
+    // 1.36 H-C3 (136-1008, GF-042): un cambio en vuelo
+    // bloquea el siguiente (doble toque en el menú).
+    if (_mutando) return;
+    setState(() => _mutando = true);
     // Yunque de App 1.31 (familia B-15, rama escritura): la
     // mutación no puede fallar en silencio — bitácora + snack.
     // (El diálogo de resolver y su foto gestionada llevan su
     // propio aviso dentro de _cambiarEstadoDatos.)
     try {
       await _cambiarEstadoDatos(nuevo);
+      if (mounted) {
+        mostrarSnack(context, 'Estado actualizado');
+      }
     } catch (e) {
       AppLog.error('incidencias', 'cambiar_estado_fallo',
           d: '$e');
@@ -745,6 +850,8 @@ class _DetalleIncidenciaScreenState
             '${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
       }
+    } finally {
+      if (mounted) setState(() => _mutando = false);
     }
   }
 

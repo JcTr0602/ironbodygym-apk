@@ -21,7 +21,8 @@ import '../negocio.dart' show fmtFecha, fmtMonto;
 import '../tiempo.dart';
 import '../turnos_resolucion.dart';
 import 'app_bar.dart';
-import 'auditoria.dart' show descripcionOp, payloadDeOp, tiposOpSensibles;
+import 'auditoria.dart'
+    show descripcionOp, esOpMia, tiposOpSensibles;
 import 'componentes.dart';
 import 'skeleton.dart';
 import 'diseno.dart';
@@ -110,6 +111,10 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
     _cargarPersonas();
   }
 
+  /// 1.36 H-C3 (136-1024, GF-059): la lista de personas no
+  /// se pudo LEER (distinto de «identidad no resuelta»).
+  bool _falloLecturaPersonas = false;
+
   Future<void> _cargarPersonas() async {
     final personas = <PersonaApk>[];
     try {
@@ -139,6 +144,10 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
       // identificar tu usuario…») y no a la lectura.
       AppLog.error('auditoria_persona', 'cargar_personas_fallo',
           d: '$e');
+      // 1.36 H-C3 (136-1024, GF-059): y además se DICE en
+      // pantalla como fallo de lectura (bandera), no como
+      // identidad no resuelta.
+      _falloLecturaPersonas = true;
     }
     if (!mounted) return;
     setState(() {
@@ -295,14 +304,17 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         if (f.compareTo(desdeIso) < 0 || f.compareTo(hastaIso) > 0) {
           continue;
         }
-        final p = payloadDeOp(op);
-        final tg = p['registrado_por'];
-        final nombre = '${p['registrado_por_nombre'] ?? ''}';
-        final esSuya = (tg is num && persona.telegramId == tg.toInt()) ||
-            (nombre.isNotEmpty &&
-                normalizarNombreTurno(nombre) ==
-                    normalizarNombreTurno(persona.nombre));
-        if (esSuya) sensibles.add(op);
+        // 1.36 H-C3 (136-1025, GF-060): la atribución usa
+        // las MISMAS firmas tolerantes de auditoria.dart
+        // (esOpMia: firma numérica manda, firma de texto
+        // normalizada con normalizarActor, sin firma = del
+        // teléfono). El filtro anterior reconocía menos
+        // firmas y SUBCONTABA las sensibles de la persona.
+        if (esOpMia(op,
+            miActor: persona.nombre,
+            miTelegramId: persona.telegramId)) {
+          sensibles.add(op);
+        }
       }
       // Cobertura P2: ventana global del espejo de aperturas.
       String? minFecha;
@@ -403,14 +415,23 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
                   onReintentar: _recargarTodo,
                 )
               : _persona == null
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(AppEspacio.xl),
-                    child: Text(
-                        'No se pudo identificar tu usuario en este '
-                        'teléfono. Sincroniza y vuelve a intentarlo.'),
-                  ),
-                )
+              // 1.36 H-C3 (136-1024, GF-059): fallo de
+              // LECTURA → EstadoError con reintento.
+              ? (_falloLecturaPersonas
+                  ? EstadoError(
+                      titulo: 'No se pudo leer la lista de personas',
+                      detalle:
+                          'La copia local de usuarios no se pudo leer.',
+                      onReintentar: _cargarPersonas,
+                    )
+                  : const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(AppEspacio.xl),
+                        child: Text(
+                            'No se pudo identificar tu usuario en este '
+                            'teléfono. Sincroniza y vuelve a intentarlo.'),
+                      ),
+                    ))
               : ListView(
                   padding: const EdgeInsets.all(AppEspacio.md),
                   children: [
@@ -597,7 +618,11 @@ class _AuditoriaPersonaScreenState extends State<AuditoriaPersonaScreen> {
         children: [
           SizedBox(
             width: 108,
+            // 1.36 H-C3 (136-1026, GF-062): la fecha+franja
+            // puede ocupar DOS líneas en 320 dp/fuente
+            // grande en vez de cortarse.
             child: Text('$f · $franja',
+                maxLines: 2,
                 style: AppTexto.metadato.copyWith(fontWeight: FontWeight.w700)),
           ),
           Expanded(
