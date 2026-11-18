@@ -1426,9 +1426,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                               : fmtFecha(e.key)),
                           trailing: Text(
                               '${fmtMonto(e.value)} CUP',
-                              style: const TextStyle(
-                                  fontWeight:
-                                      FontWeight.bold)),
+                              // UI136-06: cifras tabulares (tnum).
+                              style: AppTexto.conTabulares(
+                                  const TextStyle(
+                                      fontWeight:
+                                          FontWeight.bold))),
                         ),
                     ],
                     const SizedBox(height: 12),

@@ -1178,7 +1178,15 @@ class _ServiciosEstadisticasScreenState
             children: [
               Text(titulo, style: AppTexto.metadato),
               const SizedBox(height: 4),
-              Text(valor, style: AppTexto.titulo),
+              // UI136-06/08: el valor del KPI con cifras
+              // tabulares (tnum) y FittedBox, para que no se
+              // corte con la escala de letra a 1,45×.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(valor,
+                    style: AppTexto.conTabulares(AppTexto.titulo)),
+              ),
               const SizedBox(height: 4),
               if (delta == null)
                 Text(

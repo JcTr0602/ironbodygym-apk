@@ -538,7 +538,9 @@ class _HistorialVentasScreenState
   Widget _totalCol(String etiqueta, String valor) {
     return Column(
       children: [
-        Text(valor, style: AppTexto.subtitulo),
+        // UI136-06: cifras tabulares (tnum) en los totales.
+        Text(valor,
+            style: AppTexto.conTabulares(AppTexto.subtitulo)),
         Text(etiqueta, style: AppTexto.secundario),
       ],
     );
@@ -877,8 +879,9 @@ class _HistorialVentasScreenState
             if (!ventaProtegida)
               Text(
                 lineaTotal,
-                style: AppTexto.cuerpo
-                    .copyWith(fontWeight: FontWeight.w600),
+                // UI136-06: cifras tabulares (tnum).
+                style: AppTexto.conTabulares(AppTexto.cuerpo
+                    .copyWith(fontWeight: FontWeight.w600)),
               ),
             if (nota.isNotEmpty && !ventaProtegida)
               Padding(
@@ -1031,7 +1034,9 @@ class _HistorialVentasScreenState
                       style: AppTexto.secundario)),
               Expanded(
                   child: Text(valor,
-                      style: AppTexto.cuerpo)),
+                      // UI136-06: cifras tabulares (tnum).
+                      style: AppTexto.conTabulares(
+                          AppTexto.cuerpo))),
             ],
           ),
         );

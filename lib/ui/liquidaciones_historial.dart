@@ -184,7 +184,9 @@ class _LiquidacionesHistorialScreenState
                 ),
                 Text(
                   '${fmtMonto(entregado)} $moneda',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  // UI136-06: cifras tabulares (tnum).
+                  style: AppTexto.conTabulares(
+                      const TextStyle(fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(width: AppEspacio.sm),
                 // SL-5 G07-8: chip de estado de la casa
@@ -201,8 +203,10 @@ class _LiquidacionesHistorialScreenState
             Text(
               'Esperado: ${fmtMonto(esperado)} $moneda'
               '${arrastre > 0 ? ' · Arrastre: ${fmtMonto(arrastre)} $moneda' : ''}',
-              style: AppTexto.metadato.copyWith(
-                  color: AppColores.textoSecundario(context)),
+              // UI136-06: cifras tabulares (tnum).
+              style: AppTexto.conTabulares(AppTexto.metadato
+                  .copyWith(
+                      color: AppColores.textoSecundario(context))),
             ),
             Text(
               '${fmtFecha('${h['creada_en'] ?? ''}')}'

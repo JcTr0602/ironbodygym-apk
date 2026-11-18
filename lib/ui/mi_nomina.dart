@@ -1217,10 +1217,11 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
           Expanded(child: Text(etiqueta, style: AppTexto.cuerpo)),
           Text(
             valor,
-            style: AppTexto.cuerpo.copyWith(
+            // UI136-06: importes con cifras tabulares (tnum).
+            style: AppTexto.conTabulares(AppTexto.cuerpo.copyWith(
                 fontWeight:
                     negrita ? FontWeight.w700 : FontWeight.w400,
-                color: color),
+                color: color)),
           ),
         ],
       ),
