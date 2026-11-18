@@ -855,15 +855,19 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                         const EdgeInsets.symmetric(vertical: 2),
                     child: Row(
                       children: [
+                        // UI136-16: el neto es LA cifra de
+                        // esta tarjeta — sube a la jerarquía
+                        // de la vista del dueño y de la
+                        // precalculada (título + métrica), no
+                        // una línea más en cuerpo.
                         const Expanded(
                           child: Text('NETO ESTIMADO',
-                              style: AppTexto.cuerpo),
+                              style: AppTexto.titulo),
                         ),
                         MontoAnimado(
                           valor: _neto,
                           formato: (v) => fmtMonto(v),
-                          style: AppTexto.cuerpo.copyWith(
-                              fontWeight: FontWeight.w700,
+                          style: AppTexto.metrica.copyWith(
                               color: colorCifraNomina(_neto)),
                         ),
                       ],
