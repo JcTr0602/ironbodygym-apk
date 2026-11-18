@@ -126,7 +126,16 @@ class _FilaPlusResidualFichaState extends State<FilaPlusResidualFicha> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_listo) return const SizedBox.shrink();
+    // 1.36 FICHA (136-196): mientras la RPC del residual
+    // resuelve (hasta 12 s), la fila pinta su estado en
+    // el hueco que ocupará — la tarjeta Membresía ya no
+    // crece de golpe cuando el Plus aterriza.
+    if (!_listo) {
+      return const FilaInfoFicha(
+          icono: Icons.star_rounded,
+          etiqueta: 'Plus',
+          valor: 'Verificando…');
+    }
     final p = _plus;
     final texto = p == null
         ? null

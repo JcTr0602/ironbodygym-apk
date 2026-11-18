@@ -63,6 +63,40 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
   // medición + gráfico); el historial entero solo con
   // «Ver todo».
   bool _verTodo = false;
+  // 1.36 FICHA (136-210): «Ver todo» pinta el historial
+  // por tramos de 40 (antes, todas las mediciones en un
+  // solo Column de golpe) y la serie/los deltas se
+  // memoizan por identidad de la lista de medidas.
+  int _topeVerTodo = 40;
+  List<Map<String, dynamic>>? _medidasMemoSerie;
+  String? _metricaMemoSerie;
+  List<({DateTime fecha, double valor})>? _serieMemo;
+  List<Map<String, dynamic>>? _medidasMemoDeltas;
+  Map<String, double?>? _deltasMemo;
+
+  List<({DateTime fecha, double valor})> _serieVigente() {
+    if (identical(_medidas, _medidasMemoSerie) &&
+        _metricaVigente == _metricaMemoSerie &&
+        _serieMemo != null) {
+      return _serieMemo!;
+    }
+    final s = serieMedicion(_medidas, _metricaVigente);
+    _medidasMemoSerie = _medidas;
+    _metricaMemoSerie = _metricaVigente;
+    _serieMemo = s;
+    return s;
+  }
+
+  Map<String, double?> _deltasVigentes() {
+    if (identical(_medidas, _medidasMemoDeltas) &&
+        _deltasMemo != null) {
+      return _deltasMemo!;
+    }
+    final d = deltasUltimaMedicion(_medidas);
+    _medidasMemoDeltas = _medidas;
+    _deltasMemo = d;
+    return d;
+  }
   String? _metricaGrafico;
 
   @override
@@ -288,15 +322,27 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
                 unidad: kMetricasMedicion[_metricaVigente]?.unidad ??
                     '',
                 puntos: [
-                  for (final p
-                      in serieMedicion(_medidas, _metricaVigente))
+                  for (final p in _serieVigente())
                     PuntoSerie(p.fecha, p.valor),
                 ],
               ),
             ],
             // Historial completo, solo a petición.
-            if (_verTodo)
-              for (final m in _medidas) _filaHistorial(m),
+            // 136-210: por tramos de 40, no de golpe.
+            if (_verTodo) ...[
+              for (final m in _medidas.take(_topeVerTodo))
+                _filaHistorial(m),
+              if (_medidas.length > _topeVerTodo)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () =>
+                        setState(() => _topeVerTodo += 40),
+                    child: Text(
+                        'Ver más mediciones (${_medidas.length - _topeVerTodo} restantes)'),
+                  ),
+                ),
+            ],
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -325,7 +371,7 @@ class _TarjetaMedidasState extends State<TarjetaMedidas> {
   Widget _ultimaDestacada() {
     final ultima = _medidas.first;
     final medidas = ultima['medidas'];
-    final deltas = deltasUltimaMedicion(_medidas);
+    final deltas = _deltasVigentes();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppEspacio.md),

@@ -14,7 +14,6 @@ import '../tiempo.dart' show aHabana;
 import 'acciones_acceso.dart';
 import 'app_bar.dart';
 import 'diseno.dart';
-import 'ficha.dart';
 import 'ficha_secciones.dart' show FilaInfoFicha;
 import 'foto_personal_ficha.dart';
 import 'componentes.dart';
@@ -356,16 +355,14 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
             const SizedBox(height: AppEspacio.sm),
             OutlinedButton.icon(
               icon: const Icon(Icons.person_rounded, size: 18),
-              label: const Text('Abrir ficha del cliente'),
-              onPressed: () async {
-                await Navigator.of(context).push(
-                  RutaIron(
-                    builder: (_) =>
-                        FichaScreen(clienteId: widget.clienteId),
-                  ),
-                );
-                if (mounted) _refrescarTodo();
-              },
+              // 1.36 FICHA (136-230): esta pantalla solo
+              // se abre DESDE la ficha del mismo cliente
+              // (o desde Control de Acceso): «abrir» otra
+              // FichaScreen duplicaba la pila y se leía
+              // como un bucle. El botón VUELVE a la ficha
+              // que ya está debajo en la pila.
+              label: const Text('Volver a la ficha del cliente'),
+              onPressed: () => Navigator.of(context).pop(),
             ),
           ],
         ),

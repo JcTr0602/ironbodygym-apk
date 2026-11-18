@@ -236,7 +236,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(AppRadio.md),
             child: Image.file(archivo,
-                height: 150,
+                height: 180,
                 width: double.infinity,
                 fit: BoxFit.cover),
           ),
@@ -276,28 +276,39 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
         // «sin foto» (antes ambos eran el mismo hueco vacío y
         // la ficha saltaba al aparecer la foto): una línea
         // compacta lo dice mientras se verifica.
-        return Tarjeta(
-          child: Row(
-            children: [
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
+        // 1.36 FICHA (136-212): el estado de carga RESERVA
+        // el alto del bloque con foto (180 de imagen +
+        // cabecera) en vez de nacer compacto y recolocar
+        // la pestaña al resolver.
+        return const Tarjeta(
+          child: SizedBox(
+            height: 236,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: AppEspacio.sm),
+                  Text('Foto personal: verificando…'),
+                ],
               ),
-              const SizedBox(width: AppEspacio.sm),
-              Expanded(
-                child: Text('Foto personal: verificando…',
-                    style: AppTexto.secundario),
-              ),
-            ],
+            ),
           ),
         );
       case _EstadoFoto.sinFoto:
         // Sin foto: sin espacio muerto.
         return const SizedBox.shrink();
       case _EstadoFoto.error:
+        // 136-212: el error también reserva el alto del
+        // bloque (no recoloca la pestaña al aparecer).
         return Tarjeta(
-          child: Row(
+          child: SizedBox(
+            height: 236,
+            child: Row(
             children: [
               Icon(
                   _falloFueDeRed
@@ -314,6 +325,7 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   onPressed: _consultar,
                   child: const Text('Reintentar')),
             ],
+            ),
           ),
         );
       case _EstadoFoto.conFoto:
@@ -356,14 +368,19 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(AppRadio.md),
                     child: Image.file(_archivo!,
-                        height: 220,
+                        height: 180,
                         width: double.infinity,
                         fit: BoxFit.cover),
                   ),
                 )
               else
                 Container(
-                  height: 120,
+                  // 1.36 FICHA (136-226): un solo alto
+                  // (180) para el área de foto en todos
+                  // sus estados — miniaturas, foto sola y
+                  // error de descarga ya no hacen saltar
+                  // lo de debajo.
+                  height: 180,
                   width: double.infinity,
                   decoration: BoxDecoration(
                     // 1.23 (Delta Argón 6ª): token del tema en

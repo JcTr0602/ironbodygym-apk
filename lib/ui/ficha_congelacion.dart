@@ -24,6 +24,7 @@ import '../congelaciones_gestion.dart';
 import '../errores_sync.dart';
 import '../tiempo.dart';
 import 'componentes.dart';
+import 'diseno.dart';
 import 'congelaciones.dart';
 
 /// SL-2 G03-11: mensaje del snack cuando el cierre de la
@@ -57,8 +58,25 @@ class SeccionCongelacionFicha extends StatefulWidget {
       _SeccionCongelacionFichaState();
 }
 
+/// 1.36 FICHA (136-227): la cabecera de la sección, una
+/// sola para las tres ramas (pendiente / aprobada /
+/// staff) — antes cada rama la componía a mano.
+Widget _cabeceraCongelacion(String texto) => Row(
+      children: [
+        const Icon(Icons.ac_unit_rounded, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(texto, style: AppTexto.subtitulo),
+        ),
+      ],
+    );
+
 class _SeccionCongelacionFichaState
     extends State<SeccionCongelacionFicha> {
+  // 1.36 FICHA (136-196): mientras carga, la sección
+  // pinta su estado (alto reservado) en vez de nacer
+  // vacía y materializarse empujando la ficha.
+  bool _cargandoCongelacion = true;
   CongelacionGestion? _pendiente;
   CongelacionGestion? _aprobada;
   Map<String, dynamic>? _vigenteStaff;
@@ -71,6 +89,15 @@ class _SeccionCongelacionFichaState
   }
 
   Future<void> _cargar() async {
+    if (mounted) setState(() => _cargandoCongelacion = true);
+    try {
+      await _cargarInterno();
+    } finally {
+      if (mounted) setState(() => _cargandoCongelacion = false);
+    }
+  }
+
+  Future<void> _cargarInterno() async {
     if (AuthService().isOwner) {
       final filas = await CongelacionesService.instance
           .deCliente(widget.clienteId);
@@ -150,30 +177,39 @@ class _SeccionCongelacionFichaState
   @override
   Widget build(BuildContext context) {
     final hoy = ahoraHabana();
+    if (_cargandoCongelacion &&
+        _pendiente == null &&
+        _aprobada == null &&
+        _vigenteStaff == null) {
+      // 136-196: estado pintado desde el primer frame.
+      return const Tarjeta(
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 8),
+            Expanded(child: Text('Congelación: verificando…')),
+          ],
+        ),
+      );
+    }
     // Vista del dueño (espejo completo).
     if (AuthService().isOwner) {
       if (_pendiente == null && _aprobada == null) {
         return const SizedBox.shrink();
       }
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
+      // 1.36 FICHA (136-227): la primitiva Tarjeta de la
+      // casa (antes Card crudo con Padding 12 y literales).
+      return Tarjeta(
+        child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (_pendiente != null) ...[
-                const Row(
-                  children: [
-                    Icon(Icons.ac_unit_rounded, size: 20),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '❄️ Solicitud de congelación pendiente',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
+                _cabeceraCongelacion(
+                    '❄️ Solicitud de congelación pendiente'),
                 const SizedBox(height: 4),
                 Text(
                   '${_fmtF(_pendiente!.desde)} → '
@@ -186,7 +222,9 @@ class _SeccionCongelacionFichaState
                   child: FilledButton(
                     onPressed: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      // 1.36 FICHA (136-222): ruta de la
+                      // casa (token de 220 ms).
+                      RutaIron(
                         builder: (_) => const CongelacionesScreen(),
                       ),
                     ).then((_) => _cargar()),
@@ -196,20 +234,8 @@ class _SeccionCongelacionFichaState
               ],
               if (_aprobada != null) ...[
                 if (_pendiente != null) const Divider(),
-                Row(
-                  children: [
-                    const Icon(Icons.ac_unit_rounded, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '❄️ Congelación aprobada · '
-                        '${_aprobada!.etiquetaEstado(hoy)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
+                _cabeceraCongelacion('❄️ Congelación aprobada · '
+                    '${_aprobada!.etiquetaEstado(hoy)}'),
                 const SizedBox(height: 4),
                 Text(
                   '${_fmtF(_aprobada!.inicioEfectivo ?? _aprobada!.desde)}'
@@ -229,7 +255,6 @@ class _SeccionCongelacionFichaState
               ],
             ],
           ),
-        ),
       );
     }
     // Vista del staff (solo la ventana, sin motivo).
@@ -238,24 +263,12 @@ class _SeccionCongelacionFichaState
     final inicio = _f(v['inicio_efectivo']) ?? _f(v['desde']);
     final fin = _f(v['hasta_efectivo']) ?? _f(v['hasta']);
     final mat = (v['dias_materializados'] as num?)?.toInt();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+    // 136-227: también la vista del staff va en Tarjeta.
+    return Tarjeta(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
-              children: [
-                Icon(Icons.ac_unit_rounded, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '❄️ Congelación aprobada',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
+            _cabeceraCongelacion('❄️ Congelación aprobada'),
             const SizedBox(height: 4),
             Text(
               '${_fmtF(inicio)} → ${_fmtF(fin)}'
@@ -271,7 +284,6 @@ class _SeccionCongelacionFichaState
               ),
             ),
           ],
-        ),
       ),
     );
   }

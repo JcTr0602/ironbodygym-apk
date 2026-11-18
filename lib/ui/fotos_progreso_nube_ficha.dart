@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -149,7 +148,6 @@ class _SeccionFotosProgresoNubeState
   // foto, resuelta al descargar sus bytes: la rejilla
   // pinta cada celda con la forma de SU foto en vez de
   // recortar todas al mismo rectángulo.
-  final Map<String, double> _aspectos = {};
 
   // 1.28 (M4-B6): selección para moderar por tandas
   // (pulsación larga entra en el modo; vacío = modo
@@ -175,7 +173,6 @@ class _SeccionFotosProgresoNubeState
       _falloEnMs.clear();
       _futuroFallo.clear();
       _eliminandoIds.clear();
-      _aspectos.clear();
       _seleccion.clear();
       _viendoId = null;
       _fotos = const [];
@@ -357,11 +354,11 @@ class _SeccionFotosProgresoNubeState
         _falloEnMs.remove(fotoId);
         _futuroFallo.remove(fotoId);
         _guardarEnCache(fotoId, bytes);
-        // 1.28 (M4-C5): la proporción real sale de los
-        // bytes (la EF no la devuelve): se resuelve EN
-        // SEGUNDO PLANO, sin bloquear la entrega de la
-        // miniatura (la celda adopta la forma al llegar).
-        unawaited(_resolverAspecto(fotoId, bytes));
+        // 1.36 FICHA (136-208): ya NO se resuelve la
+        // proporción por foto: cada resolución hacía
+        // setState de toda la sección y las alturas
+        // cambiaban bajo el dedo. Las celdas son de
+        // proporción fija y estable (ver _celdaFoto).
       }
       return bytes;
     } catch (_) {
@@ -369,30 +366,6 @@ class _SeccionFotosProgresoNubeState
       return null;
     } finally {
       _liberarDescarga();
-    }
-  }
-
-  /// 1.28 (M4-C5): resuelve y guarda la proporción de la
-  /// foto (acotada a un rango sano para la rejilla).
-  /// Best-effort: bytes que no decodifican dejan la
-  /// proporción por defecto de la celda.
-  Future<void> _resolverAspecto(String fotoId, Uint8List bytes) async {
-    if (_aspectos.containsKey(fotoId)) return;
-    try {
-      final codec = await ui.instantiateImageCodec(bytes,
-          targetWidth: 64);
-      final frame = await codec.getNextFrame();
-      final w = frame.image.width;
-      final h = frame.image.height;
-      frame.image.dispose();
-      codec.dispose();
-      if (w > 0 && h > 0 && !_dispuesto) {
-        _aspectos[fotoId] = (w / h).clamp(0.45, 2.2).toDouble();
-        // La celda se repinta con la forma real.
-        if (mounted) setState(() {});
-      }
-    } catch (_) {
-      // Sin proporción: la celda usa su defecto.
     }
   }
 
@@ -501,7 +474,6 @@ class _SeccionFotosProgresoNubeState
       ];
       final quitados = _bytesCache.remove(fotoId);
       if (quitados != null) _bytesCacheTotal -= quitados.length;
-      _aspectos.remove(fotoId);
       _falloEnMs.remove(fotoId);
       _futuroFallo.remove(fotoId);
       _seleccion.remove(fotoId);
@@ -731,7 +703,10 @@ class _SeccionFotosProgresoNubeState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
-            aspectRatio: _aspectos[fotoId] ?? 0.8,
+            // 136-208: proporción ÚNICA y estable de la
+            // rejilla (1:1): ninguna foto recoloca la
+            // galería al llegar.
+            aspectRatio: 1,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: Stack(

@@ -134,10 +134,17 @@ class _BuscarScreenState extends State<BuscarScreen>
       final prefs = await SharedPreferences.getInstance();
       final ids = prefs.getStringList(_kRecientesDirectorio) ?? const [];
       if (ids.isEmpty) return;
-      final todos = await listaClientes('');
-      final porId = {
-        for (final c in todos) (c['id'] as num?)?.toInt(): c,
-      };
+      // 1.36 FICHA (136-211): Recientes resuelve sus
+      // ≤5 ids UNO a uno (clientePorId), sin releer el
+      // padrón entero en cada retorno a Buscar.
+      // (Toca archivo del carril de campo: portar al fundir.)
+      final porId = <int, Map<String, dynamic>>{};
+      for (final s in ids) {
+        final id = int.tryParse(s);
+        if (id == null) continue;
+        final c = await clientePorId(id);
+        if (c != null) porId[id] = c;
+      }
       if (!mounted) return;
       setState(() {
         _recientes = [
