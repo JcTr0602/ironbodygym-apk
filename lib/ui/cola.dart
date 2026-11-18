@@ -1713,6 +1713,20 @@ class _ColaScreenState extends State<ColaScreen> {
                 style: AppTexto.cuerpo,
               ),
             ],
+            // UI136-12: los comprobantes de transferencia
+            // también se nombran — el héroe los suma a su
+            // total y esta tarjeta no los mencionaba: con
+            // 0 operaciones y 1 comprobante, el héroe
+            // anunciaba 1 y aquí no se decía de qué.
+            if (_compPendientes > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                '🧾 Además, $_compPendientes '
+                '${_compPendientes == 1 ? 'comprobante' : 'comprobantes'} '
+                'de transferencia por subir.',
+                style: AppTexto.cuerpo,
+              ),
+            ],
             if (_fotosError > 0) ...[
               const SizedBox(height: 4),
               Text(
