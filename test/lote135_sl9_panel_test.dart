@@ -411,10 +411,14 @@ void main() {
           maxScrolls: 60);
       await tester.pump();
       await tester.tap(find.text('Cierre de caja'));
-      expect(await _esperarHasta(tester, find.text('Recogida')),
+      // 1.36 H-B3 (136-823): la etiqueta del botón lleva el
+      // monto («Recogida 500 CUP»).
+      expect(
+          await _esperarHasta(
+              tester, find.text('Recogida 500 CUP')),
           isTrue,
           reason: 'la sección de cobros no pintó la recogida');
-      await tester.tap(find.text('Recogida'));
+      await tester.tap(find.text('Recogida 500 CUP'));
       expect(
           await _esperarHasta(tester, find.text('Registrar recogida')),
           isTrue,

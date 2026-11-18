@@ -230,15 +230,20 @@ void main() {
               'TextButton suelto');
       expect(find.widgetWithText(TextButton, 'Recogida'), findsNothing);
       // La forma de la casa: BotonPrimario para confirmar.
-      expect(find.widgetWithText(BotonPrimario, 'Confirmar'),
+      // 1.36 H-B3 (136-823): el botón lleva el MONTO en su
+      // etiqueta («Confirmar 500 CUP»); la forma de la casa
+      // y el resultado de la acción no cambian.
+      expect(find.widgetWithText(BotonPrimario, 'Confirmar 500 CUP'),
           findsOneWidget);
-      expect(find.widgetWithText(BotonSecundario, 'Recogida'),
+      expect(find.widgetWithText(BotonSecundario, 'Recogida 500 CUP'),
           findsOneWidget);
       // Y el resultado de la acción es el de siempre.
-      await tester.tap(find.widgetWithText(BotonPrimario, 'Confirmar'));
+      await tester.tap(
+          find.widgetWithText(BotonPrimario, 'Confirmar 500 CUP'));
       await tester.pump();
       expect(confirmado, 'Gabriel');
-      await tester.tap(find.widgetWithText(BotonSecundario, 'Recogida'));
+      await tester.tap(
+          find.widgetWithText(BotonSecundario, 'Recogida 500 CUP'));
       await tester.pump();
       expect(recogida, 'Gabriel');
     });
@@ -257,11 +262,14 @@ void main() {
           isTrue,
           reason: 'la bajada completa no cargó');
       await _ciclos(tester, 4);
-      // UNA sola acción principal (FilledButton) entre las tres.
-      expect(find.byType(FilledButton), findsOneWidget,
+      // UNA sola acción principal entre las tres.
+      // 1.36 H-B3 (136-828): la acción principal es la
+      // primitiva de la casa (BotonPrimario), no un
+      // FilledButton suelto: el conteo se hace sobre ella.
+      expect(find.byType(BotonPrimario), findsOneWidget,
           reason: 'solo «Bajar todo de nuevo» es la acción '
               'principal; subir y copiar son secundarias');
-      expect(find.widgetWithText(FilledButton, 'Bajar todo de nuevo'),
+      expect(find.widgetWithText(BotonPrimario, 'Bajar todo de nuevo'),
           findsOneWidget);
       // La explicación nace PLEGADA: su cuerpo no se ve.
       expect(
