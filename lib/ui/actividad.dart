@@ -279,6 +279,27 @@ bool actividadVisibleParaEntrenador(
   );
 }
 
+/// ARG136-05: ¿el [detalle] crudo de una actividad nombra
+/// a algún cliente protegido? [nombres] viene ya
+/// normalizado (minúsculas, sin espacios extremos) desde
+/// TODO el espejo de clientes — la pauta de
+/// AuditoriaScreen. La comparación es por CONTENCIÓN: el
+/// detalle es texto libre del servidor («<Nombre> — 2000
+/// CUP (mensual, …)») y el nombre viaja dentro, no como
+/// campo. Cubre las entradas SIN cliente_id rescatable,
+/// que el filtro por id de _cargarDatos no alcanza. Un
+/// nombre compartido por un protegido y un no protegido
+/// retira ambas entradas: ante la duda, la privacidad
+/// manda (el mismo criterio de esNombreProtegido).
+bool detalleNombraProtegido(String detalle, Set<String> nombres) {
+  if (detalle.isEmpty || nombres.isEmpty) return false;
+  final d = detalle.toLowerCase();
+  for (final n in nombres) {
+    if (n.isNotEmpty && d.contains(n)) return true;
+  }
+  return false;
+}
+
 /// (1.36 H-B4 136-995) el monto de una actividad: con las
 /// DOS monedas presentes se muestran las dos (antes el USD
 /// tapaba el CUP y el cobro parecía solo en dólares).
@@ -708,6 +729,29 @@ class _ActividadScreenState extends State<ActividadScreen> {
         final id = _clienteIdDe(a);
         return id != null && _protegidosIds.contains(id);
       });
+      // ARG136-05: el filtro por id no alcanza a las
+      // entradas SIN cliente_id rescatable (ni patrón
+      // «cliente NNN» en el detalle): su detalle nombra
+      // al protegido y la tarjeta enseñaba el nombre y el
+      // monto. Se retiran también por NOMBRE protegido,
+      // con el conjunto armado de TODO el espejo (no solo
+      // de los clientes del feed), como AuditoriaScreen.
+      try {
+        final nombresProtegidos = <String>{
+          for (final c in await LocalDb.instance.allMirror('clientes'))
+            if (esVistaProtegida(c, esDueno: esDueno))
+              '${c['nombre'] ?? ''}'.trim().toLowerCase(),
+        }..remove('');
+        if (nombresProtegidos.isNotEmpty) {
+          lista.removeWhere((a) => detalleNombraProtegido(
+              '${a['detalle'] ?? ''}', nombresProtegidos));
+        }
+      } catch (_) {
+        // Sin espejo legible no hay nombres que proteger
+        // que el filtro por id no cubra ya: se sigue con
+        // la lista filtrada por id (fail-closed en lo que
+        // sí se conoce).
+      }
     }
     // v1.2.1: resolver nombres y fotos de clientes para cada item.
     _nombres.clear();
