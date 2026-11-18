@@ -1436,7 +1436,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
                               AppColores.naranja,
-                          foregroundColor: Colors.white,
+                          foregroundColor: AppColores.sobreMarca,
                           shape: RoundedRectangleBorder(
                             borderRadius:
                                 BorderRadius.circular(
@@ -3166,7 +3166,7 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
                         'Tasa USD no disponible: los montos en '
                         'dólares no se comparan en este filtro.',
                         style: AppTexto.secundario.copyWith(
-                            color: AppColores.alerta)),
+                            color: AppColores.alertaTexto(context))),
                     const SizedBox(height: 8),
                   ],
                   seccion('Tipo de operación', [
@@ -3315,7 +3315,7 @@ class _HojaFiltrosActividadState extends State<_HojaFiltrosActividad> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
                               AppColores.naranja,
-                          foregroundColor: Colors.white,
+                          foregroundColor: AppColores.sobreMarca,
                           shape: RoundedRectangleBorder(
                             borderRadius:
                                 BorderRadius.circular(

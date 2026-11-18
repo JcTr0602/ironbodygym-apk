@@ -215,7 +215,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
             ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColores.naranja,
-                  foregroundColor: Colors.white,
+                  foregroundColor: AppColores.sobreMarca,
                 ),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Registrar otro')),

@@ -2181,8 +2181,8 @@ class _DialogoRegistrarAdelantoState
                   Expanded(
                     child: Text(
                       avisoExceso,
-                      style: AppTexto.metadato
-                          .copyWith(color: AppColores.alerta),
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.alertaTexto(context)),
                     ),
                   ),
                 ],

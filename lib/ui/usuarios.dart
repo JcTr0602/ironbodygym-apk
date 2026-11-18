@@ -273,6 +273,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
             label: const Text('Copiar'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
+              foregroundColor: AppColores.sobreMarca,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppRadio.md),
               ),
@@ -804,6 +805,7 @@ class _DialogoNuevaContrasenaState
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
+              foregroundColor: AppColores.sobreMarca,
               shape: RoundedRectangleBorder(
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),
@@ -889,6 +891,7 @@ class _DialogoCrearUsuarioState extends State<_DialogoCrearUsuario> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
+              foregroundColor: AppColores.sobreMarca,
               shape: RoundedRectangleBorder(
                 borderRadius:
                     BorderRadius.circular(AppRadio.md),

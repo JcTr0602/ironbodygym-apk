@@ -679,8 +679,8 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
                               : 'Sin conexión: se enseña la última foto de '
                                   'las ${_foto!.hora.hour.toString().padLeft(2, '0')}:'
                                   '${_foto!.hora.minute.toString().padLeft(2, '0')}.',
-                      style: AppTexto.metadato
-                          .copyWith(color: AppColores.alerta),
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.alertaTexto(context)),
                     ),
                   ),
                 ],
