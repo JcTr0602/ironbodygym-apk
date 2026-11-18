@@ -20,6 +20,7 @@ import '../tiempo.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'hoja_accion.dart';
+import 'skeleton.dart';
 import 'primitivas.dart';
 
 /// Lo que la hoja devuelve al liquidar con éxito: lo que
@@ -212,6 +213,23 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
     }
   }
 
+  /// 1.36 H-B2 (136-645): error en línea del entregado —
+  /// vacío no dice nada (aún no se teclea); inválido o por
+  /// encima del esperado se dice bajo el campo.
+  String? _errorEntregadoEnLinea() {
+    final texto = _entregadoCtrl.text.trim();
+    if (texto.isEmpty) return null;
+    final v = double.tryParse(texto.replaceAll(',', '.'));
+    if (v == null || !v.isFinite || v < 0) {
+      return 'Escribe un monto válido.';
+    }
+    if (v - _esperado > 0.01) {
+      return 'Supera el pendiente confirmado '
+          '(${fmtMonto(_esperado)} $_moneda).';
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final parcial = !_cargando &&
@@ -227,9 +245,10 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
       titulo: 'Liquidar con arrastre · ${widget.nombre}',
       icono: Icons.account_balance_wallet_rounded,
       cuerpo: _cargando
+          // 1.36 H-B2 (136-645): esqueleto, no spinner suelto.
           ? const Padding(
               padding: EdgeInsets.all(AppEspacio.lg),
-              child: Center(child: CircularProgressIndicator()),
+              child: SkeletonTarjeta(),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,6 +258,8 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
                     padding:
                         const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: SegmentedButton<String>(
+                      // 136-645: sin check.
+                      showSelectedIcon: false,
                       segments: const [
                         ButtonSegment(
                             value: 'CUP', label: Text('CUP')),
@@ -260,10 +281,16 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
                       },
                     ),
                   ),
-                Text(
-                  'Pendiente confirmado: ${fmtMonto(_esperado)} $_moneda',
-                  style: AppTexto.cuerpo
-                      .copyWith(fontWeight: FontWeight.w600),
+                // 136-646: el pendiente se anuncia con
+                // monto y moneda.
+                Semantics(
+                  label: 'Pendiente confirmado: '
+                      '${fmtMonto(_esperado)} $_moneda',
+                  child: Text(
+                    'Pendiente confirmado: ${fmtMonto(_esperado)} $_moneda',
+                    style: AppTexto.cuerpo
+                        .copyWith(fontWeight: FontWeight.w600),
+                  ),
                 ),
                 Text(
                   'Calculado solo sobre datos confirmados por el '
@@ -273,10 +300,44 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
                       color: AppColores.textoSecundario(context)),
                 ),
                 const SizedBox(height: AppEspacio.sm),
+                // 1.36 H-B2 (136-646): atajos del importe.
+                if (_esperado > 0)
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: AppEspacio.sm),
+                    child: Wrap(
+                      spacing: AppEspacio.sm,
+                      children: [
+                        ActionChip(
+                          label: const Text('Todo'),
+                          onPressed: () => setState(() =>
+                              _entregadoCtrl.text =
+                                  _esperado.toStringAsFixed(_esperado ==
+                                          _esperado.roundToDouble()
+                                      ? 0
+                                      : 2)),
+                        ),
+                        ActionChip(
+                          label: const Text('Mitad'),
+                          onPressed: () => setState(() =>
+                              _entregadoCtrl.text = (_esperado / 2)
+                                  .toStringAsFixed((_esperado / 2) ==
+                                          (_esperado / 2)
+                                              .roundToDouble()
+                                      ? 0
+                                      : 2)),
+                        ),
+                      ],
+                    ),
+                  ),
                 CampoMoneda(
                   controller: _entregadoCtrl,
                   etiqueta: 'Monto entregado ($_moneda)',
                   moneda: _moneda,
+                  // 136-645: validación EN LÍNEA del
+                  // entregado (la de _liquidar, con snack,
+                  // se conserva como red al deslizar).
+                  errorText: _errorEntregadoEnLinea(),
                   onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: AppEspacio.sm),
@@ -284,15 +345,25 @@ class _HojaLiquidarState extends State<HojaLiquidar> {
                   controller: _notaCtrl,
                   etiqueta: 'Nota (opcional)',
                 ),
-                if (parcial) ...[
-                  const SizedBox(height: AppEspacio.sm),
-                  Text(
-                    'Liquidación parcial: el resto queda como '
-                    'saldo de arrastre.',
-                    style: AppTexto.metadato
-                        .copyWith(color: AppColores.alerta),
-                  ),
-                ],
+                // 136-646: el aviso de parcial/arrastre
+                // entra y sale animado.
+                AnimatedSwitcher(
+                  duration: AppMovimiento.corta,
+                  child: parcial
+                      ? Padding(
+                          key: const ValueKey('parcial'),
+                          padding: const EdgeInsets.only(
+                              top: AppEspacio.sm),
+                          child: Text(
+                            'Liquidación parcial: el resto '
+                            'queda como saldo de arrastre.',
+                            style: AppTexto.metadato
+                                .copyWith(color: AppColores.alerta),
+                          ),
+                        )
+                      : const SizedBox.shrink(
+                          key: ValueKey('completa')),
+                ),
               ],
             ),
       // G07-6 (desbloqueo lote 141): liquidar se confirma

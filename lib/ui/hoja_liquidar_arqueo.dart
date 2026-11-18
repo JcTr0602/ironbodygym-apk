@@ -44,6 +44,7 @@ import 'componentes.dart';
 import 'diseno.dart';
 import 'hoja_accion.dart';
 import 'hoja_liquidar.dart';
+import 'skeleton.dart';
 import 'primitivas.dart';
 
 // Las primitivas compartidas viven en primitivas.dart
@@ -414,9 +415,10 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
       titulo: 'Liquidar Arqueo · ${widget.nombre}',
       icono: Icons.account_balance_wallet_rounded,
       cuerpo: _cargando
+          // 1.36 H-B2 (136-647): esqueleto, no spinner suelto.
           ? const Padding(
               padding: EdgeInsets.all(AppEspacio.lg),
-              child: Center(child: CircularProgressIndicator()),
+              child: SkeletonTarjeta(),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -424,6 +426,8 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
                 // Selector de MODO de la puerta única: cada
                 // modo ejecuta su operación, sin fundirlas.
                 SegmentedButton<ModoHojaArqueo>(
+                  // 136-647: sin check.
+                  showSelectedIcon: false,
                   segments: const [
                     ButtonSegment(
                       value: ModoHojaArqueo.cierre,
@@ -438,11 +442,21 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
                   onSelectionChanged: (s) => _cambiarModo(s.first),
                 ),
                 const SizedBox(height: AppEspacio.md),
+                // 1.36 H-B2 (136-647): el cuerpo propio de
+                // cada modo cruza al cambiar el selector.
+                AnimatedSwitcher(
+                  duration: AppMovimiento.media,
+                  child: KeyedSubtree(
+                    key: ValueKey(_modo),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                 if (!esC1 && _usd > 0)
                   Padding(
                     padding:
                         const EdgeInsets.only(bottom: AppEspacio.sm),
                     child: SegmentedButton<String>(
+                      showSelectedIcon: false,
                       segments: const [
                         ButtonSegment(value: 'CUP', label: Text('CUP')),
                         ButtonSegment(value: 'USD', label: Text('USD')),
@@ -492,11 +506,18 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        _contado.isEmpty
-                            ? '— $monedaVista'
-                            : '$_contado $monedaVista',
-                        style: AppTexto.conTabulares(AppTexto.displayPequeno),
+                      // 136-647: el contado se anuncia con
+                      // monto y moneda.
+                      child: Semantics(
+                        label: 'Contado: '
+                            '${_contado.isEmpty ? 'sin importe' : '$_contado $monedaVista'}',
+                        child: Text(
+                          _contado.isEmpty
+                              ? '— $monedaVista'
+                              : '$_contado $monedaVista',
+                          style:
+                              AppTexto.conTabulares(AppTexto.displayPequeno),
+                        ),
                       ),
                     ),
                     TextButton(
@@ -508,6 +529,23 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
                     ),
                   ],
                 ),
+                // 1.36 H-B2 (136-651): sin importe tecleado,
+                // la hoja dice qué falta (el deslizar está
+                // deshabilitado y el porqué no se adivina).
+                if (contado == null)
+                  Text(
+                    'Teclea el importe contado con el pad.',
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.textoSecundario(context)),
+                  ),
+                // 136-647: los mensajes de diferencia entran
+                // y salen con AnimatedSize, no de golpe.
+                AnimatedSize(
+                  duration: AppMovimiento.corta,
+                  alignment: Alignment.topLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                 if (diferencia != null && diferencia > 0.01)
                   Text(
                     esC1
@@ -531,10 +569,17 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
                     style: AppTexto.metadato
                         .copyWith(color: AppColores.error),
                   ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: AppEspacio.sm),
                 PadNumerico(
                   valor: _contado,
                   onCambia: (v) => setState(() => _contado = v),
+                ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),

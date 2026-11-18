@@ -12,6 +12,7 @@ import '../localdb.dart';
 import '../negocio.dart';
 import '../tiempo.dart';
 import '../auth.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import '../app_log.dart';
@@ -217,6 +218,23 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   }
 
   Future<void> _cargarMes() async {
+    // 1.36 H-B2 (136-635): red de seguridad como _cargar —
+    // un fallo aquí dejaba el spinner eterno (la bandera
+    // solo bajaba en el camino feliz).
+    try {
+      await _cargarMesDatos();
+    } catch (e) {
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _cargarMesDatos() async {
     setState(() => _cargando = true);
     // v1.3.6: filtro por entrenador (null = dueño, ve todo).
     final soloTid = _filtroEntrenador;
@@ -241,6 +259,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         _diasMes = diasMes;
         _totalMes = totalMes;
         _cargando = false;
+        _falloCarga = false;
       });
     }
   }
@@ -249,6 +268,21 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   /// Usa el campo explícito `turno`, NUNCA la hora del pago.
   /// Para hoy incluye los pagos optimistas en cola (diariosDeHoy).
   Future<void> _cargarDiaDetalle(String fechaIso) async {
+    // 136-635: misma red que _cargarMes.
+    try {
+      await _cargarDiaDetalleDatos(fechaIso);
+    } catch (e) {
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = true;
+          _cargando = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _cargarDiaDetalleDatos(String fechaIso) async {
     setState(() {
       _cargando = true;
       _diaDetalle = fechaIso;
@@ -297,6 +331,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
         _totalPorTurnoDet = totales;
         _turnosCerrados = cerrados;
         _cargando = false;
+        _falloCarga = false;
       });
     }
   }
@@ -348,8 +383,14 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        // v1.3.3: en detalle de día, el back vuelve a la vista de mes.
+      // 1.36 H-B2 (136-635): AppBar de la casa (appBarIron)
+      // y título del día con el mes en letra.
+      appBar: appBarIron(
+        context,
+        _modo == 2 && _diaDetalle != null
+            ? 'Día ${int.parse(_diaDetalle!.substring(8, 10))} de '
+                '${_nombreMes(int.parse(_diaDetalle!.substring(5, 7))).toLowerCase()}'
+            : 'Día del gym',
         leading: _modo == 2
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_rounded),
@@ -359,10 +400,7 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 },
               )
             : null,
-        title: Text(_modo == 2 && _diaDetalle != null
-            ? 'Día ${_diaDetalle!.substring(8, 10)}/${_diaDetalle!.substring(5, 7)}'
-            : 'Día del gym'),
-        actions: [
+        acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () {
@@ -392,9 +430,11 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
               children: [
                 // v1.3.3: selector Hoy / Mes.
                 Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
                   child: SegmentedButton<int>(
+                    // 1.36 H-B2 (136-637): sin check.
+                    showSelectedIcon: false,
                     segments: const [
                       ButtonSegment(
                           value: 0,
@@ -421,16 +461,24 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                 // v1.10.0 (Bloque 2, A1): píldora de estado de sync,
                 // siempre visible. Mismo texto de frescura que Buscar.
                 Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                      AppEspacio.lg, AppEspacio.sm, AppEspacio.lg, 0),
                   child: _pildoraSync(),
                 ),
                 Expanded(
-                  child: _modo == 1
-                      ? _vistaMes()
-                      : _modo == 2
-                          ? _vistaDiaDetalle()
-                          : _vistaHoy(),
+                  // 136-637: el cambio de vista cruza.
+                  child: AnimatedSwitcher(
+                    duration: AppMovimiento.resuelta(
+                        context, AppMovimiento.media),
+                    child: KeyedSubtree(
+                      key: ValueKey('$_modo|$_diaDetalle'),
+                      child: _modo == 1
+                          ? _vistaMes()
+                          : _modo == 2
+                              ? _vistaDiaDetalle()
+                              : _vistaHoy(),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -593,8 +641,9 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                               fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right_rounded,
-                            color: Colors.grey),
+                        Icon(Icons.chevron_right_rounded,
+                            color:
+                                AppColores.textoSecundario(context)),
                       ],
                     ),
                     onTap: () {
@@ -787,9 +836,15 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                             style: AppTexto.secundario.copyWith(
                                 color: Colors.white.withValues(
                                     alpha: 0.85))),
-                        Text('${fmtMonto(_totalHoy)} CUP',
-                            style: AppTexto.display.copyWith(
-                                color: Colors.white)),
+                        // 1.36 H-B2 (136-640): el total de
+                        // la cabecera de marca cuenta hasta
+                        // su valor.
+                        MontoAnimado(
+                          valor: _totalHoy,
+                          formato: (v) => '${fmtMonto(v)} CUP',
+                          style: AppTexto.display.copyWith(
+                              color: Colors.white),
+                        ),
                         const SizedBox(height: 4),
                         // F3-18: los dos montos van
                         // etiquetados (antes «$X · $Y» sin
@@ -916,6 +971,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                                   fontWeight:
                                       FontWeight.w600),
                             ),
+                            // 1.36 H-B2 (136-638): el desglose
+                            // se anuncia colapsado tras su
+                            // «ver detalle».
+                            subtitle: Text(
+                              '${(e.value['items'] as List).length} cobros · ver detalle',
+                              style: AppTexto.metadato,
+                            ),
                             trailing: Text(
                               '${fmtMonto(e.value['total'] as double)} CUP',
                               style: const TextStyle(
@@ -1003,13 +1065,12 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
                       style: AppTexto.subtitulo),
                   const SizedBox(height: 8),
                   if (_porCobrar.isEmpty)
-                    Tarjeta(
-                      child: Text(
-                          'Nadie vence hoy. Todo al día.',
-                          textAlign: TextAlign.center,
-                          style: AppTexto.secundario.copyWith(
-                              color: AppColores
-                                  .textoSecundario(context))),
+                    // 1.36 H-B2 (136-640): el vacío con el
+                    // componente de la casa.
+                    const EstadoVacio(
+                      icono: Icons.check_circle_rounded,
+                      titulo: 'Nadie vence hoy',
+                      subtitulo: 'Todo al día.',
                     )
                   else
                     for (final c in _porCobrar)
@@ -1078,7 +1139,12 @@ class _FotoMiniState extends State<_FotoMini> {
   @override
   Widget build(BuildContext context) {
     if (_foto == null) return widget.fallback;
-    return ClipRRect(
+    // 1.36 H-B2 (136-638): la miniatura se anuncia como
+    // foto del cliente.
+    return Semantics(
+      image: true,
+      label: 'Foto del cliente',
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: Image.file(
         _foto!,
@@ -1089,6 +1155,7 @@ class _FotoMiniState extends State<_FotoMini> {
         // acotan la decodificación; cacheWidth sí.
         cacheWidth:
             (80 * MediaQuery.devicePixelRatioOf(context)).round(),
+      ),
       ),
     );
   }

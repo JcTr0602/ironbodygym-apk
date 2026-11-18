@@ -237,27 +237,15 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                         )
                       : _entrenadores.isEmpty
                       ? ListView(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.all(AppEspacio.xxl),
-                              child: Column(
-                                children: [
-                                  const Icon(Icons.check_circle_outline_rounded,
-                                      size: 56, color: Colors.green),
-                                  const SizedBox(height: 12),
-                                  const Text('Nada pendiente. Todo cuadrado.',
-                                      style: AppTexto.subtitulo),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'El esperado se calcula solo sobre datos '
-                                    'confirmados por el servidor.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                        color: AppColores.textoSecundario(
-                                            context)),
-                                  ),
-                                ],
-                              ),
+                          children: const [
+                            // 1.36 H-B2 (136-642): el vacío con
+                            // el componente de la casa.
+                            EstadoVacio(
+                              icono: Icons.check_circle_outline_rounded,
+                              titulo: 'Nada pendiente. Todo cuadrado.',
+                              subtitulo: 'El esperado se calcula '
+                                  'solo sobre datos confirmados '
+                                  'por el servidor.',
                             ),
                           ],
                         )
@@ -294,7 +282,15 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                             return Padding(
                               padding:
                                   const EdgeInsets.only(bottom: AppEspacio.sm),
-                              child: Tarjeta(
+                              // 136-642: la tarjeta se anuncia
+                              // con su resumen (nombre y
+                              // pendientes) a los lectores.
+                              child: Semantics(
+                                button: true,
+                                label: '$nombre'
+                                    '${cup > 0 ? ', ${fmtMonto(cup)} CUP pendientes' : ''}'
+                                    '${usd > 0 ? ', ${fmtMonto(usd)} USD pendientes' : ''}',
+                                child: Tarjeta(
                                 onTap: () async {
                                   await Navigator.of(context).push(
                                     RutaIron(
@@ -355,16 +351,35 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                           ClipRRect(
                                             borderRadius:
                                                 BorderRadius.circular(4),
-                                            child: LinearProgressIndicator(
-                                              value: porcion.clamp(0.0, 1.0),
-                                              minHeight: 5,
-                                              backgroundColor: AppColores
-                                                  .borde(context)
-                                                  .withValues(alpha: 0.3),
-                                              valueColor:
-                                                  AlwaysStoppedAnimation<
-                                                          Color>(
-                                                      colorAntiguedad),
+                                            // 136-642: la porción
+                                            // crece animada.
+                                            child: TweenAnimationBuilder<
+                                                double>(
+                                              tween: Tween<double>(
+                                                  begin: 0,
+                                                  end: porcion.clamp(
+                                                      0.0, 1.0)),
+                                              duration:
+                                                  AppMovimiento
+                                                      .resuelta(
+                                                          context,
+                                                          AppMovimiento
+                                                              .media),
+                                              builder:
+                                                  (ctx, fraccion, _) =>
+                                                      LinearProgressIndicator(
+                                                value: fraccion,
+                                                minHeight: 5,
+                                                backgroundColor:
+                                                    AppColores.borde(
+                                                            context)
+                                                        .withValues(
+                                                            alpha: 0.3),
+                                                valueColor:
+                                                    AlwaysStoppedAnimation<
+                                                            Color>(
+                                                        colorAntiguedad),
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -372,6 +387,7 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
                                     ),
                                     const Icon(Icons.chevron_right_rounded),
                                   ],
+                                ),
                                 ),
                               ),
                             );
@@ -716,6 +732,13 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     }
   }
 
+  /// 1.36 H-B2 (136-643): formato del importe sembrado en
+  /// el campo de entregado (entero sin decimales; con
+  /// decimales, dos) — el mismo criterio del cambio de
+  /// moneda.
+  String _fmtEntregado(double v) =>
+      v.toStringAsFixed(v == v.roundToDouble() ? 0 : 2);
+
   void _aviso(String msg) {
     if (!mounted) return;
     mostrarSnack(context, msg);
@@ -757,6 +780,8 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                           padding:
                               const EdgeInsets.only(bottom: AppEspacio.sm),
                           child: SegmentedButton<String>(
+                            // 1.36 H-B2 (136-643): sin check.
+                            showSelectedIcon: false,
                             segments: const [
                               ButtonSegment(
                                   value: 'CUP', label: Text('CUP')),
@@ -836,8 +861,12 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text(
-                              '${fmtMonto(_esperado)} $_moneda',
+                            // 136-643: el pendiente cuenta
+                            // hasta su valor.
+                            MontoAnimado(
+                              valor: _esperado,
+                              formato: (v) =>
+                                  '${fmtMonto(v)} $_moneda',
                               style: AppTexto.displayPequeno.copyWith(
                                   color: AppColores.naranja),
                             ),
@@ -961,13 +990,32 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                           setState(() {});
                         },
                       ),
-                      const SizedBox(height: AppEspacio.sm),
-                      TextField(
-                        controller: _notaCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Nota (opcional)',
-                          border: OutlineInputBorder(),
+                      // 1.36 H-B2 (136-643): atajos del
+                      // importe entregado.
+                      if (_esperado > 0)
+                        Wrap(
+                          spacing: AppEspacio.sm,
+                          children: [
+                            ActionChip(
+                              label: const Text('Todo'),
+                              onPressed: () => setState(() =>
+                                  _entregadoCtrl.text =
+                                      _fmtEntregado(_esperado)),
+                            ),
+                            ActionChip(
+                              label: const Text('Mitad'),
+                              onPressed: () => setState(() =>
+                                  _entregadoCtrl.text = _fmtEntregado(
+                                      _esperado / 2)),
+                            ),
+                          ],
                         ),
+                      const SizedBox(height: AppEspacio.sm),
+                      // 136-643: la nota con el campo de la
+                      // casa, no un TextField crudo.
+                      CampoTexto(
+                        controller: _notaCtrl,
+                        etiqueta: 'Nota (opcional)',
                       ),
                       const SizedBox(height: AppEspacio.md),
                       BotonPrimario(
@@ -1021,16 +1069,20 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                   0,
                                   (a, h) =>
                                       a + diferenciaDeLiquidacion(h));
+                          // 1.36 H-B2 (136-644): el resumen
+                          // del mes en su propia tarjeta.
                           return Padding(
                             padding: const EdgeInsets.only(
                                 bottom: AppEspacio.sm),
-                            child: Text(
-                              'Este mes: ${delMes.length} '
-                              'liquidaci${delMes.length == 1 ? 'ón' : 'ones'} · '
-                              '${fmtMonto(entregadoCup)} CUP entregados'
-                              '${entregadoUsd > 0 ? ' + ${fmtMonto(entregadoUsd)} USD' : ''} · '
-                              'diferencias: ${fmtMonto(diferenciasCup)} CUP',
-                              style: AppTexto.secundario,
+                            child: Tarjeta(
+                              child: Text(
+                                'Este mes: ${delMes.length} '
+                                'liquidaci${delMes.length == 1 ? 'ón' : 'ones'} · '
+                                '${fmtMonto(entregadoCup)} CUP entregados'
+                                '${entregadoUsd > 0 ? ' + ${fmtMonto(entregadoUsd)} USD' : ''} · '
+                                'diferencias: ${fmtMonto(diferenciasCup)} CUP',
+                                style: AppTexto.secundario,
+                              ),
                             ),
                           );
                         }),
@@ -1049,7 +1101,13 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                         Padding(
                           padding: const EdgeInsets.only(
                               bottom: AppEspacio.sm),
-                          child: Tarjeta(
+                          // 136-644: la fila se anuncia con
+                          // su resumen completo.
+                          child: Semantics(
+                            label: '${h['estado'] == 'parcial' ? 'Parcial' : 'Liquidado'}: '
+                                '${fmtMonto(h['monto_entregado'])} ${h['moneda'] ?? 'CUP'}, '
+                                'esperado ${fmtMonto(h['monto_esperado'])}',
+                            child: Tarjeta(
                             child: Column(
                               crossAxisAlignment:
                                   CrossAxisAlignment.start,
@@ -1067,14 +1125,22 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                     // SL-5 G07-8: chip de estado
                                     // de la casa (ChipEstado), no
                                     // un Container armado a mano.
-                                    ChipEstado.semantico(
-                                      texto: h['estado'] == 'parcial'
-                                          ? 'Parcial'
-                                          : 'Liquidado',
-                                      significado:
-                                          h['estado'] == 'parcial'
-                                              ? SignificadoChip.alerta
-                                              : SignificadoChip.exito,
+                                    // 1.36 H-B2 (136-644): el chip
+                                    // cruza al cambiar de estado.
+                                    AnimatedSwitcher(
+                                      duration: AppMovimiento.corta,
+                                      child: ChipEstado.semantico(
+                                        key: ValueKey(
+                                            '${h['estado']}'),
+                                        texto:
+                                            h['estado'] == 'parcial'
+                                                ? 'Parcial'
+                                                : 'Liquidado',
+                                        significado:
+                                            h['estado'] == 'parcial'
+                                                ? SignificadoChip.alerta
+                                                : SignificadoChip.exito,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1100,6 +1166,39 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                   Text('${h['nota']}',
                                       style:
                                           AppTexto.metadato),
+                                // 1.36 H-B2 (136-644): repetir
+                                // esta liquidación siembra su
+                                // importe (y su moneda) en el
+                                // formulario de arriba.
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton.icon(
+                                    icon: const Icon(
+                                        Icons.replay_rounded,
+                                        size: 18),
+                                    label: const Text('Repetir'),
+                                    onPressed: () {
+                                      setState(() {
+                                        if ((h['moneda'] ?? 'CUP') !=
+                                            _moneda) {
+                                          _moneda =
+                                              '${h['moneda'] ?? 'CUP'}';
+                                        }
+                                        _entregadoCtrl.text =
+                                            _fmtEntregado(
+                                                (h['monto_entregado']
+                                                            as num?)
+                                                        ?.toDouble() ??
+                                                    0);
+                                      });
+                                      mostrarSnack(context,
+                                          'Importe cargado en el '
+                                          'formulario de liquidación',
+                                          significado:
+                                              SignificadoChip.exito);
+                                    },
+                                  ),
+                                ),
                                 // T5 (1.20): el expediente de
                                 // esta liquidación, o el botón
                                 // para abrirlo si faltó dinero.
@@ -1176,6 +1275,7 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
                                   ),
                               ],
                             ),
+                          ),
                           ),
                         ),
                     ],
