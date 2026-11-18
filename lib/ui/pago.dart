@@ -861,13 +861,10 @@ class _PagoScreenState extends State<PagoScreen> {
                           },
                         ),
                 ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppEspacio.md),
-            child: Row(
-              children: [
+                const SizedBox(width: AppEspacio.sm),
+                // UI136-03: «Solo vencidos» comparte la fila
+                // del buscador — antes ocupaba una fila
+                // dedicada sobre el listado (Regla 1).
                 ChoiceChip(
                   label: const Text('Solo vencidos'),
                   selected: _soloVencidos,

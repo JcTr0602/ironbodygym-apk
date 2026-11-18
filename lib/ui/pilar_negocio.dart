@@ -39,7 +39,6 @@ import 'ajustes.dart';
 import 'arqueo.dart';
 import 'avisos_entrenador.dart';
 import 'bandeja.dart';
-import 'cierre_mes.dart';
 import 'comparativa_entrenadores.dart';
 import 'componentes.dart';
 import 'congelaciones.dart';
@@ -155,9 +154,12 @@ class _PilarNegocioState extends State<PilarNegocio> {
       case 'nomina':
         return Column(
           children: [
+            // UI136-03: «Cierre de mes» ya no se enlaza
+            // también desde aquí — su puerta en esta pestaña
+            // es la tarjeta «Cierre de mes guiado» de la
+            // propia NominaScreen (una sola puerta por
+            // destino en el primer pantallazo).
             _filaEnlaces([
-              ('Cierre de mes', Icons.lock_rounded,
-                  () => _ir(const CierreMesScreen())),
               ('Precalculada', Icons.calculate_rounded,
                   () => _ir(const NominaPrecalculadaScreen())),
               ('Panel del negocio', Icons.dashboard_rounded,

@@ -504,39 +504,11 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               ],
             ),
           ),
-        // v1.4.1 (Pieza 9): estadísticas de adopción y campaña WA.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.bar_chart_rounded, size: 18),
-                  label: const Text('Adopción'),
-                  onPressed: () => Navigator.of(context).push(
-                    RutaIron(
-                      builder: (_) =>
-                          const EstadisticasAdopcionScreen(),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.campaign_rounded, size: 18),
-                  label: const Text('Campaña WA'),
-                  onPressed: () => Navigator.of(context).push(
-                    RutaIron(
-                      builder: (_) => const CampanaWaScreen(),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        // v1.4.1 (Pieza 9): estadísticas de adopción y campaña
+        // WA. UI136-03: ya no ocupan una fila fija de botones
+        // sobre la lista — viven en el menú «Más herramientas»
+        // de la fila del buscador (Regla 1: lo ocasional va
+        // plegado; el espacio permanente es de la lista).
         // Tarjetas de conteo filtrables (12-15 + Revocados + Sin acceso)
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -617,6 +589,51 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 tooltip: 'Recargar',
                 onPressed: _cargar,
               ),
+              // UI136-03: herramientas ocasionales (adopción
+              // y campaña) tras el menú, no en fila fija.
+              PopupMenuButton<String>(
+                popUpAnimationStyle: estiloAparicionMenu,
+                icon: const Icon(Icons.more_horiz_rounded),
+                tooltip: 'Más herramientas',
+                onSelected: (v) {
+                  if (v == 'adopcion') {
+                    Navigator.of(context).push(
+                      RutaIron(
+                        builder: (_) =>
+                            const EstadisticasAdopcionScreen(),
+                      ),
+                    );
+                  } else if (v == 'campana') {
+                    Navigator.of(context).push(
+                      RutaIron(
+                        builder: (_) => const CampanaWaScreen(),
+                      ),
+                    );
+                  }
+                },
+                itemBuilder: (ctx) => const [
+                  PopupMenuItem(
+                    value: 'adopcion',
+                    child: Row(
+                      children: [
+                        Icon(Icons.bar_chart_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('Adopción'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'campana',
+                    child: Row(
+                      children: [
+                        Icon(Icons.campaign_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('Campaña WA'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -632,24 +649,20 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             children: [
               Flexible(child: _botonFiltrosAcceso()),
               const Spacer(),
+              // UI136-03: el contador vive en esta fila —
+              // antes ocupaba una fila propia sobre la lista.
+              Text(
+                _vista == 'sinacceso'
+                    ? '${sinAccesoFiltrados.length} sin acceso'
+                    : '${filtrados.length} accesos',
+                style: AppTexto.secundario,
+              ),
               if (_hayFiltros)
                 TextButton(
                   onPressed: _limpiarFiltros,
                   child: const Text('Limpiar'),
                 ),
             ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              _vista == 'sinacceso'
-                  ? '${sinAccesoFiltrados.length} clientes sin acceso'
-                  : '${filtrados.length} accesos',
-              style: AppTexto.secundario,
-            ),
           ),
         ),
         const SizedBox(height: AppEspacio.sm),
