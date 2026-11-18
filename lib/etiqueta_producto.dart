@@ -7,21 +7,42 @@
 
 /// Etiqueta compuesta de un producto: «C4 · Pre Entrenos».
 /// Con categoría nula o vacía devuelve solo el nombre.
+/// 1.36 H-B3 (136-760): el nombre se recorta; un nombre vacío
+/// o de espacios no deja el separador huérfano « · Categoría»
+/// — con categoría se muestra solo la categoría y sin ella,
+/// «(Sin nombre)».
 String etiquetaProducto(String nombre, String? categoria) {
+  final nom = nombre.trim();
   final cat = (categoria ?? '').trim();
-  if (cat.isEmpty) return nombre;
-  return '$nombre · $cat';
+  if (nom.isEmpty) return cat.isEmpty ? '(Sin nombre)' : cat;
+  if (cat.isEmpty) return nom;
+  return '$nom · $cat';
 }
 
 /// Mapa id → nombre de categoría desde las filas del espejo
 /// `categorias_suplemento` (cada fila trae `id` y `nombre`).
+/// 1.36 H-B3 (136-760): con [marcarInactivas], las categorías
+/// inactivas se nombran «Nombre (inactiva)» — los selectores
+/// que usan el mapa no ofrecen una categoría muerta como si
+/// estuviera viva (la lectura de activa/activo es tolerante).
 Map<int, String> mapaCategoriasSuplemento(
-    List<Map<String, dynamic>> categorias) {
+    List<Map<String, dynamic>> categorias,
+    {bool marcarInactivas = false}) {
   final mapa = <int, String>{};
   for (final c in categorias) {
     final id = (c['id'] as num?)?.toInt();
     final nombre = '${c['nombre'] ?? ''}'.trim();
-    if (id != null && nombre.isNotEmpty) mapa[id] = nombre;
+    if (id == null || nombre.isEmpty) continue;
+    var activa = true;
+    final v = c['activa'] ?? c['activo'];
+    if (v is bool) activa = v;
+    if (v is num) activa = v != 0;
+    if (v is String) {
+      final t = v.trim().toLowerCase();
+      if (t == '0' || t == 'false') activa = false;
+    }
+    mapa[id] =
+        marcarInactivas && !activa ? '$nombre (inactiva)' : nombre;
   }
   return mapa;
 }
@@ -43,14 +64,34 @@ String etiquetaDeSuplemento(
   );
 }
 
+/// 1.36 H-B3 (136-760): normalización de búsqueda — minúsculas
+/// sin diacríticos y el separador «·» como espacio, para que
+/// «proteina» encuentre «Proteína» y «c4 pre» cruce el
+/// separador de la etiqueta compuesta.
+String normalizarBusquedaProducto(String texto) {
+  var t = texto.toLowerCase().replaceAll('·', ' ');
+  const acentos = {
+    'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a',
+    'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+    'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+    'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o',
+    'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+    'ñ': 'n', 'ç': 'c',
+  };
+  acentos.forEach((k, v) => t = t.replaceAll(k, v));
+  return t.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 /// El buscador de los selectores filtra sobre la cadena COMPUESTA
 /// (ajuste de Argón al ítem 13): «c4» encuentra el producto por su
 /// nombre y «creatinas» encuentra todos los de esa categoría.
 bool coincideBusquedaProducto(
     String consulta, String nombre, String? categoria) {
-  final q = consulta.trim().toLowerCase();
+  final q = normalizarBusquedaProducto(consulta);
   if (q.isEmpty) return true;
-  return etiquetaProducto(nombre, categoria).toLowerCase().contains(q);
+  return normalizarBusquedaProducto(
+          etiquetaProducto(nombre, categoria))
+      .contains(q);
 }
 
 /// Filtro de disponibilidad del catálogo (14/25, PURO):

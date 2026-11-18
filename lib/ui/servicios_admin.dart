@@ -214,7 +214,10 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _botes = botes;
       _pomos = pomos;
       _suplementos = suplementos;
-      _categorias = mapaCategoriasSuplemento(categorias);
+      // 1.36 H-B3 (136-760): selectores con la categoría
+      // inactiva marcada.
+      _categorias = mapaCategoriasSuplemento(categorias,
+          marcarInactivas: true);
       _personas = personas;
       _cargando = false;
       _errorCarga = false;

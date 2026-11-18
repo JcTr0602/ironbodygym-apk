@@ -238,7 +238,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // Nombre del producto en cada pomo: pomo → suplemento directo.
     // Ítem 13: etiqueta compuesta «Nombre · Categoría».
     final cats = mapaCategoriasSuplemento(
-        await LocalDb.instance.allMirror('categorias_suplemento'));
+        await LocalDb.instance.allMirror('categorias_suplemento'),
+        // 1.36 H-B3 (136-760): en selectores, la categoría
+        // inactiva se marca como tal.
+        marcarInactivas: true);
     // 10/25: solo los suplementos de los pomos visibles, por PK,
     // en vez del catálogo completo.
     final supIds = <int>{
