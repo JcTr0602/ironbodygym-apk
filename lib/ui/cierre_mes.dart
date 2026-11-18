@@ -10,6 +10,7 @@ import 'cola.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
+import 'liquidaciones_historial.dart';
 import 'nomina.dart';
 import 'skeleton.dart';
 import 'pendiente.dart';
@@ -56,6 +57,11 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     setState(() {
       _cargando = true;
       _errorCarga = false;
+      // 1.36 H-B3 (136-808): el estado anterior se LIMPIA
+      // al cargar/cambiar de mes — si la evaluación falla,
+      // la pantalla enseña el error con reintento, no la
+      // foto del mes anterior como si fuera la vigente.
+      _estado = null;
     });
     try {
       final e = await evaluarCierreMes(_pref);
@@ -87,6 +93,45 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     _cargar();
   }
 
+  /// 1.36 H-B3 (136-815): selector directo de mes en
+  /// formato YYYY-MM (para cerrar un mes atrasado sin
+  /// caminar flecha a flecha).
+  Future<void> _elegirMesDirecto() async {
+    final ctrl = TextEditingController(text: _pref);
+    final elegido = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ir a un mes'),
+        content: CampoTexto(
+          controller: ctrl,
+          etiqueta: 'Mes (AAAA-MM)',
+          hint: '2026-09',
+          teclado: TextInputType.datetime,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Ir'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (elegido == null || !mounted) return;
+    if (!RegExp(r'^\d{4}-(0[1-9]|1[0-2])$').hasMatch(elegido)) {
+      mostrarSnack(context,
+          'Escribe el mes como AAAA-MM (p. ej. 2026-09).',
+          significado: SignificadoChip.alerta);
+      return;
+    }
+    setState(() => _pref = elegido);
+    _cargar();
+  }
+
   Future<void> _ir(Widget pantalla) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => pantalla),
@@ -97,9 +142,13 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     _cargar();
   }
 
-  Widget _destinoDe(PasoCierreMes paso) => switch (paso.id) {
+  Widget _destinoDe(PasoCierreMes paso) =>
+      // 1.36 H-B3 (136-815/809): la ruta sale del modelo
+      // (destinoId) y «liquidaciones» tiene la suya propia.
+      switch (paso.destinoId ?? paso.id) {
         'sync' => const ColaScreen(),
-        'nomina' || 'liquidaciones' => const NominaScreen(),
+        'nomina' => const NominaScreen(),
+        'liquidaciones' => const LiquidacionesHistorialScreen(),
         'arqueo' => const ArqueoScreen(),
         'entrega' => const PendienteScreen(),
         _ => const AjustesScreen(),
@@ -199,17 +248,30 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                   Row(
                     children: [
                       IconButton(
+                        // 1.36 H-B3 (136-812): tooltip en las
+                        // flechas de mes.
+                        tooltip: 'Mes anterior',
                         onPressed: () => _moverMes(-1),
                         icon: const Icon(Icons.chevron_left_rounded),
                       ),
                       Expanded(
-                        child: Text(
-                          'Cierre de ${_nombreMes}',
-                          style: AppTexto.titulo,
-                          textAlign: TextAlign.center,
+                        // 1.36 H-B3 (136-815): tocar el mes
+                        // abre el selector directo YYYY-MM.
+                        child: InkWell(
+                          onTap: _elegirMesDirecto,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: AppEspacio.sm),
+                            child: Text(
+                              'Cierre de ${_nombreMes}',
+                              style: AppTexto.titulo,
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
                         ),
                       ),
                       IconButton(
+                        tooltip: 'Mes siguiente',
                         onPressed: () => _moverMes(1),
                         icon: const Icon(Icons.chevron_right_rounded),
                       ),
@@ -270,13 +332,62 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                     style: AppTexto.titulo,
                   ),
                 ),
-                if (paso.esManual)
-                  Text('Confirmación manual',
-                      style: AppTexto.secundario),
+                // 1.36 H-B3 (136-815): el estado del paso
+                // con el chip semántico de la casa según el
+                // enum del modelo.
+                ChipEstado.semantico(
+                  significado: switch (paso.estadoPaso) {
+                    EstadoPasoCierre.verificado =>
+                      SignificadoChip.exito,
+                    EstadoPasoCierre.noVerificable =>
+                      SignificadoChip.alerta,
+                    EstadoPasoCierre.bloqueado =>
+                      SignificadoChip.error,
+                    EstadoPasoCierre.pendiente =>
+                      SignificadoChip.info,
+                  },
+                  texto: switch (paso.estadoPaso) {
+                    EstadoPasoCierre.verificado => 'Verificado',
+                    EstadoPasoCierre.noVerificable =>
+                      'No verificable',
+                    EstadoPasoCierre.bloqueado => 'Bloqueado',
+                    EstadoPasoCierre.pendiente =>
+                      'Confirmación manual',
+                  },
+                ),
               ],
             ),
             const SizedBox(height: AppEspacio.sm),
             Text(paso.detalle, style: AppTexto.cuerpo),
+            // 1.36 H-B3 (136-815): la checklist COMPLETA de
+            // bloqueos (el detalle solo resume) y la hora de
+            // confirmación de los pasos manuales.
+            if (paso.bloqueos.length > 1) ...[
+              const SizedBox(height: AppEspacio.sm),
+              for (final b in paso.bloqueos)
+                Padding(
+                  padding:
+                      const EdgeInsets.only(bottom: AppEspacio.xs),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.block_rounded,
+                          size: 15,
+                          color: AppColores.alertaTexto(context)),
+                      const SizedBox(width: AppEspacio.xs),
+                      Expanded(
+                          child: Text(b, style: AppTexto.cuerpo)),
+                    ],
+                  ),
+                ),
+            ],
+            if (paso.confirmadoEn != null) ...[
+              const SizedBox(height: AppEspacio.sm),
+              Text(
+                'Confirmado el ${textoUltimaSyncOk(paso.confirmadoEn)}',
+                style: AppTexto.secundario,
+              ),
+            ],
             const SizedBox(height: AppEspacio.md),
             Wrap(
               spacing: AppEspacio.sm,
@@ -284,9 +395,12 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                 OutlinedButton.icon(
                   onPressed: () => _ir(_destinoDe(paso)),
                   icon: const Icon(Icons.open_in_new_rounded),
-                  label: Text(switch (paso.id) {
+                  label: Text(switch (paso.destinoId ?? paso.id) {
                     'sync' => 'Ir a la cola',
-                    'nomina' || 'liquidaciones' => 'Ir a Nómina',
+                    'nomina' => 'Ir a Nómina',
+                    // 1.36 H-B3 (136-809): liquidaciones a
+                    // SU pantalla, con su rótulo.
+                    'liquidaciones' => 'Ir a liquidaciones',
                     'arqueo' => 'Ir a Arqueo',
                     'entrega' => 'Ir a Pendientes',
                     _ => 'Ir a Ajustes',

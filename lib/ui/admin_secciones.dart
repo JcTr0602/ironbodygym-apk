@@ -666,6 +666,11 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   // Módulo 6 (datos visibles): últimos eventos de carga/purga.
   List<Map<String, dynamic>> _eventosCarga = [];
   bool _cargando = true;
+  // 1.36 H-B3 (136-808): si la última lectura FALLÓ, los
+  // datos en pantalla son los de la lectura anterior y van
+  // SELLADOS como «sin verificar» (no se pintan como la
+  // foto vigente).
+  bool _datosSinVerificar = false;
 
   @override
   void initState() {
@@ -931,12 +936,16 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
         _enTurnoSinFila = enTurnoSinFila;
         _eventosCarga = eventosCarga;
         _cargando = false;
+        _datosSinVerificar = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _ultimoError = 'No se pudo leer el diagnóstico: $e';
         _cargando = false;
+        // 1.36 H-B3 (136-808): lo que queda en pantalla es
+        // la foto anterior: sellada, no vigente.
+        _datosSinVerificar = _datos.isNotEmpty;
       });
     }
   }
@@ -1143,6 +1152,16 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                             ),
                           ),
                       ],
+                    ]),
+                  if (_datosSinVerificar)
+                    seccionAdmin(context, Icons.unpublished_rounded,
+                        'Datos sin verificar', [
+                      Text(
+                          'La última lectura del diagnóstico falló: '
+                          'las cifras de arriba son de la lectura '
+                          'anterior, no la foto de ahora.',
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores.alertaTexto(context))),
                     ]),
                   if (_ultimoError != null)
                     seccionAdmin(context, Icons.error_outline_rounded, 'Último error', [
@@ -1498,6 +1517,12 @@ class _VerificacionEspejoScreenState
     setState(() {
       _cargando = true;
       _fallo = false;
+      // 1.36 H-B3 (136-808): al RECARGAR, el resultado de
+      // la verificación anterior y sus deltas (_antes) se
+      // limpian — quedaban pintados como si fueran de la
+      // foto nueva.
+      _resultado = null;
+      _antes = {};
     });
     try {
       final conteos = await _contar();
@@ -1659,8 +1684,30 @@ class _VerificacionEspejoScreenState
                           style: AppTexto.cuerpo),
                       if (_errorSync != null &&
                           _errorSync!.isNotEmpty)
-                        Text('Último error: $_errorSync',
-                            style: AppTexto.cuerpo),
+                        // 1.36 H-B3 (136-831): el último
+                        // error se pinta COMO error (color e
+                        // icono), no con el estilo de cuerpo.
+                        Padding(
+                          padding: const EdgeInsets.only(
+                              top: AppEspacio.xs),
+                          child: Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.error_outline_rounded,
+                                  size: 18,
+                                  color:
+                                      AppColores.errorTexto(context)),
+                              const SizedBox(width: AppEspacio.xs),
+                              Expanded(
+                                child: Text('Último error: $_errorSync',
+                                    style: AppTexto.cuerpo.copyWith(
+                                        color: AppColores.errorTexto(
+                                            context))),
+                              ),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       const Text(
                         'Alcance: conteos iguales no certifican '

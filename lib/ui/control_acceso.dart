@@ -977,11 +977,36 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     // Antes se contaba _seleccion entera y las selecciones ocultas
     // tras buscar bloqueaban el tope antes de llegar a 40 visibles.
     final visiblesIds = lista.map((e) => e.clienteId).toSet();
+    // 1.36 H-B3 (136-808): si la última consulta FALLÓ, la
+    // lista es la anterior y va SELLADA arriba — antes solo
+    // el contador decía «sin consultar» y la lista se
+    // pintaba como vigente.
+    final sellada = _sinAccesoFallo;
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.lg),
-      itemCount: lista.length,
+      itemCount: lista.length + (sellada ? 1 : 0),
       itemBuilder: (ctx, i) {
-        final c = lista[i];
+        if (sellada && i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+            child: Row(
+              children: [
+                Icon(Icons.unpublished_rounded,
+                    size: 18,
+                    color: AppColores.alertaTexto(ctx)),
+                const SizedBox(width: AppEspacio.xs),
+                const Expanded(
+                  child: Text(
+                    'Lista sin verificar: la última consulta falló; '
+                    'esto es lo último que se supo.',
+                    style: AppTexto.secundario,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        final c = lista[i - (sellada ? 1 : 0)];
         final sel = _seleccion.contains(c.clienteId);
         return Card(
           child: ListTile(

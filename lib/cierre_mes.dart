@@ -37,6 +37,20 @@ import 'ultimo_sync.dart';
 /// app se cierra a mitad de ruta, al volver cada paso está
 /// como quedó. Los pasos automáticos NO se guardan: se
 /// evalúan en vivo cada vez (su verdad es la BD, no la meta).
+/// 1.36 H-B3 (136-815): el estado de un paso con nombre —
+/// la UI pinta su chip con los tokens de la casa según
+/// este enum, no según dos bools sueltos.
+enum EstadoPasoCierre { verificado, pendiente, bloqueado, noVerificable }
+
+/// 1.36 H-B3 (136-815): nombres acotados para los
+/// detalles: 'A, B, C y 2 más' en vez del join sin límite
+/// que desbordaba la tarjeta. PURO.
+String resumenNombres(List<String> nombres, {int max = 3}) {
+  if (nombres.length <= max) return nombres.join(', ');
+  final visibles = nombres.take(max).join(', ');
+  return '$visibles y ${nombres.length - max} más';
+}
+
 class PasoCierreMes {
   final String id;
   final String titulo;
@@ -47,13 +61,43 @@ class PasoCierreMes {
   /// automática honesta); auto = se lee de los datos.
   final bool esManual;
 
+  /// 1.36 H-B3 (136-815): TODOS los bloqueos del paso, uno
+  /// por línea — el detalle resume, pero la tarjeta puede
+  /// desplegar la lista completa (antes solo se veía el
+  /// primer motivo).
+  final List<String> bloqueos;
+
+  /// 1.36 H-B3 (136-815): cuándo confirmó el dueño un paso
+  /// manual (estaba guardado en la meta y no se exponía).
+  final DateTime? confirmadoEn;
+
+  /// 1.36 H-B3 (136-815): el paso no se pudo COMPROBAR
+  /// (lectura fallida o entrenador sin identificador): no
+  /// es «pendiente», es «no verificable».
+  final bool noVerificable;
+
+  /// 1.36 H-B3 (136-815): id de la pantalla que resuelve
+  /// el paso (la ruta vive en el modelo, no solo en la UI).
+  final String? destinoId;
+
   const PasoCierreMes({
     required this.id,
     required this.titulo,
     required this.detalle,
     required this.verificado,
     required this.esManual,
+    this.bloqueos = const [],
+    this.confirmadoEn,
+    this.noVerificable = false,
+    this.destinoId,
   });
+
+  EstadoPasoCierre get estadoPaso {
+    if (verificado) return EstadoPasoCierre.verificado;
+    if (noVerificable) return EstadoPasoCierre.noVerificable;
+    if (esManual) return EstadoPasoCierre.pendiente;
+    return EstadoPasoCierre.bloqueado;
+  }
 }
 
 class EstadoCierreMes {
@@ -188,11 +232,32 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
         atrasados == 0 &&
         sinRegistroEnTurno == 0,
     esManual: false,
+    // 1.36 H-B3 (136-815): la checklist completa y el
+    // estado «no verificable» cuando la lectura falló.
+    bloqueos: [
+      if (pendientes > 0)
+        '$pendientes operaciones sin subir en este teléfono',
+      if (!telefonosVerificables)
+        'No se pudo comprobar la sincronización de los teléfonos',
+      if (atrasados > 0) '$atrasados teléfono(s) en turno atrasados',
+      if (sinRegistroEnTurno > 0)
+        '$sinRegistroEnTurno teléfono(s) en turno sin registro de sync',
+    ],
+    noVerificable: !telefonosVerificables,
+    destinoId: 'sync',
   );
 
   // --- Foto de nómina del mes (pasos 1 a 4) ---
   final foto = await fotoNominaMes(pref);
   final personas = foto.personas;
+
+  // 1.36 H-B3 (136-815): la hora de confirmación de los
+  // pasos manuales sale de la meta (estaba guardada y no
+  // se exponía en el modelo).
+  DateTime? confirmadoDe(String id) {
+    final v = manuales[id];
+    return v is String ? DateTime.tryParse(v) : null;
+  }
 
   final pasoNomina = PasoCierreMes(
     id: 'nomina',
@@ -203,6 +268,8 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
         'cuadra.',
     verificado: manualOk('nomina'),
     esManual: true,
+    confirmadoEn: confirmadoDe('nomina'),
+    destinoId: 'nomina',
   );
 
   final faltanLiquidar = <String>[
@@ -217,9 +284,14 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
         : faltanLiquidar.isEmpty
             ? 'Todos los entrenadores tienen su nómina de '
                 'este mes liquidada.'
-            : 'Falta liquidar a: ${faltanLiquidar.join(', ')}.',
+            // 1.36 H-B3 (136-815): nombres acotados.
+            : 'Falta liquidar a: ${resumenNombres(faltanLiquidar)}.',
     verificado: personas.isNotEmpty && faltanLiquidar.isEmpty,
     esManual: false,
+    bloqueos: [
+      for (final n in faltanLiquidar) 'Falta liquidar a $n',
+    ],
+    destinoId: 'liquidaciones',
   );
 
   // --- Arqueo y pendiente a entregar por entrenador ---
@@ -261,18 +333,27 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
         ? 'Sin datos de entrenadores para este mes.'
         : sinTelegram.isNotEmpty
             ? 'No se puede verificar el arqueo de: '
-                '${sinTelegram.join(', ')} (su usuario no trae '
+                '${resumenNombres(sinTelegram)} (su usuario no trae '
                 'identificador de Telegram).'
             : arqueoPendiente.isEmpty
                 ? 'Todo el efectivo cobrado ya pasó por una '
                     'liquidación de caja.'
                 : 'Efectivo sin liquidar de: '
-                    '${arqueoPendiente.join(', ')}. Haz el '
+                    '${resumenNombres(arqueoPendiente)}. Haz el '
                     'arqueo con cada uno.',
     verificado: personas.isNotEmpty &&
         arqueoPendiente.isEmpty &&
         sinTelegram.isEmpty,
     esManual: false,
+    // 1.36 H-B3 (136-815): checklist completa + estado.
+    bloqueos: [
+      for (final n in sinTelegram)
+        '$n: sin identificador de Telegram (no verificable)',
+      for (final n in arqueoPendiente)
+        '$n: efectivo sin pasar por liquidación de caja',
+    ],
+    noVerificable: sinTelegram.isNotEmpty,
+    destinoId: 'arqueo',
   );
   final pasoEntrega = PasoCierreMes(
     id: 'entrega',
@@ -281,18 +362,26 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
         ? 'Sin datos de entrenadores para este mes.'
         : sinTelegram.isNotEmpty
             ? 'No se puede verificar la entrega de: '
-                '${sinTelegram.join(', ')} (su usuario no trae '
+                '${resumenNombres(sinTelegram)} (su usuario no trae '
                 'identificador de Telegram).'
             : entregaPendiente.isEmpty
                 ? 'Ningún entrenador te debe efectivo por '
                     'entregar.'
                 : 'Aún te deben entregar: '
-                    '${entregaPendiente.join(', ')}. Confirma '
+                    '${resumenNombres(entregaPendiente)}. Confirma '
                     'la entrega con cada uno.',
     verificado: personas.isNotEmpty &&
         entregaPendiente.isEmpty &&
         sinTelegram.isEmpty,
     esManual: false,
+    bloqueos: [
+      for (final n in sinTelegram)
+        '$n: sin identificador de Telegram (no verificable)',
+      for (final n in entregaPendiente)
+        '$n: aún debe entregar efectivo',
+    ],
+    noVerificable: sinTelegram.isNotEmpty,
+    destinoId: 'entrega',
   );
 
   final pasoRespaldo = PasoCierreMes(
@@ -303,6 +392,8 @@ Future<EstadoCierreMes> evaluarCierreMes(String pref) async {
         'fuera del teléfono.',
     verificado: manualOk('respaldo'),
     esManual: true,
+    confirmadoEn: confirmadoDe('respaldo'),
+    destinoId: 'respaldo',
   );
 
   // (M2-A A8) lectura tolerante: un cerradoEn corrupto (no

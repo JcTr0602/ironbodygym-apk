@@ -192,8 +192,9 @@ class _SolicitudesAdelantoScreenState
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColores.naranja));
+      // 1.36 H-B3 (136-812): el componente de carga de la
+      // casa, no el spinner crudo.
+      return const EstadoCargando(texto: 'Cargando solicitudes…');
     }
     // (136-802) fallo de carga: error con reintento, no vacío.
     if (_errorCarga != null) {
@@ -345,25 +346,19 @@ class _SolicitudesAdelantoScreenState
   }
 
   Widget _chipEstado(String estado) {
-    final color = switch (estado) {
-      'aprobado' => AppColores.exitoOscuro,
-      'rechazado' => AppColores.error,
-      _ => AppColores.alertaOscuro,
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        switch (estado) {
-          'aprobado' => 'Aprobada',
-          'rechazado' => 'Rechazada',
-          _ => 'Pendiente',
-        },
-        style: AppTexto.minuscula.copyWith(color: color, fontWeight: FontWeight.w600),
-      ),
+    // 1.36 H-B3 (136-812): ChipEstado.semantico de la casa
+    // en vez del Container manual con colores *Oscuro.
+    return ChipEstado.semantico(
+      significado: switch (estado) {
+        'aprobado' => SignificadoChip.exito,
+        'rechazado' => SignificadoChip.error,
+        _ => SignificadoChip.alerta,
+      },
+      texto: switch (estado) {
+        'aprobado' => 'Aprobada',
+        'rechazado' => 'Rechazada',
+        _ => 'Pendiente',
+      },
     );
   }
 }

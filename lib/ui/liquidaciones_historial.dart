@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../negocio.dart';
 import 'app_bar.dart';
 import 'arqueo.dart';
@@ -65,7 +66,9 @@ class _LiquidacionesHistorialScreenState
       AppLog.error('liquidaciones', 'carga_fallo', d: '$e');
       if (mounted) {
         setState(() {
-          _falloCarga = '$e';
+          // 1.36 H-B3 (136-812): el detalle del EstadoError
+          // va amable; el crudo ya quedó en la bitácora.
+          _falloCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }
@@ -263,15 +266,13 @@ class _LiquidacionesHistorialScreenState
                     onRefresh: _cargar,
                     child: visibles.isEmpty
                         ? ListView(
+                            // 1.36 H-B3 (136-812): el vacío
+                            // con la primitiva de la casa.
                             children: const [
-                              Padding(
-                                padding:
-                                    EdgeInsets.all(AppEspacio.xxl),
-                                child: Text(
-                                  'Sin liquidaciones que mostrar.',
-                                  textAlign: TextAlign.center,
-                                  style: AppTexto.secundario,
-                                ),
+                              EstadoVacio(
+                                icono: Icons.receipt_long_rounded,
+                                titulo:
+                                    'Sin liquidaciones que mostrar.',
                               ),
                             ],
                           )

@@ -446,7 +446,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _verificarCierresAutoReal() async {
-    final ejecuto = await verificarCierresAutomaticos();
+    // 1.36 H-B3 (136-817): el barrido devuelve resultado
+    // (estado/motivo/turnoIds); el diálogo solo sale si de
+    // verdad se cerró algo.
+    final resultado = await verificarCierresAutomaticos();
+    final ejecuto = resultado.turnoIds.isNotEmpty;
     if (ejecuto && mounted) {
       // Mostrar diálogo informativo.
       // 1.35 (UI-12, oleada 1): con el diálogo de la casa.

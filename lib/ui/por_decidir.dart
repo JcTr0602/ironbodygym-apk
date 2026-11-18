@@ -249,6 +249,11 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
   int _alertasCatalogo = 0;
   bool _catalogoOk = true;
   List<Map<String, dynamic>> _arqueos = const [];
+  // 1.36 H-B3 (136-808): la lectura de arqueos sellada
+  // como las congelaciones y el catálogo — un fallo no se
+  // traga dejando la lista anterior (o el vacío) como si
+  // fuera la foto de ahora.
+  bool _arqueosOk = true;
 
   @override
   void initState() {
@@ -304,8 +309,15 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
     }
     try {
       final a = await (widget.cargarArqueos ?? entrenadoresConPendiente)();
-      if (mounted) setState(() => _arqueos = a);
-    } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _arqueos = a;
+          _arqueosOk = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _arqueosOk = false);
+    }
     // 1.32 (Fase 3 — Momento 4, 5º): las alertas de
     // catálogo salen del espejo LOCAL de suplementos
     // (sin red, como todo lo local de esta bandeja).
@@ -548,6 +560,11 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
             onTap: () => widget.onIr(const ComunidadPanelScreen()),
           ),
           // --- Arqueos (Momento 3A): liquidar sin salir ---
+          if (!_arqueosOk)
+            const Text(
+              'Arqueos: no se pudo leer el pendiente de arqueo.',
+              style: AppTexto.metadato,
+            ),
           for (final e in _arqueos.take(2))
             ListTile(
               dense: true,

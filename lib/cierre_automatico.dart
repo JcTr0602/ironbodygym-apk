@@ -8,6 +8,38 @@ import 'app_log.dart';
 import 'tiempo.dart';
 import 'turno_service.dart';
 
+/// 1.36 H-B3 (136-816): «abierto» normalizado — la caché
+/// de horarios puede traerlo como bool, 1 o '1'/'true'
+/// según la vía que la escribió. PURO.
+bool esAbiertoHorario(dynamic v) =>
+    v == true ||
+    v == 1 ||
+    (v is String && (v == '1' || v.toLowerCase() == 'true'));
+
+/// 1.36 H-B3 (136-816): parseo flexible de 'H:mm'/'HH:mm'
+/// (la guarda de longitud descartaba '9:30' antes de
+/// parsear). Null si no es una hora válida. PURO.
+({int h, int m})? parseHoraFlexible(String? s) {
+  if (s == null) return null;
+  final partes = s.trim().split(':');
+  if (partes.length != 2) return null;
+  final h = int.tryParse(partes[0].trim());
+  final m = int.tryParse(partes[1].trim());
+  if (h == null || m == null) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return (h: h, m: m);
+}
+
+/// 1.36 H-B3 (136-816): las únicas franjas que el
+/// auto-cierre sabe cerrar. Un turno renombrado o
+/// desconocido NO cae a cierre_2: fail-closed. PURO.
+bool esTurnoConocidoAutoCierre(String turno) {
+  final t = turno.toLowerCase();
+  return t.contains('mañana') ||
+      t.contains('manana') ||
+      t.contains('tarde');
+}
+
 /// Decisión pura del auto-cierre (1.14, M1.30): ¿ya pasaron 30 min
 /// del cierre configurado para este turno? El día y la hora salen
 /// del TURNO (fecha_turno + cierre del día de semana del turno),
@@ -44,26 +76,29 @@ bool debeAutoCerrarTurno({
     (h) => (h['dia_semana'] as num?)?.toInt() == diaSemanaTurno,
     orElse: () => {},
   );
-  if (horarioDia.isEmpty || horarioDia['abierto'] != true) {
+  if (horarioDia.isEmpty || !esAbiertoHorario(horarioDia['abierto'])) {
     return false;
   }
   final turnoNombre = turno.toLowerCase();
   String? horaCierreStr;
   if (turnoNombre.contains('mañana') || turnoNombre.contains('manana')) {
     horaCierreStr = horarioDia['cierre_1']?.toString();
-  } else {
+  } else if (turnoNombre.contains('tarde')) {
     horaCierreStr =
         horarioDia['cierre_2']?.toString() ?? horarioDia['cierre_1']?.toString();
-  }
-  if (horaCierreStr == null || horaCierreStr.length < 5) return false;
-  final partes = horaCierreStr.substring(0, 5).split(':');
-  final hCierre = int.tryParse(partes[0]) ?? -1;
-  final mCierre = int.tryParse(partes.length > 1 ? partes[1] : '0') ?? -1;
-  // Panel 1.14 (Luna): horas fuera de rango también se normalizan
-  // (25:00 pasa al día siguiente). Un horario corrupto no cierra.
-  if (hCierre < 0 || hCierre > 23 || mCierre < 0 || mCierre > 59) {
+  } else {
+    // 1.36 H-B3 (136-816): turno desconocido = fail-closed
+    // (antes TODO lo no-mañana caía a cierre_2 y un turno
+    // renombrado se cerraba con la hora de la tarde).
     return false;
   }
+  // 1.36 H-B3 (136-816): parseo flexible ('9:30' vale) con
+  // rangos validados dentro del helper — un horario
+  // corrupto no cierra (Panel 1.14 Luna).
+  final hc = parseHoraFlexible(horaCierreStr);
+  if (hc == null) return false;
+  final hCierre = hc.h;
+  final mCierre = hc.m;
   final fechaCierre = DateTime(
     baseFecha.year,
     baseFecha.month,
@@ -75,9 +110,20 @@ bool debeAutoCerrarTurno({
   return ahora.isAfter(limiteCierre);
 }
 
+/// 1.36 H-B3 (136-817): el barrido devuelve su RESULTADO
+/// — estado ('sin_verificar' | 'sin_pendientes' |
+/// 'con_cierres' | 'fallo'), motivo legible y los
+/// turnoIds cerrados — para que la UI distinga «no había
+/// nada» de «no se pudo comprobar» (antes todo era un
+/// bool y ambos casos se pintaban igual).
+typedef ResultadoBarridoAutoCierre = ({
+  String estado,
+  String motivo,
+  List<String> turnoIds,
+});
+
 /// Verifica y ejecuta cierres automáticos pendientes.
-/// Retorna true si se ejecutó algún auto-cierre.
-Future<bool> verificarCierresAutomaticos() async {
+Future<ResultadoBarridoAutoCierre> verificarCierresAutomaticos() async {
   try {
     final prefs =
         await SharedPreferences.getInstance();
@@ -91,7 +137,11 @@ Future<bool> verificarCierresAutomaticos() async {
       // ninguna señal de por qué.
       AppLog.info('cierre_automatico', 'sin_cache_horarios',
           d: 'sin cache_horarios_gym: el barrido no corre');
-      return false; // Sin horarios, no se puede verificar
+      return (
+        estado: 'sin_verificar',
+        motivo: 'sin cache de horarios',
+        turnoIds: const <String>[]
+      );
     }
 
     final horarios = (jsonDecode(cacheRaw) as List)
@@ -104,14 +154,27 @@ Future<bool> verificarCierresAutomaticos() async {
     // Obtener turnos sin cerrar
     final turnos =
         await TurnoService.instance.turnosSinResolver();
-    if (turnos.isEmpty) return false;
+    if (turnos.isEmpty) {
+      return (
+        estado: 'sin_pendientes',
+        motivo: 'sin turnos por resolver',
+        turnoIds: const <String>[]
+      );
+    }
 
-    bool ejecutoAlguno = false;
+    final cerrados = <String>[];
     for (final turno in turnos) {
       final turnoId = '${turno['turno_id'] ?? ''}';
       final fechaTurnoStr =
           '${turno['fecha_turno'] ?? ''}';
       if (turnoId.isEmpty || fechaTurnoStr.isEmpty) {
+        continue;
+      }
+      // 1.36 H-B3 (136-816): turno desconocido = fail-closed
+      // CON log (no cae a la hora de la tarde).
+      if (!esTurnoConocidoAutoCierre('${turno['turno'] ?? ''}')) {
+        AppLog.error('cierre_automatico', 'turno_desconocido',
+            d: 'turno=$turnoId nombre=${turno['turno']}');
         continue;
       }
 
@@ -134,7 +197,7 @@ Future<bool> verificarCierresAutomaticos() async {
           // entrenador («tu turno se cerró automáticamente»).
           automatico: true,
         );
-        ejecutoAlguno = true;
+        cerrados.add(turnoId);
       } catch (e) {
         // Continuar con el siguiente turno, pero con señal
         // (auditoría 1.21 A-06): un fallo permanente aquí era
@@ -144,9 +207,15 @@ Future<bool> verificarCierresAutomaticos() async {
             d: 'turno=$turnoId error=$e');
       }
     }
-    return ejecutoAlguno;
+    return (
+      estado: cerrados.isEmpty ? 'sin_pendientes' : 'con_cierres',
+      motivo: cerrados.isEmpty
+          ? 'ningun turno cumplia el auto-cierre'
+          : '${cerrados.length} cierre(s) automatico(s)',
+      turnoIds: cerrados,
+    );
   } catch (e) {
     AppLog.error('cierre_automatico', 'barrido_fallo', d: '$e');
-    return false;
+    return (estado: 'fallo', motivo: '$e', turnoIds: const <String>[]);
   }
 }
