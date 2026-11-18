@@ -128,6 +128,11 @@ class _VentaSuplementoScreenState
   String _clienteNombre = '';
   bool _promoActiva = false;
   bool _guardando = false;
+  // (1.36 H-A2 136-754) bandera de confirmación desde el
+  // PRIMER toque: cubre permiso, pre-chequeo de stock, vista
+  // previa y aviso de duplicado — los awaits previos a
+  // _guardando dejaban una ventana para una segunda venta.
+  bool _confirmando = false;
   // v1.3.7 (Fase B §6.2): venta a fiado (solo con cliente).
   bool _esFiado = false;
 
@@ -338,10 +343,21 @@ class _VentaSuplementoScreenState
   }
 
   Future<void> _confirmar() async {
+    // (136-754) la bandera nace AQUÍ, antes del primer await, y
+    // se libera en finally pase lo que pase: la regresión 1 de
+    // Argón (botón muerto tras una validación fallida) se evita
+    // porque el finally la libera SIEMPRE, no porque nazca tarde.
+    if (_confirmando || _guardando) return;
+    setState(() => _confirmando = true);
+    try {
+      await _confirmarFlujo();
+    } finally {
+      if (mounted) setState(() => _confirmando = false);
+    }
+  }
+
+  Future<void> _confirmarFlujo() async {
     // v1.3.1: guarda de reentrada (evita venta duplicada).
-    // Argón (regresión 1): _guardando solo se activa DESPUÉS de pasar todas
-    // las validaciones y el diálogo de confirmación. Activarlo antes dejaba
-    // el botón muerto si una validación fallaba.
     if (_guardando) return;
     // Yunque B (YB-SER-01): el servidor exige
     // can_vender_suplementos para venta_suplemento y
@@ -1074,7 +1090,8 @@ class _VentaSuplementoScreenState
                 // la cantidad supera el stock (el pre-chequeo en
                 // _confirmar cubre el mismo caso si el stock
                 // cambia en caliente).
-                onPressed: (_guardando ||
+                onPressed: (_confirmando ||
+                        _guardando ||
                         stock < 1 ||
                         _cantidad > stock)
                     ? null

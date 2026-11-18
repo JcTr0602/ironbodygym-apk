@@ -164,10 +164,13 @@ List<Map<String, dynamic>> filtrarVentasHistorial({
         (v['suplemento_id'] as num?)?.toInt() != productoId) {
       return false;
     }
+    // (1.36 H-A2 136-764) la moneda se lee con el lector
+    // canónico (ausente = CUP, tolerante): el cast crudo
+    // dejaba fuera ventas cuya moneda venía en otro formato.
     if (moneda == 'USD') {
-      if ((v['moneda'] as String?) != 'USD') return false;
+      if (LocalDb.monedaDe(v) != 'USD') return false;
     } else if (moneda == 'CUP') {
-      if ((v['moneda'] as String?) == 'USD') return false;
+      if (LocalDb.monedaDe(v) == 'USD') return false;
     }
     final f = '${v['fecha'] ?? ''}';
     if (f.length >= 10) {
@@ -225,6 +228,9 @@ class _HistorialVentasScreenState
   // candado del comprador en cada fila (el espejo ya lo trae).
   Map<int, Map<String, dynamic>> _clientes = {};
   bool _cargando = true;
+  // (136-764) fallo de carga: EstadoError con reintento, no
+  // un «Sin ventas registradas» falso.
+  String? _errorCarga;
   // Resaltado (4/25): id + llave por fila para desplazar a la venta.
   int? _resaltado;
   final _llaves = <int, GlobalKey>{};
@@ -323,6 +329,7 @@ class _HistorialVentasScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -384,6 +391,7 @@ class _HistorialVentasScreenState
     }
     if (!mounted) return;
     setState(() {
+      _errorCarga = null;
       _ventas = ventas;
       _productos = mapa;
       _anuladasPendientes = anuladas;
@@ -526,6 +534,20 @@ class _HistorialVentasScreenState
   Widget _cuerpo() {
     if (_cargando) {
       return const EstadoCargando(texto: 'Cargando ventas…');
+    }
+    // (136-764) fallo de carga con reintento.
+    if (_errorCarga != null && _ventas.isEmpty) {
+      return EstadoError(
+        titulo: 'No se pudo cargar el historial de ventas',
+        detalle: _errorCarga,
+        onReintentar: () {
+          setState(() {
+            _errorCarga = null;
+            _cargando = true;
+          });
+          _cargar();
+        },
+      );
     }
     if (_ventas.isEmpty) {
       return const EstadoVacio(
@@ -710,8 +732,12 @@ class _HistorialVentasScreenState
         (v['fiado_cliente_id'] as num?)?.toInt();
     final clienteVenta =
         cidVenta != null ? _clientes[cidVenta] : null;
-    final ventaProtegida =
-        clienteVenta != null && esVistaProtegida(clienteVenta);
+    // (136-764) el DUEÑO no tiene vista protegida: sin pasar
+    // esDueno, su propia fila le ocultaba total, recibo y
+    // detalle como a un entrenador.
+    final ventaProtegida = clienteVenta != null &&
+        esVistaProtegida(clienteVenta,
+            esDueno: AuthService().isOwner);
     final fecha = '${v['fecha'] ?? ''}'.length >= 10
         ? '${v['fecha']}'.substring(0, 10)
         : '${v['fecha'] ?? ''}';
@@ -973,7 +999,9 @@ class _HistorialVentasScreenState
               // NO ve teléfono, estado ni vencimiento del comprador
               // protegido; solo el nombre y el candado. El resto de
               // la venta (producto, precio) no es personal.
-              if (cliente != null && esVistaProtegida(cliente))
+              if (cliente != null &&
+                  esVistaProtegida(cliente,
+                      esDueno: AuthService().isOwner))
                 const Row(
                   children: [
                     Icon(Icons.lock_rounded,

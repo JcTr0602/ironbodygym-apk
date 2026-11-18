@@ -137,6 +137,12 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   // antes de activar _guardando; sin esta bandera, dos toques
   // rápidos podían abrir dos confirmaciones y vender dos veces.
   bool _confirmandoPrecio = false;
+  // (1.36 H-A2 136-750) la promo y los clientes cargan async:
+  // hasta que _cargar termina (o falla), Confirmar está
+  // bloqueado — antes se podía vender con la promo aún sin
+  // leer (se perdía el mes gratis) o sin clientes cargados.
+  bool _cargandoDatos = true;
+  String? _errorCargaDatos;
   List<Map<String, dynamic>> _clientes = [];
 
   // Lote 1 Argón: lectura estricta del oficial, igual que la pantalla
@@ -178,6 +184,9 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   }
 
   bool get _puedeConfirmar {
+    // (136-750) sin promo/clientes cargados (o con su carga
+    // fallida) no se confirma.
+    if (_cargandoDatos || _errorCargaDatos != null) return false;
     if (_guardando) return false;
     final p = _precioVenta;
     if (p == null || p <= 0) return false;
@@ -208,17 +217,32 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
   }
 
   Future<void> _cargar() async {
-    final aj = await LocalDb.instance.getAjustes();
-    final clientes = await LocalDb.instance.allMirror('clientes');
-    if (!mounted) return;
-    setState(() {
-      // Yunque 3 (K6-3): lector tolerante de flags A2-D2.
-      _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
-      _clientes = clientes
-          .where((c) => (c['estado'] as String?) == 'activo')
-          .toList()
-        ..sort(compararPorNombre);
-    });
+    // (136-750) si LocalDb falla, el diálogo lo dice con
+    // reintento en vez de vender a ciegas sin promo ni clientes.
+    try {
+      final aj = await LocalDb.instance.getAjustes();
+      final clientes = await LocalDb.instance.allMirror('clientes');
+      if (!mounted) return;
+      setState(() {
+        // Yunque 3 (K6-3): lector tolerante de flags A2-D2.
+        _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
+        _clientes = clientes
+            .where((c) => (c['estado'] as String?) == 'activo')
+            .toList()
+          ..sort(compararPorNombre);
+        _cargandoDatos = false;
+        _errorCargaDatos = null;
+      });
+    } catch (e) {
+      AppLog.error('detalle_suplemento', 'venta_rapida_cargar_fallo',
+          d: '$e');
+      if (!mounted) return;
+      setState(() {
+        _cargandoDatos = false;
+        _errorCargaDatos = 'No se pudieron cargar la promo ni '
+            'los clientes de este teléfono.';
+      });
+    }
   }
 
   @override
@@ -264,6 +288,27 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
             'una venta de ${widget.sup['nombre']} x$_cantidad',
       );
       if (!sigue || !mounted) return;
+    }
+    // (136-750) el stock se RELEE del espejo al confirmar: la
+    // foto del widget pudo quedar vieja (otra venta, un ajuste)
+    // y vender sobre ella descuenta un stock que ya no hay.
+    {
+      final sidStock = (widget.sup['id'] as num?)?.toInt();
+      if (sidStock != null) {
+        final filas = await LocalDb.instance.allMirror('suplementos');
+        final fila = filas
+            .where((f) => (f['id'] as num?)?.toInt() == sidStock)
+            .firstOrNull;
+        final stockVigente =
+            (fila?['stock'] as num?)?.toInt() ?? widget.stock;
+        if (!mounted) return;
+        if (_cantidad > stockVigente) {
+          mostrarSnack(context,
+              'El stock cambió: quedan $stockVigente. Ajusta la cantidad.',
+              significado: SignificadoChip.error);
+          return;
+        }
+      }
     }
     setState(() => _guardando = true);
     try {
@@ -490,9 +535,36 @@ class _DialogoVentaRapidaState extends State<_DialogoVentaRapida> {
             ] else
               _clienteSeleccionado(),
             const SizedBox(height: AppEspacio.sm),
+            // (136-750) carga de promo/clientes en curso o
+            // fallida: se dice aquí y Confirmar queda bloqueado.
+            if (_cargandoDatos)
+              const Text('Cargando promo y clientes…',
+                  style: AppTexto.secundario)
+            else if (_errorCargaDatos != null) ...[
+              Text(_errorCargaDatos!,
+                  style: AppTexto.cuerpo.copyWith(
+                      color: AppColores.errorTexto(context))),
+              TextButton.icon(
+                onPressed: () => setState(() {
+                  _cargandoDatos = true;
+                  _errorCargaDatos = null;
+                  _cargar();
+                }),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Reintentar'),
+              ),
+            ],
             // La promo solo aplica con cliente asociado.
-            if (_conCliente && _promoActiva)
+            // (136-750 + regla de Jc) con FIADO activo la promo
+            // NO aplica nunca: el aviso de «mes gratis» se
+            // oculta y se dice lo contrario, sin ambigüedad.
+            if (_conCliente && _promoActiva && !_esFiado)
               _infoPromo()
+            else if (_conCliente && _promoActiva && _esFiado)
+              const Text(
+                'Venta fiada: no aplica la promo de 1 mes gratis.',
+                style: AppTexto.secundario,
+              )
             else if (!_conCliente)
               _advertenciaSinPromo(),
             // 1.25 T91: fiado y nota, como en la venta
