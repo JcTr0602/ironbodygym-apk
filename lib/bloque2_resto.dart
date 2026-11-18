@@ -54,6 +54,7 @@ import 'negocio.dart'
         idsLiquidados,
         esPendiente,
         esPagoAnulado,
+        esPagoCasa,
         esPagoDiarioEfectivo,
         fechaNacDeCarnet,
         ventasSuplementosCup,
@@ -523,20 +524,31 @@ ResumenIngresos resumenIngresos(
 /// ingreso contable (anulada, Casa en dosis con precio 0, sin fecha).
 /// [fuente] es 'pagos' | 'pagos_diarios' | 'ventas_suplementos' |
 /// 'servicio_ventas'. El monto sale de la fila tal cual (congelado).
+/// [casaIds]: cuentas a la Casa del espejo, para excluir los
+/// pagos por pertenencia (la marca propia de la fila manda
+/// siempre; sin conjunto, solo manda la marca).
 FilaIngreso? filaIngresoDesdeEspejo(
-    String fuente, Map<String, dynamic> r) {
+    String fuente, Map<String, dynamic> r,
+    {Set<int>? casaIds}) {
   if (r['anulada'] == 1 ||
       r['anulada'] == true ||
       r['anulado'] == 1 ||
       r['anulado'] == true) {
     return null;
   }
-  final fechaRaw = '${r['fecha'] ?? ''}';
-  if (fechaRaw.length < 10) return null;
-  final fecha = fechaRaw.substring(0, 10);
+  // ARG136-02: la fecha es la de NEGOCIO Habana
+  // (fechaNegocioHabana), como en el resto de lectores de
+  // dinero — antes salía del substring crudo y un timestamp
+  // UTC de madrugada caía en el día UTC, no en el suyo.
+  final fecha = fechaNegocioHabana(r['fecha']);
+  if (fecha.isEmpty) return null;
   final metodo = '${r['metodo'] ?? 'efectivo'}';
   switch (fuente) {
     case 'pagos':
+      // ARG136-02: la Casa tampoco suma en mensualidades
+      // (la rama de servicio_ventas ya miraba su marca; esta
+      // no miraba ni la marca ni la pertenencia).
+      if (esPagoCasa(r, casaIds ?? const <int>{})) return null;
       final monto = (r['monto'] as num?)?.toDouble() ?? 0;
       if (monto == 0) return null;
       return FilaIngreso('mensualidades', metodo, monto, fecha);
@@ -594,17 +606,25 @@ FilaIngreso? filaIngresoDesdeEspejo(
 /// - `pagos` va por la columna indexada `fecha`
 ///   (pagosPorFiltro) con UN DÍA de margen por debajo:
 ///   la columna guarda la fecha de NEGOCIO Habana y la
-///   conversión [filaIngresoDesdeEspejo] usa los 10
-///   primeros caracteres del JSON crudo; entre ambas
-///   puede haber un día de diferencia (un timestamp UTC
-///   de madrugada). El margen garantiza que ninguna
-///   fila del rango se quede fuera del precorte; el
-///   rango EXACTO lo sigue aplicando [resumenIngresos]
-///   sobre la fecha de la conversión, como antes.
+///   conversión [filaIngresoDesdeEspejo] usa la misma
+///   fecha de negocio (ARG136-02; antes usaba los 10
+///   primeros caracteres del JSON crudo y entre ambas
+///   podía haber un día de diferencia). El margen se
+///   conserva como superconjunto de seguridad para
+///   filas legadas; el rango EXACTO lo sigue aplicando
+///   [resumenIngresos] sobre la fecha de la conversión,
+///   como antes. Sobre los pagos mandan además los dos
+///   cortes de los demás lectores de dinero: la
+///   anulación viva en la cola de este teléfono
+///   (ARG136-02: sin ella, un pago anulado offline
+///   sumaba hasta que el pull retiraba la fila) y la
+///   exclusión de las Cuentas a la Casa, que entra por
+///   la propia conversión.
 /// - Las otras tres fuentes van por `mirrorPorFecha`,
-///   que filtra EN SQL sobre el mismo substring del
-///   JSON que usa la conversión: el precorte es exacto,
-///   sin margen.
+///   que pre-filtra con ventana ensanchada y filtra
+///   fino con la misma fecha de negocio que usa la
+///   conversión: el precorte es superconjunto, sin
+///   pérdidas.
 Future<List<FilaIngreso>> filasIngresoPeriodo(
     String desde, String hasta) async {
   final filas = <FilaIngreso>[];
@@ -612,9 +632,17 @@ Future<List<FilaIngreso>> filasIngresoPeriodo(
   final desdePrecorte = d == null
       ? desde
       : _isoFecha(d.subtract(const Duration(days: 1)));
+  final anuladosCola =
+      await LocalDb.instance.pagosAnuladosEnCola();
+  final casaIds = await LocalDb.instance.idsCuentasCasa();
   for (final p
       in await LocalDb.instance.pagosPorFiltro(fechaDesde: desdePrecorte)) {
-    final f = filaIngresoDesdeEspejo('pagos', p);
+    // ARG136-02: el overlay de anulaciones en cola SOLO
+    // se aplica a 'pagos' — el conjunto trae ids de esa
+    // tabla y aplicarlo a otra fuente colisionaría por
+    // número.
+    if (esPagoAnulado(p, anuladosCola)) continue;
+    final f = filaIngresoDesdeEspejo('pagos', p, casaIds: casaIds);
     if (f != null) filas.add(f);
   }
   for (final fuente in const [

@@ -1484,6 +1484,12 @@ bool _esPagoCasa(Map<String, dynamic> p, Set<int> casas) {
   return false;
 }
 
+/// Fachada pública de [_esPagoCasa] para los lectores de
+/// dinero de otros módulos (ARG136-02: el reporte C5 de
+/// bloque2_resto la necesita sin duplicar la regla).
+bool esPagoCasa(Map<String, dynamic> p, Set<int> casas) =>
+    _esPagoCasa(p, casas);
+
 /// 1.23 (auditoría extra #6): ¿este pago del espejo está anulado
 /// a efectos de dinero? Dos fuentes, cualquiera basta:
 /// - la marca del propio JSON (`anulado`): la pone la marca

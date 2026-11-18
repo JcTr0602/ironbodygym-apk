@@ -570,12 +570,16 @@ void main() {
       expect(rNuevo.transferencia, rViejo.transferencia);
       expect(rNuevo.total, rViejo.total);
       expect(rNuevo.porConcepto, rViejo.porConcepto);
-      // Y las cifras esperadas a mano (el borde UTC entra
-      // por su fecha cruda 2026-11-01, no por la columna):
+      // Y las cifras esperadas a mano. ARG136-02: el borde
+      // UTC (2026-11-01T02:30Z) entra por su fecha de
+      // NEGOCIO Habana, 2026-10-31 — queda FUERA de
+      // noviembre en las dos vías (antes la conversión lo
+      // contaba en noviembre por el substring crudo y el
+      // pago 2 sumaba 2500 a transferencia/mensualidades).
       expect(rNuevo.efectivo, 4500);
-      expect(rNuevo.transferencia, 3700);
-      expect(rNuevo.total, 8200);
-      expect(rNuevo.porConcepto['mensualidades'], 4500);
+      expect(rNuevo.transferencia, 1200);
+      expect(rNuevo.total, 5700);
+      expect(rNuevo.porConcepto['mensualidades'], 2000);
       expect(rNuevo.porConcepto['diarios'], 600);
       expect(rNuevo.porConcepto['suplementos'], 1600);
       expect(rNuevo.porConcepto['dosis'], 1200);
