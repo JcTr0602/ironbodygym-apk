@@ -519,29 +519,41 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
               _tarjetaFiltro('todos', 'Todos', '${todos.length}',
                   Icons.people_rounded,
                   AppColores.textoSecundario(context)),
-              _tarjetaFiltro('activos', 'Activos', '$activos',
-                  Icons.check_circle_rounded, AppColores.exitoOscuro),
-              _tarjetaFiltro('nunca', 'Nunca han entrado', '$nunca',
-                  Icons.login_rounded,
-                  AppColores.textoSecundario(context)),
-              _tarjetaFiltro('7d', 'Últimos 7 días', '$ult7',
-                  Icons.schedule_rounded, AppColores.infoOscuro),
-              _tarjetaFiltro('bloqueados', 'Bloqueados', '$bloqueados',
-                  Icons.lock_rounded, AppColores.alertaOscuro),
-              _tarjetaFiltro('revocados', 'Revocados', '$revocados',
-                  Icons.block_rounded,
-                  AppColores.textoSecundario(context)),
+              // UI136-09: las tarjetas de conteo en cero no
+              // se construyen (regla de Jc); se quedan si son
+              // la vista activa, para no dejar al usuario en
+              // un filtro sin tarjeta.
+              if (activos > 0 || _vista == 'activos')
+                _tarjetaFiltro('activos', 'Activos', '$activos',
+                    Icons.check_circle_rounded, AppColores.exitoOscuro),
+              if (nunca > 0 || _vista == 'nunca')
+                _tarjetaFiltro('nunca', 'Nunca han entrado', '$nunca',
+                    Icons.login_rounded,
+                    AppColores.textoSecundario(context)),
+              if (ult7 > 0 || _vista == '7d')
+                _tarjetaFiltro('7d', 'Últimos 7 días', '$ult7',
+                    Icons.schedule_rounded, AppColores.infoOscuro),
+              if (bloqueados > 0 || _vista == 'bloqueados')
+                _tarjetaFiltro('bloqueados', 'Bloqueados', '$bloqueados',
+                    Icons.lock_rounded, AppColores.alertaOscuro),
+              if (revocados > 0 || _vista == 'revocados')
+                _tarjetaFiltro('revocados', 'Revocados', '$revocados',
+                    Icons.block_rounded,
+                    AppColores.textoSecundario(context)),
               // 1.25 T88: si la consulta de sin-acceso
               // FALLO, el contador dice «sin consultar» —
               // nunca un 0 falso (la lista ya lo distingue
               // con _sinAccesoFallo; la tarjeta no).
-              _tarjetaFiltro('sinacceso', 'Sin acceso',
-                  _sinAccesoFallo
-                      ? 'sin consultar'
-                      : '${_sinAcceso.length}',
-                  Icons.person_add_rounded,
-                  AppColores.naranjaOscuro,
-                  valorEsTexto: _sinAccesoFallo),
+              if (_sinAccesoFallo ||
+                  _sinAcceso.isNotEmpty ||
+                  _vista == 'sinacceso')
+                _tarjetaFiltro('sinacceso', 'Sin acceso',
+                    _sinAccesoFallo
+                        ? 'sin consultar'
+                        : '${_sinAcceso.length}',
+                    Icons.person_add_rounded,
+                    AppColores.naranjaOscuro,
+                    valorEsTexto: _sinAccesoFallo),
             ],
           ),
         ),

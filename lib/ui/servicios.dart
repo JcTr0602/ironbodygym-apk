@@ -2687,28 +2687,33 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ],
                 ),
               ),
-              Expanded(
-                child: Column(
-                  children: [
-                    Icon(Icons.local_drink_rounded, size: 20, color: AppColores.textoSecundario(context)),
-                    Text('$aguaSuelta',
-                        style: AppTexto.titulo),
-                    Text('Pomos sueltos',
-                        style: AppTexto.metadato),
-                  ],
+              // UI136-09: la columna en cero no aparece
+              // (regla de Jc); «Dosis hoy» es la principal
+              // y se queda siempre.
+              if (aguaSuelta > 0)
+                Expanded(
+                  child: Column(
+                    children: [
+                      Icon(Icons.local_drink_rounded, size: 20, color: AppColores.textoSecundario(context)),
+                      Text('$aguaSuelta',
+                          style: AppTexto.titulo),
+                      Text('Pomos sueltos',
+                          style: AppTexto.metadato),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    Icon(Icons.home_rounded, size: 20, color: AppColores.textoSecundario(context)),
-                    Text('$casaN',
-                        style: AppTexto.titulo),
-                    Text('Cuenta Casa',
-                        style: AppTexto.metadato),
-                  ],
+              if (casaN > 0)
+                Expanded(
+                  child: Column(
+                    children: [
+                      Icon(Icons.home_rounded, size: 20, color: AppColores.textoSecundario(context)),
+                      Text('$casaN',
+                          style: AppTexto.titulo),
+                      Text('Cuenta Casa',
+                          style: AppTexto.metadato),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
           // UI136-02: fuera el sello «incluye N por

@@ -1086,6 +1086,11 @@ class _ServiciosEstadisticasScreenState
     );
   }
 
+  /// UI136-09: ¿el valor viene en cero? (numérico o texto;
+  /// nulo cuenta como cero).
+  bool _esCero(dynamic v) =>
+      v is num ? v == 0 : (num.tryParse('$v') ?? 0) == 0;
+
   Widget _fila(String etiqueta, String valor, {bool negrita = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -1342,10 +1347,16 @@ class _ServiciosEstadisticasScreenState
               _fila('Rendimiento del bote',
                   '${e.value['rendimiento']} dosis'),
               _fila('Dosis servidas', '${e.value['servidas']}'),
-              _fila('Casa', '${e.value['casa']}'),
-              _fila('Mermas', '${e.value['merma']}'),
-              _fila('Cortesías', '${e.value['cortesia']}'),
-              _fila('Consumo del staff', '${e.value['staff']}'),
+              // UI136-09: el detalle en cero no aparece
+              // (regla de Jc).
+              if (!_esCero(e.value['casa']))
+                _fila('Casa', '${e.value['casa']}'),
+              if (!_esCero(e.value['merma']))
+                _fila('Mermas', '${e.value['merma']}'),
+              if (!_esCero(e.value['cortesia']))
+                _fila('Cortesías', '${e.value['cortesia']}'),
+              if (!_esCero(e.value['staff']))
+                _fila('Consumo del staff', '${e.value['staff']}'),
               // v1.13.0 (ajuste 6): punto de equilibrio y margen %
               // con guarda NaN: bote nuevo o solo Casa/mermas →
               // «Pendiente de primeras ventas», nunca división
@@ -1387,6 +1398,14 @@ class _ServiciosEstadisticasScreenState
   Widget _tarjetaInversion() {
     final b = _b;
     String cup(String k) => '${fmtMonto(b[k])} CUP';
+    // UI136-09: fila de detalle que solo aparece con
+    // movimiento (regla de Jc: en cero no aparece). Los
+    // totales de la tarjeta (ingresos, margen, neto) se
+    // quedan siempre: son el resumen, no el ruido.
+    Widget filaSi(String etiqueta, String clave) =>
+        _esCero(b[clave])
+            ? const SizedBox.shrink()
+            : _fila(etiqueta, cup(clave));
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
@@ -1404,26 +1423,29 @@ class _ServiciosEstadisticasScreenState
                   ? 'Inversión en botes (este mes)'
                   : 'Inversión en botes (acumulada)',
               cup('inversion_botes')),
-          _fila(
+          filaSi(
               _periodo == 'mes'
                   ? 'Inversión en agua (este mes)'
                   : 'Inversión en agua (acumulada)',
-              cup('inversion_agua')),
+              'inversion_agua'),
           const Divider(height: 20),
           _fila('Ingresos por dosis', cup('ing_sin')),
-          _fila('Ingresos dosis con agua', cup('ing_con')),
-          _fila('Ingresos pomos sueltos', cup('ing_agua')),
+          filaSi('Ingresos dosis con agua', 'ing_con'),
+          filaSi('Ingresos pomos sueltos', 'ing_agua'),
           _fila('Ingresos totales', cup('ingresos'), negrita: true),
           const Divider(height: 20),
           _fila('Costo de dosis vendidas', cup('costo_dosis')),
-          _fila('Costo del agua vendida', cup('costo_agua')),
-          _fila('Mermas (a costo)', cup('mermas_costo')),
+          filaSi('Costo del agua vendida', 'costo_agua'),
+          filaSi('Mermas (a costo)', 'mermas_costo'),
           _fila('Margen', cup('margen'), negrita: true),
-          _fila('Comisión a entrenadores', cup('comision')),
+          filaSi('Comisión a entrenadores', 'comision'),
           _fila('Neto del dueño', cup('neto_dueno'), negrita: true),
           const Divider(height: 20),
-          _fila('Casa: ${(b['casa_n'] as int?) ?? 0} consumos (a costo)',
-              cup('casa_costo')),
+          if (!_esCero(b['casa_costo']) ||
+              ((b['casa_n'] as int?) ?? 0) > 0)
+            _fila(
+                'Casa: ${(b['casa_n'] as int?) ?? 0} consumos (a costo)',
+                cup('casa_costo')),
           _fila('Margen medio por dosis', cup('margen_medio')),
           _fila('% de dosis con agua',
               '${((b['pct_con_agua'] as double?) ?? 0).toStringAsFixed(0)} %'),

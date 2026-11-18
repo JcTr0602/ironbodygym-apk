@@ -938,14 +938,22 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
         // cuántos pomos hay y cuántos andan bajos (≤4, el
         // rojo del semáforo), sin abrir fila por fila.
         if (pomos.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-            child: Text(
-              '${pomos.length} pomos · '
-              '${pomos.where((l) => ((l['saldo_local'] as num?)?.toInt() ?? 99) <= 4).length} con pocas dosis',
-              style: AppTexto.secundario,
-            ),
-          ),
+          Builder(builder: (context) {
+            final bajos = pomos
+                .where((l) =>
+                    ((l['saldo_local'] as num?)?.toInt() ?? 99) <= 4)
+                .length;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+              child: Text(
+                // UI136-09: el «· N con pocas dosis» en
+                // cero no aparece (regla de Jc).
+                '${pomos.length} pomos'
+                '${bajos > 0 ? ' · $bajos con pocas dosis' : ''}',
+                style: AppTexto.secundario,
+              ),
+            );
+          }),
         if (pomos.isEmpty)
           // 1.36 H-B3 (136-728): el vacío de pomos es el
           // EstadoVacio de la casa, no un Text plano.

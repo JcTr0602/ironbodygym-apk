@@ -826,7 +826,14 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
                   const SizedBox(height: 12),
                   const Text('Desglose por concepto',
                       style: AppTexto.titulo),
-                  for (final c in kConceptosC5)
+                  // UI136-09: los conceptos sin movimiento
+                  // no pintan su tarjeta en cero (regla de
+                  // Jc); «plus» se queda siempre: su tarjeta
+                  // es de estado (consulta al servidor), no
+                  // una fila de importe. Si todo está en
+                  // cero, manda el EstadoVacio de arriba.
+                  for (final c in kConceptosC5.where((c) =>
+                      c == 'plus' || (r.porConcepto[c] ?? 0) != 0))
                     Tarjeta(
                       child: ListTile(
                         contentPadding: EdgeInsets.zero,
