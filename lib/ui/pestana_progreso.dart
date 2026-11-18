@@ -114,6 +114,30 @@ class Medicion {
   }
 }
 
+/// (1.36 H-A2 136-565) Fusión de la lista RPC con las
+/// mediciones locales PENDIENTES (nacidas por la vía de ops,
+/// espejado=false): la RPC aún no las conoce y sustituir la
+/// lista entera por la suya las hacía desaparecer de la
+/// pestaña hasta que bajaban al espejo. Se deduplica por
+/// identidad (idCrudo —UUID de la vía de ops o id de servidor
+/// en texto— o, sin crudo, el id numérico) y el conjunto sale
+/// ordenado por creado_en descendente, como ambas fuentes.
+/// PURO.
+List<Medicion> fusionarMedicionesRpcConPendientes(
+    List<Medicion> rpc, List<Medicion> pendientesLocales) {
+  String clave(Medicion m) =>
+      (m.idCrudo != null && m.idCrudo!.isNotEmpty)
+          ? m.idCrudo!
+          : '${m.id}';
+  final clavesRpc = rpc.map(clave).toSet();
+  final fusion = <Medicion>[
+    ...rpc,
+    for (final m in pendientesLocales)
+      if (!clavesRpc.contains(clave(m))) m,
+  ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return fusion;
+}
+
 /// Parsea números aceptando coma decimal (teclados en español).
 double? _parseNum(String text) =>
     double.tryParse(text.trim().replaceAll(',', '.'));
@@ -194,10 +218,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
     // teléfono (la lección de la ficha del 2026-11-02).
     final cid = int.tryParse(widget.clienteId);
     var pintoLocal = false;
+    // (136-565) las filas locales crudas se conservan: al llegar
+    // la RPC, sus pendientes (espejado=false) se fusionan.
+    var localesCrudas = <Map<String, dynamic>>[];
     try {
       final locales = cid == null
           ? <Map<String, dynamic>>[]
           : await medicionesClienteLocal(cid);
+      localesCrudas = locales;
       if (mounted && locales.isNotEmpty) {
         setState(() {
           _mediciones = _desdeEspejoLocal(locales);
@@ -228,7 +256,13 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           .toList();
       if (mounted) {
         setState(() {
-          _mediciones = lista;
+          // (136-565) la RPC no pisa las pendientes locales.
+          final pendientes = _desdeEspejoLocal([
+            for (final r in localesCrudas)
+              if (r['espejado'] == false) r,
+          ]);
+          _mediciones =
+              fusionarMedicionesRpcConPendientes(lista, pendientes);
           _cargando = false;
           _error = null;
         });

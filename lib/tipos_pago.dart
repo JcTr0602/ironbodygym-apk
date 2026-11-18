@@ -322,7 +322,16 @@ Future<List<TipoPago>> getTiposPago(
   // sintetiza desde la clave fija 'mensualidad_menores' — el mismo
   // patrón de respaldo que usa precioMenor() — colocado junto al
   // mensual. Si el blob SÍ trae 'menores', se respeta tal cual.
-  if (paraMenor && !tipos.any((t) => t.id == 'menores')) {
+  // (1.36 H-A2 136-632) la síntesis también corre cuando el
+  // 'menores' presente NO es activo/visible: el filtro final lo
+  // descartaría y el cobro del menor caería al primer tipo de la
+  // lista (p. ej. el semanal de 600) en vez de a su tarifa. Se
+  // considera «visible» un menores activo, con nombre y monto.
+  final hayMenoresVisible = tipos.any((t) =>
+      t.id == 'menores' && t.activo && t.nombre.isNotEmpty && t.monto > 0);
+  if (paraMenor && !hayMenoresVisible) {
+    // El menores no visible sale: el sintético ocupa su lugar.
+    tipos.removeWhere((t) => t.id == 'menores');
     // (M2-A A6) el monto sintetizado sale de la fuente única.
     final montoMenor = precioMenoresDesdeAjustes(aj);
     if (montoMenor > 0) {

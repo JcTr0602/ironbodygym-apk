@@ -391,6 +391,18 @@ class _PendienteScreenState extends State<PendienteScreen> {
       // Argón B2: recalcular _totalUsd en el setState optimista.
       _totalUsd = _entrenadores.fold(
           0.0, (acc, e) => acc + e.totalPorMoneda('USD'));
+      // (1.36 H-A2 136-670) el total autoritativo CUP también se
+      // descuenta en el setState optimista, como en cobro parcial
+      // y liquidación: sin esto la cabecera seguía enseñando el
+      // total anterior (con los pagos ya confirmados) hasta la
+      // próxima carga. El ajuste neto se recalcula contra el
+      // bruto que queda en pantalla.
+      if (_totalAutoritativoCup != null) {
+        _totalAutoritativoCup = (_totalAutoritativoCup! - totalCup)
+            .clamp(0.0, double.infinity);
+        final ajuste = _totalDueno - _totalAutoritativoCup!;
+        _ajusteNetoCup = ajuste.abs() > 0.01 ? ajuste : 0;
+      }
       _confirmando = true;
     });
     try {
