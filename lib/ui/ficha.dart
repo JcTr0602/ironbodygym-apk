@@ -4099,7 +4099,7 @@ class _FichaScreenState extends State<FichaScreen> {
                                         BorderRadius.circular(
                                             AppRadio.sm),
                                   ),
-                                  child: Icon(
+                                  child: const Icon(
                                       Icons.person_outline_rounded,
                                       size: 18,
                                       // 1.36 H-C1 (136-483):
