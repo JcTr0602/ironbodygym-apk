@@ -627,8 +627,9 @@ String resumenMostradorSync({
   // PERSISTIDO (avisoSyncCorto de la foto, p. ej. tras un
   // reinicio con sesion_invalida) también es un fallo
   // conocido, aunque la fase ya sea idle y lastError de
-  // memoria sea null. Su rama va tras hayNovedades==true
-  // y antes de hayNovedades==null — el mismo orden que
+  // memoria sea null. Comparte la rama de error con
+  // [hayError] y va tras hayNovedades==true y antes de
+  // hayNovedades==null — el mismo orden que
   // varianteBannerDe: el error conocido manda sobre el
   // «sin verificar», pero no sobre pendientes, novedades
   // ni la falta de conexión, que van antes.
@@ -653,17 +654,22 @@ String resumenMostradorSync({
         ? 'Queda 1 por atender fuera de la cola'
         : 'Quedan $fueraCola por atender fuera de la cola';
   }
-  if (hayError) {
-    return 'La última sincronización falló: toca '
-        '«Sincronizar ahora»';
-  }
+  // 1.36 (136-892): prioridad DOCUMENTADA de las ramas —
+  // pendientes → sin conexión → novedades → error. El orden
+  // anterior ponía hayError antes que la conexión y las
+  // novedades: un fallo VIEJO (p. ej. el de anoche) tapaba el
+  // «Sin conexión» de ahora y el «Hay novedades» real, y el
+  // Mostrador mandaba a «Sincronizar ahora» contra un muro.
+  // El error (de memoria o persistido, S-01) manda solo
+  // sobre el «sin verificar» de hayNovedades==null, como en
+  // varianteBannerDe.
   if (enLinea == false) {
     return 'Sin conexión: todo se subirá solo cuando vuelva';
   }
   if (hayNovedades == true) {
     return 'Hay novedades por bajar del servidor';
   }
-  if (avisoPersistido) {
+  if (hayError || avisoPersistido) {
     return 'La última sincronización falló: toca '
         '«Sincronizar ahora»';
   }

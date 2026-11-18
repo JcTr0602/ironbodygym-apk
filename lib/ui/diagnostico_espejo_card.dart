@@ -77,6 +77,11 @@ class _TarjetaDiagnosticoEspejoState
 
   Future<void> _sincronizar() async {
     setState(() => _sincronizando = true);
+    // 1.36 (136-908): el desenlace del ciclo se CAPTURA: la
+    // tarjeta jamás afirma que la sincronización terminó
+    // bien cuando el ciclo falló, ni siquiera si el espejo
+    // acabó con filas (pudieron bajar en una bajada parcial).
+    var cicloOk = false;
     try {
       // G08-3: el problema de esta tarjeta es un espejo
       // vacío que necesita BAJADA — el botón corría solo el
@@ -85,12 +90,16 @@ class _TarjetaDiagnosticoEspejoState
       final ciclo = widget.cicloSyncParaTest;
       if (ciclo != null) {
         await ciclo();
+        cicloOk = true;
       } else {
-        await SyncEngine.instance.run(forzar: true);
+        final res = await SyncEngine.instance.run(forzar: true);
+        cicloOk = res.corrio && res.error == null;
       }
     } catch (_) {
-      // El motor ya registra y clasifica sus fallos; aquí solo
-      // importa re-evaluar el espejo tras el intento.
+      // El motor ya registra y clasifica sus fallos; aquí el
+      // ciclo queda marcado como NO ok y se re-evalúa el
+      // espejo tras el intento.
+      cicloOk = false;
     }
     if (!mounted) return;
     setState(() => _sincronizando = false);
@@ -100,20 +109,41 @@ class _TarjetaDiagnosticoEspejoState
     // COMPROBAR que el espejo ya tiene filas. Antes se
     // afirmaba «Datos recuperados» por el solo hecho de
     // que el diagnóstico se apagara, sin mirar el espejo.
+    // 1.36 (136-908): la comprobación cuenta las filas
+    // LEGIBLES del espejo (conteoMirrorLegible, el mismo
+    // conteo de la evaluación del W1), no el conteo crudo:
+    // con el JSON dañado, el conteo crudo veía filas que
+    // ninguna pantalla puede leer y la tarjeta celebraba
+    // una recuperación fantasma.
     var filas = 0;
     try {
-      filas = await LocalDb.instance.contar('clientes');
+      filas =
+          (await LocalDb.instance.conteoMirrorLegible('clientes'))
+              .legibles;
     } catch (_) {}
     if (!mounted) return;
-    if (filas > 0) {
+    if (filas > 0 && cicloOk) {
       mostrarSnack(context, 'Datos recuperados. Ya se ven los clientes.',
           significado: SignificadoChip.exito);
-    } else {
+    } else if (filas > 0) {
+      mostrarSnack(
+          context,
+          'Ya se ven clientes, pero la sincronización no '
+          'terminó bien. Vuelve a sincronizar para '
+          'completarla.',
+          significado: SignificadoChip.alerta);
+    } else if (cicloOk) {
       mostrarSnack(
           context,
           'La sincronización terminó, pero la lista de '
           'clientes sigue vacía.',
           significado: SignificadoChip.alerta);
+    } else {
+      mostrarSnack(
+          context,
+          'La sincronización no se pudo completar y la '
+          'lista de clientes sigue vacía.',
+          significado: SignificadoChip.error);
     }
   }
 

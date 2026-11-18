@@ -142,6 +142,7 @@ class SaludSyncScreen extends StatefulWidget {
 class _SaludSyncScreenState extends State<SaludSyncScreen> {
   bool _cargando = true;
   bool _comprobando = false;
+  bool _errorCarga = false;
   SaludSyncDatos? _datos;
 
   @override
@@ -151,12 +152,27 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
   }
 
   Future<void> _cargar() async {
-    final d = await cargarSaludSync();
-    if (!mounted) return;
-    setState(() {
-      _datos = d;
-      _cargando = false;
-    });
+    // 1.36 (136-897): la lectura de salud puede FALLAR (BD
+    // cerrada a mitad de arranque, meta ilegible): sin este
+    // try/catch la excepción se perdía y la pantalla se
+    // quedaba en «Leyendo la salud del sync…» para siempre,
+    // sin error ni salida. Ahora el fallo se pinta como
+    // error con reintento, como manda el patrón de la casa.
+    try {
+      final d = await cargarSaludSync();
+      if (!mounted) return;
+      setState(() {
+        _datos = d;
+        _errorCarga = false;
+        _cargando = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorCarga = true;
+        _cargando = false;
+      });
+    }
   }
 
   // S-03: delega en la pura de salud_sync — con la
@@ -251,9 +267,20 @@ class _SaludSyncScreenState extends State<SaludSyncScreen> {
     final d = _datos;
     return Scaffold(
       appBar: appBarIron(context, 'Salud de la sincronización'),
-      body: _cargando || d == null
+      body: _cargando
           ? const EstadoCargando(texto: 'Leyendo la salud del sync…')
-          : RefrescoIron(
+          : _errorCarga || d == null
+              ? EstadoError(
+                  titulo: 'No se pudo leer la salud del sync',
+                  detalle: 'La lectura local falló. La '
+                      'sincronización no se ha tocado: vuelve a '
+                      'intentarlo.',
+                  onReintentar: () {
+                    setState(() => _cargando = true);
+                    _cargar();
+                  },
+                )
+              : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

@@ -459,8 +459,17 @@ Future<SaludSyncDatos> cargarSaludSync() async {
   // añadía era el lookup DNS de enLinea (hasta 5 s con la
   // red en negro), un dato que esta pantalla ni muestra.
   // La Salud pinta ahora sin esperar a la red.
-  final serverSeq =
-      int.tryParse(await db.getMeta('server_seq') ?? '0') ?? 0;
+  // 1.36 (136-897): esta lectura va guardada como el resto
+  // de la foto (patrón S-03): si la meta no se puede leer, la
+  // foto sale con serverSeq desconocido (0 = sin comparar,
+  // los semáforos componen «sin verificar» por sus otras
+  // señales) en vez de tumbar TODA la salud y dejar la
+  // pantalla en «cargando» eterno.
+  var serverSeq = 0;
+  try {
+    serverSeq =
+        int.tryParse(await db.getMeta('server_seq') ?? '0') ?? 0;
+  } catch (_) {}
 
   final tablas = <EstadoTablaSalud>[];
   var divergentes = 0;
