@@ -424,7 +424,7 @@ const novedades = [
   ]),
   Novedad('1.2.1', [
     'Categorías de suplementos',
-    '12 bugs corregidos y mejoras en Actividad',
+    '12 errores corregidos y mejoras en Actividad',
     'Fixes de auditoría de seguridad',
   ]),
   Novedad('1.2.0', [
@@ -470,16 +470,16 @@ const novedades = [
     'Caja rápida en Agregar pago',
     'Reporte de pagos diarios por fecha y turno',
     'Eliminar foto de cliente desde la ficha',
-    'Actividad con badge, pendiente a recoger',
+    'Actividad con aviso de pendiente a recoger',
   ]),
   Novedad('1.0.14', [
     'Menores de 18 pagan 1500 CUP/mes automáticamente',
     'Usuarios APK: rol, dispositivo, historial de accesos, foto, compartir credenciales por WhatsApp',
     'Cierre de turno sin pagos diarios',
-    'Aviso visual de días vigentes al pagar por adelantado (fix del preview)',
-    'Distingue "sin internet" de "servidor inaccesible" (fix del falso "sin conexión")',
+    'Aviso visual de días vigentes al pagar por adelantado',
+    'Distingue «sin internet» de «servidor inaccesible»',
     'Fix: la huella ahora sí se verifica al abrir',
-    'Pantalla de sincronización con 3 estados y mejor UX',
+    'Pantalla de sincronización con 3 estados, más clara',
   ]),
   Novedad('1.0.13', [
     'Pagos realizados tocable: lista de clientes que pagaron',
@@ -556,7 +556,7 @@ const novedades = [
     'Diálogo "Novedades" al actualizar',
   ]),
   Novedad('1.0.4', [
-    'Fix crítico: el botón de sincronizar ahora sí funciona (bug _running)',
+    'El botón de sincronizar ahora sí funciona siempre',
     'Al archivar, el cliente desaparece al momento (actualización optimista)',
     'La descarga se repite hasta estar al día (no más falso "sincronizado")',
     'Fix error 400 en gastos que bloqueaba la descarga',
@@ -576,7 +576,7 @@ const novedades = [
     '️ Corregir pagos (monto/fecha o anular) desde la ficha, solo admin',
     'Alerta de duplicados por carnet al inscribir',
     'Gastos del gym y cierre de caja diario',
-    'La sesión ahora refresca el token antes de pedirte entrar de nuevo',
+    'La sesión se renueva sola antes de pedirte entrar de nuevo',
     'Si una operación es rechazada por el servidor, ya no bloquea a las demás',
   ]),
   Novedad('1.0.2', [

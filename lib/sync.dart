@@ -838,7 +838,7 @@ String errorSyncLegible(String crudo) {
     return 'Sin permiso para esta operación.';
   }
   if (t.contains('404') || t.contains('not found')) {
-    return 'No se encontró el recurso en el servidor.';
+    return 'No se encontró esta información en el servidor.';
   }
   if (t.contains('500') || t.contains('internal server error')) {
     return 'Error del servidor. Intenta más tarde.';
@@ -846,9 +846,12 @@ String errorSyncLegible(String crudo) {
   if (t.contains('clientexception')) {
     return 'Error de conexión. Revisa tu internet e intenta de nuevo.';
   }
-  // Fallback: recorta el tecnicismo a una línea legible.
-  final unaLinea = crudo.replaceAll(RegExp(r'\s+'), ' ').trim();
-  return unaLinea.length > 120 ? '${unaLinea.substring(0, 120)}…' : unaLinea;
+  // ERR-G02 (1.36): el fallback NUNCA devuelve el texto crudo:
+  // esta salida se pinta como «Motivo:» en incidencias y en
+  // atención del dueño, así que lo no reconocido se dice con
+  // la frase genérica de la casa. El detalle técnico queda en
+  // la bitácora (AppLog) de quien capturó el error.
+  return 'Hubo un problema al sincronizar. Intenta de nuevo.';
 }
 
 class SessionExpired implements Exception {

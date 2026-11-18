@@ -269,7 +269,7 @@ class _CuentasPorCobrarScreenState
     // Se valida antes de encolar.
     final ventaId = (v['id'] as num?)?.toInt();
     if (ventaId == null) {
-      mostrarSnack(context, 'No se puede cobrar: venta sin identificador', significado: SignificadoChip.alerta);
+      mostrarSnack(context, 'No se puede cobrar: a esta venta le falta su número de registro', significado: SignificadoChip.alerta);
       return;
     }
 

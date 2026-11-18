@@ -117,7 +117,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     final id = (c['id'] as num?)?.toInt();
     if (id == null || id <= 0) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo recuperar: cliente sin identificador válido.', significado: SignificadoChip.error);
+        mostrarSnack(context, 'No se pudo recuperar: a este cliente le falta su número de registro.', significado: SignificadoChip.error);
       }
       return null;
     }

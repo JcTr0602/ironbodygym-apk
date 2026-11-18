@@ -85,7 +85,7 @@ Future<File> _copiarConCandado({File? destinoDirecto}) async {
     try {
       final res = await d.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
       if (res.isEmpty) {
-        throw StateError('No se pudo volcar el WAL; reintenta');
+        throw StateError('No se pudo preparar la copia; espera un momento y reintenta');
       }
       final fila = res.first;
       final busy = (fila['busy'] as num?)?.toInt() ?? 1;
@@ -93,11 +93,11 @@ Future<File> _copiarConCandado({File? destinoDirecto}) async {
       final checkpointed = (fila['checkpointed'] as num?)?.toInt() ?? -2;
       if (busy != 0 || log != checkpointed) {
         throw StateError(
-            'No se pudo volcar el WAL (checkpoint ocupado); reintenta');
+            'No se pudo preparar la copia; espera un momento y reintenta');
       }
     } catch (e) {
       if (e is StateError) rethrow;
-      throw StateError('No se pudo volcar el WAL ($e); reintenta');
+      throw StateError('No se pudo preparar la copia; espera un momento y reintenta');
     }
     // La ruta sale de LocalDb.dbPath() (única fuente): antes se
     // reconstruía a mano como getDatabasesPath() + 'ironbody.db',

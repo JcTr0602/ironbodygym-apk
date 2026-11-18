@@ -99,8 +99,8 @@ import 'reparar_sync_screen.dart';
 }) {
   if (divergentes < 0) {
     return (
-      texto: 'La comprobación no pudo completarse '
-          '(¿sin conexión?)',
+      texto: 'La comprobación no pudo completarse. '
+          'Inténtalo de nuevo.',
       significado: SignificadoChip.error,
     );
   }

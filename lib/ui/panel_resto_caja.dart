@@ -843,7 +843,7 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
                                 _plusConsultando
                                     ? 'Consultando los confirmados al servidor…'
                                     : _plusSinDatos
-                                        ? 'Sin datos del servidor (sin conexión o la RPC no devolvió confirmados): no suma al total.'
+                                        ? 'Sin datos del servidor (sin conexión o sin pagos confirmados): no suma al total.'
                                         : '$_nPlus confirmados en el rango · suma a Transferencias y al Total.',
                                 style: AppTexto.secundario)
                             : null,
