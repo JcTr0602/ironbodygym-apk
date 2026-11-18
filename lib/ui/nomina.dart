@@ -62,6 +62,12 @@ class _NominaScreenState extends State<NominaScreen> {
   // v1.4.0: sello del pre-cálculo ("Actualizado: ...").
   String _actualizadoEtiqueta = '';
   String _mesEtiqueta = '';
+  // UI136-13: el prefijo YYYY-MM del mes CARGADO en
+  // pantalla. Lo fija _cargarDatos y lo consume la foto de
+  // cierre (antes la foto lo releía del reloj: cruzar la
+  // medianoche del cambio de mes rotulaba los datos del
+  // mes saliente con el nombre del entrante).
+  String _prefCargado = '';
   // v1.3.9: lista de bonos por entrenador [{id, entrenador, monto, nota}]
   List<Map<String, dynamic>> _bonos = [];
   final _tarifaCtrl = TextEditingController();
@@ -145,6 +151,7 @@ class _NominaScreenState extends State<NominaScreen> {
     setState(() => _cargando = true);
     final ahora = ahoraHabana();
     final pref = hoyHabanaIso().substring(0, 7); // YYYY-MM
+    _prefCargado = pref;
     _mesEtiqueta = _nombreMes(ahora.month);
     // Misma fuente que "Pagos realizados": clientes únicos con pago
     // este mes. v1.4.0: cálculo compartido en NominaCalc (lo usan
@@ -240,12 +247,18 @@ class _NominaScreenState extends State<NominaScreen> {
   Future<void> _mostrarFotoCierre({String? solo}) async {
     final base = _clientesPagados * _tarifa;
     final porEnt = <String, FilaCierreNomina>{};
-    // Yunque R5-M8-1/M8-6: el mes de la foto es el mes
-    // CARGADO en pantalla (el pref de _cargarDatos), no el
-    // reloj de este instante: cruzar la medianoche del
-    // cambio de mes con la pantalla abierta ya no rotula
-    // los datos del mes viejo con el nombre del nuevo.
-    final prefFoto = hoyHabanaIso().substring(0, 7);
+    // Yunque R5-M8-1/M8-6 + UI136-13: el mes de la foto es
+    // el mes CARGADO en pantalla (_prefCargado, fijado por
+    // _cargarDatos), no el reloj de este instante: cruzar
+    // la medianoche del cambio de mes con la pantalla
+    // abierta ya no rotula los datos del mes viejo con el
+    // nombre del nuevo. (Hasta UI136-13 el código releía
+    // el reloj y este comentario decía lo contrario de lo
+    // que el código hacía; si aún no cargó nada, manda el
+    // reloj.)
+    final prefFoto = _prefCargado.isNotEmpty
+        ? _prefCargado
+        : hoyHabanaIso().substring(0, 7);
     for (final ent in ['duany', 'gabriel']) {
       final persona = _personasAdelantos[ent];
       if (persona == null) continue;
