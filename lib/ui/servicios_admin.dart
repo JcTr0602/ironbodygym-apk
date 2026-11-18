@@ -1200,7 +1200,11 @@ class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
     return DialogoApp(
       titulo: 'Rellenar pomo · ${widget.nombreTitular}',
       iconoTitulo: Icons.add_circle_outline_rounded,
-      contenido: Column(
+      // UI136-11: el contenido rueda — en pantallas bajas
+      // o con la escala de letra grande, la Column sin
+      // scroll desbordaba el diálogo.
+      contenido: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1234,7 +1238,8 @@ class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
               if (_error != null) setState(() => _error = null);
             },
           ),
-        ],
+          ],
+        ),
       ),
       acciones: [
         TextButton(

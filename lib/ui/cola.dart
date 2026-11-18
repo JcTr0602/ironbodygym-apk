@@ -2707,25 +2707,34 @@ class _ColaScreenState extends State<ColaScreen> {
         iconoTitulo: Icons.error_outline_rounded,
         contenido: fallos.isEmpty
             ? const Text('No hay fotos con error.')
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final f in fallos)
-                    ListTile(
+            // UI136-11: hasta 20 filas ruedan en una zona
+            // acotada — la Column sin scroll desbordaba el
+            // diálogo en pantallas bajas.
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 400),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final f in fallos)
+                        ListTile(
                       dense: true,
                       leading: const Icon(Icons.photo_rounded,
                           color: AppColores.error),
                       title: Text(
                           'Foto ${f['id']} (${f['tipo']}) — '
                           '${f['intentos']} intentos'),
-                      subtitle: Text(
-                        // 1.35 (SP-08): también aquí se pinta
-                        // la frase por clase, no el crudo.
-                        fraseErrorFoto(f['ultimo_error'] as String?),
-                        style: AppTexto.metadato,
-                      ),
-                    ),
-                ],
+                          subtitle: Text(
+                            // 1.35 (SP-08): también aquí se
+                            // pinta la frase por clase, no el
+                            // crudo.
+                            fraseErrorFoto(f['ultimo_error'] as String?),
+                            style: AppTexto.metadato,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
       ),
     );

@@ -1310,9 +1310,13 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 style: AppTexto.secundario,
               ),
               const SizedBox(height: AppEspacio.md),
-              Flexible(
+              // UI136-11: altura acotada y scroll real —
+              // el Flexible+shrinkWrap dentro de la Column
+              // mínima reventaba con muchos resultados o
+              // pantallas bajas.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
                 child: ListView.builder(
-                  shrinkWrap: true,
                   itemCount: resultados.length,
                   itemBuilder: (ctx, i) {
                     final r = resultados[i];

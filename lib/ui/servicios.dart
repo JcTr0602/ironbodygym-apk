@@ -2994,13 +2994,12 @@ class _DialogoClienteState extends State<_DialogoCliente> {
     return DialogoApp(
       titulo: 'Cliente del gym',
       iconoTitulo: Icons.person_search_rounded,
-      // 1.36 H-B3 (136-724): el contenido se acolcha con los
-      // viewInsets — con el teclado abierto (autofocus) los
-      // resultados y el Cancelar quedaban tapados.
-      contenido: Padding(
-        padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(context).bottom),
-        child: SizedBox(
+      // 1.36 H-B3 (136-724) ponía aquí un Padding propio
+      // con los viewInsets; UI136-11 lo retira: DialogoApp
+      // es un AlertDialog y la ruta del diálogo YA acolcha
+      // sobre el teclado — la compensación propia la
+      // duplicaba y encogía el área útil.
+      contenido: SizedBox(
         width: double.maxFinite,
         height: 380,
         child: Column(
@@ -3077,7 +3076,6 @@ class _DialogoClienteState extends State<_DialogoCliente> {
                     ),
             ),
           ],
-        ),
         ),
       ),
       acciones: [
@@ -3290,7 +3288,11 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
       // diálogo es el nombre único del producto.
       titulo: etiquetaTipoServicio(tipo),
       iconoTitulo: Icons.bolt_rounded,
-      contenido: Column(
+      // UI136-11: el contenido rueda — en pantallas bajas
+      // o con la escala de letra grande, la Column sin
+      // scroll desbordaba el diálogo.
+      contenido: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3527,7 +3529,8 @@ class _DialogoVentaServicioState extends State<_DialogoVentaServicio> {
               ),
             ],
           ),
-        ],
+          ],
+        ),
       ),
       acciones: [
         TextButton(
