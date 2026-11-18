@@ -143,9 +143,10 @@ void main() {
         find.widgetWithText(TextField, 'Concepto (ej: pago de la luz)'),
         'Algo');
     // 1.32 (O2F2): con el pad no se puede teclear «abc»;
-    // el inválido de la era del pad es el monto CERO: la
-    // misma guarda de _guardar («Concepto o monto
-    // inválidos») lo rechaza.
+    // el inválido de la era del pad es el monto CERO.
+    // 1.36 H-B2 (136-685): el aviso ya no es el snack
+    // genérico «Concepto o monto inválidos» — el error va
+    // EN LÍNEA bajo el campo del monto.
     await tester.tap(find.byType(CampoMontoPad));
     await _esperarTexto(tester, 'Aceptar');
     await tester.pumpAndSettle();
@@ -154,7 +155,7 @@ void main() {
     await tester.tap(find.text('Aceptar'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Guardar'));
-    await _esperarTexto(tester, 'Concepto o monto inválidos');
+    await _esperarTexto(tester, 'El monto debe ser mayor que cero.');
 
     // El diálogo sigue abierto (no se cerró con datos malos):
     // su botón Guardar sigue presente.
