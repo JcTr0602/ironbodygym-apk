@@ -99,12 +99,55 @@ class ComprobantesService {
   /// archivos huérfanos de [purgarSubidosViejos] (tope 1/24 h).
   static DateTime? _ultimoBarridoHuerfanos;
 
+  /// 1.36 (136-940): cadena de encoladas EN CURSO por uuid.
+  /// La ruta local es determinista ($uuid.$ext) y la
+  /// generación se asigna en la transacción POSTERIOR al
+  /// rename: dos encoladas concurrentes del mismo uuid
+  /// podían cruzar los papeles (la segunda renombraba SUS
+  /// bytes sobre la ruta y la primera transacción sellaba
+  /// SU generación apuntando a ellos). En serie por uuid,
+  /// rename y asignación quedan atados dentro de este
+  /// isolate; entre isolates manda el CAS por generación
+  /// del worker y la revalidación de los borrados (abajo).
+  static final Map<String, Future<void>> _encolarEnSerie =
+      {};
+
   /// Guarda la foto elegida (comprimida a máx. 1600 px, WebP
   /// q80; si la compresión falla, copia el original como .jpg)
   /// y deja la fila 'pendiente' de subida. [baseDir] solo lo
   /// usan los tests; en producción es el directorio de
   /// documentos de la app.
   Future<void> encolar({
+    required String comprobanteUuid,
+    required String rutaOrigen,
+    Directory? baseDir,
+  }) async {
+    final previa = _encolarEnSerie[comprobanteUuid];
+    final actual = () async {
+      // La encolada anterior pudo fallar: su error es SUYO;
+      // esta corre igual (la cadena no se envenena).
+      if (previa != null) {
+        try {
+          await previa;
+        } catch (_) {}
+      }
+      await _encolarInterno(
+        comprobanteUuid: comprobanteUuid,
+        rutaOrigen: rutaOrigen,
+        baseDir: baseDir,
+      );
+    }();
+    _encolarEnSerie[comprobanteUuid] = actual;
+    try {
+      await actual;
+    } finally {
+      if (identical(_encolarEnSerie[comprobanteUuid], actual)) {
+        _encolarEnSerie.remove(comprobanteUuid);
+      }
+    }
+  }
+
+  Future<void> _encolarInterno({
     required String comprobanteUuid,
     required String rutaOrigen,
     Directory? baseDir,
@@ -234,10 +277,11 @@ class ComprobantesService {
     // una fila apuntando a un archivo ausente.
     for (final extPrevia in const ['webp', 'jpg']) {
       if (extPrevia == ext) continue;
-      try {
-        final viejo = File('${dir.path}/$comprobanteUuid.$extPrevia');
-        if (await viejo.exists()) await viejo.delete();
-      } catch (_) {}
+      // 136-940: con revalidación — si otra encolada (otro
+      // isolate) acaba de dejar la fila vigente apuntando a
+      // esta ruta, no se toca.
+      await _borrarArchivoSiNoReferenciado(
+          db, '${dir.path}/$comprobanteUuid.$extPrevia');
     }
     for (final clave in [
       'tus_loc_${comprobanteUuid}_comp',
@@ -260,6 +304,29 @@ class ComprobantesService {
         d: 'uuid=$comprobanteUuid ext=$ext');
   }
 
+  /// 1.36 (136-940): borra el archivo [ruta] SOLO si ninguna
+  /// fila VIGENTE lo referencia. La ruta local es
+  /// determinista por uuid ($uuid.$ext): una re-encolada
+  /// concurrente deja la fila nueva apuntando a la MISMA
+  /// ruta que una purga/descarte de la generación vieja
+  /// quiere borrar — el CAS por generación protege la FILA,
+  /// pero sin esta revalidación el archivo de los bytes
+  /// vigentes desaparecía bajo la fila nueva.
+  Future<void> _borrarArchivoSiNoReferenciado(
+      Database db, String? ruta) async {
+    if (ruta == null) return;
+    try {
+      final refs = await db.query('comprobantes_pago',
+          columns: ['comprobante_uuid'],
+          where: 'ruta_local = ?',
+          whereArgs: [ruta],
+          limit: 1);
+      if (refs.isNotEmpty) return;
+      final f = File(ruta);
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
   /// Descarta el comprobante (el cobro se deshizo dentro de la
   /// ventana de Deshacer): borra la fila y el archivo local.
   /// Si ya se había subido, el objeto del bucket queda huérfano
@@ -268,24 +335,28 @@ class ComprobantesService {
     final db = await LocalDb.instance.db;
     final filas = await db.query(
       'comprobantes_pago',
-      columns: ['ruta_local'],
+      columns: ['ruta_local', 'generacion'],
       where: 'comprobante_uuid = ?',
       whereArgs: [comprobanteUuid],
       limit: 1,
     );
+    // 1.36 (136-940): el descarte va con CAS por generación
+    // y el archivo solo se borra revalidando la referencia
+    // vigente: si el comprobante se re-encoló tras la
+    // lectura (generación nueva, bytes nuevos en la misma
+    // ruta determinista), este descarte de la encarnación
+    // vieja no se lleva ni la fila ni los bytes nuevos.
     if (filas.isNotEmpty) {
-      final ruta = filas.first['ruta_local'] as String?;
-      if (ruta != null) {
-        try {
-          await File(ruta).delete();
-        } catch (_) {}
-      }
+      final generacion = filas.first['generacion'] as int? ?? 0;
+      final borradas = await db.delete(
+        'comprobantes_pago',
+        where: 'comprobante_uuid = ? AND generacion = ?',
+        whereArgs: [comprobanteUuid, generacion],
+      );
+      if (borradas == 0) return;
+      await _borrarArchivoSiNoReferenciado(
+          db, filas.first['ruta_local'] as String?);
     }
-    await db.delete(
-      'comprobantes_pago',
-      where: 'comprobante_uuid = ?',
-      whereArgs: [comprobanteUuid],
-    );
     // Caza Fotos L3-ALTA (Argón): las claves TUS de reanudación
     // también se borran. Sin esto, un descarte a mitad de subida
     // dejaba tus_loc_/tus_offset_ huérfanas en meta para siempre,
@@ -386,12 +457,12 @@ class ComprobantesService {
         whereArgs: [f['comprobante_uuid'], f['generacion']],
       );
       if (borradas == 0) continue;
-      final ruta = f['ruta_local'] as String?;
-      if (ruta != null) {
-        try {
-          await File(ruta).delete();
-        } catch (_) {}
-      }
+      // 136-940: el CAS protegía la fila, no el ARCHIVO: la
+      // ruta es determinista y una re-encolada con la misma
+      // extensión deja la fila vigente apuntando a esta
+      // misma ruta. Solo se borra si ya nadie la referencia.
+      await _borrarArchivoSiNoReferenciado(
+          db, f['ruta_local'] as String?);
     }
     // Caza Fotos L1-MEDIA (Argón): barrido de archivos huérfanos
     // del directorio (descartes a mitad de escritura, cambios de

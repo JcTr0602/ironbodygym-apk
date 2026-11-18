@@ -293,6 +293,40 @@ void main() {
     });
   });
 
+  group('136-689: Inscribir — el reintento tras fallar la '
+      'foto no duplica la inscripción', () {
+    test('el intento (uuid + huella de payload) vive en el '
+        'State y la op solo se encola una vez por intento', () {
+      final s = _src('lib/ui/inscribir.dart');
+      expect(s, contains('_opUuidIntento'));
+      expect(s, contains('_payloadIntentoJson'));
+      expect(s, contains('if (!_opIntentoEncolada)'),
+          reason: 'con la op ya encolada, el reintento salta '
+              'directo a la foto');
+      expect(s, contains('_opUuidCasaIntento'));
+      expect(s, contains('if (!_opCasaEncolada)'),
+          reason: 'la vía Casa tiene el mismo candado');
+      // El uuid nace SOLO al abrir un intento nuevo (huella
+      // distinta), nunca por intento de guardado a secas.
+      expect(s, contains('_payloadIntentoJson != payloadIntentoJson'));
+      expect(s, contains('_payloadCasaIntentoJson != payloadCasaJson'));
+    });
+  });
+
+  group('136-940: Comprobantes — generación y archivo atados',
+      () {
+    test('encolar serializa por uuid y los borrados de '
+        'archivo revalidan la referencia vigente', () {
+      final s = _src('lib/comprobantes.dart');
+      expect(s, contains('_encolarEnSerie'),
+          reason: 'rename + asignación de generación no se '
+              'cruzan entre encoladas del mismo uuid');
+      expect(s, contains('_borrarArchivoSiNoReferenciado'),
+          reason: 'ningún archivo se borra sin revalidar que '
+              'la fila vigente ya no lo referencia');
+    });
+  });
+
   group('136-919: _pullIncidenciasHistorial como sus hermanas',
       () {
     test('pagina, cierra retenciones en finally y registra '
