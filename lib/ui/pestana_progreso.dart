@@ -142,6 +142,10 @@ List<Medicion> fusionarMedicionesRpcConPendientes(
 double? _parseNum(String text) =>
     double.tryParse(text.trim().replaceAll(',', '.'));
 
+/// 1.36 H-B2 (136-566): formato decimal de la casa en esta
+/// pestaña: un decimal con COMA (como la tarjeta de Medidas).
+String _fmt1(double v) => v.toStringAsFixed(1).replaceAll('.', ',');
+
 class PestanaProgreso extends StatefulWidget {
   final String clienteId;
   final String nombreCliente;
@@ -163,6 +167,11 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   // 1.28 (M4-A12): diálogos de medición en curso — dos
   // toques apilaban dos formularios/confirmaciones.
   bool _dialogoMedicionAbierto = false;
+  // 1.36 H-B2 (136-568/570): el refresco falló con datos
+  // locales pintados (aviso discreto) y la fuente vigente
+  // (clave de transición local→RPC).
+  bool _avisoSinConexion = false;
+  String _fuente = 'local';
 
   @override
   void initState() {
@@ -231,6 +240,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           _mediciones = _desdeEspejoLocal(locales);
           _cargando = false;
           _error = null;
+          _fuente = 'local';
           pintoLocal = true;
         });
       }
@@ -265,13 +275,17 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               fusionarMedicionesRpcConPendientes(lista, pendientes);
           _cargando = false;
           _error = null;
+          _avisoSinConexion = false;
+          _fuente = 'rpc';
         });
       }
     } catch (e) {
       if (pintoLocal) {
-        // Lo pintado manda: sin red se queda el espejo y el
-        // fallo del refresco solo va a la bitácora.
+        // Lo pintado manda: sin red se queda el espejo.
+        // 136-568: el fallo ya no va SOLO a la bitácora: un
+        // aviso discreto dice que lo pintado es lo guardado.
         AppLog.error('progreso', 'refresco_fallo', d: '$e');
+        if (mounted) setState(() => _avisoSinConexion = true);
         return;
       }
       AppLog.error('progreso', 'cargar_fallo', d: '$e');
@@ -324,11 +338,24 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       );
     }
 
+    // 1.36 H-B2 (136-570): el paso local→RPC cruza con
+    // fundido por clave de fuente en vez de parpadear.
     return RefrescoIron(
       onRefresh: _cargar,
-      child: ListView(
+      child: AnimatedSwitcher(
+        duration: AppMovimiento.resuelta(context, AppMovimiento.corta),
+        child: ListView(
+        key: ValueKey(_fuente),
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
+          if (_avisoSinConexion)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppEspacio.md),
+              child: Text(
+                'Sin conexión: datos guardados en este teléfono',
+                style: AppTexto.secundario,
+              ),
+            ),
           // Botón de plan nutricional
           Card(
             child: ListTile(
@@ -358,25 +385,14 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
           // VÁLIDOS, no mediciones: con 2 mediciones pero un
           // solo peso válido, antes no salía ni gráfica ni
           // tarjeta — un vacío mudo.
+          // 1.36 H-B2 (136-564): puerta INDEPENDIENTE por
+          // serie — cada gráfico sale si SU serie tiene 2+
+          // puntos, haya o no 2 pesos (antes cintura/brazo/
+          // muslo vivían dentro de la puerta del peso y con
+          // un solo peso válido no salía ningún gráfico).
           if (puntosPesoValidos(_mediciones).length >= 2) ...[
             GraficoPesoEntrenador(mediciones: _mediciones),
             const SizedBox(height: 16),
-            // 1.25 T109: el gráfico deja de ser solo del
-            // peso — cintura, brazo y muslo ganan el suyo
-            // cuando hay 2+ mediciones con ese dato.
-            for (final (titulo, serie) in [
-              ('Evolución de cintura',
-                  serieMetricaOpcional(_mediciones, (m) => m.cinturaCm)),
-              ('Evolución de brazo',
-                  serieMetricaOpcional(_mediciones, (m) => m.brazoCm)),
-              ('Evolución de muslo',
-                  serieMetricaOpcional(_mediciones, (m) => m.musloCm)),
-            ])
-              if (serie.length >= 2) ...[
-                GraficoMetricaGestion(
-                    titulo: titulo, unidad: 'cm', puntos: serie),
-                const SizedBox(height: 16),
-              ],
           ] else if (puntosPesoValidos(_mediciones).length == 1 ||
               _mediciones.length == 1) ...[
             Card(
@@ -406,7 +422,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
                         ];
                         return validos.isEmpty
                             ? 'Último: sin peso registrado'
-                            : 'Último: ${validos.first.toStringAsFixed(1)} kg';
+                            : 'Último: ${_fmt1(validos.first)} kg';
                       }(),
                       style:
                           AppTexto.displayPequeno,
@@ -417,6 +433,21 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             ),
             const SizedBox(height: 16),
           ],
+          // 1.25 T109 + 136-564: cintura, brazo y muslo con
+          // su propia puerta (2+ puntos de SU serie).
+          for (final (titulo, serie) in [
+            ('Evolución de cintura',
+                serieMetricaOpcional(_mediciones, (m) => m.cinturaCm)),
+            ('Evolución de brazo',
+                serieMetricaOpcional(_mediciones, (m) => m.brazoCm)),
+            ('Evolución de muslo',
+                serieMetricaOpcional(_mediciones, (m) => m.musloCm)),
+          ])
+            if (serie.length >= 2) ...[
+              GraficoMetricaGestion(
+                  titulo: titulo, unidad: 'cm', puntos: serie),
+              const SizedBox(height: 16),
+            ],
 
           // Botón registrar (solo con permiso). Con la
           // lista vacía no se pinta: la acción vive en el
@@ -468,6 +499,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               ),
           ],
         ],
+        ),
       ),
     );
   }
@@ -496,7 +528,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
         title: Text(
           m.pesoKg == null
               ? 'Sin peso registrado'
-              : '${m.pesoKg!.toStringAsFixed(1)} kg',
+              : '${_fmt1(m.pesoKg!)} kg',
           style: AppTexto.titulo,
         ),
         subtitle: Column(
@@ -520,11 +552,11 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
               Text(
                 [
                   if (m.cinturaCm != null)
-                    'Cintura ${m.cinturaCm!.toStringAsFixed(1)}',
+                    'Cintura ${_fmt1(m.cinturaCm!)}',
                   if (m.brazoCm != null)
-                    'Brazo ${m.brazoCm!.toStringAsFixed(1)}',
+                    'Brazo ${_fmt1(m.brazoCm!)}',
                   if (m.musloCm != null)
-                    'Pierna ${m.musloCm!.toStringAsFixed(1)}',
+                    'Muslo ${_fmt1(m.musloCm!)}',
                 ].join(' · '),
                 style: AppTexto.metadato,
               ),
@@ -575,13 +607,13 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
             // v1.4.0: el detalle solo muestra las medidas visibles.
             if (m.cinturaCm != null)
               Text(
-                  'Cintura: ${m.cinturaCm!.toStringAsFixed(1)} cm'),
+                  'Cintura: ${_fmt1(m.cinturaCm!)} cm'),
             if (m.brazoCm != null)
               Text(
-                  'Brazo: ${m.brazoCm!.toStringAsFixed(1)} cm'),
+                  'Brazo: ${_fmt1(m.brazoCm!)} cm'),
             if (m.musloCm != null)
               Text(
-                  'Pierna: ${m.musloCm!.toStringAsFixed(1)} cm'),
+                  'Muslo: ${_fmt1(m.musloCm!)} cm'),
             if (m.notas != null && m.notas!.isNotEmpty)
               Text('Notas: ${m.notas}'),
           ],
@@ -610,7 +642,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
   Future<void> _mostrarFormularioFlujo(
       BuildContext context, Medicion? existente) async {
     // v1.4.0 (Paso 3, diseño de Argón): el formulario solo muestra
-    // Peso, Cintura, Brazo y Pierna. % grasa, pecho y cadera quedan
+    // Peso, Cintura, Brazo y Muslo. % grasa, pecho y cadera quedan
     // en la BD: al EDITAR se reenvían los valores previos de la
     // medición (el RPC es de reemplazo completo y no puede cambiar
     // de firma); al CREAR van en null, como hasta ahora.
@@ -784,7 +816,7 @@ class _PestanaProgresoState extends State<PestanaProgreso> {
       mensaje: m.pesoKg == null
           ? 'Se elimina esta medición. No se puede deshacer.'
           : 'Se elimina la medición de '
-              '${m.pesoKg!.toStringAsFixed(1)} kg. No se puede '
+              '${_fmt1(m.pesoKg!)} kg. No se puede '
               'deshacer.',
       aceptar: 'Eliminar',
       peligro: true,
@@ -899,7 +931,33 @@ class _DialogoMedicionState extends State<_DialogoMedicion> {
     super.dispose();
   }
 
+  // 1.36 H-B2 (136-567): la validación vive DENTRO del
+  // diálogo y conserva lo tecleado (antes el diálogo se
+  // cerraba y el error llegaba por snack, perdiendo el
+  // formulario).
+  String? _errorDialogo;
+
   void _guardar() {
+    final peso = _parseNum(_pesoCtrl.text);
+    if (peso == null) {
+      setState(() => _errorDialogo =
+          'El peso es requerido y debe ser un número.');
+      return;
+    }
+    final medidasForm = <String, double>{
+      'peso_kg': peso,
+      if (_parseNum(_cinturaCtrl.text) != null)
+        'cintura_cm': _parseNum(_cinturaCtrl.text)!,
+      if (_parseNum(_brazoCtrl.text) != null)
+        'brazo_cm': _parseNum(_brazoCtrl.text)!,
+      if (_parseNum(_musloCtrl.text) != null)
+        'muslo_cm': _parseNum(_musloCtrl.text)!,
+    };
+    final errorRango = validarMedicion(medidasForm);
+    if (errorRango != null) {
+      setState(() => _errorDialogo = errorRango);
+      return;
+    }
     Navigator.pop(
         context,
         (
@@ -923,52 +981,66 @@ class _DialogoMedicionState extends State<_DialogoMedicion> {
           children: [
             TextField(
               controller: _pesoCtrl,
+              autofocus: true,
+              textInputAction: TextInputAction.next,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'Peso (kg) *',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _cinturaCtrl,
+              
+              textInputAction: TextInputAction.next,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'Cintura (cm)',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _brazoCtrl,
+              
+              textInputAction: TextInputAction.next,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'Brazo (cm)',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _musloCtrl,
+              
+              textInputAction: TextInputAction.next,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Pierna (cm)',
-                border: OutlineInputBorder(),
+                labelText: 'Muslo (cm)',
               ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _notasCtrl,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _guardar(),
               maxLines: 2,
               decoration: const InputDecoration(
                 labelText: 'Notas',
-                border: OutlineInputBorder(),
               ),
             ),
+            if (_errorDialogo != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(_errorDialogo!,
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(context))),
+              ),
+            ],
           ],
         ),
       ),
