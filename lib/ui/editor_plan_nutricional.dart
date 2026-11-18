@@ -40,6 +40,7 @@ class _EditorPlanNutricionalState
   // plan que el servidor sí tenía.
   bool _falloCarga = false;
   String? _actualizadoPor;
+  String? _creadoPor;
   DateTime? _actualizadoEn;
 
   @override
@@ -99,8 +100,14 @@ class _EditorPlanNutricionalState
         }
         setState(() {
           _ctrl.text = contenido;
+          // (1.36 H-B4 136-961) la metadata se etiqueta con
+          // el campo REAL: quien actualizó si el servidor lo
+          // trae; si no, se dice «Creado por» (antes se
+          // leía creado_por y se etiquetaba «Última
+          // actualización»).
           _actualizadoPor =
-              m['creado_por']?.toString();
+              m['actualizado_por']?.toString();
+          _creadoPor = m['creado_por']?.toString();
           final ae = m['actualizado_en'];
           if (ae != null) {
             _actualizadoEn =
@@ -230,7 +237,15 @@ class _EditorPlanNutricionalState
         acciones: [
           if (puedeEditar && !_cargando && !_falloCarga)
             IconButton(
-              icon: const Icon(Icons.save_rounded),
+              // (1.36 H-B4 136-961) el guardado se ve en el
+              // propio botón.
+              icon: _guardando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child:
+                          CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.save_rounded),
               onPressed:
                   _guardando ? null : _guardar,
               tooltip: 'Guardar',
@@ -252,13 +267,37 @@ class _EditorPlanNutricionalState
                 )
               : Column(
               children: [
-                if (_actualizadoPor != null)
+                if (_actualizadoPor != null || _creadoPor != null)
                   Padding(
                     padding: const EdgeInsets.all(AppEspacio.sm),
                     child: Text(
-                      'Última actualización: ${_actualizadoPor ?? ''}'
-                      '${_actualizadoEn != null ? ' • ${_actualizadoEn!.day}/${_actualizadoEn!.month}/${_actualizadoEn!.year}' : ''}',
-                      style: AppTexto.metadato.copyWith(color: Colors.grey[600]),
+                      _actualizadoPor != null
+                          ? 'Última actualización: $_actualizadoPor'
+                              '${_actualizadoEn != null ? ' • ${_actualizadoEn!.day}/${_actualizadoEn!.month}/${_actualizadoEn!.year}' : ''}'
+                          : 'Creado por: $_creadoPor',
+                      // (1.36 H-B4 136-961) token, no gris crudo.
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.textoSecundario(context)),
+                    ),
+                  ),
+                // (1.36 H-B4 136-961) el modo solo lectura se
+                // SEÑALA, no se descubre al teclear.
+                if (!puedeEditar)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppEspacio.lg),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_rounded,
+                            size: 16,
+                            color:
+                                AppColores.textoSecundario(context)),
+                        const SizedBox(width: 6),
+                        Text('Solo lectura',
+                            style: AppTexto.secundario.copyWith(
+                                color: AppColores.textoSecundario(
+                                    context))),
+                      ],
                     ),
                   ),
                 if (puedeEditar)

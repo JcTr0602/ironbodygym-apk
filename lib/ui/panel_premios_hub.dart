@@ -85,19 +85,30 @@ class _PremiosHubScreenState extends State<PremiosHubScreen> {
                     const Text('Bandeja'),
                     if (pendientes > 0) ...[
                       const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: AppColores.naranja,
-                          borderRadius:
-                              BorderRadius.circular(AppRadio.circular),
-                        ),
-                        child: Text(
-                          '$pendientes',
-                          style: AppTexto.metadato.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
+                      // (1.36 H-B4 136-966) la pastilla se
+                      // anuncia como «N vales por aprobar» y
+                      // entra/sale con transición.
+                      AnimatedSwitcher(
+                        duration:
+                            const Duration(milliseconds: 200),
+                        child: Semantics(
+                          key: ValueKey(pendientes),
+                          label: '$pendientes vales por aprobar',
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: AppColores.naranja,
+                              borderRadius: BorderRadius.circular(
+                                  AppRadio.circular),
+                            ),
+                            child: Text(
+                              '$pendientes',
+                              style: AppTexto.metadato.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
                       ),

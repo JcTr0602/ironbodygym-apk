@@ -18,6 +18,7 @@ import '../guia_validacion.dart';
 import '../localdb.dart';
 import '../sync.dart';
 import '../tiempo.dart';
+import 'app_bar.dart';
 import 'diseno.dart';
 import 'guia_editor.dart';
 import 'guia_equipos.dart';
@@ -94,6 +95,7 @@ class _GuiaScreenState extends State<GuiaScreen> {
     setState(() {
       _busqueda = '';
       _soloEsenciales = false;
+      _grupoFiltro = null;
     });
   }
 
@@ -109,16 +111,22 @@ class _GuiaScreenState extends State<GuiaScreen> {
   /// y la quita una nueva edición guardada).
   Set<String> _enCola = {};
 
+  bool _falloCarga = false;
+
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      _falloCarga = false;
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // (1.36 H-B4 136-948) y se VE: error con reintento,
+      // no una lista vacía que parece «sin fichas».
+      _falloCarga = true;
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -292,6 +300,26 @@ class _GuiaScreenState extends State<GuiaScreen> {
     var out = s;
     mapa.forEach((k, v) => out = out.replaceAll(k, v));
     return out.toLowerCase();
+  }
+
+  // (1.36 H-B4 136-949) filtro por GRUPO (equipo activo u
+  // «Otros» = equipos inactivos/desconocidos), separado del
+  // buscador de texto: el chip «Otros» ya no teclea «Otros»
+  // en el buscador (eso solo encontraba fichas con la
+  // palabra «otros» en el título).
+  String? _grupoFiltro;
+
+  /// Bandera del espejo normalizada (true o 1), la misma
+  /// regla que esencialesTrasPublicar.
+  bool _esEsencial(Object? v) => v == true || v == 1;
+
+  String _grupoDe(Map<String, dynamic> ficha) {
+    final eq = '${ficha['equipoId'] ?? ''}';
+    final activos = {
+      for (final e in _equipos)
+        if (e['activo'] == true) '${e['equipoId']}',
+    };
+    return activos.contains(eq) ? eq : 'Otros';
   }
 
   bool _coincideBusqueda(Map<String, dynamic> ficha) {
@@ -610,8 +638,13 @@ class _GuiaScreenState extends State<GuiaScreen> {
   @override
   Widget build(BuildContext context) {
     if (!AuthService().isOwner) {
-      return const Center(
-          child: Text('Solo el dueño administra la Biblioteca.'));
+      // (1.36 H-B4 136-948) la vista de no-dueño va en su
+      // Scaffold con appBarIron, no un Center suelto.
+      return Scaffold(
+        appBar: appBarIron(context, 'Guía'),
+        body: const Center(
+            child: Text('Solo el dueño administra la Biblioteca.')),
+      );
     }
     if (_cargando) {
       // 1.25 T114: esqueleto con la forma de la lista.
@@ -620,14 +653,30 @@ class _GuiaScreenState extends State<GuiaScreen> {
         children: const [SkeletonLista(items: 4)],
       );
     }
-    final esenciales = _publicadas.where((p) => p['esencial'] == true).length;
+    if (_falloCarga) {
+      return EstadoError(
+        titulo: 'No se pudo cargar la Guía',
+        detalle: 'La lectura local falló en este teléfono. '
+            'Reinténtalo.',
+        onReintentar: _cargar,
+      );
+    }
+    // (1.36 H-B4 136-950) esenciales con la bandera
+    // normalizada (true o 1), como el resto de la pantalla.
+    final esenciales = _publicadas.where((p) => _esEsencial(p['esencial'])).length;
     final publicadasFiltradas = _publicadas.where((p) {
-      if (_soloEsenciales && p['esencial'] != true) return false;
+      if (_soloEsenciales && !_esEsencial(p['esencial'])) return false;
+      if (_grupoFiltro != null && _grupoDe(p) != _grupoFiltro) {
+        return false;
+      }
       return _coincideBusqueda(p);
     }).toList();
     final borradoresFiltrados = _borradores.where((b) {
       final doc = _docBorrador(b);
-      if (_soloEsenciales && doc['esencial'] != true) return false;
+      if (_soloEsenciales && !_esEsencial(doc['esencial'])) return false;
+      if (_grupoFiltro != null && _grupoDe(doc) != _grupoFiltro) {
+        return false;
+      }
       return _coincideBusqueda(doc);
     }).toList();
     // Grupos: equipos activos en orden canónico; las fichas de un
@@ -660,8 +709,15 @@ class _GuiaScreenState extends State<GuiaScreen> {
             Expanded(
               child: FilledButton.icon(
                 onPressed: _sincronizando ? null : _sincronizar,
-                icon: const Icon(Icons.sync_rounded),
-                label: const Text('Actualizar'),
+                // (1.36 H-B4 136-950) spinner sobre el botón.
+                icon: _sincronizando
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child:
+                            CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.sync_rounded),
+                label: Text(_sincronizando ? 'Actualizando…' : 'Actualizar'),
               ),
             ),
           ],
@@ -756,10 +812,10 @@ class _GuiaScreenState extends State<GuiaScreen> {
                         label: Text(
                             '${g == 'Otros' ? 'Otros' : _nombreEquipo(g)} · ${conteosPortada[g]!.length}'),
                         onPressed: () {
-                          final nombre =
-                              g == 'Otros' ? 'Otros' : _nombreEquipo(g);
-                          _busquedaCtrl.text = nombre;
-                          setState(() => _busqueda = nombre);
+                          // (1.36 H-B4 136-949) filtrar por
+                          // el grupo, no teclear su nombre.
+                          setState(() => _grupoFiltro =
+                              _grupoFiltro == g ? null : g);
                         },
                       ),
                   ],

@@ -684,7 +684,7 @@ class _EditorRutinasGymScreenState extends State<EditorRutinasGymScreen> {
                       icono: Icons.fitness_center_rounded,
                       titulo: 'Sin rutinas del gym',
                       subtitulo: 'Arma la primera rutina con '
-                          'fichas de GymPedia para que los '
+                          'fichas de la Guía para que los '
                           'clientes la adopten desde su app.',
                     )
                   : ListView.separated(
@@ -912,6 +912,14 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
       accion: 'Deshacer',
       alAccion: () {
         if (!mounted) return;
+        // (1.36 H-B4 136-958) deshacer no duplica: si la
+        // ficha ya volvió a la rutina (re-elegida a mano),
+        // no se inserta una segunda copia.
+        if (_ejercicios.any((e) => e.fichaId == quitado.fichaId)) {
+          mostrarSnack(context,
+              'Esa ficha ya está en la rutina: no se duplicó.');
+          return;
+        }
         setState(() {
           final destino =
               i > _ejercicios.length ? _ejercicios.length : i;
@@ -936,7 +944,7 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
       return;
     }
     if (_seleccion.isEmpty) {
-      mostrarSnack(context, 'Elige al menos una ficha de GymPedia',
+      mostrarSnack(context, 'Elige al menos una ficha de la Guía',
           significado: SignificadoChip.alerta);
       return;
     }
@@ -1204,7 +1212,7 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
                             child: const EstadoVacio(
                               icono: Icons.fitness_center_rounded,
                               titulo: 'Todavía no hay ejercicios',
-                              subtitulo: 'Elige fichas de GymPedia '
+                              subtitulo: 'Elige fichas de la Guía '
                                   'para armar la rutina: el cliente '
                                   'entrena con las series que '
                                   'pongas aquí.',
@@ -1257,7 +1265,7 @@ class _FormularioRutinaScreenState extends State<FormularioRutinaScreen> {
                     onPressed: _puedeElegir ? _elegirFichas : null,
                     icon: const Icon(Icons.add_rounded),
                     label: Text(_ejercicios.isEmpty
-                        ? 'Elegir fichas de GymPedia'
+                        ? 'Elegir fichas de la Guía'
                         : 'Añadir o quitar fichas'),
                   ),
                   const SizedBox(height: AppEspacio.sm),
@@ -1695,11 +1703,11 @@ class _TarjetaEjercicioEditorState
                 subtitle: Text(_descansoSeg != null
                     ? 'Ahora: ${textoDuracionSeg(_descansoSeg!)} '
                         '(fijado en la rutina)'
-                    : 'Ahora: el de la ficha de GymPedia'
+                    : 'Ahora: el de la ficha de la Guía'
                         '${deFicha != null ? ' (${textoDuracionSeg(deFicha)})' : ''}'),
               ),
               ListTile(
-                title: const Text('El de la ficha de GymPedia'),
+                title: const Text('El de la ficha de la Guía'),
                 subtitle: deFicha != null
                     ? Text(textoDuracionSeg(deFicha))
                     : const Text('La ficha no trae uno: el '
@@ -1875,9 +1883,12 @@ class _TarjetaEjercicioEditorState
                   if (widget.reordenable)
                     ReorderableDragStartListener(
                       index: widget.indice,
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.only(right: AppEspacio.xs),
+                      // (1.36 H-B4 136-959) asa de arrastre
+                      // de 48 px: el icono de 20 era un blanco
+                      // chico para el pulgar.
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
                         child: Icon(Icons.drag_handle_rounded,
                             size: 20,
                             color:
@@ -2002,7 +2013,10 @@ class _TarjetaEjercicioEditorState
                       ),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: Text('A',
+                        // (1.36 H-B4 136-958) la columna de
+                        // repeticiones máximas se rotula «MÁX»,
+                        // no «A».
+                        child: Text('MÁX',
                             textAlign: TextAlign.center,
                             style: AppTexto.etiqueta.copyWith(
                                 color: AppColores.textoSecundario(
@@ -2027,8 +2041,15 @@ class _TarjetaEjercicioEditorState
                 children: [
                   _chipAccion(
                     icono: Icons.add_rounded,
-                    texto: 'Serie',
-                    onTap: widget.bloqueado
+                    // (1.36 H-B4 136-958) al llegar a 20
+                    // series el chip se bloquea y lo dice.
+                    texto: _series.length >=
+                            kMaxSeriesPorEjercicioRutina
+                        ? 'Serie (máx. 20)'
+                        : 'Serie',
+                    onTap: widget.bloqueado ||
+                            _series.length >=
+                                kMaxSeriesPorEjercicioRutina
                         ? null
                         : () => setState(() {
                               _series.add(_CtrlsSerie(_series.isEmpty
@@ -2311,7 +2332,7 @@ class _SelectorFichasScreenState extends State<SelectorFichasScreen> {
                     icono: Icons.menu_book_rounded,
                     titulo: 'El catálogo está vacío',
                     subtitulo: 'Este teléfono aún no tiene '
-                        'fichas de GymPedia: sincroniza la app '
+                        'fichas de la Guía: sincroniza la app '
                         'y vuelve a intentarlo.',
                   )
                 : visibles.isEmpty

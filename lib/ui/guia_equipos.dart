@@ -78,23 +78,34 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   /// Guarda un equipo (op + espejo local) SIN recargar: el
   /// llamador decide cuándo recargar (Argón Guía BAJA: mover
   /// disparaba dos _cargar(), uno por equipo tocado).
-  Future<void> _guardarEquipo(Map<String, dynamic> e) async {
-    await _db.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'guia_equipo_upsert',
-      payload: {
-        'equipoId': e['equipoId'],
-        'equipoNombre': e['equipoNombre'],
-        'orden': e['orden'],
-        'activo': e['activo'],
-      },
-    );
-    await _db.guiaGuardarEquipo(e);
+  /// (1.36 H-B4 136-947) devuelve false si el guardado
+  /// falló: el fallo queda en bitácora y el llamador avisa
+  /// (antes un throw aquí moría sin aviso en los
+  /// try/finally sin catch de crear/renombrar/mover).
+  Future<bool> _guardarEquipo(Map<String, dynamic> e) async {
+    try {
+      await _db.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'guia_equipo_upsert',
+        payload: {
+          'equipoId': e['equipoId'],
+          'equipoNombre': e['equipoNombre'],
+          'orden': e['orden'],
+          'activo': e['activo'],
+        },
+      );
+      await _db.guiaGuardarEquipo(e);
+      return true;
+    } catch (err) {
+      AppLog.error('ui', 'guia_equipo_guardar_fallo', d: '$err');
+      return false;
+    }
   }
 
-  Future<void> _aplicarEquipo(Map<String, dynamic> e) async {
-    await _guardarEquipo(e);
-    await _cargar();
+  Future<bool> _aplicarEquipo(Map<String, dynamic> e) async {
+    final ok = await _guardarEquipo(e);
+    if (ok) await _cargar();
+    return ok;
   }
 
   static String _slugDesdeNombre(String nombre) {
@@ -143,13 +154,15 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
             (a, b) => a > b ? a : b);
     setState(() => _ocupado = true);
     try {
-      await _aplicarEquipo({
+      final ok = await _aplicarEquipo({
         'equipoId': slug,
         'equipoNombre': texto.trim(),
         'orden': maxOrden + 1,
         'activo': true,
       });
-      _aviso('Equipo creado al final de la lista.');
+      _aviso(ok
+          ? 'Equipo creado al final de la lista.'
+          : 'No se pudo guardar el equipo. Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -174,8 +187,11 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
     }
     setState(() => _ocupado = true);
     try {
-      await _aplicarEquipo({...e, 'equipoNombre': texto.trim()});
-      _aviso('Equipo renombrado.');
+      final ok =
+          await _aplicarEquipo({...e, 'equipoNombre': texto.trim()});
+      _aviso(ok
+          ? 'Equipo renombrado.'
+          : 'No se pudo guardar el equipo. Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -197,15 +213,20 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
       ];
       final movido = reordenados.removeAt(i);
       reordenados.insert(j, movido);
+      var todoOk = true;
       for (var k = 0; k < reordenados.length; k++) {
         final e = reordenados[k];
         final nuevo = k + 1;
         if (((e['orden'] as num?)?.toInt() ?? 0) != nuevo) {
           e['orden'] = nuevo;
-          await _guardarEquipo(e);
+          if (!await _guardarEquipo(e)) todoOk = false;
         }
       }
       await _cargar();
+      if (!todoOk) {
+        _aviso('Parte del nuevo orden no se pudo guardar. '
+            'Revisa la lista antes de seguir.');
+      }
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -259,8 +280,10 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
     if (confirmar != true || !mounted) return;
     setState(() => _ocupado = true);
     try {
-      await _aplicarEquipo({...e, 'activo': false});
-      _aviso('Equipo desactivado.');
+      final ok = await _aplicarEquipo({...e, 'activo': false});
+      _aviso(ok
+          ? 'Equipo desactivado.'
+          : 'No se pudo guardar el equipo. Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -269,8 +292,10 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
   Future<void> _reactivar(Map<String, dynamic> e) async {
     setState(() => _ocupado = true);
     try {
-      await _aplicarEquipo({...e, 'activo': true});
-      _aviso('Equipo reactivado.');
+      final ok = await _aplicarEquipo({...e, 'activo': true});
+      _aviso(ok
+          ? 'Equipo reactivado.'
+          : 'No se pudo guardar el equipo. Inténtalo de nuevo.');
     } finally {
       if (mounted) setState(() => _ocupado = false);
     }
@@ -287,11 +312,15 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
     }
     return Scaffold(
       appBar: appBarIron(context, 'Equipamiento'),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _ocupado ? null : _crear,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Nuevo equipo'),
-      ),
+      // (1.36 H-B4 136-947) sin FAB mientras carga o con
+      // error: crear sobre una lista no leída duplicaría.
+      floatingActionButton: (_cargando || _falloCarga != null)
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _ocupado ? null : _crear,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Nuevo equipo'),
+            ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando equipos…')
           : _falloCarga != null
@@ -311,13 +340,15 @@ class _GuiaEquiposScreenState extends State<GuiaEquiposScreen> {
                 ),
                 const SizedBox(height: 12),
                 if (_equipos.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: AppEspacio.xl),
-                    child: Text(
-                      'Aún no hay equipos. Crea el primero para '
-                      'poder escribir fichas.',
-                      style: TextStyle(color: AppColores.textoSecundario(context)),
-                    ),
+                  // (1.36 H-B4 136-947) el vacío ofrece la
+                  // acción, no solo el texto.
+                  EstadoVacio(
+                    icono: Icons.fitness_center_rounded,
+                    titulo: 'Aún no hay equipos',
+                    subtitulo: 'Crea el primero para poder '
+                        'escribir fichas.',
+                    textoAccion: 'Crear equipo',
+                    onAccion: _ocupado ? null : _crear,
                   ),
                 for (var i = 0; i < _equipos.length; i++)
                   Card(

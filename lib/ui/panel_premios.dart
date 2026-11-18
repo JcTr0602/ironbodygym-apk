@@ -132,6 +132,11 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
   bool _cargando = true;
   bool _falloCarga = false;
   bool _resolviendo = false;
+  // (1.36 H-B4 136-962) la resolución se marca POR TARJETA:
+  // solo el vale afectado muestra «Aplicando…» /
+  // «Rechazando…» y la lista no se recarga entera.
+  int? _resolviendoId;
+  String _resolviendoAccion = '';
   BandejaPremios _bandeja = BandejaPremios.vacia;
   Set<int> _resueltosLocales = {};
 
@@ -328,7 +333,11 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
     // distinto, el espejo sumando dos veces y la
     // segunda op rechazada en el servidor para siempre.
     if (_resolviendo) return;
-    setState(() => _resolviendo = true);
+    setState(() {
+      _resolviendo = true;
+      _resolviendoId = v.id;
+      _resolviendoAccion = 'Aplicando…';
+    });
     try {
       final cli =
           await LocalDb.instance.mirrorPorIds('clientes', [v.clienteId]);
@@ -425,7 +434,12 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
             significado: SignificadoChip.error);
       }
     } finally {
-      if (mounted) setState(() => _resolviendo = false);
+      if (mounted) {
+        setState(() {
+          _resolviendo = false;
+          _resolviendoId = null;
+        });
+      }
     }
   }
 
@@ -434,7 +448,11 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
     // _aprobar — antes del primer await, no tras el
     // diálogo (doble toque = dos diálogos apilados).
     if (_resolviendo) return;
-    setState(() => _resolviendo = true);
+    setState(() {
+      _resolviendo = true;
+      _resolviendoId = v.id;
+      _resolviendoAccion = 'Rechazando…';
+    });
     try {
       final nota = await showDialog<String>(
         context: context,
@@ -455,7 +473,11 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
         );
         // 1.28 (M5-B2): el contador del hub se refresca.
         premiosAvisosExternos.value++;
-        await _cargar();
+        // (1.36 H-B4 136-962) sin recarga entera: el vale
+        // sale de la lista localmente, como al aprobar.
+        _genCarga++;
+        setState(
+            () => _resueltosLocales = {..._resueltosLocales, v.id});
       } else {
         mostrarSnack(
             context,
@@ -472,7 +494,12 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
             significado: SignificadoChip.error);
       }
     } finally {
-      if (mounted) setState(() => _resolviendo = false);
+      if (mounted) {
+        setState(() {
+          _resolviendo = false;
+          _resolviendoId = null;
+        });
+      }
     }
   }
 
@@ -664,21 +691,37 @@ class _PremiosPanelScreenState extends State<PremiosPanelScreen> {
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: _resolviendo ? null : () => _rechazar(v),
-                child: const Text('Rechazar'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: _resolviendo ? null : () => _aprobar(v),
-                icon: const Icon(Icons.done_all_rounded, size: 18),
-                label: const Text('Aprobar premio'),
-              ),
-            ],
-          ),
+          // (1.36 H-B4 136-962) solo ESTA tarjeta se bloquea
+          // y dice qué está haciendo.
+          if (_resolviendoId == v.id)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(_resolviendoAccion, style: AppTexto.secundario),
+              ],
+            )
+          else
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: _resolviendo ? null : () => _rechazar(v),
+                  child: const Text('Rechazar'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _resolviendo ? null : () => _aprobar(v),
+                  icon: const Icon(Icons.done_all_rounded, size: 18),
+                  label: const Text('Aprobar premio'),
+                ),
+              ],
+            ),
         ],
       ),
     );

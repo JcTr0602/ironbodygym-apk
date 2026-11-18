@@ -64,6 +64,7 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
   final _busquedaCtrl = TextEditingController();
   List<({int id, String nombre, String telefono})> _todos = const [];
   bool _cargandoClientes = true;
+  bool _falloClientes = false;
   int? _seleccionadoId;
   String _seleccionadoNombre = '';
   DetallePremiosCliente? _detalle;
@@ -173,13 +174,20 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
       setState(() {
         _todos = todos;
         _cargandoClientes = false;
+        _falloClientes = false;
       });
     } catch (e) {
       // Yunque de App 1.31 (C1-5): el fallo queda en bitácora
       // en vez de leerse como «no hay clientes con premios».
       AppLog.error('premios_clientes', 'cargar_clientes_fallo',
           d: '$e');
-      if (mounted) setState(() => _cargandoClientes = false);
+      // (1.36 H-B4 136-964) y se VE: error con reintento.
+      if (mounted) {
+        setState(() {
+          _cargandoClientes = false;
+          _falloClientes = true;
+        });
+      }
     }
   }
 
@@ -398,7 +406,19 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         _pagadoHasta = apoyos.hasta;
         _anulacionesEnCurso = apoyos.enCurso;
       });
-    } catch (_) {}
+    } catch (e) {
+      // (1.36 H-B4 136-964) una recarga de detalle que
+      // falla AVISA: el detalle en pantalla puede estar
+      // viejo (antes el catch era mudo).
+      AppLog.error('premios_clientes', 'recargar_detalle_fallo',
+          d: '$e');
+      if (_detalleVigente(gen, id)) {
+        mostrarSnack(context,
+            'No se pudo actualizar el detalle: se muestra '
+            'la última foto cargada.',
+            significado: SignificadoChip.alerta);
+      }
+    }
   }
 
   /// Corrección A4-D4 (auditorías 1.28): conceder con
@@ -571,6 +591,14 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
     if (_cargandoClientes) {
       return const EstadoCargando(texto: 'Cargando clientes…');
     }
+    if (_falloClientes) {
+      return EstadoError(
+        titulo: 'No se pudieron cargar los clientes',
+        detalle: 'La lectura falló en este teléfono. '
+            'Reinténtalo.',
+        onReintentar: _cargarClientes,
+      );
+    }
     final q = _busquedaCtrl.text.trim().toLowerCase();
     final visibles = q.isEmpty
         ? _todos
@@ -591,9 +619,18 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
         ),
         Expanded(
           child: visibles.isEmpty
-              ? const EstadoVacio(
+              // (1.36 H-B4 136-964) el vacío distingue «sin
+              // clientes» de «sin resultados para el filtro».
+              ? EstadoVacio(
                   icono: Icons.person_search_rounded,
-                  titulo: 'Sin clientes con ese criterio.',
+                  titulo: _todos.isEmpty
+                      ? 'Sin clientes.'
+                      : 'Sin clientes con ese criterio.',
+                  subtitulo: _todos.isEmpty
+                      ? 'Todavía no hay clientes en el espejo '
+                          'de este teléfono.'
+                      : 'Ningún cliente coincide con la '
+                          'búsqueda.',
                 )
               : ListView.builder(
                   itemCount: visibles.length,
@@ -769,7 +806,20 @@ class _PremiosClientesTabState extends State<PremiosClientesTab> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final e in d.sello.entries)
+              // (1.36 H-B4 136-965) medallas en el orden
+              // del catálogo, no en el orden del mapa del
+              // servidor.
+              for (final e in (d.sello.entries.toList()
+                ..sort((a, b) {
+                  int r(String k) {
+                    final base = k.split('@').first;
+                    final i = ordenCatalogoLogros.indexOf(base);
+                    return i < 0 ? ordenCatalogoLogros.length : i;
+                  }
+
+                  final c = r(a.key).compareTo(r(b.key));
+                  return c != 0 ? c : a.key.compareTo(b.key);
+                })))
                 // 1.28 (M5-C4): cada medalla con SU icono
                 // y su nombre (las claves del reto llevan
                 // «@<mes>»: tituloLogroPremio ya nombra

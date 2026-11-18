@@ -75,6 +75,8 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   int _baseRevision = 0;
   bool _publicadoExiste = false;
   bool _ocupado = false;
+  // (1.36 H-B4 136-946) progreso con nombre en el botón.
+  bool _publicando = false;
   List<Map<String, dynamic>> _equipos = [];
   int _esenciales = 0;
 
@@ -183,7 +185,9 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     if (!mounted) return;
     setState(() {
       _equipos = eq;
-      _esenciales = pub.where((p) => p['esencial'] == true).length;
+      _esenciales = pub
+          .where((p) => p['esencial'] == true || p['esencial'] == 1)
+          .length;
       // Si el borrador trae un equipo ya inactivo, se conserva en
       // la lista para mostrarlo (la validación impedirá publicar).
       if (_equipoId != null &&
@@ -215,8 +219,11 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     _sinonimos = [for (final s in (d['sinonimos'] as List?) ?? []) '$s'];
     _equipoId = '${d['equipoId'] ?? ''}';
     _silueta = '${d['siluetaId'] ?? 'pecho'}';
-    _esencial = d['esencial'] == true;
-    _revisado = d['revisado_entrenador'] == true;
+    // (1.36 H-B4 136-944) banderas del espejo normalizadas
+    // como en el resto (true o 1): el espejo guarda enteros.
+    _esencial = d['esencial'] == true || d['esencial'] == 1;
+    _revisado = d['revisado_entrenador'] == true ||
+        d['revisado_entrenador'] == 1;
     _muscPrinc.text = ((d['musculosPrincipales'] as List?) ?? []).join(', ');
     _muscSec.text = ((d['musculosSecundarios'] as List?) ?? []).join(', ');
     final vr = d['vistaRapida'] as Map?;
@@ -414,7 +421,11 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
     if (_slug.text.trim().isEmpty) {
       _slug.text = _slugDesdeTitulo(_titulo.text);
     }
-    setState(() => _ocupado = true);
+    setState(() {
+      _ocupado = true;
+      _publicando = true;
+    });
+    var encolada = false;
     try {
       if (!await _chequearObsoleto()) return;
       final a = _fichaActual();
@@ -512,6 +523,7 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         tipo: 'guia_upsert_publicado',
         payload: payload,
       );
+      encolada = true;
       final optimista = Map<String, dynamic>.from(_fichaActual())
         ..['revision'] = _baseRevision + 1
         // Si la imagen cambió, el servidor subirá imagen_rev en 1
@@ -546,9 +558,19 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
       AppLog.error('ui', 'guia_publicar_fallo', d: '$e');
       // SL-10 G13-4: mensaje amable; la excepción queda
       // en bitácora, no en pantalla.
-      _aviso('No se pudo publicar. Inténtalo de nuevo.');
+      // (1.36 H-B4 136-945) si la op YA quedó encolada, el
+      // aviso lo dice: no fue «no se pudo publicar».
+      _aviso(encolada
+          ? 'La publicación quedó encolada y se enviará al '
+              'sincronizar. No la publiques otra vez.'
+          : 'No se pudo publicar. Inténtalo de nuevo.');
     } finally {
-      if (mounted) setState(() => _ocupado = false);
+      if (mounted) {
+        setState(() {
+          _ocupado = false;
+          _publicando = false;
+        });
+      }
     }
   }
 
@@ -569,7 +591,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
         if (_tieneImagen && _imagenLocal.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-            child: Image.file(File(_imagenLocal), height: 120),
+            child: Image.file(File(_imagenLocal),
+            height: 120,
+            width: double.infinity,
+            fit: BoxFit.cover),
           )
         else if (_tieneImagen && _publicadoExiste)
           Padding(
@@ -718,6 +743,17 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
   }
 
   Future<void> _quitarImagen() async {
+    // (1.36 H-B4 136-945) quitar la imagen pide
+    // confirmación: al publicar, la ficha queda sin foto.
+    final confirmar = await DialogoApp.confirmar(
+      context,
+      titulo: 'Quitar la imagen',
+      mensaje: 'Al publicar, la ficha quedará sin imagen. '
+          'El borrador conserva todo lo demás.',
+      aceptar: 'Quitar imagen',
+      peligro: true,
+    );
+    if (confirmar != true || !mounted) return;
     if (_imagenLocal.isNotEmpty) {
       await _db.guiaBorrarImagenLocal(_imagenLocal);
     }
@@ -840,7 +876,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
           children: [
             for (var i = 0; i < items.length; i++)
               Padding(
-                key: ValueKey('item_$i'),
+                // (1.36 H-B4 136-946) clave estable por
+                // elemento: el propio controlador, no el
+                // índice (que cambia al reordenar).
+                key: ValueKey(items[i]),
                 padding: const EdgeInsets.only(bottom: AppEspacio.sm),
                 child: Row(
                   children: [
@@ -1041,7 +1080,10 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
             if (_tieneImagen && _imagenLocal.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-                child: Image.file(File(_imagenLocal), height: 160),
+                child: Image.file(File(_imagenLocal),
+                    height: 160,
+                    width: double.infinity,
+                    fit: BoxFit.cover),
               )
             else if (_tieneImagen && _publicadoExiste)
               Padding(
@@ -1094,8 +1136,15 @@ class _GuiaEditorScreenState extends State<GuiaEditorScreen> {
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _ocupado ? null : _publicar,
-            icon: const Icon(Icons.publish_rounded),
-            label: const Text('Publicar (con vista previa)'),
+            icon: _publicando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.publish_rounded),
+            label: Text(_publicando
+                ? 'Publicando…'
+                : 'Publicar (con vista previa)'),
           ),
           if (_publicadoExiste) ...[
             const SizedBox(height: 8),

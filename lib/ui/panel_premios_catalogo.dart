@@ -154,6 +154,15 @@ class _PremiosCatalogoTabState extends State<PremiosCatalogoTab> {
             style: AppTexto.secundario,
           ),
           const SizedBox(height: 12),
+          // (1.36 H-B4 136-963) catálogo vacío con nombre,
+          // no una pantalla con solo la intro.
+          if (_entradas.isEmpty)
+            const EstadoVacio(
+              icono: Icons.emoji_events_outlined,
+              titulo: 'Sin premios configurados',
+              subtitulo: 'El servidor no devolvió ninguna '
+                  'entrada del catálogo.',
+            ),
           for (final e in _entradas) ...[
             Tarjeta(
               onTap: () => _editar(e),
@@ -290,12 +299,19 @@ class _DialogoEditarPremioState extends State<_DialogoEditarPremio> {
           CampoTexto(
               controller: _metaCtrl,
               etiqueta: 'Meta (días entrenados verificados)',
-              teclado: TextInputType.number),
+              teclado: TextInputType.number,
+              // (1.36 H-B4 136-963) al corregir, el error sale.
+              onChanged: (_) {
+                if (_error != null) setState(() => _error = null);
+              }),
           const SizedBox(height: 8),
           CampoTexto(
               controller: _premioCtrl,
               etiqueta: 'Premio (días de mensualidad gratis)',
-              teclado: TextInputType.number),
+              teclado: TextInputType.number,
+              onChanged: (_) {
+                if (_error != null) setState(() => _error = null);
+              }),
           const SizedBox(height: 8),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

@@ -24,8 +24,11 @@ class BibliotecaScreen extends StatelessWidget {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Biblioteca'),
+        // (1.36 H-B4 136-943) la cáscara usa appBarIron
+        // con su TabBar, como el resto de la casa.
+        appBar: appBarIron(
+          context,
+          'Biblioteca',
           bottom: const TabBar(
             tabs: [
               Tab(text: 'GymPedia'),

@@ -16,6 +16,7 @@ import 'skeleton.dart';
 import 'diseno.dart';
 import 'gympedia_editor.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 /// GY3 (estéticas 1.19): texto del sello de respaldo de un
 /// artículo GymPedia (puro; mismo vocabulario que el editor).
@@ -185,6 +186,9 @@ class _GympediaScreenState extends State<GympediaScreen> {
   /// cuya op sigue en cola (marca `gympedia_en_cola_<slug>`).
   Set<String> _enCola = {};
 
+  // (1.36 H-B4 136-951)
+  bool _falloCarga = false;
+
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
@@ -193,10 +197,13 @@ class _GympediaScreenState extends State<GympediaScreen> {
     // bajarla (la hermana guia_lista sí lo hacía).
     try {
       await _cargarDatos();
+      _falloCarga = false;
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // (1.36 H-B4 136-951) y se VE: error con reintento.
+      _falloCarga = true;
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -241,18 +248,28 @@ class _GympediaScreenState extends State<GympediaScreen> {
     // pull COMPLETO por un botón de una sola sección.
     // 1.22 GY-06: snack honesto según si el ciclo corrió.
     var corrio = false;
+    Object? fallo;
     try {
       // P-7: con datos frescos manda el catálogo local
       // (regla de Jc); viejos → el alcance baja primero.
       corrio = await SyncEngine.instance.datosFrescos() ||
           await SyncEngine.instance.sincronizarScope('gympedia');
-    } catch (_) {}
+    } catch (e) {
+      // (1.36 H-B4 136-951) el aviso nombra el error real;
+      // «Sin conexión» solo cuando no hubo excepción.
+      fallo = e;
+      AppLog.error('ui', 'gympedia_sync_fallo', d: '$e');
+    }
     await _cargar();
     if (!mounted) return;
     setState(() => _sincronizando = false);
     if (corrio) {
       mostrarSnack(context, 'GymPedia actualizada',
           significado: SignificadoChip.exito);
+    } else if (fallo != null) {
+      mostrarSnack(context,
+          'No se pudo sincronizar: ${clasificarError(fallo).mensaje} '
+          'Se muestra el catálogo local.');
     } else {
       mostrarSnack(context, 'Sin conexión: catálogo local');
     }
@@ -397,6 +414,14 @@ class _GympediaScreenState extends State<GympediaScreen> {
         children: const [SkeletonLista(items: 4)],
       );
     }
+    if (_falloCarga) {
+      return EstadoError(
+        titulo: 'No se pudo cargar GymPedia',
+        detalle: 'La lectura local falló en este teléfono. '
+            'Reinténtalo.',
+        onReintentar: _cargar,
+      );
+    }
     return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               children: [
@@ -427,8 +452,15 @@ class _GympediaScreenState extends State<GympediaScreen> {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _sincronizando ? null : _sincronizar,
-                  icon: const Icon(Icons.sync_rounded),
-                  label: const Text('Actualizar'),
+                  icon: _sincronizando
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child:
+                              CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.sync_rounded),
+                  label:
+                      Text(_sincronizando ? 'Actualizando…' : 'Actualizar'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -484,7 +516,13 @@ class _GympediaScreenState extends State<GympediaScreen> {
                                       overflow:
                                           TextOverflow.ellipsis,
                                       style: AppTexto.subtitulo),
-                                  Text('${b['slug']}',
+                                  // (1.36 H-B4 136-952) la fila
+                                  // dice la categoría legible; el
+                                  // slug vive en el detalle.
+                                  Text(
+                                      GympediaValidacion.nombreCategoria[
+                                              '${b['categoria']}'] ??
+                                          '${b['categoria']}',
                                       style: AppTexto.secundario),
                                 ],
                               ),
@@ -573,8 +611,10 @@ class _GympediaScreenState extends State<GympediaScreen> {
                                             TextOverflow.ellipsis),
                                     const SizedBox(height: 2),
                                     Text(
-                                        'Rev. ${(p['revision'] as num?)?.toInt() ?? 1}'
-                                        '${(p['tiene_imagen'] == true || p['tiene_imagen'] == 1) ? ' · con imagen' : ''}',
+                                        // (1.36 H-B4 136-952) sin
+                                        // «· con imagen»: la miniatura
+                                        // ya lo muestra.
+                                        'Rev. ${(p['revision'] as num?)?.toInt() ?? 1}',
                                         style: AppTexto.secundario),
                                     // GY3: el sello con su texto.
                                     Text(_textoSello('${p['sello']}'),

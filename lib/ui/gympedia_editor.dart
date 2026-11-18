@@ -125,9 +125,23 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     _init();
   }
 
+  bool _falloInit = false;
+
   Future<void> _init() async {
     // Ronda 17 M3-H1: sin dueño no se inicializa el editor.
     if (!AuthService().isOwner) return;
+    try {
+      await _initDatos();
+    } catch (e) {
+      // (1.36 H-B4 136-953) un fallo al abrir el editor se
+      // VE con reintento; antes _listo nunca subía y la
+      // carga era eterna.
+      AppLog.error('ui', 'gympedia_editor_init_fallo', d: '$e');
+      if (mounted) setState(() => _falloInit = true);
+    }
+  }
+
+  Future<void> _initDatos() async {
     Map<String, dynamic>? fuente = widget.borrador;
     var desdeBorrador = fuente != null;
     if (fuente == null && widget.publicado != null) {
@@ -337,7 +351,13 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
     }
     s = s.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
     s = s.replaceAll(RegExp(r'^-+|-+$'), '');
-    return s.length > 80 ? s.substring(0, 80) : s;
+    if (s.length > 80) {
+      // (1.36 H-B4 136-955) tras recortar a 80, volver a
+      // limpiar los guiones de los extremos: el corte puede
+      // dejar un '-' final que la validación rechaza.
+      s = s.substring(0, 80).replaceAll(RegExp(r'^-+|-+$'), '');
+    }
+    return s;
   }
 
   Map<String, dynamic> _articuloActual() {
@@ -873,6 +893,20 @@ class _GympediaEditorScreenState extends State<GympediaEditorScreen> {
         appBar: appBarIron(context, 'Artículo GymPedia'),
         body: const Center(
             child: Text('Solo el dueño administra la GymPedia.')),
+      );
+    }
+    if (_falloInit) {
+      return Scaffold(
+        appBar: appBarIron(context, 'Artículo GymPedia'),
+        body: EstadoError(
+          titulo: 'No se pudo abrir el editor',
+          detalle: 'La lectura del artículo falló en este '
+              'teléfono. Reinténtalo.',
+          onReintentar: () {
+            setState(() => _falloInit = false);
+            _init();
+          },
+        ),
       );
     }
     if (!_listo) {

@@ -415,8 +415,13 @@ DetallePremiosCliente parseDetallePremiosCliente(Object? json) {
   if (crudosV is List) {
     for (final e in crudosV) {
       if (e is! Map) continue;
+      // (1.36 H-B4 136-967) un vale sin id válido no entra:
+      // sin id no se puede resolver ni anular, y pintarlo
+      // sería ofrecer acciones imposibles.
+      final idVale = _entero(e['id']);
+      if (idVale <= 0) continue;
       vales.add(ValeHistorial(
-        id: _entero(e['id']),
+        id: idVale,
         logroId: _texto(e['logro_id']),
         premioDias: _conteo(e['premio_dias']),
         diasAlReclamar: _conteo(e['dias_al_reclamar']),
@@ -525,8 +530,14 @@ List<EntradaCatalogoPremio> parseCatalogoPremios(Object? json) {
   final crudos = json['items'];
   if (crudos is! List) return const [];
   final entradas = <EntradaCatalogoPremio>[];
+  final logrosVistos = <String>{};
   for (final e in crudos) {
     if (e is! Map) continue;
+    // (1.36 H-B4 136-967) entradas sin logro o duplicadas
+    // se descartan: el catálogo manda por logro y un
+    // duplicado partiría la edición en dos filas.
+    final logroE = _texto(e['logro_id']);
+    if (logroE.isEmpty || !logrosVistos.add(logroE)) continue;
     String? ultimo;
     final uc = e['ultimo_cambio'];
     if (uc is Map) {
@@ -540,7 +551,7 @@ List<EntradaCatalogoPremio> parseCatalogoPremios(Object? json) {
       }
     }
     entradas.add(EntradaCatalogoPremio(
-      logroId: _texto(e['logro_id']),
+      logroId: logroE,
       nombre: _texto(e['nombre']),
       metaDias: _conteo(e['meta_dias']),
       premioDias: _conteo(e['premio_dias']),
