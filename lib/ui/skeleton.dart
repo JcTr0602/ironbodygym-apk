@@ -739,11 +739,7 @@ class _FilaAjusteEsqueleto extends StatelessWidget {
 /// tarjetas de sección debajo — la forma de la ficha del
 /// cliente en su primera carga.
 class SkeletonFicha extends StatelessWidget {
-  /// 1.36 FICHA (136-214/216): tag del Hero de destino,
-  /// cuando la puerta lo trae: el esqueleto ya monta el
-  /// destino con la silueta de la credencial.
-  final String? heroTag;
-  const SkeletonFicha({super.key, this.heroTag});
+  const SkeletonFicha({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -760,13 +756,13 @@ class SkeletonFicha extends StatelessWidget {
               // su tira — no el avatar circular de la
               // cabecera antigua: al cargar, el primer
               // pantallazo ya no salta de forma.
-              if (heroTag != null)
-                Hero(
-                  tag: heroTag!,
-                  child: const SkeletonLinea(alto: 196),
-                )
-              else
-                const SkeletonLinea(alto: 196),
+              // Sin Hero en el esqueleto: durante el
+              // vuelo el Hero recibe ancho NO acotado y
+              // la línea de ancho infinito revienta el
+              // layout (cazado por Jornada S14). El
+              // destino del vuelo lo monta la credencial
+              // en el primer frame con datos (136-214).
+              const SkeletonLinea(alto: 196),
               const SizedBox(height: AppEspacio.sm),
               const SkeletonLinea(ancho: 180, alto: 14),
               const SizedBox(height: AppEspacio.xs),

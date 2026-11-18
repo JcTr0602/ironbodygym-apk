@@ -3122,11 +3122,7 @@ class _FichaScreenState extends State<FichaScreen> {
                 // 1.30 (Oleada D6, UI130-22): la primera
                 // carga de la ficha enseña su esqueleto
                 // (cabecera + tarjetas), no un spinner.
-                ? SkeletonFicha(
-                    heroTag: widget.origenHero == null
-                        ? null
-                        : tagHeroCliente(
-                            widget.origenHero!, widget.clienteId))
+                ? const SkeletonFicha()
                 : c == null
                     ? _clienteNoEncontrado()
                     : Column(
