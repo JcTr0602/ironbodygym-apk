@@ -45,6 +45,13 @@ class _PinLockScreenState extends State<PinLockScreen>
   String? _error;
   bool _verificando = false;
 
+  /// 1.36 H-C1 (136-439): hasta que la comprobación de
+  /// bloqueo vigente resuelve, la pantalla se pinta
+  /// «comprobando» y el teclado no acepta dígitos (antes
+  /// la primera frame dejaba teclear y luego los
+  /// descartaba si había bloqueo).
+  bool _comprobandoBloqueo = true;
+
   /// 1.35 (UI-17): la sacudida de los puntos al fallar el
   /// PIN (con Tacto.error y el error anunciado por
   /// semántica). Con «reducir movimiento» no se anima.
@@ -74,7 +81,9 @@ class _PinLockScreenState extends State<PinLockScreen>
     // espera al abrir la pantalla, se dice desde el
     // principio (antes había que fallar una vez para
     // «descubrirlo», y el aviso mentía: «PIN incorrecto»).
-    _avisarSiBloqueado();
+    _avisarSiBloqueado().whenComplete(() {
+      if (mounted) setState(() => _comprobandoBloqueo = false);
+    });
   }
 
   @override
@@ -112,39 +121,58 @@ class _PinLockScreenState extends State<PinLockScreen>
   }
 
   Future<void> _tecla(String d) async {
-    if (_verificando || _bloqueado || _pin.length >= 4) return;
+    if (_verificando ||
+        _comprobandoBloqueo ||
+        _bloqueado ||
+        _pin.length >= 4) {
+      return;
+    }
     setState(() {
       _pin += d;
       _error = null;
     });
     if (_pin.length == 4) {
       setState(() => _verificando = true);
-      final ok =
-          await PerfilService.instance.verificarPin(_pin);
-      if (!mounted) return;
-      if (ok) {
-        await PerfilService.instance.setUltimaActividad(
-            DateTime.now().millisecondsSinceEpoch);
+      // 1.36 H-C1 (136-438): try/catch — si verificarPin
+      // (o lo que cuelga de él) LANZA, _verificando se
+      // libera y el fallo se DICE; antes quedaba clavado
+      // en true y la pantalla moría con el spinner.
+      try {
+        final ok =
+            await PerfilService.instance.verificarPin(_pin);
         if (!mounted) return;
-        Navigator.of(context).pop(true);
-      } else {
+        if (ok) {
+          await PerfilService.instance.setUltimaActividad(
+              DateTime.now().millisecondsSinceEpoch);
+          if (!mounted) return;
+          Navigator.of(context).pop(true);
+        } else {
+          setState(() {
+            _verificando = false;
+            _pin = '';
+          });
+          // 1.28 (M5-A7/R1M5-4): verificarPin devuelve el
+          // mismo false por PIN erróneo y por bloqueo de
+          // intentos; la pantalla distingue preguntando el
+          // tiempo restante: si hay espera, ESE es el
+          // mensaje (con sus minutos), no «PIN incorrecto».
+          if (!await _avisarSiBloqueado() && mounted) {
+            // 1.35 (UI-17): el fallo se siente (Tacto.error),
+            // se ve (sacudida de los puntos) y se anuncia
+            // (el error lleva semántica de región viva).
+            Tacto.error();
+            _sacudir();
+            setState(() => _error = 'PIN incorrecto');
+          }
+        }
+      } catch (_) {
+        if (!mounted) return;
         setState(() {
           _verificando = false;
           _pin = '';
+          _error = 'No se pudo comprobar el PIN. '
+              'Inténtalo de nuevo.';
         });
-        // 1.28 (M5-A7/R1M5-4): verificarPin devuelve el
-        // mismo false por PIN erróneo y por bloqueo de
-        // intentos; la pantalla distingue preguntando el
-        // tiempo restante: si hay espera, ESE es el
-        // mensaje (con sus minutos), no «PIN incorrecto».
-        if (!await _avisarSiBloqueado() && mounted) {
-          // 1.35 (UI-17): el fallo se siente (Tacto.error),
-          // se ve (sacudida de los puntos) y se anuncia
-          // (el error lleva semántica de región viva).
-          Tacto.error();
-          _sacudir();
-          setState(() => _error = 'PIN incorrecto');
-        }
       }
     }
   }
@@ -260,9 +288,11 @@ class _PinLockScreenState extends State<PinLockScreen>
                   style: AppTexto.displayPequeno),
               const SizedBox(height: 8),
               Text(
-                  _bloqueado
-                      ? 'Demasiados intentos fallidos'
-                      : 'Escribe tu PIN para continuar',
+                  _comprobandoBloqueo && !_bloqueado
+                      ? 'Comprobando…'
+                      : _bloqueado
+                          ? 'Demasiados intentos fallidos'
+                          : 'Escribe tu PIN para continuar',
                   style: AppTexto.secundario.copyWith(
                       color: AppColores.textoSecundario(context))),
               const SizedBox(height: 24),
@@ -340,9 +370,11 @@ class _PinLockScreenState extends State<PinLockScreen>
                 // Durante la espera el teclado se ve
                 // atenuado y no responde.
                 Opacity(
-                  opacity: _bloqueado ? 0.35 : 1,
+                  opacity: _bloqueado || _comprobandoBloqueo
+                      ? 0.35
+                      : 1,
                   child: IgnorePointer(
-                    ignoring: _bloqueado,
+                    ignoring: _bloqueado || _comprobandoBloqueo,
                     child: _teclado(),
                   ),
                 ),

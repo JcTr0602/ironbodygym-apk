@@ -233,6 +233,13 @@ class AccesoAppCache {
   DateTime? _verificadoEn;
   bool _esPersistido = false;
 
+  /// 1.36 H-C1 (136-450): el motivo del ÚLTIMO fallo de
+  /// carga (la excepción tal cual), expuesto para quien
+  /// quiera decirlo en vez del genérico «sin conexión».
+  /// null si la última carga salió bien o aún no hubo.
+  Object? _ultimoErrorCarga;
+  Object? get ultimoErrorCarga => _ultimoErrorCarga;
+
   /// true si el caché ya se cargó en esta sesión (aunque esté vacío).
   bool get cargado => _porCliente != null;
 
@@ -312,9 +319,12 @@ class AccesoAppCache {
       _porCliente = {for (final a in lista) a.clienteId: a};
       _verificadoEn = ahoraHabana();
       _esPersistido = false;
+      _ultimoErrorCarga = null;
       unawaited(_persistir(res));
       return true;
-    } catch (_) {
+    } catch (e) {
+      // 1.36 H-C1 (136-450): el motivo queda expuesto.
+      _ultimoErrorCarga = e;
       return false;
     }
   }

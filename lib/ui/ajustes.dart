@@ -667,8 +667,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
     try {
       await _auth.changePassword(datos.actual, datos.nueva);
       _msg('Contraseña cambiada');
-    } catch (_) {
-      _msgError('No se pudo cambiar: verifica tu contraseña actual');
+    } catch (e) {
+      // 1.36 H-C1 (136-463): red ≠ credenciales también aquí.
+      _msgError(mensajeErrorCambioClave(e));
     }
   }
 

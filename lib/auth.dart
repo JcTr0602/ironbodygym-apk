@@ -16,6 +16,30 @@ import 'app_log.dart';
 import 'config.dart';
 import 'localdb.dart';
 
+/// 1.36 H-C1 (136-463): mensaje del cambio de contraseña
+/// distinguiendo RED de CREDENCIALES, como ya hace el
+/// login (mensajeErrorLogin). PURO. Antes Ajustes caía
+/// todo en «verifica tu contraseña actual» y un fallo de
+/// red se presentaba como contraseña mala.
+String mensajeErrorCambioClave(Object e) {
+  final s = e.toString();
+  if (s.contains('Invalid login credentials') ||
+      s.contains('invalid_credentials')) {
+    return 'Tu contraseña actual no es correcta.';
+  }
+  final esRed = s.contains('SocketException') ||
+      s.contains('TimeoutException') ||
+      s.contains('timed out') ||
+      s.contains('RetryableFetch') ||
+      s.contains('Failed host lookup') ||
+      s.contains('NetworkException');
+  if (esRed) {
+    return 'Sin conexión con el servidor. Revisa tu '
+        'conexión e inténtalo de nuevo.';
+  }
+  return 'No se pudo cambiar la contraseña. Inténtalo de nuevo.';
+}
+
 String usernameToEmail(String username) {
   var n = username.trim().toLowerCase();
   // quita tildes
@@ -640,7 +664,11 @@ class AuthService {
     final nombre = meta?['nombre'] as String?;
     if (nombre != null && nombre.isNotEmpty) return nombre;
     final email = session?.user.email ?? '';
-    return emailToUsername(email);
+    final desdeEmail = emailToUsername(email);
+    // 1.36 H-C1 (136-461): sin sesión ni nombre, la
+    // cadena vacía no se pinta en ningún sitio — manda
+    // el genérico del rol.
+    return desdeEmail.isEmpty ? 'Entrenador' : desdeEmail;
   }
 
   String? get _jwt => session?.accessToken;

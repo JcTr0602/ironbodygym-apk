@@ -44,6 +44,15 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
   /// dos diálogos ni encola dos bajas.
   final Set<String> _quitandoIds = {};
   List<Map<String, dynamic>> _activos = [];
+
+  /// 1.36 H-C1 (136-454): reflejo LOCAL de las ops de
+  /// candado recién encoladas que el espejo aún no trae:
+  /// al aplicar, la fila nace aquí marcada «Por
+  /// sincronizar» en vez de que la lista «siga igual»
+  /// hasta que la op aterrice; al quitar, el id queda
+  /// oculto hasta que el espejo confirme la baja.
+  final List<Map<String, dynamic>> _aplicadosPendientes = [];
+  final Set<String> _retiradosPendientes = {};
   List<({String tid, String nombre})> _entrenadores = [];
   final Map<String, String> _nombresPersonas = {};
 
@@ -114,9 +123,19 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
           }
         }
       } catch (_) {}
+      // 1.36 H-C1 (136-454): poda del reflejo local — lo
+      // que el espejo ya trae deja de ser «pendiente», y
+      // una baja ya confirmada deja de ocultarse.
+      final idsEspejo = {for (final f in activos) '${f['id']}'};
+      _aplicadosPendientes
+          .removeWhere((f) => idsEspejo.contains('${f['id']}'));
+      _retiradosPendientes.removeWhere((id) => !idsEspejo.contains(id));
+      final visibles = activos
+          .where((f) => !_retiradosPendientes.contains('${f['id']}'))
+          .toList();
       if (!mounted) return;
       setState(() {
-        _activos = activos;
+        _activos = [..._aplicadosPendientes, ...visibles];
         _entrenadores = entrenadores;
         _cargando = false;
         _falloCarga = false;
@@ -264,10 +283,18 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                   child: Text(_tituloFila(f),
                       style: AppTexto.subtitulo),
                 ),
-                const ChipEstado.semantico(
-                  texto: 'Activo',
-                  significado: SignificadoChip.alerta,
-                ),
+                // 1.36 H-C1 (136-454): la fila encolada y
+                // aún no sincronizada se rotula como tal.
+                if (f['_pendienteSync'] == true)
+                  const ChipEstado.semantico(
+                    texto: 'Por sincronizar',
+                    significado: SignificadoChip.info,
+                  )
+                else
+                  const ChipEstado.semantico(
+                    texto: 'Activo',
+                    significado: SignificadoChip.alerta,
+                  ),
               ],
             ),
             if (mensaje.isNotEmpty) ...[
@@ -423,8 +450,9 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
               idManual: _idManual,
               objetivo: objetivo)
           : null;
-      await _enviarOp({
-        'id': const Uuid().v4(),
+      final idNuevo = const Uuid().v4();
+      final opNueva = <String, dynamic>{
+        'id': idNuevo,
         'alcance': _alcance,
         // C-1: la app sale DERIVADA del objetivo (regla D), no
         // del selector libre: una combinación incoherente la
@@ -445,6 +473,14 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
         if (_horasCaducidad > 0)
           'expira_ts': isoHabana(
               ahoraHabana().add(Duration(hours: _horasCaducidad))),
+      };
+      await _enviarOp(opNueva);
+      // 1.36 H-C1 (136-454): la op encolada se refleja al
+      // instante como fila «Por sincronizar».
+      _aplicadosPendientes.add({
+        ...opNueva,
+        '_pendienteSync': true,
+        'creada_ts': isoHabana(ahoraHabana()),
       });
       if (!mounted) return;
       _mensajeCtrl.clear();
@@ -484,6 +520,11 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
           'mensaje': '${f['mensaje']}',
         'activo': 0,
       });
+      // 1.36 H-C1 (136-454): la baja encolada oculta la
+      // fila al instante hasta que el espejo la confirme.
+      _retiradosPendientes.add(idFila);
+      _aplicadosPendientes
+          .removeWhere((f) => '${f['id']}' == idFila);
       if (!mounted) return;
       mostrarSnack(context, 'Candado retirado.');
       await _cargar();
@@ -670,7 +711,7 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                               () => _personaTipo = v ?? 'entrenador'),
                         ),
                         const SizedBox(height: AppEspacio.md),
-                        if (_personaTipo == 'entrenador')
+                        if (_personaTipo == 'entrenador') ...[
                           SelectorIronForm<String>(
                             valorInicial: _personaTid,
                             etiqueta: 'Entrenador',
@@ -680,7 +721,21 @@ class _PanelCandadoScreenState extends State<PanelCandadoScreen> {
                             ],
                             alCambiar: (v) =>
                                 setState(() => _personaTid = v),
-                          )
+                          ),
+                          // 1.36 H-C1 (136-456): sin
+                          // entrenadores en la meta, el
+                          // selector no queda vacío mudo.
+                          if (_entrenadores.isEmpty) ...[
+                            const SizedBox(height: AppEspacio.sm),
+                            Text(
+                              'Aún sin datos de entrenadores: '
+                              'sincroniza y vuelve a intentarlo.',
+                              style: AppTexto.metadato.copyWith(
+                                  color: AppColores.textoSecundario(
+                                      context)),
+                            ),
+                          ],
+                        ]
                         else ...[
                           if (!_idManual) ...[
                             InputDecorator(
@@ -1008,12 +1063,16 @@ class _BuscadorPersonaCandadoState
       invitados: _invitados,
       consulta: _filtro.text,
     );
+    // 1.36 H-C1 (136-457): el alto ya no es 440 fijo —
+    // es como máximo el 65 % de la pantalla (en alturas
+    // cortas o apaisado el diálogo ya no desborda).
+    final altoPantalla = MediaQuery.of(context).size.height;
     return DialogoApp(
       titulo: 'Buscar cliente o invitado',
       iconoTitulo: Icons.person_search_rounded,
       contenido: SizedBox(
         width: double.maxFinite,
-        height: 440,
+        height: altoPantalla * 0.65 < 440 ? altoPantalla * 0.65 : 440,
         child: Column(
           children: [
             TextField(

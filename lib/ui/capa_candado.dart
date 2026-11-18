@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../acceso_bloqueo.dart';
@@ -42,12 +44,26 @@ class CapaCandado extends StatefulWidget {
 }
 
 class _CapaCandadoState extends State<CapaCandado> {
+  /// 1.36 H-C1 (136-447): la hora de reactivación se
+  /// REFRESCA mientras la capa vive (repintado cada 30 s):
+  /// el texto ya no es una foto calculada al montar.
+  Timer? _refresco;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusManager.instance.primaryFocus?.unfocus();
     });
+    _refresco = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _refresco?.cancel();
+    super.dispose();
   }
 
   @override
@@ -59,8 +75,12 @@ class _CapaCandadoState extends State<CapaCandado> {
       child: ColoredBox(
         color: AppColores.carbonProfundo.withAlpha(0xF0),
         child: SafeArea(
+          // 1.36 H-C1 (136-445): la tarjeta va en scroll —
+          // un mensaje del dueño muy largo en una pantalla
+          // corta ya no desborda.
           child: Center(
-            child: Padding(
+            child: SingleChildScrollView(
+              child: Padding(
               padding: const EdgeInsets.all(AppEspacio.xl),
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 420),
@@ -157,6 +177,7 @@ class _CapaCandadoState extends State<CapaCandado> {
                   ],
                 ),
               ),
+            ),
             ),
           ),
         ),

@@ -151,8 +151,25 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _entrar() async {
+    // 1.36 H-C1 (136-433): guarda de reentrada — el botón
+    // se sustituye por el spinner, pero el Enter del campo
+    // de contraseña seguía llamando y podía duplicar el
+    // signIn.
+    if (_cargando) return;
     final u = _user.text.trim();
     final p = _pass.text;
+    // 1.36 H-C1 (136-462): si teclea un «@», el alias se
+    // convertiría en OTRO usuario en silencio y el fallo
+    // se leería como credenciales malas: se avisa de que
+    // basta el nombre, sin dominio, y no se intenta.
+    if (u.contains('@')) {
+      setState(() {
+        _error = 'Escribe solo tu nombre de usuario, sin '
+            'el @ ni el dominio.';
+        _errorEsAviso = false;
+      });
+      return;
+    }
     if (u.isEmpty || p.isEmpty) {
       setState(() {
         _error = 'Escribe usuario y contraseña';
@@ -288,7 +305,15 @@ class _LoginScreenState extends State<LoginScreen>
                         child: Image.asset('assets/logo.jpg',
                             height: 130,
                             width: 130,
-                            fit: BoxFit.cover),
+                            fit: BoxFit.cover,
+                            // 1.36 H-C1 (136-434): como el
+                            // fondo — si el logo faltara, un
+                            // rayo de marca, no un error
+                            // crudo sobre la puerta.
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.bolt_rounded,
+                                    size: 64,
+                                    color: AppColores.naranja)),
                       ),
                     ),
                     const SizedBox(height: AppEspacio.lg),

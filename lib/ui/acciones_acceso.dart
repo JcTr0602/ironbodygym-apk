@@ -69,6 +69,11 @@ Future<void> _conGuardaAcceso(
         'Ya hay una acción en curso para este cliente; espera a que termine.');
     return;
   }
+  // 1.36 H-C1 (136-453): señal de procesamiento — tras
+  // cerrar la hoja, la RPC puede tardar hasta 12 s y el
+  // primer aviso ya no es el final: se dice que corre.
+  // El aviso final la reemplaza (el helper no encola).
+  _snack(ctx, 'Procesando…');
   try {
     await accion();
   } finally {
