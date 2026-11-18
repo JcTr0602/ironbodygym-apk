@@ -35,6 +35,7 @@ import 'por_cobrar.dart';
 import 'detalle_suplemento.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart';
+import 'hoja_accion.dart';
 import 'reservas.dart';
 import 'servicios.dart';
 import 'servicios_admin.dart';
@@ -63,9 +64,18 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   final _auth = AuthService();
   List<Map<String, dynamic>> _items = [];
   bool _cargando = true;
+  // 1.36 H-B3 (136-766): el fallo de la carga inicial es un
+  // estado propio con reintento — antes el catch solo
+  // escribía en bitácora y la pantalla decía «Sin
+  // suplementos», un error disfrazado de catálogo vacío.
+  bool _errorCarga = false;
   String _busqueda = '';
   final _busquedaCtrl = TextEditingController();
   bool _promoActiva = true;
+  // 1.36 H-B3 (136-769): hasta que los ajustes cargan, la
+  // tarjeta de promo NO afirma «activa» (el valor inicial
+  // true se leía como estado real, también el entrenador).
+  bool _promoCargada = false;
   // v1.2.1: categorías
   List<Map<String, dynamic>> _categorias = [];
   int? _filtroCategoria; // null = todas
@@ -182,10 +192,16 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted && _errorCarga) {
+        setState(() => _errorCarga = false);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
-      // (la clase nació de fallos mudos).
+      // (la clase nació de fallos mudos) y, desde 136-766,
+      // también en pantalla como EstadoError si no hay
+      // catálogo que mostrar.
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -232,6 +248,7 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
       // tasa llegaban con cast duro: un bool/texto del
       // servidor tumbaba la carga del catálogo).
       _promoActiva = flagAjusteTolerante(aj['promo_suplementos']);
+      _promoCargada = true;
       _tasaUsd = montoAjusteTolerante(aj['tasa_usd']);
       _topIds = topIds;
       _topTotales = topTotales;
@@ -349,20 +366,45 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         if (cmpNombre != 0) return cmpNombre;
         return (a['id'] as int? ?? 0).compareTo(b['id'] as int? ?? 0);
       });
+    } else {
+      // 1.36 H-B3 (136-771): el orden determinista también
+      // es del entrenador (antes su catálogo quedaba en el
+      // orden crudo del espejo y cambiaba entre cargas):
+      // nombre, luego id como desempate final.
+      res = [...res]..sort((a, b) {
+          final cmpNombre = compararPorNombre(a, b);
+          if (cmpNombre != 0) return cmpNombre;
+          return (SyncEngine.enteroTolerante(a['id']) ?? 0)
+              .compareTo(SyncEngine.enteroTolerante(b['id']) ?? 0);
+        });
     }
     return res;
   }
 
   Future<void> _togglePromo(bool v) async {
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'ajuste',
-      payload: {'clave': 'promo_suplementos', 'valor': v ? 1 : 0},
-    );
-    // Optimista: reflejar de inmediato en ajustes locales.
-    final aj = await LocalDb.instance.getAjustes();
-    aj['promo_suplementos'] = v ? 1 : 0;
-    await LocalDb.instance.setAjustes(aj);
+    // 1.36 H-B3 (136-768): encolar y guardar el ajuste van
+    // con red — si algo falla, el interruptor NO se mueve
+    // y el dueño ve el aviso (antes la excepción quedaba
+    // sin manejar y la promo parecía cambiada sin estarlo).
+    try {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'ajuste',
+        payload: {'clave': 'promo_suplementos', 'valor': v ? 1 : 0},
+      );
+      // Optimista: reflejar de inmediato en ajustes locales.
+      final aj = await LocalDb.instance.getAjustes();
+      aj['promo_suplementos'] = v ? 1 : 0;
+      await LocalDb.instance.setAjustes(aj);
+    } catch (e) {
+      AppLog.error('ui', 'promo_toggle_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(
+            context, 'No se pudo cambiar la promo: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     unawaited(SyncEngine.instance.push());
     if (mounted) setState(() => _promoActiva = v);
   }
@@ -478,15 +520,25 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         acciones: [
           // v1.3.4 (C5): "+ Nuevo" compacto en la cabecera (solo dueño).
           // Ni FAB (tapaba el botón Vender) ni tarjeta en el grid.
+          // 1.36 H-B3 (136-769): a 360 dp, «Nuevo» + Reservas
+          // + menú desbordaban la barra — en pantallas
+          // estrechas «Nuevo» queda como icono con tooltip.
           if (_esDueno)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
-              child: FilledButton.tonalIcon(
+            if (MediaQuery.sizeOf(context).width < 380)
+              IconButton(
+                icon: const Icon(Icons.add_rounded),
+                tooltip: 'Nuevo suplemento',
                 onPressed: () => _irEditar(null),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Nuevo'),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppEspacio.sm),
+                child: FilledButton.tonalIcon(
+                  onPressed: () => _irEditar(null),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Nuevo'),
+                ),
               ),
-            ),
           // 1.25 T120 (F4-14): en la barra quedan solo «Nuevo»
           // y Reservas (con contador) — compartir y fiados
           // pasaron al menú ⋮, agrupados por bloques.
@@ -496,8 +548,19 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             IconButton(
               icon: Badge(
                 isLabelVisible: _reservasSolicitadas > 0,
-                label: Text('$_reservasSolicitadas'),
-                child: const Icon(Icons.bookmark_border_rounded),
+                // 1.36 H-B3 (136-769): el contador se topa
+                // («99+») y se anuncia entero al lector de
+                // pantalla — antes un número largo rompía
+                // la insignia y no se anunciaba.
+                label: Text(_reservasSolicitadas > 99
+                    ? '99+'
+                    : '$_reservasSolicitadas'),
+                child: Semantics(
+                  label: _reservasSolicitadas > 0
+                      ? '$_reservasSolicitadas solicitudes de reserva pendientes'
+                      : 'Sin solicitudes de reserva pendientes',
+                  child: const Icon(Icons.bookmark_border_rounded),
+                ),
               ),
               tooltip: 'Reservas',
               onPressed: () async {
@@ -569,7 +632,9 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                   children: [
                     Icon(Icons.bolt_rounded, size: 20),
                     SizedBox(width: AppEspacio.sm),
-                    Text('Servicios ⚡ por dosis'),
+                    // 1.36 H-B3 (136-769): el rayo ya es el
+                    // icono — fuera el ⚡ duplicado del texto.
+                    Text('Servicios por dosis'),
                   ],
                 ),
               ),
@@ -649,6 +714,51 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               compact: true,
               alcance: 'suplementos',
               alTerminarSync: _recargarTrasBanner),
+          // 1.36 H-B3 (136-771): embebida (dentro de otra
+          // pantalla) no hay AppBar: Nuevo, Reservas y el
+          // menú no desaparecen sin sustituto — fila
+          // compacta con las tres entradas.
+          if (widget.embebida)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+              child: Row(
+                children: [
+                  if (_esDueno)
+                    FilledButton.tonalIcon(
+                      onPressed: () => _irEditar(null),
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('Nuevo'),
+                    ),
+                  const Spacer(),
+                  if (_puedeReservas)
+                    IconButton(
+                      icon: Badge(
+                        isLabelVisible: _reservasSolicitadas > 0,
+                        label: Text(_reservasSolicitadas > 99
+                            ? '99+'
+                            : '$_reservasSolicitadas'),
+                        child: const Icon(
+                            Icons.bookmark_border_rounded),
+                      ),
+                      tooltip: 'Reservas',
+                      onPressed: () async {
+                        await Navigator.push(
+                          context,
+                          RutaIron(
+                              builder: (_) => const ReservasScreen()),
+                        );
+                        if (mounted) _cargar();
+                      },
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.more_vert_rounded),
+                    tooltip: 'Más opciones',
+                    onPressed: _abrirMasOpcionesEmbebida,
+                  ),
+                ],
+              ),
+            ),
           // 1.34 Campo 2 (B-3): la cabecera del catálogo
           // (promo + buscador + categorías) se PLIEGA al
           // bajar por la lista y reaparece al subir o al
@@ -704,8 +814,15 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
             children: [
               if (_categorias.isNotEmpty) ...[
                 ChoiceChip(
-                  label: const Text('Todas',
-                      style: AppTexto.etiqueta),
+                  // 1.36 H-B3 (136-769): la etiqueta sigue
+                  // al estado del chip (texto pleno si está
+                  // elegido, secundario si no) — el estilo
+                  // fijo dejaba el elegido en gris apagado.
+                  label: Text('Todas',
+                      style: AppTexto.etiqueta.copyWith(
+                          color: _filtroCategoria == null
+                              ? AppColores.texto(context)
+                              : AppColores.textoSecundario(context))),
                   selected: _filtroCategoria == null,
                   onSelected: (_) => setState(
                       () => _filtroCategoria = null),
@@ -714,7 +831,11 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 for (final c in _categorias) ...[
                   ChoiceChip(
                     label: Text('${c['nombre']}',
-                        style: AppTexto.etiqueta),
+                        style: AppTexto.etiqueta.copyWith(
+                            color: _filtroCategoria ==
+                                    (c['id'] as int?)
+                                ? AppColores.texto(context)
+                                : AppColores.textoSecundario(context))),
                     selected: _filtroCategoria ==
                         (c['id'] as int?),
                     onSelected: (_) => setState(() =>
@@ -730,7 +851,13 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               // al final de la misma fila; la categoría se
               // queda (es navegación del catálogo, no un
               // recorte ocasional).
-              _botonStock(),
+              // 1.36 H-B3 (136-771): el botón es solo del
+              // dueño — el catálogo del entrenador YA viene
+              // filtrado a activo con stock, así que sus
+              // opciones «Agotados»/«Con stock» mentían
+              // (una siempre vacía, la otra idéntica a
+              // «Todos»).
+              if (_esDueno) _botonStock(),
             ],
           ),
         ),
@@ -866,6 +993,84 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
     setState(() => _filtroStock = elegido);
   }
 
+  /// 1.36 H-B3 (136-771): las opciones del menú ⋮ cuando
+  /// la pantalla va embebida (sin AppBar): la hoja de la
+  /// casa con los mismos destinos y las mismas rutas.
+  Future<void> _abrirMasOpcionesEmbebida() async {
+    Widget opcion(String valor, IconData icono, String texto) =>
+        Builder(
+          builder: (ctx) => ListTile(
+            leading: Icon(icono, size: 20),
+            title: Text(texto),
+            onTap: () => Navigator.of(ctx).pop(valor),
+          ),
+        );
+    final v = await showHojaIron<String>(
+      context,
+      titulo: 'Más opciones',
+      icono: Icons.more_vert_rounded,
+      cuerpo: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          opcion('servicios', Icons.bolt_rounded,
+              'Servicios por dosis'),
+          opcion(
+              'historial',
+              _esDueno
+                  ? Icons.receipt_long_rounded
+                  : Icons.history_rounded,
+              _esDueno ? 'Historial de ventas' : 'Mis ventas'),
+          opcion('fiados', Icons.account_balance_wallet_rounded,
+              'Fiados por cobrar'),
+          opcion('compartir', Icons.share_rounded,
+              'Compartir catálogo'),
+          if (_esDueno) ...[
+            opcion('categorias', Icons.category_rounded,
+                'Categorías'),
+            opcion('admin_servicios', Icons.settings_rounded,
+                'Administrar dosis y botes'),
+          ],
+        ],
+      ),
+    );
+    if (v == null || !mounted) return;
+    if (v == 'compartir') {
+      _compartirCatalogo();
+    } else if (v == 'fiados') {
+      await Navigator.push(
+        context,
+        RutaIron(
+            builder: (_) =>
+                const PorCobrarScreen(pestanaInicial: 1)),
+      );
+    } else if (v == 'historial') {
+      await Navigator.push(
+        context,
+        RutaIron(
+            builder: (_) =>
+                HistorialVentasScreen(soloMias: !_esDueno)),
+      );
+    } else if (v == 'categorias') {
+      await Navigator.push(
+        context,
+        RutaIron(
+            builder: (_) => const CategoriasSuplementoScreen()),
+      );
+      if (mounted) _cargar();
+    } else if (v == 'admin_servicios') {
+      await Navigator.push(
+        context,
+        RutaIron(builder: (_) => const ServiciosAdminScreen()),
+      );
+      if (mounted) _cargar();
+    } else if (v == 'servicios') {
+      await Navigator.push(
+        context,
+        RutaIron(builder: (_) => const ServiciosScreen()),
+      );
+    }
+  }
+
   Widget _tarjetaPromo() {
     // 1.25 T33: para el entrenador, con la promo apagada la
     // banda solo ocupaba una capa más sobre el catálogo sin
@@ -883,7 +1088,14 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
         padding: const EdgeInsets.fromLTRB(
             AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
         child: Tarjeta(
-          onTap: () => setState(() => _promoDesplegada = true),
+          // 1.36 H-B3 (136-771): desplegar la promo es
+          // solo del dueño (lleva a su interruptor); el
+          // entrenador ve el resumen sin affordance.
+          // 1.36 H-B3 (136-769): sin cargar, el resumen no
+          // afirma estado («Promo · cargando…»).
+          onTap: _esDueno
+              ? () => setState(() => _promoDesplegada = true)
+              : null,
           padding: const EdgeInsets.symmetric(
               horizontal: AppEspacio.md, vertical: AppEspacio.xs),
           child: Row(
@@ -894,12 +1106,17 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
               const SizedBox(width: AppEspacio.sm),
               Expanded(
                 child: Text(
-                    _promoActiva ? 'Promo · activa' : 'Promo · inactiva',
+                    !_promoCargada
+                        ? 'Promo · cargando…'
+                        : _promoActiva
+                            ? 'Promo · activa'
+                            : 'Promo · inactiva',
                     style: AppTexto.secundario),
               ),
-              Icon(Icons.expand_more_rounded,
-                  size: 20,
-                  color: AppColores.textoSecundario(context)),
+              if (_esDueno)
+                Icon(Icons.expand_more_rounded,
+                    size: 20,
+                    color: AppColores.textoSecundario(context)),
             ],
           ),
         ),
@@ -918,11 +1135,19 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 color: AppColores.textoSecundario(context)),
             const SizedBox(width: AppEspacio.sm),
             Expanded(
-              child: Text(
-                  _promoActiva
-                      ? 'Promo activa · 1 mes gratis por compra'
-                      : 'Promo inactiva',
-                  style: AppTexto.secundario),
+              // 1.36 H-B3 (136-770): el texto de la tarjeta
+              // desplegada cruza con fundido al cambiar el
+              // estado (antes saltaba en seco dentro del
+              // AnimatedSize de la cabecera).
+              child: AnimatedSwitcher(
+                duration: AppMovimiento.corta,
+                child: Text(
+                    _promoActiva
+                        ? 'Promo activa · 1 mes gratis por compra'
+                        : 'Promo inactiva',
+                    key: ValueKey(_promoActiva),
+                    style: AppTexto.secundario),
+              ),
             ),
             Switch(
               value: _promoActiva,
@@ -951,6 +1176,19 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   Widget _cuerpo() {
     if (_cargando) {
       return const EstadoCargando(texto: 'Cargando suplementos…');
+    }
+    // 1.36 H-B3 (136-766): sin catálogo que mostrar y con
+    // fallo de carga, la pantalla lo DICE y ofrece
+    // reintentar — no disfraza el error de vacío.
+    if (_errorCarga && _items.isEmpty) {
+      return EstadoError(
+        titulo: 'No se pudieron cargar los suplementos',
+        detalle: 'Revisa el teléfono e inténtalo de nuevo.',
+        onReintentar: () {
+          setState(() => _errorCarga = false);
+          _cargar();
+        },
+      );
     }
     final items = _filtrados;
     if (items.isEmpty) {
@@ -1095,7 +1333,17 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                               mainAxisSpacing: 12,
                             ),
                             itemCount: items.length,
+                            // 1.36 H-B3 (136-770): la cascada
+                            // va clavada al ID del suplemento
+                            // (la llave vive en el ItemCascada,
+                            // no solo en la tarjeta): al
+                            // buscar o filtrar, el ítem que
+                            // queda conserva su estado y NO
+                            // se reanima; antes la posición
+                            // mandaba y la rejilla entera
+                            // volvía a desfilar.
                             itemBuilder: (ctx, i) => ItemCascada(
+                                key: ValueKey(items[i]['id']),
                                 indice: i,
                                 child: _TarjetaSuplemento(
                                   key: ValueKey(items[i]['id']),
@@ -1166,8 +1414,12 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
   }
 
   Widget _miniTop(Map<String, dynamic> s) {
-    final precio =
-        (s['precio_oficial'] as num?)?.toDouble() ?? 0;
+    // 1.36 H-B3 (136-767): el mini-top usa el MISMO precio
+    // visible que la tarjeta (oficial → legacy → sin
+    // precio); antes solo miraba el oficial y un producto
+    // con solo precio legacy salía a 0.00 aquí.
+    final visible = precioVisibleSuplemento(s);
+    final precio = visible.precio ?? 0;
     return SizedBox(
       width: 148,
       child: Tarjeta(
@@ -1190,8 +1442,15 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
                 overflow: TextOverflow.ellipsis,
                 style: AppTexto.cuerpo),
             // Ronda 3-9 #8: en USD, equivalente CUP redondeado.
+            // 1.36 H-B3 (136-767): sin precio visible, la
+            // frase de la casa («Consultar precio»), no 0.00.
+            if (visible.precio == null)
+              Text('Consultar precio',
+                  style: AppTexto.secundario.copyWith(
+                      color: AppColores.textoSecundario(context)))
+            else
             Builder(builder: (_) {
-              final moneda = LocalDb.monedaDe(s);
+              final moneda = visible.moneda;
               final cup = moneda == 'USD'
                   ? precioOficialEn('CUP', precio, _tasaUsd)
                   : null;
@@ -1234,6 +1493,77 @@ class _SuplementosScreenState extends State<SuplementosScreen> {
 // ---------------------------------------------------------------------------
 // v1.3.4 (C5): tarjeta de catálogo — vista única de suplementos.
 // ---------------------------------------------------------------------------
+
+/// 1.36 H-B3 (136-767): el precio VISIBLE del catálogo,
+/// UNA sola regla para la tarjeta y «Más vendidos»:
+/// precio_oficial → legacy `precio` → sin precio (null).
+/// Antes la tarjeta caía a «0.00 CUP» y el mini-top solo
+/// miraba el oficial: el mismo producto decía dos cosas.
+/// PURO (la moneda sale de LocalDb.monedaDe, la de siempre).
+({double? precio, String moneda}) precioVisibleSuplemento(
+    Map<String, dynamic> s) {
+  final oficial = (s['precio_oficial'] as num?)?.toDouble();
+  final legacy = (s['precio'] as num?)?.toDouble();
+  final p = (oficial != null && oficial > 0)
+      ? oficial
+      : (legacy != null && legacy > 0 ? legacy : null);
+  return (precio: p, moneda: LocalDb.monedaDe(s));
+}
+
+/// El precio visible como texto plano: «Consultar precio»
+/// cuando no hay precio que enseñar (la misma frase que ya
+/// usa compartir el catálogo). PURO.
+String textoPrecioVisibleSuplemento(Map<String, dynamic> s) {
+  final v = precioVisibleSuplemento(s);
+  if (v.precio == null) return 'Consultar precio';
+  return '${v.precio!.toStringAsFixed(2)} ${v.moneda}';
+}
+
+/// 1.36 H-B3 (136-768): chip «Foto pendiente de
+/// sincronizar» decidido por la COLA REAL de fotos
+/// (fotos_cola), no por `foto_local`: una foto ya
+/// confirmada puede conservar foto_local hasta el próximo
+/// pull y el aviso mentía. Si la consulta falla, el aviso
+/// se conserva (nunca ocultar un pendiente real).
+class ChipFotoPendienteSuplemento extends StatefulWidget {
+  final int suplementoId;
+  const ChipFotoPendienteSuplemento(
+      {super.key, required this.suplementoId});
+
+  @override
+  State<ChipFotoPendienteSuplemento> createState() =>
+      _ChipFotoPendienteSuplementoState();
+}
+
+class _ChipFotoPendienteSuplementoState
+    extends State<ChipFotoPendienteSuplemento> {
+  late Future<bool> _futura;
+
+  @override
+  void initState() {
+    super.initState();
+    _futura = FotosColaService.instance
+        .hayFotoPendienteDeSuplemento(widget.suplementoId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _futura,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        // Error de consulta → conservar el aviso.
+        final pendiente = snap.data ?? true;
+        if (!pendiente) return const SizedBox.shrink();
+        return const ChipEstado.semantico(
+            texto: 'Foto pendiente de sincronizar',
+            significado: SignificadoChip.alerta);
+      },
+    );
+  }
+}
 
 /// (1.30 D5 · UI130-18, ALTA-02) ¿El suplemento no tiene foto
 /// propia? Sin foto local ni remota, el catálogo enseña la
@@ -1367,10 +1697,9 @@ class _TarjetaSuplemento extends StatelessWidget {
 
   // B3 (Argón): el precio mostrado es SIEMPRE precio_oficial
   // (fallback legacy a `precio`); ultimo_precio no se usa.
-  double get _precio =>
-      (sup['precio_oficial'] as num?)?.toDouble() ??
-      (sup['precio'] as num?)?.toDouble() ??
-      0;
+  // 1.36 H-B3 (136-767): pasa por el helper único
+  // precioVisibleSuplemento (0 cuando no hay precio).
+  double get _precio => precioVisibleSuplemento(sup).precio ?? 0;
 
   // Lógica tolerante (igual que _compartirCatalogo): 'activo'
   // puede venir como int, bool o faltar (null) sin romper ni
@@ -1396,6 +1725,17 @@ class _TarjetaSuplemento extends StatelessWidget {
   /// como metadato (la rejilla lo llevaba aún a pelo, en
   /// AppColores.naranja: 2,52 en claro).
   Widget _precioTexto(BuildContext context, {int? maxLines}) {
+    // 1.36 H-B3 (136-767): sin precio visible, «Consultar
+    // precio» (la frase de compartir) — nunca «0.00 CUP».
+    if (precioVisibleSuplemento(sup).precio == null) {
+      return Text(
+        'Consultar precio',
+        style: AppTexto.secundario
+            .copyWith(color: AppColores.textoSecundario(context)),
+        maxLines: maxLines,
+        overflow: maxLines == null ? null : TextOverflow.ellipsis,
+      );
+    }
     final moneda = LocalDb.monedaDe(sup);
     // Ronda 3-9 #8: en USD, equivalente CUP redondeado.
     final cup = moneda == 'USD' ? precioOficialEn('CUP', _precio, tasaUsd) : null;
@@ -1448,42 +1788,50 @@ class _TarjetaSuplemento extends StatelessWidget {
       );
 
   /// La marca de la foto genérica en la rejilla: pastilla
-  /// oscura flotante, como el badge de stock.
-  Widget _marcaGenerica() => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
-        decoration: BoxDecoration(
-          color: Colors.black87,
-          borderRadius: BorderRadius.circular(AppRadio.chip),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.photo_library_outlined,
-                size: 11, color: Colors.white),
-            const SizedBox(width: 4),
-            Text('Foto genérica',
-                style: AppTexto.minuscula.copyWith(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
-          ],
-        ),
-      );
+  /// flotante, como el badge de stock.
+  /// 1.36 H-B3 (136-769): el par inverso del tema
+  /// (inverseSurface/onInverseSurface), pensado para
+  /// flotar sobre contenido en ambos temas — fuera el
+  /// black87/white fijos.
+  Widget _marcaGenerica() => Builder(builder: (context) {
+        final esquema = Theme.of(context).colorScheme;
+        return Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
+          decoration: BoxDecoration(
+            color: esquema.inverseSurface,
+            borderRadius: BorderRadius.circular(AppRadio.chip),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.photo_library_outlined,
+                  size: 11, color: esquema.onInverseSurface),
+              const SizedBox(width: 4),
+              Text('Foto genérica',
+                  style: AppTexto.minuscula.copyWith(
+                      color: esquema.onInverseSurface,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        );
+      });
 
   Widget _buildFila(BuildContext context) {
     final presentacion = textoPresentacion(sup);
     final chip = _chipStock();
-    return Opacity(
-      // SU3 (estéticas 1.19): sin stock la tarjeta se atenúa;
-      // desde D5 el estado va además en el chip con palabra.
-      opacity: _hayStock ? 1.0 : 0.55,
-      child: Tarjeta(
+    // 1.36 H-B3 (136-769): fuera el Opacity 0.55 de SU3 — a
+    // media opacidad bajaba el contraste de nombre, precio,
+    // chip y botón; el estado ya lo dicen el chip con
+    // palabra y el botón deshabilitado («Sin stock»).
+    return Tarjeta(
         padding: EdgeInsets.zero,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(AppRadio.lg),
           child: Material(
             type: MaterialType.transparency,
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Zona del cuerpo: foto + datos → detalle.
                 Expanded(
@@ -1551,8 +1899,10 @@ class _TarjetaSuplemento extends StatelessWidget {
                     ),
                   ),
                 ),
-                Container(
-                    width: 1, height: 64, color: AppColores.borde(context)),
+                // 1.36 H-B3 (136-769): el separador se
+                // estira con la fila (antes 64 fijos: con
+                // nombre de 2 líneas + chip quedaba corto).
+                Container(width: 1, color: AppColores.borde(context)),
                 // Zona de la acción: «Vender», única y destacada.
                 Padding(
                   padding: const EdgeInsets.symmetric(
@@ -1563,24 +1913,23 @@ class _TarjetaSuplemento extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 
   Widget _buildRejilla(BuildContext context) {
-    final oscuro = Theme.of(context).brightness == Brightness.dark;
     final presentacion = textoPresentacion(sup);
     final chip = _chipStock();
-    return Opacity(
-      opacity: _hayStock ? 1.0 : 0.55,
-      child: Card(
+    // 1.36 H-B3 (136-769): fuera el Opacity 0.55 (contraste)
+    // y el borde white10/black12 a pelo: el token de borde
+    // de la casa, como el resto de tarjetas.
+    return Card(
         elevation: 2,
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadio.md),
           side: BorderSide(
-            color: oscuro ? Colors.white10 : Colors.black12,
+            color: AppColores.borde(context),
             width: 1,
           ),
         ),
@@ -1657,7 +2006,6 @@ class _TarjetaSuplemento extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 
@@ -1718,8 +2066,29 @@ class _FotoMiniTopState extends State<_FotoMiniTop> {
     return FutureBuilder<File?>(
       future: _futura,
       builder: (ctx, snap) {
+        // 1.36 H-B3 (136-769): «Más vendidos» enseña lo
+        // mismo que el catálogo — mientras resuelve, el
+        // shimmer de la casa (antes salía el placeholder
+        // final y parpadeaba); sin foto propia, la genérica
+        // de su clase (antes nunca llegaba aquí).
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const _ShimmerFoto();
+        }
         final f = snap.data;
-        if (f == null) return _sinFoto(ctx);
+        if (f == null) {
+          if (supSinFotoPropia(widget.sup)) {
+            return Image(
+                image: providerFotoAcotada(
+                    AssetImage(assetFotoGenericaSuplemento(
+                        '${widget.sup['nombre'] ?? ''}')),
+                    ancho: 1080),
+                height: 64,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _sinFoto(ctx));
+          }
+          return _sinFoto(ctx);
+        }
         // T2 (Bloque 2): la foto vuela al detalle. La
         // decodificación va acotada por ancho a 1080 con
         // providerFotoAcotada en AMBOS extremos: el
@@ -1880,16 +2249,21 @@ class _BadgeStock extends StatelessWidget {
     // Rediseño 1.20: el badge consume la regla ÚNICA de stock
     // (umbral_stock del producto; antes un umbral fijo de 5) y
     // lleva siempre el texto del estado.
+    // 1.36 H-B3 (136-769): pastilla con el par inverso del
+    // tema (flota sobre la foto en claro y en oscuro) y el
+    // punto de inactivo con el color de su superficie —
+    // fuera black87/white/grey fijos.
+    final esquema = Theme.of(context).colorScheme;
     final Color punto = switch (estadoStockSuplemento(sup)) {
       EstadoStockSuplemento.agotado => AppColores.error,
       EstadoStockSuplemento.bajo => AppColores.alerta,
       EstadoStockSuplemento.disponible => AppColores.exito,
-      EstadoStockSuplemento.inactivo => Colors.grey,
+      EstadoStockSuplemento.inactivo => esquema.onInverseSurface,
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: AppEspacio.sm, vertical: AppEspacio.xs),
       decoration: BoxDecoration(
-        color: Colors.black87,
+        color: esquema.inverseSurface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -1907,7 +2281,7 @@ class _BadgeStock extends StatelessWidget {
           Text(
             textoEstadoStock(sup),
             style: AppTexto.minuscula.copyWith(
-              color: Colors.white,
+              color: esquema.onInverseSurface,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -1973,6 +2347,77 @@ class _EditarSuplementoScreenState
   // v1.2.1: categoría del suplemento.
   List<Map<String, dynamic>> _categorias = [];
   int? _categoriaId;
+  // 1.36 H-B3 (136-769): mientras las categorías cargan, el
+  // hueco del selector se reserva (antes aparecía de golpe
+  // tras el async y la pantalla saltaba).
+  bool _cargandoCategorias = true;
+  // 1.36 H-B3 (136-771): focos de los campos validables —
+  // el diálogo de validación ahora ADEMÁS lleva al campo
+  // culpable al cerrarse.
+  final _focoNombre = FocusNode();
+  final _focoPrecio = FocusNode();
+  final _focoStock = FocusNode();
+  final _focoCosto = FocusNode();
+  final _focoUmbral = FocusNode();
+  final _focoPeso = FocusNode();
+  final _focoServicios = FocusNode();
+  // 1.36 H-B3 (136-771): foto de los valores al abrir, para
+  // pedir confirmación si se sale con cambios sin guardar
+  // (antes el back los descartaba en silencio).
+  String _iniNombre = '';
+  String _iniDesc = '';
+  String _iniPrecio = '';
+  String _iniStock = '';
+  String _iniCosto = '';
+  String _iniUmbral = '';
+  String _iniPesoValor = '';
+  String _iniServicios = '';
+  String? _iniPesoUnidad;
+  int? _iniCategoriaId;
+  bool _iniActivo = true;
+  bool _permitirSalida = false;
+
+  bool _hayCambiosSinGuardar() {
+    return _nombre.text != _iniNombre ||
+        _desc.text != _iniDesc ||
+        _precio.text != _iniPrecio ||
+        _stock.text != _iniStock ||
+        _costo.text != _iniCosto ||
+        _umbral.text != _iniUmbral ||
+        _pesoValor.text != _iniPesoValor ||
+        _servicios.text != _iniServicios ||
+        _pesoUnidad != _iniPesoUnidad ||
+        _moneda != _monedaIni ||
+        _categoriaId != _iniCategoriaId ||
+        _activo != _iniActivo ||
+        _fotoNueva != null;
+  }
+
+  /// Salida del editor marcando la PopScope como libre y
+  /// saliendo en el siguiente frame (con el resultado que
+  /// toque: true si se guardó).
+  void _salirEditor([Object? resultado]) {
+    setState(() => _permitirSalida = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop(resultado);
+    });
+  }
+
+  Future<void> _alIntentarSalir() async {
+    if (!_hayCambiosSinGuardar()) {
+      _salirEditor();
+      return;
+    }
+    final salir = await DialogoApp.confirmar(context,
+        titulo: 'Descartar cambios',
+        mensaje:
+            'Tienes cambios sin guardar en este suplemento. '
+            'Si sales ahora, se pierden.',
+        aceptar: 'Descartar',
+        cancelar: 'Seguir editando',
+        peligro: true);
+    if (salir && mounted) _salirEditor();
+  }
 
   bool get _editando => widget.suplemento != null;
   bool get _duplicando =>
@@ -2022,14 +2467,35 @@ class _EditarSuplementoScreenState
     } else {
       _umbral.text = '3';
     }
+    // 1.36 H-B3 (136-771): la foto de valores iniciales se
+    // toma con el formulario YA llenado (crear, editar o
+    // duplicar): salir sin tocar nada no pide confirmación.
+    _iniNombre = _nombre.text;
+    _iniDesc = _desc.text;
+    _iniPrecio = _precio.text;
+    _iniStock = _stock.text;
+    _iniCosto = _costo.text;
+    _iniUmbral = _umbral.text;
+    _iniPesoValor = _pesoValor.text;
+    _iniServicios = _servicios.text;
+    _iniPesoUnidad = _pesoUnidad;
+    _iniCategoriaId = _categoriaId;
+    _iniActivo = _activo;
     _cargarCategorias();
   }
 
   Future<void> _cargarCategorias() async {
-    final cats =
-        await LocalDb.instance.allMirror('categorias_suplemento');
+    List<Map<String, dynamic>> cats;
+    try {
+      cats = await LocalDb.instance.allMirror('categorias_suplemento');
+    } catch (e) {
+      AppLog.error('ui', 'editor_categorias_fallo', d: '$e');
+      if (mounted) setState(() => _cargandoCategorias = false);
+      return;
+    }
     if (!mounted) return;
     setState(() {
+      _cargandoCategorias = false;
       _categorias = cats
           .where((c) => (c['activa'] as int?) != 0)
           .toList()
@@ -2058,6 +2524,14 @@ class _EditarSuplementoScreenState
     // Argón #9 (BAJO): _costo y _umbral también se liberan.
     _costo.dispose();
     _umbral.dispose();
+    // 1.36 H-B3 (136-771): los nodos de foco también.
+    _focoNombre.dispose();
+    _focoPrecio.dispose();
+    _focoStock.dispose();
+    _focoCosto.dispose();
+    _focoUmbral.dispose();
+    _focoPeso.dispose();
+    _focoServicios.dispose();
     super.dispose();
   }
 
@@ -2099,8 +2573,9 @@ class _EditarSuplementoScreenState
     final nombre = _nombre.text.trim();
     final precio = double.tryParse(
         _precio.text.trim().replaceAll(',', '.'));
-    final stock =
-        int.tryParse(_stock.text.trim()) ?? 0;
+    // El stock se lee de su parseo ESTRICTO de abajo
+    // (stockParse): el blando con «?? 0» traducía en
+    // silencio un texto no numérico a stock 0.
     if (nombre.isEmpty || precio == null || !precio.isFinite || precio <= 0) {
       await DialogoApp.confirmar(context,
           titulo: 'Revisa los datos',
@@ -2108,6 +2583,10 @@ class _EditarSuplementoScreenState
               'El nombre y un precio oficial mayor que 0 son obligatorios.',
           aceptar: 'Entendido',
           cancelar: '');
+      // 1.36 H-B3 (136-771): el aviso lleva al campo.
+      if (mounted) {
+        (nombre.isEmpty ? _focoNombre : _focoPrecio).requestFocus();
+      }
       return;
     }
     // Autoauditoría 1.22 #2 (D2-07): el stock tecleado viajaba
@@ -2126,6 +2605,7 @@ class _EditarSuplementoScreenState
               'El stock debe ser un número entero de 0 en adelante.',
           aceptar: 'Entendido',
           cancelar: '');
+      if (mounted) _focoStock.requestFocus();
       return;
     }
     // v1.4.3: presentación del envase, con validación ESTRICTA
@@ -2148,6 +2628,7 @@ class _EditarSuplementoScreenState
                 'El contenido del envase debe ser un número mayor que 0 (ej. 300), o el campo vacío.',
             aceptar: 'Entendido',
             cancelar: '');
+        if (mounted) _focoPeso.requestFocus();
         return;
       }
     }
@@ -2162,6 +2643,7 @@ class _EditarSuplementoScreenState
                 'Los servicios por envase deben ser un número entero mayor que 0 (ej. 60), o el campo vacío.',
             aceptar: 'Entendido',
             cancelar: '');
+        if (mounted) _focoServicios.requestFocus();
         return;
       }
     }
@@ -2174,6 +2656,25 @@ class _EditarSuplementoScreenState
               'El contenido del envase necesita cantidad y unidad juntas (ej. 300 + g), o ambos vacíos.',
           aceptar: 'Entendido',
           cancelar: '');
+      if (mounted) _focoPeso.requestFocus();
+      return;
+    }
+    // 1.36 H-B3 (136-768): el umbral sigue la MISMA
+    // doctrina estricta que el stock: un texto no vacío no
+    // interpretable («5.0») o negativo es ERROR visible —
+    // antes caía en silencio al 3 por defecto y el dueño
+    // creía haber fijado otro umbral.
+    final umbralTxt = _umbral.text.trim();
+    final umbralParse = int.tryParse(umbralTxt);
+    if ((umbralTxt.isNotEmpty && umbralParse == null) ||
+        (umbralParse != null && umbralParse < 0)) {
+      await DialogoApp.confirmar(context,
+          titulo: 'Revisa el umbral',
+          mensaje:
+              'El umbral de stock bajo debe ser un número entero de 0 en adelante, o el campo vacío.',
+          aceptar: 'Entendido',
+          cancelar: '');
+      if (mounted) _focoUmbral.requestFocus();
       return;
     }
     setState(() => _guardando = true);
@@ -2196,11 +2697,13 @@ class _EditarSuplementoScreenState
                   'El costo debe ser un número de 0 en adelante, o el campo vacío.',
               aceptar: 'Entendido',
               cancelar: '');
+          if (mounted) _focoCosto.requestFocus();
           return;
         }
       }
-      final umbral =
-          int.tryParse(_umbral.text.trim()) ?? 3;
+      // Validado ANTES del try (136-768): vacío = 3 por
+      // defecto legítimo; texto válido manda tal cual.
+      final umbral = umbralParse ?? 3;
       // G#6 (Hy4): red al cambiar la moneda de un suplemento
       // existente — el precio NO se reconvierte solo: unos
       // 3000 CUP pasarían a ser 3000 USD. Antes de encolar
@@ -2228,7 +2731,9 @@ class _EditarSuplementoScreenState
         // v1.4.6: moneda del precio oficial; viaja siempre en la
         // op (crear y editar) para que el servidor la persista.
         'moneda': _moneda,
-        'stock': stock,
+        // El stock VALIDADO arriba (136-768), no el parseo
+        // blando inicial.
+        'stock': stockParse ?? 0,
         'activo': _activo ? 1 : 0,
         // v1.2.1: categoría asignada.
         if (_categoriaId != null) 'categoria_id': _categoriaId,
@@ -2237,7 +2742,7 @@ class _EditarSuplementoScreenState
         // restringe); umbral siempre.
         if (AuthService().isOwner && costo != null && costo >= 0)
           'costo': costo,
-        'umbral_stock': umbral < 0 ? 3 : umbral,
+        'umbral_stock': umbral,
         // v1.4.3: presentación del envase. Al CREAR se manda
         // siempre; al EDITAR solo si cambió respecto a lo que
         // traía la ficha (vacío = limpiar el dato). Si no cambió,
@@ -2316,7 +2821,20 @@ class _EditarSuplementoScreenState
             'afecta a las ventas y reservas futuras.',
             significado: SignificadoChip.info);
       }
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) _salirEditor(true);
+    } catch (e) {
+      // 1.36 H-B3 (136-768): encolar el suplemento o su
+      // foto puede fallar — el dueño lo VE y el formulario
+      // queda abierto con sus datos (antes solo había
+      // finally: la pantalla volvía sin guardar y sin
+      // decir nada, y el error no quedaba ni en bitácora
+      // desde esta pantalla).
+      AppLog.error('ui', 'guardar_suplemento_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo guardar: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -2332,7 +2850,16 @@ class _EditarSuplementoScreenState
     final fotoLocalActual = _editando
         ? (widget.suplemento?['foto_local'] as String?)
         : null;
-    return Scaffold(
+    // 1.36 H-B3 (136-771): salir con cambios sin guardar
+    // pide confirmación (PopScope + foto de valores de
+    // _hayCambiosSinGuardar); sin cambios, sale directo.
+    return PopScope(
+      canPop: _permitirSalida,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _alIntentarSalir();
+      },
+      child: Scaffold(
       appBar: appBarIron(
         context,
         _editando ? 'Editar suplemento' : _duplicando ? 'Duplicar suplemento' : 'Nuevo suplemento',
@@ -2355,7 +2882,15 @@ class _EditarSuplementoScreenState
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Center(
-                  child: GestureDetector(
+                  // 1.36 H-B3 (136-769): la foto era un
+                  // GestureDetector pelado — el lector de
+                  // pantalla no la anunciaba como botón.
+                  child: Semantics(
+                    button: true,
+                    label: _editando
+                        ? 'Cambiar foto del suplemento'
+                        : 'Agregar foto del suplemento',
+                    child: GestureDetector(
                     // v1.2.1: permitir foto también al crear (antes solo al editar).
                     onTap: _elegirFoto,
                     child: Container(
@@ -2399,6 +2934,7 @@ class _EditarSuplementoScreenState
                                   ],
                                 ),
                     ),
+                    ),
                   ),
                 ),
                 if (_editando && widget.suplemento != null) ...[
@@ -2413,17 +2949,22 @@ class _EditarSuplementoScreenState
                 ],
                 if (fotoLocalActual != null &&
                     fotoLocalActual.isNotEmpty &&
-                    _fotoNueva == null) ...[
+                    _fotoNueva == null &&
+                    widget.suplemento?['id'] is num) ...[
                   const SizedBox(height: AppEspacio.sm),
-                  const Center(
-                    child: ChipEstado.semantico(
-                        texto: 'Foto pendiente de sincronizar',
-                        significado: SignificadoChip.alerta),
+                  // 1.36 H-B3 (136-768): el aviso se decide
+                  // por la cola real de fotos, no solo por
+                  // foto_local (ver ChipFotoPendienteSuplemento).
+                  Center(
+                    child: ChipFotoPendienteSuplemento(
+                        suplementoId:
+                            (widget.suplemento!['id'] as num).toInt()),
                   ),
                 ],
                 const SizedBox(height: AppEspacio.md),
                 CampoTexto(
                     controller: _nombre,
+                    focusNode: _focoNombre,
                     etiqueta: 'Nombre',
                     hint: 'Ej. Creatina Monohidrato 500g'),
                 const SizedBox(height: AppEspacio.md),
@@ -2431,6 +2972,25 @@ class _EditarSuplementoScreenState
                     controller: _desc,
                     etiqueta: 'Descripción (opcional)',
                     maxLineas: 2),
+                // 1.36 H-B3 (136-769): mientras las
+                // categorías cargan, el hueco se reserva con
+                // su indicador — el selector ya no aparece
+                // de golpe empujando el formulario.
+                if (_categorias.isEmpty && _cargandoCategorias) ...[
+                  const SizedBox(height: AppEspacio.md),
+                  const Row(
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: AppEspacio.sm),
+                      Text('Cargando categorías…',
+                          style: AppTexto.secundario),
+                    ],
+                  ),
+                ],
                 // v1.2.1: selector de categoría.
                 if (_categorias.isNotEmpty) ...[
                   const SizedBox(height: AppEspacio.md),
@@ -2471,6 +3031,7 @@ class _EditarSuplementoScreenState
                     Expanded(
                       child: CampoTexto(
                           controller: _pesoValor,
+                          focusNode: _focoPeso,
                           etiqueta: 'Contenido del envase',
                           hint: 'Ej. 300',
                           teclado:
@@ -2508,6 +3069,7 @@ class _EditarSuplementoScreenState
                 const SizedBox(height: AppEspacio.sm),
                 CampoTexto(
                     controller: _servicios,
+                    focusNode: _focoServicios,
                     etiqueta: 'Servicios por envase (opcional)',
                     hint: 'Ej. 60',
                     teclado: TextInputType.number),
@@ -2529,6 +3091,7 @@ class _EditarSuplementoScreenState
                       flex: 3,
                       child: CampoTexto(
                           controller: _precio,
+                          focusNode: _focoPrecio,
                           etiqueta: 'Precio oficial ($_moneda)',
                           teclado:
                               const TextInputType.numberWithOptions(
@@ -2556,6 +3119,7 @@ class _EditarSuplementoScreenState
                   const SizedBox(height: AppEspacio.sm),
                   CampoTexto(
                       controller: _costo,
+                      focusNode: _focoCosto,
                       etiqueta: 'Costo por unidad (USD)',
                       teclado:
                           const TextInputType.numberWithOptions(
@@ -2575,11 +3139,13 @@ class _EditarSuplementoScreenState
               children: [
                 CampoTexto(
                     controller: _stock,
+                    focusNode: _focoStock,
                     etiqueta: 'Stock',
                     teclado: TextInputType.number),
                 const SizedBox(height: AppEspacio.sm),
                 CampoTexto(
                     controller: _umbral,
+                    focusNode: _focoUmbral,
                     etiqueta: 'Alerta de stock bajo (unidades)',
                     teclado: TextInputType.number),
                 const SizedBox(height: AppEspacio.sm),
@@ -2608,6 +3174,7 @@ class _EditarSuplementoScreenState
             onPressed: _guardando ? null : _guardar,
           ),
         ),
+      ),
       ),
     );
   }

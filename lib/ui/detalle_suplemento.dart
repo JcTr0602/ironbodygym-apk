@@ -1264,11 +1264,15 @@ class DetalleSuplementoScreen extends StatelessWidget {
           // Rediseño 1.20: foto_local presente = foto nueva
           // aún no confirmada por el servidor (el pull la
           // limpia); se avisa sin bloquear nada.
-          if (fotoLocal != null && fotoLocal.isNotEmpty) ...[
+          // 1.36 H-B3 (136-768): el aviso se decide por la
+          // COLA REAL de fotos (el chip compartido consulta
+          // fotos_cola), no solo por foto_local.
+          if (fotoLocal != null &&
+              fotoLocal.isNotEmpty &&
+              suplemento['id'] is num) ...[
             const SizedBox(height: AppEspacio.sm),
-            const ChipEstado.semantico(
-                texto: 'Foto pendiente de sincronizar',
-                significado: SignificadoChip.alerta),
+            ChipFotoPendienteSuplemento(
+                suplementoId: (suplemento['id'] as num).toInt()),
           ],
           const SizedBox(height: AppEspacio.md),
           // 1.35 (UX-13): el nombre vive en el velo de

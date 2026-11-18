@@ -2058,6 +2058,22 @@ class FotosColaService {
     return (r.first['n'] as int? ?? 0);
   }
 
+  /// 1.36 H-B3 (136-768): ¿este suplemento tiene una foto
+  /// REALMENTE en la cola, sin confirmación del servidor
+  /// (pendiente, subiendo o en error)? La UI lo consulta en
+  /// vez de inferirlo de `foto_local`, que puede sobrevivir
+  /// a una subida ya confirmada hasta el próximo pull y
+  /// hacía mentir al aviso «Foto pendiente de sincronizar».
+  Future<bool> hayFotoPendienteDeSuplemento(int suplementoId) async {
+    final db = await LocalDb.instance.db;
+    final r = await db.rawQuery(
+        "SELECT COUNT(*) AS n FROM fotos_cola "
+        "WHERE suplemento_id = ? "
+        "AND estado IN ('pendiente', 'subiendo', 'error')",
+        [suplementoId]);
+    return ((r.first['n'] as num?)?.toInt() ?? 0) > 0;
+  }
+
   /// v1.3.4 (veredicto de Argón, Bug A1.4): pendientes que la QoS
   /// permitiría reclamar AHORA. Excluye las variantes 'original'
   /// diferidas por QoS (holgura/velocidad insuficiente): contarlas
