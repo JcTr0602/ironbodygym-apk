@@ -589,6 +589,10 @@ class CopiaSeguridadScreen extends StatefulWidget {
 class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
   int _pendientes = -1;
   bool _exportando = false;
+
+  /// 1.36 H-C3 (136-1047, GF-083): la copia espera a que
+  /// termine una sincronización en curso.
+  bool _esperandoSync = false;
   bool _verificando = false;
 
   /// Módulo 6 (1.19): trazabilidad de copias. Registro local (meta
@@ -668,7 +672,9 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
     setState(() => _exportando = true);
     try {
       // 1.14 (M6.30): la copia en frío vive en exportarCopiaFria.
-      final destino = await exportarCopiaFria();
+      final destino = await exportarCopiaFria(onEsperandoSync: () {
+        if (mounted) setState(() => _esperandoSync = true);
+      });
       final tamano = await destino.length();
       await registrarAccionMantenimiento(
           'f5_exportar_copia', {'pendientes_al_exportar': _pendientes});
@@ -730,7 +736,12 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
         mostrarSnack(context, 'No se pudo exportar: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
-      if (mounted) setState(() => _exportando = false);
+      if (mounted) {
+        setState(() {
+          _exportando = false;
+          _esperandoSync = false;
+        });
+      }
     }
   }
 
@@ -843,7 +854,11 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
           // (1.36 H-B4 136-863) exportar, verificar y compartir
           // son pasos distintos: el botón dice en cuál está.
           BotonPrimario(
-            texto: _exportando ? 'Exportando…' : 'Exportar copia',
+            texto: _esperandoSync
+                ? 'Esperando a la sincronización…'
+                : _exportando
+                    ? 'Exportando…'
+                    : 'Exportar copia',
             cargando: _exportando,
             onPressed:
                 (_exportando || _verificando) ? null : _exportar,

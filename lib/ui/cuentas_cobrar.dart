@@ -11,6 +11,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'buscar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 import 'ficha.dart';
 import 'widgets.dart';
@@ -125,8 +126,12 @@ class _CuentasCobrarScreenState
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-C3 (136-1035, GF-071): esqueleto de la casa
+    // también en las cuentas de mensualidades vencidas.
     final cuerpo = _cargando
-          ? const EstadoCargando(texto: 'Cargando cuentas por cobrar…')
+          ? const Padding(
+              padding: EdgeInsets.all(AppEspacio.lg),
+              child: SkeletonLista(items: 3))
           : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(

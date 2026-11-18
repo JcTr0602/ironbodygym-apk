@@ -46,16 +46,22 @@ class _AyudaScreenState extends State<AyudaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final buscando = _consulta.isNotEmpty;
-    final q = _sinAcentosAyuda(_consulta);
-    bool coincide(_SeccionAyuda s) =>
+    // 1.36 H-C3 (136-1034, GF-070): la consulta se guarda
+    // SIN recortar (el trim por tecla impedía escribir
+    // frases con espacios); se normaliza AQUÍ, al filtrar.
+    final q = _sinAcentosAyuda(_consulta.trim());
+    final buscando = q.isNotEmpty;
+    bool coincide(_SeccionAyuda s, String nombreTema) =>
         !buscando ||
         _sinAcentosAyuda(s.titulo).contains(q) ||
-        _sinAcentosAyuda(s.texto).contains(q);
+        _sinAcentosAyuda(s.texto).contains(q) ||
+        // 136-1034: también coincide el NOMBRE DEL TEMA.
+        _sinAcentosAyuda(nombreTema).contains(q);
     final hijos = <Widget>[];
     var resultados = 0;
     for (final t in _temasAyuda) {
-      final ss = t.secciones.where(coincide).toList();
+      final ss =
+          t.secciones.where((s) => coincide(s, t.nombre)).toList();
       resultados += ss.length;
       if (ss.isEmpty) continue;
       hijos.add(_Tema(t.nombre, key: _claveDe(t.nombre)));
@@ -63,7 +69,9 @@ class _AyudaScreenState extends State<AyudaScreen> {
         hijos.add(_Seccion(
           s.titulo,
           s.texto,
-          key: ValueKey('ayuda-${s.titulo}-$buscando'),
+          // 136-1034: la key lleva la consulta NORMALIZADA:
+          // cada búsqueda distinta re-expande la sección.
+          key: ValueKey('ayuda-${s.titulo}-$q'),
           icono: s.icono,
           color: s.color,
           expandida: buscando,
@@ -125,8 +133,8 @@ class _AyudaScreenState extends State<AyudaScreen> {
               controller: _buscador,
               hint: 'Buscar en la ayuda…',
               icono: Icons.search_rounded,
-              onChanged: (v) =>
-                  setState(() => _consulta = v.trim()),
+              // 136-1034: sin trim por tecla.
+              onChanged: (v) => setState(() => _consulta = v),
             ),
           ),
           SingleChildScrollView(
@@ -136,14 +144,21 @@ class _AyudaScreenState extends State<AyudaScreen> {
                 AppEspacio.sm),
             child: Row(
               children: [
-                for (final t in _temasAyuda) ...[
-                  ActionChip(
-                    label: Text(t.nombre,
-                        style: AppTexto.etiqueta),
-                    onPressed: () => _irATema(t.nombre),
-                  ),
-                  const SizedBox(width: AppEspacio.sm),
-                ],
+                // 1.36 H-C3 (136-1034, GF-070): al buscar,
+                // los chips de temas SIN coincidencias se
+                // ocultan (antes quedaban todos y llevaban a
+                // temas que ya no están en la lista).
+                for (final t in _temasAyuda)
+                  if (!buscando ||
+                      t.secciones
+                          .any((s) => coincide(s, t.nombre))) ...[
+                    ActionChip(
+                      label: Text(t.nombre,
+                          style: AppTexto.etiqueta),
+                      onPressed: () => _irATema(t.nombre),
+                    ),
+                    const SizedBox(width: AppEspacio.sm),
+                  ],
               ],
             ),
           ),

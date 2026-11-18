@@ -5,6 +5,7 @@
 library;
 
 import '../app_log.dart';
+import '../errores_sync.dart';
 import 'package:flutter/material.dart';
 
 import '../negocio.dart';
@@ -124,6 +125,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     double total,
     int movimientos,
   })? _detalleSel;
+
+  /// 1.36 H-C3 (136-1029, GF-065): la lectura del día
+  /// seleccionado falló (la burbuja lo dice, no «Calculando…»).
+  bool _falloDetalleDia = false;
 
   // Vista por rol (v1.2): el entrenador ve solo sus propios números.
   final _auth = AuthService();
@@ -284,26 +289,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
         nov = await fNovedades;
       } catch (_) {}
       if (mounted && v == _versionCarga && nov != null) {
-        final novedades = nov!;
+        final novedades = nov;
+        // 1.36 H-C3 (136-1028, GF-064): conversión TOLERANTE
+        // índice a índice y aplicación por separado: un
+        // índice con forma inesperada conserva su valor
+        // anterior y NO aborta las demás novedades (antes un
+        // solo cast estricto tumbaba el grupo entero y las
+        // urgencias quedaban viejas).
+        int? intTol(int i) =>
+            novedades.length > i ? (novedades[i] as num?)?.toInt() : null;
+        List<Map<String, dynamic>>? listaTol(
+            int i, List<Map<String, dynamic>> anterior) {
+          if (novedades.length <= i) return anterior;
+          final v = novedades[i];
+          if (v is! List) return anterior;
+          try {
+            return [
+              for (final e in v)
+                Map<String, dynamic>.from(e as Map),
+            ];
+          } catch (_) {
+            return anterior;
+          }
+        }
+
         setState(() {
-          final nomina = novedades[0] as double?;
           // (M2-A A11) si el precálculo falló, la nómina
           // anterior NO se conserva (podía ser de otro mes y
           // la fila seguía diciendo «Utilidad neta real»):
           // null devuelve la etiqueta honesta «antes de
           // nómina» de filaUtilidadBalance.
-          _nominaProy = nomina;
-          _cumpleHoy = novedades[1] as int;
-          _casaActivas = novedades[2] as int;
-          _stockBajo = novedades[3] as List<Map<String, dynamic>>;
+          _nominaProy = novedades.isNotEmpty
+              ? (novedades[0] as num?)?.toDouble()
+              : null;
+          _cumpleHoy = intTol(1) ?? _cumpleHoy;
+          _casaActivas = intTol(2) ?? _casaActivas;
+          _stockBajo = listaTol(3, _stockBajo) ?? _stockBajo;
           _turnosOlvidados =
-              novedades[4] as List<Map<String, dynamic>>;
-          _plusVigentes = novedades[5] as int?;
-          final porComprobarT4 = novedades[6] as int?;
+              listaTol(4, _turnosOlvidados) ?? _turnosOlvidados;
+          _plusVigentes = intTol(5) ?? _plusVigentes;
+          final porComprobarT4 = intTol(6);
           if (porComprobarT4 != null && porComprobarT4 >= 0) {
             _porComprobar = porComprobarT4;
           }
-          final diferenciasT5 = novedades[7] as int?;
+          final diferenciasT5 = intTol(7);
           if (diferenciasT5 != null && diferenciasT5 >= 0) {
             _diferenciasAbiertas = diferenciasT5;
           }
@@ -343,19 +372,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       final tid = _auth.telegramId;
-      final hoy = await seguro(ingresosHoyPorEntrenador(tid), _miHoy);
-      final semana =
-          await seguro(ingresosSemanaPorEntrenador(tid), _miSemana);
-      final mes = await seguro(cobradoMes(tid), _miMes);
-      final pendCup = await seguro(pendienteEntrega(tid), _miPendCup);
-      final pendUsd =
-          await seguro(pendienteEntregaUsd(tid), _miPendUsd);
-      final porMet =
-          await seguro(ingresosPorMetodoEntrenador(tid), _miPorMetodo);
-      final porTip =
-          await seguro(ingresosPorTipoEntrenador(tid), _miPorTipo);
-      final mp =
-          await seguro(mejorPeorDiaEntrenador(tid), _miMejorPeor);
+      // 1.36 H-C3 (136-1033, GF-069): las lecturas corren en
+      // PARALELO (Future.wait), cada una con su seguro por
+      // métrica de siempre (antes ocho esperas en serie).
+      final r = await Future.wait<dynamic>([
+        seguro(ingresosHoyPorEntrenador(tid), _miHoy),
+        seguro(ingresosSemanaPorEntrenador(tid), _miSemana),
+        seguro(cobradoMes(tid), _miMes),
+        seguro(pendienteEntrega(tid), _miPendCup),
+        seguro(pendienteEntregaUsd(tid), _miPendUsd),
+        seguro(ingresosPorMetodoEntrenador(tid), _miPorMetodo),
+        seguro(ingresosPorTipoEntrenador(tid), _miPorTipo),
+        seguro(mejorPeorDiaEntrenador(tid), _miMejorPeor),
+      ]);
+      final hoy = r[0] as double;
+      final semana = r[1] as double;
+      final mes = r[2] as double;
+      final pendCup = r[3] as double;
+      final pendUsd = r[4] as double;
+      final porMet = r[5] as Map<String, double>;
+      final porTip = r[6] as Map<String, double>;
+      final mp = r[7] as Map<String, Map<String, dynamic>>;
       // T5 (1.20): sus expedientes de diferencia de caja
       // (degrada en silencio: un fallo no tumba el panel).
       var misDif = _misDiferencias;
@@ -456,11 +493,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              MontoAnimado(
-                  valor: _mes,
-                  formato: fmtMonto,
-                  style: AppTexto.display.copyWith(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
+              // 1.36 H-C3 (136-1031, GF-067): la cifra del
+              // héroe se encoge con FittedBox en vez de
+              // desbordar con montos grandes.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: MontoAnimado(
+                      valor: _mes,
+                      formato: fmtMonto,
+                      style: AppTexto.display.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
               const SizedBox(width: 6),
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -551,6 +598,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Detalle de ingresos por período (v1.0.11).
   /// Muestra desglose por método de pago.
   Future<void> _detalleIngresos(String periodo) async {
+    // 1.36 H-C3 (136-1029, GF-065): un fallo de la lectura
+    // se DICE (snack amable); antes la hoja simplemente no
+    // se abría y no pasaba nada visible.
+    try {
+      await _detalleIngresosDatos(periodo);
+    } catch (e) {
+      AppLog.error('ui', 'dashboard_detalle_ingresos_fallo',
+          d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo cargar el detalle: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+    }
+  }
+
+  Future<void> _detalleIngresosDatos(String periodo) async {
     final titulo = periodo == 'hoy'
         ? 'Ingresos de hoy'
         : periodo == 'semana'
@@ -1047,14 +1111,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // función única (con nómina, «real» la descuenta).
     final utilidad = filaUtilidadBalance(
         ingresos: _mes, gastos: _gastosMes, nominaProy: _nominaProy);
-    final ef = _porMetodo['efectivo'] ?? 0;
-    final tr = _porMetodo['transferencia'] ?? 0;
-    final supM = _porMetodo['suplementos'] ?? 0;
-    final servM = _porMetodo['servicios'] ?? 0;
-    final men = _porTipo['mensual'] ?? 0;
-    final dia = _porTipo['diario'] ?? 0;
-    final supT = _porTipo['suplementos'] ?? 0;
-    final servT = _porTipo['servicios'] ?? 0;
+    // 1.36 H-C3 (136-1030, GF-066): acceso nulo-seguro con
+    // toDouble (un monto entero en el mapa tumbaba el
+    // desglose con el cast implícito).
+    double de(Map<String, double> m, String k) =>
+        (m[k] as num?)?.toDouble() ?? 0;
+    final ef = de(_porMetodo, 'efectivo');
+    final tr = de(_porMetodo, 'transferencia');
+    final supM = de(_porMetodo, 'suplementos');
+    final servM = de(_porMetodo, 'servicios');
+    final men = de(_porTipo, 'mensual');
+    final dia = de(_porTipo, 'diario');
+    final supT = de(_porTipo, 'suplementos');
+    final servT = de(_porTipo, 'servicios');
     final total = _mes;
     return Tarjeta(
       child: Column(
@@ -1110,11 +1179,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ],
-            if (_mejorPeor.isNotEmpty) ...[
+            // 1.36 H-C3 (136-1030, GF-066): «mejor» puede
+            // faltar o traer el monto entero: sin `!` ni cast.
+            if (_mejorPeor['mejor'] is Map) ...[
               const SizedBox(height: AppEspacio.sm),
               Text(
-                'Mejor día: ${fmtFecha(_mejorPeor['mejor']!['dia'] as String?)} '
-                '(${fmtMonto(_mejorPeor['mejor']!['monto'] as double)} CUP)',
+                'Mejor día: ${fmtFecha('${(_mejorPeor['mejor'] as Map)['dia'] ?? ''}')} '
+                '(${fmtMonto(((_mejorPeor['mejor'] as Map)['monto'] as num?)?.toDouble() ?? 0)} CUP)',
                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
               ),
             ],
@@ -1150,10 +1221,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _diaSel = fecha;
       _detalleSel = null;
+      _falloDetalleDia = false;
     });
-    final r = await resumenIngresosDia(fecha);
-    if (mounted && _diaSel == fecha) {
-      setState(() => _detalleSel = r);
+    // 1.36 H-C3 (136-1029, GF-065): si la lectura falla, la
+    // burbuja lo dice con Reintentar (antes «Calculando…»
+    // eterno).
+    try {
+      final r = await resumenIngresosDia(fecha);
+      if (mounted && _diaSel == fecha) {
+        setState(() => _detalleSel = r);
+      }
+    } catch (e) {
+      AppLog.error('ui', 'dashboard_detalle_dia_fallo', d: '$e');
+      if (mounted && _diaSel == fecha) {
+        setState(() => _falloDetalleDia = true);
+      }
     }
   }
 
@@ -1188,7 +1270,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
-          if (d == null)
+          if (_falloDetalleDia && d == null) ...[
+            const Text('No se pudo cargar el detalle del día',
+                style: AppTexto.secundario),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => _seleccionarDia(fecha),
+                child: const Text('Reintentar'),
+              ),
+            ),
+          ] else if (d == null)
             const Text('Calculando…', style: AppTexto.secundario)
           else ...[
             Text(
@@ -1225,7 +1317,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// iba en 8 px y el día en 7 px y no se leía ningún número.
   Widget _graficoDias() {
     final datos = _periodoGrafico == '30' ? _ultimos30 : _ultimos7;
-    if (datos.isEmpty) return const SizedBox.shrink();
+    // 1.36 H-C3 (136-1031, GF-067): gráfico sin datos se
+    // EXPLICA (antes un hueco vacío sin decir nada).
+    if (datos.isEmpty) {
+      return const EstadoVacio(
+        icono: Icons.bar_chart_rounded,
+        titulo: 'Sin ingresos en el período',
+        subtitulo: 'Cuando haya cobros, aquí verás su gráfico.',
+      );
+    }
     final maxMonto = datos
         .map((e) => (e['monto'] as num).toDouble())
         .reduce((a, b) => a > b ? a : b);
@@ -1316,8 +1416,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // (la clave por fecha+período la relanza
                     // al cambiar el selector 7/30).
                     TweenAnimationBuilder<double>(
+                      // 1.36 H-C3 (136-1032, GF-068): la
+                      // clave lleva el MONTO: si el dato del
+                      // día cambia, la barra se re-anima a su
+                      // nueva altura (antes la clave era solo
+                      // fecha+período y el cambio era seco).
                       key: ValueKey(
-                          'barra-$fecha-$_periodoGrafico'),
+                          'barra-$fecha-$_periodoGrafico-$monto'),
                       tween: Tween(begin: 0.0, end: 1.0),
                       duration: AppMovimiento.larga,
                       curve: AppMovimiento.curvaSuave,

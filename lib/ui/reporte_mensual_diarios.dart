@@ -139,22 +139,33 @@ class _ReporteMensualDiariosScreenState
                         height: 64,
                         child: Align(
                           alignment: Alignment.bottomCenter,
-                          child: Container(
-                            height: 8 +
-                                (maximo > 0
-                                    ? serie[i] / maximo * 56
-                                    : 0),
-                            decoration: BoxDecoration(
-                              color: i == mejor
-                                  ? AppColores.naranja
-                                  : sel == i + 1
-                                      ? AppColores.naranja
-                                          .withValues(alpha: 0.85)
-                                      : AppColores.naranja
-                                          .withValues(alpha: 0.35),
-                              borderRadius:
-                                  const BorderRadius.vertical(
-                                      top: Radius.circular(2)),
+                          // 1.36 H-C3 (136-1044, GF-080): la
+                          // barra crece animada (mismo patrón
+                          // que las del Dashboard).
+                          child: TweenAnimationBuilder<double>(
+                            key: ValueKey(
+                                'rep-mensual-${_mes.year}-${_mes.month}-$i-${serie[i]}'),
+                            tween: Tween(begin: 0, end: 1),
+                            duration: AppMovimiento.larga,
+                            curve: AppMovimiento.curvaSuave,
+                            builder: (ctx, f, _) => Container(
+                              height: (8 +
+                                      (maximo > 0
+                                          ? serie[i] / maximo * 56
+                                          : 0)) *
+                                  f,
+                              decoration: BoxDecoration(
+                                color: i == mejor
+                                    ? AppColores.naranja
+                                    : sel == i + 1
+                                        ? AppColores.naranja
+                                            .withValues(alpha: 0.85)
+                                        : AppColores.naranja
+                                            .withValues(alpha: 0.35),
+                                borderRadius:
+                                    const BorderRadius.vertical(
+                                        top: Radius.circular(2)),
+                              ),
                             ),
                           ),
                         ),
@@ -184,6 +195,82 @@ class _ReporteMensualDiariosScreenState
       // Argón 1.25 MEDIA: la selección de día no viaja
       // entre meses (un 31 no existe en febrero).
       _diaSel = null;
+      // 1.36 H-C3 (136-1043, GF-079): el dato del mes
+      // anterior se INVALIDA al cambiar: no se pinta el mes
+      // viejo bajo el rótulo del nuevo mientras carga.
+      _datos = {};
+    });
+    _cargar();
+  }
+
+  /// 1.36 H-C3 (136-1044, GF-080): salto rápido a un mes/ano
+  /// concreto (antes solo flechas de a un mes).
+  Future<void> _saltarAMes() async {
+    var ano = _mes.year;
+    final elegido = await showDialog<DateTime>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => DialogoApp(
+          titulo: 'Ir a un mes',
+          iconoTitulo: Icons.calendar_month_rounded,
+          contenido: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Año anterior',
+                    icon: const Icon(Icons.chevron_left_rounded),
+                    onPressed: () => setD(() => ano--),
+                  ),
+                  Text('$ano', style: AppTexto.subtitulo),
+                  IconButton(
+                    tooltip: 'Año siguiente',
+                    icon: const Icon(Icons.chevron_right_rounded),
+                    onPressed: ano >= ahoraHabana().year
+                        ? null
+                        : () => setD(() => ano++),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppEspacio.sm),
+              Wrap(
+                spacing: AppEspacio.sm,
+                runSpacing: AppEspacio.sm,
+                children: [
+                  for (var m = 1; m <= 12; m++)
+                    ChoiceChip(
+                      label: Text(_meses[m - 1].substring(0, 3)),
+                      selected: ano == _mes.year && m == _mes.month,
+                      onSelected: (_) =>
+                          Navigator.pop(ctx, DateTime(ano, m)),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          acciones: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (elegido == null || !mounted) return;
+    final ahora = ahoraHabana();
+    final limite = DateTime(ahora.year, ahora.month);
+    final destino =
+        elegido.isAfter(limite) ? limite : elegido;
+    if (destino.year == _mes.year && destino.month == _mes.month) {
+      return;
+    }
+    setState(() {
+      _mes = destino;
+      _diaSel = null;
+      _datos = {};
     });
     _cargar();
   }
@@ -222,15 +309,29 @@ class _ReporteMensualDiariosScreenState
                       MainAxisAlignment.center,
                   children: [
                     IconButton(
+                      // 1.36 H-C3 (136-1044, GF-080): las
+                      // flechas se anuncian.
+                      tooltip: 'Mes anterior',
                       icon: const Icon(
                           Icons.chevron_left_rounded),
                       onPressed: () => _cambiarMes(-1),
                     ),
-                    Text(
-                      '${_meses[_mes.month - 1]} ${_mes.year}',
-                      style: AppTexto.subtitulo,
+                    // 136-1044: tocar el rótulo abre el salto
+                    // rápido a mes/año.
+                    InkWell(
+                      onTap: _saltarAMes,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.sm,
+                            vertical: AppEspacio.xs),
+                        child: Text(
+                          '${_meses[_mes.month - 1]} ${_mes.year}',
+                          style: AppTexto.subtitulo,
+                        ),
+                      ),
                     ),
                     IconButton(
+                      tooltip: 'Mes siguiente',
                       icon: const Icon(
                           Icons.chevron_right_rounded),
                       onPressed: () {
@@ -284,9 +385,13 @@ class _ReporteMensualDiariosScreenState
                   const SizedBox(height: 16),
                 ],
                 // Por turno
+                // 1.36 H-C3 (136-1043, GF-079): la sección
+                // entera se oculta si ningún turno tiene
+                // importe (regla de filas en cero de Jc).
+                if (turnosVisibles.isNotEmpty) ...[
                 const Text('Por turno',
                     style: AppTexto.subtitulo),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppEspacio.sm),
                 Row(
                   children: [
                     for (var i = 0; i < turnosVisibles.length; i++)
@@ -321,6 +426,7 @@ class _ReporteMensualDiariosScreenState
                       ),
                   ],
                 ),
+                ],
                 // Argón stats MENOR: resumenMensualDiarios agrupa
                 // también 'noche'; sin tarjeta, ese dinero sumaba en
                 // el total sin aparecer en ninguna tarjeta de turno.

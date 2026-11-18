@@ -16,13 +16,18 @@ import 'package:uuid/uuid.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart'
-    show esFiadoPendienteVenta, fmtFecha, totalVentaRegistrado;
+    show
+        esFiadoPendienteVenta,
+        fmtFecha,
+        fmtMonto,
+        totalVentaRegistrado;
 
 export '../negocio.dart' show esFiadoPendienteVenta;
 import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'diseno.dart';
 import 'widgets.dart';
 import '../app_log.dart';
@@ -243,12 +248,19 @@ class _CuentasPorCobrarScreenState
   }
 
   String _textoTotal() {
+    // 1.36 H-C3 (136-1035, GF-071): formato de la casa
+    // (fmtMonto), no decimales crudos de toStringAsFixed.
     final t = totalesFiados(_fiados);
     final partes = <String>[];
-    if (t.cup != 0) partes.add('${t.cup.toStringAsFixed(2)} CUP');
-    if (t.usd != 0) partes.add('${t.usd.toStringAsFixed(2)} USD');
-    return partes.isEmpty ? '0.00 CUP' : partes.join(' · ');
+    if (t.cup != 0) partes.add('${fmtMonto(t.cup)} CUP');
+    if (t.usd != 0) partes.add('${fmtMonto(t.usd)} USD');
+    return partes.isEmpty ? '${fmtMonto(0)} CUP' : partes.join(' · ');
   }
+
+  /// 1.36 H-C3 (136-1035, GF-071): ventas con un cobro en
+  /// curso: su botón «Cobrar» queda bloqueado hasta que la
+  /// op se encola (o falla), sin doble cobro por doble toque.
+  final Set<int> _saldando = {};
 
   Future<void> _saldar(Map<String, dynamic> v) async {
     final prodId = (v['suplemento_id'] as num?)?.toInt();
@@ -272,6 +284,9 @@ class _CuentasPorCobrarScreenState
       mostrarSnack(context, 'No se puede cobrar: a esta venta le falta su número de registro', significado: SignificadoChip.alerta);
       return;
     }
+    // 136-1035: ya hay un cobro en curso de esta venta.
+    if (_saldando.contains(ventaId)) return;
+    setState(() => _saldando.add(ventaId));
 
     // 1.15 V2: selector de método de cobro. Solo el efectivo
     // suma al pendiente CUP (la transferencia va directo a la
@@ -323,7 +338,10 @@ class _CuentasPorCobrarScreenState
         ),
       ),
     );
-    if (ok != true) return;
+    if (ok != true) {
+      if (mounted) setState(() => _saldando.remove(ventaId));
+      return;
+    }
     final fechaCobro = hoyHabanaIso();
     // D2-03: op + marca optimista en una transacción y con
     // re-chequeo de duplicado dentro (ver encolarSaldarFiado).
@@ -336,6 +354,7 @@ class _CuentasPorCobrarScreenState
     );
     if (!encolado) {
       if (mounted) {
+        setState(() => _saldando.remove(ventaId));
         mostrarSnack(context,
             'Este fiado ya tiene un cobro pendiente de sincronizar',
             significado: SignificadoChip.alerta);
@@ -441,7 +460,12 @@ class _CuentasPorCobrarScreenState
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const EstadoCargando(texto: 'Cargando fiados por cobrar…');
+      // 1.36 H-C3 (136-1035, GF-071): esqueleto de la casa
+      // en vez del texto de carga suelto.
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: AppEspacio.md),
+        child: SkeletonLista(items: 3),
+      );
     }
     if (_fiados.isEmpty) {
       // 1.25 T118 (F2-18): vacío del sistema (antes un texto
@@ -452,7 +476,10 @@ class _CuentasPorCobrarScreenState
         subtitulo: 'Nadie debe suplementos ahora mismo.',
       );
     }
-    return ListView.builder(
+    // 1.36 H-C3 (136-1035, GF-071): la pantalla
+    // independiente también se refresca tirando (antes solo
+    // la incrustada heredaba el refresco de su pantalla).
+    final lista = ListView.builder(
       padding: const EdgeInsets.symmetric(
           horizontal: AppEspacio.md),
       itemCount: _fiados.length,
@@ -503,7 +530,12 @@ class _CuentasPorCobrarScreenState
                         fontWeight: FontWeight.bold,
                         color: AppColores.naranja)),
                 TextButton(
-                  onPressed: () => _saldar(v),
+                  // 136-1035: bloqueado hasta que la op
+                  // del cobro queda encolada.
+                  onPressed:
+                      _saldando.contains((v['id'] as num?)?.toInt())
+                          ? null
+                          : () => _saldar(v),
                   child: const Text('Cobrar'),
                 ),
               ],
@@ -512,5 +544,7 @@ class _CuentasPorCobrarScreenState
         );
       },
     );
+    if (widget.incrustada) return lista;
+    return RefrescoIron(onRefresh: _cargarDatos, child: lista);
   }
 }

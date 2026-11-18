@@ -11,7 +11,9 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_log.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -42,7 +44,26 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
     _cargar();
   }
 
+  String? _falloCarga;
+
   Future<void> _cargar() async {
+    // 1.36 H-C3 (136-1036, GF-072): un fallo de las lecturas
+    // locales ya no deja el spinner eterno: se dice con
+    // EstadoError y Reintentar.
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      AppLog.error('ui', 'estado_cuenta_carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _falloCarga = mensajeErrorAmable(e);
+          _cargando = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final filas = await LocalDb.instance
         .mirrorPorIds('clientes', [widget.clienteId]);
     if (filas.isEmpty) {
@@ -189,7 +210,19 @@ class _EstadoCuentaScreenState extends State<EstadoCuentaScreen> {
       appBar: appBarIron(context, 'Estado de cuenta'),
       body: _cargando
           ? const EstadoCargando()
-          : _protegido
+          : _falloCarga != null && _cliente == null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el estado de cuenta',
+                  detalle: _falloCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _falloCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : _protegido
               ? const EstadoVacio(
                   icono: Icons.lock_rounded,
                   titulo: 'Cliente protegido',

@@ -71,7 +71,13 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
     _cargar();
   }
 
+  int _genCarga = 0;
+
   Future<void> _cargar() async {
+    // 1.36 H-C3 (136-1039, GF-075): token de generación —
+    // una carga vieja que termina tarde NO pisa el
+    // resultado de la más reciente.
+    final gen = ++_genCarga;
     List<ReportePlus>? lista;
     String? error;
     try {
@@ -89,7 +95,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
       ops = await LocalDb.instance.pendingOpsLectura();
     } catch (e) {
       AppLog.error('ui', 'reportes_plus_ops_fallo', d: '$e');
-      if (!mounted) return;
+      if (!mounted || gen != _genCarga) return;
       setState(() {
         if (lista != null) _reportes = lista;
         _error = error ??
@@ -107,7 +113,7 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
     // puente) la tarjeta se desbloqueaba y admitía la decisión
     // CONTRARIA sobre el mismo reporte, que luego rebotaba en
     // el servidor como REPORTE_YA_RESUELTO.
-    if (!mounted) return;
+    if (!mounted || gen != _genCarga) return;
     setState(() {
       if (lista != null) _reportes = lista;
       _error = error;
@@ -210,7 +216,18 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
       body: Column(
         children: [
           const SyncBanner(),
-          Expanded(child: _cuerpo()),
+          Expanded(
+            // 1.36 H-C3 (136-1042, GF-078): los estados se
+            // cruzan con la animación de la casa.
+            child: CruceEstados(
+              estado: _cargando
+                  ? 'cargando'
+                  : _error != null
+                      ? 'error'
+                      : 'contenido',
+              child: _cuerpo(),
+            ),
+          ),
         ],
       ),
     );
@@ -221,7 +238,10 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
       return const EstadoCargando(texto: 'Cargando reportes…');
     }
     if (_error != null) {
-      return Center(
+      // 1.36 H-C3 (136-1040, GF-076): el cuerpo de error es
+      // DESLIZABLE (en pantallas bajas el botón Reintentar
+      // quedaba fuera del Center fijo).
+      return SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(AppEspacio.lg),
           child: Column(
@@ -382,8 +402,29 @@ class _ReportesPlusScreenState extends State<ReportesPlusScreen> {
                   Icon(Icons.sync_rounded,
                       size: 16, color: AppColores.info),
                   SizedBox(width: 8),
-                  Text('Decisión encolada: se aplica al sincronizar',
-                      style: AppTexto.metadato.copyWith(color: AppColores.info, fontWeight: FontWeight.w600)),
+                  // 1.36 H-C3 (136-1040, GF-076): el texto
+                  // va en Expanded (no desborda en pantallas
+                  // estrechas).
+                  Expanded(
+                    child: Text(
+                        'Decisión encolada: se aplica al sincronizar',
+                        style: AppTexto.metadato.copyWith(color: AppColores.info, fontWeight: FontWeight.w600)),
+                  ),
+                  // 1.36 H-C3 (136-1042, GF-078): con la op
+                  // aún pendiente, la tarjeta ofrece
+                  // reintentar el envío sin salir.
+                  if (_conOpPendiente.contains(r.id) &&
+                      !_enCurso.contains(r.id))
+                    TextButton(
+                      onPressed: () {
+                        unawaited(SyncEngine.instance
+                            .push()
+                            .then((_) {
+                          if (mounted) _cargar();
+                        }, onError: (_) {}));
+                      },
+                      child: const Text('Reintentar envío'),
+                    ),
                 ],
               )
             else if (_puedeDecidir)
@@ -533,12 +574,14 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
           // la cotización vencida — sin marcarla, «Confirmar»
           // queda deshabilitado.
           if (widget.cotizacionVencida) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: AppEspacio.md),
             Text(
               '⚠️ La cotización de este reporte ya venció '
               '(pasaron más de 24 h desde el reporte): el '
               'precio pudo haber cambiado.',
-              style: TextStyle(
+              // 1.36 H-C3 (136-1041, GF-077): tokens de la
+              // casa, no TextStyle crudo.
+              style: AppTexto.secundario.copyWith(
                   color: AppColores.alerta,
                   fontWeight: FontWeight.w600),
             ),
@@ -552,7 +595,7 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
                   'Confirmo de todos modos, al monto reportado'),
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: AppEspacio.md),
           TextField(
             controller: _ctrl,
             keyboardType:
@@ -573,14 +616,14 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
           // ingreso. Para el pago que no corresponde, la vía
           // es Rechazar con motivo.
           if (_descuadra) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppEspacio.sm),
             Text(
               'Ojo: el monto no coincide con el paquete de '
               '${widget.meses == 1 ? '1 mes' : '${widget.meses} meses'} '
               '(${fmtMonto(widget.monto)} CUP): el invitado '
               'recibirá igualmente los $_dias días del paquete '
               'y el ingreso quedará por el monto que confirmes.',
-              style: TextStyle(
+              style: AppTexto.secundario.copyWith(
                   color: AppColores.alerta,
                   fontWeight: FontWeight.w600),
             ),
@@ -595,7 +638,13 @@ class _DialogoConfirmarPlusState extends State<_DialogoConfirmarPlus> {
         FilledButton(
           // Yunque B (YB-FLU-03): con la cotización vencida,
           // sin la aceptación expresa no se confirma.
-          onPressed: (widget.cotizacionVencida && !_aceptoVencida)
+          // 1.36 H-C3 (136-1041, GF-077): la validez del monto
+          // se recalcula EN VIVO (onChanged ya repinta): con
+          // el monto inválido el botón nace deshabilitado, no
+          // espera al toque para decirlo.
+          onPressed: (widget.cotizacionVencida && !_aceptoVencida) ||
+                  !montoConfirmacionPlusValido(double.tryParse(
+                      _ctrl.text.trim().replaceAll(',', '.')))
               ? null
               : _confirmar,
           child: const Text('Confirmar'),
@@ -662,9 +711,13 @@ class _DialogoRechazarPlusState extends State<_DialogoRechazarPlus> {
           Text('${widget.nombre} · ${fmtMonto(widget.monto)} CUP · '
               'ref. ${widget.referencia} · '
               'Paquete: ${widget.meses == 1 ? '1 mes · 30 días' : '${widget.meses} meses · ${widget.meses * 30} días'}'),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppEspacio.md),
           TextField(
             controller: _ctrl,
+            // 1.36 H-C3 (136-1041, GF-077): la validez se
+            // recalcula al teclear: «Rechazar» solo se
+            // habilita con el motivo escrito.
+            onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               labelText: 'Motivo (obligatorio, lo ve el invitado)',
               border: const OutlineInputBorder(),
@@ -681,7 +734,7 @@ class _DialogoRechazarPlusState extends State<_DialogoRechazarPlus> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: _rechazar,
+          onPressed: _ctrl.text.trim().isEmpty ? null : _rechazar,
           child: const Text('Rechazar'),
         ),
       ],

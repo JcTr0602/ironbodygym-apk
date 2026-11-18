@@ -40,16 +40,26 @@ String nombreCopiaManual(DateTime ahora) {
 /// ninguna copia intermedia en `copias_manuales` — la vía
 /// automática dejaba una BD completa sin rotar por semana
 /// y teléfono, para siempre.
-Future<File> exportarCopiaFria({File? destinoDirecto}) async {
+Future<File> exportarCopiaFria(
+    {File? destinoDirecto, void Function()? onEsperandoSync}) async {
   // 1.24 Bloque 5 (F5): el mismo rigor que el export de Ajustes
   // y que la importación — candado de sync tomado durante el
   // checkpoint y la copia (ningún ciclo hace checkpoint a
   // media copia) y volcado exigido COMPLETO (busy == 0 Y
   // log == checkpointed; antes aquí solo se pedía busy == 0).
   String? candado;
+  var avisoEsperaDado = false;
   for (var i = 0; i < 25 && candado == null; i++) {
     candado = await LocalDb.instance.adquirirSyncLock();
     if (candado == null) {
+      // 1.36 H-C3 (136-1047, GF-083): la espera del candado
+      // (hasta ~15 s) AVISA una vez a la pantalla: esperar
+      // a que termine la sincronización no es lo mismo que
+      // estar copiando, y el usuario lo distingue.
+      if (!avisoEsperaDado) {
+        avisoEsperaDado = true;
+        onEsperandoSync?.call();
+      }
       await Future<void>.delayed(const Duration(milliseconds: 600));
     }
   }
