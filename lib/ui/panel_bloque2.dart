@@ -365,6 +365,7 @@ class VencimientosProximosScreen extends StatefulWidget {
 class _VencimientosProximosScreenState
     extends State<VencimientosProximosScreen> {
   var _cargando = true;
+  String? _errorCarga;
   List<Map<String, dynamic>> _vencidos = [];
   List<Map<String, dynamic>> _proximos = [];
 
@@ -384,6 +385,7 @@ class _VencimientosProximosScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -441,6 +443,18 @@ class _VencimientosProximosScreenState
       appBar: appBarIron(context, 'Vencimientos próximos'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
