@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_log.dart';
+import '../errores_sync.dart' show mensajeErrorAmable;
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import 'admin_secciones.dart';
@@ -79,7 +80,9 @@ class _GastosScreenState extends State<GastosScreen> {
       if (!mounted) return;
       setState(() {
         _gastos = const [];
-        _errorCarga = '$e';
+        // 1.36 H-B2 (136-683): el error se muestra AMABLE,
+        // no la excepción cruda.
+        _errorCarga = mensajeErrorAmable(e);
         _cargado = true;
       });
     }
@@ -133,9 +136,19 @@ class _GastosScreenState extends State<GastosScreen> {
         ),
       );
     }
-    return SeccionGastosScreen(
-      getGastos: () => _gastos,
-      onAgregarGasto: _agregar,
+    // 136-683/684: la recarga por gesto (RefreshIndicator)
+    // la aporta esta pantalla vía la sección compartida, y
+    // los estados cruzan con AnimatedSwitcher.
+    return AnimatedSwitcher(
+      duration: AppMovimiento.media,
+      child: KeyedSubtree(
+        key: const ValueKey('contenido'),
+        child: SeccionGastosScreen(
+          getGastos: () => _gastos,
+          onAgregarGasto: _agregar,
+          onRecargar: _recargar,
+        ),
+      ),
     );
   }
 }

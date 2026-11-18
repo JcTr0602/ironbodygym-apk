@@ -36,7 +36,8 @@ Future<bool> agregarGastoFlow(BuildContext context) async {
       !PermisosEntrenador().canRegistrarGastos) {
     mostrarSnack(
         context,
-        'No tienes permiso para registrar gastos. Pídeselo a Jc.',
+        'No tienes permiso para registrar gastos. '
+        'Pídeselo al dueño.',
         significado: SignificadoChip.error);
     return false;
   }
@@ -191,7 +192,10 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
               '${comoMiles.toStringAsFixed(0)} CUP. '
               'Elige el monto correcto:'),
           acciones: [
-            TextButton(
+            // 1.36 H-B2 (136-686): las dos lecturas con el
+            // MISMO peso visual (antes una era botón de
+            // texto y la otra, el botón principal).
+            FilledButton(
               onPressed: () => Navigator.pop(ctx, comoDecimal),
               child: Text('${comoDecimal.toStringAsFixed(2)} CUP'),
             ),

@@ -5,6 +5,7 @@
 /// confirmadas).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -68,7 +69,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
   // 1.25 T117 (F1-61): el futuro de precios se crea UNA sola vez;
   // antes se creaba dentro de build y el FutureBuilder se reiniciaba
   // (con su parpadeo) en cada reconstrucción.
-  late final Future<Map<String, double>> _preciosFut;
+  late Future<Map<String, double>> _preciosFut;
   String _sexo = 'M';
   String _periodo = 'mensual';
   int _meses = 1;
@@ -113,6 +114,13 @@ class _InscribirScreenState extends State<InscribirScreen> {
   }
   File? _foto;
   bool _guardando = false;
+  // 1.36 H-B2 (136-696): el spinner del botón solo tras
+  // CONFIRMAR (tras el diálogo de resumen): _guardando es
+  // la guarda anti-doble-toque desde el primer toque
+  // (Argón lote 4, bloqueante) y cubre también los
+  // diálogos previos, donde el botón no debe fingir que
+  // ya está guardando.
+  bool _confirmandoGuardado = false;
   // 1.36 (136-689): identidad del intento de guardado. La
   // op de inscripción y la foto se encolan en dos pasos: si
   // el segundo falla (disco, compresión), el usuario
@@ -160,25 +168,44 @@ class _InscribirScreenState extends State<InscribirScreen> {
       }
     });
     if (error != null) {
-      switch (campo) {
-        case 'nombre':
-          _focoNombre.requestFocus();
-        case 'telefono':
-          _focoTelefono.requestFocus();
-        case 'carnet':
-          _focoCarnet.requestFocus();
+      final foco = switch (campo) {
+        'nombre' => _focoNombre,
+        'telefono' => _focoTelefono,
+        _ => _focoCarnet,
+      };
+      foco.requestFocus();
+      // 1.36 H-B2 (136-696): el campo con error se trae a
+      // la vista (el formulario es largo: el foco sin
+      // scroll dejaba el error fuera de pantalla).
+      final ctxFoco = foco.context;
+      if (ctxFoco != null) {
+        Scrollable.ensureVisible(ctxFoco,
+            duration: AppMovimiento.larga,
+            curve: AppMovimiento.curvaSuave,
+            alignment: 0.2);
       }
     }
   }
   // v1.7.0: inscribir directamente como Cuenta a la Casa (solo
   // dueño; el servidor revalida que el actor sea admin).
   bool _cuentaCasa = false;
+  // 1.36 H-B2 (136-694): la confirmación de la Casa en
+  // curso — el switch se deshabilita mientras el diálogo
+  // está abierto (un segundo toque apilaba dos diálogos).
+  bool _confirmandoCasa = false;
   // 1.32 (Disparador 2B): la caché LOCAL de invitados, leída
   // una vez al abrir (LocalDb meta; jamás red al teclear —
   // Compuerta 2). La coincidencia se calcula en build con la
   // función pura del servicio.
   List<InvitadoResumen> _cacheInvitados2B = const [];
   double _precioMenorVal = 1500;
+  // 1.36 H-B2 (136-695): la tarifa del menor está
+  // «cargando» hasta que llega la real (antes el selector
+  // enseñaba 1500 como si fuera la vigente).
+  bool _precioMenorCargado = false;
+  // 136-695: la carga de tipos personalizados falló —
+  // se avisa con reintento en la sección de membresía.
+  bool _errorTipos = false;
 
   @override
   void initState() {
@@ -227,7 +254,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
       final cache = await InvitadosService().leerCacheInvitados();
       if (!mounted || cache == null) return;
       setState(() => _cacheInvitados2B = cache.lista);
-    } catch (_) {}
+    } catch (e) {
+      // 1.36 H-B2 (136-692): sin caché no hay aviso de
+      // duplicado por teléfono — el fallo queda en bitácora.
+      AppLog.error('inscribir', 'cache_invitados_fallo', d: '$e');
+    }
   }
 
   /// v1.3.9: cargar tipos de pago personalizados (ej. "Oferta 50%").
@@ -242,28 +273,60 @@ class _InscribirScreenState extends State<InscribirScreen> {
                   .contains(t.id))
           .toList();
       if (mounted) {
-        setState(() => _tiposCustom = custom);
+        setState(() {
+          _tiposCustom = custom;
+          _errorTipos = false;
+        });
       }
-    } catch (_) {}
+    } catch (e) {
+      // 136-695: sin tipos personalizados el selector solo
+      // ofrece los estándar — se avisa con reintento.
+      AppLog.error('inscribir', 'tipos_custom_fallo', d: '$e');
+      if (mounted) setState(() => _errorTipos = true);
+    }
   }
 
   Future<void> _cargarPrecioMenor() async {
-    final p = await precioMenor();
-    if (mounted) setState(() => _precioMenorVal = p);
+    // 1.36 H-B2 (136-693): con red de seguridad — un fallo
+    // aquí era una excepción async sin dueño y la tarifa
+    // del menor quedaba en su valor inicial sin avisar.
+    try {
+      final p = await precioMenor();
+      if (mounted) {
+        setState(() {
+          _precioMenorVal = p;
+          _precioMenorCargado = true;
+        });
+      }
+    } catch (e) {
+      AppLog.error('inscribir', 'precio_menor_fallo', d: '$e');
+    }
   }
 
   void _actualizarEsMenor() {
-    final esMenorVal = esMenor(_carnet.text.trim());
-    final fechaInvalida = carnetFechaInvalida(_carnet.text);
-    final pareceTel = carnetPareceTelefono(_carnet.text,
+    // 1.36 H-B2 (136-692): la validación EN VIVO trabaja
+    // sobre los dígitos sanitizados, igual que el guardado
+    // (YB-CLI-10): con espacios/guiones tecleados, las
+    // funciones sobre el texto crudo daban otro veredicto
+    // que el guardado. Y un error de carnet ya fijado se
+    // limpia en vivo cuando el carnet queda válido (o
+    // vacío), no solo al reintentar el guardado.
+    final digitos = _carnet.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final esMenorVal = esMenor(digitos);
+    final fechaInvalida = carnetFechaInvalida(digitos);
+    final pareceTel = carnetPareceTelefono(digitos,
         telefono: _telefono.text);
+    final carnetYaValido =
+        digitos.isEmpty || validarCarnet(digitos);
     if (esMenorVal != _esMenor ||
         fechaInvalida != _carnetFechaInvalida ||
-        pareceTel != _carnetPareceTelefono) {
+        pareceTel != _carnetPareceTelefono ||
+        (_errCarnet != null && carnetYaValido)) {
       setState(() {
         _esMenor = esMenorVal;
         _carnetFechaInvalida = fechaInvalida;
         _carnetPareceTelefono = pareceTel;
+        if (carnetYaValido) _errCarnet = null;
       });
     }
   }
@@ -380,8 +443,11 @@ class _InscribirScreenState extends State<InscribirScreen> {
           color: AppColores.casaFondo,
           borderRadius: BorderRadius.circular(AppRadio.md),
         ),
-        child: const Text('Cuenta a la Casa · sin cobro',
-            style: AppTexto.secundario,
+        // 1.36 H-B2 (136-697): el resumen en modo Casa con
+        // su color de texto propio (casaTexto).
+        child: Text('Cuenta a la Casa · sin cobro',
+            style: AppTexto.secundario
+                .copyWith(color: AppColores.casaTexto),
             textAlign: TextAlign.center),
       );
     }
@@ -410,15 +476,22 @@ class _InscribirScreenState extends State<InscribirScreen> {
             color: AppColores.naranja.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(AppRadio.md),
           ),
-          child: Text(
-            '${_etiquetaPeriodo()} · '
-            '${fmtMonto(_montoPeriodo(pr))} CUP · '
-            '${_metodoPago == 'transferencia' ? 'Transferencia' : 'Efectivo'}'
-            '${_inicioEsExcepcion ? ' · comenzó el ${fmtFecha(_inicioIso)}' : ''}'
-            '${vence != null ? ' · vence el $vence' : ''}',
-            style: AppTexto.secundario
-                .copyWith(fontWeight: FontWeight.w700),
-            textAlign: TextAlign.center,
+          // 1.36 H-B2 (136-696): el resumen cruza al
+          // cambiar período/método/monto, no salta.
+          child: AnimatedSwitcher(
+            duration: AppMovimiento.corta,
+            child: Text(
+              '${_etiquetaPeriodo()} · '
+              '${fmtMonto(_montoPeriodo(pr))} CUP · '
+              '${_metodoPago == 'transferencia' ? 'Transferencia' : 'Efectivo'}'
+              '${_inicioEsExcepcion ? ' · comenzó el ${fmtFecha(_inicioIso)}' : ''}'
+              '${vence != null ? ' · vence el $vence' : ''}',
+              key: ValueKey(
+                  '${_etiquetaPeriodo()}|${_montoPeriodo(pr)}|$_metodoPago|$_inicioIso|$vence'),
+              style: AppTexto.secundario
+                  .copyWith(fontWeight: FontWeight.w700),
+              textAlign: TextAlign.center,
+            ),
           ),
         );
       },
@@ -625,7 +698,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
         fotoPath: _foto?.path,
       );
       if (okCasa != true || !mounted) return;
-      setState(() => _guardando = true);
+      setState(() => _confirmandoGuardado = true);
       try {
         final payloadCasa = <String, dynamic>{
           'nombre': nombre,
@@ -680,7 +753,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
         AppLog.error('inscribir', 'guardar_casa_fallo', d: '$e');
         mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       } finally {
-        if (mounted) setState(() => _guardando = false);
+        if (mounted) {
+          setState(() {
+            _guardando = false;
+            _confirmandoGuardado = false;
+          });
+        }
       }
       return;
     }
@@ -714,7 +792,7 @@ class _InscribirScreenState extends State<InscribirScreen> {
     );
     if (ok != true || !mounted) return;
 
-    setState(() => _guardando = true);
+    setState(() => _confirmandoGuardado = true);
     try {
       String? fotoPath = _foto?.path;
       final payload = <String, dynamic>{
@@ -833,7 +911,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
       AppLog.error('inscribir', 'guardar_fallo', d: '$e');
       mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
     } finally {
-      if (mounted) setState(() => _guardando = false);
+      if (mounted) {
+        setState(() {
+          _guardando = false;
+          _confirmandoGuardado = false;
+        });
+      }
     }
   }
 
@@ -985,7 +1068,15 @@ class _InscribirScreenState extends State<InscribirScreen> {
                               size: pasos[i].ok || pasos[i].opcional
                                   ? 13
                                   : 6,
-                              color: Colors.white,
+                              // 136-697: el paso incompleto
+                              // lleva su icono en el color de
+                              // texto secundario sobre el borde
+                              // (blanco sobre borde era
+                              // invisible).
+                              color: pasos[i].ok
+                                  ? Colors.white
+                                  : AppColores.textoSecundario(
+                                      context),
                             ),
                           ),
                           const SizedBox(width: AppEspacio.xs),
@@ -1308,8 +1399,24 @@ class _InscribirScreenState extends State<InscribirScreen> {
                         'entregarlo al cliente.',
                         style: AppTexto.secundario),
                     value: _crearAccesoApp,
-                    onChanged: (v) =>
-                        setState(() => _crearAccesoApp = v),
+                    onChanged: (v) {
+                      setState(() => _crearAccesoApp = v);
+                      // 136-696: al ACTIVAR «Crear acceso»,
+                      // el teléfono se valida en el acto (no
+                      // recién al guardar).
+                      if (v) {
+                        final tel = _telefono.text.trim();
+                        final sano = tel.isEmpty
+                            ? ''
+                            : (sanitizarTelefono(tel) ?? '');
+                        if (!validarTelefono(sano)) {
+                          _fijarError('telefono',
+                              'Para crear el acceso de la app '
+                              'hace falta un teléfono válido de '
+                              '8 dígitos.');
+                        }
+                      }
+                    },
                   ),
                   const SizedBox(height: AppEspacio.md),
                 ],
@@ -1327,11 +1434,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
                         'avisos. Solo el dueño puede otorgarla.',
                         style: AppTexto.secundario),
                     value: _cuentaCasa,
-                    onChanged: (v) async {
+                    onChanged: _confirmandoCasa
+                        ? null
+                        : (v) async {
                       if (!v) {
                         setState(() => _cuentaCasa = false);
                         return;
                       }
+                      setState(() => _confirmandoCasa = true);
                       // T19: activar la Casa DESCARTA la
                       // membresía elegida abajo; se dice antes
                       // de que ocurra, no después.
@@ -1348,6 +1458,9 @@ class _InscribirScreenState extends State<InscribirScreen> {
                       );
                       if (ok == true && mounted) {
                         setState(() => _cuentaCasa = true);
+                      }
+                      if (mounted) {
+                        setState(() => _confirmandoCasa = false);
                       }
                     },
                   ),
@@ -1394,11 +1507,76 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                 // con pr['transfer']!.
                                 'transfer': 2500.0,
                               };
+                          // 1.36 H-B2 (136-694): si los
+                          // precios no cargaron, se DICE (las
+                          // etiquetas salen de los de
+                          // referencia, no de los vigentes).
+                          if (snap.hasError) {
+                            AppLog.error('inscribir',
+                                'precios_fallo',
+                                d: '${snap.error}');
+                          }
                           return Column(
                             crossAxisAlignment:
                                 CrossAxisAlignment
                                     .start,
                             children: [
+                              if (snap.hasError)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                      bottom: AppEspacio.sm),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'No se pudieron cargar '
+                                          'los precios actuales: '
+                                          'las etiquetas muestran '
+                                          'los de referencia.',
+                                          style: AppTexto.metadato
+                                              .copyWith(
+                                                  color: AppColores
+                                                      .errorTexto(
+                                                          context)),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => setState(
+                                            () => _preciosFut =
+                                                _precios()),
+                                        child:
+                                            const Text('Reintentar'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              if (_errorTipos)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                      bottom: AppEspacio.sm),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'No se pudieron cargar '
+                                          'los tipos de pago '
+                                          'personalizados.',
+                                          style: AppTexto.metadato
+                                              .copyWith(
+                                                  color: AppColores
+                                                      .errorTexto(
+                                                          context)),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed:
+                                            _cargarTiposCustom,
+                                        child:
+                                            const Text('Reintentar'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               SelectorIronForm<String>(
                                 valorInicial: _periodo ==
                                         'mensual'
@@ -1416,7 +1594,10 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                       in [1, 2, 3])
                                     OpcionSelector(
                                         'mensual:$m',
-                                        _esMenor
+                                        _esMenor &&
+                                                !_precioMenorCargado
+                                            ? '$m mes${m == 1 ? '' : 'es'} (cargando tarifa de menor…)'
+                                            : _esMenor
                                             ? '$m mes${m == 1 ? '' : 'es'} (${fmtMonto(_precioMenorVal * m)} CUP) — Menor de edad'
                                             // v1.3.9 (Bug 2): mostrar tarifa según método de pago elegido.
                                             : '$m mes${m == 1 ? '' : 'es'} (${fmtMonto((_metodoPago == 'transferencia' ? pr['transfer']! : pr['mensual']!) * m)} CUP)'),
@@ -1483,13 +1664,18 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                   }
                                 }),
                               ),
-                              if (_periodo ==
-                                  'personalizado') ...[
-                                const SizedBox(
-                                    height:
-                                        AppEspacio
-                                            .md),
-                                Row(
+                              // 1.36 H-B2 (136-695): los
+                              // campos de «Personalizado»
+                              // entran con AnimatedSize.
+                              AnimatedSize(
+                                duration: AppMovimiento.corta,
+                                alignment: Alignment.topCenter,
+                                child: _periodo == 'personalizado'
+                                    ? Padding(
+                                        padding: const EdgeInsets
+                                            .only(
+                                            top: AppEspacio.md),
+                                        child: Row(
                                   children: [
                                     Expanded(
                                       child:
@@ -1516,10 +1702,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                                   .numberWithOptions(
                                                   decimal:
                                                       true)),
-                                    ),
+                                        ),
                                   ],
-                                ),
-                              ],
+                                        ),
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
                             ],
                           );
                         },
@@ -1691,8 +1879,22 @@ class _InscribirScreenState extends State<InscribirScreen> {
                                 Icons.delete_outline_rounded,
                                 size: 18),
                             label: const Text('Quitar foto'),
-                            onPressed: () =>
-                                setState(() => _foto = null),
+                            // 1.36 H-B2 (136-693): quitar la
+                            // foto BORRA el archivo descartado
+                            // en segundo plano (antes solo se
+                            // soltaba la referencia y el
+                            // original quedaba huérfano).
+                            onPressed: () {
+                              final descartada = _foto;
+                              setState(() => _foto = null);
+                              if (descartada != null) {
+                                unawaited(() async {
+                                  try {
+                                    await descartada.delete();
+                                  } catch (_) {}
+                                }());
+                              }
+                            },
                           ),
                         ),
                     ],
@@ -1723,19 +1925,19 @@ class _InscribirScreenState extends State<InscribirScreen> {
                   // cálculos del guardado (_montoPeriodo).
                   _resumenEnVivo(),
                   const SizedBox(height: AppEspacio.sm),
-                  _guardando
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                          color: AppColores.naranja))
-                  : BotonPrimario(
-                      // 1.25 T117 (F1-67): en modo conversión el
-                      // botón dice la acción real, no la genérica.
-                      texto: widget.conversion != null
-                          ? 'Convertir en cliente'
-                          : 'Guardar inscripción',
-                      icono: Icons.check_rounded,
-                      onPressed: _guardar,
-                    ),
+                  // 1.36 H-B2 (136-697): el botón conserva
+                  // su rótulo y enseña el progreso (antes lo
+                  // sustituía un spinner sin texto).
+                  BotonPrimario(
+                    // 1.25 T117 (F1-67): en modo conversión el
+                    // botón dice la acción real, no la genérica.
+                    texto: widget.conversion != null
+                        ? 'Convertir en cliente'
+                        : 'Guardar inscripción',
+                    icono: Icons.check_rounded,
+                    cargando: _confirmandoGuardado,
+                    onPressed: _guardando ? null : _guardar,
+                  ),
                 ],
               ),
             ),

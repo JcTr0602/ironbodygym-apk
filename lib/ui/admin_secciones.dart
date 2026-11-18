@@ -503,10 +503,15 @@ class SeccionGastosScreen extends StatefulWidget {
   final List<Map<String, dynamic>> Function() getGastos;
   final Future<void> Function() onAgregarGasto;
 
+  /// 1.36 H-B2 (136-683): recarga por gesto opcional (la
+  /// aporta la pantalla que envuelve la sección).
+  final Future<void> Function()? onRecargar;
+
   const SeccionGastosScreen({
     super.key,
     required this.getGastos,
     required this.onAgregarGasto,
+    this.onRecargar,
   });
 
   @override
@@ -535,9 +540,7 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
   @override
   Widget build(BuildContext context) {
     final gastos = widget.getGastos();
-    return Scaffold(
-      appBar: appBarIron(context, 'Gastos'),
-      body: ListView(
+    final lista = ListView(
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           seccionAdmin(context, Icons.receipt_long_rounded, 'Últimos gastos', [
@@ -576,12 +579,23 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
                 onAccion: _agregarYActualizar,
               ),
             for (final g in gastos.take(10))
-              ListTile(
+              // 1.36 H-B2 (136-684): la fila entra con un
+              // fundido (la inserción del gasto nuevo se
+              // nota, no aparece de golpe).
+              TweenAnimationBuilder<double>(
+                key: ValueKey(
+                    '${g['concepto']}|${g['fecha']}|${g['monto']}'),
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: AppMovimiento.media,
+                builder: (ctx, t, hijo) =>
+                    Opacity(opacity: t, child: hijo),
+                child: ListTile(
                 dense: true,
                 title: Text('${g['concepto'] ?? '—'}'),
                 subtitle: Text(fmtFecha(g['fecha'] as String?)),
                 trailing: Text('${fmtMonto(g['monto'])} CUP',
                     style: AppTexto.cifraFila),
+                ),
               ),
             if (gastos.length > 10)
               Padding(
@@ -600,7 +614,19 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
             ),
           ]),
         ],
-      ),
+      );
+    return Scaffold(
+      appBar: appBarIron(context, 'Gastos'),
+      // 136-683: gesto de recarga cuando la pantalla lo da.
+      body: widget.onRecargar == null
+          ? lista
+          : RefreshIndicator(
+              onRefresh: () async {
+                await widget.onRecargar!();
+                if (mounted) setState(() {});
+              },
+              child: lista,
+            ),
     );
   }
 }
