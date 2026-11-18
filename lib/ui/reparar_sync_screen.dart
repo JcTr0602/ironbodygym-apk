@@ -294,9 +294,13 @@ class _RepararSyncScreenState extends State<RepararSyncScreen> {
         detalle: _error,
         onReintentar: _falloDiagnostico ? _diagnosticar : _reparar,
       ),
-      // 1.36 H-C2 (136-902): sin botón «Volver» propio —
-      // la salida es la flecha del AppBar (antes había
-      // dos salidas para lo mismo).
+      Center(
+        child: TextButton.icon(
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: const Text('Volver'),
+        ),
+      ),
     ];
   }
 
