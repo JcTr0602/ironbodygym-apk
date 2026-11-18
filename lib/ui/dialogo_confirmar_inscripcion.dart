@@ -57,33 +57,44 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
     this.desdeTxt,
   });
 
-  /// Círculo naranja con check blanco (fallback sin foto).
-  Widget _iconoCheckNaranja() {
+  /// Alto ÚNICO de cabecera con y sin foto (1.36 H-B3 136-713:
+  /// antes la foto sumaba padding+borde ≈84 px frente a 72 del
+  /// check y el contenido saltaba según hubiera foto).
+  static const double _altoCabecera = 78;
+
+  /// Círculo con check (fallback sin foto). 1.36 H-B3
+  /// (136-713): el color sigue al modo — dorado en Cuenta a la
+  /// Casa, naranja en la inscripción normal (antes el fallback
+  /// era siempre naranja aunque el anillo pidiera dorado).
+  Widget _iconoCheck() {
     return Container(
-      width: 72,
-      height: 72,
-      decoration: const BoxDecoration(
-        color: AppColores.naranja,
+      width: _altoCabecera,
+      height: _altoCabecera,
+      decoration: BoxDecoration(
+        color: esCasa ? AppColores.casaIcono : AppColores.naranja,
         shape: BoxShape.circle,
       ),
-      child: const Icon(Icons.check_rounded, color: Colors.white, size: 40),
+      child: Icon(Icons.check_rounded,
+          color: esCasa ? Colors.white : AppColores.sobreMarca, size: 40),
     );
   }
 
-  /// Cabecera: foto del cliente o check naranja si no hay foto / falla.
+  /// Cabecera: foto del cliente o check si no hay foto / falla.
   /// 1.25 T64: entra con la micro-animación de escala del
   /// recibo (celebración contenida) y la foto lleva el
   /// ANILLO del color del estado: dorado en Cuenta a la
   /// Casa, naranja en la inscripción normal.
-  Widget _cabecera() {
+  Widget _cabecera(BuildContext context) {
     final colorAnillo =
         esCasa ? AppColores.casaIcono : AppColores.naranja;
+    final hayFoto = fotoPath != null && fotoPath!.isNotEmpty;
     Widget interior;
-    if (fotoPath == null || fotoPath!.isEmpty) {
-      interior = _iconoCheckNaranja();
+    if (!hayFoto) {
+      interior = _iconoCheck();
     } else {
       interior = Container(
-        padding: const EdgeInsets.all(3),
+        width: _altoCabecera,
+        height: _altoCabecera,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(color: colorAnillo, width: 3),
@@ -91,24 +102,33 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
         child: ClipOval(
           child: Image.file(
             File(fotoPath!),
-            width: 72,
-            height: 72,
+            width: _altoCabecera,
+            height: _altoCabecera,
             fit: BoxFit.cover,
             // Argón: decodificar solo miniatura ligera (la foto de cámara
             // tiene resolución nativa de varios MB).
             cacheWidth: 216,
-            errorBuilder: (_, __, ___) => _iconoCheckNaranja(),
+            errorBuilder: (_, __, ___) => _iconoCheck(),
           ),
         ),
       );
     }
+    // 1.36 H-B3 (136-713): semántica en foto/check y sin doble
+    // escala — con «Reducir movimiento» no hay tween (la
+    // entrada de showDialog ya anima la aparición).
+    final conSemantica = Semantics(
+      image: hayFoto,
+      label: hayFoto ? 'Foto de $nombre' : 'Inscripción lista para confirmar',
+      child: interior,
+    );
+    if (MediaQuery.of(context).disableAnimations) return conSemantica;
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.6, end: 1.0),
+      tween: Tween(begin: 0.85, end: 1.0),
       duration: AppMovimiento.larga,
       curve: AppMovimiento.curvaPop,
       builder: (context, escala, hijo) =>
           Transform.scale(scale: escala, child: hijo),
-      child: interior,
+      child: conSemantica,
     );
   }
 
@@ -142,6 +162,23 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
   /// 1.25 T117 (F1-77): el método con su icono y su nombre
   /// completo, con jerarquía propia (antes iba como un
   /// paréntesis en crudo bajo el monto: «(efectivo)»).
+  /// Etiqueta legible del método (1.36 H-B3 136-713): el
+  /// código crudo no se pinta; un código desconocido se
+  /// presenta capitalizado y vacío = sin fila.
+  static String etiquetaMetodoInscripcion(String metodo) {
+    switch (metodo.trim().toLowerCase()) {
+      case 'efectivo':
+        return 'Efectivo';
+      case 'transferencia':
+        return 'Transferencia';
+      case '':
+        return '';
+      default:
+        final m = metodo.trim();
+        return m[0].toUpperCase() + m.substring(1);
+    }
+  }
+
   Widget _filaMetodo() {
     final esTransf = metodoPago == 'transferencia';
     return Row(
@@ -155,11 +192,7 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
             color: AppColores.naranja),
         const SizedBox(width: AppEspacio.xs),
         Text(
-          esTransf
-              ? 'Transferencia'
-              : metodoPago == 'efectivo'
-                  ? 'Efectivo'
-                  : metodoPago,
+          etiquetaMetodoInscripcion(metodoPago),
           style: AppTexto.cuerpo,
         ),
       ],
@@ -181,7 +214,7 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _cabecera(),
+            _cabecera(context),
             const SizedBox(height: AppEspacio.md),
             if (esCasa) ...[
               // F1-78: la Casa no cobra: su «monto» es la propia
@@ -222,19 +255,22 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
                 ),
               ),
               // F1-80: el desglose del monto, si lo hay.
-              if (desgloseTxt != null)
+              // 1.36 H-B3 (136-713): filas y pastillas SIN
+              // dato no se pintan (fuera «Válido hasta » vacío,
+              // icono de método sin texto, desglose en blanco).
+              if (desgloseTxt != null && desgloseTxt!.trim().isNotEmpty)
                 Text(
                   desgloseTxt!,
                   style: AppTexto.secundario,
                 ),
               // F1-77: método con icono y nombre completo.
-              _filaMetodo(),
+              if (metodoPago.trim().isNotEmpty) _filaMetodo(),
             ],
             const SizedBox(height: AppEspacio.md),
             Divider(color: AppColores.borde(context), height: 1),
             const SizedBox(height: AppEspacio.sm),
             _filaDato(context, Icons.person_rounded, 'Nombre', nombre),
-            if (!esCasa)
+            if (!esCasa && periodoEtiqueta.trim().isNotEmpty)
               _filaDato(context, Icons.calendar_month_rounded,
                   'Período', periodoEtiqueta),
             if (carnet.isNotEmpty)
@@ -245,7 +281,8 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
             if (esCasa && sexo.isNotEmpty)
               _filaDato(context, Icons.person_rounded, 'Sexo', sexo),
             // Vigencia como pastilla (la Casa no tiene).
-            if (!esCasa)
+            // 1.36 H-B3 (136-713): sin fecha no hay pastilla.
+            if (!esCasa && validoHastaTxt.trim().isNotEmpty)
             Padding(
               padding:
                   const EdgeInsets.symmetric(vertical: AppEspacio.sm),
@@ -313,7 +350,9 @@ class DialogoConfirmarInscripcion extends StatelessWidget {
           onPressed: () => Navigator.pop(context, true),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColores.naranja,
-            foregroundColor: Colors.white,
+            // Sobre la marca manda el token (el blanco da
+            // 2,75:1 sobre el naranja; sobreMarca 6,32:1).
+            foregroundColor: AppColores.sobreMarca,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadio.md),
             ),

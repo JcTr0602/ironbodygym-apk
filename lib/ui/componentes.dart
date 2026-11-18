@@ -995,12 +995,15 @@ class DialogoApp extends StatelessWidget {
   }
 
   /// Muestra un diálogo de confirmación simple. Devuelve true si aceptó.
+  /// 1.36 H-B3 (136-717): [cancelar] nullable — null (o vacío)
+  /// OMITE el botón de cancelar; antes `cancelar: ''` dejaba
+  /// un botón invisible con el área táctil activa.
   static Future<bool> confirmar(
     BuildContext context, {
     required String titulo,
     required String mensaje,
     String aceptar = 'Aceptar',
-    String cancelar = 'Cancelar',
+    String? cancelar = 'Cancelar',
     IconData icono = Icons.help_outline_rounded,
     bool peligro = false,
   }) async {
@@ -1011,10 +1014,11 @@ class DialogoApp extends StatelessWidget {
         iconoTitulo: icono,
         contenido: Text(mensaje, style: AppTexto.cuerpo),
         acciones: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(cancelar),
-          ),
+          if (cancelar != null && cancelar.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(cancelar),
+            ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(

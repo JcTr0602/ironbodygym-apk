@@ -185,7 +185,7 @@ class _VentaSuplementoInscripcionScreenState
           titulo: 'Falta el nombre',
           mensaje: 'Escribe el nombre del nuevo cliente.',
           aceptar: 'Entendido',
-          cancelar: '');
+          cancelar: null);
       return;
     }
     final carnet = _carnet.text.trim();
@@ -198,7 +198,7 @@ class _VentaSuplementoInscripcionScreenState
           mensaje: 'El carnet debe tener de 6 a 11 dígitos '
               '(o déjalo vacío).',
           aceptar: 'Entendido',
-          cancelar: '');
+          cancelar: null);
       return;
     }
     // Argón Clientes #1: teléfono con formato válido (el alta
@@ -223,7 +223,7 @@ class _VentaSuplementoInscripcionScreenState
           mensaje: 'El teléfono debe tener 8 dígitos empezando '
               'con 5 o 6 (o déjalo vacío).',
           aceptar: 'Entendido',
-          cancelar: '');
+          cancelar: null);
       return;
     }
     final dups = await posiblesDuplicados(
@@ -245,7 +245,7 @@ class _VentaSuplementoInscripcionScreenState
               'Cada carnet corresponde a '
               'un solo cliente: no se puede inscribir de nuevo.',
           aceptar: 'Entendido',
-          cancelar: '');
+          cancelar: null);
       return;
     }
     if (dups.isNotEmpty) {
@@ -275,7 +275,9 @@ class _VentaSuplementoInscripcionScreenState
                 onPressed: () => Navigator.pop(ctx, true),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColores.naranja,
-                  foregroundColor: Colors.white,
+                  // 1.36 H-B3 (136-717): sobre el naranja
+                  // manda el token de la casa, no Colors.white.
+                  foregroundColor: AppColores.sobreMarca,
                 ),
                 child: const Text('Sí, es nuevo')),
           ],
@@ -297,7 +299,7 @@ class _VentaSuplementoInscripcionScreenState
               'Vuelve a la pantalla anterior y revisa la valoración '
               'antes de inscribir.',
           aceptar: 'Entendido',
-          cancelar: '');
+          cancelar: null);
       return;
     }
 
@@ -308,7 +310,7 @@ class _VentaSuplementoInscripcionScreenState
           titulo: 'Stock insuficiente',
           mensaje: 'Indica una cantidad mayor que 0.',
           aceptar: 'Entendido',
-          cancelar: '');
+          cancelar: null);
       return;
     }
     {
@@ -318,6 +320,10 @@ class _VentaSuplementoInscripcionScreenState
         final dbPre = await LocalDb.instance.db;
         final rowsPre = await dbPre.query('suplementos',
             columns: ['data'], where: 'id = ?', whereArgs: [sidPre]);
+        // 1.36 H-B3 (136-716): tras el await del pre-chequeo
+        // se comprueba mounted antes de abrir el diálogo
+        // siguiente (el contexto puede estar desmontado).
+        if (!mounted) return;
         if (rowsPre.isNotEmpty) {
           final dataPre = jsonDecode(rowsPre.first['data'] as String)
               as Map<String, dynamic>;
@@ -328,7 +334,7 @@ class _VentaSuplementoInscripcionScreenState
                 mensaje:
                     'Solo quedan $stockPre en stock.',
                 aceptar: 'Entendido',
-                cancelar: '');
+                cancelar: null);
             return;
           }
         }
@@ -362,7 +368,10 @@ class _VentaSuplementoInscripcionScreenState
       // clientes.telefono, contra la regla de la casa). El
       // teléfono se sanitiza a sus 8 dígitos y el carnet a
       // dígitos, como en Inscribir y en la ficha.
-      final telefono = sanitizarTelefono(_telefono.text) ?? '';
+      // 1.36 H-B3 (136-718): el payload lleva el teléfono YA
+      // validado arriba (`tel`, sanitizado y comprobado),
+      // no una re-sanitización del texto crudo del campo.
+      final telefono = tel;
       final carnetLimpio = carnet.replaceAll(RegExp(r'[^0-9]'), '');
       // Argón #9 (ALTO): verificación de stock + descuento + encolado
       // en UNA sola transacción, igual que registrarVentaSuplemento.
@@ -421,11 +430,15 @@ class _VentaSuplementoInscripcionScreenState
         }
         return;
       }
-      unawaited(SyncEngine.instance.push());
       // Lote 3 (MEDIO): sin conexión (o antes del pull) el cliente
       // recién inscrito aún no existe en el espejo local: no aparece
       // en la lista ni en Control de Acceso hasta sincronizar. Se
       // avisa antes de salir, en vez de dejarlo descubrirlo.
+      // 1.36 H-B3 (136-718): el aviso va ANTES de lanzar el push
+      // (antes el push salía primero y el aviso de «en cola»
+      // llegaba cuando el envío ya estaba en marcha: el texto
+      // ahora describe el estado real al confirmarse — encolado
+      // y pendiente de sincronizar).
       if (mounted) {
         await DialogoApp.confirmar(context,
             titulo: 'Inscripción en cola',
@@ -434,8 +447,9 @@ class _VentaSuplementoInscripcionScreenState
                 'Control de Acceso y en la gaveta del turno cuando el '
                 'teléfono sincronice.',
             aceptar: 'Entendido',
-            cancelar: '');
+            cancelar: null);
       }
+      unawaited(SyncEngine.instance.push());
       if (mounted) Navigator.pop(context, true);
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -568,33 +582,66 @@ class _VentaSuplementoInscripcionScreenState
               ],
             ),
           ),
-          if (_promoActiva) ...[
-            const SizedBox(height: AppEspacio.md),
-            Container(
-              padding:
-                  const EdgeInsets.all(AppEspacio.md),
-              decoration: BoxDecoration(
-                color: AppColores.naranja
-                    .withValues(alpha: 0.12),
-                borderRadius:
-                    BorderRadius.circular(AppRadio.md),
-                border: Border.all(
-                    color: AppColores.naranja
-                        .withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.card_giftcard_rounded,
-                      color: AppColores.textoSecundario(context)),
-                  SizedBox(width: AppEspacio.sm),
-                  Expanded(
-                    child: Text(
-                      'Se le asignará 1 mes gratis por la promo.',
-                      style: AppTexto.cuerpo,
+          // 1.36 H-B3 (136-718): el banner de promo entra con
+          // transición (antes aparecía de golpe tras getAjustes
+          // y desplazaba el formulario). 136-717: icono y texto
+          // con el token de marca sobre el tinte naranja (antes
+          // textoSecundario, que no es color de marca).
+          AnimatedSize(
+            duration: AppMovimiento.media,
+            alignment: Alignment.topCenter,
+            child: !_promoActiva
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: AppEspacio.md),
+                    child: Container(
+                      padding: const EdgeInsets.all(AppEspacio.md),
+                      decoration: BoxDecoration(
+                        color: AppColores.naranja.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(AppRadio.md),
+                        border: Border.all(
+                            color: AppColores.naranja.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.card_giftcard_rounded,
+                              color: AppColores.textoNaranja(context)),
+                          const SizedBox(width: AppEspacio.sm),
+                          Expanded(
+                            child: Text(
+                              'Se le asignará 1 mes gratis por la promo.',
+                              style: AppTexto.cuerpo.copyWith(
+                                  color: AppColores.textoNaranja(context)),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+          ),
+          // 1.36 H-B3 (136-718): la tasa USD se valida EN LÍNEA
+          // al pintar la pantalla, no recién al confirmar.
+          if (widget.moneda == 'USD' &&
+              (widget.usdTasa == null ||
+                  !widget.usdTasa!.isFinite ||
+                  widget.usdTasa! <= 0)) ...[
+            const SizedBox(height: AppEspacio.md),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    size: 20, color: AppColores.alertaTexto(context)),
+                const SizedBox(width: AppEspacio.sm),
+                Expanded(
+                  child: Text(
+                    'Venta en USD sin una tasa válida: vuelve a la '
+                    'pantalla anterior y revisa la valoración antes '
+                    'de inscribir.',
+                    style: AppTexto.cuerpo.copyWith(
+                        color: AppColores.alertaTexto(context)),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -607,23 +654,49 @@ class _VentaSuplementoInscripcionScreenState
         child: Padding(
           padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
               AppEspacio.sm, AppEspacio.lg, AppEspacio.sm),
-          child: BotonPrimario(
-            texto: _guardando
-                ? 'Registrando…'
-                : 'Confirmar inscripción + venta',
-            // Argón P1#2-parte: deshabilitado sin stock o si la
-            // cantidad supera el stock del snapshot (el pre-chequeo
-            // en _confirmar relee el stock vivo antes de confirmar).
-            onPressed: (_guardando ||
-                    ((widget.suplemento['stock'] as num?)?.toInt() ??
-                            0) <
-                        1 ||
-                    widget.cantidad >
-                        ((widget.suplemento['stock'] as num?)?.toInt() ??
-                            0))
+          child: Builder(builder: (context) {
+            final stockSnap =
+                (widget.suplemento['stock'] as num?)?.toInt() ?? 0;
+            // 1.36 H-B3 (136-718): el botón deshabilitado por
+            // stock EXPLICA el motivo junto al botón (antes se
+            // apagaba en silencio).
+            final motivoStock = _guardando
                 ? null
-                : _confirmar,
-          ),
+                : stockSnap < 1
+                    ? 'Sin stock disponible de este suplemento.'
+                    : widget.cantidad > stockSnap
+                        ? 'La cantidad (${widget.cantidad}) supera el '
+                            'stock disponible ($stockSnap).'
+                        : null;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (motivoStock != null) ...[
+                  Text(
+                    motivoStock,
+                    textAlign: TextAlign.center,
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.alertaTexto(context)),
+                  ),
+                  const SizedBox(height: AppEspacio.sm),
+                ],
+                BotonPrimario(
+                  texto: _guardando
+                      ? 'Registrando…'
+                      : 'Confirmar inscripción + venta',
+                  // 1.36 H-B3 (136-718): progreso visible al
+                  // registrar (indicador del botón de la casa).
+                  cargando: _guardando,
+                  // Argón P1#2-parte: deshabilitado sin stock o si la
+                  // cantidad supera el stock del snapshot (el pre-chequeo
+                  // en _confirmar relee el stock vivo antes de confirmar).
+                  onPressed:
+                      (_guardando || motivoStock != null) ? null : _confirmar,
+                ),
+              ],
+            );
+          }),
         ),
       ),
     );
@@ -674,6 +747,23 @@ class _FotoBandaVentaState extends State<_FotoBandaVenta> {
     return FutureBuilder<File?>(
       future: _futura,
       builder: (ctx, snap) {
+        // 1.36 H-B3 (136-716): mientras carga NO se pinta
+        // «sin foto» (parpadeo): hay un estado de carga propio
+        // del mismo tamaño.
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            width: 56,
+            height: 56,
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColores.naranja),
+              ),
+            ),
+          );
+        }
         final f = snap.data;
         if (f == null) {
           // SL-6 (G05-13): la marca de «sin foto» es la
@@ -691,8 +781,22 @@ class _FotoBandaVentaState extends State<_FotoBandaVenta> {
             width: 56,
             height: 56,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) =>
-                const PlaceholderSuplemento(alto: 56),
+            // 1.36 H-B3 (136-716): el error conserva el MISMO
+            // tamaño 56×56 (antes el placeholder sin SizedBox
+            // rompía el Row) y la imagen entra con crossfade.
+            errorBuilder: (_, __, ___) => const SizedBox(
+              width: 56,
+              height: 56,
+              child: PlaceholderSuplemento(alto: 56),
+            ),
+            frameBuilder: (ctx, child, frame, wasSynchronouslyLoaded) {
+              if (wasSynchronouslyLoaded) return child;
+              return AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: AppMovimiento.corta,
+                child: child,
+              );
+            },
           ),
         );
       },
