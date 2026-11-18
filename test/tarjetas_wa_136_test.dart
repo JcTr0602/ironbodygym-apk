@@ -17,6 +17,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ironbody_gym/ui/confirmacion_cobro.dart';
 import 'package:ironbody_gym/ui/tarjetas_wa.dart';
 
 Future<void> _pintar(
@@ -191,6 +192,32 @@ void main() {
     expect(nombre.maxLines, 2);
     expect(nombre.overflow, isNot(TextOverflow.ellipsis));
     expect(nombre.data, contains('de la Torre'));
+  });
+
+  testWidgets('entrada: la confirmación con tarjeta ofrece «Enviar tarjeta»',
+      (tester) async {
+    tester.view.physicalSize = const Size(420, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ConfirmacionOperacionScreen(
+          titulo: '¡Cobro registrado!',
+          monto: '2 000 CUP',
+          tarjetaWa: TarjetaWaRecibo(
+            cliente: 'Ana Barbara Duran',
+            concepto: '30 días',
+            metodo: 'Efectivo',
+            fechaIso: '2026-11-17',
+            total: 2000,
+            pagadoHastaIso: '2026-12-21',
+          ),
+          tarjetaTexto: 'recibo',
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Enviar tarjeta'), findsOneWidget);
   });
 
   testWidgets('TJ-01: escala del sistema ×1,45 no entra en la tarjeta',

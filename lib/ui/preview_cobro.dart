@@ -32,6 +32,7 @@ import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'permisos_ui.dart';
 import 'confirmacion_cobro.dart';
+import 'tarjetas_wa.dart';
 import 'dialogo_telefono.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
@@ -844,6 +845,22 @@ Future<ResultadoCobro> _cobrarConPreviewYReciboFlujo({
         // 1.31 (Yunque A, Pieza 3): «Enviar comprobante» con
         // la foto del ticket y este texto como pie.
         comprobantePie: pieComprobante,
+        // 1.36 (136-292): la TARJETA de recibo en el mismo
+        // gesto — «Enviar tarjeta» en la confirmación la
+        // comparte imagen+texto por la hoja del sistema
+        // con el mismo texto del recibo (pieComprobante).
+        tarjetaWa: TarjetaWaRecibo(
+          cliente: nombreCliente,
+          concepto: periodoTextoPreview(payload),
+          metodo: '${payload['metodo'] ?? ''}' == 'transferencia'
+              ? 'Transferencia'
+              : 'Efectivo',
+          fechaIso: hoyHabanaIso(),
+          total: monto.toDouble(),
+          pagadoHastaIso:
+              vencRaw.length >= 10 ? vencRaw.substring(0, 10) : vencRaw,
+        ),
+        tarjetaTexto: pieComprobante,
         // 1.25 T69: enviar el recibo por WhatsApp si el
         // cliente tiene teléfono en su ficha.
         // 1.30 (Oleada 10, FICHA-06): sin teléfono, el

@@ -39,6 +39,7 @@ import '../localdb.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'tarjeta_imagen.dart';
+import 'tarjetas_wa.dart' show mostrarCompartirTarjetaWa;
 
 /// SL-4 · G10-6: genera los bytes PNG de [imagen] (el ticket
 /// a resolución 3.0), los pasa a [usar] y libera la imagen
@@ -114,6 +115,17 @@ class ConfirmacionOperacionScreen extends StatefulWidget {
   /// Op local del cobro. null = confirmación sin deshacer.
   final String? opUuid;
 
+  /// 1.36 (136-291…294): la TARJETA de WhatsApp de la
+  /// operación (recibo/comprobante ya pintado por el
+  /// llamador). Si viene, la pantalla ofrece «Enviar
+  /// tarjeta»: el motor la captura a PNG y la comparte
+  /// imagen+texto por la hoja del sistema (wa.me no
+  /// adjunta). El texto es [tarjetaTexto] o, en su
+  /// defecto, el pie del comprobante / el comprobante.
+  final Widget? tarjetaWa;
+  final String? tarjetaTexto;
+  final String tarjetaNombreArchivo;
+
   const ConfirmacionOperacionScreen({
     super.key,
     required this.titulo,
@@ -127,6 +139,9 @@ class ConfirmacionOperacionScreen extends StatefulWidget {
     this.accionExtra,
     this.comprobantePie,
     this.opUuid,
+    this.tarjetaWa,
+    this.tarjetaTexto,
+    this.tarjetaNombreArchivo = 'tarjeta_wa',
   });
 
   @override
@@ -481,6 +496,32 @@ class _ConfirmacionOperacionScreenState
                   ),
                   const SizedBox(height: AppEspacio.lg),
                 ],
+                // 1.36 (136-291…294): la tarjeta de WhatsApp
+                // de la operación, imagen+texto por la hoja
+                // de compartir (el motor de tarjetas_wa).
+                if (widget.tarjetaWa != null) ...[
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 48),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.image_rounded),
+                        label: const Text('Enviar tarjeta'),
+                        onPressed: () => mostrarCompartirTarjetaWa(
+                          context,
+                          tarjeta: widget.tarjetaWa!,
+                          texto: widget.tarjetaTexto ??
+                              widget.comprobantePie ??
+                              widget.comprobanteTexto ??
+                              '',
+                          nombreArchivo: widget.tarjetaNombreArchivo,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppEspacio.lg),
+                ],
                 if (_puedeDeshacer) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 48),
@@ -652,6 +693,10 @@ class ConfirmacionCobroScreen extends StatelessWidget {
   /// comprobante» de la pantalla.
   final String? comprobantePie;
 
+  /// 1.36 (136-292): la tarjeta de recibo ya pintada.
+  final Widget? tarjetaWa;
+  final String? tarjetaTexto;
+
   const ConfirmacionCobroScreen({
     super.key,
     required this.nombreCliente,
@@ -664,6 +709,8 @@ class ConfirmacionCobroScreen extends StatelessWidget {
     this.escalonTexto,
     this.accionExtra,
     this.comprobantePie,
+    this.tarjetaWa,
+    this.tarjetaTexto,
   });
 
   @override
@@ -684,6 +731,9 @@ class ConfirmacionCobroScreen extends StatelessWidget {
       opUuid: opUuid,
       accionExtra: accionExtra,
       comprobantePie: comprobantePie,
+      tarjetaWa: tarjetaWa,
+      tarjetaTexto: tarjetaTexto,
+      tarjetaNombreArchivo: 'tarjeta_recibo',
     );
   }
 }
