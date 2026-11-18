@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import '../tipos_pago.dart';
 import 'app_bar.dart';
@@ -98,7 +99,7 @@ class _ReporteMargenesScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

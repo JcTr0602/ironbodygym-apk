@@ -205,7 +205,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
       if (mounted && gen == _genCarga) {
-        setState(() => _errorCarga = '$e');
+        setState(() => _errorCarga = mensajeErrorAmable(e));
       }
     } finally {
       if (mounted && _cargando && gen == _genCarga) {

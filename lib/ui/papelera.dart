@@ -16,6 +16,7 @@ import 'package:uuid/uuid.dart';
 import 'dart:async';
 
 import '../app_log.dart';
+import '../errores_sync.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
@@ -75,7 +76,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
       await _cargarDatos();
     } catch (e) {
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     }
   }
 

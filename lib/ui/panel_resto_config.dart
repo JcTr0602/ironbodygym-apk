@@ -480,7 +480,7 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
       // cero como si fuera un mes sin ingresos.
       if (mounted) {
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }

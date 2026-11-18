@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 import '../cliente_protegido.dart';
+import '../errores_sync.dart';
 import '../negocio.dart';
 
 import '../auth.dart';
@@ -56,7 +57,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

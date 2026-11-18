@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../cliente_protegido.dart';
 import '../congelaciones_gestion.dart';
 import '../localdb.dart';
@@ -123,7 +124,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -266,7 +267,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -395,7 +396,7 @@ class _VencimientosProximosScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

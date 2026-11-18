@@ -120,7 +120,7 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     } catch (e) {
       AppLog.error('usuarios', 'lectura_local_fallo', d: '$e');
       // (136-802) la lectura local falló: error con reintento.
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
       _pintar(const [], pullFallo: _pullFallo || pullFallo);
       return;
     }

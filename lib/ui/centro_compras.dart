@@ -32,6 +32,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../fotos.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -196,7 +197,7 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

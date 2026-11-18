@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../negocio.dart';
+import '../errores_sync.dart';
 import 'exportar_excel.dart';
 import '../auth.dart';
 import '../localdb.dart';
@@ -333,7 +334,7 @@ class _HistorialVentasScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

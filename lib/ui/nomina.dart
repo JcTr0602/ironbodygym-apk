@@ -132,7 +132,7 @@ class _NominaScreenState extends State<NominaScreen> {
       AppLog.error('ui', 'carga_fallo', d: '$e');
       // (136-802) y se pinta como error con reintento.
       if (mounted && gen == _genCarga) {
-        setState(() => _errorCarga = '$e');
+        setState(() => _errorCarga = mensajeErrorAmable(e));
       }
     } finally {
       if (mounted && gen == _genCarga && _cargando) {
@@ -2029,7 +2029,7 @@ class _NominaScreenState extends State<NominaScreen> {
         if (mounted) {
           mostrarSnack(
               context,
-              err is StateError ? err.message : '$err',
+              mensajeErrorAmable(err),
               significado: SignificadoChip.error);
         }
         return;

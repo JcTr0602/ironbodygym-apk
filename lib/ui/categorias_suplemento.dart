@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 import '../negocio.dart';
+import '../errores_sync.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
@@ -88,7 +89,7 @@ class _CategoriasSuplementoScreenState
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
       // 1.36 H-B3 (136-757): y se pinta con reintento.
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

@@ -54,7 +54,7 @@ class _TiposIncidenciaScreenState
       // (Yunque de App 1.31: familia B-15).
       AppLog.error('ui', 'carga_fallo', d: '$e');
       if (mounted) {
-        setState(() => _errorCarga = '$e');
+        setState(() => _errorCarga = mensajeErrorAmable(e));
       }
     } finally {
       if (mounted && _cargando) {

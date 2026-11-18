@@ -236,7 +236,7 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
       // (136-802) el fallo se pinta, no se traga.
       if (mounted) {
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }
@@ -480,7 +480,7 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
       // (136-802) el fallo se pinta, no se traga.
       if (mounted) {
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }
@@ -676,7 +676,7 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
       if (mounted && gen == _generacion) {
         // (136-802) el fallo se pinta, no se traga.
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }
@@ -924,7 +924,7 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }

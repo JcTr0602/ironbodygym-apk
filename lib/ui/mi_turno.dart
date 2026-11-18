@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 
 import '../app_log.dart';
+import '../errores_sync.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
@@ -502,8 +503,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       await _cargar();
     } catch (e) {
       if (!mounted) return;
-      mostrarSnack(context,
-          '$e'.replaceFirst('Exception: ', ''));
+      mostrarSnack(context, mensajeErrorAmable(e));
     } finally {
       if (mounted) setState(() => _repitiendo = false);
     }

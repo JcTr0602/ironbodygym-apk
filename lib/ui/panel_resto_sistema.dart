@@ -178,7 +178,7 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
       // (136-802) el fallo no se pinta como «sin errores» sano.
       if (mounted) {
         setState(() {
-          _errorCarga = '$e';
+          _errorCarga = mensajeErrorAmable(e);
           _cargando = false;
         });
       }
@@ -405,7 +405,8 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
       await cuerpo();
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo completar: $e',
+        mostrarSnack(context,
+            'No se pudo completar: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
       }
     } finally {

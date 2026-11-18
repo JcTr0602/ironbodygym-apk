@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import '../negocio.dart';
@@ -75,7 +76,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);

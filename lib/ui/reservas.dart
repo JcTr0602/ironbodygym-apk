@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../cliente_protegido.dart';
 import '../fotos.dart';
 import '../localdb.dart';
@@ -518,7 +519,7 @@ class _ReservasScreenState extends State<ReservasScreen> {
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
       // (136-741) y se PINTA como error con reintento.
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted) setState(() => _errorCarga = mensajeErrorAmable(e));
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
