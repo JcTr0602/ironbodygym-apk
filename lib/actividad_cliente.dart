@@ -300,10 +300,13 @@ class ActividadClienteService {
       // (1.36 H-B4 136-1000) la foto lleva su rango: una
       // foto de «todo» no se reutiliza para «esta semana»
       // (la consulta filtra por rango y la foto vieja
-      // pintaba filas fuera del rango pedido).
-      if (rangoClave != null &&
-          '${dec['rango'] ?? ''}' != rangoClave) {
-        return null;
+      // pintaba filas fuera del rango pedido). Una foto
+      // legada sin rango vale SOLO para el rango por
+      // defecto («todo»), que es el que la produjo.
+      if (rangoClave != null) {
+        final guardado = '${dec['rango'] ?? ''}';
+        final efectivo = guardado.isEmpty ? 'todo' : guardado;
+        if (efectivo != rangoClave) return null;
       }
       final filasCrudas = dec['filas'];
       if (filasCrudas is! List) return null;
