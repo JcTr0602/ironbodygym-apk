@@ -177,13 +177,22 @@ class SkeletonLista extends StatelessWidget {
 /// mismas alturas aproximadas, para que nada «salte» cuando
 /// llegan las cifras. Sustituye al spinner genérico.
 class SkeletonDashboard extends StatelessWidget {
-  const SkeletonDashboard({super.key});
+  const SkeletonDashboard({super.key}) : enColumna = false;
+
+  /// 1.36 (cierre de Aplica-136): variante SIN viewport para
+  /// vivir como SECCIÓN dentro de otra lista (H-B1 136-333 lo
+  /// montó así en el Mostrador): un ListView dentro de una
+  /// sección recibe alto ilimitado y el layout explota
+  /// («Vertical viewport was given unbounded height», cazado
+  /// por jornada135_novedades). Las piezas son las mismas; la
+  /// envoltura es una columna.
+  const SkeletonDashboard.seccion({super.key}) : enColumna = true;
+
+  final bool enColumna;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(AppEspacio.lg),
-      children: const [
+    const piezas = <Widget>[
         // Héroe del mes.
         Tarjeta(
           child: Column(
@@ -226,7 +235,16 @@ class SkeletonDashboard extends StatelessWidget {
         ),
         SizedBox(height: 16),
         SkeletonTarjeta(),
-      ],
+    ];
+    if (enColumna) {
+      return const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: piezas,
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(AppEspacio.lg),
+      children: piezas,
     );
   }
 }

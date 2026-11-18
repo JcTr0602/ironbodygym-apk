@@ -1938,7 +1938,9 @@ class _HomeScreenState extends State<HomeScreen>
           child: Padding(
             padding: EdgeInsets.fromLTRB(
                 AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
-            child: SkeletonDashboard(),
+            // (cierre de Aplica-136): variante en columna — la
+            // de viewport explota como sección (alto ilimitado).
+            child: SkeletonDashboard.seccion(),
           ),
         ),
       ];
