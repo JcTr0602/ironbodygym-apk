@@ -5150,9 +5150,13 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   // con columnas NULL.
   // 1.23 (auditoría extra #6): lo anulado no es cobrado del día.
   final anuladosCola = await LocalDb.instance.pagosAnuladosEnCola();
+  // ARG136-03 (a): la Casa tampoco es cobrado del turno
+  // (cobradoHoyPorMetodo ya la excluía; este bucle no).
+  final casas = await LocalDb.instance.idsCuentasCasa();
   for (final p in await LocalDb.instance.pagosPorDiaYEntrenador(hoy, telegramId)) {
     notaUuid(p);
     if (esPagoAnulado(p, anuladosCola)) continue;
+    if (_esPagoCasa(p, casas)) continue;
     cobrado += (p['monto'] as num?)?.toDouble() ?? 0;
   }
   for (final d in await LocalDb.instance.allMirror('pagos_diarios')) {
@@ -5195,7 +5199,30 @@ Future<(double, double)> miTurnoHoy(int? telegramId, {String? fecha}) async {
   // fecha raíz, se usa la fecha de creación de la op.
   var noCalculadasTurno = 0;
   for (final op in await LocalDb.instance.pendingOpsLectura()) {
-    if (op['telegram_id'] != telegramId) continue;
+    // ARG136-03 (b): en las ops venta_servicio el
+    // beneficiario es el responsable del efectivo del
+    // payload (si viene), no el autor — el mismo desvío
+    // 1.15 V6 de pendienteEntrega: una venta del dueño «a
+    // nombre de» un entrenador suma al turno de ESE
+    // entrenador. Demás tipos: filtro por autor, como
+    // siempre.
+    if ('${op['tipo']}' == 'venta_servicio') {
+      Map<String, dynamic>? pay;
+      try {
+        pay = jsonDecode(op['payload'] as String)
+            as Map<String, dynamic>;
+      } catch (_) {
+        pay = null;
+      }
+      final benef = (pay == null
+              ? null
+              : LocalDb.normalizarTelegramId(
+                  pay['responsable_efectivo_id'])) ??
+          LocalDb.normalizarTelegramId(op['telegram_id']);
+      if (benef != telegramId) continue;
+    } else if (op['telegram_id'] != telegramId) {
+      continue;
+    }
     if (uuidsEspejo.contains('${op['op_uuid']}')) continue;
     try {
       final payload =
