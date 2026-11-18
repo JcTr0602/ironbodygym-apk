@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 
 import '../tiempo.dart';
 import 'diseno.dart';
+import 'primitivas.dart';
 
 /// Un punto de la serie: fecha (instante) y valor.
 class PuntoSerie {
@@ -151,7 +152,24 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
   Widget build(BuildContext context) {
     final ordenados = List<PuntoSerie>.from(widget.puntos)
       ..sort((a, b) => a.fecha.compareTo(b.fecha));
-    if (ordenados.length < 2) return const SizedBox.shrink();
+    // 1.36 H-B1 (136-391): con UN solo punto no hay línea
+    // que trazar, pero el dato existe — se dice con su
+    // valor y su fecha en vez de desaparecer en silencio.
+    if (ordenados.length == 1) {
+      final p = ordenados.single;
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(AppEspacio.lg),
+          child: Text(
+            'Una sola medición por ahora: '
+            '${p.valor.toStringAsFixed(1)} ${widget.unidad} · '
+            '${fmtFechaHabana(p.fecha)}',
+            style: AppTexto.secundario,
+          ),
+        ),
+      );
+    }
+    if (ordenados.isEmpty) return const SizedBox.shrink();
     final valores = ordenados.map((p) => p.valor).toList();
     final max = valores.reduce((a, b) => a > b ? a : b);
     final min = valores.reduce((a, b) => a < b ? a : b);
@@ -235,7 +253,9 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
               selValido
                   ? '${fmtFechaHabana(ordenados[_sel!].fecha)} · '
                       '${fmt(ordenados[_sel!].valor)} ${widget.unidad}'
-                  : 'Toca un punto para ver su valor y su fecha.',
+                  // 1.36 H-B1 (136-399): la ayuda dice lo
+                  // que el gesto permite de verdad.
+                  : 'Toca o arrastra para explorar.',
               style: AppTexto.secundario.copyWith(
                 fontWeight: selValido ? FontWeight.w700 : FontWeight.w400,
               ),
@@ -248,7 +268,11 @@ class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
 
   void _elegir(double dx, double ancho, List<double> xs) {
     final i = indicePuntoCercano(xs, dx, ancho);
-    if (i >= 0 && _sel != i) setState(() => _sel = i);
+    if (i >= 0 && _sel != i) {
+      // 1.36 H-B1 (136-398): cambiar de punto se siente.
+      Tacto.seleccion();
+      setState(() => _sel = i);
+    }
   }
 }
 

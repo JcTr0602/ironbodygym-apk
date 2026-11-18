@@ -41,7 +41,13 @@ class HojaAccion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
+    // 1.36 H-B1 (136-403): el teclado empuja la hoja
+    // ENTERA siempre — antes solo subía el pie y una hoja
+    // sin pie quedaba tapada por el teclado.
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: ConstrainedBox(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.92,
       ),
@@ -87,6 +93,10 @@ class HojaAccion extends StatelessWidget {
           ),
           Flexible(
             child: SingleChildScrollView(
+              // 1.36 H-B1 (136-406): arrastrar esconde el
+              // teclado, como en el resto de la casa.
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                   AppEspacio.xs, AppEspacio.lg, AppEspacio.md),
               child: cuerpo,
@@ -94,15 +104,15 @@ class HojaAccion extends StatelessWidget {
           ),
           if (pie != null)
             Padding(
-              padding: EdgeInsets.fromLTRB(
+              padding: const EdgeInsets.fromLTRB(
                   AppEspacio.lg,
                   AppEspacio.sm,
                   AppEspacio.lg,
-                  AppEspacio.md +
-                      MediaQuery.of(context).viewInsets.bottom),
+                  AppEspacio.md),
               child: pie!,
             ),
         ],
+      ),
       ),
     );
   }
@@ -122,6 +132,8 @@ Future<T?> showHojaIron<T>(
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: true,
+    // 1.36 H-B1 (136-403): la hoja respeta el área segura.
+    useSafeArea: true,
     builder: (ctx) => HojaAccion(
       titulo: titulo,
       icono: icono,

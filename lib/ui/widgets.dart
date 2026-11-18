@@ -187,7 +187,13 @@ class SyncBanner extends StatefulWidget {
 class _SyncBannerState extends State<SyncBanner>
     with SingleTickerProviderStateMixin {
   late final AnimationController _giro;
-  bool _expandido = false;
+
+  /// 1.36 H-B1 (136-364): el expandido es POR VARIANTE —
+  /// el detalle del error y el desglose de pendientes no
+  /// comparten bandera (antes abrir uno dejaba el otro
+  /// «abierto» al cambiar de estado).
+  bool _expandidoError = false;
+  bool _expandidoPendientes = false;
 
   @override
   void initState() {
@@ -396,9 +402,17 @@ class _SyncBannerState extends State<SyncBanner>
                   widthFactor: 1,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
+                      // 1.36 H-B1 (136-365): en error, la
+                      // compacta lleva la forma del error
+                      // (tinte y borde del estado), no el
+                      // chip neutro de siempre.
+                      color: esError
+                          ? color.withValues(alpha: 0.10)
+                          : Theme.of(context).cardColor,
                       border: Border.all(
-                          color: Theme.of(context).dividerColor),
+                          color: esError
+                              ? color
+                              : Theme.of(context).dividerColor),
                       borderRadius:
                           BorderRadius.circular(AppRadio.md),
                     ),
@@ -424,9 +438,11 @@ class _SyncBannerState extends State<SyncBanner>
                         ),
                         if (pct != null) ...[
                           const SizedBox(width: 8),
+                          // 1.36 H-B1 (136-367): el porcentaje
+                          // va en color de texto; el color del
+                          // estado queda en icono y barra.
                           Text(pct,
                               style: AppTexto.metadato.copyWith(
-                                  color: color,
                                   fontWeight: FontWeight.bold)),
                         ],
                       ],
@@ -476,15 +492,16 @@ class _SyncBannerState extends State<SyncBanner>
                 // pie inexistente: no se ofrece.
                 if (s.lastError != null)
                   TextButton(
-                    onPressed: () =>
-                        setState(() => _expandido = !_expandido),
+                    onPressed: () => setState(
+                        () => _expandidoError = !_expandidoError),
                     style: TextButton.styleFrom(
                         foregroundColor: Colors.white),
-                    child: Text(
-                        _expandido ? 'Ocultar detalle' : 'Ver detalle'),
+                    child: Text(_expandidoError
+                        ? 'Ocultar detalle'
+                        : 'Ver detalle'),
                   ),
               ],
-              pie: _expandido && s.lastError != null
+              pie: _expandidoError && s.lastError != null
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -528,8 +545,10 @@ class _SyncBannerState extends State<SyncBanner>
             onTap: () {
               if (enProgreso) {
                 // En curso, el toque despliega el desglose
-                // de pendientes (como antes).
-                setState(() => _expandido = !_expandido);
+                // de pendientes (136-364: y el desglose se
+                // pinta también en curso — algo real).
+                setState(() =>
+                    _expandidoPendientes = !_expandidoPendientes);
               } else {
                 _dispararSync();
               }
@@ -591,9 +610,9 @@ class _SyncBannerState extends State<SyncBanner>
                         ),
                       ),
                       if (pct != null)
-                        Text(pct,
-                            style: AppTexto.titulo
-                                .copyWith(color: color)),
+                        // 1.36 H-B1 (136-367): porcentaje en
+                        // color de texto.
+                        Text(pct, style: AppTexto.titulo),
                       if (!enProgreso)
                         Icon(Icons.chevron_right_rounded,
                             color: AppColores.textoSecundario(context)
@@ -620,7 +639,7 @@ class _SyncBannerState extends State<SyncBanner>
                       ),
                     ),
                   ],
-                  if (_expandido && s.pending > 0 && !enProgreso)
+                  if (_expandidoPendientes && s.pending > 0)
                     FutureBuilder<Map<String, int>>(
                       future:
                           LocalDb.instance.pendingByType(),

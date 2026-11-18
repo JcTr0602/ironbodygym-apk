@@ -15,6 +15,55 @@ import 'package:flutter/material.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 
+/// 1.36 H-B1 (136-369): el pulso COMPARTIDO de un grupo de
+/// esqueleto — un solo reloj para todas las líneas del
+/// grupo (antes cada SkeletonLinea latía con su propio
+/// controlador y la lista respiraba desacompasada).
+class PulsoEsqueleto extends InheritedWidget {
+  final Animation<double> pulso;
+
+  const PulsoEsqueleto(
+      {super.key, required this.pulso, required super.child});
+
+  static Animation<double>? de(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<PulsoEsqueleto>()
+      ?.pulso;
+
+  @override
+  bool updateShouldNotify(PulsoEsqueleto oldWidget) =>
+      pulso != oldWidget.pulso;
+}
+
+/// Grupo de esqueleto: monta el único controlador del
+/// pulso y lo ofrece a las SkeletonLinea descendientes.
+class GrupoEsqueleto extends StatefulWidget {
+  final Widget child;
+
+  const GrupoEsqueleto({super.key, required this.child});
+
+  @override
+  State<GrupoEsqueleto> createState() => _GrupoEsqueletoState();
+}
+
+class _GrupoEsqueletoState extends State<GrupoEsqueleto>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1200))
+    ..repeat(reverse: true);
+  late final Animation<double> _pulso =
+      Tween(begin: 0.5, end: 1.0).animate(_c);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      PulsoEsqueleto(pulso: _pulso, child: widget.child);
+}
+
 /// Una línea de skeleton con ancho configurable.
 class SkeletonLinea extends StatelessWidget {
   final double ancho;
@@ -42,6 +91,12 @@ class SkeletonLinea extends StatelessWidget {
         ),
       );
       if (reducir) return barra;
+      // 136-369: dentro de un grupo, TODAS las líneas
+      // laten con el pulso compartido; fuera, el suyo.
+      final compartido = PulsoEsqueleto.de(context);
+      if (compartido != null) {
+        return FadeTransition(opacity: compartido, child: barra);
+      }
       // Pulso sutil (no rotación) para no marear.
       return _Pulso(child: barra);
     });
@@ -54,7 +109,10 @@ class SkeletonTarjeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Tarjeta(
+    // 136-369: sin grupo ancestro, la tarjeta ES el grupo
+    // (sus 3 líneas comparten un pulso); dentro de un
+    // grupo mayor (lista), hereda el de la lista.
+    final tarjeta = const Tarjeta(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -66,6 +124,8 @@ class SkeletonTarjeta extends StatelessWidget {
         ],
       ),
     );
+    if (PulsoEsqueleto.de(context) != null) return tarjeta;
+    return GrupoEsqueleto(child: tarjeta);
   }
 }
 
@@ -94,14 +154,18 @@ class SkeletonLista extends StatelessWidget {
       if (c.maxHeight.isFinite) {
         n = ((c.maxHeight + 8) / altoRanura).floor().clamp(1, items);
       }
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < n; i++) ...[
-            const SkeletonTarjeta(),
-            const SizedBox(height: 8),
+      // 136-369: la lista es UN grupo — un solo pulso
+      // para todas sus tarjetas y líneas.
+      return GrupoEsqueleto(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < n; i++) ...[
+              const SkeletonTarjeta(),
+              const SizedBox(height: 8),
+            ],
           ],
-        ],
+        ),
       );
     });
   }

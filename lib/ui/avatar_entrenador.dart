@@ -45,9 +45,17 @@ class AvatarEntrenador extends StatefulWidget {
           }
         }
       } catch (_) {}
+      // 1.36 H-B1 (136-376): un mapa vacío (la carga falló
+      // o el meta aún no bajó) NO se cachea — el próximo
+      // avatar lo reintenta; y al cambiar los usuarios el
+      // mapa se refresca en vez de quedar fósil.
+      if (mapa.isEmpty) _mapaFut = null;
       return mapa;
     }();
   }
+
+  /// 136-376: punto de refresco al cambiar los usuarios.
+  static void invalidarMapa() => _mapaFut = null;
 
   @override
   State<AvatarEntrenador> createState() => _AvatarEntrenadorState();
@@ -95,38 +103,58 @@ class _AvatarEntrenadorState extends State<AvatarEntrenador> {
     final inicial = nombre.trim().isEmpty
         ? '?'
         : nombre.trim()[0].toUpperCase();
-    final respaldo = CircleAvatar(
-      radius: tamano / 2,
-      backgroundColor:
-          colorChipEntrenador(nombre).withValues(alpha: 0.18),
-      child: Text(
-        inicial,
-        style: TextStyle(
-          color: colorChipEntrenador(nombre),
-          fontWeight: FontWeight.bold,
-          fontSize: tamano * 0.42,
+    // 1.36 H-B1 (136-381): el respaldo lleva EL MISMO
+    // borde que la rama con foto (mismo aro, mismo radio
+    // útil) — el avatar no cambia de silueta al cargar.
+    final borde = BoxDecoration(
+      shape: BoxShape.circle,
+      border: Border.all(
+          color: colorChipEntrenador(nombre), width: 1.6),
+    );
+    final respaldo = Container(
+      decoration: borde,
+      child: CircleAvatar(
+        radius: tamano / 2 - 1.6,
+        backgroundColor:
+            colorChipEntrenador(nombre).withValues(alpha: 0.18),
+        child: Text(
+          inicial,
+          style: TextStyle(
+            color: colorChipEntrenador(nombre),
+            fontWeight: FontWeight.bold,
+            fontSize: tamano * 0.42,
+          ),
         ),
       ),
     );
     final f = _foto;
-    if (f == null) return respaldo;
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-            color: colorChipEntrenador(nombre), width: 1.6),
-      ),
-      child: CircleAvatar(
-        radius: tamano / 2 - 1.6,
-        // 1.34 Campo 2 (P-1): decodificación acotada
-        // al tamaño del avatar.
-        backgroundImage: providerFotoAcotada(FileImage(f),
-            ancho: (tamano *
-                    MediaQuery.devicePixelRatioOf(context) *
-                    2)
-                .round()),
-        backgroundColor: AppColores.borde(context),
-      ),
+    final Widget contenido = f == null
+        ? KeyedSubtree(
+            key: const ValueKey('avatar-respaldo'), child: respaldo)
+        : KeyedSubtree(
+            key: const ValueKey('avatar-foto'),
+            child: Container(
+              decoration: borde,
+              child: CircleAvatar(
+                radius: tamano / 2 - 1.6,
+                // 1.34 Campo 2 (P-1): decodificación acotada
+                // al tamaño del avatar.
+                backgroundImage: providerFotoAcotada(FileImage(f),
+                    ancho: (tamano *
+                            MediaQuery.devicePixelRatioOf(context) *
+                            2)
+                        .round()),
+                backgroundColor: AppColores.borde(context),
+              ),
+            ),
+          );
+    // 1.36 H-B1 (136-385): la foto FUNDE al llegar
+    // (fundido corto; instantáneo con «reducir movimiento»).
+    return AnimatedSwitcher(
+      duration: MediaQuery.of(context).disableAnimations
+          ? Duration.zero
+          : AppMovimiento.corta,
+      child: contenido,
     );
   }
 }

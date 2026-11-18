@@ -60,6 +60,13 @@ class CabeceraTarjetaIron extends StatelessWidget {
               width: 26,
               height: 26,
               fit: BoxFit.cover,
+              // 1.36 H-B1 (136-388): si el arte de marca no
+              // carga, la cabecera no se rompe — rayo de
+              // marca de respaldo.
+              errorBuilder: (_, __, ___) => const Icon(
+                  Icons.bolt_rounded,
+                  size: 26,
+                  color: AppColores.naranja),
             ),
           ),
           const SizedBox(width: 10),
