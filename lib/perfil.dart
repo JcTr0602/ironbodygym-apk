@@ -669,6 +669,10 @@ class PerfilService {
       'metricas_home',
       'vibracion_haptica',
       'alto_contraste',
+      // ARG136-10: Reducir movimiento también se
+      // restablece (su clave sobrevivía al reset y el
+      // ajuste «restablecido» volvía al arrancar).
+      'reducir_movimiento_v1',
       'buscar_swipe_der',
       'buscar_swipe_izq',
     ]) {

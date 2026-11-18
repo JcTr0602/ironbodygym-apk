@@ -1648,6 +1648,9 @@ class _AjustesScreenState extends State<AjustesScreen> {
     // defecto (apagado), por su vía propia — resetAjustes
     // borra la clave, pero el notificador manda en sesión.
     await ThemeController.setModoSol(false);
+    // ARG136-10: Reducir movimiento igual — clave borrada
+    // en resetAjustes y notificador resincronizado aquí.
+    await ThemeController.setReducirMovimiento(false);
     _cargar();
     _msg('Ajustes restablecidos');
   }
