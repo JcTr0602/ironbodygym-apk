@@ -323,20 +323,28 @@ class LupaUniversalScreen extends StatefulWidget {
 
 class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
   final _ctrl = TextEditingController();
+  final _foco = FocusNode();
   final _auth = AuthService();
   List<Map<String, dynamic>> _clientes = const [];
   List<String> _recientes = const [];
   String _consulta = '';
+  // 1.36 H-B2 (136-572): la primera carga del espejo se
+  // distingue del vacío: hasta que termina, hay indicador.
+  bool _cargando = true;
 
   @override
   void initState() {
     super.initState();
     _cargar();
+    // 136-579: foco al entrar, como en el panel buscador.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _foco.requestFocus());
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _foco.dispose();
     super.dispose();
   }
 
@@ -349,11 +357,32 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
         _clientes = filas;
         _recientes =
             prefs.getStringList(_kRecientesLupa) ?? const [];
+        _cargando = false;
       });
     } catch (_) {
       // Sin espejo legible, la lupa enseña el campo y el aviso
       // de vacío honesto; jamás resultados inventados.
+      if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  // 1.36 H-B2 (136-581): borrado individual y total de
+  // recientes, persistido en la misma clave.
+  Future<void> _borrarReciente(String id) async {
+    setState(() =>
+        _recientes = _recientes.where((r) => r != id).toList());
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kRecientesLupa, _recientes);
+    } catch (_) {}
+  }
+
+  Future<void> _borrarRecientes() async {
+    setState(() => _recientes = const []);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kRecientesLupa);
+    } catch (_) {}
   }
 
   Future<void> _registrarReciente(String id) async {
@@ -424,15 +453,27 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
                 AppEspacio.lg, AppEspacio.md, AppEspacio.lg, AppEspacio.sm),
             child: CampoTexto(
               controller: _ctrl,
+              focusNode: _foco,
+              accionTexto: TextInputAction.search,
+              onSubmitted: (_) => _foco.unfocus(),
               hint: 'Nombre, teléfono o herramienta…',
               icono: Icons.search_rounded,
               onChanged: (v) => setState(() => _consulta = v),
             ),
           ),
           Expanded(
-            child: !buscando
-                ? _recientesVista()
-                : ListView(
+            // 136-578: cruce por modo (recientes/resultados)
+            // con clave, sin sustituir de golpe.
+            child: AnimatedSwitcher(
+              duration:
+                  AppMovimiento.resuelta(context, AppMovimiento.corta),
+              child: _cargando && _clientes.isEmpty && _recientes.isEmpty
+                  ? const EstadoCargando(
+                      key: ValueKey('lupa-cargando'),
+                      texto: 'Cargando el espejo…')
+                  : !buscando
+                      ? _recientesVista()
+                      : ListView(
                     key: const ValueKey('lupa-resultados'),
                     children: [
                       if (clientesRes.isNotEmpty) ...[
@@ -462,6 +503,7 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
                         ),
                     ],
                   ),
+            ),
           ),
         ],
       ),
@@ -470,14 +512,15 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
 
   Widget _recientesVista() {
     if (_recientes.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(AppEspacio.lg),
-        child: Text(
-          'Escribe un nombre (en cualquier orden, sin tildes), '
-          'los últimos 4 dígitos de un teléfono o el nombre de '
-          'una herramienta.',
-          style: AppTexto.secundario,
-        ),
+      // 136-577: vacío centrado de la casa (antes un párrafo
+      // suelto en la esquina).
+      return const EstadoVacio(
+        key: ValueKey('lupa-recientes'),
+        icono: Icons.history_rounded,
+        titulo: 'Sin recientes todavía',
+        subtitulo: 'Escribe un nombre (en cualquier orden, sin '
+            'tildes), los últimos 4 dígitos de un teléfono o el '
+            'nombre de una herramienta.',
       );
     }
     // C-2: los recientes de funciones pasan por la puerta de
@@ -489,17 +532,41 @@ class _LupaUniversalScreenState extends State<LupaUniversalScreen> {
     return ListView(
       key: const ValueKey('lupa-recientes'),
       children: [
-        const EncabezadoSeccion(titulo: 'RECIENTES'),
+        // 136-581: «Borrar recientes» en el propio encabezado.
+        EncabezadoSeccion(
+          titulo: 'RECIENTES',
+          accionTexto: 'Borrar recientes',
+          onAccion: _borrarRecientes,
+        ),
         for (final r in _recientes) ...[
           if (r.startsWith('cliente:') &&
               porId[r.substring(8)] != null)
-            _filaCliente(porId[r.substring(8)]!, compacta: true),
+            // 136-581: borrado individual por fila.
+            FilaCliente(
+              cliente: porId[r.substring(8)]!,
+              compacta: true,
+              desambiguar:
+                  !esVistaProtegida(porId[r.substring(8)]!,
+                      esDueno: _auth.isOwner),
+              trailing: IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: 'Quitar de recientes',
+                onPressed: () => _borrarReciente(r),
+              ),
+              onTap: () => _abrirCliente(
+                  (porId[r.substring(8)]!['id'] as num).toInt()),
+            ),
           if (!r.startsWith('cliente:'))
             for (final f in funciones)
               if (f.id == r)
                 ListTile(
                   leading: Icon(f.icono),
                   title: Text(f.titulo),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    tooltip: 'Quitar de recientes',
+                    onPressed: () => _borrarReciente(r),
+                  ),
                   onTap: () => _abrirFuncion(f),
                 ),
         ],

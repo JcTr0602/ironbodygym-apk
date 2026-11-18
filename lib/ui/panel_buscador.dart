@@ -18,6 +18,7 @@ import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
 import 'app_bar.dart';
+import 'buscar.dart' show FilaCliente;
 import 'componentes.dart';
 import 'diseno.dart';
 
@@ -512,6 +513,23 @@ List<FuncionPanel> recientesPanel(List<String> ids,
 }
 
 const _kRecientesPanel = 'panel_buscador_recientes_v1';
+
+/// 1.36 H-B2 (136-580): ¿la consulta parece un NOMBRE o un
+/// TELÉFONO (y no una función)? 4+ dígitos seguidos, o dos o
+/// más palabras de letras. PURO. Cuando lo parece, los
+/// clientes mandan y las funciones se limitan.
+bool consultaPareceNombreOTelefono(String q) {
+  final t = q.trim();
+  if (t.isEmpty) return false;
+  final digitos = t.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digitos.length >= 4 && digitos.length >= t.length - 1) {
+    return true;
+  }
+  final palabras =
+      t.split(RegExp(r'\s+')).where((w) => w.length >= 2).toList();
+  return palabras.length >= 2 &&
+      palabras.every((w) => RegExp(r'^[^0-9]+$').hasMatch(w));
+}
 const _kMaxRecientesPanel = 5;
 
 /// La pantalla del buscador: devuelve el id elegido
@@ -533,6 +551,10 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
   // «clientes» del buscador global. Se pinta sin él y se
   // rellena al llegar (es local: no hay red de por medio).
   List<Map<String, dynamic>> _clientes = const [];
+  // 1.36 H-B2 (136-576): la carga del espejo tiene estado:
+  // «Nada con ese nombre» solo se afirma tras cargar bien.
+  bool _cargandoClientes = true;
+  bool _errorClientes = false;
 
   // Argón 1.25 ALTA (segunda capa): el buscador global
   // es del Panel (territorio del dueño); un no-dueño ni
@@ -566,26 +588,48 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
     try {
       final filas = await LocalDb.instance.allMirror('clientes');
       if (!mounted) return;
-      setState(() => _clientes = filas);
+      setState(() {
+        _clientes = filas;
+        _cargandoClientes = false;
+        _errorClientes = false;
+      });
     } catch (e) {
       // Sin espejo legible, el buscador de funciones sigue —
       // Y ESPECIFICADO: pero desde el Yunque de App 1.31
       // (C1-6) el fallo queda en bitácora, no en silencio.
       AppLog.aviso('panel_buscador', 'clientes_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _cargandoClientes = false;
+          _errorClientes = true;
+        });
+      }
     }
+  }
+
+  // 1.36 H-B2 (136-581): borrado de recientes del panel.
+  Future<void> _borrarRecientePanel(String id) async {
+    setState(() =>
+        _recientesIds = _recientesIds.where((r) => r != id).toList());
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kRecientesPanel, _recientesIds);
+  }
+
+  Future<void> _borrarRecientesPanel() async {
+    setState(() => _recientesIds = []);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kRecientesPanel);
   }
 
   void _elegirCliente(Map<String, dynamic> c) =>
       Navigator.pop(context, 'cliente:${c['id']}');
 
   Widget _filaCliente(Map<String, dynamic> c) {
-    final tel = '${c['telefono'] ?? ''}'.trim();
-    return ListTile(
-      leading: AvatarCliente(
-          nombre: '${c['nombre'] ?? ''}', tamano: TamanoAvatar.s),
-      title: Text('${c['nombre'] ?? 'Sin nombre'}'),
-      subtitle: tel.isEmpty ? null : Text(tel),
-      trailing: const Icon(Icons.chevron_right_rounded),
+    // 1.36 H-B2 (136-577): la MISMA fila de cliente que la
+    // lupa y Buscar (FilaCliente), no un ListTile propio.
+    return FilaCliente(
+      cliente: c,
+      desambiguar: !esVistaProtegida(c),
       onTap: () => _elegirCliente(c),
     );
   }
@@ -601,11 +645,19 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
     Navigator.pop(context, f.id);
   }
 
-  Widget _fila(FuncionPanel f) => ListTile(
+  Widget _fila(FuncionPanel f, {bool esReciente = false}) =>
+      ListTile(
         leading: Icon(f.icono, color: AppColores.naranja),
         title: Text(f.titulo),
         subtitle: f.detalle == null ? null : Text(f.detalle!),
-        trailing: const Icon(Icons.chevron_right_rounded),
+        // 136-581: en recientes, la X borra; fuera, el chevron.
+        trailing: esReciente
+            ? IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: 'Quitar de recientes',
+                onPressed: () => _borrarRecientePanel(f.id),
+              )
+            : const Icon(Icons.chevron_right_rounded),
         onTap: () => _elegir(f),
       );
 
@@ -614,11 +666,20 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
     if (!_soyDueno) {
       return Scaffold(
         appBar: appBarIron(context, 'Buscar en el Panel'),
-        body: const Center(
-            child: Text('Solo el dueño usa el buscador.')),
+        // 136-577: vacío con candado de la casa, no texto suelto.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo el dueño usa el buscador',
+          subtitulo: 'El buscador del Panel es territorio del dueño.',
+        ),
       );
     }
-    final resultados = buscarFuncionesPanel(_consulta);
+    // 136-580: si la consulta parece nombre/teléfono, las
+    // funciones se limitan a 3 y los clientes van primero.
+    final parecePersona = consultaPareceNombreOTelefono(_consulta);
+    final resultadosTodos = buscarFuncionesPanel(_consulta);
+    final resultados =
+        parecePersona ? resultadosTodos.take(3).toList() : resultadosTodos;
     final clientesRes = buscarClientesPanel(_consulta, _clientes);
     final recientes = recientesPanel(_recientesIds);
     return Scaffold(
@@ -632,63 +693,94 @@ class _BuscadorPanelScreenState extends State<BuscadorPanelScreen> {
               hint: '¿Qué quieres hacer?',
               icono: Icons.search_rounded,
               focusNode: _foco,
+              accionTexto: TextInputAction.search,
+              onSubmitted: (_) => _foco.unfocus(),
               onChanged: (v) => setState(() => _consulta = v),
             ),
           ),
           Expanded(
-            child: _consulta.trim().isEmpty
-                ? ListView(
-                    children: [
-                      if (recientes.isNotEmpty) ...[
-                        const Padding(
-                          padding: EdgeInsets.symmetric(
-                              horizontal: AppEspacio.lg),
-                          child: Text('Usados recientemente',
-                              style: AppTexto.secundario),
-                        ),
-                        for (final f in recientes) _fila(f),
-                        const Divider(),
-                      ],
-                      const Padding(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: AppEspacio.lg),
-                        child: Text('Todas las funciones',
-                            style: AppTexto.secundario),
-                      ),
-                      for (final f in catalogoFuncionesPanel)
-                        _fila(f),
-                    ],
-                  )
-                : (resultados.isEmpty && clientesRes.isEmpty)
-                    ? const Center(
-                        child: Text(
-                            'Nada con ese nombre. Prueba con '
-                            '«sync», «precios» o «acceso».',
-                            style: AppTexto.secundario))
-                    : ListView(
-                        children: [
-                          if (resultados.isNotEmpty) ...[
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: AppEspacio.lg),
-                              child: Text('Funciones',
-                                  style: AppTexto.secundario),
-                            ),
-                            for (final f in resultados) _fila(f),
-                          ],
-                          if (clientesRes.isNotEmpty) ...[
-                            if (resultados.isNotEmpty) const Divider(),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: AppEspacio.lg),
-                              child: Text('Clientes',
-                                  style: AppTexto.secundario),
-                            ),
-                            for (final c in clientesRes)
-                              _filaCliente(c),
-                          ],
+            // 136-578: cruce por modo con clave.
+            child: AnimatedSwitcher(
+              duration:
+                  AppMovimiento.resuelta(context, AppMovimiento.corta),
+              child: _consulta.trim().isEmpty
+                  ? ListView(
+                      key: const ValueKey('panel-catalogo'),
+                      children: [
+                        if (recientes.isNotEmpty) ...[
+                          // 136-577: encabezado de sección de la
+                          // casa; 136-581: con «Borrar recientes».
+                          EncabezadoSeccion(
+                            titulo: 'USADOS RECIENTEMENTE',
+                            accionTexto: 'Borrar recientes',
+                            onAccion: _borrarRecientesPanel,
+                          ),
+                          for (final f in recientes)
+                            _fila(f, esReciente: true),
+                          const Divider(),
                         ],
-                      ),
+                        const EncabezadoSeccion(
+                            titulo: 'TODAS LAS FUNCIONES'),
+                        for (final f in catalogoFuncionesPanel)
+                          _fila(f),
+                      ],
+                    )
+                  : _cargandoClientes &&
+                          resultados.isEmpty &&
+                          clientesRes.isEmpty
+                      ? const EstadoCargando(
+                          key: ValueKey('panel-cargando'),
+                          texto: 'Cargando clientes…')
+                      : _errorClientes &&
+                              resultadosTodos.isEmpty &&
+                              clientesRes.isEmpty
+                          ? EstadoError(
+                              key: const ValueKey('panel-error'),
+                              titulo:
+                                  'No se pudo leer el espejo de clientes',
+                              detalle: 'Las funciones tampoco '
+                                  'respondieron a ese nombre.',
+                              onReintentar: _cargarClientes,
+                            )
+                          : (resultados.isEmpty && clientesRes.isEmpty)
+                              ? const EstadoVacio(
+                                  key: ValueKey('panel-vacio'),
+                                  icono: Icons.search_off_rounded,
+                                  // 136-576: solo tras cargar bien.
+                                  titulo: 'Nada con ese nombre',
+                                  subtitulo: 'Prueba con «sync», '
+                                      '«precios» o «acceso».',
+                                )
+                              : ListView(
+                                  key: const ValueKey('panel-resultados'),
+                                  children: [
+                                    if (parecePersona &&
+                                        clientesRes.isNotEmpty) ...[
+                                      const EncabezadoSeccion(
+                                          titulo: 'CLIENTES'),
+                                      for (final c in clientesRes)
+                                        _filaCliente(c),
+                                      if (resultados.isNotEmpty)
+                                        const Divider(),
+                                    ],
+                                    if (resultados.isNotEmpty) ...[
+                                      const EncabezadoSeccion(
+                                          titulo: 'FUNCIONES'),
+                                      for (final f in resultados)
+                                        _fila(f),
+                                    ],
+                                    if (!parecePersona &&
+                                        clientesRes.isNotEmpty) ...[
+                                      if (resultados.isNotEmpty)
+                                        const Divider(),
+                                      const EncabezadoSeccion(
+                                          titulo: 'CLIENTES'),
+                                      for (final c in clientesRes)
+                                        _filaCliente(c),
+                                    ],
+                                  ],
+                                ),
+            ),
           ),
         ],
       ),

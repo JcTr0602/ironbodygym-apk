@@ -2502,6 +2502,11 @@ class CampoTexto extends StatefulWidget {
   // para conservar su digitsOnly al pasar al campo de la
   // casa; sin ellos el campo se comporta como siempre).
   final List<TextInputFormatter>? formateadores;
+  // 1.36 H-B2 (136-579): acción del teclado y envío, para los
+  // buscadores de la casa (search/done sin que cada pantalla
+  // monte su propio campo).
+  final TextInputAction? accionTexto;
+  final void Function(String)? onSubmitted;
 
   const CampoTexto({
     super.key,
@@ -2517,6 +2522,8 @@ class CampoTexto extends StatefulWidget {
     this.errorText,
     this.focusNode,
     this.formateadores,
+    this.accionTexto,
+    this.onSubmitted,
   });
 
   @override
@@ -2544,6 +2551,8 @@ class _CampoTextoState extends State<CampoTexto> {
       inputFormatters: widget.formateadores,
       validator: widget.validador,
       onChanged: widget.onChanged,
+      textInputAction: widget.accionTexto,
+      onFieldSubmitted: widget.onSubmitted,
       maxLines: widget.maxLineas,
       style: AppTexto.cuerpo,
       // 1.36 (136-279): la decoración ÚNICA del kit — antes
