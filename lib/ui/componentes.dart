@@ -1508,6 +1508,20 @@ InputDecoration _decoracionCampo(
       borderSide:
           const BorderSide(color: AppColores.naranja, width: 2),
     ),
+    // 1.36 H-C1 (136-415): el borde de error se DECLARA
+    // aquí (color de error del esquema), no se hereda del
+    // fallback del tema: enfocado con error se pinta en
+    // error con grosor 2, como el foco normal.
+    errorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      borderSide: BorderSide(
+          color: Theme.of(context).colorScheme.error),
+    ),
+    focusedErrorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      borderSide: BorderSide(
+          color: Theme.of(context).colorScheme.error, width: 2),
+    ),
     filled: true,
     fillColor: AppColores.superficie(context),
     contentPadding: const EdgeInsets.symmetric(
@@ -2461,10 +2475,29 @@ class FormularioIron extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (final e in errores) ...[
-                  ErrorInline(e),
-                  const SizedBox(height: AppEspacio.xs),
-                ],
+                // 1.36 H-C1 (136-409): el bloque de errores
+                // va ACOTADO (máx. 96 dp con su scroll): con
+                // muchos errores a la vez ya no comprime el
+                // formulario ni empuja la CTA fuera.
+                if (errores.isNotEmpty)
+                  ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(maxHeight: 96),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment:
+                            CrossAxisAlignment.stretch,
+                        children: [
+                          for (final e in errores) ...[
+                            ErrorInline(e),
+                            const SizedBox(
+                                height: AppEspacio.xs),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 if (resumen != null) ...[
                   resumen!,
                   const SizedBox(height: AppEspacio.sm),
@@ -2611,8 +2644,11 @@ class AvisoCarnetTelefono extends StatelessWidget {
               'carnet. Revísalo: del carnet solo hacen falta '
               'los 6 dígitos de la fecha de nacimiento. '
               'Puedes guardar igual.',
-              style: AppTexto.metadato
-                  .copyWith(color: AppColores.alertaOscuro),
+              // 1.36 H-C1 (136-414): el texto de alerta se
+              // resuelve por tema (alertaTexto), no con el
+              // tono oscuro fijo en ambos.
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.alertaTexto(context)),
             ),
           ),
         ],
@@ -2638,8 +2674,9 @@ class AvisoFechaCarnet extends StatelessWidget {
             child: Text(
               'Esa fecha no existe, revísala: el día y el mes '
               'pueden estar invertidos. Puedes guardar igual.',
-              style: AppTexto.metadato
-                  .copyWith(color: AppColores.alertaOscuro),
+              // 1.36 H-C1 (136-414): idem AvisoCarnetTelefono.
+              style: AppTexto.metadato.copyWith(
+                  color: AppColores.alertaTexto(context)),
             ),
           ),
         ],
@@ -3408,6 +3445,13 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
   File? _foto;
   String? _resueltoPara;
 
+  /// 1.36 H-C1 (136-408): la ruta local con la que se
+  /// resolvió — el early return de [_resolverFoto] la mira
+  /// también: una foto REHECHA en local (mismo storage aún
+  /// sin subir) debe re-resolverse, no quedarse con la
+  /// anterior hasta que la subida cambie el storage.
+  String? _resueltoLocal;
+
   // 1.31: escucha de aterrizajes de la cola de precarga,
   // como la fila de Buscar.
   StreamSubscription<String>? _subFoto;
@@ -3449,11 +3493,19 @@ class _AvatarClienteConFotoState extends State<AvatarClienteConFoto> {
     final sp = widget.fotoStorage;
     // Si ESTA foto ya está resuelta y mostrada, la
     // re-comprobación por reconstrucción no aporta nada.
-    if (sp == _resueltoPara && _foto != null) return;
-    if (sp != _resueltoPara && _foto != null && mounted) {
+    // 1.36 H-C1 (136-408): «esta foto» = storage Y local.
+    if (sp == _resueltoPara &&
+        widget.fotoLocal == _resueltoLocal &&
+        _foto != null) {
+      return;
+    }
+    if ((sp != _resueltoPara || widget.fotoLocal != _resueltoLocal) &&
+        _foto != null &&
+        mounted) {
       setState(() => _foto = null);
     }
     _resueltoPara = sp;
+    _resueltoLocal = widget.fotoLocal;
     final local = widget.fotoLocal;
     if (local != null && local.isNotEmpty) {
       final f = File(local);
@@ -3789,13 +3841,21 @@ class FilaLibro extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          if (valorAnimado != null && formatoAnimado != null)
-            MontoAnimado(
-                valor: valorAnimado!,
-                formato: formatoAnimado!,
-                style: estiloMontoFinal)
-          else
-            Text(monto, style: estiloMontoFinal),
+          // 1.36 H-C1 (136-410): el monto va en Flexible
+          // con ellipsis — un monto extremo ya no desborda
+          // la fila (antes era un Text directo en la Row).
+          Flexible(
+            child: valorAnimado != null && formatoAnimado != null
+                ? MontoAnimado(
+                    valor: valorAnimado!,
+                    formato: formatoAnimado!,
+                    style: estiloMontoFinal)
+                : Text(monto,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: estiloMontoFinal),
+          ),
         ],
       ),
     );
@@ -3808,12 +3868,20 @@ class PuntoMetodo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 10,
-      height: 10,
-      decoration: BoxDecoration(
-        color: colorDeMetodo(metodo),
-        shape: BoxShape.circle,
+    // 1.36 H-C1 (136-410): el método no se comunica SOLO
+    // por el color del punto — lleva su etiqueta
+    // semántica para el lector de pantalla.
+    return Semantics(
+      label: metodo == null || metodo!.isEmpty
+          ? 'Sin método'
+          : 'Método: $metodo',
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          color: colorDeMetodo(metodo),
+          shape: BoxShape.circle,
+        ),
       ),
     );
   }
@@ -3916,7 +3984,16 @@ class TarjetaDecision extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            chipEstado,
+            // 1.36 H-C1 (136-411): el chip va en Flexible —
+            // un chip largo ya no desborda la cabecera.
+            Flexible(child: chipEstado),
+            // 1.36 H-C1 (136-419): marca de selección junto
+            // al chip (el borde y la semántica van fuera).
+            if (seleccionada) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.check_circle_rounded,
+                  size: 18, color: AppColores.naranja),
+            ],
           ],
         ),
         if (contexto != null || prioridadTexto != null) ...[
@@ -3929,12 +4006,19 @@ class TarjetaDecision extends StatelessWidget {
                       size: 14, color: colorContexto ?? secundario),
                   const SizedBox(width: 4),
                 ],
-                Text(contexto!,
-                    style: AppTexto.metadato.copyWith(
-                      color: colorContexto ?? secundario,
-                      fontWeight:
-                          contextoDestacado ? FontWeight.bold : null,
-                    )),
+                // 1.36 H-C1 (136-411): el contexto también
+                // va en Flexible con ellipsis.
+                Flexible(
+                  child: Text(contexto!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTexto.metadato.copyWith(
+                        color: colorContexto ?? secundario,
+                        fontWeight: contextoDestacado
+                            ? FontWeight.bold
+                            : null,
+                      )),
+                ),
               ],
               if (contextoSecundario != null) ...[
                 const SizedBox(width: 8),
@@ -3993,13 +4077,31 @@ class TarjetaDecision extends StatelessWidget {
         ],
       ],
     );
-    final tarjeta = Tarjeta(
-      padding: const EdgeInsets.all(AppEspacio.md),
-      color: seleccionada
-          ? Theme.of(context).colorScheme.primaryContainer
-          : null,
-      onTap: onTap,
-      child: contenido,
+    // 1.36 H-C1 (136-419): la selección se marca TAMBIÉN
+    // con borde de marca + check en la cabecera y
+    // Semantics(selected) — no solo con el tinte de fondo
+    // (en el tema táctico el primaryContainer salía
+    // azul-gris, débil y fuera de marca).
+    final tarjeta = Semantics(
+      selected: seleccionada,
+      child: Container(
+        decoration: seleccionada
+            ? BoxDecoration(
+                border: Border.all(
+                    color: AppColores.naranja, width: 1.6),
+                borderRadius:
+                    BorderRadius.circular(AppRadio.md),
+              )
+            : null,
+        child: Tarjeta(
+          padding: const EdgeInsets.all(AppEspacio.md),
+          color: seleccionada
+              ? Theme.of(context).colorScheme.primaryContainer
+              : null,
+          onTap: onTap,
+          child: contenido,
+        ),
+      ),
     );
     if (onLongPress == null) return tarjeta;
     // Tarjeta no expone onLongPress (su InkWell es de toque):
@@ -4126,7 +4228,13 @@ class _AvisoActivo {
   });
 }
 
-_AvisoActivo? _avisoActivo;
+/// 1.36 H-C1 (136-412): el registro del aviso activo va
+/// POR MESSENGER (mapa), no en un único global: con dos
+/// ScaffoldMessenger vivos, el segundo aviso sobrescribía
+/// el registro y la primera barra perdía su protección
+/// de prioridad (P2).
+final Map<ScaffoldMessengerState, _AvisoActivo> _avisosActivos =
+    {};
 
 /// Reloj con el que se MIDE la antigüedad de la barra activa
 /// (solo diferencias de instantes; no es fecha de negocio).
@@ -4340,7 +4448,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
   final critica = avisoEsCritico(significado, conAccion: conAccion);
   // Política de prioridades (Argón B6 §1): una P2 joven no la
   // pisa un aviso automático P1; ese aviso se descarta.
-  final activo = _avisoActivo;
+  final activo = _avisosActivos[messenger];
   if (activo != null &&
       identical(activo.dueno, messenger) &&
       avisoEntranteSeDescarta(
@@ -4360,7 +4468,7 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
   messenger.clearSnackBars();
   final registro = _AvisoActivo(
       dueno: messenger, critica: critica, desde: _relojAvisos());
-  _avisoActivo = registro;
+  _avisosActivos[messenger] = registro;
   final ctrl = messenger.showSnackBar(
     SnackBar(
       // En este SDK, un SnackBar CON acción nace persistente
@@ -4390,7 +4498,9 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>?
   // Al cerrarse la barra (vence, acción o descarte), su
   // protección muere con ella: nada queda «protegido» en vacío.
   ctrl.closed.then((_) {
-    if (identical(_avisoActivo, registro)) _avisoActivo = null;
+    if (identical(_avisosActivos[messenger], registro)) {
+      _avisosActivos.remove(messenger);
+    }
   });
   return ctrl;
 }
