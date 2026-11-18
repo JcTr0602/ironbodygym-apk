@@ -31,6 +31,11 @@ const Map<String, TipoOperacionInfo> kTiposOperacion = {
       TipoOperacionInfo('Pago de mensualidad', Icons.payments_rounded),
   'regalar_mes_cumpleanos':
       TipoOperacionInfo('Regalo de cumpleaños', Icons.card_giftcard_rounded),
+  // 1.36: mes de cortesía del dueño (botón rápido de la ficha;
+  // el alta de la op en el servidor llegó primero — esta entrada
+  // es su etiqueta en cola e historial).
+  'regalar_mes':
+      TipoOperacionInfo('Mes de cortesía', Icons.card_giftcard_rounded),
   'pago_diario': TipoOperacionInfo('Pago diario', Icons.payments_rounded),
   'editar_pago':
       TipoOperacionInfo('Corrección de pago', Icons.edit_note_rounded),
