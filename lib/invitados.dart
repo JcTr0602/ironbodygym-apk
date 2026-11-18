@@ -979,6 +979,12 @@ enum AccionConversion {
   confirmarEnServidor,
   marcarOpRechazada,
   yaConfirmada,
+
+  /// (1.36 H-A2 136-708) la op se APLICÓ pero su resultado no
+  /// trae el cliente creado: no es «todo bien» ni «esperar» —
+  /// es un error de revisión que la ficha debe enseñar con
+  /// acción de reintento.
+  opAplicadaSinCliente,
 }
 
 AccionConversion accionParaConversion({
@@ -994,10 +1000,11 @@ AccionConversion accionParaConversion({
   }
   if (opEstado == 'aplicada') {
     // Solo se confirma si el resultado trae el cliente creado;
-    // sin él, algo va mal y no se toca Supabase.
+    // sin él, algo va mal y no se toca Supabase — pero (136-708)
+    // tampoco se espera en silencio: es revisión/error.
     return extraerIdDeResultado(opResultado, 'cliente_id') != null
         ? AccionConversion.confirmarEnServidor
-        : AccionConversion.ninguna;
+        : AccionConversion.opAplicadaSinCliente;
   }
   if (opEstado == 'rechazada') return AccionConversion.marcarOpRechazada;
   // pendiente / enviada / error / necesita_revision / sin op: esperar.
@@ -1052,6 +1059,10 @@ ReanudarConversion reanudarPara({
   if (local != null) {
     switch (local.estado) {
       case EstadoConversion.preparada:
+        // (1.36 H-A2 136-708) la preparación NACIDA OFFLINE no
+        // existe en el servidor (no hay lock que validar): se
+        // reanuda en el propio teléfono, que es donde nació.
+        if (local.nacidaOffline) return ReanudarConversion.abrirInscribir;
         // G3: «Reanudar» solo se ofrece si la preparación sigue
         // vigente en el servidor (uuid + lock). Con el lock
         // vencido o la preparación desaparecida, el registro
@@ -1345,9 +1356,16 @@ class AccionLoteInvitados {
   /// ANTES de pintar el resumen.
   String get opIdActual => _opId;
 
+  /// (1.36 H-A2 136-709) la huella se calcula sobre los ids
+  /// ORDENADOS y ÚNICOS: el mismo conjunto elegido en otro
+  /// orden (o con un duplicado de la selección) es la MISMA
+  /// intención y debe reutilizar el op_id; antes, reordenar la
+  /// selección generaba un op_id nuevo para el mismo lote.
   static String _huellaDe(
-          List<String> ids, String accion, int? dias, String? motivo) =>
-      '$accion|${dias ?? ''}|${motivo ?? ''}|${ids.join(',')}';
+      List<String> ids, String accion, int? dias, String? motivo) {
+    final unicos = ids.toSet().toList()..sort();
+    return '$accion|${dias ?? ''}|${motivo ?? ''}|${unicos.join(',')}';
+  }
 
   Future<ResultadoLote> ejecutar(
     InvitadosService svc, {
@@ -1371,13 +1389,36 @@ class AccionLoteInvitados {
       );
       _huella = ''; // respuesta válida: la intención se consumió
       return r;
-    } on InvitadoError catch (e) {
-      // Solo el fallo de transporte conserva la intención; un
-      // error de dominio también la consume (fue respuesta).
-      if (e.codigo != 'RED') _huella = '';
+    } catch (e) {
+      // (136-709) el op_id SOLO se reutiliza si el fallo fue de
+      // TRANSPORTE (el servidor nunca respondió). Un error de
+      // servidor — PostgrestException, InvitadoError de dominio
+      // o una respuesta inesperada — consume la intención:
+      // reusar el op_id devolvería el resultado cacheado del
+      // lote original y los fallidos jamás se ejecutarían.
+      if (!esErrorTransporteInvitado(e)) _huella = '';
       rethrow;
     }
   }
+}
+
+/// (1.36 H-A2 136-709) ¿El fallo fue de TRANSPORTE (sin
+/// respuesta del servidor)? Solo entonces reutilizar el op_id
+/// de un lote es seguro. PURO.
+/// - PostgrestException: el servidor respondió (error suyo).
+/// - InvitadoError de dominio (codigo != 'RED'): respondió.
+/// - InvitadoError 'RED' con «Respuesta inesperada»: respondió,
+///   aunque malformada.
+/// - InvitadoError 'RED' genérico y cualquier otra excepción
+///   (socket, timeout…): transporte.
+bool esErrorTransporteInvitado(Object e) {
+  if (e is PostgrestException) return false;
+  if (e is InvitadoError) {
+    if (e.codigo != 'RED') return false;
+    if (e.mensaje.startsWith('Respuesta inesperada')) return false;
+    return true;
+  }
+  return true;
 }
 
 class InvitadosService {
@@ -1732,6 +1773,15 @@ class InvitadosService {
           'RED', 'Respuesta inesperada del servidor.');
     }
     final m = res.map((k, v) => MapEntry('$k', v));
+    // (1.36 H-A2 136-709) el conversion_uuid se valida ANTES de
+    // guardar la conversión local: un uuid vacío persistido
+    // dejaba un registro `preparada` inservible que ninguna
+    // reanudación podía confirmar.
+    if ('${m['conversion_uuid'] ?? ''}'.trim().isEmpty) {
+      throw const InvitadoError('DATOS',
+          'El servidor no devolvió una conversión válida. '
+          'Inténtalo de nuevo.');
+    }
     // SL-X2 (BG-01 residual): guarda de tipo real.
     final prefillRaw = m['prefill'];
     final prefill = prefillRaw is Map ? prefillRaw : const {};
@@ -2284,6 +2334,18 @@ class InvitadosService {
       } else if (accion == AccionConversion.marcarOpRechazada) {
         conv.estado = EstadoConversion.opRechazada;
         conv.resultadoMedidas = resultadoMedidasDeOp(resultado);
+        await store.guardar(conv);
+      } else if (accion == AccionConversion.opAplicadaSinCliente) {
+        // (136-708) la op se aplicó sin devolver el cliente: el
+        // fallo queda registrado en el registro local y la ficha
+        // lo enseña como «Conversión pendiente de confirmar» con
+        // su botón de reintento («Sincronizar / verificar
+        // ahora»), en vez de esperar para siempre en silencio.
+        conv.errorConfirmacion =
+            'La inscripción se aplicó en el servidor pero no '
+            'devolvió el cliente creado. Reintenta la '
+            'verificación; si persiste, revisa la cola de '
+            'operaciones.';
         await store.guardar(conv);
       }
     }

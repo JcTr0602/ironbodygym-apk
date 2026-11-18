@@ -2062,7 +2062,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     // estado reventaba con el force-unwrap en vez de mostrar
     // el snack de solo lectura (hoy el botón no se ofrece en
     // offline, pero la guarda no puede depender de eso).
-    if (_offlineCache) {
+    // (136-708) la conversión preparada NACIDA OFFLINE sí se
+    // reanuda sin conexión (nació en este teléfono); el resto de
+    // reanudaciones en modo caché sigue en solo lectura.
+    final localPre = _local;
+    if (_offlineCache &&
+        !(localPre != null &&
+            localPre.nacidaOffline &&
+            localPre.estado == EstadoConversion.preparada)) {
       _snack('Sin conexión: el detalle está en solo lectura.');
       return;
     }
@@ -2088,6 +2095,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
       fechaNac: d.fechaNac,
       carnet: d.carnet,
       medidas: d.mediciones,
+      // (136-708) la marca de nacimiento offline viaja en la
+      // reanudación: sin ella la op perdía la marca y la
+      // verificación confirmaba con un uuid que el servidor no
+      // conoce.
+      nacidaOffline: local.nacidaOffline,
     );
     await Navigator.of(context).push(RutaIron(
       builder: (_) => InscribirScreen(conversion: datos),
@@ -2098,6 +2110,13 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   Future<void> _cancelarConversion() async {
     final local = _local;
     if (local == null) return;
+    // (136-699) cancelar una conversión del SERVIDOR exige red;
+    // la nacida offline se cancela local y sí se permite.
+    if (_offlineCache && !local.nacidaOffline) {
+      _snack('Sin conexión: cancelar esta conversión necesita '
+          'conexión. El detalle está en solo lectura.');
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(
@@ -2177,9 +2196,11 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
     // «Reanudar inscripción» (1.25 T87), la acción del
     // momento cuando una conversión quedó preparada, que no
     // duplica a ninguna de las dos.
+    // (136-708) en modo caché solo se ofrece reanudar la
+    // conversión nacida offline (la única reanudable sin red).
     final puedeReanudar =
         reanudar == ReanudarConversion.abrirInscribir &&
-            !_offlineCache;
+            (!_offlineCache || (_local?.nacidaOffline ?? false));
     if (!puedeReanudar) {
       return null;
     }
@@ -2452,6 +2473,14 @@ class _InvitadoDetalleScreenState extends State<InvitadoDetalleScreen> {
   /// resolver el showDialog con el campo aún reconstruyéndose
   /// en la animación de salida (defecto D-B1-08).
   Future<void> _rechazar() async {
+    // (1.36 H-A2 136-699) en modo caché el rechazo exige red:
+    // se bloquea con aviso ANTES de abrir el diálogo (antes el
+    // diálogo se llenaba y el fallo caía al confirmar).
+    if (_offlineCache) {
+      _snack('Sin conexión: rechazar la solicitud necesita '
+          'conexión. El detalle está en solo lectura.');
+      return;
+    }
     final motivo = await showDialog<String>(
       context: context,
       builder: (_) => const _DialogoRechazarInvitado(),
