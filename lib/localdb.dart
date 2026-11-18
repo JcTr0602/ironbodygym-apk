@@ -6069,9 +6069,26 @@ class LocalDb {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// 1.36 (136-231): los tipos de aviso DE VENCIMIENTO — los que
+  /// comparten el registro único de «ya le avisé» con Listas
+  /// (ver [marcarAvisado]). Los demás tipos de la bandeja
+  /// (cumple, recibo) son hechos distintos y siguen viviendo
+  /// solo en su tabla por día.
+  static const tiposAvisoVencimiento = {
+    'vencido',
+    'vence_hoy',
+    'por_vencer',
+  };
+
   /// v1.13.0 (Avisos WhatsApp, Argón ajuste 5): marca un aviso como
   /// contactado en SQLite local (cliente_id + tipo + fecha Habana).
   /// INSERT OR REPLACE: remarcar actualiza la hora, no duplica.
+  ///
+  /// 1.36 (136-231): si el tipo es de VENCIMIENTO, la marca cae
+  /// TAMBIÉN en el registro único ([marcarAvisado], ligado al
+  /// pagado_hasta actual): contactar en la Bandeja o en Buscar
+  /// marca Listas — el cliente sale del botón masivo y de la
+  /// pastilla del pilar sin esperar a otra superficie.
   Future<void> marcarAvisoWaContactado(
       int clienteId, String tipo, String fechaHabana) async {
     final d = await db;
@@ -6085,9 +6102,20 @@ class LocalDb {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    if (tiposAvisoVencimiento.contains(tipo)) {
+      final filas = await mirrorPorIds('clientes', [clienteId]);
+      if (filas.isNotEmpty) {
+        await marcarAvisado(clienteId,
+            pagadoHasta: filas.first['pagado_hasta'] as String?);
+      }
+    }
   }
 
   /// Desmarca un aviso contactado (el «deshacer» de la bandeja).
+  ///
+  /// 1.36 (136-231): desmarcar un tipo de VENCIMIENTO desmarca
+  /// también el registro único — si no, Listas seguiría dando
+  /// al cliente por avisado tras el Deshacer de la Bandeja.
   Future<void> desmarcarAvisoWaContactado(
       int clienteId, String tipo, String fechaHabana) async {
     final d = await db;
@@ -6096,10 +6124,22 @@ class LocalDb {
       where: 'cliente_id=? AND tipo=? AND fecha_habana=?',
       whereArgs: [clienteId, tipo, fechaHabana],
     );
+    if (tiposAvisoVencimiento.contains(tipo)) {
+      await desmarcarAvisado(clienteId);
+    }
   }
 
   /// Contactados de un día (fecha Habana 'YYYY-MM-DD'): claves
   /// 'tipo_clienteId' para comparar con la bandeja.
+  ///
+  /// 1.36 (136-231): para los tipos de VENCIMIENTO el día se lee
+  /// del registro único: una marca vigente (su pagado_hasta
+  /// sigue siendo el actual) hecha ESE día cuenta como
+  /// contactado de ese día con CUALQUIER tipo de vencimiento —
+  /// avisar en Listas apaga la Bandeja del mismo día, y una
+  /// marca de un día anterior NO se lee como contacto de hoy
+  /// (la semántica de «hoy» es la misma en las dos superficies:
+  /// el hecho es uno, su fecha es la de la marca).
   Future<Set<String>> avisosWaContactados(String fechaHabana) async {
     final d = await db;
     final rows = await d.query(
@@ -6108,9 +6148,45 @@ class LocalDb {
       where: 'fecha_habana=?',
       whereArgs: [fechaHabana],
     );
-    return {
+    final claves = <String>{
       for (final r in rows) '${r['tipo']}_${r['cliente_id']}',
     };
+    // La caducidad manda también sobre la tabla: si el cliente
+    // renovó (su pagado_hasta ya no es el de la marca), sus
+    // claves de vencimiento de la tabla no cuentan — el hecho
+    // avisado era de OTRO vencimiento.
+    final marcas = await metasValoresConPrefijo('avisado_');
+    if (marcas.isNotEmpty) {
+      final clientes = await allMirror('clientes');
+      final hastaPorId = <int, String?>{
+        for (final c in clientes)
+          if (c['id'] != null)
+            (c['id'] as num).toInt(): c['pagado_hasta'] as String?,
+      };
+      for (final e in marcas.entries) {
+        final id = int.tryParse(e.key.substring('avisado_'.length));
+        if (id == null || !hastaPorId.containsKey(id)) continue;
+        final corte = e.value.indexOf('|');
+        if (corte < 0) continue;
+        if (e.value.substring(0, corte) == (hastaPorId[id] ?? '')) {
+          continue;
+        }
+        for (final t in tiposAvisoVencimiento) {
+          claves.remove('${t}_$id');
+        }
+      }
+    }
+    final vigentes = await avisadosVigentesConFecha();
+    for (final e in vigentes.entries) {
+      final f = e.value;
+      final dia =
+          '${f.year.toString().padLeft(4, '0')}-${f.month.toString().padLeft(2, '0')}-${f.day.toString().padLeft(2, '0')}';
+      if (dia != fechaHabana) continue;
+      for (final t in tiposAvisoVencimiento) {
+        claves.add('${t}_${e.key}');
+      }
+    }
+    return claves;
   }
 
   /// v1.13.0 (F4, CONTRATO_F4_20261024): watermark del pull de
@@ -10129,12 +10205,56 @@ class LocalDb {
       {required String? pagadoHasta}) async {
     final ahora = isoHabana(ahoraHabana()); // v1.3.4 (Argón)
     await setMeta('avisado_$clienteId', '${pagadoHasta ?? ''}|$ahora');
+    // 1.36 (136-231): espejo en el índice por día de la Bandeja —
+    // avisar en Listas apaga la Bandeja de HOY. El tipo se deriva
+    // del estado del cliente (el mismo criterio de Buscar,
+    // F1-55): la clave de la bandeja es por tipo, pero el hecho
+    // es único y [avisosWaContactados] lo lee del registro para
+    // cualquier tipo de vencimiento.
+    final hoy = hoyHabanaIso();
+    // Días hasta el vencimiento, en días de calendario (la
+    // gemela de negocio.dart no se importa aquí: localdb es
+    // la capa baja y negocio depende de ella, no al revés).
+    int? d;
+    if (pagadoHasta != null && pagadoHasta.length >= 10) {
+      final f = DateTime.tryParse(pagadoHasta.substring(0, 10));
+      final h = DateTime.tryParse(hoy);
+      if (f != null && h != null) d = f.difference(h).inDays;
+    }
+    final tipo = d == null || d < 0
+        ? 'vencido'
+        : d == 0
+            ? 'vence_hoy'
+            : 'por_vencer';
+    final db_ = await db;
+    await db_.insert(
+      'avisos_wa_contactados',
+      {
+        'cliente_id': clienteId,
+        'tipo': tipo,
+        'fecha_habana': hoy,
+        'contactado_en': ahora,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   /// Desmarca el aviso (v1.1). Permite deshacer si fue un error.
+  ///
+  /// 1.36 (136-231): también retira las filas de vencimiento del
+  /// índice por día — desmarcar en Listas devuelve al cliente a
+  /// la Bandeja, no solo a la lista.
   Future<void> desmarcarAvisado(int clienteId) async {
     final d = await db;
     await d.delete('meta', where: 'k=?', whereArgs: ['avisado_$clienteId']);
+    await d.delete(
+      'avisos_wa_contactados',
+      where: 'cliente_id=? AND tipo IN (?,?,?)',
+      whereArgs: [
+        clienteId,
+        ...tiposAvisoVencimiento,
+      ],
+    );
   }
 
   /// Devuelve el timestamp de aviso, o null si no se ha avisado.

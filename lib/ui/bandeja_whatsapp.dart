@@ -248,6 +248,24 @@ class _BandejaWhatsappScreenState extends State<BandejaWhatsappScreen>
       await _migrarDesdePrefs();
       final tocados =
           await LocalDb.instance.avisosWaContactados(_hoy);
+      // 1.36 (136-231): para los avisos de VENCIMIENTO manda el
+      // registro único — un cliente ya avisado de ESTE
+      // vencimiento (ayer, desde Listas o desde aquí) sale
+      // atendido también hoy: las dos superficies afirman el
+      // mismo hecho y nadie recibe dos avisos por el mismo
+      // vencimiento. El «contactado hoy» de la tabla sigue
+      // rigiendo los tipos del día (cumple, recibo).
+      final vigentes =
+          await LocalDb.instance.idsAvisadosVigentes();
+      for (final a in avisos) {
+        if (!LocalDb.tiposAvisoVencimiento.contains('${a['tipo']}')) {
+          continue;
+        }
+        final cid = (a['cliente_id'] as num?)?.toInt() ?? 0;
+        if (cid > 0 && vigentes.contains(cid)) {
+          tocados.add(_clave(a));
+        }
+      }
       // 1.25 T42: la marca de la pantalla de Cumpleaños (prefs
       // felicitado_<año>_<id>) también apaga el aviso aquí:
       // las dos pantallas comparten marca o el cliente recibe
