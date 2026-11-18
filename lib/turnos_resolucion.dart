@@ -201,7 +201,10 @@ DateTime instanteParedDeMinutos(DateTime fecha, int minutos) {
   final v = ventanaFranja(fecha, franja);
   if (v == null) return (nombre: programado, cubriendo: false);
   final desde = instanteParedDeMinutos(fecha, v.inicio - 45); // T1
-  final hasta = instanteParedDeMinutos(fecha, v.fin);
+  // 1.36 H-B3 (136-793): el fin lleva el MISMO colchón de
+  // +45 min que turnoIdDe (turno_service): una apertura
+  // rezagada contaba para el id del turno pero no aquí.
+  final hasta = instanteParedDeMinutos(fecha, v.fin + 45);
   // Aperturas ligadas a la franja (colchón incluido) y vivas.
   final vivas = [
     for (final a in aperturas)
@@ -431,7 +434,8 @@ bool hayCierreFranja(
   var hayViva = false;
   if (v != null) {
     final desde = instanteParedDeMinutos(fecha, v.inicio - 45);
-    final hasta = instanteParedDeMinutos(fecha, v.fin);
+    // 1.36 H-B3 (136-793): fin + 45, como turnoIdDe.
+    final hasta = instanteParedDeMinutos(fecha, v.fin + 45);
     hayViva = aperturas.any((a) =>
         a.viva &&
         !a.aperturaEn.isBefore(desde) &&
@@ -465,7 +469,8 @@ bool huboAperturaEnFranja({
   final v = ventanaFranja(fecha, franja);
   if (v == null) return false;
   final desde = instanteParedDeMinutos(fecha, v.inicio - 45);
-  final hasta = instanteParedDeMinutos(fecha, v.fin);
+  // 1.36 H-B3 (136-793): fin + 45, como turnoIdDe.
+  final hasta = instanteParedDeMinutos(fecha, v.fin + 45);
   return aperturas.any((a) =>
       !a.aperturaEn.isBefore(desde) && a.aperturaEn.isBefore(hasta));
 }
@@ -563,10 +568,14 @@ List<DetalleFranjaTurno> detalleDiaTurnos({
           break;
         }
       }
+      // 1.36 H-B3 (136-794): la hora de cierre sale SOLO
+      // de hora_cierre — fabricarla desde creada_en pintaba
+      // la hora de creación como si fuera la del cierre.
+      // Sin hora, la entrada queda cierre=null y la UI la
+      // rotula «cierre administrativo».
       final horaCierre = cierre == null
           ? ''
-          : _hhmmTurno(
-              '${cierre['hora_cierre'] ?? cierre['creada_en'] ?? ''}');
+          : _hhmmTurno('${cierre['hora_cierre'] ?? ''}');
       final cubre = '${a['cubre_a'] ?? ''}'.trim();
       entradas.add((
         nombre: nombre,

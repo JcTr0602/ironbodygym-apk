@@ -182,8 +182,18 @@ void aplicarHorarioAFranjas(List<DiaHorario> dias) {
   fijarVentanasDesdeHorarioGym({
     for (final d in dias)
       d.diaSemana: (
-        manana: d.abierto ? ventana(d.apertura1, d.cierre1) : null,
-        tarde: d.abierto ? ventana(d.apertura2, d.cierre2) : null,
+        // 1.36 H-B3 (136-788): el contrato de turnos
+        // prohíbe domingo (sin franjas) y tarde de sábado —
+        // ventanaFranja aplica esa guarda a las constantes
+        // de fábrica pero NO al mapa sembrado, así que aquí
+        // se fuerza null: el horario del gym puede abrir
+        // domingo, pero no crea franjas de turno.
+        manana: (d.abierto && d.diaSemana != 7)
+            ? ventana(d.apertura1, d.cierre1)
+            : null,
+        tarde: (d.abierto && d.diaSemana != 6 && d.diaSemana != 7)
+            ? ventana(d.apertura2, d.cierre2)
+            : null,
       ),
   });
 }
@@ -219,6 +229,16 @@ class _HorarioGymState extends State<HorarioGym> {
   bool _cargando = true;
   bool _guardando = false;
   List<DiaHorario> _dias = [];
+  // 1.36 H-B3 (136-789): el refresco de red falló y lo que
+  // se ve es la copia guardada — se dice con un chip (antes
+  // la caché se pintaba como si fuera el dato fresco).
+  bool _refrescoFallo = false;
+  // 1.36 H-B3 (136-784): el error de validación/guardado
+  // vive inline y señala el día implicado (con scroll
+  // hasta su tarjeta y resaltado).
+  String? _errorGuardado;
+  int? _diaConError;
+  final _clavesDia = <int, GlobalKey>{};
 
   // 1.25 T89: firma del horario tal como se cargó (y
   // tras cada guardado): salir con la firma distinta
@@ -315,6 +335,7 @@ class _HorarioGymState extends State<HorarioGym> {
           _dias = lista;
           _firmaCargada = _firmaActual;
           _cargando = false;
+          _refrescoFallo = false;
         });
         // Guardar caché
         await prefs.setString(_kCacheKey,
@@ -325,6 +346,12 @@ class _HorarioGymState extends State<HorarioGym> {
     } catch (e) {
       // SL-X2 (G12-8): mensaje amable + bitácora.
       AppLog.error('ui', 'horario_gym_cargar', d: '$e');
+      if (mounted && _dias.isNotEmpty) {
+        // 1.36 H-B3 (136-789): con copia en pantalla, el
+        // fallo del refresco se anuncia con el chip «Sin
+        // conexión: copia guardada», no en silencio.
+        setState(() => _refrescoFallo = true);
+      }
       if (mounted && _dias.isEmpty) {
         setState(() => _cargando = false);
         mostrarSnack(context,
@@ -338,7 +365,9 @@ class _HorarioGymState extends State<HorarioGym> {
   /// guardar — antes un rango invertido o solapado viajaba al
   /// servidor y volvía como error crudo. Devuelve el problema
   /// en lenguaje llano o null si todo está bien.
-  String? _validarRangos() {
+  /// 1.36 H-B3 (136-784): devuelve también el día implicado
+  /// para señalarlo inline y llevar el scroll hasta él.
+  ({String mensaje, int diaSemana})? _validarRangos() {
     int? min(String? hhmm) {
       if (hhmm == null || hhmm.length < 5) return null;
       final h = int.tryParse(hhmm.substring(0, 2));
@@ -351,26 +380,61 @@ class _HorarioGymState extends State<HorarioGym> {
       if (!d.abierto) continue;
       final a1 = min(d.apertura1), c1 = min(d.cierre1);
       if (a1 == null || c1 == null) {
-        return '${d.nombre}: falta la hora de apertura o de cierre del Turno 1.';
+        return (
+          mensaje:
+              '${d.nombre}: falta la hora de apertura o de cierre del Turno 1.',
+          diaSemana: d.diaSemana
+        );
       }
       if (a1 >= c1) {
-        return '${d.nombre}: la apertura del Turno 1 debe ser antes que su cierre.';
+        return (
+          mensaje:
+              '${d.nombre}: la apertura del Turno 1 debe ser antes que su cierre.',
+          diaSemana: d.diaSemana
+        );
       }
       final hay2 = d.apertura2 != null || d.cierre2 != null;
       if (hay2) {
         final a2 = min(d.apertura2), c2 = min(d.cierre2);
         if (a2 == null || c2 == null) {
-          return '${d.nombre}: el Turno 2 necesita apertura y cierre.';
+          return (
+            mensaje: '${d.nombre}: el Turno 2 necesita apertura y cierre.',
+            diaSemana: d.diaSemana
+          );
         }
         if (a2 >= c2) {
-          return '${d.nombre}: la apertura del Turno 2 debe ser antes que su cierre.';
+          return (
+            mensaje:
+                '${d.nombre}: la apertura del Turno 2 debe ser antes que su cierre.',
+            diaSemana: d.diaSemana
+          );
         }
         if (a2 < c1) {
-          return '${d.nombre}: el Turno 2 se solapa con el Turno 1.';
+          return (
+            mensaje: '${d.nombre}: el Turno 2 se solapa con el Turno 1.',
+            diaSemana: d.diaSemana
+          );
         }
       }
     }
     return null;
+  }
+
+  /// 1.36 H-B3 (136-784): lleva el scroll hasta la tarjeta
+  /// del día implicado en el error (tras el repintado que
+  /// lo resalta).
+  void _irAlDiaConError() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _diaConError == null
+          ? null
+          : _clavesDia[_diaConError]?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(ctx,
+            duration: AppMovimiento.media,
+            curve: AppMovimiento.curva,
+            alignment: 0.1);
+      }
+    });
   }
 
   Future<void> _guardar() async {
@@ -378,9 +442,22 @@ class _HorarioGymState extends State<HorarioGym> {
     // F3-12: validar en local antes de molestar al servidor.
     final problema = _validarRangos();
     if (problema != null) {
-      mostrarSnack(context, problema, significado: SignificadoChip.error);
+      // 1.36 H-B3 (136-784): error INLINE sobre la lista y
+      // scroll al día implicado (el snack solo, se iba y
+      // el día culpable quedaba sin señalar).
+      setState(() {
+        _errorGuardado = problema.mensaje;
+        _diaConError = problema.diaSemana;
+      });
+      mostrarSnack(context, problema.mensaje,
+          significado: SignificadoChip.error);
+      _irAlDiaConError();
       return;
     }
+    setState(() {
+      _errorGuardado = null;
+      _diaConError = null;
+    });
     setState(() => _guardando = true);
     try {
       final payload =
@@ -410,6 +487,9 @@ class _HorarioGymState extends State<HorarioGym> {
       // SL-X2 (G12-8): mensaje amable + bitácora.
       AppLog.error('ui', 'horario_gym_guardar', d: '$e');
       if (mounted) {
+        // 1.36 H-B3 (136-784): también inline.
+        setState(() => _errorGuardado =
+            'No se pudo guardar el horario: ${mensajeErrorAmable(e)}');
         mostrarSnack(context,
             'No se pudo guardar el horario: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
@@ -447,6 +527,10 @@ class _HorarioGymState extends State<HorarioGym> {
       final mm =
           picked.minute.toString().padLeft(2, '0');
       setState(() {
+        // 1.36 H-B3 (136-784): al corregir, el error y el
+        // resaltado del día se retiran.
+        _errorGuardado = null;
+        _diaConError = null;
         final valor = '$hh:$mm';
         switch (campo) {
           case 'apertura1':
@@ -544,6 +628,48 @@ class _HorarioGymState extends State<HorarioGym> {
                 // Clientes y equipo, y en Usuarios), con el plan
                 // semanal, los ajustes por fecha y la precedencia.
                 // Esta pantalla queda solo para el horario del gym.
+                // 1.36 H-B3 (136-789): el resumen canónico
+                // (textoHorarioCanonico) se calculaba y no
+                // se pintaba en ninguna parte — ahora abre
+                // la pantalla; y si el refresco falló, el
+                // chip «Sin conexión: copia guardada».
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
+                      AppEspacio.md, AppEspacio.lg, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (textoHorarioCanonico(_dias).isNotEmpty)
+                        Text(textoHorarioCanonico(_dias),
+                            style: AppTexto.secundario),
+                      if (_refrescoFallo) ...[
+                        const SizedBox(height: AppEspacio.sm),
+                        const ChipEstado.semantico(
+                            texto: 'Sin conexión: copia guardada',
+                            significado: SignificadoChip.alerta),
+                      ],
+                      if (_errorGuardado != null) ...[
+                        const SizedBox(height: AppEspacio.sm),
+                        Tarjeta(
+                          color:
+                              AppColores.error.withValues(alpha: 0.10),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded,
+                                  color:
+                                      AppColores.errorTexto(context)),
+                              const SizedBox(width: AppEspacio.sm),
+                              Expanded(
+                                child: Text(_errorGuardado!,
+                                    style: AppTexto.secundario),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
@@ -560,10 +686,17 @@ class _HorarioGymState extends State<HorarioGym> {
 
   Widget _buildDiaCard(DiaHorario dia) {
     // F3-30: Tarjeta de la casa (antes Card de Material).
+    // 1.36 H-B3 (136-784): la tarjeta lleva su GlobalKey
+    // (para llevar el scroll al día del error) y se tiñe
+    // si es el día implicado en el error de guardado.
     return Padding(
+      key: _clavesDia.putIfAbsent(dia.diaSemana, () => GlobalKey()),
       padding:
           const EdgeInsets.only(bottom: AppEspacio.md),
       child: Tarjeta(
+        color: _diaConError == dia.diaSemana
+            ? AppColores.error.withValues(alpha: 0.08)
+            : null,
         padding: const EdgeInsets.all(AppEspacio.lg),
         child: Column(
           crossAxisAlignment:
@@ -577,23 +710,52 @@ class _HorarioGymState extends State<HorarioGym> {
                     style: AppTexto.titulo,
                   ),
                 ),
-                Switch(
-                  value: dia.abierto,
-                  onChanged: (v) {
-                    setState(
-                        () => dia.abierto = v);
-                  },
+                // 1.36 H-B3 (136-789): el Switch se anuncia
+                // («Abierto»/«Cerrado» de ese día) — antes
+                // era un interruptor sin etiqueta semántica.
+                Semantics(
+                  label: '${dia.nombre}: abierto',
+                  toggled: dia.abierto,
+                  child: Switch(
+                    value: dia.abierto,
+                    onChanged: (v) {
+                      setState(
+                          () => dia.abierto = v);
+                    },
+                  ),
                 ),
                 Text(
                   dia.abierto
                       ? 'Abierto'
                       : 'Cerrado',
+                  // 1.36 H-B3 (136-789): tokens de estado
+                  // con contexto (fuera exitoOscuro /
+                  // errorOscuro fijos, ilegibles en oscuro).
                   style: AppTexto.metadato.copyWith(color: dia.abierto
-                        ? AppColores.exitoOscuro
-                        : AppColores.errorOscuro, fontWeight: FontWeight.w600),
+                        ? AppColores.exitoTexto(context)
+                        : AppColores.errorTexto(context), fontWeight: FontWeight.w600),
                 ),
               ],
             ),
+            // 1.36 H-B3 (136-788): aviso de lo que NO mueve
+            // turnos — domingo sin franjas y sábado sin
+            // tarde, aunque el gym abra.
+            if (dia.diaSemana == 7)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
+                child: Text(
+                  'El domingo no hay turnos: este horario no crea franjas de turno.',
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
+                ),
+              ),
+            if (dia.diaSemana == 6)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
+                child: Text(
+                  'La tarde del sábado no crea franja de turno.',
+                  style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
+                ),
+              ),
             if (dia.abierto) ...[
               const Divider(),
               Text('Turno 1',
@@ -689,9 +851,17 @@ class _HorarioGymState extends State<HorarioGym> {
   Widget _horaChip(
       String label, String? valor, VoidCallback onTap,
       {VoidCallback? onLongPress}) {
-    return InkWell(
+    // 1.36 H-B3 (136-789): el chip se anuncia como botón
+    // con su hora («Apertura: 06:00») y el InkWell recorta
+    // la onda con el mismo radio del borde (antes la onda
+    // salía cuadrada sobre la caja redondeada).
+    return Semantics(
+      button: true,
+      label: '$label: ${valor ?? 'sin hora'}',
+      child: InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(AppRadio.sm),
       child: Container(
         padding: const EdgeInsets.symmetric(
             vertical: 10, horizontal: AppEspacio.md),
@@ -711,6 +881,7 @@ class _HorarioGymState extends State<HorarioGym> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

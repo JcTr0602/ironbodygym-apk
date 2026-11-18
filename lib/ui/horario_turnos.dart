@@ -52,6 +52,18 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   // foto inicial de las selecciones permite avisar al salir
   // con cambios sin guardar.
   bool _usuariosNoCargaron = false;
+  // 1.36 H-B3 (136-780): la lectura del PATRÓN guardado
+  // falló — guardar encima pisaría el patrón real con el
+  // de por defecto, así que el guardado se bloquea.
+  bool _errorLecturaPatron = false;
+  // 1.36 H-B3 (136-780): la lista de usuarios SÍ cargó
+  // pero no dejó ningún asignable (todos dueño/admin o
+  // bloqueados): es un estado distinto del fallo de
+  // lectura y se dice distinto.
+  bool _sinAsignables = false;
+  // 1.36 H-B3 (136-784): el error de guardado también
+  // vive inline sobre los días, no solo en el snack.
+  String? _errorGuardado;
   Map<int, Map<String, String?>> _inicial = {};
 
   bool get _hayCambios {
@@ -88,6 +100,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   Future<void> _cargar() async {
     // Asignaciones vigentes en crudo (del espejo de ajustes).
     final crudas = <(int, String, String)>[];
+    var patronFallo = false;
     try {
       final aj = await LocalDb.instance.getAjustes();
       final h = aj['horario_turnos'];
@@ -103,7 +116,13 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
           });
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      // 1.36 H-B3 (136-780): antes el catch era mudo y el
+      // guardado quedaba habilitado sobre el patrón por
+      // defecto — guardar pisaba el patrón real.
+      patronFallo = true;
+      AppLog.error('horario_turnos', 'leer_patron_fallo', d: '$e');
+    }
 
     // UNA normalización de identidad para usuarios y asignaciones
     // (panel S4): clave en minúsculas -> forma visible. Primero los
@@ -115,6 +134,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         canon.putIfAbsent(bruto.trim().toLowerCase(),
             () => _visible(bruto));
     var usuariosOk = false;
+    var asignables = 0;
     try {
       final raw = await LocalDb.instance.getMeta('usuarios_apk');
       if (raw != null && raw.isNotEmpty) {
@@ -137,21 +157,34 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
           final base = (nom != null && nom.isNotEmpty)
               ? nom
               : (m['username'] as String? ?? '');
-          if (base.trim().isNotEmpty) registrar(base);
+          if (base.trim().isNotEmpty) {
+            registrar(base);
+            asignables++;
+          }
         }
       }
     } catch (_) {}
     for (final (d, franja, nombre) in crudas) {
-      final visible = registrar(nombre);
-      if (_sel.containsKey(d) && _sel[d]!.containsKey(franja)) {
-        _sel[d]![franja] = visible;
+      // 1.36 H-B3 (136-780): validar día 1..6 y franja
+      // permitida ANTES de registrar — una asignación con
+      // día 7 o franja «noche» colaba su nombre en el canon
+      // y aparecía como entrenador asignable.
+      if (!_sel.containsKey(d) || !_sel[d]!.containsKey(franja)) {
+        continue;
       }
+      _sel[d]![franja] = registrar(nombre);
     }
 
     if (mounted) {
       setState(() {
-        _entrenadores = canon.values.toList();
+        // 1.36 H-B3 (136-783): orden alfabético — el orden
+        // ya no depende del orden guardado en ajustes.
+        _entrenadores = canon.values.toList()
+          ..sort((a, b) =>
+              a.toLowerCase().compareTo(b.toLowerCase()));
         _usuariosNoCargaron = !usuariosOk;
+        _errorLecturaPatron = patronFallo;
+        _sinAsignables = usuariosOk && asignables == 0;
         _inicial = {
           for (final e in _sel.entries)
             e.key: Map<String, String?>.from(e.value),
@@ -162,6 +195,15 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   }
 
   Future<void> _guardar() async {
+    // 1.36 H-B3 (136-780): con la lectura del patrón
+    // fallida, guardar pisaría el patrón real con el de
+    // por defecto — bloqueado hasta recargar bien.
+    if (_errorLecturaPatron) {
+      setState(() => _errorGuardado =
+          'No se puede guardar: la lectura del patrón guardado falló. '
+          'Sal y vuelve a entrar para recargarlo.');
+      return;
+    }
     final mapa = <String, dynamic>{};
     _sel.forEach((dia, franjas) {
       final limpio = <String, String>{};
@@ -190,6 +232,7 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
           e.key: Map<String, String?>.from(e.value),
       };
       if (mounted) {
+        setState(() => _errorGuardado = null);
         mostrarSnack(context, 'Horario de turnos guardado (se sincronizará)', significado: SignificadoChip.exito);
         Navigator.of(context).pop();
       }
@@ -198,6 +241,11 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
       // de la casa y la excepción a la bitácora.
       AppLog.error('horario_turnos', 'guardar_patron_fallo', d: '$e');
       if (mounted) {
+        // 1.36 H-B3 (136-784): el error queda TAMBIÉN
+        // inline sobre los días (el snack se va y el
+        // motivo se perdía).
+        setState(() => _errorGuardado =
+            'No se pudo guardar el horario: ${mensajeErrorAmable(e)}');
         mostrarSnack(context,
             'No se pudo guardar el horario: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
@@ -212,8 +260,13 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Entrenadores por turno'),
-        body: const Center(
-          child: Text('Solo el dueño puede configurar el horario.'),
+        // 1.36 H-B3 (136-782): estado de la casa con icono
+        // y tipografía (antes un Text pelado centrado).
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo el dueño',
+          subtitulo:
+              'Solo el dueño puede configurar el horario de turnos.',
         ),
       );
     }
@@ -244,7 +297,10 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
         acciones: [
           if (!_cargando)
             TextButton(
-              onPressed: _guardando ? null : _guardar,
+              // 1.36 H-B3 (136-780): sin patrón leído no se
+              // guarda (ver _guardar, que también lo frena).
+              onPressed:
+                  (_guardando || _errorLecturaPatron) ? null : _guardar,
               child: _guardando
                   ? const SizedBox(
                       width: 20,
@@ -274,8 +330,10 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
                     color: AppColores.alerta.withValues(alpha: 0.12),
                     child: Row(
                       children: [
-                        const Icon(Icons.warning_amber_rounded,
-                            color: AppColores.alertaOscuro),
+                        // 1.36 H-B3 (136-782): token con
+                        // contexto (fuera alertaOscuro fijo).
+                        Icon(Icons.warning_amber_rounded,
+                            color: AppColores.alertaTexto(context)),
                         const SizedBox(width: AppEspacio.sm),
                         Expanded(
                           child: Text(
@@ -284,6 +342,68 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
                             'ya guardadas. Sincroniza y vuelve a entrar.',
                             style: AppTexto.secundario,
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // 1.36 H-B3 (136-780): estados que antes se
+                // confundían con el fallo de lectura o con
+                // el patrón por defecto.
+                if (_errorLecturaPatron) ...[
+                  const SizedBox(height: 12),
+                  Tarjeta(
+                    color: AppColores.error.withValues(alpha: 0.10),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline_rounded,
+                            color: AppColores.errorTexto(context)),
+                        const SizedBox(width: AppEspacio.sm),
+                        const Expanded(
+                          child: Text(
+                            'No se pudo leer el patrón guardado: '
+                            'el guardado está bloqueado para no '
+                            'pisarlo. Sal y vuelve a entrar.',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (_sinAsignables) ...[
+                  const SizedBox(height: 12),
+                  Tarjeta(
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded,
+                            color: AppColores.textoSecundario(context)),
+                        const SizedBox(width: AppEspacio.sm),
+                        const Expanded(
+                          child: Text(
+                            'La lista de usuarios cargó, pero no '
+                            'hay entrenadores asignables (solo '
+                            'cuentas de dueño/administración o '
+                            'bloqueadas).',
+                            style: AppTexto.secundario,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (_errorGuardado != null) ...[
+                  const SizedBox(height: 12),
+                  Tarjeta(
+                    color: AppColores.error.withValues(alpha: 0.10),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline_rounded,
+                            color: AppColores.errorTexto(context)),
+                        const SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          child: Text(_errorGuardado!,
+                              style: AppTexto.secundario),
                         ),
                       ],
                     ),
@@ -339,12 +459,16 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
     final valor = _sel[dia]![franja];
     return Row(
       children: [
-        SizedBox(
-          width: 64,
+        // 1.36 H-B3 (136-782): ancho flexible — los 64 dp
+        // fijos cortaban «Mañana» con texto grande.
+        Flexible(
           child: Text(etiqueta,
+              overflow: TextOverflow.ellipsis,
               style: AppTexto.secundario.copyWith(color: AppColores.textoSecundario(context))),
         ),
+        const SizedBox(width: AppEspacio.sm),
         Expanded(
+          flex: 3,
           child: SelectorIron<String?>(
             valor: valor,
             tituloPanel: etiqueta,

@@ -120,12 +120,43 @@ typedef ResultadoComprobacionCierres = ({
   int sinCasar,
 });
 
+/// 1.36 H-B3 (136-791): el texto de la fase de la sync del
+/// cierre para la UI. PURO. 'inactiva' no se pinta ('').
+/// Las fases las publica [TurnoService] en
+/// [TurnoService.fasesSyncCierre] durante prepararCierre /
+/// confirmarCierre: antes los topes de 5 s/3 s y la corrida
+/// que seguía en segundo plano no publicaban nada y la UI
+/// no podía decir «sigue en segundo plano».
+String textoFaseSyncCierre(String fase) {
+  return switch (fase) {
+    'sincronizando' => 'Sincronizando el cierre…',
+    'segundo_plano' =>
+      'La sincronización del cierre sigue en segundo plano',
+    'completada' => 'Sincronización del cierre completada',
+    _ => '',
+  };
+}
+
 class TurnoService {
   TurnoService._();
   static final TurnoService instance = TurnoService._();
 
   final _auth = AuthService();
   final _db = LocalDb.instance;
+
+  // 1.36 H-B3 (136-791): fase vigente de la sync del cierre
+  // y su corriente para la UI (ver textoFaseSyncCierre).
+  final _fasesSyncCierreCtrl = StreamController<String>.broadcast();
+  String _faseSyncCierre = 'inactiva';
+  String get faseSyncCierre => _faseSyncCierre;
+  Stream<String> get fasesSyncCierre => _fasesSyncCierreCtrl.stream;
+
+  void _ponerFaseSyncCierre(String fase) {
+    _faseSyncCierre = fase;
+    if (!_fasesSyncCierreCtrl.isClosed) {
+      _fasesSyncCierreCtrl.add(fase);
+    }
+  }
 
   /// Turno ABIERTO (abierto_local | abierto_sincronizado) del entrenador
   /// logueado para la fecha+franja actuales (hora de La Habana), o null.
@@ -806,6 +837,8 @@ class TurnoService {
   /// promover ese turno: la promoción exige por turno su op
   /// de cierre en 'aplicada' (ver promoverTurnosConEvidencia).
   Future<void> _syncConTope(Duration espera) async {
+    // 1.36 H-B3 (136-791): la fase se publica para la UI.
+    _ponerFaseSyncCierre('sincronizando');
     final runFut = SyncEngine.instance.run(forzar: true);
     var termino = false;
     try {
@@ -820,11 +853,14 @@ class TurnoService {
     }
     if (termino) {
       await marcarTurnosSincronizados();
+      _ponerFaseSyncCierre('completada');
     } else {
+      _ponerFaseSyncCierre('segundo_plano');
       unawaited(runFut.then((_) async {
         try {
           await marcarTurnosSincronizados();
         } catch (_) {}
+        _ponerFaseSyncCierre('completada');
       }).catchError((_) {}));
     }
   }

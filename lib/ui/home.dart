@@ -2846,12 +2846,26 @@ class _HomeScreenState extends State<HomeScreen>
           showDialog(
             context: context,
             barrierDismissible: false,
-            builder: (ctx) => const AlertDialog(
+            builder: (ctx) => AlertDialog(
               content: Row(
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(width: 16),
-                  Text('Sincronizando…'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(width: 16),
+                  // 1.36 H-B3 (136-791): el diálogo dice la
+                  // FASE real de la sync del cierre que
+                  // publica TurnoService (antes «Sincronizando…»
+                  // a secas, también cuando la corrida ya
+                  // seguía en segundo plano).
+                  Expanded(
+                    child: StreamBuilder<String>(
+                      stream: TurnoService.instance.fasesSyncCierre,
+                      initialData: TurnoService.instance.faseSyncCierre,
+                      builder: (_, snap) {
+                        final t = textoFaseSyncCierre(snap.data ?? '');
+                        return Text(t.isEmpty ? 'Sincronizando…' : t);
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),

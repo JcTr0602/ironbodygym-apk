@@ -26,16 +26,26 @@ import '../nomina_precalc.dart';
 import '../perfil.dart';
 import '../permisos_entrenador.dart';
 import '../servicios.dart' as servicios_lib;
+import '../sync.dart';
 import '../tiempo.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'historial_ventas.dart' show vendedorVentaSuplementoId;
 import 'primitivas.dart';
+import 'skeleton.dart';
 import 'servicios.dart';
 import 'widgets.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
+
+/// 1.36 H-B3 (136-799): un bono con su signo — positivo
+/// con '+', negativo con el '−' que ya trae fmtMonto (un
+/// bono negativo es un descuento). Antes la vista previa
+/// prefijaba '+' a fmtMonto y un bono de −500 se pintaba
+/// «+-500». PURO.
+String fmtBonoConSigno(double v) =>
+    v > 0 ? '+${fmtMonto(v)}' : fmtMonto(v);
 
 class MiNominaScreen extends StatefulWidget {
   /// 1.32 «Mostrador Táctico»: embebida = pestaña «Mi Nómina»
@@ -177,25 +187,34 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     return BonosNominaService.instance.bonosPorMes(clave, desde, hasta);
   }
 
+  // 1.36 H-B3 (136-798): token de generación de la carga
+  // (el patrón de detalle/historial/control_acceso): dos
+  // _cargar solapados aplicaban su setState en orden de
+  // LLEGADA y la foto vieja podía pisar la nueva.
+  int _genCarga = 0;
+
   Future<void> _cargar() async {
+    final gen = ++_genCarga;
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
-      await _cargarDatos();
+      await _cargarDatos(gen);
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
-      if (mounted) setState(() => _errorCarga = '$e');
+      if (mounted && gen == _genCarga) {
+        setState(() => _errorCarga = '$e');
+      }
     } finally {
-      if (mounted && _cargando) {
+      if (mounted && _cargando && gen == _genCarga) {
         setState(() => _cargando = false);
       }
     }
   }
 
-  Future<void> _cargarDatos() async {
+  Future<void> _cargarDatos(int gen) async {
     setState(() => _cargando = true);
     final pref = NominaCalc.prefMesActual();
     // #6 (Argón nómina): refrescar el pre-cálculo antes de
@@ -402,7 +421,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
         }
       }
     } catch (_) {}
-    if (!mounted) return;
+    // 1.36 H-B3 (136-798): una carga superada no pinta.
+    if (!mounted || gen != _genCarga) return;
     setState(() {
       _miId = miId;
       _porConfirmar = porConfirmar;
@@ -617,6 +637,14 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       '${fmtMonto(neto)} CUP',
                       style: AppTexto.subtitulo),
                 ),
+              // 1.36 H-B3 (136-803): foto parcial sin neto =
+              // el detalle AÚN no llega completo — no se
+              // pinta como una liquidación entera.
+              if (neto == null)
+                const Text(
+                    'El detalle aún no llega completo a tu '
+                    'teléfono; puedes confirmar igualmente.',
+                    style: AppTexto.cuerpo),
             ],
             const SizedBox(height: AppEspacio.md),
             BotonPrimario(
@@ -658,8 +686,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
 
   Widget _cuerpo() {
     if (_cargando) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColores.naranja));
+      // 1.36 H-B3 (136-803): el esqueleto de la casa (el
+      // mismo SkeletonNomina de la cara del dueño), no un
+      // spinner crudo.
+      return const SkeletonNomina();
     }
     // (136-802) el fallo de carga no se pinta como nómina vacía.
     if (_errorCarga != null) {
@@ -720,6 +750,8 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                 ),
               ),
             // E3: aviso de horas sin subir (no bloquea nada).
+            // 1.36 H-B3 (136-803): el aviso trae su acción
+            // («Subir ahora» aquí mismo, sin ir a la cola).
             if (_horasSinSubir != null &&
                 _horasSinSubir! >= kHorasAvisoSinSubir)
               Container(
@@ -729,12 +761,41 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   color: AppColores.alerta.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(AppRadio.md),
                 ),
-                child: Text(
-                  '⚠ Llevas ${_horasSinSubir!.toStringAsFixed(0)} horas '
-                  'sin subir operaciones. Abre la cola y toca '
-                  '«Subir ahora» cuando tengas conexión.',
-                  style: AppTexto.cuerpo.copyWith(
-                      fontWeight: FontWeight.w600),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                            size: 18,
+                            color: AppColores.alertaTexto(context)),
+                        const SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          child: Text(
+                            'Llevas ${_horasSinSubir!.toStringAsFixed(0)} horas '
+                            'sin subir operaciones.',
+                            style: AppTexto.cuerpo.copyWith(
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () async {
+                          await SyncEngine.instance.run(forzar: true);
+                          if (!mounted) return;
+                          mostrarSnack(context,
+                              'Sincronización lanzada: la cola sube lo pendiente.',
+                              significado: SignificadoChip.info);
+                          await _cargar();
+                        },
+                        child: const Text('Subir ahora'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             const SizedBox(height: AppEspacio.md),
@@ -749,7 +810,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   Text('Vista previa — mes $_pref',
                       style: AppTexto.subtitulo),
                   const SizedBox(height: AppEspacio.sm),
-                  _linea('Base', fmtMonto(_base)),
+                  // 1.36 H-B3 (136-803): la vista previa
+                  // lleva el sufijo CUP en sus importes,
+                  // como el resto de la pantalla.
+                  _linea('Base', '${fmtMonto(_base)} CUP'),
                   // B5 (1.23): las cifras hermanas llevan el
                   // MISMO semántico que en la cara del dueño
                   // (nomina.dart): a favor en exito (vía
@@ -760,20 +824,27 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   // usaba la barra apilada de abajo (verde lo
                   // que cobra, rojo lo descontado).
                   _linea('Comisión dosis',
-                      '$_dosis dosis · ${fmtMonto(_comision)}',
+                      '$_dosis dosis · ${fmtMonto(_comision)} CUP',
                       color: _comision != 0
                           ? colorCifraNomina(_comision)
                           : null),
-                  _linea('Bonos', '+${fmtMonto(_bonosMes)}',
+                  // 1.36 H-B3 (136-799): Bonos con el
+                  // formato CON SIGNO de la cara del dueño
+                  // — el '+' fijo pintaba «+-500» con un
+                  // bono negativo (descuento).
+                  _linea('Bonos',
+                      '${fmtBonoConSigno(_bonosMes)} CUP',
                       color: _bonosMes != 0
                           ? colorCifraNomina(_bonosMes)
                           : null),
                   _linea(
-                      'Adelantos del mes', '-${fmtMonto(_adelantosMes)}',
+                      'Adelantos del mes',
+                      '-${fmtMonto(_adelantosMes)} CUP',
                       color:
                           _adelantosMes > 0 ? AppColores.error : null),
                   _linea(
-                      'Deuda arrastrada', '-${fmtMonto(_deudaEntrante)}',
+                      'Deuda arrastrada',
+                      '-${fmtMonto(_deudaEntrante)} CUP',
                       color:
                           _deudaEntrante > 0 ? AppColores.error : null),
                   const Divider(),
@@ -901,7 +972,11 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                     for (final s in _solicitudes.where((s) => s.pendiente))
                       _filaConChip(
                         '· ${fmtMonto(s.monto)} CUP · ${s.motivo}'
-                        '${s.creadoEn != null ? ' · ${s.creadoEn!.substring(0, 10)}' : ''}',
+                        // 1.36 H-B3 (136-800): la MISMA
+                        // guarda length >= 10 de «Por
+                        // enviar» — un creadoEn corto
+                        // lanzaba al construir la lista.
+                        '${s.creadoEn != null && s.creadoEn!.length >= 10 ? ' · ${s.creadoEn!.substring(0, 10)}' : ''}',
                         _chipSolicitud(s),
                       ),
                   // v1.12.0 (F3 destino): solicitudes resueltas con
@@ -926,6 +1001,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                   BotonPrimario(
                     texto: 'Pedir adelanto',
                     icono: Icons.request_page_rounded,
+                    // 1.36 H-B3 (136-803): el botón enseña
+                    // el envío en curso (cargando), no solo
+                    // se deshabilita en silencio.
+                    cargando: _pidiendo,
                     onPressed: _pidiendo ? null : _pedirAdelanto,
                   ),
                 ],
@@ -1032,12 +1111,24 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
                       'teléfono.',
                       style: AppTexto.secundario,
                     )
-                  else
+                  else ...[
+                    // 1.36 H-B3 (136-803): la lista se corta
+                    // en 50 y lo DICE («50 de N»).
+                    if (_ventas.length > 50)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            bottom: AppEspacio.sm),
+                        child: Text(
+                          'Mostrando 50 de ${_ventas.length} ventas',
+                          style: AppTexto.secundario,
+                        ),
+                      ),
                     for (final v in _ventas.take(50))
                       Text(
                         _textoVenta(v),
                         style: AppTexto.cuerpo,
                       ),
+                  ],
                 ],
               ),
             ),

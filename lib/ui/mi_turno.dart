@@ -593,15 +593,23 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
     // hoy hay un turno abierto, el chip nombra ESE turno
     // y dice «abierto» aunque el reloj ya haya cruzado
     // de franja (mismo criterio que el Home en T08).
+    // 1.36 H-B3 (136-773): _cerrado se comprueba ANTES que
+    // la rama de abierto — _cerrado deriva del propio
+    // turno visible (o de su meta), así que un turno
+    // cerrado nunca se anuncia «abierto» ni en la ventana
+    // entre el cierre y la recarga.
     final v = _turnoVisible;
     final estadoV = '${v?['estado'] ?? ''}';
+    final nombreV = switch ('${v?['turno'] ?? ''}') {
+      'manana' => 'Turno de mañana',
+      'tarde' => 'Turno de tarde',
+      _ => _turnoActual(),
+    };
+    if (v != null && _cerrado) {
+      return '$nombreV · cerrado';
+    }
     if (v != null && estadoV.startsWith('abierto')) {
-      final nombre = switch ('${v['turno'] ?? ''}') {
-        'manana' => 'Turno de mañana',
-        'tarde' => 'Turno de tarde',
-        _ => _turnoActual(),
-      };
-      return '$nombre · abierto';
+      return '$nombreV · abierto';
     }
     final base = _turnoActual();
     if (_cerrado && base != 'Fuera de franja de turno') {
@@ -612,7 +620,12 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
 
   /// Icono según el turno actual.
   IconData _iconoTurno() {
-    return switch (franjaDeInstante(ahoraHabana())) {
+    // 1.36 H-B3 (136-773): el icono sale de la MISMA
+    // fuente que el chip (la franja del turno visible);
+    // el reloj solo manda cuando no hay turno visible.
+    final franjaV = '${_turnoVisible?['turno'] ?? ''}';
+    return switch (
+        franjaV.isNotEmpty ? franjaV : franjaDeInstante(ahoraHabana())) {
       'manana' => Icons.wb_sunny_rounded,
       'tarde' => Icons.wb_twilight_rounded,
       _ => Icons.schedule_rounded,
@@ -736,7 +749,11 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Cierre de turno'),
-        content: Column(
+        // 1.36 H-B3 (136-772): el contenido rueda — a
+        // 360 dp con texto grande, resumen + aviso de
+        // pendientes desbordaban el diálogo sin scroll.
+        content: SingleChildScrollView(
+            child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -858,7 +875,7 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
               ),
             ],
           ],
-        ),
+            )),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -954,6 +971,13 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                       mostrarSnack(context,
                           'Turno cerrado. ¡Buen trabajo!',
                           significado: SignificadoChip.exito);
+                      // 1.36 H-B3 (136-773): recargar la
+                      // MISMA fuente (_turnoVisible +
+                      // _cerrado) tras el cierre — antes
+                      // solo se ponía _cerrado y el chip
+                      // seguía diciendo «abierto» del
+                      // _turnoVisible viejo.
+                      await _cargar();
                     }
                     return;
                   }
@@ -996,6 +1020,9 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                   if (mounted) {
                     setState(() => _cerrado = true);
                     mostrarSnack(context, 'Turno cerrado. ¡Buen trabajo!', significado: SignificadoChip.exito);
+                    // 1.36 H-B3 (136-773): misma recarga
+                    // de la fuente única tras el cierre.
+                    await _cargar();
                   }
                 } finally {
                   _confirmandoCierre = false;
@@ -1192,14 +1219,31 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         ),
                         // Yunque B (YB-TRA-08): suma incompleta
                         // visible junto a la cifra que afecta.
+                        // 1.36 H-B3 (136-774): icono del
+                        // sistema + token con contexto y
+                        // singular/plural real (fuera el «⚠»
+                        // como texto y el «operación(es)»).
                         if (_sumaIncompleta > 0) ...[
                           const SizedBox(height: 4),
-                          Text(
-                            '⚠ $_sumaIncompleta operación(es) de '
-                            'hoy no se pudieron sumar: el total '
-                            'puede estar incompleto.',
-                            style: AppTexto.secundario.copyWith(
-                                color: AppColores.alerta),
+                          Row(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.warning_amber_rounded,
+                                  size: 16,
+                                  color: AppColores.alertaTexto(context)),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  '$_sumaIncompleta '
+                                  '${_sumaIncompleta == 1 ? 'operación' : 'operaciones'} de '
+                                  'hoy no se pudieron sumar: el total '
+                                  'puede estar incompleto.',
+                                  style: AppTexto.secundario.copyWith(
+                                      color: AppColores.alertaTexto(context)),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ],
@@ -1373,7 +1417,13 @@ class _MiTurnoScreenState extends State<MiTurnoScreen> {
                         ListTile(
                           dense: true,
                           leading: Icon(Icons.calendar_today_rounded, size: 20, color: AppColores.textoSecundario(context)),
-                          title: Text(fmtFecha(e.key)),
+                          // 1.36 H-B3 (136-774): la clave
+                          // '—' (fecha desconocida) se rotula
+                          // «Sin fecha» y NO pasa por
+                          // fmtFecha (que la pintaba cruda).
+                          title: Text(e.key == '—'
+                              ? 'Sin fecha'
+                              : fmtFecha(e.key)),
                           trailing: Text(
                               '${fmtMonto(e.value)} CUP',
                               style: const TextStyle(

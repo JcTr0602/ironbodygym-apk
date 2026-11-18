@@ -86,10 +86,38 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
 
   bool get _soyDueno => AuthService().isOwner;
 
+  // 1.36 H-B3 (136-777): reloj del hub — _hoy/_franjaActual
+  // nacen en _cargar y sin esto el marcador «ahora» quedaba
+  // falso con la app abierta (cruzaba la franja o el día y
+  // la pantalla seguía en la anterior).
+  Timer? _relojHub;
+
   @override
   void initState() {
     super.initState();
     _cargar();
+    _relojHub = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      final ahora = ahoraHabana();
+      final mismoDia = ahora.year == _hoy.year &&
+          ahora.month == _hoy.month &&
+          ahora.day == _hoy.day;
+      if (!mismoDia) {
+        // Cambió el día: todo el mapa depende de la fecha.
+        _cargar();
+      } else if (franjaDeInstante(ahora) != _franjaActual) {
+        setState(() {
+          _hoy = ahora;
+          _franjaActual = franjaDeInstante(ahora);
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _relojHub?.cancel();
+    super.dispose();
   }
 
   Future<void> _cargar() async {
@@ -145,10 +173,29 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
               '${abierto['hora_apertura'] ?? ''}');
           if (en != null) {
             final nombre = AuthService().displayName;
+            // 1.36 H-B3 (136-778): la superposición solo
+            // sustituye MI apertura de la franja ABIERTA
+            // (abierto['turno'], con su ventana ±45): mis
+            // aperturas de la OTRA franja se conservan —
+            // antes el filtro por nombre las borraba todas
+            // y el día perdía la franja ya trabajada.
+            final vAbierta =
+                ventanaFranja(hoy, '${abierto['turno'] ?? ''}');
+            bool esDeLaFranjaAbierta(AperturaTurno a) {
+              if (vAbierta == null) return true;
+              final desde =
+                  instanteParedDeMinutos(hoy, vAbierta.inicio - 45);
+              final hasta =
+                  instanteParedDeMinutos(hoy, vAbierta.fin + 45);
+              return !a.aperturaEn.isBefore(desde) &&
+                  a.aperturaEn.isBefore(hasta);
+            }
+
             aperturas = [
               for (final a in aperturas)
                 if (normalizarNombreTurno(a.nombre) !=
-                    normalizarNombreTurno(nombre))
+                        normalizarNombreTurno(nombre) ||
+                    !esDeLaFranjaAbierta(a))
                   a,
               (
                 nombre: nombre,
@@ -670,11 +717,16 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
               AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.lg),
-          child: Column(
+          // 1.36 H-B3 (136-772): el detalle del día rueda —
+          // con varias aperturas por franja y texto grande
+          // la columna fija desbordaba la hoja.
+          child: SingleChildScrollView(
+              child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -710,7 +762,11 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
                         '✓ ${e.nombre} abrió ${e.apertura}'
-                        '${e.cerrado ? (e.cierre != null ? ' · cerró ${e.cierre}' : ' · cerrado') : ' · sin cerrar'}'
+                        // 1.36 H-B3 (136-794): cerrado sin
+                        // hora = cierre administrativo (la
+                        // hora ya no se fabrica en la
+                        // resolución desde creada_en).
+                        '${e.cerrado ? (e.cierre != null ? ' · cerró ${e.cierre}' : ' · cierre administrativo') : ' · sin cerrar'}'
                         '${e.cubreA != null ? ' · cubre a ${e.cubreA}' : ''}',
                         style: AppTexto.cuerpo,
                       ),
@@ -729,7 +785,7 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                 ),
               ],
             ],
-          ),
+              )),
         ),
       ),
     );
@@ -1106,9 +1162,30 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                                 style: AppTexto.cuerpo,
                               );
                             }
-                            return const Text(
-                              'Turno anterior sin cerrar.',
-                              style: AppTexto.cuerpo,
+                            // 1.36 H-B3 (136-779): el estado
+                            // lleva acción directa — antes
+                            // era texto muerto y el cierre
+                            // quedaba a dos pantallas.
+                            return Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Turno anterior sin cerrar.',
+                                  style: AppTexto.cuerpo,
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).push(
+                                    RutaIron(
+                                      builder: (_) =>
+                                          const MiTurnoScreen(),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                      'Ver y cerrar en Mi Turno'),
+                                ),
+                              ],
                             );
                           },
                         ),
@@ -1174,8 +1251,12 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                                 '${p.usd > 0 ? ' + ${fmtMonto(p.usd)} USD' : ''}',
                                 style: AppTexto.cuerpo,
                               ),
-                              const Icon(Icons.chevron_right_rounded,
-                                  color: Colors.grey, size: 18),
+                              // 1.36 H-B3 (136-779): token de
+                              // la casa, no Colors.grey crudo.
+                              Icon(Icons.chevron_right_rounded,
+                                  color: AppColores.textoSecundario(
+                                      context),
+                                  size: 18),
                             ],
                           ),
                         ),

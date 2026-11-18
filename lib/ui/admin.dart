@@ -2690,8 +2690,13 @@ class _AdminScreenState extends State<AdminScreen> {
               style: AppTexto.titulo.copyWith(color: color, fontWeight: FontWeight.w700),
               maxLines: 2),
           const SizedBox(height: 2),
+          // 1.36 H-B3 (136-772): la etiqueta también cede
+          // con elipsis — a 360 dp con texto grande la
+          // tarjeta desbordaba por ella.
           Text(etiqueta,
-              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),
+              style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context)),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
           // 1.25 Panel 7: línea de comparación («+8 % vs
           // octubre») cuando hay base del mes pasado.
           if (sub != null) ...[

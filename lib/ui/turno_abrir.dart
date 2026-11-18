@@ -15,6 +15,34 @@ import '../localdb.dart';
 import '../turno_service.dart';
 import 'componentes.dart';
 
+/// 1.36 H-B3 (136-785): el nombre visible de un usuario
+/// para la suplencia: el `nombre` si trae algo, si no el
+/// `username` (con nombre '' el ?? de antes NO caía al
+/// username y el entrenador desaparecía de la lista).
+/// PURO.
+String nombreVisibleSuplente(Map<String, dynamic> m) {
+  final nombre = '${m['nombre'] ?? ''}'.trim();
+  if (nombre.isNotEmpty) return nombre;
+  return '${m['username'] ?? ''}'.trim();
+}
+
+/// 1.36 H-B3 (136-785): la lista de suplentes sale
+/// normalizada (recortada), sin duplicados por nombre
+/// normalizado y ordenada alfabéticamente — antes salía
+/// en orden de lectura, con duplicados si el meta los
+/// traía. PURO.
+List<String> normalizarListaSuplentes(List<String> crudos) {
+  final vistos = <String>{};
+  final out = <String>[];
+  for (final c in crudos) {
+    final n = c.trim();
+    if (n.isEmpty) continue;
+    if (vistos.add(n.toLowerCase())) out.add(n);
+  }
+  out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return out;
+}
+
 /// Nombres de los demás entrenadores (meta usuarios_apk),
 /// sin el propio. Vacío si no hay nadie más configurado.
 Future<List<String>> nombresOtrosEntrenadores() async {
@@ -26,8 +54,7 @@ Future<List<String>> nombresOtrosEntrenadores() async {
       for (final u in jsonDecode(raw) as List) {
         final m = Map<String, dynamic>.from(u as Map);
         final tid = LocalDb.normalizarTelegramId(m['telegram_id']);
-        final nombre =
-            '${m['nombre'] ?? m['username'] ?? ''}'.trim();
+        final nombre = nombreVisibleSuplente(m);
         // FIN-26 de Argón (1.20): la suplencia es entre
         // entrenadores — fuera el dueño/admin (rol de la lista)
         // y los usuarios bloqueados en la APK.
@@ -56,7 +83,7 @@ Future<List<String>> nombresOtrosEntrenadores() async {
         'No se pudo comprobar a quién podrías cubrir hoy. '
         'El turno no se abrió; inténtalo de nuevo.');
   }
-  return nombres;
+  return normalizarListaSuplentes(nombres);
 }
 
 /// Selector «¿a quién cubres hoy?». Devuelve (cancelado,

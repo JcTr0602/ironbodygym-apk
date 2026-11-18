@@ -653,25 +653,44 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 AppEspacio.lg, 0, AppEspacio.lg, AppEspacio.sm),
             child: Card(
               color: AppColores.alerta.withValues(alpha: 0.12),
-              child: ListTile(
-                leading: const Icon(Icons.key_rounded, size: 20),
-                title: const Text('PINs de la última generación',
-                    style: AppTexto.cuerpo),
-                subtitle: const Text(
-                    'Aún no confirmaste la entrega. Si la app se cierra, '
-                    'se pierden y habrá que resetearlos.'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
+              // 1.36 H-B3 (136-772): las acciones van DEBAJO
+              // del texto en un Wrap — como trailing de un
+              // ListTile desbordaban a 360 dp con texto
+              // grande.
+              child: Padding(
+                padding: const EdgeInsets.all(AppEspacio.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextButton(
-                      onPressed: () =>
-                          _mostrarResultadosMasivos(_ultimosResultados!),
-                      child: const Text('Ver'),
+                    const Row(
+                      children: [
+                        Icon(Icons.key_rounded, size: 20),
+                        SizedBox(width: AppEspacio.sm),
+                        Expanded(
+                          child: Text('PINs de la última generación',
+                              style: AppTexto.cuerpo),
+                        ),
+                      ],
                     ),
-                    TextButton(
-                      onPressed: () =>
-                          setState(() => _ultimosResultados = null),
-                      child: const Text('Ya los entregué'),
+                    const SizedBox(height: AppEspacio.xs),
+                    const Text(
+                        'Aún no confirmaste la entrega. Si la app se cierra, '
+                        'se pierden y habrá que resetearlos.',
+                        style: AppTexto.secundario),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => _mostrarResultadosMasivos(
+                              _ultimosResultados!),
+                          child: const Text('Ver'),
+                        ),
+                        TextButton(
+                          onPressed: () =>
+                              setState(() => _ultimosResultados = null),
+                          child: const Text('Ya los entregué'),
+                        ),
+                      ],
                     ),
                   ],
                 ),

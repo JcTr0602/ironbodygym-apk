@@ -234,7 +234,11 @@ class ImagenCierreNomina extends StatelessWidget {
   Widget _bloque(FilaCierreNomina f) {
     final detalle = <String>[
       'Base ${fmtMonto(f.base)}',
-      if (f.bono != 0) 'Bono ${fmtMonto(f.bono)}',
+      // 1.36 H-B3 (136-805): el bono negativo es un
+      // DESCUENTO y se rotula como tal — «Bono -500» se
+      // leía ambiguo junto a los adelantos con su signo.
+      if (f.bono > 0) 'Bono ${fmtMonto(f.bono)}',
+      if (f.bono < 0) 'Descuento ${fmtMonto(-f.bono)}',
       if (f.comision != 0) 'Comisión ${fmtMonto(f.comision)}',
       if (f.adelantos != 0) 'Adelantos −${fmtMonto(f.adelantos)}',
       if (f.deuda != 0) 'Deuda −${fmtMonto(f.deuda)}',

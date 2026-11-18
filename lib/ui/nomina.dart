@@ -54,6 +54,10 @@ class _NominaScreenState extends State<NominaScreen> {
   // Pasada 2 de Argón (1.20): candado de las acciones de
   // dinero de esta pantalla (bono, tarifa) contra doble toque.
   bool _operando = false;
+  // 1.36 H-B3 (136-801): el guardado de la tarifa enseña
+  // su estado en el botón (antes solo bloqueaba en
+  // silencio vía _operando).
+  bool _guardandoTarifa = false;
   int _clientesPagados = 0;
   // v1.4.0: sello del pre-cálculo ("Actualizado: ...").
   String _actualizadoEtiqueta = '';
@@ -492,6 +496,17 @@ class _NominaScreenState extends State<NominaScreen> {
         mostrarSnack(context, 'Bono agregado', significado: SignificadoChip.exito);
       }
       return true;
+    } catch (e) {
+      // 1.36 H-B3 (136-801): el fallo del servicio se VE
+      // (antes subía sin snack y la hoja se cerraba como
+      // si el bono hubiera quedado).
+      AppLog.error('nomina', 'agregar_bono_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo agregar el bono: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+      return false;
     } finally {
       _operando = false;
     }
@@ -539,6 +554,14 @@ class _NominaScreenState extends State<NominaScreen> {
       setState(() => _bonos = actualizados);
       if (mounted) {
         mostrarSnack(context, 'Bono eliminado', significado: SignificadoChip.exito);
+      }
+    } catch (e) {
+      // 1.36 H-B3 (136-801): fallo visible, como al agregar.
+      AppLog.error('nomina', 'eliminar_bono_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo eliminar el bono: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
       }
     } finally {
       _operando = false;
@@ -865,6 +888,16 @@ class _NominaScreenState extends State<NominaScreen> {
     // MOSTRANDO (no se pierde en silencio) con su aviso, y no
     // suma en ningún total (NominaCalc lo salta).
     final rechazado = b['rechazado'] == true;
+    // 1.36 H-B3 (136-801): con el mes de su destino ya
+    // liquidado, el bono no se puede eliminar — el botón
+    // nace deshabilitado y el motivo va en el tooltip (no
+    // se descubre al tocar).
+    final claveDestino = '${b['entrenador'] ?? 'ambos'}';
+    final objetivosDestino = claveDestino == 'ambos'
+        ? const ['duany', 'gabriel']
+        : [claveDestino];
+    final destinoLiquidado =
+        objetivosDestino.any((c) => _nominaLiquidadaMes[c] == true);
     return Card(
       margin: const EdgeInsets.only(bottom: AppEspacio.sm),
       child: ListTile(
@@ -892,8 +925,12 @@ class _NominaScreenState extends State<NominaScreen> {
               ),
         trailing: IconButton(
           icon: const Icon(Icons.delete_outline_rounded, color: AppColores.error),
-          tooltip: 'Eliminar bono',
-          onPressed: () => _eliminarBono('${b['id']}'),
+          tooltip: destinoLiquidado
+              ? 'Mes liquidado: no se puede eliminar'
+              : 'Eliminar bono',
+          onPressed: destinoLiquidado
+              ? null
+              : () => _eliminarBono('${b['id']}'),
         ),
       ),
     );
@@ -904,6 +941,7 @@ class _NominaScreenState extends State<NominaScreen> {
     if (!AuthService().isOwner) return;
     if (_operando) return;
     _operando = true;
+    if (mounted) setState(() => _guardandoTarifa = true);
     final texto = _tarifaCtrl.text.trim().replaceAll(',', '.');
     // (1.36 H-A2 136-796 · GD-028) null ≠ valor válido: un
     // campo vacío o no numérico es ERROR VISIBLE y no guarda
@@ -912,6 +950,7 @@ class _NominaScreenState extends State<NominaScreen> {
     final tarifa = NominaCalc.montoTolerante(texto);
     if (tarifa == null) {
       _operando = false;
+      if (mounted) setState(() => _guardandoTarifa = false);
       mostrarSnack(context,
           'Escribe la tarifa por cliente (un importe válido) antes de guardar.',
           significado: SignificadoChip.error);
@@ -919,6 +958,7 @@ class _NominaScreenState extends State<NominaScreen> {
     }
     if (tarifa <= 0) {
       _operando = false;
+      if (mounted) setState(() => _guardandoTarifa = false);
       mostrarSnack(context, 'Ingresa una tarifa válida', significado: SignificadoChip.alerta);
       return;
     }
@@ -943,6 +983,7 @@ class _NominaScreenState extends State<NominaScreen> {
       }
     } finally {
       _operando = false;
+      if (mounted) setState(() => _guardandoTarifa = false);
     }
   }
 
@@ -1002,6 +1043,33 @@ class _NominaScreenState extends State<NominaScreen> {
               child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
+                // 1.36 H-B3 (136-804): embebida no hay
+                // AppBar — «Foto del cierre» y «Bajar
+                // cambios» viven también en el CUERPO.
+                if (widget.embebida && esDueno) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _mostrarFotoCierre(),
+                          icon: const Icon(Icons.image_rounded,
+                              size: 18),
+                          label: const Text('Foto del cierre'),
+                        ),
+                      ),
+                      const SizedBox(width: AppEspacio.sm),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _actualizarNomina,
+                          icon: const Icon(Icons.refresh_rounded,
+                              size: 18),
+                          label: const Text('Bajar cambios'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 // 1.23 (W2): la puerta del cierre de mes guiado
                 // vive aquí (solo dueño): es la pantalla desde
                 // la que naturalmente se cierra el mes.
@@ -1081,6 +1149,21 @@ class _NominaScreenState extends State<NominaScreen> {
                           ),
                         for (final b in _bonos)
                           _buildFilaBono(context, b),
+                        // 1.36 H-B3 (136-801): con el mes
+                        // liquidado, la tarjeta lo EXPLICA y
+                        // «Agregar bono» nace deshabilitado
+                        // si ya no queda destino editable.
+                        if (_nominaLiquidadaMes.values
+                            .any((v) => v == true)) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'La nómina de este mes ya está '
+                            'liquidada'
+                            '${_nominaLiquidadaMes['duany'] == true && _nominaLiquidadaMes['gabriel'] == true ? '' : ' para ${_nominaLiquidadaMes['duany'] == true ? 'Duany' : 'Gabriel'}'}'
+                            ': sus bonos no se pueden cambiar.',
+                            style: AppTexto.secundario,
+                          ),
+                        ],
                         const Divider(height: 24),
                         // (1.30 D4 · UI130-12) el formulario
                         // en línea sale de la tarjeta:
@@ -1088,8 +1171,12 @@ class _NominaScreenState extends State<NominaScreen> {
                         BotonPrimario(
                           texto: 'Agregar bono',
                           icono: Icons.add_rounded,
-                          onPressed: () =>
-                              _abrirHojaAgregarBono(context),
+                          onPressed: (_nominaLiquidadaMes['duany'] ==
+                                      true &&
+                                  _nominaLiquidadaMes['gabriel'] ==
+                                      true)
+                              ? null
+                              : () => _abrirHojaAgregarBono(context),
                         ),
                       ],
                     ),
@@ -1131,7 +1218,10 @@ class _NominaScreenState extends State<NominaScreen> {
                             const SizedBox(width: 8),
                             BotonPrimario(
                               texto: 'Guardar',
-                              onPressed: _guardarTarifa,
+                              cargando: _guardandoTarifa,
+                              onPressed: _guardandoTarifa
+                                  ? null
+                                  : _guardarTarifa,
                               expandido: false,
                             ),
                           ],
@@ -1539,11 +1629,18 @@ class _NominaScreenState extends State<NominaScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 86,
+          // 1.36 H-B3 (136-772): la fecha ya no va en una
+          // caja fija de 86 dp — con texto grande a 360 dp
+          // la fila desbordaba; la fecha cede con elipsis y
+          // el importe también.
+          Flexible(
+            flex: 0,
             child: Text('${e['fecha'] ?? ''}',
-                style: AppTexto.metadato),
+                style: AppTexto.metadato,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
           ),
+          const SizedBox(width: AppEspacio.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1576,9 +1673,15 @@ class _NominaScreenState extends State<NominaScreen> {
               ],
             ),
           ),
-          Text(
-            '${monto >= 0 ? '' : '+'}${fmtMonto(monto.abs())} CUP',
-            style: AppTexto.secundario.copyWith(color: esReverso ? AppColores.exito : AppColores.error, fontWeight: FontWeight.w700),
+          Flexible(
+            flex: 0,
+            child: Text(
+              '${monto >= 0 ? '' : '+'}${fmtMonto(monto.abs())} CUP',
+              style: AppTexto.secundario.copyWith(color: esReverso ? AppColores.exito : AppColores.error, fontWeight: FontWeight.w700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
           ),
           if (esDueno &&
               !liquidada &&
