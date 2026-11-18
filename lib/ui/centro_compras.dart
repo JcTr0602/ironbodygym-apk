@@ -276,7 +276,14 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     for (final v in ventas) {
       // P2#6: fuera anuladas y Casa (antes se fijaba 'anulada': 0
       // ignorando el origen y se sumaban).
-      if (esAnulada(v) || esCasa(v)) continue;
+      // ARG136-01: fuera también el fiado PENDIENTE — una
+      // venta fiada sin saldar no es dinero cobrado y el
+      // Extracto la sumaba al total como si lo fuera (el
+      // predicado canónico esFiadoPendienteVenta, el mismo
+      // que C5 aplica en filaIngresoDesdeEspejo).
+      if (esAnulada(v) || esCasa(v) || esFiadoPendienteVenta(v)) {
+        continue;
+      }
       final precio = (v['precio'] as num?)?.toDouble() ?? 0;
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final total = (v['total'] as num?)?.toDouble() ?? precio * cant;
@@ -296,7 +303,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
         // Corrección 2026-10-26: la venta trae su moneda (el espejo
         // publica la fila entera, moneda incluida). Antes se
         // ignoraba y todo se pintaba CUP.
-        'moneda': '${v['moneda'] ?? 'CUP'}',
+        // ARG136-01: la lectura pasa por el normalizador de
+        // la casa (LocalDb.monedaDe): solo 'USD' explícito
+        // es USD; cualquier otra cosa es CUP.
+        'moneda': LocalDb.monedaDe(v),
         'fecha': '${v['fecha'] ?? ''}',
         'anulada': 0,
         'detalle': v,
@@ -307,7 +317,11 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     // de auditoría completa sigue en ServiciosScreen.
     for (final v in ventasServicioSinReversos(servicios)) {
       // P2#6: fuera anuladas y Casa, igual que en suplementos.
-      if (esAnulada(v) || esCasa(v)) continue;
+      // ARG136-01: y fuera el fiado pendiente, igual que en
+      // suplementos.
+      if (esAnulada(v) || esCasa(v) || esFiadoPendienteVenta(v)) {
+        continue;
+      }
       final precio = (v['precio_unitario'] as num?)?.toDouble() ?? 0;
       final cant = (v['cantidad'] as num?)?.toInt() ?? 0;
       final cid = (v['cliente_id'] as num?)?.toInt();
@@ -335,8 +349,10 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
             : (cid != null ? (nombreCli[cid] ?? 'Cliente $cid') : '—'),
         'monto': precio * cant,
         // Servicios (dosis/agua): servicio_ventas no tiene moneda;
-        // sus precios son CUP por diseño.
-        'moneda': 'CUP',
+        // sus precios son CUP por diseño. ARG136-01: la fila
+        // pasa por el mismo normalizador (sin clave moneda
+        // devuelve 'CUP').
+        'moneda': LocalDb.monedaDe(v),
         'fecha': '${v['fecha'] ?? ''}',
         'anulada': 0,
         'detalle': v,
