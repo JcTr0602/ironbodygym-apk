@@ -376,6 +376,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                                           c['foto_local'] as String?,
                                       fotoStorage:
                                           c['foto_storage'] as String?,
+                                      nombre: '${c['nombre'] ?? ''}',
                                     ),
                               title: Text('${c['nombre']}'),
                               subtitle: Column(
@@ -427,7 +428,12 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
 class ClienteAvatarThumb extends StatefulWidget {
   final String? fotoStorage;
   final String? fotoLocal;
-  const ClienteAvatarThumb({super.key, this.fotoStorage, this.fotoLocal});
+
+  /// UI136-10: el nombre del cliente — sin foto, el respaldo
+  /// es SU inicial, no un icono fijo.
+  final String nombre;
+  const ClienteAvatarThumb(
+      {super.key, this.fotoStorage, this.fotoLocal, this.nombre = ''});
 
   @override
   State<ClienteAvatarThumb> createState() => _ClienteAvatarThumbState();
@@ -506,6 +512,18 @@ class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
         backgroundColor: Colors.transparent,
       );
     }
-    return const Icon(Icons.verified_rounded, color: AppColores.exito);
+    // UI136-10: sin foto, la inicial del cliente sobre el
+    // tinte de éxito (antes un ✓ fijo para todos: el avatar
+    // es la foto y la letra solo es el respaldo).
+    final nombre = widget.nombre.trim();
+    return CircleAvatar(
+      backgroundColor: AppColores.exito.withValues(alpha: 0.15),
+      child: Text(
+        nombre.isEmpty ? '?' : nombre[0].toUpperCase(),
+        style: AppTexto.etiqueta.copyWith(
+            color: AppColores.exitoOscuro,
+            fontWeight: FontWeight.bold),
+      ),
+    );
   }
 }

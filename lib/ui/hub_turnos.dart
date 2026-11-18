@@ -971,27 +971,13 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                                         mainAxisSize:
                                             MainAxisSize.min,
                                         children: [
-                                          CircleAvatar(
-                                            radius: 13,
-                                            backgroundColor:
-                                                colorChipEntrenador(n)
-                                                    .withValues(
-                                                        alpha: 0.18),
-                                            child: Text(
-                                              n.trim().isEmpty
-                                                  ? '?'
-                                                  : n.trim()[0]
-                                                      .toUpperCase(),
-                                              style: AppTexto.etiqueta
-                                                  .copyWith(
-                                                      color:
-                                                          colorChipEntrenador(
-                                                              n),
-                                                      fontWeight:
-                                                          FontWeight
-                                                              .bold),
-                                            ),
-                                          ),
+                                          // UI136-10: el avatar
+                                          // de la casa — foto
+                                          // real por nombre; la
+                                          // inicial es solo su
+                                          // respaldo.
+                                          AvatarEntrenador(
+                                              nombre: n, tamano: 26),
                                           const SizedBox(width: 4),
                                           Text(n,
                                               style: AppTexto.cuerpo),

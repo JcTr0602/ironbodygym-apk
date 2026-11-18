@@ -1742,7 +1742,8 @@ class _ActividadScreenState extends State<ActividadScreen> {
   /// v1.3.5 (Fase 1, A3): avatar 40×40 unificado. Foto del cliente
   /// (cacheWidth 120, fallback limpio) o círculo semántico por tipo.
   Widget _avatarActividad(String? fotoPath, Color color, String accion,
-      String categoria) {
+      String categoria,
+      {String? nombreCliente}) {
     IconData icono;
     switch (categoria) {
       case 'mensualidades':
@@ -1765,6 +1766,27 @@ class _ActividadScreenState extends State<ActividadScreen> {
       // FutureBuilder: parpadeo y re-trabajo por fila).
       return _AvatarActividadFoto(
           fotoPath: fotoPath, color: color, icono: icono);
+    }
+    // UI136-10: sin foto pero con cliente, el respaldo es
+    // SU inicial (la regla del dueño: foto, y la letra solo
+    // de respaldo); sin cliente queda el icono de categoría.
+    final nombre = (nombreCliente ?? '').trim();
+    if (nombre.isNotEmpty) {
+      return Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Text(
+            nombre[0].toUpperCase(),
+            style: AppTexto.etiqueta.copyWith(
+                color: color, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
     }
     return _iconoAvatar(color, icono);
   }
@@ -2398,7 +2420,14 @@ class _ActividadScreenState extends State<ActividadScreen> {
                   fotoPath,
                   color,
                   accion,
-                  categoria),
+                  categoria,
+                  // UI136-10: el nombre solo si es un nombre
+                  // real (no el «Cliente N» de relleno).
+                  nombreCliente:
+                      (nombreCli != null &&
+                              !nombreCli.startsWith('Cliente '))
+                          ? nombreCli
+                          : null),
               const SizedBox(
                   width:
                       AppEspacio
