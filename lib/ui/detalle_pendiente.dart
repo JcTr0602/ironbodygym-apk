@@ -246,12 +246,23 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                         onReintentar: _cargar,
                       )
                     : _items.isEmpty
-                    ? const EstadoVacio(
-                        icono: Icons.check_circle_rounded,
-                        titulo: 'Nada pendiente',
-                        subtitulo:
-                            'Todo lo cobrado ya se entregó.',
-                      )
+                    ? (total > 0 || totalUsd > 0)
+                        // 1.36 H-C2 (136-668): con saldo
+                        // canónico > 0 la lista vacía NO es
+                        // «todo entregado»: es un saldo sin
+                        // movimientos componibles.
+                        ? EstadoVacio(
+                            icono: Icons.warning_amber_rounded,
+                            titulo: 'Saldo pendiente sin movimientos',
+                            subtitulo:
+                                'Hay ${fmtMonto(total)} CUP${totalUsd > 0 ? ' y ${fmtMonto(totalUsd)} USD' : ''} pendientes de entrega, pero los movimientos no se pudieron componer en esta pantalla.',
+                          )
+                        : const EstadoVacio(
+                            icono: Icons.check_circle_rounded,
+                            titulo: 'Nada pendiente',
+                            subtitulo:
+                                'Todo lo cobrado ya se entregó.',
+                          )
                     : ListView.builder(
                         padding: const EdgeInsets.all(AppEspacio.md),
                         itemCount: _items.length,

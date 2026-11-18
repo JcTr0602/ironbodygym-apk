@@ -215,8 +215,15 @@ class _TarjetaCierreTurnoScreenState
     if (_compartiendo) return;
     setState(() => _compartiendo = true);
     try {
-      final boundary = _tarjetaKey.currentContext!
-          .findRenderObject() as RenderRepaintBoundary;
+      // 1.36 H-C2 (136-656): sin force-unwrap — si la
+      // tarjeta aún no está pintada, error controlado con
+      // su aviso, no un crash al compartir.
+      final ctxTarjeta = _tarjetaKey.currentContext;
+      final objeto = ctxTarjeta?.findRenderObject();
+      if (objeto is! RenderRepaintBoundary) {
+        throw StateError('tarjeta no lista');
+      }
+      final boundary = objeto;
       final imagen = await boundary.toImage(pixelRatio: 3.0);
       final datos =
           await imagen.toByteData(format: ui.ImageByteFormat.png);

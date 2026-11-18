@@ -17,6 +17,33 @@ import 'componentes.dart';
 import 'diseno.dart';
 import '../app_log.dart';
 
+/// 1.36 H-C2 (136-636, pura): turnos cerrados del detalle
+/// de Mi Día desde las filas de `turnos_cierre` de [fechaIso].
+/// Con [soloTid] (vista de entrenador) solo cuentan los
+/// cierres de ESE entrenador: el sello «Caja cerrada» no
+/// puede venir del cierre de otro. Sin filtro (dueño)
+/// cuentan todos, como antes.
+Set<String> turnosCerradosDelDetalle(
+    List<Map<String, dynamic>> cierres, String fechaIso, int? soloTid) {
+  final cerrados = <String>{};
+  for (final c in cierres) {
+    if (soloTid != null &&
+        LocalDb.normalizarTelegramId(c['telegram_id']) != soloTid) {
+      continue;
+    }
+    final f = '${c['fecha'] ?? ''}';
+    if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
+      final t = '${c['turno'] ?? ''}'
+          .toLowerCase()
+          .replaceAll('manana', 'mañana');
+      if (t == 'mañana' || t == 'tarde' || t == 'noche') {
+        cerrados.add(t);
+      }
+    }
+  }
+  return cerrados;
+}
+
 class MiDiaScreen extends StatefulWidget {
   const MiDiaScreen({super.key});
 
@@ -309,21 +336,13 @@ class _MiDiaScreenState extends State<MiDiaScreen> {
       totales[key] = totales[key]! +
           ((d['total'] as num?)?.toDouble() ?? 0);
     }
-    // Cruzar con turnos_cierre para saber si el turno ya cerró caja.
-    final cerrados = <String>{};
+    // Cruzar con turnos_cierre para saber si el turno ya
+    // cerró caja (136-636: filtrado por el entrenador de
+    // la vista cuando la vista es de un entrenador).
+    var cerrados = <String>{};
     try {
       final cierres = await LocalDb.instance.allMirror('turnos_cierre');
-      for (final c in cierres) {
-        final f = '${c['fecha'] ?? ''}';
-        if (f.length >= 10 && f.substring(0, 10) == fechaIso) {
-          final t = '${c['turno'] ?? ''}'
-              .toLowerCase()
-              .replaceAll('manana', 'mañana');
-          if (t == 'mañana' || t == 'tarde' || t == 'noche') {
-            cerrados.add(t);
-          }
-        }
-      }
+      cerrados = turnosCerradosDelDetalle(cierres, fechaIso, soloTid);
     } catch (_) {}
     if (mounted) {
       setState(() {

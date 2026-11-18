@@ -155,6 +155,9 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
   ModoHojaArqueo _modo = ModoHojaArqueo.cierre;
   bool _cargaInicial = true;
   bool _cargando = true;
+  // 1.36 H-C2 (136-650): el fallo de carga se ve y se
+  // reintenta (antes la hoja nacía con expectativa 0).
+  bool _errorCarga = false;
 
   // Resolvedores de la costura: la falsa inyectada o la real.
   Future<({double cup, double usd})> _pendArqueo() =>
@@ -205,8 +208,12 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
   double get _esperado => _modo == ModoHojaArqueo.entregaC1
       ? _deltaC1
       : (_moneda == 'USD' ? _usd : _cup);
-  double? get _contadoNum =>
-      _contado.isEmpty ? null : double.tryParse(_contado);
+  // 1.36 H-C2 (136-648): la coma decimal se normaliza
+  // antes de parsear, como en las hojas hermanas (un
+  // «1,5» pegado/tecleado se leía null y bloqueaba).
+  double? get _contadoNum => _contado.isEmpty
+      ? null
+      : double.tryParse(_contado.replaceAll(',', '.'));
 
   @override
   void initState() {
@@ -218,6 +225,7 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
       v.toStringAsFixed(v == v.roundToDouble() ? 0 : 2);
 
   Future<void> _cargar() async {
+    if (mounted) setState(() => _errorCarga = false);
     try {
       final pend = await _pendArqueo();
       // El delta C1 se lee SIEMPRE: el selector de modo
@@ -243,7 +251,12 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
         _cargando = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() {
+          _cargando = false;
+          _errorCarga = true;
+        });
+      }
     }
   }
 
@@ -420,7 +433,16 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
               padding: EdgeInsets.all(AppEspacio.lg),
               child: SkeletonTarjeta(),
             )
-          : Column(
+          : _errorCarga
+              // 1.36 H-C2 (136-650): error visible con
+              // reintento, no expectativa 0 engañosa.
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el arqueo',
+                  detalle:
+                      'Los saldos de este entrenador no se pudieron leer.',
+                  onReintentar: _cargar,
+                )
+              : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Selector de MODO de la puerta única: cada
@@ -429,13 +451,16 @@ class _HojaLiquidarArqueoState extends State<HojaLiquidarArqueo> {
                   // 136-647: sin check.
                   showSelectedIcon: false,
                   segments: const [
+                    // 1.36 H-C2 (136-649): etiquetas cortas —
+                    // las completas desbordaban en pantallas
+                    // estrechas con texto grande.
                     ButtonSegment(
                       value: ModoHojaArqueo.cierre,
-                      label: Text('Liquidación de cierre'),
+                      label: Text('Cierre'),
                     ),
                     ButtonSegment(
                       value: ModoHojaArqueo.entregaC1,
-                      label: Text('Entrega anticipada'),
+                      label: Text('Entrega C1'),
                     ),
                   ],
                   selected: {_modo},

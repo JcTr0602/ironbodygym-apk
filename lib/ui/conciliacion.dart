@@ -279,6 +279,14 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                   r['_conciliacion'] == 'rechazada')
               .take(20)
               .toList();
+          // 1.36 H-C2 (136-665): la selección se poda a los
+          // ids que siguen por comprobar (antes el contador
+          // contaba filas ya fuera de la lista).
+          final presentes = {
+            for (final p in _porComprobar)
+              if ((p['id'] as num?) != null) (p['id'] as num).toInt(),
+          };
+          _seleccion.removeWhere((id) => !presentes.contains(id));
           _falloCarga = null;
           _cargando = false;
         });
@@ -386,19 +394,24 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                         verComprobanteTransferencia(context, uuid),
                   ),
                 const Spacer(),
-                ElevatedButton.icon(
-                  icon:
-                      const Icon(Icons.fact_check_rounded, size: 18),
-                  label: const Text('Conciliar'),
-                  onPressed: () async {
-                    final ok = await mostrarDialogoConciliar(
-                      context,
-                      pago: p,
-                      nombreCliente: _nombreDe(p),
-                    );
-                    if (ok) _cargar();
-                  },
-                ),
+                // 1.36 H-C2 (136-664): «Conciliar» solo en
+                // filas accionables y fuera del modo lote —
+                // en resueltas abría un diálogo con destino
+                // pendiente incoherente con su estado.
+                if (conciliacionAccionable(estado) && !_seleccionando)
+                  ElevatedButton.icon(
+                    icon:
+                        const Icon(Icons.fact_check_rounded, size: 18),
+                    label: const Text('Conciliar'),
+                    onPressed: () async {
+                      final ok = await mostrarDialogoConciliar(
+                        context,
+                        pago: p,
+                        nombreCliente: _nombreDe(p),
+                      );
+                      if (ok) _cargar();
+                    },
+                  ),
               ],
             ),
           ],

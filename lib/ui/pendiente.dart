@@ -495,7 +495,14 @@ class _PendienteScreenState extends State<PendienteScreen> {
       EntrenadorPendiente ent) async {
     if (!_esDueno || _confirmando) return;
     final tid = int.tryParse(ent.trainerTelegramId);
-    if (tid == null) return;
+    // 1.36 H-C2 (136-672): sin id numérico no se sale en
+    // silencio: el toque recibe su respuesta.
+    if (tid == null) {
+      mostrarSnack(context,
+          'No se pudo identificar al entrenador de esta tarjeta.',
+          significado: SignificadoChip.error);
+      return;
+    }
     if (await _redirigirArqueoSiBloqueado(tid)) return;
     final foto = await fotoCobroParcial(tid);
     final arq = await pendienteArqueo(tid);
@@ -1502,7 +1509,9 @@ class _EntrenadorCard extends StatelessWidget {
                             Icons.account_balance_wallet_rounded,
                             size: 16),
                         label: const Text('Liquidar en arqueo…'),
-                        onPressed: onLiquidar,
+                        // 1.36 H-C2 (136-673): mientras se
+                        // confirma, liquidar también se apaga.
+                        onPressed: confirmando ? null : onLiquidar,
                       ),
                     ),
                     // 1.26.1 (rediseño): el cuadre, acción de
@@ -1512,7 +1521,9 @@ class _EntrenadorCard extends StatelessWidget {
                         icon:
                             const Icon(Icons.share_rounded, size: 15),
                         label: const Text('Cuadre a WhatsApp'),
-                        onPressed: onWhatsApp,
+                        // 1.36 H-C2 (136-673): y el cuadre
+                        // tampoco corre durante la confirmación.
+                        onPressed: confirmando ? null : onWhatsApp,
                       ),
                     ),
                   ],

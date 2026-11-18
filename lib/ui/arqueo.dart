@@ -69,12 +69,16 @@ class _ArqueoScreenState extends State<ArqueoScreen> {
     });
     try {
       final lista = await entrenadoresConPendiente();
-      var difAbiertas = _difAbiertas;
+      // 1.36 H-C2 (136-641): las lecturas secundarias nacen
+      // en 0/{} en cada carga: si fallan, el badge y la
+      // antigüedad NO conservan el valor de la carga
+      // anterior como si fuera actual.
+      var difAbiertas = 0;
       try {
         difAbiertas =
             await DiferenciasCajaService.instance.conteoAbiertas();
       } catch (_) {}
-      var antiguedad = _antiguedad;
+      var antiguedad = <String, EntrenadorPendiente>{};
       try {
         final agrupados =
             procesarPendientes(await pagosPendientesDetalle());
@@ -480,7 +484,10 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
       // liquidación) y los totales quedan para el puente.
       final pend = await resumenPendienteEntrega(widget.telegramId);
       final hist = await liquidacionesDeEntrenador(widget.telegramId);
-      var exps = _expedientes;
+      // 1.36 H-C2 (136-641): igual que en la lista — si la
+      // lectura de expedientes falla, no se pintan los de
+      // la carga anterior como actuales.
+      var exps = <String, Map<String, dynamic>>{};
       try {
         exps = await DiferenciasCajaService.instance
             .porLiquidacion();
@@ -516,15 +523,20 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
 
   /// (M2-BC B2/C4) refresca el estado «liquidación en cola»
   /// de la moneda elegida (sello, resumen y Deshacer).
-  Future<void> _refrescarEnCola() async {
+  /// 1.36 H-C2 (136-639): la moneda se CAPTURA al llamar y
+  /// el resultado solo se aplica si sigue siendo la moneda
+  /// vigente: dos refrescos solapados tras un cambio de
+  /// moneda no pintan el sello de la moneda equivocada.
+  Future<void> _refrescarEnCola([String? moneda]) async {
+    final m = moneda ?? _moneda;
     final uuid =
-        await uuidLiquidacionEnCola(widget.telegramId, _moneda);
+        await uuidLiquidacionEnCola(widget.telegramId, m);
     String? resumen;
     try {
       resumen = await LocalDb.instance
-          .getMeta('resumen_liq_${widget.telegramId}_$_moneda');
+          .getMeta('resumen_liq_${widget.telegramId}_$m');
     } catch (_) {}
-    if (mounted) {
+    if (mounted && m == _moneda) {
       setState(() {
         _uuidEnCola = uuid;
         _resumenReciente = resumen;

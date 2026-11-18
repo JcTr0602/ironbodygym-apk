@@ -8,12 +8,13 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../localdb.dart';
 import '../negocio.dart';
-import '../tiempo.dart' show fechaNegocioHabana;
+import '../tiempo.dart' show fechaNegocioHabana, aHabana;
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'skeleton.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 /// Claves de franja derivadas de los cierres (PURO): pares día-entrenador,
 /// claves de cierre y primer turno del día. Lo usa _cobradosPorFranja para
@@ -192,6 +193,10 @@ class HistorialCajaScreen extends StatefulWidget {
 class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
   List<Map<String, dynamic>> _cierres = [];
   bool _cargando = true;
+  // 1.36 H-C2 (136-653): la carga falló — no es «sin
+  // cierres»: se pinta error con reintento y el fallo del
+  // refresco se avisa.
+  bool _errorCarga = false;
 
   @override
   void initState() {
@@ -205,10 +210,23 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
     // (spinner eterno: la clase de la ficha 2026-11-02).
     try {
       await _cargarDatos();
+      if (mounted && _errorCarga) {
+        setState(() => _errorCarga = false);
+      }
     } catch (e) {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // 1.36 H-C2 (136-653): y se VE — estado de error si
+      // no hay nada que enseñar, aviso si el refresco falló
+      // con la lista presente.
+      if (mounted) {
+        setState(() => _errorCarga = true);
+        if (_cierres.isNotEmpty) {
+          mostrarSnack(context, mensajeErrorAmable(e),
+              significado: SignificadoChip.error);
+        }
+      }
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -301,8 +319,17 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
       };
 
   static String _fmtCerrado(String? iso) {
+    // 1.36 H-C2 (136-654): la hora se formatea con el
+    // helper Habana (un sello UTC no se pinta crudo como
+    // si fuera hora local); lo no parseable conserva el
+    // formato anterior.
     if (iso == null || iso.length < 16) return iso ?? '—';
-    return iso.substring(0, 16).replaceAll('T', ' ');
+    final dt = DateTime.tryParse(iso);
+    if (dt == null) return iso.substring(0, 16).replaceAll('T', ' ');
+    final h = dt.isUtc ? aHabana(dt) : dt;
+    String dos(int n) => n.toString().padLeft(2, '0');
+    return '${h.year}-${dos(h.month)}-${dos(h.day)} '
+        '${dos(h.hour)}:${dos(h.minute)}';
   }
 
   @override
@@ -321,20 +348,41 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
         : itemsHistorialCajaPorDia(_cierres);
     return Scaffold(
       appBar: appBarIron(context, 'Historial de caja'),
-      body: _cargando
-          // v1.2.6 (Gemini): skeleton consistente con el resto de listas.
-          ? const Padding(
-              padding: EdgeInsets.all(AppEspacio.lg),
-              child: SkeletonLista(items: 4),
-            )
-          : _cierres.isEmpty
-              ? const EstadoVacio(
-                  icono: Icons.history_rounded,
-                  titulo: 'Sin cierres registrados',
-                  subtitulo:
-                      'Los cierres de turno aparecerán aquí.',
-                )
-              : RefrescoIron(
+      // 1.36 H-C2 (136-654): los estados cruzan con el
+      // componente de la casa, no en seco.
+      body: CruceEstados(
+        estado: _cargando
+            ? 'cargando'
+            : _errorCarga && _cierres.isEmpty
+                ? 'error'
+                : _cierres.isEmpty
+                    ? 'vacio'
+                    : 'contenido',
+        child: _cargando
+            // v1.2.6 (Gemini): skeleton consistente con el resto de listas.
+            ? const Padding(
+                padding: EdgeInsets.all(AppEspacio.lg),
+                child: SkeletonLista(items: 4),
+              )
+            : _errorCarga && _cierres.isEmpty
+                // 1.36 H-C2 (136-653): fallo ≠ «sin cierres».
+                ? EstadoError(
+                    titulo: 'No se pudo cargar el historial',
+                    detalle:
+                        'Los cierres no se pudieron leer en este teléfono.',
+                    onReintentar: _cargar,
+                  )
+                : _cierres.isEmpty
+                    ? EstadoVacio(
+                        icono: Icons.history_rounded,
+                        titulo: 'Sin cierres registrados',
+                        subtitulo:
+                            'Los cierres de turno aparecerán aquí.',
+                        // 136-654: el vacío también reintenta.
+                        textoAccion: 'Reintentar',
+                        onAccion: _cargar,
+                      )
+                    : RefrescoIron(
                   onRefresh: _cargar,
                   child: ListView.builder(
                     padding: const EdgeInsets.all(AppEspacio.lg),
@@ -368,7 +416,10 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                                 'cierre${it['cierres'] == 1 ? '' : 's'} · '
                                 '${fmtMonto((it['cobrado'] as num).toDouble())} CUP'
                                 '${usdDia > 0 ? ' · ${fmtMonto(usdDia)} USD' : ''}',
-                                style: AppTexto.metadato,
+                                // 136-654: totales con cifras
+                                // tabulares, como el resto.
+                                style: AppTexto.conTabulares(
+                                    AppTexto.metadato),
                               ),
                             ],
                           ),
@@ -437,6 +488,7 @@ class _HistorialCajaScreenState extends State<HistorialCajaScreen> {
                     },
                   ),
                 ),
+      ),
     );
   }
 }

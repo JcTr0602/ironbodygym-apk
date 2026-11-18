@@ -41,6 +41,19 @@ class _PorCobrarScreenState extends State<PorCobrarScreen>
   }
 
   @override
+  void didUpdateWidget(PorCobrarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 1.36 H-C2 (136-678): un cambio posterior de la
+    // pestaña inicial sí mueve la pestaña.
+    if (widget.pestanaInicial != oldWidget.pestanaInicial &&
+        widget.pestanaInicial >= 0 &&
+        widget.pestanaInicial < _tabs.length &&
+        _tabs.index != widget.pestanaInicial) {
+      _tabs.animateTo(widget.pestanaInicial);
+    }
+  }
+
+  @override
   void dispose() {
     _tabs.dispose();
     super.dispose();
@@ -79,8 +92,10 @@ class _PorCobrarScreenState extends State<PorCobrarScreen>
                 children: [
                   Text(
                     'Dinero en la calle',
-                    style: AppTexto.secundario
-                        .copyWith(color: Colors.white70),
+                    // 1.36 H-C2 (136-678): texto sobre carbón
+                    // con el token de la casa, no white70 fijo.
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.textoSobreOscuroSuave),
                   ),
                   // SL-5B G04-12: la cifra se asienta con
                   // MontoAnimado (la pieza de la casa), no
@@ -89,21 +104,27 @@ class _PorCobrarScreenState extends State<PorCobrarScreen>
                     valor: cargando ? 0 : combinadoCup,
                     // 1.36 (136-309/318): cifra y moneda con
                     // espacio duro (fmtMontoConMoneda).
-                    formato: (v) => cargando
-                        ? '…'
-                        : fmtMontoConMoneda(v, 'CUP') +
-                            ((_fiadosUsd ?? 0) > 0
-                                ? ' · ${fmtMontoConMoneda(_fiadosUsd!, 'USD')}'
-                                : ''),
+                    // 1.36 H-C2 (136-678): SOLO el CUP se
+                    // anima; el USD va en su línea secundaria
+                    // fija (antes viajaba dentro del formato
+                    // animado y parpadeaba con cada paso).
+                    formato: (v) =>
+                        cargando ? '…' : fmtMontoConMoneda(v, 'CUP'),
                     style: AppTexto.display
                         .copyWith(color: AppColores.naranja),
                   ),
                   Text(
                     'Vencidos ${_totalVencidos == null ? '…' : '${fmtMonto(_totalVencidos!)} CUP'}'
                     ' · Fiados ${_fiadosCup == null ? '…' : '${fmtMonto(_fiadosCup!)} CUP'}',
-                    style: AppTexto.minuscula
-                        .copyWith(color: Colors.white70),
+                    style: AppTexto.minuscula.copyWith(
+                        color: AppColores.textoSobreOscuroSuave),
                   ),
+                  if ((_fiadosUsd ?? 0) > 0)
+                    Text(
+                      'Fiados en USD: ${fmtMonto(_fiadosUsd!)} USD',
+                      style: AppTexto.minuscula.copyWith(
+                          color: AppColores.textoSobreOscuroSuave),
+                    ),
                 ],
               ),
             ),
