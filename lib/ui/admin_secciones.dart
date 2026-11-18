@@ -541,6 +541,28 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
         padding: const EdgeInsets.all(AppEspacio.lg),
         children: [
           seccionAdmin(context, Icons.receipt_long_rounded, 'Últimos gastos', [
+            // 1.36 H-B2 (136-684): la sección dice su total
+            // y cuántos gastos hay (antes solo filas sueltas
+            // y el corte a 10 era invisible).
+            if (gastos.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppEspacio.sm),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${gastos.length} gasto${gastos.length == 1 ? '' : 's'}',
+                        style: AppTexto.secundario,
+                      ),
+                    ),
+                    Text(
+                      '${fmtMonto(gastos.fold<double>(0, (a, g) => a + ((g['monto'] as num?)?.toDouble() ?? 0)))} CUP',
+                      style: AppTexto.cifraFila,
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (gastos.isEmpty)
               // 1.25 T107: vacío con icono, explicación y
               // la acción de registrar el primer gasto.
@@ -559,8 +581,16 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
                 title: Text('${g['concepto'] ?? '—'}'),
                 subtitle: Text(fmtFecha(g['fecha'] as String?)),
                 trailing: Text('${fmtMonto(g['monto'])} CUP',
-                    style:
-                        const TextStyle(fontWeight: FontWeight.bold)),
+                    style: AppTexto.cifraFila),
+              ),
+            if (gastos.length > 10)
+              Padding(
+                padding: const EdgeInsets.only(top: AppEspacio.xs),
+                child: Text(
+                  'Mostrando los últimos 10 de ${gastos.length}.',
+                  style: AppTexto.metadato.copyWith(
+                      color: AppColores.textoSecundario(context)),
+                ),
               ),
             const SizedBox(height: 8),
             BotonSecundario(

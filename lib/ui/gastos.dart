@@ -4,7 +4,10 @@ import '../app_log.dart';
 import '../negocio.dart';
 import '../permisos_entrenador.dart';
 import 'admin_secciones.dart';
+import 'app_bar.dart';
 import 'componentes.dart';
+import 'diseno.dart';
+import 'skeleton.dart';
 import 'dialogo_gasto.dart';
 import 'permisos_ui.dart';
 
@@ -111,13 +114,19 @@ class _GastosScreenState extends State<GastosScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_cargado) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      // 1.36 H-B2 (136-683): esqueleto y AppBar de la casa
+      // también en los estados previos de esta pantalla.
+      return Scaffold(
+        appBar: appBarIron(context, 'Gastos'),
+        body: const Padding(
+          padding: EdgeInsets.all(AppEspacio.lg),
+          child: SkeletonLista(items: 4),
+        ),
       );
     }
     if (_errorCarga != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Gastos')),
+        appBar: appBarIron(context, 'Gastos'),
         body: EstadoError(
           detalle: _errorCarga,
           onReintentar: _recargar,

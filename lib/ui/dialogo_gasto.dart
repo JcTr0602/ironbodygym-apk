@@ -106,6 +106,11 @@ class DialogoAgregarGasto extends StatefulWidget {
 class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
   final _conceptoCtrl = TextEditingController();
   final _montoCtrl = TextEditingController();
+  // 1.36 H-B2 (136-686): errores EN LÍNEA de cada campo
+  // (antes todo era un snack genérico «Concepto o monto
+  // inválidos» que no decía cuál campo fallaba).
+  String? _errorConcepto;
+  String? _errorMonto;
 
   // Delta Argón 1.27 (#2): un doble toque en
   // «Guardar» no debe disparar dos Navigator.pop: el
@@ -146,16 +151,22 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
     // formatos que nadie escribió a propósito.
     if (concepto.isEmpty ||
         !RegExp(r'^\d+([.,]\d+)?$').hasMatch(crudo)) {
-      mostrarSnack(context, 'Concepto o monto inválidos',
-          significado: SignificadoChip.alerta);
+      setState(() {
+        _errorConcepto =
+            concepto.isEmpty ? 'Escribe el concepto del gasto.' : null;
+        _errorMonto = crudo.isEmpty ||
+                !RegExp(r'^\d+([.,]\d+)?$').hasMatch(crudo)
+            ? 'Escribe el monto con el pad (solo números).'
+            : null;
+      });
       return;
     }
     var monto = double.tryParse(crudo.replaceAll(',', '.'));
     // Clase N-2 (1.22 #2): NaN/Infinity pasaban el <= 0 y
     // el payload reventaba al codificarse a JSON.
     if (monto == null || !monto.isFinite || monto <= 0) {
-      mostrarSnack(context, 'Concepto o monto inválidos',
-          significado: SignificadoChip.alerta);
+      setState(() =>
+          _errorMonto = 'El monto debe ser mayor que cero.');
       return;
     }
     setState(() => _guardando = true);
@@ -169,13 +180,17 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
       final comoDecimal = monto;
       final elegido = await showDialog<double>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('¿Cuánto es?'),
-          content: Text('Escribiste «$crudo». Eso puede ser '
+        // 1.36 H-B2 (136-688): el diálogo de ambigüedad
+        // con el DialogoApp de la casa, no un AlertDialog
+        // crudo.
+        builder: (ctx) => DialogoApp(
+          titulo: '¿Cuánto es?',
+          iconoTitulo: Icons.help_outline_rounded,
+          contenido: Text('Escribiste «$crudo». Eso puede ser '
               '${comoDecimal.toStringAsFixed(2)} CUP o '
               '${comoMiles.toStringAsFixed(0)} CUP. '
               'Elige el monto correcto:'),
-          actions: [
+          acciones: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, comoDecimal),
               child: Text('${comoDecimal.toStringAsFixed(2)} CUP'),
@@ -223,7 +238,13 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
         children: [
           CampoTexto(
               controller: _conceptoCtrl,
-              etiqueta: 'Concepto (ej: pago de la luz)'),
+              etiqueta: 'Concepto (ej: pago de la luz)',
+              errorText: _errorConcepto,
+              onChanged: (_) {
+                if (_errorConcepto != null) {
+                  setState(() => _errorConcepto = null);
+                }
+              }),
           const SizedBox(height: 8),
           // 1.32 (O2F2, Pieza 4): el monto del gasto se
           // teclea con el pad del mostrador. La validación
@@ -233,8 +254,21 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
             etiqueta: 'Monto (CUP)',
             valor: _montoCtrl.text,
             sufijo: 'CUP',
-            onTap: _editarMontoConPad,
+            onTap: () async {
+              setState(() => _errorMonto = null);
+              await _editarMontoConPad();
+            },
           ),
+          if (_errorMonto != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppEspacio.xs),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(_errorMonto!,
+                    style: AppTexto.metadato.copyWith(
+                        color: AppColores.errorTexto(context))),
+              ),
+            ),
         ],
       ),
       acciones: [
@@ -251,12 +285,28 @@ class _DialogoAgregarGastoState extends State<DialogoAgregarGasto> {
           onPressed: _guardando ? null : _guardar,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColores.naranja,
-            foregroundColor: Colors.white,
+            // 136-685: token de contraste sobre la marca.
+            foregroundColor: AppColores.sobreMarca,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadio.md),
             ),
           ),
-          child: const Text('Guardar'),
+          // 136-685: en curso se ve (spinner + rótulo).
+          child: _guardando
+              ? const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColores.sobreMarca)),
+                    SizedBox(width: AppEspacio.sm),
+                    Text('Guardando…'),
+                  ],
+                )
+              : const Text('Guardar'),
         ),
       ],
     );
