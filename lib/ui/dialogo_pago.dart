@@ -873,8 +873,16 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-                'Vence: ${fmtFecha(cliente['pagado_hasta'] as String?)}'),
+            // 1.36 H-C2 (136-610): vencimiento por el helper
+            // de la casa (acepta dinámico, convierte ISO con
+            // hora a día Habana) y «Sin vencimiento» si no hay.
+            Builder(builder: (_) {
+              final vence =
+                  normalizarFechaCobro(cliente['pagado_hasta']);
+              return Text(vence == null
+                  ? 'Sin vencimiento'
+                  : 'Vence: ${fmtFecha(vence)}');
+            }),
             // v1.0.14: aviso de precio reducido para menores.
             // 1.35 (UI-11): con el aviso de la casa.
             if (menor)

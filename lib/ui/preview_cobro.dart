@@ -299,7 +299,12 @@ class _PreviewCobroScreenState extends State<PreviewCobroScreen> {
             child: widget.montoValor != null
                 ? MontoAnimado(
                     valor: widget.montoValor!,
-                    formato: (_) => widget.montoTexto)
+                    // 1.36 H-C2 (136-613): el formato usa el
+                    // valor ANIMADO (antes devolvía el texto
+                    // final fijo y el contador no contaba).
+                    // El único llamador compone montoTexto
+                    // como fmtMonto(monto) CUP.
+                    formato: (v) => '${fmtMonto(v)} CUP')
                 : Text(widget.montoTexto,
                     textAlign: TextAlign.end,
                     style: AppTexto.metrica.copyWith(fontFeatures:

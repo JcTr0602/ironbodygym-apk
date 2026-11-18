@@ -450,6 +450,28 @@ class _PagoScreenState extends State<PagoScreen> {
   /// - Pago en espejo: se encola 'anular_pago' (op ya soportada por
   ///   el servidor).
   /// - Op 'enviada' (en camino): no se toca, se avisa que espere.
+  /// 1.36 H-C2 (136-606): por qué este cobro NO se puede
+  /// deshacer desde aquí (null = sí se puede). El botón se
+  /// pintaba para todo _ultimoMio y el motivo solo salía
+  /// tras tocar y confirmar: ahora se dice antes.
+  String? _motivoNoDeshacer(_Cobro u) {
+    if (u.esLocal) {
+      if (u.estadoOp == 'pendiente' || u.estadoOp == 'error') {
+        return null;
+      }
+      return 'Ese pago se está sincronizando: espera a que '
+          'suba para poder deshacerlo.';
+    }
+    if (u.pagoId == null) {
+      return 'Este cobro no se puede deshacer desde aquí.';
+    }
+    if (!_auth.isOwner) {
+      return 'Solo el dueño puede anular un pago ya '
+          'sincronizado.';
+    }
+    return null;
+  }
+
   Future<void> _deshacerUltimo() async {
     final u = _ultimoMio;
     if (u == null) return;
@@ -652,18 +674,33 @@ class _PagoScreenState extends State<PagoScreen> {
             ),
             if (ultimo != null) ...[
               const SizedBox(height: AppEspacio.sm),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.undo_rounded, size: 18),
-                  label: Text(
-                      'Deshacer último (${fmtMonto(ultimo.monto)} CUP)'),
-                  onPressed: _deshacerUltimo,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColores.error,
-                  ),
-                ),
-              ),
+              // 1.36 H-C2 (136-606): si no se puede deshacer,
+              // el botón nace apagado y el motivo se lee
+              // debajo, sin tener que tocar para descubrirlo.
+              Builder(builder: (_) {
+                final motivo = _motivoNoDeshacer(ultimo);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.undo_rounded, size: 18),
+                      label: Text(
+                          'Deshacer último (${fmtMonto(ultimo.monto)} CUP)'),
+                      onPressed: motivo == null ? _deshacerUltimo : null,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColores.error,
+                      ),
+                    ),
+                    if (motivo != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(motivo,
+                            style: AppTexto.metadato.copyWith(
+                                color: AppColores.alertaTexto(context))),
+                      ),
+                  ],
+                );
+              }),
             ],
           ],
         ),

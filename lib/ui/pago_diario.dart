@@ -136,7 +136,13 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     }
   }
 
+  // 1.36 H-C2 (136-617): token de petición del reporte —
+  // cambios rápidos de fecha no dejan que la respuesta
+  // vieja pise la vigente.
+  int _genReporte = 0;
+
   Future<void> _cargarReporteDatos() async {
+    final gen = ++_genReporte;
     setState(() => _cargandoReporte = true);
     final iso =
         '${_fechaReporte.year.toString().padLeft(4, '0')}-'
@@ -145,7 +151,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     final datos = await diariosDeFecha(iso);
     final turnos = await resumenDiarioPorTurno(iso);
     final ult7 = await totalesDiariosUltimos(7);
-    if (mounted) {
+    if (mounted && gen == _genReporte) {
       setState(() {
         _reporteDatos = datos;
         _reporteTurnos = turnos;
@@ -960,13 +966,21 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.chevron_left_rounded),
-                    onPressed: () {
-                      setState(() {
-                        _fechaReporte = _fechaReporte.subtract(
-                            const Duration(days: 1));
-                      });
-                      _cargarReporte();
-                    },
+                    // 1.36 H-C2 (136-617): el selector de
+                    // fecha nace en 2024 (firstDate): el
+                    // chevron no retrocede más allá.
+                    onPressed: _fechaReporte
+                                .toIso8601String()
+                                .substring(0, 10) ==
+                            '2024-01-01'
+                        ? null
+                        : () {
+                            setState(() {
+                              _fechaReporte = _fechaReporte.subtract(
+                                  const Duration(days: 1));
+                            });
+                            _cargarReporte();
+                          },
                   ),
                   Expanded(
                     child: InkWell(

@@ -51,6 +51,10 @@ class _PagosPorMetodoState
     extends State<PagosPorMetodo> {
   int _periodoIdx = 0; // 0=Hoy, 1=Mes, 2=Mes anterior
   bool _cargando = true;
+  // 1.36 H-C2 (136-628): la última carga falló: los totales
+  // del periodo anterior no se pintan como si fueran del
+  // nuevo.
+  bool _falloCarga = false;
   double _efectivo = 0;
   double _transferencia = 0;
   double _mixto = 0;
@@ -303,11 +307,17 @@ class _PagosPorMetodoState
           _nMixto = nMixto;
           _cargando = false;
           _yaCargo = true;
+          _falloCarga = false;
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _cargando = false);
+        // 1.36 H-C2 (136-628): el fallo deja el estado de
+        // error (con reintento), no los totales anteriores.
+        setState(() {
+          _cargando = false;
+          _falloCarga = true;
+        });
         // SL-5 G07-5: nada crudo a pantalla — el aviso usa
         // el mensaje amable de la casa, no la excepción.
         mostrarSnack(context, mensajeErrorAmable(e), significado: SignificadoChip.error);
@@ -363,7 +373,19 @@ class _PagosPorMetodoState
               },
             ),
           ),
-          if (_cargando && !_yaCargo)
+          if (_falloCarga && !_cargando)
+            // 1.36 H-C2 (136-628): fallo tras cambiar de
+            // periodo → error con reintento, no los totales
+            // del periodo anterior.
+            Expanded(
+              child: EstadoError(
+                titulo: 'No se pudo cargar el desglose',
+                detalle:
+                    'Los totales de este periodo no se pudieron leer.',
+                onReintentar: _cargar,
+              ),
+            )
+          else if (_cargando && !_yaCargo)
             const Expanded(
               child: EstadoCargando(texto: 'Cargando desglose…'),
             )

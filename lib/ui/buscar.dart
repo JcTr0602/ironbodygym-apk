@@ -20,6 +20,7 @@ import '../permisos_entrenador.dart';
 import '../tiempo.dart';
 import '../sync.dart';
 import '../cliente_protegido.dart';
+import '../errores_sync.dart';
 import 'acciones_acceso.dart';
 import 'app_bar.dart';
 import 'diagnostico_espejo_card.dart';
@@ -45,6 +46,20 @@ DateTime? _pullEnHabana(String ts) {
   final d = DateTime.tryParse(ts);
   if (d == null) return null;
   return d.isUtc ? aHabana(d) : d;
+}
+
+/// 1.36 H-C2 (136-594, pura): ¿el error de sync [errEnPared]
+/// (ya en pared Habana) es POSTERIOR a la última bajada
+/// buena [realInstante] (instante del motor)? La comparación
+/// se hace con ambos en pared Habana: comparar la pared
+/// contra el instante crudo desfasa 4-5 h según la zona
+/// del teléfono. Sin bajada buena, todo error cuenta.
+bool errorSyncPosteriorABajada(DateTime? errEnPared, DateTime? realInstante) {
+  if (errEnPared == null) return false;
+  if (realInstante == null) return true;
+  final realHab =
+      realInstante.isUtc ? aHabana(realInstante) : realInstante;
+  return errEnPared.isAfter(realHab);
 }
 
 class BuscarScreen extends StatefulWidget {
@@ -82,6 +97,9 @@ class _BuscarScreenState extends State<BuscarScreen>
     return _conteoNombres;
   }
   bool _busco = false;
+  // 1.36 H-C2 (136-597): la última búsqueda falló (lectura
+  // del espejo): el vacío no debe fingir «sin resultados».
+  bool _falloBusqueda = false;
   String _filtro = 'todos'; // todos | aldia | vencidos | porvencer | sinfoto
   bool _enNotas = false; // v1.0.15: búsqueda avanzada en notas
   String _rangoEdad = 'todas'; // todas | menores | 18-25 | 26-35 | 36-50 | 50+
@@ -220,6 +238,19 @@ class _BuscarScreenState extends State<BuscarScreen>
     // 1.35 (SP-00): la cáscara reconstruye el pilar al
     // reactivarlo (didUpdateWidget): releer el sello.
     unawaited(_refrescarSello());
+    // 1.36 H-C2 (136-595): si el marco salta con OTRO
+    // filtro inicial (Pulso del Día con la vista ya
+    // montada), se aplica y se rebusca: antes solo valía
+    // el de initState y el salto caía en el filtro viejo.
+    final f = widget.filtroInicial;
+    if (f != oldWidget.filtroInicial &&
+        f != null &&
+        const {'todos', 'aldia', 'vencidos', 'porvencer', 'sinfoto'}
+            .contains(f) &&
+        f != _filtro) {
+      setState(() => _filtro = f);
+      unawaited(_buscar());
+    }
   }
 
   @override
@@ -246,27 +277,30 @@ class _BuscarScreenState extends State<BuscarScreen>
       final parcial =
           parcialTs == null ? null : _pullEnHabana(parcialTs);
       final errEn = errTs == null ? null : _pullEnHabana(errTs);
+      // 1.36 H-C2 (136-594): errEn está en PARED Habana y
+      // `real` es un instante: compararlos tal cual desfasa
+      // 4-5 h según la zona del teléfono. La comparación se
+      // hace con AMBOS en pared Habana.
+      final realHab =
+          real == null ? null : (real.isUtc ? aHabana(real) : real);
       setState(() {
         // FIN-28: el instante del motor viene de tryParse
         // (UTC si trae offset); se normaliza a pared
         // Habana como hacía la lectura directa de la meta.
-        _ultimoPull =
-            real == null ? null : (real.isUtc ? aHabana(real) : real);
+        _ultimoPull = realHab;
         _ultimoPullParcial = parcial;
         // La corrida cortada solo «vigente» si su error es
         // posterior a la última bajada buena (si no, ya la
         // tapó una bajada limpia y no hay nada que decir).
         _bajadaCortadaPorPresupuesto =
             errCodigo == 'presupuesto_agotado' &&
-                errEn != null &&
-                (real == null || errEn.isAfter(real));
+                errorSyncPosteriorABajada(errEn, real);
         // SL-X2 (G02-2): cualquier error de corrida vigente
         // (no solo el de presupuesto) marca la lista como no
         // verificada a efectos del estado vacío.
         _syncFalloVigente = errCodigo != null &&
             errCodigo.isNotEmpty &&
-            errEn != null &&
-            (real == null || errEn.isAfter(real));
+            errorSyncPosteriorABajada(errEn, real);
       });
     } catch (_) {}
   }
@@ -290,6 +324,7 @@ class _BuscarScreenState extends State<BuscarScreen>
   }
 
   Future<void> _cargarConfigInterno() async {
+    final ordenPrevio = _orden;
     const cerrada = {'ninguna', 'cobrar', 'diario', 'venta', 'editar'};
     final der = await PerfilService.instance.getSwipeBuscarDer();
     final izq = await PerfilService.instance.getSwipeBuscarIzq();
@@ -312,6 +347,19 @@ class _BuscarScreenState extends State<BuscarScreen>
       }
       _compacta = compactaGuardada == '1';
     });
+    // 1.36 H-C2 (136-596): si el orden guardado difiere del
+    // usado en la carga ya pintada, se reaplica sobre los
+    // resultados presentes (antes la lista nacía con el
+    // orden por defecto y el guardado solo valía en la
+    // siguiente búsqueda). Con notas manda la relevancia,
+    // como en _buscar.
+    if (_orden != ordenPrevio &&
+        _res.isNotEmpty &&
+        !(_enNotas && _q.text.trim().isNotEmpty)) {
+      final r = [..._res];
+      _aplicarOrden(r);
+      if (mounted) setState(() => _res = r);
+    }
     // B1 (estéticas 1.19): aviso único la primera vez que hay
     // deslizables configurados. Se marca visto al mostrarse, así
     // no vuelve aunque no lo cierre.
@@ -358,7 +406,28 @@ class _BuscarScreenState extends State<BuscarScreen>
     }
   }
 
+  /// 1.36 H-C2 (136-597): red de error de la búsqueda —
+  /// un fallo de lectura no deja la lista vieja ni el vacío
+  /// mudo: con lista presente avisa en sencillo y sin lista
+  /// levanta el estado de error con reintento.
   Future<void> _buscar() async {
+    try {
+      await _buscarInterno();
+      if (mounted && _falloBusqueda) {
+        setState(() => _falloBusqueda = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      if (_res.isNotEmpty) {
+        mostrarSnack(context, mensajeErrorAmable(e),
+            significado: SignificadoChip.error);
+      } else {
+        setState(() => _falloBusqueda = true);
+      }
+    }
+  }
+
+  Future<void> _buscarInterno() async {
     // v1.3.1: descartar resultados obsoletos (race condition).
     final gen = ++_gen;
     final q = _q.text.trim();
@@ -580,6 +649,15 @@ class _BuscarScreenState extends State<BuscarScreen>
   bool get _sinVerificar => _ultimoPull == null || _syncFalloVigente;
 
   Widget _vacioBuscar() {
+    // 1.36 H-C2 (136-597): el fallo de búsqueda se dice
+    // como fallo, con reintento — no como «sin resultados».
+    if (_falloBusqueda) {
+      return EstadoError(
+        titulo: 'No se pudo buscar',
+        detalle: 'La lista no se pudo leer en este teléfono.',
+        onReintentar: () => unawaited(_buscar()),
+      );
+    }
     // 1.36 H-B2 (136-598): antes de la primera búsqueda no
     // hay vacío que afirmar: esqueleto de carga.
     if (!_busco) {
@@ -1880,6 +1958,10 @@ class _BuscarScreenState extends State<BuscarScreen>
       final r = await showModalBottomSheet<String>(
         context: context,
         isDismissible: false,
+        // 1.36 H-C2 (136-600): isDismissible no gobierna el
+        // arrastre: sin enableDrag:false la pasada guiada
+        // se cerraba arrastrando pese a ser no-descartable.
+        enableDrag: false,
         isScrollControlled: true,
         builder: (ctx) => HojaAccion(
           titulo: 'Aviso ${i + 1} de ${conTel.length}',
