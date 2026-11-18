@@ -100,7 +100,11 @@ List<DatoModuloPanel> modulosPanel({
       // dorado de módulo — el verde significa solo «al día».
       tinte: AppColores.moduloCaja,
       titulo: 'Caja y dinero',
-      estado: cajaHoyTotal > 0 || pendCajaTotal > 0
+      // 1.36 H-C2 (136-855): el estado y el distintivo
+      // salen del MISMO conjunto (pendCaja): antes el
+      // texto miraba los totales y el distintivo el
+      // conteo, y podían discrepar.
+      estado: cajaHoyTotal > 0 || pendCaja > 0
           ? 'Hoy \$${fmtMonto(cajaHoyTotal)} cobrado'
               '${pendCaja > 0 ? ' · \$${fmtMonto(pendCajaTotal)} por liquidar' : ''}'
           : 'Sin cobros registrados hoy',
@@ -136,7 +140,11 @@ List<DatoModuloPanel> modulosPanel({
           _conteo(stockCritico, 'producto en stock crítico',
               'productos en stock crítico'),
       ].join(' · ').ifEmpty('Reservas y stock al día'),
-      badge: reservas > 0 ? reservas : null,
+      // 136-855: el distintivo suma el mismo conjunto
+      // que el texto enseña (reservas + stock crítico).
+      badge: (reservas + stockCritico) > 0
+          ? reservas + stockCritico
+          : null,
     ),
     DatoModuloPanel(
       // El icono pasa de «precios» a «ajustes»: el

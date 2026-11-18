@@ -860,11 +860,22 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   Future<void> _comprobarCierres() async {
     if (_comprobando) return;
     setState(() => _comprobando = true);
-    final r = await TurnoService.instance.reconciliarConServidor();
-    if (!mounted) return;
-    setState(() => _comprobando = false);
-    _snack(textoComprobacionCierres(ok: r.ok, marcados: r.marcados));
-    if (r.ok && r.marcados > 0) await _cargar();
+    // 1.36 H-C2 (136-775): try/finally — si la
+    // reconciliación LANZA (fuera de sus caminos con
+    // ok=false), el spinner baja y el fallo se dice.
+    try {
+      final r = await TurnoService.instance.reconciliarConServidor();
+      if (!mounted) return;
+      _snack(textoComprobacionCierres(ok: r.ok, marcados: r.marcados));
+      if (r.ok && r.marcados > 0) await _cargar();
+    } catch (e) {
+      if (mounted) {
+        _snack('No se pudo comprobar los cierres: '
+            '${mensajeErrorAmable(e)}');
+      }
+    } finally {
+      if (mounted) setState(() => _comprobando = false);
+    }
   }
 
   @override

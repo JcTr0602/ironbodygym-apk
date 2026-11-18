@@ -36,6 +36,20 @@ String isoFechaTurno(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
+/// 1.36 H-C2 (136-792, pura): el día de negocio de un
+/// sello de turno — 'YYYY-MM-DD' si el texto empieza por
+/// una fecha ISO válida (con hora o sin ella); si no, el
+/// texto tal cual (la comparación seguirá fallando contra
+/// una fecha bien formada, como debe ser).
+String fechaDiaTurno(dynamic v) {
+  final s = '${v ?? ''}'.trim();
+  if (s.length >= 10) {
+    final p = s.substring(0, 10);
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(p)) return p;
+  }
+  return s;
+}
+
 /// Ventanas de franja de UN día derivadas del horario del gym
 /// (1.25 T30): bloque 1 del día = mañana, bloque 2 = tarde;
 /// null = ese bloque no existe ese día.
@@ -279,8 +293,11 @@ bool cierreCorrespondeApertura(
       tidApertura.isNotEmpty) {
     return tidCierre == tidApertura;
   }
-  if ('${cierre['fecha'] ?? ''}' !=
-      '${apertura['fecha_turno'] ?? ''}') {
+  // 1.36 H-C2 (136-792): la fecha se casa por su día
+  // normalizado, no por el texto crudo (una fila legada
+  // con hora no dejaba de corresponder a su apertura).
+  if (fechaDiaTurno(cierre['fecha']) !=
+      fechaDiaTurno(apertura['fecha_turno'])) {
     return false;
   }
   final turnoCierre = '${cierre['turno'] ?? ''}'.toLowerCase();

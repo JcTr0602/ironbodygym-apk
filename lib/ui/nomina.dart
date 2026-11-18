@@ -1812,6 +1812,16 @@ class _NominaScreenState extends State<NominaScreen> {
         break;
       }
     }
+    // 1.36 H-C2 (136-797): la gaveta inicial ES la
+    // opción que el selector va a mostrar — si la
+    // reconocida no está entre las personas de la foto,
+    // manda la primera (antes el selector pintaba una y
+    // el guardado resolvía otra: fotoPersonas[gaveta]
+    // podía ser null y descuentaA salía vacío).
+    if (!fotoPersonas.containsKey(gaveta) &&
+        fotoPersonas.isNotEmpty) {
+      gaveta = fotoPersonas.keys.first;
+    }
     final nombreEntrenador =
         fotoPersonas[entrenadorId]?.nombre ?? 'el entrenador';
     final ok = await showDialog<bool>(

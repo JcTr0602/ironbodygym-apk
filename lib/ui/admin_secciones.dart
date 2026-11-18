@@ -348,14 +348,17 @@ class SeccionAjustesScreen extends StatefulWidget {
   final Future<void> Function(TipoPago) onEliminarTipo;
   final Future<void> Function() onAgregarTipo;
   final Future<void> Function() onGuardarTipos;
-  final Map<String, TextEditingController> montos;
-  final List<(String, String)> clavesMonto;
-  final Future<void> Function() onGuardarMontos;
+  // 1.36 H-C2 (136-824): los campos montos/clavesMonto/
+  // onGuardarMontos se fueron: la sección 'precios' dejó
+  // de existir en esta pantalla en 1.25 (T99, la lista
+  // única vive en el Centro de Precios de admin.dart) y
+  // ningún llamador pasa ya 'precios'. Campos muertos
+  // fuera.
   // v1.2.4: datos bancarios
   final Map<String, TextEditingController> bancarios;
   final Future<void> Function() onGuardarBancarios;
   final bool Function(String) esTipoFijo;
-  // v1.3.9: filtrar por sección ('tipos', 'precios', 'bancarios', null=todas)
+  // v1.3.9: filtrar por sección ('tipos', 'bancarios', null=todas)
   final String? seccion;
 
   const SeccionAjustesScreen({
@@ -366,9 +369,6 @@ class SeccionAjustesScreen extends StatefulWidget {
     required this.onEliminarTipo,
     required this.onAgregarTipo,
     required this.onGuardarTipos,
-    required this.montos,
-    required this.clavesMonto,
-    required this.onGuardarMontos,
     required this.bancarios,
     required this.onGuardarBancarios,
     required this.esTipoFijo,
@@ -725,7 +725,13 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       ahoraServidorUtc: _ahoraServidor, // 1.28 M1-A11/F8: sin hora del servidor, sinVerificar (no reloj del dispositivo)
       enTurno: tid != null && _enTurnoHoy.contains(tid),
     );
-    final etiqueta = etiquetaUltimoSync(f, ahoraHabana());
+    // 1.36 H-C2 (136-827): la etiqueta usa LA MISMA
+    // hora de referencia que la clasificación (la del
+    // servidor): con el reloj del dispositivo, un
+    // teléfono podía pintarse «hace 2 h» y clasificarse
+    // atrasado a la vez.
+    final etiqueta =
+        etiquetaUltimoSync(f, _ahoraServidor ?? ahoraHabana());
     final (Color? color, IconData? icono, String sufijo) =
         switch (estado) {
       EstadoSyncTelefono.atrasado => (

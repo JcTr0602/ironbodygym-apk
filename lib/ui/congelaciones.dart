@@ -79,30 +79,52 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
     _cargar();
   }
 
+  /// 1.36 H-C2 (136-874): el espejo local no trajo
+  /// datos en la última carga — el vacío se dice
+  /// distinto de «no hay solicitudes».
+  bool _sinDatosLocales = false;
+
   Future<void> _cargar() async {
     // Pinta primero con el espejo local (offline-first) y
     // refresca después con la RPC enriquecida.
-    final espejo = await CongelacionesService.instance.leerEspejo();
-    if (espejo.ok && mounted) {
-      setState(() {
-        _lista = espejo.datos;
-        _cargando = false;
-      });
-    }
-    await _enriquecerClientes();
-    final remoto = await CongelacionesService.instance.listarRemoto();
-    if (!mounted) return;
-    if (remoto.ok) {
-      setState(() {
-        _lista = remoto.datos;
-        _errorRemoto = null;
-        _cargando = false;
-      });
-    } else {
-      setState(() {
-        _errorRemoto = remoto.error;
-        _cargando = false;
-      });
+    // 1.36 H-C2 (136-874): try/catch/finally — una
+    // lectura que LANZA (no que devuelve fallo) ya no
+    // deja el esqueleto eterno: la carga baja siempre.
+    try {
+      final espejo = await CongelacionesService.instance.leerEspejo();
+      _sinDatosLocales = !espejo.ok || espejo.datos.isEmpty;
+      if (espejo.ok && mounted) {
+        setState(() {
+          _lista = espejo.datos;
+          _cargando = false;
+        });
+      }
+      await _enriquecerClientes();
+      final remoto = await CongelacionesService.instance.listarRemoto();
+      if (!mounted) return;
+      if (remoto.ok) {
+        setState(() {
+          _lista = remoto.datos;
+          _errorRemoto = null;
+          _cargando = false;
+        });
+      } else {
+        setState(() {
+          _errorRemoto = remoto.error;
+          _cargando = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorRemoto ??=
+              'No se pudo cargar: ${mensajeErrorAmable(e)}';
+        });
+      }
+    } finally {
+      if (mounted && _cargando) {
+        setState(() => _cargando = false);
+      }
     }
   }
 
@@ -347,12 +369,19 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                     ),
                   if (_lista.isEmpty)
                     // (1.36 H-B4 136-876) vacío de la casa.
+                    // 136-874: sin datos LOCALES y sin
+                    // remoto, el vacío no afirma «no hay
+                    // solicitudes»: dice que no se sabe.
                     EstadoVacio(
                       icono: Icons.ac_unit_rounded,
-                      titulo: 'Sin solicitudes',
-                      subtitulo:
-                          'Cuando un cliente pida congelar su '
-                          'mensualidad desde su app, aparecerá aquí.',
+                      titulo: _sinDatosLocales && _errorRemoto != null
+                          ? 'Sin datos en este teléfono'
+                          : 'Sin solicitudes',
+                      subtitulo: _sinDatosLocales && _errorRemoto != null
+                          ? 'No hay copia local y el servidor no '
+                              'respondió. Recarga cuando haya conexión.'
+                          : 'Cuando un cliente pida congelar su '
+                              'mensualidad desde su app, aparecerá aquí.',
                       textoAccion: 'Recargar',
                       onAccion: _cargar,
                     ),

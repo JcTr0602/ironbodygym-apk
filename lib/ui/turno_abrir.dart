@@ -95,15 +95,28 @@ Future<(bool, String?)> elegirCubreA(
     builder: (ctx) => SimpleDialog(
       title: const Text('¿A quién cubres hoy?'),
       children: [
-        SimpleDialogOption(
-          onPressed: () => Navigator.pop(ctx, -1),
-          child: const Text('A nadie — es mi turno'),
-        ),
-        for (var i = 0; i < nombres.length; i++)
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, i),
-            child: Text('Cubro a ${nombres[i]}'),
+        // 1.36 H-C2 (136-786): lista acotada con scroll —
+        // con muchos entrenadores el diálogo no crece sin
+        // límite.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 420),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, -1),
+                  child: const Text('A nadie — es mi turno'),
+                ),
+                for (var i = 0; i < nombres.length; i++)
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(ctx, i),
+                    child: Text('Cubro a ${nombres[i]}'),
+                  ),
+              ],
+            ),
           ),
+        ),
       ],
     ),
   );
@@ -119,12 +132,15 @@ Future<(bool, String?)> elegirCubreA(
 /// y el turno NO se abre: nunca un «normal» fingido.
 Future<bool> abrirTurnoConSuplente(BuildContext context) async {
   final nombres = await nombresOtrosEntrenadores();
-  if (nombres.isEmpty || !context.mounted) {
+  // 1.36 H-C2 (136-786): el contexto se comprueba tras
+  // CADA await, no solo tras el primero.
+  if (!context.mounted) return false;
+  if (nombres.isEmpty) {
     await TurnoService.instance.abrirTurno();
     return true;
   }
   final (cancelado, cubreA) = await elegirCubreA(context, nombres);
-  if (cancelado) return false;
+  if (cancelado || !context.mounted) return false;
   await TurnoService.instance.abrirTurno(cubreA: cubreA);
   return true;
 }
@@ -152,6 +168,8 @@ Future<void> marcarCubreA(BuildContext context) async {
     return;
   }
   final (cancelado, cubreA) = await elegirCubreA(context, nombres);
-  if (cancelado) return;
+  // 136-786: tras el diálogo, el contexto sigue vivo o
+  // no se actúa.
+  if (cancelado || !context.mounted) return;
   await TurnoService.instance.abrirTurno(cubreA: cubreA);
 }

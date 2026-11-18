@@ -283,10 +283,19 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                         ? 'Mes cerrado el '
                             '${textoUltimaSyncOk(e.cerradoEn)}. '
                             'Esta es la constancia del cierre.'
-                        : '${e.verificados} de ${e.pasos.length} '
-                            'pasos verificados. La ruta guía y '
-                            'comprueba; cada paso lo confirmas tú '
-                            'en su pantalla.',
+                        : e.constanciaInvalida
+                            // 1.36 H-C2 (136-813): hay
+                            // constancia pero su fecha no
+                            // se puede leer: se dice, no se
+                            // ofrece cerrar otra vez.
+                            ? 'Este mes tiene una constancia '
+                                'de cierre guardada, pero su '
+                                'fecha no se puede leer. No se '
+                                'ofrece cerrarlo otra vez.'
+                            : '${e.verificados} de ${e.pasos.length} '
+                                'pasos verificados. La ruta guía y '
+                                'comprueba; cada paso lo confirmas tú '
+                                'en su pantalla.',
                     style: AppTexto.secundario,
                     textAlign: TextAlign.center,
                   ),
@@ -406,7 +415,12 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
                     _ => 'Ir a Ajustes',
                   }),
                 ),
-                if (paso.esManual && !paso.verificado)
+                // 1.36 H-C2 (136-813): con el mes ya
+                // cerrado no se confirman pasos: la
+                // constancia no se reescribe a posteriori.
+                if (paso.esManual &&
+                    !paso.verificado &&
+                    _estado?.cerradoEn == null)
                   FilledButton(
                     onPressed: () => _confirmarManual(paso),
                     child: Text(paso.id == 'nomina'

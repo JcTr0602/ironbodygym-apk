@@ -1961,7 +1961,11 @@ class _HomeScreenState extends State<HomeScreen>
         buzon: _tarjetaBuzon(),
         // E3 (C6-01): la tarjeta existe en la portada solo
         // si trae algo que Por Decidir no anuncia ya.
-        hayBuzon: _buzon.hayPortada,
+        // 1.36 H-C2 (136-873): la tarjeta solo se pinta
+        // con un conteo VERIFICADO (alguna fuente leída
+        // de verdad): el flag existía en ConteoBuzon y
+        // la portada no lo consultaba.
+        hayBuzon: _buzon.verificado && _buzon.hayPortada,
         alertas: _tiraAlertas(esDueno: true),
         informe: _informeSemanaMes(),
         onPersonalizar: _personalizarEstacion,

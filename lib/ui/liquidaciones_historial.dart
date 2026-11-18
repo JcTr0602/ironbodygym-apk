@@ -14,6 +14,7 @@ import '../app_log.dart';
 import '../auth.dart';
 import '../errores_sync.dart';
 import '../negocio.dart';
+import '../nomina_calc.dart';
 import 'app_bar.dart';
 import 'arqueo.dart';
 import 'componentes.dart';
@@ -142,12 +143,15 @@ class _LiquidacionesHistorialScreenState
   }
 
   Widget _fila(Map<String, dynamic> h) {
+    // 1.36 H-C2 (136-811): importes con el lector
+    // tolerante de la casa (texto también vale): un
+    // importe serializado como texto pintaba 0.
     final entregado =
-        (h['monto_entregado'] as num?)?.toDouble() ?? 0;
+        NominaCalc.montoTolerante(h['monto_entregado']) ?? 0;
     final esperado =
-        (h['monto_esperado'] as num?)?.toDouble() ?? 0;
+        NominaCalc.montoTolerante(h['monto_esperado']) ?? 0;
     final arrastre =
-        (h['saldo_arrastre'] as num?)?.toDouble() ?? 0;
+        NominaCalc.montoTolerante(h['saldo_arrastre']) ?? 0;
     final moneda = '${h['moneda'] ?? 'CUP'}';
     final parcial = h['estado'] == 'parcial';
     final tid =

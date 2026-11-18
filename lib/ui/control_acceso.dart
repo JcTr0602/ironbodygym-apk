@@ -242,6 +242,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       setState(() => _cargando = false);
     }
     final ok = await cache.cargar();
+    // 1.36 H-C2 (136-881): una carga superada no sigue
+    // escribiendo estado tras sus awaits.
+    if (!mounted || gen != _genCarga) return;
     try {
       // Autoauditoría 1.22 #2: lectura con timeout (12 s). La
       // caché de accesos ya trae el suyo (10 s), pero esta RPC
@@ -270,7 +273,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
     } catch (_) {
       // Sin espejo local disponible: nadie se marca (fail-safe).
     }
-    if (mounted) {
+    // 136-881: el setState final también exige ser la
+    // generación vigente, no solo estar montado.
+    if (mounted && gen == _genCarga) {
       setState(() {
         _cargando = false;
         if (!ok && !AccesoAppCache.instance.cargado) {

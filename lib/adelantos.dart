@@ -715,20 +715,25 @@ class AdelantosService {
       final snap = await snapshotNomina(mes,
           entrenadorId: entrenadorId, telegramId: telegramId);
       if (snap == null) continue;
-      final base = (snap['base'] as num?)?.toDouble();
-      final tarifaFoto =
-          (snap['tarifa_por_cliente'] as num?)?.toDouble();
+      // 1.36 H-C2 (136-807): la lectura de la foto pasa
+      // por el lector tolerante ÚNICO (importesDeFoto-
+      // Liquidacion acepta texto además de num): una foto
+      // con importes serializados como texto ya no se
+      // salta en silencio dejando el cálculo vivo.
+      final imp = importesDeFotoLiquidacion(snap);
+      if (imp == null) continue;
+      final base = imp.base;
+      final tarifaFoto = imp.tarifa;
       if (base != null) {
         brutoPorMes[mes] = base;
       } else if (tarifaFoto != null && conteoPorMes[mes] != null) {
         brutoPorMes[mes] = conteoPorMes[mes]! * tarifaFoto;
       }
-      final bonosFoto = (snap['bonos'] as num?)?.toDouble();
-      if (bonosFoto != null) bonosPorMes[mes] = bonosFoto;
-      final comisionesFoto =
-          (snap['comisiones'] as num?)?.toDouble();
-      if (comisionesFoto != null) {
-        comisionesPorMes[mes] = comisionesFoto;
+      // Bonos/comisiones solo pisan el cálculo si la foto
+      // TRAE la clave (la semántica previa de salto).
+      if (snap.containsKey('bonos')) bonosPorMes[mes] = imp.bonos;
+      if (snap.containsKey('comisiones')) {
+        comisionesPorMes[mes] = imp.comisiones;
       }
     }
   }

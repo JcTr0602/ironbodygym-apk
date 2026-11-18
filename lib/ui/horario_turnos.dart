@@ -67,6 +67,10 @@ class _HorarioTurnosScreenState extends State<HorarioTurnosScreen> {
   Map<int, Map<String, String?>> _inicial = {};
 
   bool get _hayCambios {
+    // 1.36 H-C2 (136-781): durante la carga _inicial aún
+    // está vacío y _sel ya se está poblando: no hay
+    // cambios DEL USUARIO que proteger todavía.
+    if (_cargando) return false;
     for (final d in _sel.keys) {
       for (final f in _sel[d]!.keys) {
         if (_sel[d]![f] != _inicial[d]?[f]) return true;

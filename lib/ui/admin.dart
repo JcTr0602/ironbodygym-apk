@@ -1474,88 +1474,12 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   // -- montos ----------------------------------------------------------
-  // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
-  Future<void> _guardarMontos() async {
-    if (!AuthService().isOwner) return;
-    if (_operacionEnCurso) return;
-    _operacionEnCurso = true;
-    try {
-      await _guardarMontosImpl();
-    } finally {
-      _operacionEnCurso = false;
-    }
-  }
-
-  Future<void> _guardarMontosImpl() async {
-    // 1.23 (B3 Paso 3a): parseo puro en config_precios_bancarios
-    // (solo finitos y > 0; Infinity se colaba como precio).
-    // 1.36 H-B3 (136-841): con los errores POR CLAVE — un
-    // importe inválido ya no se descarta en silencio: se
-    // nombra su campo y no se guarda nada hasta corregirlo.
-    final parseo = parsearCambiosMontosConErrores(_montos);
-    if (parseo.errores.isNotEmpty) {
-      final detalle = parseo.errores.entries
-          .map((e) => '${etiquetaMonto(e.key)}: ${e.value}')
-          .join(' · ');
-      mostrarSnack(context, 'Revisa los precios: $detalle',
-          significado: SignificadoChip.error);
-      return;
-    }
-    final cambios = parseo.cambios;
-    if (cambios.isEmpty) {
-      // 1.36 H-B3 (136-841): el vacío NO borra — conserva
-      // el valor actual, y el aviso lo dice.
-      mostrarSnack(context, 'No hay montos válidos para guardar (un campo vacío conserva su valor actual)', significado: SignificadoChip.alerta);
-      return;
-    }
-    // SL-9 (A1): la confirmación muestra las DIFERENCIAS
-    // (viejo → nuevo) contra los ajustes vigentes, no solo los
-    // valores nuevos; sin diferencias no hay nada que aplicar
-    // y no se encola nada.
-    final ajVigentes = await LocalDb.instance.getAjustes();
-    if (!mounted) return;
-    final diffs = lineasDiffMontos(cambios, ajVigentes);
-    if (diffs.isEmpty) {
-      mostrarSnack(context, 'Los precios ya son esos; no hay cambios.', significado: SignificadoChip.alerta);
-      return;
-    }
-    final mensaje = [
-      for (final d in diffs) '• $d',
-      '',
-      'Se aplicará en la próxima sincronización.',
-    ].join('\n');
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Cambiar precios',
-      mensaje: mensaje,
-      aceptar: 'Confirmar',
-      icono: Icons.price_change_rounded,
-    );
-    if (ok != true || !mounted) return;
-    // Autoauditoría 1.22 #2 (D2-01): ops + espejo en UNA
-    // transacción (aplicarCambiosMontos, B3 Paso 3a).
-    await aplicarCambiosMontos(cambios);
-    if (!mounted) return;
-    mostrarSnack(context, 'Precios guardados (se sincronizarán)', significado: SignificadoChip.exito);
-    SyncEngine.instance.push();
-    // v1.7.0 (G2 + panel): el precio del App Plus se REPUBLICA a
-    // info_publica al guardar (patrón del horario canónico de la
-    // 1.6.0): la cotización de S2 lee el precio de ahí, no del
-    // ajuste local. La republicación va con reintento durable:
-    // la clave queda marcada como pendiente ANTES del
-    // intento (fila en la tabla info_publica_pendiente, v37) y
-    // el gancho de fin de sync la republica tras cada
-    // sincronización exitosa hasta lograrlo — si el guardado
-    // fue sin red, el precio público no queda obsoleto en
-    // silencio esperando a que el dueño vuelva a guardar.
-    final precioPlus = cambios['precio_app_plus'];
-    if (precioPlus != null) {
-      final entero = precioPlus.round();
-      unawaited(invitados_svc.InvitadosService()
-          .guardarInfoPublicaConReintento(
-              'precio_app_plus', '$entero'));
-    }
-  }
+  // 1.36 H-C2 (136-824): _guardarMontos/_guardarMontosImpl
+  // se fueron con la sección 'precios' muerta de
+  // SeccionAjustesScreen: su único llamador era el campo
+  // onGuardarMontos de esa pantalla. La vía viva de
+  // precios es el Centro de Precios (aplicarCambiosMontos
+  // en bloque2_resto.dart), que no pasaba por aquí.
 
   /// v1.2.4: Guardar datos bancarios (strings, no montos).
   // Ronda 17 M2: guarda de dueño + candado anti-doble-toque.
@@ -2332,7 +2256,15 @@ class _AdminScreenState extends State<AdminScreen> {
           titulo: 'NECESITA TU ATENCIÓN',
           variante: VarianteEncabezado.panel,
           aviso: true),
-        if (pendientes.isEmpty && !_swrSolicitudes.cargando)
+        // 1.36 H-C2 (136-821): «Todo en orden» solo
+        // cuando TODAS las fuentes de atención cargaron
+        // sin fallo — antes bastaba que solicitudes no
+        // estuviera cargando y el verde salía con los
+        // reportes aún sin llegar o los vales en error.
+        if (pendientes.isEmpty &&
+            !_swrSolicitudes.cargando &&
+            !_swrReportes.cargando &&
+            (_valesCargados || !_valesError))
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: AppEspacio.lg, vertical: AppEspacio.md),
@@ -3588,9 +3520,6 @@ class _AdminScreenState extends State<AdminScreen> {
       onEliminarTipo: _eliminarTipo,
       onAgregarTipo: _agregarTipo,
       onGuardarTipos: _guardarTipos,
-      montos: _montos,
-      clavesMonto: clavesMontoConfig,
-      onGuardarMontos: _guardarMontos,
       bancarios: _bancarios,
       onGuardarBancarios: _guardarBancarios,
       esTipoFijo: _esTipoFijo,

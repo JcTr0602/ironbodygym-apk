@@ -342,6 +342,11 @@ class _PanelPermisosState extends State<PanelPermisos> {
       return;
     }
     final gen = ++_generacion;
+    // 1.36 H-C2 (136-867): la sesión al empezar — si
+    // cambia DURANTE la RPC (cierre/relevo de cuenta),
+    // la respuesta es de OTRA sesión: se descarta y la
+    // lista se limpia, no se pinta con datos ajenos.
+    final sesionAlEmpezar = AuthService().userId;
     if (mounted) {
       setState(() {
         _cargando = true;
@@ -374,6 +379,15 @@ class _PanelPermisosState extends State<PanelPermisos> {
       // Guarda de generación: una respuesta vieja no
       // pisa a la del refresco más nuevo.
       if (!mounted || gen != _generacion) return;
+      // 136-867: cambio de sesión en vuelo — limpiar.
+      if (AuthService().userId != sesionAlEmpezar) {
+        setState(() {
+          _entrenadores = [];
+          _cargando = false;
+          _errorCarga = null;
+        });
+        return;
+      }
       final lista = construirListaPermisos(res, usuarios);
       setState(() {
         _entrenadores = lista;

@@ -330,7 +330,16 @@ class _HorarioGymState extends State<HorarioGym> {
                 _nombres[ds.clamp(1, 7)]);
           })
           .toList();
-      if (lista.length == 7 && mounted) {
+      if (lista.length == 7 && mounted && _hayCambios) {
+        // 1.36 H-C2 (136-787): el usuario editó sobre la
+        // copia de caché mientras la RPC venía: sus
+        // ediciones mandan, el refresco no las pisa (ni
+        // la caché, que conserva su copia editada).
+        setState(() {
+          _cargando = false;
+          _refrescoFallo = false;
+        });
+      } else if (lista.length == 7 && mounted) {
         setState(() {
           _dias = lista;
           _firmaCargada = _firmaActual;

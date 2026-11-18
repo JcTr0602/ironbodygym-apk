@@ -209,11 +209,28 @@ class _AjustesScreenState extends State<AjustesScreen> {
   // los reales; con ella la pantalla avisa del fallo.
   bool _cargaPerfilFallo = false;
 
+  // 1.36 H-C2 (136-836): archivos que el respaldo NO
+  // incluye (fotos/comprobantes solo de este teléfono),
+  // contados al abrir: la opción de exportar lo dice
+  // antes del toque, no recién en el diálogo.
+  int _archivosSinSubir = 0;
+
+  Future<void> _refrescarSinSubir() async {
+    try {
+      final (f, c) = await _sinSubirRespaldo();
+      if (mounted) setState(() => _archivosSinSubir = f + c);
+    } catch (_) {
+      // Sin conteo no se afirma nada: la opción queda
+      // con su subtítulo neutro.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _cargar();
     _refrescarExencionBateria();
+    _refrescarSinSubir();
   }
 
   // 1.25 T113: buscador de ajustes.
@@ -2236,8 +2253,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   _opcion(
                     icono: Icons.cloud_upload_rounded,
                     titulo: 'Exportar respaldo',
-                    subtitulo:
-                        'Guarda la base de datos para compartirla',
+                    // 136-836: el subtítulo refleja los
+                    // archivos pendientes REALES.
+                    subtitulo: _archivosSinSubir > 0
+                        ? 'Hay $_archivosSinSubir archivo(s) sin '
+                            'subir que el respaldo no incluye'
+                        : 'Guarda la base de datos para compartirla',
                     // 1.36 H-B3 (136-844): progreso y
                     // bloqueo mientras una operación larga
                     // de Datos corre.

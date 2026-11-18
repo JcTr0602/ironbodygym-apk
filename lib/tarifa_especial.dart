@@ -382,9 +382,26 @@ Future<Map<int, Map<String, dynamic>>> tarifasActivasPorCliente(
 /// Argón en FIN-2: vale el motor.)
 String estadoRevisionTarifa(
     Map<String, dynamic> fila, String hoyIso) {
-  final hasta = fila['vigente_hasta'] as String?;
-  if (hasta == null || hasta.length < 10) return 'sin_fecha';
-  final h = hasta.substring(0, 10);
+  // 1.36 H-C2 (136-847): el sello se PARSEA y se lleva
+  // a su día de La Habana antes de comparar — antes un
+  // `as String?` con un valor no-texto tumbaba la
+  // revisión y un sello con hora/offset se cortaba a
+  // ciegas por los 10 primeros caracteres.
+  final crudo = fila['vigente_hasta'];
+  final hasta = crudo is String ? crudo : null;
+  if (hasta == null || hasta.isEmpty) return 'sin_fecha';
+  final String h;
+  if (hasta.length == 10 &&
+      RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(hasta)) {
+    h = hasta; // fecha sola: ya es el día de negocio
+  } else {
+    final dt = DateTime.tryParse(hasta);
+    if (dt == null) return 'sin_fecha';
+    final hab = aHabana(dt.toUtc());
+    h = '${hab.year.toString().padLeft(4, '0')}-'
+        '${hab.month.toString().padLeft(2, '0')}-'
+        '${hab.day.toString().padLeft(2, '0')}';
+  }
   if (h.compareTo(hoyIso) < 0) return 'vencida';
   DateTime? aUtc(String iso) {
     try {
