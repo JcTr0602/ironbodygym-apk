@@ -5,10 +5,27 @@
 ///   el TOTAL de activos (`activosCount()`, vía `_activosMes`)
 ///   bajo la etiqueta «Al día», mientras su destino abre el
 ///   Directorio con el filtro `aldia` (dias > 7, la Casa
-///   cuenta) cuyo chip cuenta OTRO conjunto. La corrección:
-///   la celda enseña el conteo de `conteosDeBuscar` sobre la
-///   misma base del Directorio — la cifra y el destino por
-///   fin significan lo mismo.
+///   cuenta) cuyo chip cuenta OTRO conjunto. La corrección
+///   de la 1.32: la celda enseña el conteo de
+///   `conteosDeBuscar` sobre la misma base del Directorio —
+///   la cifra y el destino por fin significan lo mismo.
+///   RE-APUNTE 1.36 (bloque J-3, adjudicación de Jc
+///   2026-11-17 «re-apuntar, no jubilar»): la 1.35 (M-2)
+///   jubiló la fila «Vencidos / Al día» del Mostrador — la
+///   celda ancla ya no existe en Home. La casilla que la
+///   sustituyó en la composición vigente es el propio chip
+///   «Al día (N)» del Directorio (`lib/ui/buscar.dart`,
+///   filtro `aldia`): el test se re-apunta a esa casilla y
+///   conserva la vigilancia — la cifra «al día» que se
+///   enseña es el conjunto de su filtro (dias > 7 + Casa),
+///   no el total de activos — verificada ahora EN el
+///   destino: el chip dice 3, «Todos» dice 5 y al tocar el
+///   chip la lista enseña exactamente esos 3. DIFERENCIA
+///   DECLARADA: ya no se vigila una celda de Home contra
+///   su destino (Home ya no promete ninguna cifra «al
+///   día»: esa mitad de la vigilancia quedó sin objeto),
+///   se vigila la coherencia cifra↔lista dentro del
+///   Directorio mismo.
 /// - Y-2 (BAJA, residuo D-5): el selector de cliente del
 ///   envío de plantillas pintaba el `telefono` CRUDO como
 ///   subtítulo; en un migrado ese campo trae el carnet y el
@@ -26,7 +43,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ironbody_gym/localdb.dart';
 import 'package:ironbody_gym/plantilla_mensaje.dart';
 import 'package:ironbody_gym/tiempo.dart';
-import 'package:ironbody_gym/ui/home.dart';
+import 'package:ironbody_gym/ui/buscar.dart';
 import 'package:ironbody_gym/ui/plantillas_mensaje.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -127,17 +144,6 @@ Future<void> _sembrarCliente(int id, Map<String, dynamic> datos) async {
   }, id);
 }
 
-Future<void> _descartarDialogos(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
-    final hay = find.byType(AlertDialog).evaluate().isNotEmpty ||
-        find.byType(Dialog).evaluate().isNotEmpty;
-    if (!hay) break;
-    Navigator.of(tester.element(find.byType(Navigator).first))
-        .popUntil((r) => r.isFirst);
-    await tester.pump(const Duration(milliseconds: 400));
-  }
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -176,8 +182,9 @@ void main() {
   });
 
   testWidgets(
-      'Y-1: la celda «Al día» del Pulso cuenta el conjunto de su '
-      'destino (dias>7 + Casa), no el total de activos',
+      'Y-1 (re-apuntado 1.36 J-3): el chip «Al día» del '
+      'Directorio cuenta el conjunto de su filtro (dias>7 + '
+      'Casa), no el total de activos',
       (tester) async {
     _telefono(tester);
     // Padrón de 5 activos: 2 al día estrictos (dias > 7),
@@ -210,74 +217,38 @@ void main() {
       'cuenta_casa': 1,
     });
     await _sesionDueno(tester);
+    // RE-APUNTE: la celda del Pulso fue jubilada por M-2
+    // (1.35); la casilla sucesora es el chip del Directorio
+    // (ver la nota Y-1 de la cabecera del archivo). Las
+    // afirmaciones de CAMPO-16 que este test arrastraba
+    // (puerta única `marco-actividad`, sin enlaces «Ver
+    // actividad reciente») NO se pierden: viven en su
+    // propio test (campo16_actividad_cabecera_test.dart).
     await tester.pumpWidget(MaterialApp(
         theme: ThemeData(fontFamily: 'Roboto'),
-        home: const HomeScreen()));
+        home: const BuscarScreen()));
     await _drenar(tester, vueltas: 10);
-    await _descartarDialogos(tester);
+    // La cifra «al día» enseñada es 3 (el conjunto del
+    // filtro: +30 ✓, +10 ✓ y la Casa ✓) y el total de
+    // activos, 5, vive en su propio chip: no se confunden.
+    expect(find.text('Al día (3)'), findsOneWidget,
+        reason: 'el chip «Al día» del Directorio debe contar '
+            'el conjunto de su filtro (3), no el total de '
+            'activos (5)');
+    expect(find.text('Todos (5)'), findsOneWidget,
+        reason: 'el total de activos (5) es la cifra de '
+            '«Todos», no la de «Al día»');
+    // Y la cifra promete la lista: al tocar el chip, la
+    // lista enseña exactamente esos 3 y ninguno más.
+    await tester.tap(find.text('Al día (3)'));
     await _drenar(tester, vueltas: 6);
-    // La fila Vencidos/Al día puede nacer bajo el pliegue
-    // (ListView perezoso): hay que rodar la lista hasta que
-    // las secciones bajas existan. El ancla histórica era el
-    // enlace «Ver actividad reciente →» al pie de las
-    // tarjetas; CAMPO-16 (segunda parte, orden de Jc) lo
-    // retiró: la ÚNICA puerta a Actividad es el botón de
-    // cabecera `marco-actividad`, junto a la lupa — se
-    // verifica esa puerta única aquí mismo y el scroll se
-    // ancla en la cabecera del informe del dueño
-    // (`hoy-informe-cabecera`), la tarjeta que alojaba el
-    // enlace retirado y la última sección del Mostrador:
-    // rodar hasta ella construye todo lo que va por encima.
-    // («Al día» a secas tampoco servía de ancla: también es
-    // el texto de la píldora de estado de sync.)
-    expect(find.text('Ver actividad reciente →'), findsNothing,
-        reason: 'CAMPO-16 2ª parte: ningún enlace de Actividad '
-            'queda en las tarjetas del Mostrador');
-    expect(find.byKey(const ValueKey('marco-actividad')),
-        findsOneWidget,
-        reason: 'la única puerta a Actividad es el botón de '
-            'cabecera junto a la lupa');
-    await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('hoy-informe-cabecera')), 200,
-        scrollable: find
-            .descendant(
-                of: find.byType(HomeScreen),
-                matching: find.byType(Scrollable))
-            .first);
-    await tester.pump(const Duration(milliseconds: 300));
-    // Compuerta: TODAS las celdas con forma (número, «Al
-    // día») — la píldora de sync no tiene esa forma — deben
-    // valer 3: el conjunto de su destino (Directorio,
-    // filtro aldia: +30 ✓, +10 ✓ y la Casa ✓). El total de
-    // activos es 5 y NO es «al día» bajo ninguna definición.
-    final valores = <String>[];
-    for (final e in find
-        .ancestor(
-            of: find.text('Al día'), matching: find.byType(InkWell))
-        .evaluate()) {
-      for (final c in find
-          .descendant(
-              of: find.byWidget(e.widget),
-              matching: find.byType(Column))
-          .evaluate()) {
-        final textos = find
-            .descendant(
-                of: find.byWidget(c.widget),
-                matching: find.byType(Text))
-            .evaluate()
-            .map((t) => (t.widget as Text).data ?? '')
-            .toList();
-        if (textos.length == 2 &&
-            textos[1] == 'Al día' &&
-            int.tryParse(textos[0]) != null) {
-          valores.add(textos[0]);
-        }
-      }
-    }
-    expect(valores, ['3'],
-        reason: 'la celda «Al día» del Pulso debe enseñar el '
-            'conteo de su destino (3), no el total de activos '
-            '(5); candidatas: $valores');
+    expect(find.text('AlDia Uno'), findsOneWidget);
+    expect(find.text('AlDia Dos'), findsOneWidget);
+    expect(find.text('Casa Cinco'), findsOneWidget);
+    expect(find.text('PorVencer Tres'), findsNothing,
+        reason: 'por vencer (3 días) no es «al día»');
+    expect(find.text('Vencido Cuatro'), findsNothing,
+        reason: 'vencido no es «al día»');
     await _cerrarCascara(tester);
   });
 
