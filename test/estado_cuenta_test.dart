@@ -33,7 +33,11 @@ void main() {
     );
     expect(t, contains('Cliente: Ana Prueba'));
     expect(t, contains('Activo hasta el 20/11/2026 (quedan 19 días)'));
-    expect(t, contains('*Pagos* (2)'));
+    // 1.36 H-C3 (136-1060, GF-097): la cortesía ya NO se
+    // filtra del estado de cuenta: aparece rotulada
+    // «Cortesía · 0 CUP» y el total no cambia.
+    expect(t, contains('*Pagos* (3)'));
+    expect(t, contains('Cortesía · 0 CUP'));
     expect(t, contains('Transferencia · 2500 CUP'));
     expect(t, contains('Total pagado: 4500 CUP'));
     expect(t, isNot(contains('Deuda pendiente')));
