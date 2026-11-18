@@ -274,7 +274,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
     'Sesión abierta': Icons.login_rounded,
   };
 
-  Widget _dato(String etiqueta, String valor) {
+  Widget _dato(String etiqueta, String valor, {bool ultima = false}) {
     // SL-2 G03-14: antes esta sección construía su fila
     // propia (etiqueta de 150 px + valor); ahora usa la
     // fila de la casa, FilaInfoFicha, con la MISMA
@@ -283,6 +283,8 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
       icono: _iconosDatoAcceso[etiqueta] ?? Icons.info_rounded,
       etiqueta: etiqueta,
       valor: valor,
+      // 1.36 H-B1 (136-507): la última fila sin hairline.
+      esUltima: ultima,
     );
   }
 
@@ -348,7 +350,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
               _dato('Revocado el', _fmtFecha(a['revocado_en'])),
             _dato('Sesión abierta', a['tiene_sesion'] == true
                 ? 'Sí · vence ${_fmtFecha(a['sesion_expira_en'])}'
-                : 'No'),
+                : 'No', ultima: true),
             // F3-25: fuera «Versión de sesión» (el token_version
             // crudo): jerga sin uso en la ficha — los cierres y
             // reseteos ya se ven en el historial de abajo.

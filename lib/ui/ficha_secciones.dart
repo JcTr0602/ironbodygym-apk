@@ -474,22 +474,30 @@ class FilaInfoFicha extends StatelessWidget {
   final String etiqueta;
   final String valor;
 
+  /// 1.36 H-B1 (136-507): la ÚLTIMA fila de su tarjeta no
+  /// dibuja la hairline inferior (quedaba una raya pegada
+  /// al borde de la tarjeta).
+  final bool esUltima;
+
   const FilaInfoFicha(
       {super.key,
       required this.icono,
       required this.etiqueta,
-      required this.valor});
+      required this.valor,
+      this.esUltima = false});
 
   @override
   Widget build(BuildContext context) {
     // Etapa 4 · F3: hairline inferior sutil entre filas.
     return Container(
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-              color: AppColores.borde(context)
-                  .withValues(alpha: 0.5)),
-        ),
+        border: esUltima
+            ? null
+            : Border(
+                bottom: BorderSide(
+                    color: AppColores.borde(context)
+                        .withValues(alpha: 0.5)),
+              ),
       ),
       padding: const EdgeInsets.symmetric(
           vertical: AppEspacio.sm),
@@ -565,12 +573,19 @@ class BarraMesFicha extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadio.circular),
-            child: LinearProgressIndicator(
-              value: frac,
-              minHeight: 8,
-              backgroundColor:
-                  AppColores.borde(context).withValues(alpha: 0.3),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
+            // 1.36 H-B1 (136-513): la barra CRECE animada
+            // hasta su fracción (antes saltaba al valor).
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0, end: frac),
+              duration: AppMovimiento.media,
+              curve: AppMovimiento.curva,
+              builder: (ctx, v, hijo) => LinearProgressIndicator(
+                value: v,
+                minHeight: 8,
+                backgroundColor:
+                    AppColores.borde(context).withValues(alpha: 0.3),
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+              ),
             ),
           ),
           const SizedBox(height: 4),
@@ -1013,11 +1028,17 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
           TextField(
             controller: _busquedaCtrl,
             decoration: InputDecoration(
+              // 1.36 H-B1 (136-509): etiqueta PERSISTENTE
+              // (con texto, el hint desaparece y el campo
+              // queda sin nombre) y tooltip en el botón de
+              // limpiar.
+              labelText: 'Buscar en el historial',
               hintText: 'Buscar en el historial…',
               prefixIcon: const Icon(Icons.search_rounded),
               suffixIcon: _busqueda.isEmpty
                   ? null
                   : IconButton(
+                      tooltip: 'Limpiar búsqueda',
                       icon: const Icon(Icons.close_rounded),
                       onPressed: () {
                         _busquedaCtrl.clear();
@@ -1088,9 +1109,12 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
               )
             else ...[
               Text(
+                // 1.36 H-B1 (136-517): el resultado dice
+                // su ÁMBITO (el filtro activo).
                 '${coincidencias.length} '
                 'resultado${coincidencias.length == 1 ? '' : 's'} '
-                'para «${_busqueda.trim()}»',
+                'para «${_busqueda.trim()}» '
+                '${filtro == 'pagos' ? 'en Solo pagos' : filtro == 'ventas' ? 'en Solo ventas' : 'en Todo'}',
                 style: AppTexto.secundario,
               ),
               const SizedBox(height: AppEspacio.xs),
@@ -1109,7 +1133,13 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
           // 1.25 T56: los meses, plegables. La cabecera
           // resume el mes (pagos y su suma) sin abrirlo.
           for (var g = 0; !buscando && g < grupos.length; g++) ...[
-            InkWell(
+            // 1.36 H-B1 (136-510): la cabecera del mes se
+            // anuncia como botón EXPANDIBLE.
+            Semantics(
+              button: true,
+              expanded: _mesesAbiertos.contains(grupos[g].clave),
+              label: grupos[g].titulo,
+              child: InkWell(
               onTap: () => setState(() {
                 if (_mesesAbiertos.contains(grupos[g].clave)) {
                   _mesesAbiertos.remove(grupos[g].clave);
@@ -1122,12 +1152,18 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
                     vertical: AppEspacio.sm),
                 child: Row(
                   children: [
-                    Icon(
-                        _mesesAbiertos.contains(grupos[g].clave)
-                            ? Icons.expand_more_rounded
-                            : Icons.chevron_right_rounded,
-                        size: 20,
-                        color: AppColores.textoSecundario(context)),
+                    // 136-514: el chevron GIRA al abrir.
+                    AnimatedRotation(
+                      turns:
+                          _mesesAbiertos.contains(grupos[g].clave)
+                              ? 0.25
+                              : 0,
+                      duration: AppMovimiento.corta,
+                      child: Icon(Icons.chevron_right_rounded,
+                          size: 20,
+                          color:
+                              AppColores.textoSecundario(context)),
+                    ),
                     const SizedBox(width: AppEspacio.xs),
                     Expanded(
                       child: Column(
@@ -1155,30 +1191,59 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
                   ],
                 ),
               ),
+              ),
             ),
-            if (_mesesAbiertos.contains(grupos[g].clave))
-              for (var i = 0; i < grupos[g].entradas.length; i++)
-                FilaTimelineFicha(
-                    e: grupos[g].entradas[i],
-                    esUltima: g == grupos.length - 1 &&
-                        i == grupos[g].entradas.length - 1,
-                    esAdmin: widget.esAdmin,
-                    esOwner: widget.esOwner,
-                    onReenviarRecibo: widget.onReenviarRecibo,
-                    onVerComprobante: widget.onVerComprobante,
-                    onCorregirPago: widget.onCorregirPago,
-                    onConciliar: widget.onConciliar),
+            // 136-514: el contenido del mes se despliega
+            // con AnimatedSize, no de golpe.
+            AnimatedSize(
+              duration: AppMovimiento.media,
+              curve: AppMovimiento.curva,
+              alignment: Alignment.topCenter,
+              child: _mesesAbiertos.contains(grupos[g].clave)
+                  ? Column(
+                      children: [
+                        for (var i = 0;
+                            i < grupos[g].entradas.length;
+                            i++)
+                          FilaTimelineFicha(
+                              e: grupos[g].entradas[i],
+                              esUltima: g == grupos.length - 1 &&
+                                  i ==
+                                      grupos[g].entradas.length -
+                                          1,
+                              esAdmin: widget.esAdmin,
+                              esOwner: widget.esOwner,
+                              onReenviarRecibo:
+                                  widget.onReenviarRecibo,
+                              onVerComprobante:
+                                  widget.onVerComprobante,
+                              onCorregirPago: widget.onCorregirPago,
+                              onConciliar: widget.onConciliar),
+                      ],
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
           ],
           // 1.29 (FB-03): el pie de la muestra — la tarjeta
           // declara que enseña una muestra y ofrece la
           // historia completa sin salir de la ficha.
-          if (!buscando && widget.onVerAnteriores != null) ...[
+          // 1.36 H-B1 (136-516): el pie sigue visible
+          // DURANTE la búsqueda (es la vía de buscar en la
+          // historia completa, no solo en la muestra).
+          if (widget.onVerAnteriores != null) ...[
             const SizedBox(height: AppEspacio.sm),
             const Divider(height: 1),
             const SizedBox(height: AppEspacio.sm),
-            const Text(
-              'Se muestran los últimos 10 pagos y las últimas '
-              '20 ventas de suplementos.',
+            // 136-512: las cifras del pie se adaptan al
+            // filtro activo.
+            Text(
+              filtro == 'pagos'
+                  ? 'Se muestran los últimos 10 pagos.'
+                  : filtro == 'ventas'
+                      ? 'Se muestran las últimas 20 ventas '
+                          'de suplementos.'
+                      : 'Se muestran los últimos 10 pagos y las '
+                          'últimas 20 ventas de suplementos.',
               style: AppTexto.secundario,
             ),
             Align(

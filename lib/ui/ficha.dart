@@ -3954,7 +3954,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             if (AuthService().isOwner)
                               FilaPlusResidualFicha(
                                   clienteId: widget.clienteId),
-                            FilaInfoFicha(icono: Icons.date_range_rounded, etiqueta: 'Inscripción', valor: fmtFecha(c[
+                            FilaInfoFicha(icono: Icons.date_range_rounded, etiqueta: 'Inscripción', esUltima: true, valor: fmtFecha(c[
                                         'fecha_inscripcion']
                                     as String?)),
                             // Bloque 1: barra del mes pagado.
@@ -4106,7 +4106,7 @@ class _FichaScreenState extends State<FichaScreen> {
                             // exacto por el banner).
                             if (_textoCumple(c) != null)
                               FilaInfoFicha(icono: Icons.celebration_rounded, etiqueta: 'Cumpleaños', valor: _textoCumple(c)!),
-                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', valor: etiquetaSexoFicha(c['sexo'])),
+                            FilaInfoFicha(icono: Icons.person_rounded, etiqueta: 'Sexo', esUltima: true, valor: etiquetaSexoFicha(c['sexo'])),
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
                             InkWell(
