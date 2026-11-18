@@ -43,7 +43,13 @@ void main() {
     final f = File('lib/ui/ficha.dart').readAsStringSync();
     // Cuerpo (build) y barra compacta.
     expect(f, contains('clienteVencidoCobrable(\n            esCasa: esCasa, pausado: pausado, dias: dias)'));
-    expect(f, contains('pausado: congelado, dias: dias'));
+    // 1.36 FICHA (136-195): la barra compacta ya no
+    // calcula la acción del momento (no hay segunda
+    // acción principal); la ÚNICA llamada a
+    // accionDelMomentoFicha vive en la barra fija y
+    // consume el `vencido` del build — el que este
+    // predicado calcula con la guarda de pausa.
+    expect(f, contains('vencido: vencido,'));
     // La fórmula vieja de la barra no vuelve.
     expect(f, isNot(contains('vencido: !esCasa && dias != null && dias < 0')));
     // Guarda en _renovarFlujo antes de cobrar.
