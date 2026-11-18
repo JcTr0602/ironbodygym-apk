@@ -91,6 +91,13 @@ class CobroParcialCompuesto {
 
 double _redondear2(double v) => (v * 100).roundToDouble() / 100;
 
+/// 1.36 H-B2 (136-616): validez del monto de un cobro
+/// parcial — positivo y NO por encima del total redondeado
+/// a 2 decimales (sin margen superior: cobrar de más
+/// dejaba el pendiente en negativo).
+bool montoCobroParcialValido(double? monto, double total) =>
+    monto != null && monto > 0 && monto <= _redondear2(total);
+
 /// Compone el cobro parcial. Devuelve null si el monto
 /// es inválido: no finito, <= 0 o mayor que el pendiente
 /// total (arrastre + suma de filas).

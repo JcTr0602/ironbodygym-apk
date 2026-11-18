@@ -36,6 +36,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../localdb.dart';
+import '../negocio.dart' show fmtMonto;
 import 'componentes.dart';
 import 'diseno.dart';
 import 'tarjeta_imagen.dart';
@@ -522,6 +523,23 @@ class _ConfirmacionOperacionScreenState
                   ),
                   const SizedBox(height: AppEspacio.lg),
                 ],
+                // 1.36 H-B2 (136-612): el bloque de deshacer
+                // entra/sale animado en altura y fundido al
+                // pasar de «puede deshacer» a «ya subió».
+                AnimatedSize(
+                  duration: AppMovimiento.resuelta(
+                      context, AppMovimiento.media),
+                  alignment: Alignment.topCenter,
+                  child: AnimatedSwitcher(
+                    duration: AppMovimiento.resuelta(
+                        context, AppMovimiento.media),
+                    child: KeyedSubtree(
+                      key: ValueKey(_puedeDeshacer
+                          ? 'deshacer'
+                          : (_yaSubio ? 'subio' : 'nada')),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                 if (_puedeDeshacer) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 48),
@@ -586,6 +604,11 @@ class _ConfirmacionOperacionScreenState
                   ),
                   const SizedBox(height: AppEspacio.lg),
                 ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 48),
                   child: BotonPrimario(
@@ -640,8 +663,11 @@ class _ConfirmacionOperacionScreenState
             child: widget.montoValor != null
                 ? MontoAnimado(
                     valor: widget.montoValor!,
+                    // 1.36 H-B2 (136-612): el formato por
+                    // defecto es fmtMonto (el de la casa), no
+                    // la cadena ya formateada del llamador.
                     formato:
-                        widget.montoFormato ?? (_) => widget.monto,
+                        widget.montoFormato ?? (v) => fmtMonto(v),
                     style: AppTexto.displayPequeno,
                   )
                 : Text(
@@ -749,13 +775,15 @@ class _CorteTicket extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-B2 (136-612): la muesca SIN borde — un círculo
+    // del color del fondo se lee como el mordisco del papel
+    // rasgado; con borde parecía una pegatina sobre el ticket.
     Widget muesca() => Container(
-          width: 14,
-          height: 14,
+          width: 16,
+          height: 16,
           decoration: BoxDecoration(
             color: AppColores.fondo(context),
             shape: BoxShape.circle,
-            border: Border.all(color: AppColores.borde(context)),
           ),
         );
     return SizedBox(

@@ -6,6 +6,8 @@
 library;
 
 import 'dart:convert';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -67,9 +69,15 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   Map<String, Map<String, double>> _reporteTurnos = {};
   List<Map<String, dynamic>> _ultimos7 = [];
   bool _cargandoReporte = false;
+  // 1.36 H-B2 (136-618/623): el fallo del reporte se declara
+  // y la recarga conserva lo ya pintado.
+  bool _errorReporte = false;
+  bool _reporteYaCargado = false;
+  Timer? _timerSello;
 
   @override
   void dispose() {
+    _timerSello?.cancel();
     // 1.24 Bloque 5: la barra Deshacer muere con su pantalla
     // (antes flotaba sobre Home hasta agotar sus 4 s).
     _ctrlDeshacer?.close();
@@ -119,6 +127,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // 136-618: y se DECLARA en la vista del reporte.
+      if (mounted) setState(() => _errorReporte = true);
     } finally {
       if (mounted && _cargandoReporte) {
         setState(() => _cargandoReporte = false);
@@ -141,6 +151,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         _reporteTurnos = turnos;
         _ultimos7 = ult7;
         _cargandoReporte = false;
+        _errorReporte = false;
+        _reporteYaCargado = true;
       });
     }
   }
@@ -238,7 +250,11 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
     // tarjeta (además del snack y la vibración).
     if (mounted) {
       setState(() => _recienRegistrado = true);
-      Future.delayed(const Duration(milliseconds: 1400), () {
+      // 1.36 H-B2 (136-622): UN temporizador reiniciable —
+      // guardados seguidos no apilan Future.delayed que
+      // apaguen el sello antes de tiempo.
+      _timerSello?.cancel();
+      _timerSello = Timer(const Duration(milliseconds: 1400), () {
         if (mounted) setState(() => _recienRegistrado = false);
       });
     }
@@ -281,14 +297,18 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
 
   Future<void> _guardar() async {
     if (_guardando) return;
+    // 1.36 H-B2 (136-615): la guarda sube ANTES de la
+    // comprobación de permiso: durante ese await el botón
+    // ya está deshabilitado y un segundo toque no pasa.
+    setState(() => _guardando = true);
     // 1.24 Bloque 3: el pago diario cuelga de can_cobrar_pagos
     // en el servidor; sin la clave, aviso al tocar y no se
     // encola una op condenada a rebotar.
     if (!await permisoOperativoOkConRefresco(
         context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      if (mounted) setState(() => _guardando = false);
       return;
     }
-    setState(() => _guardando = true);
     try {
       final cantGuardada = _cantidad;
       final uuid = await _guardarOp(
@@ -309,15 +329,18 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
   /// Botón rápido: registra 1 pago de un toque.
   Future<void> _rapido() async {
     if (_guardando) return;
+    // 136-615: la guarda sube antes de la comprobación,
+    // como en _guardar.
+    setState(() => _guardando = true);
     // SL-4 · G10-1 🚩: el atajo pasa por la MISMA comprobación
     // de permiso que el camino largo (_guardar): sin ella, un
     // entrenador sin can_cobrar_pagos veía «1 pago guardado»
     // y la op rebotaba después en el servidor.
     if (!await permisoOperativoOkConRefresco(
         context, () => PermisosEntrenador().canCobrarPagos, 'cobrar pagos')) {
+      if (mounted) setState(() => _guardando = false);
       return;
     }
-    setState(() => _guardando = true);
     try {
       // 1.23 (Delta Argón 5ª#7): el botón rápido también lleva
       // la nota escrita — antes llamaba _guardarOp SIN nota y
@@ -572,13 +595,53 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
         children: [
           const SyncBanner(compact: true),
           Expanded(
-            child: _modoReporte
-                ? _vistaReporte()
-                : _vistaRegistro(),
+            // 1.36 H-B2 (136-622): el cambio de modo cruza,
+            // no salta.
+            child: AnimatedSwitcher(
+              duration: AppMovimiento.resuelta(
+                  context, AppMovimiento.media),
+              child: KeyedSubtree(
+                key: ValueKey(_modoReporte),
+                child: _modoReporte
+                    ? _vistaReporte()
+                    : _vistaRegistro(),
+              ),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  /// 1.36 H-B2 (136-623): edición directa de la cantidad
+  /// del stepper (teclear en vez de pulsar + N veces).
+  Future<void> _editarCantidadDirecta() async {
+    final ctrl =
+        TextEditingController(text: '$_cantidad');
+    final n = await showDialog<int>(
+      context: context,
+      builder: (ctx) => DialogoApp(
+        titulo: 'Cantidad de pagos',
+        contenido: CampoTexto(
+          controller: ctrl,
+          etiqueta: 'Cantidad',
+          teclado: TextInputType.number,
+        ),
+        acciones: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(
+                  ctx, int.tryParse(ctrl.text.trim())),
+              child: const Text('Fijar')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (n != null && n >= 1 && mounted) {
+      setState(() => _cantidad = n);
+    }
   }
 
   /// v1.0.15: vista de registro (la original).
@@ -659,11 +722,16 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                                     setState(() => _cantidad--)
                                 : null,
                           ),
+                          // 1.36 H-B2 (136-623): tocar la
+                          // cifra la edita directamente.
                           SizedBox(
                             width: 72,
-                            child: Text('$_cantidad',
-                                textAlign: TextAlign.center,
-                                style: AppTexto.displayPequeno),
+                            child: InkWell(
+                              onTap: _editarCantidadDirecta,
+                              child: Text('$_cantidad',
+                                  textAlign: TextAlign.center,
+                                  style: AppTexto.displayPequeno),
+                            ),
                           ),
                           IconButton(
                             iconSize: 34,
@@ -744,12 +812,9 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                       MainAxisAlignment.spaceBetween,
                   children: [
                     const Text('Registrados hoy:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold)),
-                    Text(
-                        '${fmtMonto(_totalHoy)} CUP',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold,
+                        style: AppTexto.subtitulo),
+                    Text('${fmtMonto(_totalHoy)} CUP',
+                        style: AppTexto.subtitulo.copyWith(
                             color: AppColores.naranja)),
                   ],
                 ),
@@ -779,16 +844,42 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                         ),
                         title: Text(
                             '${d['cantidad']} pago${d['cantidad'] == 1 ? '' : 's'} — ${fmtMonto(d['total'])} CUP'),
+                        // 136-618: el join filtra los vacíos
+                        // (antes salía « · » colgando).
                         subtitle: Text([
                           if ((d['nota'] as String?)
                                   ?.isNotEmpty ==
                               true)
                             '${d['nota']}',
                           '${d['registrado_por_nombre'] ?? ''}',
-                        ].join(' · ')),
-                        trailing: const Icon(
-                            Icons.edit_rounded,
-                            size: 20),
+                        ].where((t) => t.isNotEmpty).join(' · ')),
+                        // 1.36 H-B2 (136-623): el registro
+                        // aún sin id se dice «Pendiente» y
+                        // lleva su acción de eliminar (el
+                        // editor de un sin-id solo ofrece
+                        // eliminar de la cola).
+                        trailing: d['id'] == null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const ChipEstado.semantico(
+                                    texto: 'Pendiente',
+                                    significado:
+                                        SignificadoChip.alerta,
+                                    icono: Icons.schedule_rounded,
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 20),
+                                    tooltip: 'Eliminar pendiente',
+                                    onPressed: () =>
+                                        _editarRegistro(d),
+                                  ),
+                                ],
+                              )
+                            : const Icon(Icons.edit_rounded,
+                                size: 20),
                         onTap: () => _editarRegistro(d),
                       ),
                     ),
@@ -823,11 +914,28 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
       prom7 = suma / _ultimos7.length;
     }
 
-    return _cargandoReporte
-        ? const EstadoCargando(texto: 'Cargando pago diario…')
-        : ListView(
+    // 1.36 H-B2 (136-618): fallo sin datos → error con
+    // reintento, no un reporte vacío fingido.
+    if (!_cargandoReporte && _errorReporte && !_reporteYaCargado) {
+      return EstadoError(
+        titulo: 'No se pudo cargar el reporte',
+        onReintentar: _cargarReporte,
+      );
+    }
+    // 1.36 H-B2 (136-623): la recarga conserva la lista y
+    // enseña una franja de progreso; el EstadoCargando a
+    // pantalla completa solo es la PRIMERA carga.
+    if (_cargandoReporte && !_reporteYaCargado) {
+      return const EstadoCargando(texto: 'Cargando pago diario…');
+    }
+    return ListView(
             padding: const EdgeInsets.all(AppEspacio.lg),
             children: [
+              if (_cargandoReporte)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: AppEspacio.sm),
+                  child: LinearProgressIndicator(),
+                ),
               // v1.3.2: acceso al resumen mensual.
               Padding(
                 padding:
@@ -945,10 +1053,17 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
                     children: [
-                      const Text('Comparativa',
-                          style: TextStyle(
-                              fontWeight:
-                                  FontWeight.bold)),
+                      // 136-618: la comparativa es de HOY
+                      // (ayer/promedio se calculan contra
+                      // hoy); si se mira otro día, se dice.
+                      Text(
+                          _fechaReporte
+                                      .toIso8601String()
+                                      .substring(0, 10) ==
+                                  hoyHabanaIso()
+                              ? 'Comparativa'
+                              : 'Comparativa (de hoy)',
+                          style: AppTexto.subtitulo),
                       const SizedBox(height: 4),
                       if (ayerTotal > 0)
                         Text(
@@ -963,8 +1078,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               // Mini-gráfico 7 días
               if (_ultimos7.isNotEmpty) ...[
                 const Text('Últimos 7 días',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold)),
+                    style: AppTexto.subtitulo),
                 const SizedBox(height: 8),
                 Container(
                   height: 100,
@@ -988,11 +1102,21 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                               (e['total'] as num).toDouble())
                           .reduce(
                               (a, b) => a > b ? a : b);
-                      final h = maxM > 0
-                          ? (m / maxM * 60)
-                              .clamp(4.0, 60.0)
-                          : 4.0;
-                      return Column(
+                      // 136-618: un día en cero NO pinta
+                      // barra (altura 0, no el mínimo falso
+                      // de 4) y la barra dice su día y monto.
+                      final h = m <= 0
+                          ? 0.0
+                          : (maxM > 0
+                              ? (m / maxM * 60).clamp(4.0, 60.0)
+                              : 4.0);
+                      return Tooltip(
+                        message:
+                            '${d['fecha']}: ${fmtMonto(m)} CUP',
+                        child: Semantics(
+                          label:
+                              '${d['fecha']}: ${fmtMonto(m)} CUP',
+                          child: Column(
                         mainAxisAlignment:
                             MainAxisAlignment.end,
                         children: [
@@ -1013,6 +1137,8 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
                                 AppTexto.minuscula,
                           ),
                         ],
+                          ),
+                        ),
                       );
                     }).toList(),
                   ),
@@ -1021,8 +1147,7 @@ class _PagoDiarioScreenState extends State<PagoDiarioScreen> {
               ],
               // Detalle de registros
               const Text('Registros del día',
-                  style:
-                      TextStyle(fontWeight: FontWeight.bold)),
+                  style: AppTexto.subtitulo),
               const SizedBox(height: 8),
               if (_reporteDatos.isEmpty)
                 const EstadoVacio(
@@ -1153,16 +1278,21 @@ class _DialogoEditarDiarioState extends State<_DialogoEditarDiario> {
                   'Turno: ${widget.turno == 'mañana' ? 'Mañana' : 'Tarde'}',
                   style: AppTexto.secundario),
             ),
-          TextField(
+          // 1.36 H-B2 (136-618/623): campos del kit y
+          // validación EN LÍNEA: cantidad inválida se dice
+          // bajo el campo y «Guardar» queda deshabilitado.
+          CampoTexto(
             controller: _cantCtrl,
-            keyboardType: TextInputType.number,
-            decoration:
-                const InputDecoration(labelText: 'Cantidad'),
+            etiqueta: 'Cantidad',
+            teclado: TextInputType.number,
+            errorText: n <= 0
+                ? 'Escribe una cantidad mayor que cero.'
+                : null,
             onChanged: (_) => setState(() {}),
           ),
-          TextField(
+          CampoTexto(
             controller: _notaCtrl,
-            decoration: const InputDecoration(labelText: 'Nota'),
+            etiqueta: 'Nota',
           ),
           const SizedBox(height: 12),
           Align(
@@ -1186,11 +1316,12 @@ class _DialogoEditarDiarioState extends State<_DialogoEditarDiario> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-            onPressed: () =>
-                Navigator.pop(context, _salida('guardar')),
+            onPressed: n <= 0
+                ? null
+                : () => Navigator.pop(context, _salida('guardar')),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
+              foregroundColor: AppColores.sobreMarca,
             ),
             child: const Text('Guardar')),
       ],

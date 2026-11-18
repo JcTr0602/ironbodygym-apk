@@ -1279,8 +1279,23 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
             // 1.36 (136-301/314): el monto del resumen iba
             // con un TextStyle desnudo que resolvía a 13,
             // bajo el cuerpo: ahora es cifraFila.
-            Text('Monto: ${fmtMonto(s.monto)} CUP',
-                style: AppTexto.cifraFila),
+            // 1.36 H-B2 (136-611): el monto y el vencimiento
+            // del resumen cruzan al cambiar método/meses/
+            // período, no saltan de golpe.
+            AnimatedSwitcher(
+              duration:
+                  AppMovimiento.resuelta(context, AppMovimiento.corta),
+              child: Column(
+                key: ValueKey('${s.monto}|$nuevo'),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Monto: ${fmtMonto(s.monto)} CUP',
+                      style: AppTexto.cifraFila),
+                  Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
+                      style: AppTexto.cifraFila),
+                ],
+              ),
+            ),
             // v1.10.0 (Bloque 2, D6): chip + avisos del escalón
             // que decidió el precio (no bloquean, informan).
             // 1.25 T117 (F1-84): el chip sale para TODO escalón
@@ -1310,9 +1325,6 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
                     style: AppTexto.secundario
                         .copyWith(color: AppColores.textoNaranja(context))),
               ),
-            Text('Nuevo vencimiento: ${fmtFecha(nuevo)}',
-                // 1.36 (136-301): mismo defecto que el monto.
-                style: AppTexto.cifraFila),
           ],
         ),
       ),
@@ -1331,7 +1343,9 @@ class _DialogoPaso1PagoState extends State<_DialogoPaso1Pago> {
             )) : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
-              foregroundColor: Colors.white,
+              // 1.36 H-B2 (136-611): token de contraste sobre
+              // la marca, no blanco crudo.
+              foregroundColor: AppColores.sobreMarca,
             ),
             child: const Text('Continuar')),
       ],

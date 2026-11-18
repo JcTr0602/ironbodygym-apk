@@ -3,6 +3,8 @@
 /// _abrirCobrarParcial, y lib/cobro_parcial.dart).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../cobro_parcial.dart';
@@ -39,23 +41,36 @@ class HojaCobrarParcial extends StatefulWidget {
 class HojaCobrarParcialState extends State<HojaCobrarParcial> {
   final _ctrl = TextEditingController();
   double? _monto;
+  // 1.36 H-B2 (136-622): confirmación visual breve al fijar
+  // un atajo, con UN temporizador reiniciable.
+  bool _recienFijado = false;
+  Timer? _timerFijado;
 
   @override
   void dispose() {
+    _timerFijado?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
 
-  bool get _valido =>
-      _monto != null &&
-      _monto! > 0 &&
-      _monto! - widget.total <= 0.01;
+  // 1.36 H-B2 (136-616): la validez se compara contra el
+  // total redondeado a 2 decimales, SIN el margen superior
+  // de 0.01 que dejaba cobrar de más (función pura en
+  // cobro_parcial.dart, probada por contrato).
+  bool get _valido => montoCobroParcialValido(_monto, widget.total);
 
   void _fijar(double v) {
     _ctrl.text = v == v.roundToDouble()
         ? v.toStringAsFixed(0)
         : v.toStringAsFixed(2);
-    setState(() => _monto = v);
+    setState(() {
+      _monto = v;
+      _recienFijado = true;
+    });
+    _timerFijado?.cancel();
+    _timerFijado = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _recienFijado = false);
+    });
   }
 
   @override
@@ -91,7 +106,12 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
               border: Border.all(color: AppColores.borde(context)),
               borderRadius: BorderRadius.circular(AppRadio.md),
             ),
-            child: Text(
+            // 1.36 H-B2 (136-620): el importe se anuncia con
+            // monto y moneda a los lectores de pantalla.
+            child: Semantics(
+              label:
+                  'Importe: ${fmtMonto(_monto ?? 0)} CUP',
+              child: Text(
               _ctrl.text.isEmpty ? '0' : _ctrl.text,
               style: AppTexto.display.copyWith(
                   color: AppColores.textoNaranja(context),
@@ -100,6 +120,7 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
                     FontFeature.tabularFigures()
                   ]),
               textAlign: TextAlign.end,
+              ),
             ),
           ),
           const SizedBox(height: AppEspacio.sm),
@@ -121,6 +142,25 @@ class HojaCobrarParcialState extends State<HojaCobrarParcial> {
                   onPressed: () => _fijar(a.valor),
                 ),
             ],
+          ),
+          // 136-622: confirmación visual breve al fijar.
+          AnimatedSwitcher(
+            duration: AppMovimiento.corta,
+            child: _recienFijado
+                ? Row(
+                    key: const ValueKey('fijado'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_rounded,
+                          size: 16, color: AppColores.exito),
+                      const SizedBox(width: AppEspacio.xs),
+                      Text('Importe fijado',
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores.exito,
+                              fontWeight: FontWeight.w700)),
+                    ],
+                  )
+                : const SizedBox.shrink(key: ValueKey('nada')),
           ),
           const SizedBox(height: AppEspacio.sm),
           if (_monto != null)

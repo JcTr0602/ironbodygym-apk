@@ -24,6 +24,7 @@ import '../tiempo.dart';
 import 'app_bar.dart';
 import 'buscar.dart';
 import 'componentes.dart';
+import 'skeleton.dart';
 import 'dialogo_pago.dart';
 import 'permisos_ui.dart';
 import 'preview_cobro.dart';
@@ -101,6 +102,9 @@ class _PagoScreenState extends State<PagoScreen> {
   bool _pagoEnCurso = false;
   List<_Cobro> _cobros = [];
   bool _cargandoCobros = true;
+  // 1.36 H-B2 (136-607): el fallo de carga de cobros se
+  // DECLARA (antes solo bitácora y la sección desaparecía).
+  bool _errorCobros = false;
   // PagoIds del espejo con anular_pago ya en cola (ver _cargarDatos).
   Set<int> _anulacionesVivas = {};
 
@@ -146,6 +150,7 @@ class _PagoScreenState extends State<PagoScreen> {
     } catch (e) {
       // El error NO se traga: queda en bitácora.
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCobros = true);
     } finally {
       if (mounted && _cargandoCobros) {
         setState(() => _cargandoCobros = false);
@@ -303,6 +308,7 @@ class _PagoScreenState extends State<PagoScreen> {
       setState(() {
         _cobros = cobros;
         _cargandoCobros = false;
+        _errorCobros = false;
       });
     }
   }
@@ -427,6 +433,10 @@ class _PagoScreenState extends State<PagoScreen> {
       case ResultadoCobro.cambiar:
         mostrarSnack(context, 'Cobro cancelado',
             significado: SignificadoChip.neutral);
+      // 1.36 H-B2 (136-614): rebote por cobro en curso — el
+      // aviso ya lo dio cobrarConPreviewYRecibo.
+      case ResultadoCobro.enCurso:
+        break;
     }
     SyncEngine.instance.push();
     _cargarDatosSeguro();
@@ -662,9 +672,43 @@ class _PagoScreenState extends State<PagoScreen> {
   }
 
   Widget _ultimosCobros() {
-    if (_cargandoCobros) return const SizedBox.shrink();
+    // 1.36 H-B2 (136-607): cargando enseña esqueleto y el
+    // fallo, EstadoError con reintento (antes la sección
+    // simplemente no estaba).
+    if (_cargandoCobros) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+        child: SkeletonTarjeta(),
+      );
+    }
+    if (_errorCobros && _cobros.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+        child: EstadoError(
+          titulo: 'No se pudieron cargar los cobros de hoy',
+          onReintentar: _cargarDatosSeguro,
+        ),
+      );
+    }
     final items = _cobros.take(10).toList();
     final cs = Theme.of(context).colorScheme;
+    // 1.36 H-B2 (136-608): sin cobros, el vacío se ve SIN
+    // desplegar la tarjeta.
+    if (items.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(
+            AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
+        child: Tarjeta(
+          child: EstadoVacio(
+            icono: Icons.receipt_long_rounded,
+            titulo: 'Aún no hay cobros hoy',
+            subtitulo: 'Los cobros que registres hoy salen aquí.',
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppEspacio.md, AppEspacio.sm, AppEspacio.md, 0),
@@ -700,13 +744,21 @@ class _PagoScreenState extends State<PagoScreen> {
                       c.metodo == 'efectivo'
                           ? Icons.payments_rounded
                           : Icons.smartphone_rounded;
+                  final enError = c.esLocal && c.estadoOp == 'error';
                   return ListTile(
                     dense: true,
-                    leading: Icon(iconoMetodo,
+                    // 136-608: la op en error se ve en alerta
+                    // (icono y texto), no como una más.
+                    leading: Icon(
+                        enError
+                            ? Icons.error_outline_rounded
+                            : iconoMetodo,
                         size: 20,
-                        color: c.metodo == 'efectivo'
-                            ? AppColores.exito
-                            : AppColores.info),
+                        color: enError
+                            ? AppColores.error
+                            : c.metodo == 'efectivo'
+                                ? AppColores.exito
+                                : AppColores.info),
                     title: Text(c.nombre,
                         style: AppTexto.cuerpo.copyWith(
                             fontWeight: mio
@@ -714,10 +766,13 @@ class _PagoScreenState extends State<PagoScreen> {
                                 : FontWeight.normal)),
                     subtitle: Text(
                         '${c.hora}'
-                        '${c.esLocal && c.estadoOp != 'enviada' ? ' · por subir' : ''}'
+                        '${enError ? ' · error al subir: se reintenta al sincronizar' : ''}'
+                        '${c.esLocal && !enError && c.estadoOp != 'enviada' ? ' · por subir' : ''}'
                         '${c.esLocal && c.estadoOp == 'enviada' ? ' · subiendo' : ''}',
                         style: AppTexto.etiqueta.copyWith(
-                            color: cs.onSurfaceVariant)),
+                            color: enError
+                                ? AppColores.errorTexto(context)
+                                : cs.onSurfaceVariant)),
                     // 1.36 (136-296/314): importe tabular.
                     trailing: Text('${fmtMonto(c.monto)} CUP',
                         style: AppTexto.cifraFila.copyWith(
@@ -792,9 +847,23 @@ class _PagoScreenState extends State<PagoScreen> {
             child: _res.isEmpty
                 ? EstadoVacio(
                     icono: Icons.search_off_rounded,
-                    titulo: _busco ? 'Sin resultados' : 'Busca un cliente',
+                    // 1.36 H-B2 (136-609): el vacío nombra el
+                    // filtro activo y ofrece desactivarlo.
+                    titulo: _soloVencidos && _busco
+                        ? 'Nadie vencido con ese nombre'
+                        : _busco
+                            ? 'Sin resultados'
+                            : 'Busca un cliente',
                     subtitulo: _busco
                         ? 'Prueba con otro nombre, carnet o teléfono'
+                        : null,
+                    textoAccion:
+                        _soloVencidos && _busco ? 'Quitar filtro' : null,
+                    onAccion: _soloVencidos && _busco
+                        ? () {
+                            setState(() => _soloVencidos = false);
+                            _buscar();
+                          }
                         : null,
                   )
                 : ListView.builder(

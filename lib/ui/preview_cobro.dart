@@ -489,7 +489,7 @@ String textoReciboCobroWa({
 /// repetir directo devolvió la palabra al Paso 1 del diálogo
 /// (no se guardó nada); solo lo produce el flujo con
 /// `permiteCambiar` y solo la ficha lo consume.
-enum ResultadoCobro { cancelado, guardado, deshecho, cambiar }
+enum ResultadoCobro { cancelado, guardado, deshecho, cambiar, enCurso }
 
 /// Flujo completo de cobro de mensualidad para un [payload] ya
 /// dialogado (de [pagoDialogo], en `dialogo_pago.dart`).
@@ -534,7 +534,18 @@ Future<ResultadoCobro> cobrarConPreviewYRecibo({
   required Map<String, dynamic> payload,
   bool permiteCambiar = false,
 }) async {
-  if (_cobroEnCurso) return ResultadoCobro.cancelado;
+  if (_cobroEnCurso) {
+    // 1.36 H-B2 (136-614): el rebote por cobro en curso se
+    // AVISA (antes volvía «cancelado» en silencio y el
+    // llamador lo anunciaba como una cancelación del
+    // usuario, que no lo era).
+    if (context.mounted) {
+      mostrarSnack(context,
+          'Ya hay un cobro en curso: espera a que termine.',
+          significado: SignificadoChip.alerta);
+    }
+    return ResultadoCobro.enCurso;
+  }
   _cobroEnCurso = true;
   try {
     final r = await _cobrarConPreviewYReciboFlujo(
