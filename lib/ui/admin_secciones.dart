@@ -138,20 +138,37 @@ class SeccionCobrosScreen extends StatefulWidget {
 }
 
 class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
+  // (1.36 H-A2 136-776) guarda síncrona de dinero: confirmar
+  // entregas y registrar recogidas no se duplican con un
+  // doble toque mientras el primer await corre.
+  bool _operandoCobros = false;
+
   Future<void> _confirmarYActualizar(
       {int? trainerId, required String nombre}) async {
-    await widget.onConfirmarEntrega(
-        trainerId: trainerId, nombre: nombre);
-    if (mounted) setState(() {});
+    if (_operandoCobros) return;
+    _operandoCobros = true;
+    try {
+      await widget.onConfirmarEntrega(
+          trainerId: trainerId, nombre: nombre);
+      if (mounted) setState(() {});
+    } finally {
+      _operandoCobros = false;
+    }
   }
 
   Future<void> _registrarYActualizar(
       {int? trainerId,
       required String nombre,
       required double pendiente}) async {
-    await widget.onRegistrarRecogida(
-        trainerId: trainerId, nombre: nombre, pendiente: pendiente);
-    if (mounted) setState(() {});
+    if (_operandoCobros) return;
+    _operandoCobros = true;
+    try {
+      await widget.onRegistrarRecogida(
+          trainerId: trainerId, nombre: nombre, pendiente: pendiente);
+      if (mounted) setState(() {});
+    } finally {
+      _operandoCobros = false;
+    }
   }
 
   Future<void> _irYActualizar(Widget w) async {
@@ -1899,6 +1916,10 @@ class _InvitadosFrecuentesScreenState
   bool _cargando = true;
   List<Map<String, dynamic>> _candidatos = [];
   int _umbral = umbralVisitasDefecto;
+  // (136-776) guarda del ajuste de umbral.
+  bool _operandoUmbral = false;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
 
   @override
   void initState() {
@@ -1908,20 +1929,41 @@ class _InvitadosFrecuentesScreenState
 
   Future<void> _cargar() async {
     setState(() => _cargando = true);
-    final umbral = await umbralVisitasInvitado();
-    final lista = await candidatosInvitados();
-    if (!mounted) return;
-    setState(() {
-      _umbral = umbral;
-      _candidatos = lista;
-      _cargando = false;
-    });
+    // (136-802) triestado: el fallo no se pinta como «sin
+    // candidatos» sano.
+    try {
+      final umbral = await umbralVisitasInvitado();
+      final lista = await candidatosInvitados();
+      if (!mounted) return;
+      setState(() {
+        _umbral = umbral;
+        _candidatos = lista;
+        _errorCarga = null;
+        _cargando = false;
+      });
+    } catch (e) {
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) {
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
+      }
+    }
   }
 
   Future<void> _cambiarUmbral(int delta) async {
-    await fijarUmbralVisitasInvitado(_umbral + delta);
-    if (!mounted) return;
-    _cargar();
+    // (136-776) guarda síncrona antes del primer await: dos
+    // toques rápidos no fijan dos umbrales en carrera.
+    if (_operandoUmbral) return;
+    _operandoUmbral = true;
+    try {
+      await fijarUmbralVisitasInvitado(_umbral + delta);
+      if (!mounted) return;
+      _cargar();
+    } finally {
+      _operandoUmbral = false;
+    }
   }
 
   String _etiquetaClave(String clave) {
@@ -1944,6 +1986,12 @@ class _InvitadosFrecuentesScreenState
       appBar: appBarIron(context, 'Invitados frecuentes'),
       body: _cargando
           ? const EstadoCargando(texto: 'Buscando candidatos…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudieron buscar los candidatos',
+                  detalle: _errorCarga,
+                  onReintentar: _cargar,
+                )
           : RefrescoIron(
               onRefresh: () => refrescoGeneralIron(releer: _cargar),
               child: ListView(

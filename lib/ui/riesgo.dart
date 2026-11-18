@@ -31,6 +31,8 @@ class RiesgoScreen extends StatefulWidget {
 class _RiesgoScreenState extends State<RiesgoScreen> {
   List<Map<String, dynamic>> _riesgo = [];
   bool _cargando = true;
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -61,6 +64,7 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
     if (mounted) {
       setState(() {
         _riesgo = datos;
+        _errorCarga = null;
         _cargando = false;
       });
     }
@@ -139,7 +143,19 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
       ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando clientes en riesgo…')
-          : Column(
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los clientes en riesgo',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : Column(
               children: [
                 const SyncBanner(),
                 Expanded(

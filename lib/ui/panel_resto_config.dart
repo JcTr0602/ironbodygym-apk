@@ -420,6 +420,8 @@ class RegistroMensualScreen extends StatefulWidget {
 
 class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
   ResumenIngresos? _resumen;
   int _pagaron = 0;
   String _mes = '';
@@ -449,11 +451,19 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
           _mes = mes;
           _resumen = resumen;
           _pagaron = pagaron;
+          _errorCarga = null;
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // (136-802) antes el catch mudo pintaba el registro en
+      // cero como si fuera un mes sin ingresos.
+      if (mounted) {
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -473,11 +483,23 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
       appBar: appBarIron(context, 'Registro mensual'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ajustes…')
-          : ListView(
-              padding: const EdgeInsets.all(AppEspacio.lg),
-              children: [
-                const Text(
-                  'Visor de solo lectura. La copia maestra sigue siendo '
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar el registro mensual',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(AppEspacio.lg),
+                  children: [
+                    const Text(
+                      'Visor de solo lectura. La copia maestra sigue siendo '
                   'el archivo Markdown que el dueño dicta: la app no '
                   'lo escribe ni lo modifica.',
                   style: AppTexto.secundario,

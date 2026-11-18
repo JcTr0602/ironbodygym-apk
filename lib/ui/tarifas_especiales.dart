@@ -34,6 +34,8 @@ class TarifasScreen extends StatefulWidget {
 
 class _TarifasScreenState extends State<TarifasScreen> {
   var _cargando = true;
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
   Map<String, double> _precios = {};
   List<Map<String, dynamic>> _especiales = [];
   Map<int, String> _nombres = {};
@@ -54,6 +56,7 @@ class _TarifasScreenState extends State<TarifasScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -75,6 +78,7 @@ class _TarifasScreenState extends State<TarifasScreen> {
       _precios = precios;
       _especiales = especiales;
       _nombres = nombres;
+      _errorCarga = null;
       _cargando = false;
     });
   }
@@ -85,7 +89,19 @@ class _TarifasScreenState extends State<TarifasScreen> {
       appBar: appBarIron(context, 'Tarifas'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando tarifas…')
-          : RefrescoIron(
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar las tarifas',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : RefrescoIron(
               onRefresh: _cargar,
               child: ListView(
                 padding: const EdgeInsets.all(AppEspacio.lg),

@@ -48,6 +48,9 @@ class NominaScreen extends StatefulWidget {
 
 class _NominaScreenState extends State<NominaScreen> {
   bool _cargando = true;
+  // (1.36 H-A2 136-802) triestado de carga: el fallo se pinta
+  // con EstadoError y reintento, nunca como nómina vacía sana.
+  String? _errorCarga;
   // Pasada 2 de Argón (1.20): candado de las acciones de
   // dinero de esta pantalla (bono, tarifa) contra doble toque.
   bool _operando = false;
@@ -123,6 +126,10 @@ class _NominaScreenState extends State<NominaScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // (136-802) y se pinta como error con reintento.
+      if (mounted && gen == _genCarga) {
+        setState(() => _errorCarga = '$e');
+      }
     } finally {
       if (mounted && gen == _genCarga && _cargando) {
         setState(() => _cargando = false);
@@ -206,6 +213,7 @@ class _NominaScreenState extends State<NominaScreen> {
         _actualizadoEtiqueta = _etiquetaActualizado(desdeCache
             ? cache.calculadoEn
             : ahoraHabana().toIso8601String());
+        _errorCarga = null;
         _cargando = false;
       });
     }
@@ -897,10 +905,18 @@ class _NominaScreenState extends State<NominaScreen> {
     if (_operando) return;
     _operando = true;
     final texto = _tarifaCtrl.text.trim().replaceAll(',', '.');
-    // Autoauditoría 1.22 #1: montoTolerante (N-2): 'Infinity'/
-    // 'NaN' pegados pasaban el filtro (<=0 es falso para ambos)
-    // y tarifa.toInt() lanzaba sin guardar ni avisar.
-    final tarifa = NominaCalc.montoTolerante(texto) ?? 150;
+    // (1.36 H-A2 136-796 · GD-028) null ≠ valor válido: un
+    // campo vacío o no numérico es ERROR VISIBLE y no guarda
+    // nada — antes caía a 150 en silencio y el dueño creía
+    // haber fijado la tarifa que escribió.
+    final tarifa = NominaCalc.montoTolerante(texto);
+    if (tarifa == null) {
+      _operando = false;
+      mostrarSnack(context,
+          'Escribe la tarifa por cliente (un importe válido) antes de guardar.',
+          significado: SignificadoChip.error);
+      return;
+    }
     if (tarifa <= 0) {
       _operando = false;
       mostrarSnack(context, 'Ingresa una tarifa válida', significado: SignificadoChip.alerta);
@@ -969,7 +985,19 @@ class _NominaScreenState extends State<NominaScreen> {
       body: _cargando
           // 1.28 (M3-C6): esqueleto espejo de la pantalla.
           ? const SkeletonNomina()
-          : RefrescoIron(
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar la nómina',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : RefrescoIron(
               onRefresh: _actualizarNomina,
               child: ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
@@ -980,10 +1008,18 @@ class _NominaScreenState extends State<NominaScreen> {
                 if (esDueno) ...[
                   Tarjeta(
                     onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const CierreMesScreen()),
-                      );
+                      // (136-776) guarda síncrona: un doble
+                      // toque no apila dos Cierre de mes.
+                      if (_operando) return;
+                      _operando = true;
+                      try {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const CierreMesScreen()),
+                        );
+                      } finally {
+                        _operando = false;
+                      }
                       if (!mounted) return;
                       _cargar();
                     },

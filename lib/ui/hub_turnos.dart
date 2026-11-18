@@ -282,6 +282,9 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   }
 
   Future<void> _cerrar() async {
+    // (1.36 H-A2 136-776) guarda síncrona antes del primer
+    // await: un segundo toque no apila dos diálogos de cierre.
+    if (_procesando) return;
     setState(() => _procesando = true);
     try {
       // 1.25 T84: el cierre vive en cierre_turno.dart,

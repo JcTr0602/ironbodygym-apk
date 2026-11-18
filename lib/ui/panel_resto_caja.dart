@@ -86,6 +86,8 @@ class NominaPrecalculadaScreen extends StatefulWidget {
 
 class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
   String _mes = '';
   String _calculadoEn = '';
   List<Map<String, dynamic>> _porEntrenador = [];
@@ -226,11 +228,18 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
           _pagaronGlobal = pagaron;
           _tarifa = tarifa;
           _baseGlobal = baseGlobal;
+          _errorCarga = null;
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // (136-802) el fallo se pinta, no se traga.
+      if (mounted) {
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -247,6 +256,18 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
       appBar: appBarIron(context, 'Nómina pre-calculada'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando nómina…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar esta pantalla',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -377,6 +398,8 @@ class AdelantosListaScreen extends StatefulWidget {
 
 class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
   List<Map<String, dynamic>> _filas = [];
   String _filtroMes = 'todos';
 
@@ -434,11 +457,18 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
       if (mounted) {
         setState(() {
           _filas = filas;
+          _errorCarga = null;
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // (136-802) el fallo se pinta, no se traga.
+      if (mounted) {
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -464,6 +494,18 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
       appBar: appBarIron(context, 'Adelantos'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando adelantos…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar esta pantalla',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -549,6 +591,8 @@ class IngresosPeriodoScreen extends StatefulWidget {
 
 class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
   String _preset = 'mes';
   String _desde = '';
   String _hasta = '';
@@ -611,9 +655,13 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
       // filtrar en Dart; las cifras no cambian (la
       // equivalencia la vigila un test).
       filas = await filasIngresoPeriodo(_desde, _hasta);
-    } catch (_) {
+    } catch (e) {
       if (mounted && gen == _generacion) {
-        setState(() => _cargando = false);
+        // (136-802) el fallo se pinta, no se traga.
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
       }
       return;
     }
@@ -627,6 +675,7 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
     setState(() {
       _resumen = resumenIngresos(filas, _desde, _hasta);
       _plusConsultando = true;
+      _errorCarga = null;
       _cargando = false;
     });
     unawaited(_sumarPlusDetras(filas, gen));
@@ -685,6 +734,18 @@ class _IngresosPeriodoScreenState extends State<IngresosPeriodoScreen> {
       appBar: appBarIron(context, 'Ingresos por período'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ingresos…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar esta pantalla',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
@@ -801,6 +862,8 @@ const _kEtiquetasPrecios = {
 
 class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
   final _ctrls = <String, TextEditingController>{};
   // 1.25 T99: autoguardado por campo — focos propios (al
   // perder el foco se guarda ese campo), último valor
@@ -809,6 +872,10 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
   final _valores = <String, double>{};
   final _okCampo = <String>{};
   String? _guardandoCampo;
+  // (1.36 H-A2 136-861) cola por clave del autoguardado: una
+  // edición que llega mientras otro campo guarda NO se
+  // descarta en silencio — se encola y se procesa al terminar.
+  final Set<String> _colaAutoguardar = {};
 
   @override
   void dispose() {
@@ -833,6 +900,21 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     // 1.22 T-10: guarda de dueño también en el método (la de
     // build sola no basta si el estado se crea por otra vía).
     if (!AuthService().isOwner) return;
+    // (136-802) si la lectura falla, error con reintento en
+    // vez de «Cargando precios…» eterno.
+    try {
+      await _cargarPrecios();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _cargarPrecios() async {
     final aj = await LocalDb.instance.getAjustes();
     for (final k in kClavesPreciosC6) {
       // Yunque 4 (L2-1, clase K6-3): lector tolerante —
@@ -853,7 +935,12 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
       });
       _focos[k] = foco;
     }
-    if (mounted) setState(() => _cargando = false);
+    if (mounted) {
+      setState(() {
+        _errorCarga = null;
+        _cargando = false;
+      });
+    }
   }
 
   /// 1.25 T99: autoguardado por campo. Al salir del campo
@@ -866,7 +953,16 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
     // 1.22 T-10: cambiar precios es solo del dueño, también
     // guardado en el método.
     if (!AuthService().isOwner) return;
-    if (_guardandoCampo != null) return;
+    if (_guardandoCampo != null) {
+      // (136-861) encolar por clave y avisar, no descartar.
+      if (_colaAutoguardar.add(k) && mounted) {
+        mostrarSnack(context,
+            'Espera a que termine de guardar: tu cambio de '
+            '${_kEtiquetasPrecios[k] ?? k} se guarda enseguida.',
+            significado: SignificadoChip.alerta);
+      }
+      return;
+    }
     final ctrl = _ctrls[k];
     if (ctrl == null) return;
     final v = parsePrecioCampo(ctrl.text);
@@ -903,6 +999,16 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
         AppLog.error('panel_caja', 'guardar_campo_fallo', d: '$e');
         mostrarSnack(context, mensajeErrorAmable(e), significado: SignificadoChip.error);
       }
+    } finally {
+      // (136-861) drenar la cola por clave: cada edición
+      // encolada se autoguarda ahora, en orden de llegada.
+      if (_colaAutoguardar.isNotEmpty) {
+        final siguientes = _colaAutoguardar.toList();
+        _colaAutoguardar.clear();
+        for (final sig in siguientes) {
+          unawaited(_autoguardar(sig));
+        }
+      }
     }
   }
 
@@ -918,6 +1024,18 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
       appBar: appBarIron(context, 'Precios por método'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando precios…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar esta pantalla',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : ListView(
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [

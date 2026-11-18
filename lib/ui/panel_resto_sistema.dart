@@ -84,6 +84,45 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
   bool _cargando = true;
   List<Map<String, dynamic>> _ops = [];
   List<Map<String, dynamic>> _huerfanas = [];
+  // (1.36 H-A2 136-776) acciones en curso por clave (op/foto):
+  // guarda síncrona antes del primer await contra el doble
+  // toque en Reintentar/Descartar.
+  final Set<String> _enCurso = {};
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
+
+  Future<void> _reintentarOp(Map<String, dynamic> op) async {
+    final clave = 'op:${op['op_uuid'] ?? op['id']}';
+    if (_enCurso.contains(clave)) return;
+    setState(() => _enCurso.add(clave));
+    try {
+      await SyncEngine.instance.push();
+      await _cargar();
+    } finally {
+      if (mounted) setState(() => _enCurso.remove(clave));
+    }
+  }
+
+  Future<void> _descartarHuerfana(Map<String, dynamic> f) async {
+    final clave = 'foto:${f['id']}';
+    if (_enCurso.contains(clave)) return;
+    setState(() => _enCurso.add(clave));
+    try {
+      if (!await _confirmar(
+          context,
+          'Descartar foto huérfana',
+          'Solo se borra la fila de la cola. '
+              'No toca al cliente ni a su foto.')) {
+        return;
+      }
+      await descartarFotoHuerfana((f['id'] as num).toInt());
+      await registrarAccionMantenimiento(
+          'descartar_foto_huerfana', {'foto_cola_id': f['id']});
+      await _cargar();
+    } finally {
+      if (mounted) setState(() => _enCurso.remove(clave));
+    }
+  }
   // 1.25 T121 (F5-22): nombres de los clientes afectados por
   // las ops con error, precargados en lote.
   Map<int, String> _nombresClientes = {};
@@ -125,11 +164,18 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
           _ops = ops;
           _huerfanas = huerfanas;
           _nombresClientes = nombres;
+          _errorCarga = null;
           _cargando = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
+    } catch (e) {
+      // (136-802) el fallo no se pinta como «sin errores» sano.
+      if (mounted) {
+        setState(() {
+          _errorCarga = '$e';
+          _cargando = false;
+        });
+      }
     }
   }
 
@@ -195,11 +241,23 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
       appBar: appBarIron(context, 'Errores de sincronización'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando sistema…')
-          : ListView(
-              padding: const EdgeInsets.all(AppEspacio.lg),
-              children: [
-                const Text(
-                  'En palabras claras, con los textos de Diagnóstico. '
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los errores de sync',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(AppEspacio.lg),
+                  children: [
+                    const Text(
+                      'En palabras claras, con los textos de Diagnóstico. '
                   'Las operaciones de datos NO tienen botón «Descartar»: '
                   'descartar una op dejaría el cambio vivo en este '
                   'teléfono pero nunca llegaría al servidor. Solo se '
@@ -234,10 +292,10 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                             style: AppTexto.secundario),
                         trailing: op['estado'] == 'error'
                             ? TextButton(
-                                onPressed: () async {
-                                  await SyncEngine.instance.push();
-                                  await _cargar();
-                                },
+                                onPressed: _enCurso.contains(
+                                        'op:${op['op_uuid'] ?? op['id']}')
+                                    ? null
+                                    : () => _reintentarOp(op),
                                 child: const Text('Reintentar'))
                             : const Text('Rechazada: avisar al dueño',
                                 style: AppTexto.secundario),
@@ -258,21 +316,10 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                             style: AppTexto.secundario),
                         trailing: soyDueno
                             ? TextButton(
-                                onPressed: () async {
-                                  if (!await _confirmar(
-                                      context,
-                                      'Descartar foto huérfana',
-                                      'Solo se borra la fila de la cola. '
-                                      'No toca al cliente ni a su foto.')) {
-                                    return;
-                                  }
-                                  await descartarFotoHuerfana(
-                                      (f['id'] as num).toInt());
-                                  await registrarAccionMantenimiento(
-                                      'descartar_foto_huerfana',
-                                      {'foto_cola_id': f['id']});
-                                  await _cargar();
-                                },
+                                onPressed: _enCurso
+                                        .contains('foto:${f['id']}')
+                                    ? null
+                                    : () => _descartarHuerfana(f),
                                 child: const Text('Descartar'))
                             : null,
                       ),

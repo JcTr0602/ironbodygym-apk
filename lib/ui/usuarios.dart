@@ -87,6 +87,9 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
   final _busquedaCtrl = TextEditingController();
   String _filtro = '';
   bool _pullFallo = false;
+  // (136-802) fallo de la lectura local: no se pinta como
+  // lista vacía sana.
+  String? _errorCarga;
   DateTime? _ultimoPull;
 
   @override
@@ -115,6 +118,8 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       await _leerLocal();
     } catch (e) {
       AppLog.error('usuarios', 'lectura_local_fallo', d: '$e');
+      // (136-802) la lectura local falló: error con reintento.
+      if (mounted) setState(() => _errorCarga = '$e');
       _pintar(const [], pullFallo: _pullFallo || pullFallo);
       return;
     }
@@ -158,6 +163,9 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
       _usuarios = lista;
       _cargando = false;
       _pullFallo = pullFallo;
+      // (136-802) una pintura con datos limpia el error; la
+      // pintura vacía por fallo lo conserva (lo fijó _cargar).
+      if (lista.isNotEmpty) _errorCarga = null;
       if (ultimoPull != null) _ultimoPull = ultimoPull;
     });
   }
@@ -517,14 +525,27 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                 : 'contenido',
         child: _cargando
             ? const EstadoCargando(texto: 'Cargando usuarios…')
-            : _usuarios.isEmpty
-                ? EstadoVacio(
-                  icono: Icons.people_outline_rounded,
-                  titulo: 'Sin datos',
-                  subtitulo: 'Sincroniza para ver la lista.',
-                  textoAccion: 'Actualizar',
-                  onAccion: _cargar,
-                )
+            : _errorCarga != null && _usuarios.isEmpty
+                // (136-802) fallo de lectura: error, no «Sin datos».
+                ? EstadoError(
+                    titulo: 'No se pudieron cargar los usuarios',
+                    detalle: _errorCarga,
+                    onReintentar: () {
+                      setState(() {
+                        _errorCarga = null;
+                        _cargando = true;
+                      });
+                      _cargar();
+                    },
+                  )
+                : _usuarios.isEmpty
+                    ? EstadoVacio(
+                      icono: Icons.people_outline_rounded,
+                      titulo: 'Sin datos',
+                      subtitulo: 'Sincroniza para ver la lista.',
+                      textoAccion: 'Actualizar',
+                      onAccion: _cargar,
+                    )
                 : _visibles.isEmpty
                     ? EstadoVacio(
                         icono: Icons.search_off_rounded,

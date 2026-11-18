@@ -36,6 +36,8 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
   // BD…), la pantalla enseña el error con reintento en vez de
   // quedarse en «cargando» para siempre.
   bool _errorCarga = false;
+  // (136-776) guarda anti doble toque de las acciones del cierre.
+  bool _operando = false;
 
   static const _meses = [
     'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -104,9 +106,16 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
       };
 
   Future<void> _confirmarManual(PasoCierreMes paso) async {
-    await confirmarPasoCierreMes(_pref, paso.id);
-    if (!mounted) return;
-    _cargar();
+    // (136-776) guarda síncrona antes del primer await.
+    if (_operando) return;
+    _operando = true;
+    try {
+      await confirmarPasoCierreMes(_pref, paso.id);
+      if (!mounted) return;
+      _cargar();
+    } finally {
+      _operando = false;
+    }
   }
 
   Future<void> _cerrarMes() async {

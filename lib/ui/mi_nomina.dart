@@ -48,6 +48,8 @@ class MiNominaScreen extends StatefulWidget {
 
 class _MiNominaScreenState extends State<MiNominaScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
   String _pref = '';
   int _clientesPagados = 0;
   int _tarifa = 150;
@@ -185,6 +187,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -418,6 +421,7 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
       _protegidos = protegidos;
       _horasSinSubir = horasSinSubir;
       _syncTexto = syncTexto;
+      _errorCarga = null;
       _cargando = false;
     });
   }
@@ -510,6 +514,10 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
   /// T22 (1.20): confirmar que recibí la nómina de un mes.
   Future<void> _confirmarRecepcion(Map<String, dynamic> item) async {
     if (_confirmando) return;
+    // (136-776) la bandera se activa ANTES del diálogo (primer
+    // await): con el setState tras el diálogo, un doble toque
+    // abría dos confirmaciones de recepción de nómina.
+    _confirmando = true;
     final mes = '${item['mes']}';
     final ok = await DialogoApp.confirmar(
       context,
@@ -519,7 +527,11 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
           'con la fecha y la hora.',
       aceptar: 'Sí, la recibí',
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted) {
+      // (136-776) cancelar el diálogo libera la bandera.
+      _confirmando = false;
+      return;
+    }
     setState(() => _confirmando = true);
     try {
       await AdelantosService.instance.confirmarRecepcionNomina(
@@ -648,6 +660,20 @@ class _MiNominaScreenState extends State<MiNominaScreen> {
     if (_cargando) {
       return const Center(
           child: CircularProgressIndicator(color: AppColores.naranja));
+    }
+    // (136-802) el fallo de carga no se pinta como nómina vacía.
+    if (_errorCarga != null) {
+      return EstadoError(
+        titulo: 'No se pudo cargar tu nómina',
+        detalle: _errorCarga,
+        onReintentar: () {
+          setState(() {
+            _errorCarga = null;
+            _cargando = true;
+          });
+          _cargar();
+        },
+      );
     }
     return FadeEntrada(
       child: RefrescoIron(

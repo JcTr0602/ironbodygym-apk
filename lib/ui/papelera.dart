@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
 
+import '../app_log.dart';
 import '../auth.dart';
 import '../cliente_protegido.dart';
 import '../localdb.dart';
@@ -36,6 +37,8 @@ class PapeleraScreen extends StatefulWidget {
 
 class _PapeleraScreenState extends State<PapeleraScreen> {
   List<Map<String, dynamic>> _res = [];
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
   final Set<int> _seleccionados = {};
   // Argón menos auditados MEDIO: candados de exclusión. Sin ellos,
   // un doble toque abría dos flujos solapados y encolaba dos ops
@@ -67,6 +70,16 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
   }
 
   Future<void> _cargar() async {
+    // (136-802) el fallo de lectura se captura y se pinta.
+    try {
+      await _cargarDatos();
+    } catch (e) {
+      AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
+    }
+  }
+
+  Future<void> _cargarDatos() async {
     final r = await clientesInactivos();
     // v1.3.5 (fix 2026-10-16): filtro anti-zombie. Si un pull intermedio
     // re-inserta un cliente con op eliminar_cliente en vuelo ('pendiente'
@@ -89,6 +102,7 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
     if (mounted) {
       setState(() {
         _res = filtrados;
+        _errorCarga = null;
         _seleccionados.retainWhere(idsValidos.contains);
       });
     }
@@ -524,12 +538,21 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
               ),
             ),
           Expanded(
-            child: _res.isEmpty
-                ? const EstadoVacio(
-                    ilustracion: 'assets/vacio_papelera.webp',
-                    icono: Icons.delete_outline_rounded,
-                    titulo: 'Papelera vacía',
+            child: _errorCarga != null && _res.isEmpty
+                ? EstadoError(
+                    titulo: 'No se pudo cargar la papelera',
+                    detalle: _errorCarga,
+                    onReintentar: () {
+                      setState(() => _errorCarga = null);
+                      _cargar();
+                    },
                   )
+                : _res.isEmpty
+                    ? const EstadoVacio(
+                        ilustracion: 'assets/vacio_papelera.webp',
+                        icono: Icons.delete_outline_rounded,
+                        titulo: 'Papelera vacía',
+                      )
                 : listaFiltrada.isEmpty
                     ? EstadoVacio(
                         icono: Icons.search_off_rounded,

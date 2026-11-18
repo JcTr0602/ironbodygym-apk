@@ -102,6 +102,8 @@ class CuentasCasaScreen extends StatefulWidget {
 
 class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
   var _cargando = true;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
   var _sinAcceso = false;
   List<Map<String, dynamic>> _casas = [];
 
@@ -121,6 +123,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -152,6 +155,7 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
     if (!mounted) return;
     setState(() {
       _casas = casas;
+      _errorCarga = null;
       _cargando = false;
     });
   }
@@ -177,6 +181,18 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
       appBar: appBarIron(context, 'Cuentas a la Casa'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : _casas.isEmpty
               ? const Center(
                   child: Text('Ninguna cuenta a la Casa.',
@@ -221,6 +237,8 @@ class SinFotoPrecioScreen extends StatefulWidget {
 
 class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
   var _cargando = true;
+  // (136-802) triestado de carga.
+  String? _errorCarga;
   List<Map<String, dynamic>> _mal = [];
 
   @override
@@ -239,6 +257,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -266,6 +285,7 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
     if (!mounted) return;
     setState(() {
       _mal = mal;
+      _errorCarga = null;
       _cargando = false;
     });
   }
@@ -276,6 +296,18 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
       appBar: appBarIron(context, 'Productos sin foto o sin precio'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando…')
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudo cargar',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
           : _mal.isEmpty
               ? const Center(
                   child: Text(
@@ -398,6 +430,7 @@ class _VencimientosProximosScreenState
     setState(() {
       _vencidos = vencidos;
       _proximos = proximos;
+      _errorCarga = null;
       _cargando = false;
     });
   }

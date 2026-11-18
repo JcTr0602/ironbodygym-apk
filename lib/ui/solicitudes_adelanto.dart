@@ -32,6 +32,8 @@ class SolicitudesAdelantoScreen extends StatefulWidget {
 class _SolicitudesAdelantoScreenState
     extends State<SolicitudesAdelantoScreen> {
   bool _cargando = true;
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
   bool _actuando = false;
   List<SolicitudAdelanto> _lista = [];
 
@@ -51,6 +53,7 @@ class _SolicitudesAdelantoScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -71,6 +74,7 @@ class _SolicitudesAdelantoScreenState
     if (!mounted) return;
     setState(() {
       _lista = lista;
+      _errorCarga = null;
       _cargando = false;
     });
   }
@@ -173,9 +177,11 @@ class _SolicitudesAdelantoScreenState
             child: CruceEstados(
               estado: _cargando
                   ? 'cargando'
-                  : _lista.isEmpty
-                      ? 'vacio'
-                      : 'contenido',
+                  : _errorCarga != null
+                      ? 'error'
+                      : _lista.isEmpty
+                          ? 'vacio'
+                          : 'contenido',
               child: _cuerpo(),
             ),
           ),
@@ -188,6 +194,20 @@ class _SolicitudesAdelantoScreenState
     if (_cargando) {
       return const Center(
           child: CircularProgressIndicator(color: AppColores.naranja));
+    }
+    // (136-802) fallo de carga: error con reintento, no vacío.
+    if (_errorCarga != null) {
+      return EstadoError(
+        titulo: 'No se pudieron cargar las solicitudes',
+        detalle: _errorCarga,
+        onReintentar: () {
+          setState(() {
+            _errorCarga = null;
+            _cargando = true;
+          });
+          _cargar();
+        },
+      );
     }
     if (_lista.isEmpty) {
       // 1.23 B7: vacío compartido del sistema.

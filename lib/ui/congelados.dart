@@ -30,6 +30,8 @@ class CongeladosScreen extends StatefulWidget {
 class _CongeladosScreenState extends State<CongeladosScreen> {
   List<Map<String, dynamic>> _clientes = [];
   bool _cargando = true;
+  // (136-802) triestado de carga con EstadoError y reintento.
+  String? _errorCarga;
 
   @override
   void initState() {
@@ -50,6 +52,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = '$e');
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -69,6 +72,7 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
     if (mounted) {
       setState(() {
         _clientes = congelados;
+        _errorCarga = null;
         _cargando = false;
       });
     }
@@ -99,7 +103,19 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
       appBar: appBarIron(context, 'Congelados'),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando congelados…')
-          : Column(
+          : _errorCarga != null
+              ? EstadoError(
+                  titulo: 'No se pudieron cargar los congelados',
+                  detalle: _errorCarga,
+                  onReintentar: () {
+                    setState(() {
+                      _errorCarga = null;
+                      _cargando = true;
+                    });
+                    _cargar();
+                  },
+                )
+              : Column(
               children: [
                 const SyncBanner(),
                 Expanded(
