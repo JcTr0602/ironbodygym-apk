@@ -3106,9 +3106,8 @@ class PlaceholderSuplemento extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final caja = Container(
       height: alto,
-      width: alto == null ? null : double.infinity,
       decoration: BoxDecoration(
         color: AppColores.fondo(context),
         borderRadius: BorderRadius.circular(radio),
@@ -3117,6 +3116,19 @@ class PlaceholderSuplemento extends StatelessWidget {
         Icons.medication_rounded,
         size: tamanoIcono,
         color: AppColores.textoSecundario(context),
+      ),
+    );
+    if (alto == null) return caja;
+    // 1.36 (cierre de Aplica-136): el ancho infinito literal
+    // explotaba dentro del FittedBox del vuelo Hero
+    // («BoxConstraints forces an infinite width», cazado por
+    // jornada1_suplemento S10): con restricciones acotadas el
+    // ancho es el del padre (como double.infinity); sin acotar,
+    // un ancho de reserva finito deja medir al FittedBox.
+    return LayoutBuilder(
+      builder: (ctx, c) => SizedBox(
+        width: c.maxWidth.isFinite ? c.maxWidth : alto! * 1.6,
+        child: caja,
       ),
     );
   }
