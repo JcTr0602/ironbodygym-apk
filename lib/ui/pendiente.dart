@@ -67,6 +67,9 @@ class _PendienteScreenState extends State<PendienteScreen> {
   Map<String, double> _arrastresCup = {};
   bool _cargando = true;
   bool _confirmando = false;
+  // 1.36 H-B2 (136-679): el fallo de carga se declara (sin
+  // él, una lectura rota pintaba «nada pendiente»).
+  bool _falloCarga = false;
   late final bool _esDueno;
 
   @override
@@ -105,6 +108,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _falloCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -177,6 +181,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
               (v['id'] as num).toInt(): v
           };
           _cargando = false;
+          _falloCarga = false;
         });
       }
     } else {
@@ -227,6 +232,7 @@ class _PendienteScreenState extends State<PendienteScreen> {
           _totalAutoritativoCup = autCup;
           _ajusteNetoCup = ajusteCup.abs() > 0.01 ? ajusteCup : 0;
           _cargando = false;
+          _falloCarga = false;
         });
       }
     }
@@ -819,7 +825,17 @@ class _PendienteScreenState extends State<PendienteScreen> {
                   // pantalla (total + tarjetas) en vez del
                   // spinner genérico.
                   ? const SkeletonPendiente()
-                  : RefrescoIron(
+                  // 136-679: fallo sin datos = error con
+                  // reintento, nunca la calma de «nada
+                  // pendiente» sobre una lectura rota.
+                  : _falloCarga &&
+                          _entrenadores.isEmpty &&
+                          _mens.isEmpty
+                      ? EstadoError(
+                          titulo: 'No se pudo cargar el pendiente',
+                          onReintentar: _cargar,
+                        )
+                      : RefrescoIron(
                       onRefresh: _cargar,
                       child: _esDueno
                           ? _listaDueno()
@@ -1269,9 +1285,17 @@ class _EntrenadorCard extends StatelessWidget {
         ? '${fmtMonto(totalCup)} CUP + ${fmtMonto(totalUsd)} USD'
         : '${fmtMonto(totalCup)} CUP';
     final n = entrenador.totalPagos;
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppEspacio.md),
-      child: ExpansionTile(
+    // 1.36 H-B2 (136-680): la tarjeta del entrenador es la
+    // Tarjeta de la casa (no el Card crudo) y se anuncia
+    // con su resumen.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppEspacio.md),
+      child: Semantics(
+        button: true,
+        label: '$nombre: $totalTxt sin entregar',
+        child: Tarjeta(
+          padding: EdgeInsets.zero,
+          child: ExpansionTile(
         leading: CircleAvatar(
           backgroundColor:
               AppColores.naranja.withValues(alpha: 0.15),
@@ -1335,14 +1359,22 @@ class _EntrenadorCard extends StatelessWidget {
                   Expanded(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: porcion.clamp(0.0, 1.0),
-                        minHeight: 5,
-                        backgroundColor: AppColores.borde(context)
-                            .withValues(alpha: 0.3),
-                        valueColor:
-                            const AlwaysStoppedAnimation<Color>(
-                                AppColores.naranja),
+                      // 136-680: la porción crece animada.
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween<double>(
+                            begin: 0, end: porcion.clamp(0.0, 1.0)),
+                        duration: AppMovimiento.resuelta(
+                            context, AppMovimiento.media),
+                        builder: (ctx, fraccion, _) =>
+                            LinearProgressIndicator(
+                          value: fraccion,
+                          minHeight: 5,
+                          backgroundColor: AppColores.borde(context)
+                              .withValues(alpha: 0.3),
+                          valueColor:
+                              const AlwaysStoppedAnimation<Color>(
+                                  AppColores.naranja),
+                        ),
                       ),
                     ),
                   ),
@@ -1490,6 +1522,8 @@ class _EntrenadorCard extends StatelessWidget {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }

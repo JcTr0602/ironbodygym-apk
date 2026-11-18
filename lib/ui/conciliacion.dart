@@ -24,6 +24,7 @@ import '../negocio.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 import '../errores_sync.dart';
 import '../app_log.dart';
 
@@ -91,7 +92,11 @@ Future<void> verComprobanteTransferencia(
         if (local != null) break;
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    // 1.36 H-B2 (136-666): el fallo de resolución del
+    // comprobante queda en bitácora (antes, silencio).
+    AppLog.error('conciliacion', 'comprobante_fallo', d: '$e');
+  }
   if (!context.mounted) return;
   if (local == null) {
     mostrarSnack(context,
@@ -107,7 +112,17 @@ Future<void> verComprobanteTransferencia(
       iconoTitulo: Icons.image_rounded,
       // FIN-02 de Argón (1.20): zoom con pellizco — los números
       // de confirmación bancaria tienen tipografía pequeña.
-      contenido: InteractiveViewer(
+      contenido: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 136-666: la ayuda del gesto de zoom se dice.
+          const Padding(
+            padding: EdgeInsets.only(bottom: AppEspacio.sm),
+            child: Text('Pellizca para ampliar el comprobante.',
+                style: AppTexto.secundario),
+          ),
+          Flexible(
+            child: InteractiveViewer(
         minScale: 1.0,
         maxScale: 4.0,
         // 1.32 (S-G3/Paso 0): NO es una lista — es el
@@ -119,6 +134,9 @@ Future<void> verComprobanteTransferencia(
             cacheWidth: 1600,
             errorBuilder: (context, error, stackTrace) => const Text(
                 'No se pudo mostrar la imagen del comprobante.')),
+            ),
+          ),
+        ],
       ),
       acciones: [
         TextButton(
@@ -295,7 +313,11 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
     final idFila = (p['id'] as num?)?.toInt();
     return Padding(
       padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-      child: Tarjeta(
+      // 136-669: la fila se anuncia con su resumen.
+      child: Semantics(
+        label: '${_nombreDe(p)}: ${fmtMonto(p['monto'])} CUP · '
+            '${etiquetaConciliacion(estado)}',
+        child: Tarjeta(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -315,9 +337,15 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
                   child: Text(_nombreDe(p),
                       style: AppTexto.subtitulo),
                 ),
-                ChipEstado.semantico(
-                  texto: etiquetaConciliacion(estado),
-                  significado: significadoConciliacion(estado),
+                // 136-669: el chip cruza al cambiar el
+                // estado de la transferencia.
+                AnimatedSwitcher(
+                  duration: AppMovimiento.corta,
+                  child: ChipEstado.semantico(
+                    key: ValueKey(estado),
+                    texto: etiquetaConciliacion(estado),
+                    significado: significadoConciliacion(estado),
+                  ),
                 ),
               ],
             ),
@@ -376,6 +404,7 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -411,13 +440,23 @@ class _ConciliacionScreenState extends State<ConciliacionScreen> {
               }),
             ),
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _cargar,
+            // 136-669: refresco con guarda.
+            icon: _cargando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded),
+            onPressed: _cargando ? null : _cargar,
           ),
         ],
       ),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando transferencias…')
+          // 1.36 H-B2 (136-669): esqueleto estructural.
+          ? const Padding(
+              padding: EdgeInsets.all(AppEspacio.lg),
+              child: SkeletonLista(items: 3),
+            )
           : _falloCarga != null
               ? EstadoError(
                   detalle: _falloCarga,

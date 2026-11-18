@@ -139,7 +139,9 @@ Future<bool> cerrarTurnoConDialogo(BuildContext context) async {
   // «pendiente a entregar» NO los calcula el cierre y
   // la tarjeta no los inventa.
   if (context.mounted) {
-    await Navigator.of(context).push(MaterialPageRoute(
+    // 1.36 H-B2 (136-655): la ruta de la casa (RutaIron),
+    // no un MaterialPageRoute crudo.
+    await Navigator.of(context).push(RutaIron(
       builder: (_) => TarjetaCierreTurnoScreen(prep: prep),
     ));
   }
@@ -185,7 +187,9 @@ class _TarjetaCierreTurnoScreenState
     final hora =
         apertura.length >= 16 ? apertura.substring(11, 16) : apertura;
     return [
-      if (fecha.isNotEmpty) fecha,
+      // 1.36 H-B2 (136-658): la fecha formateada de la
+      // casa, no el ISO crudo.
+      if (fecha.isNotEmpty) fmtFecha(fecha),
       if (turno.isNotEmpty) turno,
       if (hora.isNotEmpty) 'desde las $hora',
     ].join(' · ');
@@ -239,7 +243,7 @@ class _TarjetaCierreTurnoScreenState
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(etiqueta, style: AppTexto.secundario),
-          const SizedBox(width: 16),
+          const SizedBox(width: AppEspacio.lg),
           Flexible(
             child: Text(
               valor,
@@ -265,17 +269,30 @@ class _TarjetaCierreTurnoScreenState
               const SizedBox(height: AppEspacio.lg),
               // La marca de hecho en el anillo de marca,
               // como en el recibo (UX-05).
-              Container(
-                width: 84,
-                height: 84,
-                decoration: BoxDecoration(
-                  color: AppColores.naranja.withValues(alpha: 0.08),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: AppColores.naranja, width: 3),
+              // 1.36 H-B2 (136-657): la marca entra con la
+              // micro-animación de la casa (escala + fundido).
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: AppMovimiento.larga,
+                builder: (ctx, t, _) => Opacity(
+                  opacity: t,
+                  child: Transform.scale(
+                    scale: 0.6 + 0.4 * t,
+                    child: Container(
+                      width: 84,
+                      height: 84,
+                      decoration: BoxDecoration(
+                        color: AppColores.naranja
+                            .withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: AppColores.naranja, width: 3),
+                      ),
+                      child: const Icon(Icons.check_circle_rounded,
+                          size: 52, color: AppColores.exito),
+                    ),
+                  ),
                 ),
-                child: const Icon(Icons.check_circle_rounded,
-                    size: 52, color: AppColores.exito),
               ),
               const SizedBox(height: AppEspacio.lg),
               Text('Así quedó tu turno',
@@ -303,7 +320,8 @@ class _TarjetaCierreTurnoScreenState
                       const CabeceraTarjetaIron(),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(
-                            16, 8, 16, 4),
+                            AppEspacio.lg, AppEspacio.sm,
+                            AppEspacio.lg, AppEspacio.xs),
                         child: Column(
                           children: [
                             _fila('Pagos del día', '$_pagos'),
@@ -327,7 +345,8 @@ class _TarjetaCierreTurnoScreenState
                       const Divider(height: 1),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(
-                            16, 8, 16, 12),
+                            AppEspacio.lg, AppEspacio.sm,
+                            AppEspacio.lg, AppEspacio.md),
                         child: PieTarjetaImagen(
                           colorPrincipal: AppColores.texto(context),
                           colorSuave:
@@ -342,10 +361,23 @@ class _TarjetaCierreTurnoScreenState
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.share_rounded),
+                  // 136-657: spinner en curso y colores de
+                  // marca con su token de contraste.
+                  icon: _compartiendo
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColores.sobreMarca))
+                      : const Icon(Icons.share_rounded),
                   label: Text(_compartiendo
                       ? 'Compartiendo…'
                       : 'Compartir al dueño'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColores.naranja,
+                    foregroundColor: AppColores.sobreMarca,
+                  ),
                   onPressed: _compartiendo ? null : _compartir,
                 ),
               ),

@@ -13,6 +13,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 
@@ -30,6 +31,8 @@ class DetallePendienteScreen extends StatefulWidget {
 class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
   bool _cargando = true;
   bool _restringido = false;
+  // 1.36 H-B2 (136-674): el fallo de carga se declara.
+  bool _errorCarga = false;
   List<Map<String, dynamic>> _items = [];
   double _adelantos = 0;
   // 1.22 T-01: la cabecera sale de la función CANÓNICA
@@ -57,6 +60,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -88,6 +92,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
         _totalCup = totalCup;
         _totalUsd = totalUsd;
         _cargando = false;
+        _errorCarga = false;
       });
     }
   }
@@ -134,7 +139,8 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(
+          AppEspacio.lg, AppEspacio.xs, AppEspacio.lg, AppEspacio.xs),
       child: Tarjeta(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,9 +165,9 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                   const Text('Menos adelantos de gaveta'),
                   const Spacer(),
                   Text('−${fmtMonto(_adelantos)} CUP',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: Colors.red)),
+                          color: AppColores.error)),
                 ],
               ),
             ],
@@ -176,12 +182,10 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
     if (_restringido) {
       return Scaffold(
         appBar: appBarIron(context, widget.nombre),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(AppEspacio.xl),
-            child: Text(
-                'Solo puedes ver tu propio pendiente a entregar.'),
-          ),
+        // 136-674: restricción con el vacío de candado.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo puedes ver tu propio pendiente a entregar',
         ),
       );
     }
@@ -199,17 +203,22 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
             // era una fila de texto suelta y las dos pantallas
             // del mismo dinero se veían distintas).
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              padding: const EdgeInsets.fromLTRB(
+                  AppEspacio.lg, AppEspacio.md, AppEspacio.lg,
+                  AppEspacio.xs),
               child: Tarjeta(
                 padding: const EdgeInsets.all(AppEspacio.md),
                 child: Column(
                   children: [
-                    Text(
-                        '${fmtMonto(total)} CUP${totalUsd > 0 ? ' + ${fmtMonto(totalUsd)} USD' : ''}',
-                        textAlign: TextAlign.center,
-                        style: AppTexto.tituloPagina.copyWith(
-                            color: AppColores.naranja)),
+                    // 136-675: la cifra héroe cuenta hasta
+                    // su valor.
+                    MontoAnimado(
+                      valor: total,
+                      formato: (v) =>
+                          '${fmtMonto(v)} CUP${totalUsd > 0 ? ' + ${fmtMonto(totalUsd)} USD' : ''}',
+                      style: AppTexto.tituloPagina.copyWith(
+                          color: AppColores.naranja),
+                    ),
                     Text(
                         '${_items.length} movimiento${_items.length == 1 ? '' : 's'} '
                         'pendiente${_items.length == 1 ? '' : 's'}',
@@ -220,10 +229,23 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
             ),
           if (!_cargando && _items.isNotEmpty) _resumenCategorias(context),
           Expanded(
-            child: _cargando
-                ? const Center(
-                    child: CircularProgressIndicator())
-                : _items.isEmpty
+            // 1.36 H-B2 (136-674/676): esqueleto al cargar,
+            // error declarado y cruce entre estados.
+            child: AnimatedSwitcher(
+              duration: AppMovimiento.media,
+              child: _cargando
+                ? const Padding(
+                    key: ValueKey('cargando'),
+                    padding: EdgeInsets.all(AppEspacio.lg),
+                    child: SkeletonLista(items: 4),
+                  )
+                : _errorCarga && _items.isEmpty
+                    ? EstadoError(
+                        key: const ValueKey('error'),
+                        titulo: 'No se pudo cargar el pendiente',
+                        onReintentar: _cargar,
+                      )
+                    : _items.isEmpty
                     ? const EstadoVacio(
                         icono: Icons.check_circle_rounded,
                         titulo: 'Nada pendiente',
@@ -358,6 +380,7 @@ class _DetallePendienteScreenState extends State<DetallePendienteScreen> {
                           );
                         },
                       ),
+              ),
           ),
         ],
       ),

@@ -16,6 +16,7 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import 'app_log.dart';
 import 'localdb.dart';
 import 'sync.dart';
 
@@ -125,7 +126,13 @@ class DiferenciasCajaService {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // 1.36 H-B2 (136-659): el overlay de ops en cola NO
+      // se traga en silencio: si falla, las diferencias
+      // recién abiertas/resueltas en este teléfono no se
+      // verían (o se verían dos veces) sin dejar rastro.
+      AppLog.error('diferencias', 'overlay_fallo', d: '$e');
+    }
     rows.sort((a, b) {
       final ea = '${a['estado']}' == 'abierta' ? 0 : 1;
       final eb = '${b['estado']}' == 'abierta' ? 0 : 1;
@@ -186,7 +193,10 @@ class DiferenciasCajaService {
           continue;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // 136-659: mismo aviso que en todas().
+      AppLog.error('diferencias', 'overlay_fallo', d: '$e');
+    }
     return mapa;
   }
 

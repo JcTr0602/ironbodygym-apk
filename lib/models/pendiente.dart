@@ -37,7 +37,14 @@ class PagoPendiente {
   /// agrupada igual que en detallePendienteEntrenador. Solo
   /// el tipo 'servicio' admite monto < 0.
   static PagoPendiente? tryFromMap(Map<String, dynamic> map) {
-    final id = map['id'] as int?;
+    // 1.36 H-B2 (136-682): el id se lee TOLERANTE (num o
+    // texto): el cast duro `as int?` lanzaba TypeError con
+    // un id en double/texto y tumbaba la agrupación entera,
+    // contra el contrato de esta función (null si inválido).
+    final idCrudo = map['id'];
+    final id = idCrudo is num
+        ? idCrudo.toInt()
+        : int.tryParse('${idCrudo ?? ''}');
     if (id == null || id <= 0) return null;
     final tipo = map['tipo'] as String? ?? 'mensual';
     final monto = (map['monto'] as num?)?.toDouble();
@@ -104,7 +111,9 @@ class PendienteDia {
     final d = diasDeAntiguedad;
     if (d == 0) return 'HOY';
     if (d == 1) return 'AYER';
-    if (d <= 3) return 'HACE $d DÍAS';
+    // 136-682: una fecha futura (reloj/reloj del servidor)
+    // no es «HACE -1 DÍAS»: sale con su fecha.
+    if (d >= 2 && d <= 3) return 'HACE $d DÍAS';
     return '${fecha.day.toString().padLeft(2, '0')}/'
         '${fecha.month.toString().padLeft(2, '0')}';
   }
@@ -221,9 +230,13 @@ List<EntrenadorPendiente> procesarPendientes(
 
     final dias = porFechaMoneda.entries.map((f) {
       final partes = f.key.split('|');
+      // 136-682: dentro del día, lo más reciente primero
+      // (antes el orden era el de llegada de la lista).
+      final ordenados = [...f.value]
+        ..sort((a, b) => b.fecha.compareTo(a.fecha));
       return PendienteDia(
         fecha: DateTime.parse(partes[0]),
-        pagos: f.value,
+        pagos: ordenados,
       );
     }).toList()
       ..sort((a, b) => b.fecha.compareTo(a.fecha));

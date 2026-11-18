@@ -15,6 +15,7 @@ import '../negocio.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'skeleton.dart';
 
 /// Diálogo para resolver un expediente: clasificación
 /// cerrada + nota (obligatoria para «Otro», el servidor
@@ -107,14 +108,21 @@ class _DialogoResolverDiferenciaState
                   runSpacing: AppEspacio.sm,
                   children: [
                     for (final r in kResolucionesDiferencia)
-                      ChoiceChip(
-                        label: Text(
-                            etiquetaResolucionDiferencia(r)),
+                      // 1.36 H-B2 (136-660): el chip anuncia
+                      // su selección a los lectores.
+                      Semantics(
                         selected: _resolucion == r,
-                        onSelected: (_) => setState(() {
-                          _resolucion = r;
-                          _errorNota = false;
-                        }),
+                        button: true,
+                        label: etiquetaResolucionDiferencia(r),
+                        child: ChoiceChip(
+                          label: Text(
+                              etiquetaResolucionDiferencia(r)),
+                          selected: _resolucion == r,
+                          onSelected: (_) => setState(() {
+                            _resolucion = r;
+                            _errorNota = false;
+                          }),
+                        ),
                       ),
                   ],
                 ),
@@ -131,6 +139,14 @@ class _DialogoResolverDiferenciaState
                     }
                   },
                 ),
+                // 136-660: los errores del diálogo entran
+                // con AnimatedSize, no de golpe.
+                AnimatedSize(
+                  duration: AppMovimiento.corta,
+                  alignment: Alignment.topLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                 if (_errorNota) ...[
                   const SizedBox(height: AppEspacio.sm),
                   Text(
@@ -150,6 +166,9 @@ class _DialogoResolverDiferenciaState
                         color: AppColores.errorTexto(context)),
                   ),
                 ],
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -196,7 +215,21 @@ class _DialogoResolverDiferenciaState
                         }
                       }
                     },
-              child: const Text('Resolver'),
+              // 136-660: en curso se ve (spinner + rótulo).
+              child: _resolviendo
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2)),
+                        SizedBox(width: AppEspacio.sm),
+                        Text('Resolviendo…'),
+                      ],
+                    )
+                  : const Text('Resolver'),
             ),
           ],
         );
@@ -208,13 +241,20 @@ class _DialogoResolverDiferenciaState
 /// liquidaciones del arqueo.
 Widget chipExpedienteDiferencia(Map<String, dynamic> exp) {
   final resuelta = '${exp['estado']}' == 'resuelta';
-  return ChipEstado.semantico(
-    texto: resuelta
-        ? 'Expediente resuelto · '
-            '${etiquetaResolucionDiferencia('${exp['resolucion'] ?? ''}')}'
-        : 'Expediente abierto',
-    significado:
-        resuelta ? SignificadoChip.exito : SignificadoChip.alerta,
+  // 1.36 H-B2 (136-663): el chip cruza al cambiar el
+  // estado del expediente (abierto → resuelto).
+  return AnimatedSwitcher(
+    duration: AppMovimiento.corta,
+    child: ChipEstado.semantico(
+      key: ValueKey(
+          '${exp['estado']}|${exp['resolucion'] ?? ''}'),
+      texto: resuelta
+          ? 'Expediente resuelto · '
+              '${etiquetaResolucionDiferencia('${exp['resolucion'] ?? ''}')}'
+          : 'Expediente abierto',
+      significado:
+          resuelta ? SignificadoChip.exito : SignificadoChip.alerta,
+    ),
   );
 }
 
@@ -367,9 +407,16 @@ class _DiferenciasCajaScreenState
           IconButton(
             // SL-5 G07-3: este botón SOLO relee lo local;
             // su nombre lo dice (no baja nada del servidor).
+            // 136-661: con guarda — en curso se deshabilita
+            // y gira el spinner.
             tooltip: 'Releer',
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _cargar,
+            icon: _cargando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded),
+            onPressed: _cargando ? null : _cargar,
           ),
         ],
       ),
@@ -378,7 +425,11 @@ class _DiferenciasCajaScreenState
       body: CruceEstados(
         estado: _cargando ? 'cargando' : 'contenido',
         child: _cargando
-            ? const EstadoCargando(texto: 'Cargando diferencias…')
+            // 1.36 H-B2 (136-661): esqueleto estructural.
+            ? const Padding(
+                padding: EdgeInsets.all(AppEspacio.lg),
+                child: SkeletonLista(items: 3),
+              )
             : _falloCarga
                 // SL-5 G07-1: fallo de lectura con salida.
                 ? EstadoError(
@@ -447,7 +498,14 @@ class ListaDiferenciasResumen extends StatelessWidget {
         for (final e in visibles)
           Padding(
             padding: const EdgeInsets.only(bottom: AppEspacio.sm),
-            child: Row(
+            // 1.36 H-B2 (136-662): la fila del resumen se
+            // anuncia entera (monto, fecha y estado).
+            child: Semantics(
+              label: 'Faltan ${fmtMonto(e['monto'])} '
+                  '${e['moneda'] ?? 'CUP'} · '
+                  '${fmtFecha('${e['fecha'] ?? ''}')} · '
+                  '${'${e['estado']}' == 'resuelta' ? 'resuelto' : 'abierto'}',
+              child: Row(
               children: [
                 Expanded(
                   child: Text(
@@ -460,14 +518,16 @@ class ListaDiferenciasResumen extends StatelessWidget {
                 ),
                 chipExpedienteDiferencia(e),
               ],
+              ),
             ),
           ),
         if (restantes > 0)
           Align(
             alignment: Alignment.centerLeft,
-            child: TextButton(
+            child: TextButton.icon(
               onPressed: onVerMas,
-              child: Text('y $restantes más'),
+              icon: const Icon(Icons.expand_more_rounded, size: 18),
+              label: Text('y $restantes más'),
             ),
           ),
       ],
