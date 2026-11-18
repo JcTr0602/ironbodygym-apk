@@ -9,12 +9,13 @@
 ///   pintan las ramas amables únicas de la capa de
 ///   servicio (testeadas aquí como funciones puras).
 ///   El saneado del sobre {ok:false} en
-///   `parsearRespuestaListar` quedó REVERTIDO: el paso
-///   directo del mensaje de dominio del servidor es
-///   contrato fijado por test/congelacion_gestion_test
-///   («Solo el dueño ve las congelaciones.») y su
-///   endurecimiento espera decisión en el paquete de
-///   contratos. Aquí se fija ese contrato tal cual.
+///   `parsearRespuestaListar` quedó REVERTIDO en la
+///   1.35 (el paso directo del mensaje de dominio era
+///   contrato de test/congelacion_gestion_test) y se
+///   APLICA en la 1.36 por adjudicación de Jc
+///   (2026-11-17, bloque J-2b): el sobre sale con la
+///   rama amable del listado y aquel contrato se
+///   actualizó con constancia del cambio.
 /// - P-02 (mensajeErrorAnuncio): la corrección (rama por
 ///   defecto genérica) quedó probada y REVERTIDA en la
 ///   1.35 por choque con test/gestion128_m5a_test.dart,
@@ -106,7 +107,14 @@ void main() {
   });
 
   group('P-01 parsearRespuestaListar: contrato del sobre', () {
-    test('el mensaje de dominio del sobre viaja tal cual (contrato fijado)',
+    // CONTRATO MOVIDO (1.36, bloque J-2b): este grupo
+    // fijaba que el mensaje de dominio del sobre viajaba
+    // tal cual y que lo no-sobre salía «Error del
+    // servidor». La adjudicación de Jc (2026-11-17)
+    // sobre la excepción P-01 del Yunque Exhaustivo
+    // 1.35 aplica el saneado en la fuente: TODO fallo del
+    // parser sale con la rama amable única del listado.
+    test('el error del sobre sale con la rama amable, no tal cual',
         () {
       final res = CongelacionesService.parsearRespuestaListar({
         'ok': false,
@@ -114,15 +122,31 @@ void main() {
       });
       expect(res.ok, isFalse);
       expect(res.datos, isEmpty);
-      expect(res.error, 'Solo el dueño ve las congelaciones.');
+      expect(res.error,
+          'No se pudieron cargar las congelaciones. Inténtalo de nuevo.');
     });
 
-    test('una respuesta que no es el sobre sale «Error del servidor»', () {
+    test('un crudo de PostgREST en el sobre tampoco aparece', () {
+      const crudo = 'PGRST202: function not found in schema cache';
+      final res = CongelacionesService.parsearRespuestaListar({
+        'ok': false,
+        'error': crudo,
+      });
+      expect(res.ok, isFalse);
+      expect(res.datos, isEmpty);
+      expect(res.error, isNot(contains(crudo)));
+      expect(res.error,
+          'No se pudieron cargar las congelaciones. Inténtalo de nuevo.');
+    });
+
+    test('una respuesta que no es el sobre sale con la rama amable',
+        () {
       for (final rara in [null, 'texto crudo del servidor', 42]) {
         final res = CongelacionesService.parsearRespuestaListar(rara);
         expect(res.ok, isFalse, reason: '$rara');
         expect(res.datos, isEmpty);
-        expect(res.error, 'Error del servidor');
+        expect(res.error,
+            'No se pudieron cargar las congelaciones. Inténtalo de nuevo.');
       }
     });
 

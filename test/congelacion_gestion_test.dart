@@ -194,13 +194,24 @@ void main() {
     });
 
     test('el sobre de error de la RPC pasa como ok=false', () {
+      // CONTRATO MOVIDO (1.36, bloque J-2b): este test
+      // fijaba que el error del sobre viajaba tal cual
+      // (res.error == 'Solo el dueño ve las
+      // congelaciones.'). La adjudicación de Jc
+      // (2026-11-17) sobre la excepción P-01 del Yunque
+      // Exhaustivo 1.35 aplica el saneado en la fuente:
+      // el parser devuelve la rama amable única del
+      // listado y el texto del servidor no sale.
       final res = CongelacionesService.parsearRespuestaListar({
         'ok': false,
         'error': 'Solo el dueño ve las congelaciones.',
       });
       expect(res.ok, isFalse);
       expect(res.datos, isEmpty);
-      expect(res.error, 'Solo el dueño ve las congelaciones.');
+      expect(res.error,
+          'No se pudieron cargar las congelaciones. Inténtalo de nuevo.');
+      expect(res.error,
+          isNot(contains('Solo el dueño ve las congelaciones.')));
     });
 
     test('una respuesta que no es el sobre es error, no vacío',

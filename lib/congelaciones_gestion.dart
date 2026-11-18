@@ -264,18 +264,21 @@ class CongelacionesService {
     return (
       ok: false,
       datos: const <CongelacionGestion>[],
-      // El error del sobre {ok:false} del servidor viaja
-      // tal cual: son mensajes de dominio escritos para
-      // el usuario («Solo el dueño ve las congelaciones.»)
-      // y su paso directo es contrato fijado por
-      // test/congelacion_gestion_test.dart. El saneado
-      // genérico de esta rama quedó probado en el Yunque
-      // Exhaustivo (P-01) y espera decisión en el paquete
-      // de contratos; las EXCEPCIONES de la RPC sí salen
-      // traducidas (ver listarRemoto).
-      error: res is Map
-          ? '${res['error'] ?? 'Error del servidor'}'
-          : 'Error del servidor',
+      // Yunque Exhaustivo 1.35 (P-01) + adjudicación de
+      // Jc 2026-11-17 (1.36, bloque J-2b): el error del
+      // sobre {ok:false} NO viaja tal cual — sale la rama
+      // amable única del listado, saneado EN LA FUENTE
+      // para que ninguna pantalla reciba el texto del
+      // servidor. Esto MUEVE el contrato que fijaba
+      // test/congelacion_gestion_test.dart (el mensaje de
+      // dominio «Solo el dueño ve las congelaciones.»
+      // pasaba directo); ese test y el grupo del sobre de
+      // yunque_exh_p_test se actualizaron con constancia.
+      // Una respuesta que no es el sobre sale con la
+      // misma rama amable. Las EXCEPCIONES de la RPC
+      // también salen traducidas (ver listarRemoto).
+      error: mensajeListarCongelacionesFallido(
+          res is Map ? res['error'] : null),
     );
   }
 
