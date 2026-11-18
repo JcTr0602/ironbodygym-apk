@@ -329,6 +329,73 @@ String montoTxtActividad(double cup, double usd) {
   );
 }
 
+/// ARG136-07 (extracción): el rango del período anterior
+/// según el filtro de fecha activo, como función pura —
+/// el State le pasa su filtro, su «ahora» Habana y su
+/// rango elegido. Devuelve (ini, fin, etiqueta) o null si
+/// no aplica.
+(DateTime, DateTime, String)? rangoAnteriorActividad(
+    String filtroFecha, DateTime ahora,
+    {DateTime? rangoIni, DateTime? rangoFin}) {
+  final hoyIni = DateTime(ahora.year, ahora.month, ahora.day);
+  switch (filtroFecha) {
+    case 'hoy':
+      // Corte por hora: ayer hasta la misma hora actual.
+      final ayerIni = hoyIni.subtract(const Duration(days: 1));
+      return (ayerIni, ayerIni.add(Duration(
+          hours: ahora.hour,
+          minutes: ahora.minute,
+          seconds: ahora.second)), 'ayer hasta ahora');
+    case 'ayer':
+      final anteayer = hoyIni.subtract(const Duration(days: 2));
+      return (
+        anteayer,
+        anteayer
+            .add(const Duration(hours: 23, minutes: 59, seconds: 59)),
+        'anteayer'
+      );
+    case '7dias':
+      final fin = hoyIni.subtract(const Duration(days: 8));
+      final ini = hoyIni.subtract(const Duration(days: 14));
+      return (
+        ini,
+        fin.add(
+            const Duration(hours: 23, minutes: 59, seconds: 59)),
+        '7 días previos'
+      );
+    case 'mes':
+      final iniMes = DateTime(ahora.year, ahora.month - 1, 1);
+      final finMes = DateTime(ahora.year, ahora.month, 1)
+          .subtract(const Duration(seconds: 1));
+      return (iniMes, finMes, 'mes anterior');
+    case 'rango':
+      if (rangoIni == null || rangoFin == null) return null;
+      final dias = rangoFin.difference(rangoIni).inDays + 1;
+      final fin = DateTime(rangoIni.year, rangoIni.month, rangoIni.day)
+          .subtract(const Duration(seconds: 1));
+      final ini = fin.subtract(Duration(days: dias));
+      return (ini, fin, '$dias días previos');
+    default:
+      return null;
+  }
+}
+
+/// ARG136-07 (extracción): ¿el instante [ts] cae dentro
+/// de [ini, fin]? ini/fin son horas de PARED Habana (se
+/// construyen desde ahoraHabana); el instante se convierte
+/// al mismo marco antes de comparar.
+bool tsEnRangoHabana(String ts, DateTime ini, DateTime fin) {
+  if (ts.length < 10) return false;
+  DateTime dt;
+  try {
+    dt = DateTime.parse(ts);
+  } catch (_) {
+    return false;
+  }
+  if (dt.isBefore(ini) || dt.isAfter(fin)) return false;
+  return true;
+}
+
 /// v1.3.7 (Fase 2, B2): ¿el monto total en CUP pasa el filtro?
 /// Top-level para tests. filtro: 'todo'|'m500'|'m1000'|'m5000'|'rango'.
 bool pasaFiltroMonto(double totalCup, String filtro, double? min,
@@ -2506,14 +2573,7 @@ class _ActividadScreenState extends State<ActividadScreen> {
     var total = 0.0;
     for (final a in items) {
       final ts = '${a['ts'] ?? ''}';
-      if (ts.length < 10) continue;
-      DateTime? dt;
-      try {
-        dt = DateTime.parse(ts);
-      } catch (_) {
-        continue;
-      }
-      if (dt.isBefore(ini) || dt.isAfter(fin)) continue;
+      if (!tsEnRangoHabana(ts, ini, fin)) continue;
       double cup = 0, usd = 0;
       if (a['_en_cola'] == true) {
         cup = (a['_monto_cup'] as num?)?.toDouble() ?? 0;
@@ -2533,53 +2593,11 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   /// v1.3.7 (Fase 2, D2): rango del período anterior según el filtro
   /// de fecha activo. Devuelve (ini, fin, etiqueta) o null si no aplica.
-  (DateTime, DateTime, String)? _rangoAnterior() {
-    final ahora = ahoraHabana();
-    final hoyIni =
-        DateTime(ahora.year, ahora.month, ahora.day);
-    switch (_filtroFecha) {
-      case 'hoy':
-        // Corte por hora: ayer hasta la misma hora actual.
-        final ayerIni = hoyIni.subtract(const Duration(days: 1));
-        return (ayerIni, ayerIni.add(Duration(
-            hours: ahora.hour,
-            minutes: ahora.minute,
-            seconds: ahora.second)), 'ayer hasta ahora');
-      case 'ayer':
-        final anteayer = hoyIni.subtract(const Duration(days: 2));
-        return (
-          anteayer,
-          anteayer.add(const Duration(
-              hours: 23, minutes: 59, seconds: 59)),
-          'anteayer'
-        );
-      case '7dias':
-        final fin = hoyIni.subtract(const Duration(days: 8));
-        final ini = hoyIni.subtract(const Duration(days: 14));
-        return (
-          ini,
-          fin.add(const Duration(
-              hours: 23, minutes: 59, seconds: 59)),
-          '7 días previos'
-        );
-      case 'mes':
-        final iniMes = DateTime(ahora.year, ahora.month - 1, 1);
-        final finMes = DateTime(ahora.year, ahora.month, 1)
-            .subtract(const Duration(seconds: 1));
-        return (iniMes, finMes, 'mes anterior');
-      case 'rango':
-        if (_rangoIni == null || _rangoFin == null) return null;
-        final dias =
-            _rangoFin!.difference(_rangoIni!).inDays + 1;
-        final fin = DateTime(
-                _rangoIni!.year, _rangoIni!.month, _rangoIni!.day)
-            .subtract(const Duration(seconds: 1));
-        final ini = fin.subtract(Duration(days: dias));
-        return (ini, fin, '$dias días previos');
-      default:
-        return null;
-    }
-  }
+  /// ARG136-07: la lógica vive en la función pura
+  /// [rangoAnteriorActividad]; esto solo le pasa el estado.
+  (DateTime, DateTime, String)? _rangoAnterior() =>
+      rangoAnteriorActividad(_filtroFecha, ahoraHabana(),
+          rangoIni: _rangoIni, rangoFin: _rangoFin);
 
   /// v1.3.5 (Fase 1, D1): calcula (n_acciones, mapa categoría→CUP, usd)
   /// sobre los items filtrados. O(N) en memoria, cero costo de BD.
