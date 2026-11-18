@@ -978,7 +978,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             // AnimatedSwitcher al cambiar (antes saltaba por
             // setState sin transición).
             AnimatedSwitcher(
-              duration: AppMovimiento.corta,
+              // UI136-07: por la guarda de «Reducir movimiento».
+              duration: AppMovimiento.resuelta(
+                  context, AppMovimiento.corta),
               child: Text('$valor',
                   key: ValueKey('$etiqueta-$valor'),
                   style: AppTexto.cuerpo.copyWith(
@@ -1772,7 +1774,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           // AnimatedSwitcher (antes la lista cambiaba al
           // instante, en seco).
           child: AnimatedSwitcher(
-            duration: AppMovimiento.media,
+            // UI136-07: por la guarda de «Reducir movimiento».
+            duration:
+                AppMovimiento.resuelta(context, AppMovimiento.media),
             child: KeyedSubtree(
               key: ValueKey('dia-$_diaVista'),
               child: _diaVista == 0
@@ -3140,7 +3144,10 @@ class _FotoPomoServiciosState extends State<_FotoPomoServicios> {
               if (wasSynchronouslyLoaded) return child;
               return AnimatedOpacity(
                 opacity: frame == null ? 0 : 1,
-                duration: AppMovimiento.corta,
+                // UI136-07: por la guarda de «Reducir
+                // movimiento» (el ctx del frameBuilder).
+                duration:
+                    AppMovimiento.resuelta(ctx, AppMovimiento.corta),
                 child: child,
               );
             },

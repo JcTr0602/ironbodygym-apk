@@ -285,7 +285,10 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                                     TweenAnimationBuilder<double>(
                                       tween: Tween<double>(
                                           begin: 0, end: fraccion),
-                                      duration: AppMovimiento.media,
+                                      // UI136-07: por la guarda
+                                      // de «Reducir movimiento».
+                                      duration: AppMovimiento.resuelta(
+                                          context, AppMovimiento.media),
                                       builder: (ctx, valorAnim, _) =>
                                           Align(
                                         alignment:

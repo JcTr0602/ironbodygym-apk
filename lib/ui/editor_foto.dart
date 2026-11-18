@@ -121,6 +121,11 @@ class _EditorFotoDialogState extends State<EditorFotoDialog>
 
   void _reset() {
     _desdeReset = _controller.value.clone();
+    // UI136-07: el controlador nace como campo (sin
+    // contexto); su duración se resuelve AQUÍ, al disparar,
+    // por la guarda de «Reducir movimiento».
+    _animReset.duration =
+        AppMovimiento.resuelta(context, AppMovimiento.corta);
     _animReset
       ..reset()
       ..addListener(_aplicarReset)
@@ -327,7 +332,9 @@ class _EditorFotoDialogState extends State<EditorFotoDialog>
             ),
             clipBehavior: Clip.hardEdge,
             child: AnimatedSwitcher(
-              duration: AppMovimiento.corta,
+              // UI136-07: por la guarda de «Reducir movimiento».
+              duration: AppMovimiento.resuelta(
+                  context, AppMovimiento.corta),
               child: LayoutBuilder(
               key: ValueKey(
                   _preparando ? 'prep' : (_preparacionFallo ? 'fallo' : 'edicion')),

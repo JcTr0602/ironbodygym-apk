@@ -434,7 +434,9 @@ class _HistorialVentasScreenState
         // lo hace ensureVisible con la medición real del
         // ítem cuando la fila ya existe.
         _scrollCtrl.animateTo(destino > maximo ? maximo : destino,
-            duration: AppMovimiento.larga,
+            // UI136-07: por la guarda de «Reducir movimiento».
+            duration:
+                AppMovimiento.resuelta(context, AppMovimiento.larga),
             curve: AppMovimiento.curva);
         WidgetsBinding.instance.addPostFrameCallback(
             (_) => _irAResaltado(intentos + 1));
@@ -443,8 +445,11 @@ class _HistorialVentasScreenState
     }
     setState(() => _resaltado = id);
     Scrollable.ensureVisible(ctx,
-        // 1.35 (UI-13): duración por el token.
-        duration: AppMovimiento.larga, alignment: 0.5);
+        // 1.35 (UI-13): duración por el token · UI136-07: y
+        // por la guarda de «Reducir movimiento».
+        duration:
+            AppMovimiento.resuelta(context, AppMovimiento.larga),
+        alignment: 0.5);
   }
 
   Future<void> _anular(Map<String, dynamic> v) async {
