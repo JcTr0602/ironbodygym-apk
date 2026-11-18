@@ -842,7 +842,16 @@ class _PanelPermisosState extends State<PanelPermisos> {
             // 1.25 T101: la fila viva del entrenador —
             // turno de hoy, última sync y pendiente a
             // entregar, solo si la foto local cargó.
-            if (ent.telegramId != null && _syncPorTid.isNotEmpty)
+            // 1.36 H-B3 (136-856): basta CUALQUIER dato vivo
+            // (turno o pendiente también cuentan) — antes la
+            // fila entera se condicionaba al mapa de sync y
+            // un entrenador con turno/pendiente pero sin
+            // sync no enseñaba nada; su «Sin registro de
+            // sync» queda como valor parcial de la fila.
+            if (ent.telegramId != null &&
+                (_syncPorTid.isNotEmpty ||
+                    _enTurnoHoy.isNotEmpty ||
+                    _pendientePorTid.isNotEmpty))
               Padding(
                 padding: const EdgeInsets.only(top: AppEspacio.sm),
                 child: Wrap(

@@ -194,9 +194,18 @@ class _CuentasCasaScreenState extends State<CuentasCasaScreen> {
                   },
                 )
           : _casas.isEmpty
-              ? const Center(
-                  child: Text('Ninguna cuenta a la Casa.',
-                      style: AppTexto.secundario))
+              // 1.36 H-B3 (136-857): vacío con la primitiva
+              // y la nota de la Casa TAMBIÉN aquí (antes la
+              // nota solo salía con filas y el vacío era un
+              // texto suelto centrado).
+              ? const EstadoVacio(
+                  icono: Icons.home_rounded,
+                  titulo: 'Ninguna cuenta a la Casa',
+                  subtitulo:
+                      'Precio 0, nunca vencen, fuera de ingresos, '
+                      'caja y nómina. Solo el dueño otorga o quita '
+                      'la Casa desde la ficha.',
+                )
               : ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
@@ -309,10 +318,11 @@ class _SinFotoPrecioScreenState extends State<SinFotoPrecioScreen> {
                   },
                 )
           : _mal.isEmpty
-              ? const Center(
-                  child: Text(
-                      'Todos los productos tienen foto y precio.',
-                      style: AppTexto.secundario))
+              // 1.36 H-B3 (136-857): vacío con la primitiva.
+              ? const EstadoVacio(
+                  icono: Icons.check_circle_rounded,
+                  titulo: 'Todos los productos tienen foto y precio',
+                )
               : ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
@@ -465,7 +475,10 @@ class _VencimientosProximosScreenState
                 // arriba y cada sección solo si tiene filas;
                 // si no hay nadie en ninguna, un solo vacío.
                 Text(
-                  '${_vencidos.length} vencido(s) · '
+                  // 1.36 H-B3 (136-857): plural real por
+                  // conteo, no «vencido(s)».
+                  '${_vencidos.length} '
+                  '${_vencidos.length == 1 ? 'vencido' : 'vencidos'} · '
                   '${_proximos.length} por vencer en 7 días',
                   style: AppTexto.secundario,
                 ),
@@ -501,7 +514,9 @@ class _VencimientosProximosScreenState
         child: ListTile(
           leading: Icon(
               vencido ? Icons.warning_amber_rounded : Icons.event_rounded,
-              color: vencido ? Colors.red : AppColores.naranja),
+              // 1.36 H-B3 (136-857): token de error de la
+              // casa, no Colors.red crudo.
+              color: vencido ? AppColores.error : AppColores.naranja),
           title: Text('${c['nombre'] ?? ''}'),
           subtitle: Text(
               'Vence: ${fmtFecha('${c['pagado_hasta']}'.substring(0, 10))}'),

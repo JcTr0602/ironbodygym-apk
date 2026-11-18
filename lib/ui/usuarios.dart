@@ -227,11 +227,10 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
             _DialogoNuevaContrasena(username: username),
       );
       if (texto == null || !mounted) return;
-      password = texto.trim();
-      if (password.length < 6) {
-        mostrarSnack(context, 'Contraseña muy corta (mín. 6 caracteres)', significado: SignificadoChip.alerta);
-        return;
-      }
+      // 1.36 H-B3 (136-851): el diálogo ya devuelve la
+      // clave normalizada y validada; aquí no se recorta
+      // ni se revalida (la doble regla era el defecto).
+      password = texto;
     }
     final payload = <String, dynamic>{
       'accion': accion,
@@ -299,6 +298,9 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
         iconoTitulo: Icons.history_rounded,
         contenido: SizedBox(
           width: double.maxFinite,
+          // 1.36 H-B3 (136-852): historial ACOTADO con
+          // scroll (antes shrinkWrap sin límite).
+          height: accesos.isEmpty ? null : 380,
           child: accesos.isEmpty
               ? const Text('Sin accesos registrados.''\n'
                   'El historial se genera con el uso de la APK.')
@@ -453,8 +455,12 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Usuarios APK'),
-        body: const Center(
-            child: Text('Solo el dueño puede ver los usuarios.')),
+        // 1.36 H-B3 (136-852): la guarda se pinta con la
+        // primitiva de vacío con candado, no un texto suelto.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo el dueño puede ver los usuarios.',
+        ),
       );
     }
     return Scaffold(
@@ -462,10 +468,17 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
         context,
         'Usuarios APK',
         acciones: [
+          // 1.36 H-B3 (136-852): el refresco muestra su
+          // estado de carga en el propio botón.
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: _cargando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar',
-            onPressed: _cargar,
+            onPressed: _cargando ? null : _cargar,
           ),
         ],
       ),
@@ -484,24 +497,13 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(AppEspacio.lg,
                   AppEspacio.md, AppEspacio.lg, AppEspacio.xs),
-              child: TextField(
+              // 1.36 H-B3 (136-852): el buscador usa el
+              // CampoTexto del módulo, no un TextField con
+              // decoración propia.
+              child: CampoTexto(
                 controller: _busquedaCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Buscar usuario…',
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  suffixIcon: _filtro.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          tooltip: 'Quitar búsqueda',
-                          onPressed: () {
-                            _busquedaCtrl.clear();
-                            setState(() => _filtro = '');
-                          },
-                        ),
-                  isDense: true,
-                  border: const OutlineInputBorder(),
-                ),
+                hint: 'Buscar usuario…',
+                icono: Icons.search_rounded,
                 onChanged: (v) => setState(() => _filtro = v),
               ),
             ),
@@ -630,6 +632,10 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                             if (dispositivo.isNotEmpty)
                               Text(
                                 dispositivo,
+                                // 1.36 H-B3 (136-852):
+                                // subtítulos acotados.
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                         context)),
                               ),
@@ -637,6 +643,8 @@ class _UsuariosScreenState extends State<UsuariosScreen> {
                             if (appVersion.isNotEmpty)
                               Text(
                                 'App: v$appVersion',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(
                                         context)),
                               ),
@@ -779,12 +787,19 @@ class _DialogoNuevaContrasenaState
               // SL-9 (G09-12): validar ANTES de cerrar — antes
               // el aviso salía tras el pop, en la pantalla de
               // fondo, y la contraseña tecleada se perdía.
-              if (_ctrl.text.length < 6) {
+              // 1.36 H-B3 (136-851): se valida la clave YA
+              // NORMALIZADA dentro del diálogo y se devuelve
+              // normalizada — antes 'abcde ' (con espacio)
+              // pasaba el length sobre el texto crudo y
+              // reventaba en el llamador tras recortar.
+              final normalizada =
+                  normalizarPasswordNuevoUsuario(_ctrl.text);
+              if (normalizada.length < 6) {
                 setState(() => _error =
                     'Contraseña muy corta (mín. 6 caracteres)');
                 return;
               }
-              Navigator.pop(context, _ctrl.text);
+              Navigator.pop(context, normalizada);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,

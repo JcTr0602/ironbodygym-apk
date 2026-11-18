@@ -483,6 +483,20 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
               textAlign: TextAlign.center,
             ),
           ),
+          // 1.36 H-B3 (136-850): para quien no es dueño se
+          // DICE que las acciones son del dueño (antes la
+          // pantalla solo las escondía, sin explicación).
+          if (!esDueno)
+            Padding(
+              padding:
+                  const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Recuperar, renovar y eliminar son acciones del dueño.',
+                style: AppTexto.metadato.copyWith(
+                    color: AppColores.textoSecundario(context)),
+                textAlign: TextAlign.center,
+              ),
+            ),
           // v1.3.9 (Argón): buscador en tiempo real.
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -523,6 +537,18 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                   Text('${_seleccionados.length} seleccionados',
                       style: AppTexto.subtitulo),
                   const Spacer(),
+                  // 1.36 H-B3 (136-850): «Seleccionar todo»
+                  // lo filtrado, dentro de la banda del modo
+                  // selección (la salida ya existe: «Limpiar»
+                  // en el appBar).
+                  if (esDueno)
+                    TextButton(
+                      onPressed: () => setState(() =>
+                          _seleccionados.addAll(listaFiltrada
+                              .map((c) => (c['id'] as int?) ?? 0)
+                              .where((id) => id > 0))),
+                      child: const Text('Seleccionar todo'),
+                    ),
                   if (esDueno)
                     ElevatedButton.icon(
                       icon: const Icon(Icons.delete_forever_rounded,
@@ -558,6 +584,13 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                         icono: Icons.search_off_rounded,
                         titulo:
                             'No se encontraron clientes inactivos para «$_filtro».',
+                        // 1.36 H-B3 (136-850): salida directa
+                        // del vacío con búsqueda.
+                        textoAccion: 'Quitar búsqueda',
+                        onAccion: () {
+                          _searchCtrl.clear();
+                          setState(() => _filtro = '');
+                        },
                       )
                     : RefrescoIron(
                         // P-7: regla de Jc (refrescoGeneralIron).
@@ -623,7 +656,31 @@ class _PapeleraScreenState extends State<PapeleraScreen> {
                           // (cambiar_estado es SOLO_ADMIN en
                           // el servidor).
                           trailing: esDueno
-                              ? Column(
+                              ? _enCurso.contains(id)
+                                  // 1.36 H-B3 (136-849): con
+                                  // una operación en curso la
+                                  // fila muestra su estado y
+                                  // los botones quedan fuera
+                                  // (antes se podía re-tocar
+                                  // recuperar/renovar/eliminar
+                                  // a ciegas).
+                                  ? const Row(
+                                      mainAxisSize:
+                                          MainAxisSize.min,
+                                      children: [
+                                        SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child:
+                                              CircularProgressIndicator(
+                                                  strokeWidth:
+                                                      2),
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text('Trabajando…'),
+                                      ],
+                                    )
+                                  : Column(
                                   mainAxisSize: MainAxisSize.min,
                                   crossAxisAlignment:
                                       CrossAxisAlignment.end,
