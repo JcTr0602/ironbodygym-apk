@@ -1495,14 +1495,18 @@ class TarjetaReserva extends StatelessWidget {
   Future<void> _verDetalleError(BuildContext context) async {
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Error al sincronizar'),
-        content: Text(
+      // 1.36 (cierre de Aplica-136): migrado a DialogoApp — la
+      // compuerta 136-264 (test compuertas_136) prohíbe
+      // AlertDialog nuevos fuera de la primitiva y este diálogo
+      // nació crudo en H-B3 (136-745..749).
+      builder: (ctx) => DialogoApp(
+        titulo: 'Error al sincronizar',
+        contenido: Text(
           'La acción quedó guardada en este teléfono, pero la '
           'sincronización la devolvió con error:\n\n$errorSync\n\n'
           'Al reintentar, la sincronización la vuelve a subir.',
         ),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cerrar'),

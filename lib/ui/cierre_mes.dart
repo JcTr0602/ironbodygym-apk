@@ -100,15 +100,19 @@ class _CierreMesScreenState extends State<CierreMesScreen> {
     final ctrl = TextEditingController(text: _pref);
     final elegido = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ir a un mes'),
-        content: CampoTexto(
+      // 1.36 (cierre de Aplica-136): migrado a DialogoApp — la
+      // compuerta 136-264 (test compuertas_136) prohíbe
+      // AlertDialog nuevos fuera de la primitiva y este diálogo
+      // nació crudo en H-B3 (136-815).
+      builder: (ctx) => DialogoApp(
+        titulo: 'Ir a un mes',
+        contenido: CampoTexto(
           controller: ctrl,
           etiqueta: 'Mes (AAAA-MM)',
           hint: '2026-09',
           teclado: TextInputType.datetime,
         ),
-        actions: [
+        acciones: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancelar'),

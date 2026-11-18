@@ -346,8 +346,11 @@ class _PantallaErrorArranqueState extends State<PantallaErrorArranque> {
                 const Text(
                   'La app no pudo arrancar',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w700),
+                  // 1.36 (cierre de Aplica-136): el literal 20 que
+                  // H-C1 dejó aquí rompía el censo de la escalera
+                  // cerrada (136-313, test tipografia_136); el rol
+                  // de un título de pantalla es tituloPagina (20).
+                  style: AppTexto.tituloPagina,
                 ),
                 const SizedBox(height: 8),
                 const Text(
