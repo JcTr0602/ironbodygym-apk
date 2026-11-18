@@ -739,23 +739,38 @@ class _FilaAjusteEsqueleto extends StatelessWidget {
 /// tarjetas de sección debajo — la forma de la ficha del
 /// cliente en su primera carga.
 class SkeletonFicha extends StatelessWidget {
-  const SkeletonFicha({super.key});
+  /// 1.36 FICHA (136-214/216): tag del Hero de destino,
+  /// cuando la puerta lo trae: el esqueleto ya monta el
+  /// destino con la silueta de la credencial.
+  final String? heroTag;
+  const SkeletonFicha({super.key, this.heroTag});
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(AppEspacio.lg),
-      children: const [
+      children: [
         Tarjeta(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // La línea de 96×96 con radio alto/2 ES el
-              // círculo del avatar.
-              SkeletonLinea(ancho: 96, alto: 96),
-              SizedBox(height: AppEspacio.md),
-              SkeletonLinea(ancho: 180, alto: 20),
-              SizedBox(height: AppEspacio.sm),
-              SkeletonLinea(ancho: 120),
+              // 1.36 FICHA (136-216): el esqueleto dibuja
+              // la silueta REAL de la ficha — banda de la
+              // credencial de 196 dp a ancho completo y
+              // su tira — no el avatar circular de la
+              // cabecera antigua: al cargar, el primer
+              // pantallazo ya no salta de forma.
+              if (heroTag != null)
+                Hero(
+                  tag: heroTag!,
+                  child: const SkeletonLinea(alto: 196),
+                )
+              else
+                const SkeletonLinea(alto: 196),
+              const SizedBox(height: AppEspacio.sm),
+              const SkeletonLinea(ancho: 180, alto: 14),
+              const SizedBox(height: AppEspacio.xs),
+              const SkeletonLinea(ancho: 120, alto: 14),
             ],
           ),
         ),

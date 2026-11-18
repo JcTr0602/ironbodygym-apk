@@ -21,6 +21,35 @@ import 'conciliacion.dart';
 import 'diseno.dart';
 import 'estado_cuenta.dart';
 
+/// 1.36 FICHA (136-215): shuttle de la casa para el Hero de
+/// la credencial — el origen es un avatar circular (~56 dp)
+/// y el destino la banda rectangular de la credencial: el
+/// vuelo interpola el radio de esquina (círculo → tarjeta)
+/// en vez de cortar entre formas incompatibles.
+Widget shuttleHeroCredencial(
+    BuildContext ctx,
+    Animation<double> anim,
+    HeroFlightDirection dir,
+    BuildContext fromCtx,
+    BuildContext toCtx) {
+  final hijo = (toCtx.widget as Hero).child;
+  return AnimatedBuilder(
+    animation: anim,
+    builder: (c, _) => ClipRRect(
+      borderRadius:
+          BorderRadius.circular(40 - 24 * anim.value.clamp(0.0, 1.0)),
+      child: hijo,
+    ),
+  );
+}
+
+/// 1.36 FICHA (136-215): durante el vuelo, el destino
+/// conserva pintado su contenido (la banda no parpadea a
+/// vacío mientras el avatar viaja).
+Widget placeholderHeroCredencial(
+        BuildContext ctx, Size heroSize, Widget child) =>
+    child;
+
 /// Diseño Bloque 2 Paso 2 (B1): la cabecera de la ficha.
 /// 1.35 (UX-04): la cabecera se recompone como
 /// CREDENCIAL del gym — la foto manda en una banda
@@ -91,6 +120,12 @@ class CabeceraFicha extends StatelessWidget {
   /// «Sin vencimiento» para la Casa). Null = «—».
   final String? pagadoHastaTexto;
 
+  /// 1.36 FICHA (136-191): el teléfono ya formateado para
+  /// la tira de la credencial (la información general —
+  /// el contacto — sube a la zona de la credencial). Null
+  /// = sin teléfono válido: la celda no se pinta.
+  final String? telefonoTexto;
+
   const CabeceraFicha(
       {super.key,
       required this.nombre,
@@ -106,7 +141,8 @@ class CabeceraFicha extends StatelessWidget {
       this.fotoOcupada = false,
       this.fraccionPeriodo,
       this.periodoPausado = false,
-      this.pagadoHastaTexto});
+      this.pagadoHastaTexto,
+      this.telefonoTexto});
 
   String get _iniciales {
     final partes =
@@ -175,8 +211,13 @@ class CabeceraFicha extends StatelessWidget {
             : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(
-              horizontal: AppEspacio.md, vertical: AppEspacio.sm),
-          child: Row(
+              horizontal: AppEspacio.md),
+          child: SizedBox(
+            // 1.36 FICHA (136-228): objetivo táctil de
+            // 48 dp, el mínimo que la propia ficha impone
+            // a sus pestañas.
+            height: 48,
+            child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (fotoOcupada)
@@ -200,6 +241,7 @@ class CabeceraFicha extends StatelessWidget {
                       color: AppColores.textoSobreOscuro,
                       fontWeight: FontWeight.w600)),
             ],
+            ),
           ),
         ),
       ),
@@ -250,7 +292,15 @@ class CabeceraFicha extends StatelessWidget {
         children: [
           // La banda de la credencial.
           SizedBox(
-            height: 196,
+            // 1.36 FICHA (136-192/136-213): sin foto la
+            // banda baja a 152 dp (el arte de marca no
+            // manda sobre los datos) y el alto crece con
+            // la escala de fuente (aire a ×1,45) en vez de
+            // recortar nombre e insignia.
+            height: (foto != null ? 196.0 : 152.0) +
+                ((MediaQuery.textScalerOf(context).scale(14) / 14 - 1)
+                        .clamp(0.0, 0.45)) *
+                    48,
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -264,11 +314,43 @@ class CabeceraFicha extends StatelessWidget {
                             fit: BoxFit.cover)
                         : Hero(
                             tag: heroTag!,
+                            flightShuttleBuilder:
+                                shuttleHeroCredencial,
+                            placeholderBuilder:
+                                placeholderHeroCredencial,
                             child: Image(
                                 image: providerFotoAcotada(
                                     FileImage(foto!), ancho: 720),
                                 fit: BoxFit.cover),
                           ),
+                  )
+                else if (heroTag != null)
+                  // 1.36 FICHA (136-214): el destino del
+                  // Hero existe desde el primer frame con
+                  // datos, también sin foto (antes la rama
+                  // sin foto no montaba Hero y el vuelo
+                  // nunca ocurría).
+                  Hero(
+                    tag: heroTag!,
+                    flightShuttleBuilder: shuttleHeroCredencial,
+                    placeholderBuilder: placeholderHeroCredencial,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.asset('assets/arte_marca_rayo.jpg',
+                            fit: BoxFit.cover),
+                        Container(
+                            color: AppColores.grafitoTactico
+                                .withValues(alpha: 0.45)),
+                        Center(
+                          child: Text(_iniciales,
+                              style: AppTexto.display.copyWith(
+                                  fontSize: 44,
+                                  color:
+                                      AppColores.textoSobreOscuro)),
+                        ),
+                      ],
+                    ),
                   )
                 else ...[
                   Image.asset('assets/arte_marca_rayo.jpg',
@@ -279,7 +361,7 @@ class CabeceraFicha extends StatelessWidget {
                   Center(
                     child: Text(_iniciales,
                         style: AppTexto.display.copyWith(
-                            fontSize: 64,
+                            fontSize: 44,
                             color: AppColores.textoSobreOscuro)),
                   ),
                 ],
@@ -374,6 +456,10 @@ class CabeceraFicha extends StatelessWidget {
                 Expanded(
                     child: _datoTira(
                         context, 'Días que quedan', _diasTexto)),
+                if (telefonoTexto != null)
+                  Expanded(
+                      child: _datoTira(
+                          context, 'Teléfono', telefonoTexto!)),
               ],
             ),
           ),
@@ -771,6 +857,26 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
   // cierra; el mes más reciente empieza abierto.
   Set<String> _mesesAbiertos = {};
 
+  // 1.36 FICHA (136-207): la agrupación por mes (5
+  // pasadas por mes) se memoiza por identidad de las
+  // entradas + filtro: un build que no cambia los datos
+  // (un setState vecino, el buscador pintando) no repite
+  // el trabajo entero por tecla.
+  List<Map<String, dynamic>>? _entradasMemoFicha;
+  String? _filtroMemoFicha;
+  List<
+      ({
+        String clave,
+        String titulo,
+        List<Map<String, dynamic>> entradas,
+        int nPagos,
+        double sumaPagos,
+        int nVentas,
+        double sumaVentasCup,
+        double sumaVentasUsd
+      })>?
+      _gruposMemoFicha;
+
   // 1.30 (Oleada 10, FICHA-09): el buscador del historial
   // (controlador propio de la tarjeta, con su dispose).
   final _busquedaCtrl = TextEditingController();
@@ -817,7 +923,29 @@ class _TarjetaHistorialFichaState extends State<TarjetaHistorialFicha> {
         todas.where((e) => e['tipo'] != 'fiado').toList();
     // 1.25 T56: el resto va agrupado por mes (los fiados
     // siguen fijados arriba, fuera de los grupos).
-    final grupos = gruposHistorialPorMes(resto);
+    // 136-207: agrupación memoizada (ver campos arriba).
+    final List<
+      ({
+        String clave,
+        String titulo,
+        List<Map<String, dynamic>> entradas,
+        int nPagos,
+        double sumaPagos,
+        int nVentas,
+        double sumaVentasCup,
+        double sumaVentasUsd
+      })>
+        grupos;
+    if (identical(widget.entradas, _entradasMemoFicha) &&
+        widget.filtro == _filtroMemoFicha &&
+        _gruposMemoFicha != null) {
+      grupos = _gruposMemoFicha!;
+    } else {
+      grupos = gruposHistorialPorMes(resto);
+      _entradasMemoFicha = widget.entradas;
+      _filtroMemoFicha = widget.filtro;
+      _gruposMemoFicha = grupos;
+    }
     // 1.30 (Oleada 10, FICHA-09): con búsqueda activa la
     // lista deja de agruparse por meses: salen las
     // coincidencias en plano, dentro del filtro activo
