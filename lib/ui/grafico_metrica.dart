@@ -108,7 +108,12 @@ class GraficoMetricaGestion extends StatefulWidget {
 }
 
 class _GraficoMetricaGestionState extends State<GraficoMetricaGestion>
-    with SingleTickerProviderStateMixin {
+    // 1.36 (cierre de Aplica-136): TickerProviderStateMixin —
+    // H-C1 (136-397) añadió el segundo controlador (_transSel)
+    // sobre el mixin de UN solo ticker de la 1.35 y la suite
+    // final cazó la aserción «multiple tickers were created»
+    // al finalizar el árbol (hb1_widgets 136-391/399, ui03).
+    with TickerProviderStateMixin {
   int? _sel;
 
   /// 1.35 (UI-03): trazado de entrada de la línea (una
