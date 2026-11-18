@@ -36,6 +36,7 @@ import 'dialogo_pago.dart' show metodosAceptadosEfectivos;
 import 'panel_resto_caja.dart';
 import 'tarifas_especiales.dart';
 import '../app_log.dart';
+import '../errores_sync.dart';
 
 void _ir(BuildContext context, Widget pantalla) {
   Navigator.push(context, RutaIron(builder: (_) => pantalla));
@@ -194,8 +195,12 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
         mostrarSnack(context, 'Ajustes guardados y sincronizados', significado: SignificadoChip.exito);
       }
     } catch (e) {
+      // 1.36 H-B3 (136-820): snack amable; el detalle a la
+      // bitácora (antes salía la Exception cruda).
+      AppLog.error('ajustes_gym', 'guardar_fallo', d: '$e');
       if (mounted) {
-        mostrarSnack(context, '$e', significado: SignificadoChip.error);
+        mostrarSnack(context, mensajeErrorAmable(e),
+            significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -388,12 +393,27 @@ class _AjustesGymScreenState extends State<AjustesGymScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                // 1.36 H-B3 (136-820): con CERO métodos
+                // activos, Guardar nace deshabilitado y el
+                // motivo va debajo — no se descubre en el
+                // snack de error al tocar.
                 BotonPrimario(
                   texto: 'Guardar y sincronizar',
-                  onPressed: _guardando ? null : _guardar,
+                  onPressed: (_guardando ||
+                          (!_metEfectivo && !_metTransferencia))
+                      ? null
+                      : _guardar,
                   cargando: _guardando,
                   expandido: false,
                 ),
+                if (!_metEfectivo && !_metTransferencia)
+                  const Padding(
+                    padding: EdgeInsets.only(top: AppEspacio.xs),
+                    child: Text(
+                      'Activa al menos un método de pago para guardar.',
+                      style: AppTexto.secundario,
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 const Text(
                   'Los cambios rigen hacia adelante: ningún cobro ya '

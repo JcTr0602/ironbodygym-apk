@@ -339,7 +339,21 @@ class _AdminScreenState extends State<AdminScreen> {
   /// un ciclo de sync real y DESPUÉS relee; el aviso es veraz
   /// (si el ciclo no corrió o falló, se dice, no se finge).
   Future<void> _actualizarPanel() async {
-    final res = await SyncEngine.instance.run();
+    // 1.36 H-B3 (136-819): el ciclo puede LANZAR — el
+    // pull-to-refresh no termina mudo: snack amable y el
+    // detalle en bitácora.
+    SyncResultado res;
+    try {
+      res = await SyncEngine.instance.run();
+    } catch (e) {
+      AppLog.error('ui', 'actualizar_panel_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context,
+            'No se pudo sincronizar: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     await _cargar();
     if (!mounted) return;
     if (!res.corrio) {
@@ -824,10 +838,20 @@ class _AdminScreenState extends State<AdminScreen> {
   Future<void> _cargarReportesComunidad() async {
     if (!AuthService().isOwner) return;
     final gen = ++_reportesComunidadGen;
-    final n = await contarReportesComunidadNuevos();
+    // 1.36 H-B3 (136-819): se dispara con unawaited — un
+    // lanzamiento dejaba un error no gestionado; ahora se
+    // captura y el conteo anterior se CONSERVA.
+    int? n;
+    try {
+      n = await contarReportesComunidadNuevos();
+    } catch (e) {
+      AppLog.error('ui', 'reportes_comunidad_fallo', d: '$e');
+      return;
+    }
     if (!mounted || gen != _reportesComunidadGen) return;
-    if (n != null) {
-      setState(() => _reportesComunidadNuevos = n);
+    final conteo = n;
+    if (conteo != null) {
+      setState(() => _reportesComunidadNuevos = conteo);
     }
   }
 
@@ -1267,11 +1291,17 @@ class _AdminScreenState extends State<AdminScreen> {
 
   /// Navega a una pantalla de CONFIGURACIÓN y al volver
   /// recarga solo la configuración (B-02).
-  Future<void> _irConfig(Widget w) {
-    return Navigator.of(context)
-        .push(RutaIron(builder: (_) => w))
-        .then((_) => _cargarConfiguracion())
-        .then((_) => _notificarRetorno());
+  /// 1.36 H-B3 (136-819): si la recarga LANZA, el aviso de
+  /// retorno corre IGUAL (try/finally) y la recarga va por
+  /// el seguro de la casa — antes la franja quedaba vieja
+  /// sin decir nada.
+  Future<void> _irConfig(Widget w) async {
+    await Navigator.of(context).push(RutaIron(builder: (_) => w));
+    try {
+      await _seguro(() => _cargarConfiguracion(), null);
+    } finally {
+      _notificarRetorno();
+    }
   }
 
   /// Navega a un destino de SOLO LECTURA demostrable (sin
@@ -1744,6 +1774,15 @@ class _AdminScreenState extends State<AdminScreen> {
     mostrarSnack(context, 'Tipo de pago eliminado (se sincronizará)', significado: SignificadoChip.exito);
   }
 
+  // 1.36 H-B3 (136-818, adjudicación): la doble vía NO se
+  // unifica retirando el guardado global — ese guardado
+  // tiene una función real y PROBADA (F5-01, decisión de
+  // Jc 2026-11-17): si una bajada cambió los ajustes con
+  // el editor abierto, «Guardar tipos» impone lo del
+  // editor con write-through completo. Lo que mentía era
+  // el mensaje de «sin cambios»: ahora dice la verdad
+  // (cada cambio ya se aplica al momento).
+
   // Ronda 17 M2: guarda de dueño + candado anti-doble-toque
   // (mismo patrón que _guardarMontos: diálogo + op con UUID
   // nuevo; un segundo toque duplicaría la operación).
@@ -1774,7 +1813,7 @@ class _AdminScreenState extends State<AdminScreen> {
     ];
     final diffs = lineasDiffTipos(antes, _tipos);
     if (diffs.isEmpty) {
-      mostrarSnack(context, 'Los tipos ya son esos; no hay cambios.', significado: SignificadoChip.alerta);
+      mostrarSnack(context, 'Los tipos ya están guardados: cada cambio se aplica al momento.', significado: SignificadoChip.info);
       return;
     }
     final mensaje = [
@@ -2013,7 +2052,10 @@ class _AdminScreenState extends State<AdminScreen> {
     } catch (e) {
       AppLog.error('ui', 'exportar_fallo', d: '$e');
       if (mounted) {
-        mostrarSnack(context, 'No se pudo exportar: $e',
+        // 1.36 H-B3 (136-820): snack amable; el crudo ya
+        // quedó en la bitácora.
+        mostrarSnack(context,
+            'No se pudo exportar: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
       }
     }
@@ -2585,7 +2627,7 @@ class _AdminScreenState extends State<AdminScreen> {
         // analítica rica quedaba en otra pantalla pese a que
         // el Panel se presenta como la consola del dueño.
         Expanded(
-            child: _kpi('\$${fmtMonto(_ingresos)}', 'Ingresos de $mes',
+            child: _kpi('${fmtMonto(_ingresos)} CUP', 'Ingresos de $mes',
                 color: AppColores.exito,
                 sub: varIng == null ? null : '$varIng vs $mesAnt',
                 colorSub: _colorVariacion(_ingresosMesAnt == null
@@ -2631,7 +2673,7 @@ class _AdminScreenState extends State<AdminScreen> {
             Text(
               neto == null
                   ? 'Nómina del mes: -- CUP'
-                  : 'Nómina del mes: \$${fmtMonto(neto)} CUP a pagar',
+                  : 'Nómina del mes: ${fmtMonto(neto)} CUP a pagar',
               style: AppTexto.etiqueta
                   .copyWith(color: AppColores.textoSecundario(context)),
             ),
@@ -2755,21 +2797,30 @@ class _AdminScreenState extends State<AdminScreen> {
                           height: 34,
                           child: Align(
                             alignment: Alignment.bottomCenter,
-                            child: Container(
-                              width: 14,
-                              height: 6 +
-                                  28 *
-                                      (maxMonto <= 0
-                                          ? 0
-                                          : (((f['monto'] as num?)
-                                                      ?.toDouble() ??
-                                                  0) /
-                                              maxMonto)),
-                              decoration: BoxDecoration(
-                                color: AppColores.naranja,
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                            ),
+                            // 1.36 H-B3 (136-822): un día a
+                            // CERO no pinta barra (antes 6 px
+                            // naranjas simulaban actividad).
+                            child: ((f['monto'] as num?)
+                                            ?.toDouble() ??
+                                        0) <=
+                                    0
+                                ? const SizedBox.shrink()
+                                : Container(
+                                    width: 14,
+                                    height: 6 +
+                                        28 *
+                                            (maxMonto <= 0
+                                                ? 0
+                                                : (((f['monto'] as num?)
+                                                            ?.toDouble() ??
+                                                        0) /
+                                                    maxMonto)),
+                                    decoration: BoxDecoration(
+                                      color: AppColores.naranja,
+                                      borderRadius:
+                                          BorderRadius.circular(3),
+                                    ),
+                                  ),
                           ),
                         ),
                         const SizedBox(height: 4),

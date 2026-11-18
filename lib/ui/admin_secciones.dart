@@ -212,9 +212,16 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
               'Pendiente a entregar (${fmtMonto(totalPend)} CUP)',
               [
                 if (pend.isEmpty)
-                  Text('Nada pendiente. Todo cuadrado.',
-                      style: TextStyle(
-                          color: AppColores.textoSecundario(context))),
+                  // 1.36 H-B3 (136-823): el vacío con la
+                  // primitiva de la casa y su acción.
+                  EstadoVacio(
+                    icono: Icons.done_all_rounded,
+                    titulo: 'Nada pendiente. Todo cuadrado.',
+                    textoAccion: 'Abrir arqueo',
+                    onAccion: () =>
+                        _irYActualizar(const ArqueoScreen()),
+                    sinMarco: true,
+                  ),
                 for (final t in pend) ...[
                   ListTile(
                     dense: true,
@@ -236,7 +243,11 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                     children: [
                       Expanded(
                         child: BotonSecundario(
-                          texto: 'Recogida',
+                          // 1.36 H-B3 (136-823): la etiqueta
+                          // dice el MONTO antes de registrar
+                          // la recogida o la entrega.
+                          texto:
+                              'Recogida ${fmtMonto(t['total'])} CUP',
                           icono: Icons.handshake_rounded,
                           onPressed: () => _registrarYActualizar(
                               trainerId: t['id'] as int?,
@@ -248,7 +259,8 @@ class _SeccionCobrosScreenState extends State<SeccionCobrosScreen> {
                       const SizedBox(width: AppEspacio.sm),
                       Expanded(
                         child: BotonPrimario(
-                          texto: 'Confirmar',
+                          texto:
+                              'Confirmar ${fmtMonto(t['total'])} CUP',
                           icono: Icons.done_rounded,
                           onPressed: () => _confirmarYActualizar(
                               trainerId: t['id'] as int?,
@@ -412,7 +424,12 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
                 subtitle: Text(
                     '${fmtMonto(t.monto)} CUP · ${t.dias} días'
                     '${t.soloMenores ? ' · solo menores' : ''}',
-                    style: AppTexto.metadato),
+                    // 1.36 H-B3 (136-825): la fila inactiva
+                    // atenúa TAMBIÉN el subtítulo.
+                    style: AppTexto.metadato.copyWith(
+                        color: t.activo
+                            ? null
+                            : AppColores.textoSecundario(context))),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -421,11 +438,15 @@ class _SeccionAjustesScreenState extends State<SeccionAjustesScreen> {
                       onChanged: (v) => _toggleYActualizar(t, v),
                     ),
                     IconButton(
+                      // 1.36 H-B3 (136-825): tooltip y
+                      // etiqueta accesible en editar/eliminar.
+                      tooltip: 'Editar tipo',
                       icon: const Icon(Icons.edit_rounded, size: 20),
                       onPressed: () => _editarYActualizar(t),
                     ),
                     if (!widget.esTipoFijo(t.id))
                       IconButton(
+                        tooltip: 'Eliminar tipo',
                         icon: const Icon(Icons.delete_outline_rounded,
                             size: 20, color: AppColores.error),
                         onPressed: () => _eliminarYActualizar(t),
@@ -529,11 +550,15 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
   Future<void> _agregarYActualizar() async {
     if (_operando) return;
     _operando = true;
+    // 1.36 H-B3 (136-826): el candado se VE — los botones
+    // pasan a «Registrando…» deshabilitados mientras corre.
+    if (mounted) setState(() {});
     try {
       await widget.onAgregarGasto();
       if (mounted) setState(() {});
     } finally {
       _operando = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -606,12 +631,19 @@ class _SeccionGastosScreenState extends State<SeccionGastosScreen> {
                       color: AppColores.textoSecundario(context)),
                 ),
               ),
-            const SizedBox(height: 8),
-            BotonSecundario(
-              texto: 'Agregar gasto',
-              icono: Icons.add_rounded,
-              onPressed: _agregarYActualizar,
-            ),
+            // 1.36 H-B3 (136-826): en vacío, el CTA vive
+            // SOLO en el EstadoVacio (el botón inferior
+            // duplicaba la misma acción); con gastos, el
+            // botón inferior es el camino. Y durante el
+            // registro se rotula «Registrando…» inerte.
+            if (gastos.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              BotonSecundario(
+                texto: _operando ? 'Registrando…' : 'Agregar gasto',
+                icono: Icons.add_rounded,
+                onPressed: _operando ? null : _agregarYActualizar,
+              ),
+            ],
           ]),
         ],
       );
@@ -980,7 +1012,21 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
   /// un cliente recién creado que aún no subió) y se ofrece subir.
   /// La bandera la consume el pull DESPUÉS de validar la purga
   /// (G4: si la purga se omite, la bandera sobrevive).
+  // 1.36 H-B3 (136-829): la reparación deshabilita su
+  // botón mientras corre (doble toque = dos reparaciones).
+  bool _reparando = false;
+
   Future<void> _repararClientes() async {
+    if (_reparando) return;
+    setState(() => _reparando = true);
+    try {
+      await _repararClientesReal();
+    } finally {
+      if (mounted) setState(() => _reparando = false);
+    }
+  }
+
+  Future<void> _repararClientesReal() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => DialogoApp(
@@ -1013,7 +1059,19 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
           significado: SignificadoChip.alerta,
           accion: 'Subir cola',
           alAccion: () async {
-            await SyncEngine.instance.push();
+            // 1.36 H-B3 (136-829): el push de la acción
+            // también puede fallar — con aviso, no mudo.
+            try {
+              await SyncEngine.instance.push();
+            } catch (e) {
+              AppLog.error('sync', 'reparar_subir_fallo', d: '$e');
+              if (mounted) {
+                mostrarSnack(context,
+                    'No se pudo subir la cola: ${mensajeErrorAmable(e)}',
+                    significado: SignificadoChip.error);
+              }
+              return;
+            }
             await _cargar();
           });
       return;
@@ -1043,7 +1101,9 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'No se pudo reparar: $e', significado: SignificadoChip.error);
+        mostrarSnack(context,
+            'No se pudo reparar: ${mensajeErrorAmable(e)}',
+            significado: SignificadoChip.error);
       }
     }
   }
@@ -1059,8 +1119,7 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
     if (!AuthService().isOwner) {
       return Scaffold(
           appBar: appBarIron(context, 'Diagnóstico de sync'),
-          body: const Center(
-              child: Text('El diagnóstico es solo el dueño.')));
+          body: cuerpoSoloDuenoAdmin('El diagnóstico es solo del dueño.'));
     }
     return Scaffold(
       appBar: appBarIron(
@@ -1122,14 +1181,32 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                           Padding(
                             padding: const EdgeInsets.only(
                                 bottom: AppEspacio.sm),
-                            child: Text(
-                              '⚠ Hay teléfonos EN TURNO pasados '
-                              'del umbral sin sincronizar: su '
-                              'trabajo puede no estar llegando '
-                              'al servidor.',
-                              style: AppTexto.secundario.copyWith(
-                                  color: AppColores.error,
-                                  fontWeight: FontWeight.bold),
+                            // 1.36 H-B3 (136-828): icono del
+                            // sistema con su color semántico,
+                            // no el símbolo ⚠ en el texto.
+                            child: Row(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 18,
+                                    color: AppColores.error),
+                                const SizedBox(width: AppEspacio.xs),
+                                Expanded(
+                                  child: Text(
+                                    'Hay teléfonos EN TURNO pasados '
+                                    'del umbral sin sincronizar: su '
+                                    'trabajo puede no estar llegando '
+                                    'al servidor.',
+                                    style: AppTexto.secundario
+                                        .copyWith(
+                                            color: AppColores.error,
+                                            fontWeight:
+                                                FontWeight.bold),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ..._ultimoSync.map(_filaTelefonoSync),
@@ -1140,15 +1217,30 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                           Padding(
                             padding: const EdgeInsets.only(
                                 top: AppEspacio.sm),
-                            child: Text(
-                              '⚠ ${_enTurnoSinFila.length} '
-                              'teléfono(s) EN TURNO sin ninguna '
-                              'sincronización registrada '
-                              '(${_enTurnoSinFila.join(', ')}): su '
-                              'trabajo no consta en el servidor.',
-                              style: AppTexto.secundario.copyWith(
-                                  color: AppColores.error,
-                                  fontWeight: FontWeight.bold),
+                            child: Row(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 18,
+                                    color: AppColores.error),
+                                const SizedBox(width: AppEspacio.xs),
+                                Expanded(
+                                  child: Text(
+                                    '${_enTurnoSinFila.length} '
+                                    'teléfono(s) EN TURNO sin ninguna '
+                                    'sincronización registrada '
+                                    '(${_enTurnoSinFila.join(', ')}): su '
+                                    'trabajo no consta en el servidor.',
+                                    style: AppTexto.secundario
+                                        .copyWith(
+                                            color: AppColores.error,
+                                            fontWeight:
+                                                FontWeight.bold),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                       ],
@@ -1218,7 +1310,8 @@ class _SeccionDiagnosticoScreenState extends State<SeccionDiagnosticoScreen> {
                     BotonPrimario(
                       texto: 'Reparar lista de clientes',
                       icono: Icons.build_rounded,
-                      onPressed: _repararClientes,
+                      cargando: _reparando,
+                      onPressed: _reparando ? null : _repararClientes,
                     ),
                   ]),
                   // v1.3.6 (ítem 1C): cola de incidencias de sync del dueño.
@@ -1274,7 +1367,13 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _fallo = false);
+    // 1.36 H-B3 (136-830): al reintentar, la CARGA se
+    // activa antes de limpiar el error — mientras releía
+    // se pintaba «Sin eventos» como si fuera el vacío.
+    setState(() {
+      _cargando = true;
+      _fallo = false;
+    });
     try {
       final eventos =
           await AppLog.eventosRecientes(limite: 100, modulo: 'sync');
@@ -1317,8 +1416,7 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
     if (!AuthService().isOwner) {
       return Scaffold(
           appBar: appBarIron(context, 'Historial de sync'),
-          body: const Center(
-              child: Text('El historial es solo el dueño.')));
+          body: cuerpoSoloDuenoAdmin('El historial es solo del dueño.'));
     }
     return Scaffold(
       appBar: appBarIron(context, 'Historial de sync'),
@@ -1332,8 +1430,12 @@ class _HistorialSyncScreenState extends State<HistorialSyncScreen> {
                   onReintentar: _cargar,
                 )
               : _eventos.isEmpty
-              ? const Center(
-                  child: Text('Sin eventos de sync recientes.'))
+              // 1.36 H-B3 (136-830): el vacío confirmado con
+              // la primitiva de la casa.
+              ? const EstadoVacio(
+                  icono: Icons.sync_rounded,
+                  titulo: 'Sin eventos de sync recientes.',
+                )
               : RefrescoIron(
                   onRefresh: () => refrescoGeneralIron(releer: _cargar),
                   child: ListView.builder(
@@ -1643,8 +1745,7 @@ class _VerificacionEspejoScreenState
     if (!AuthService().isOwner) {
       return Scaffold(
           appBar: appBarIron(context, 'Verificación del espejo'),
-          body: const Center(
-              child: Text('Verificar el espejo es solo el dueño.')));
+          body: cuerpoSoloDuenoAdmin('Verificar el espejo es solo del dueño.'));
     }
     return Scaffold(
       appBar: appBarIron(
@@ -1813,6 +1914,47 @@ class BajadaCompletaScreen extends StatefulWidget {
       _BajadaCompletaScreenState();
 }
 
+/// 1.36 H-B3 (136-828): fila de checklist con icono
+/// semántico y Semantics — sustituye a los prefijos de
+/// texto ✓/○ mezclados con el sistema de iconos.
+Widget _filaCheckBajada(BuildContext context,
+    {required bool ok, required String texto}) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: AppEspacio.xs),
+    child: Semantics(
+      label: '${ok ? 'Cumplido' : 'Pendiente'}: $texto',
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            ok
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded,
+            size: 18,
+            color: ok
+                ? AppColores.exitoTexto(context)
+                : AppColores.textoSecundario(context),
+          ),
+          const SizedBox(width: AppEspacio.sm),
+          Expanded(child: Text(texto, style: AppTexto.cuerpo)),
+        ],
+      ),
+    ),
+  );
+}
+
+/// 1.36 H-B3 (136-828): el estado «solo dueño» COMPARTIDO
+/// de las secciones de Admin — icono de candado y
+/// jerarquía de la casa en vez del Text centrado pelado
+/// que repetían cinco pantallas.
+Widget cuerpoSoloDuenoAdmin(String mensaje) {
+  return EstadoVacio(
+    icono: Icons.lock_rounded,
+    titulo: 'Solo el dueño',
+    subtitulo: mensaje,
+  );
+}
+
 class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
   int _pendientes = -1;
   bool _copiaEnSesion = false;
@@ -1907,8 +2049,7 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
     if (!AuthService().isOwner) {
       return Scaffold(
           appBar: appBarIron(context, 'Bajada completa'),
-          body: const Center(
-              child: Text('La bajada completa es solo el dueño.')));
+          body: cuerpoSoloDuenoAdmin('La bajada completa es solo del dueño.'));
     }
     final sinPendientes = _pendientes == 0;
     return Scaffold(
@@ -1923,20 +2064,28 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
                 const Text('Antes de una bajada completa',
                     style: AppTexto.subtitulo),
                 const SizedBox(height: 8),
-                Text(
-                  '${sinPendientes ? '✓' : '○'} Sin pendientes de subir '
-                  '(${_pendientes < 0 ? '—' : _pendientes})',
-                  style: AppTexto.cuerpo,
+                // 1.36 H-B3 (136-828/832): la checklist con
+                // ICONOS semánticos (fuera ✓/○ de texto) y
+                // la línea de pendientes dice el conteo:
+                // «Pendientes de subir: N» (o — si la
+                // lectura falló); el check SOLO con N == 0.
+                _filaCheckBajada(
+                  context,
+                  ok: sinPendientes,
+                  texto: _pendientes < 0
+                      ? 'Pendientes de subir: —'
+                      : 'Pendientes de subir: $_pendientes',
                 ),
-                Text(
-                  '${_copiaEnSesion ? '✓' : '○'} Copia local creada '
-                  'en esta sesión',
-                  style: AppTexto.cuerpo,
+                _filaCheckBajada(
+                  context,
+                  ok: _copiaEnSesion,
+                  texto: 'Copia local creada en esta sesión',
                 ),
-                const Text(
-                  '✓ Primitiva segura del motor: re-descarga sin '
-                  'borrar pendientes ni datos locales (21/25).',
-                  style: AppTexto.cuerpo,
+                _filaCheckBajada(
+                  context,
+                  ok: true,
+                  texto: 'Primitiva segura del motor: re-descarga '
+                      'sin borrar pendientes ni datos locales (21/25).',
                 ),
               ],
             ),
@@ -1953,6 +2102,16 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
             icono: Icons.upload_rounded,
             onPressed: (_ocupado || sinPendientes) ? null : _subir,
           ),
+          // 1.36 H-B3 (136-832): el botón deshabilitado por
+          // no haber pendientes lo EXPLICA junto a él.
+          if (sinPendientes && !_ocupado)
+            const Padding(
+              padding: EdgeInsets.only(top: AppEspacio.xs),
+              child: Text(
+                'No hay pendientes de subir.',
+                style: AppTexto.secundario,
+              ),
+            ),
           const SizedBox(height: 8),
           BotonSecundario(
             texto: 'Crear copia local',
@@ -1960,11 +2119,13 @@ class _BajadaCompletaScreenState extends State<BajadaCompletaScreen> {
             onPressed: _ocupado ? null : _copiar,
           ),
           const SizedBox(height: 8),
-          FilledButton(
+          // 1.36 H-B3 (136-828): el botón principal con la
+          // primitiva de la casa, no un FilledButton suelto.
+          BotonPrimario(
+            texto: _ocupado ? 'Trabajando…' : 'Bajar todo de nuevo',
+            icono: Icons.download_rounded,
+            cargando: _ocupado,
             onPressed: _ocupado ? null : _bajar,
-            child: Text(_ocupado
-                ? 'Trabajando…'
-                : 'Bajar todo de nuevo'),
           ),
           if (_resultadoBajada != null) ...[
             const SizedBox(height: 12),
@@ -2081,9 +2242,8 @@ class _InvitadosFrecuentesScreenState
     if (!AuthService().isOwner) {
       return Scaffold(
           appBar: appBarIron(context, 'Invitados frecuentes'),
-          body: const Center(
-              child:
-                  Text('Los candidatos son solo del dueño.')));
+          body: cuerpoSoloDuenoAdmin(
+              'Los candidatos son solo del dueño.'));
     }
     return Scaffold(
       appBar: appBarIron(context, 'Invitados frecuentes'),
@@ -2157,20 +2317,25 @@ class _InvitadosFrecuentesScreenState
                         padding: const EdgeInsets.only(
                             bottom: AppEspacio.md),
                         child: Tarjeta(
-                          onTap: c['invitado_id'] == null
-                              ? null
-                              : () async {
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          InvitadoDetalleScreen(
-                                              invitadoId:
-                                                  '${c['invitado_id']}'),
-                                    ),
-                                  );
-                                  if (!mounted) return;
-                                  _cargar();
-                                },
+                          // 1.36 H-B3 (136-833): la tarjeta
+                          // SIN ficha ya no manda a la ficha
+                          // que no existe: ofrece «Crear
+                          // ficha» yendo a Invitados, donde
+                          // la ficha se crea de verdad.
+                          onTap: () async {
+                            await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => c['invitado_id'] ==
+                                        null
+                                    ? const InvitadosScreen()
+                                    : InvitadoDetalleScreen(
+                                        invitadoId:
+                                            '${c['invitado_id']}'),
+                              ),
+                            );
+                            if (!mounted) return;
+                            _cargar();
+                          },
                           child: Row(
                             children: [
                               IconoModuloBadge.verde(
@@ -2196,7 +2361,7 @@ class _InvitadosFrecuentesScreenState
                                       '$diasVentanaVisitas días · '
                                       'última: '
                                       '${haceX(c['ultima'] as String?, ahoraHabana()) ?? '—'}'
-                                      '${c['invitado_id'] == null ? ' · sin ficha enlazada (regístrala desde su ficha)' : ''}',
+                                      '${c['invitado_id'] == null ? ' · sin ficha enlazada' : ''}',
                                       style: AppTexto.secundario,
                                     ),
                                   ],
@@ -2204,7 +2369,22 @@ class _InvitadosFrecuentesScreenState
                               ),
                               if (c['invitado_id'] != null)
                                 const Icon(
-                                    Icons.chevron_right_rounded),
+                                    Icons.chevron_right_rounded)
+                              else
+                                TextButton(
+                                  onPressed: () async {
+                                    await Navigator.of(context)
+                                        .push(
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const InvitadosScreen(),
+                                      ),
+                                    );
+                                    if (!mounted) return;
+                                    _cargar();
+                                  },
+                                  child: const Text('Crear ficha'),
+                                ),
                             ],
                           ),
                         ),

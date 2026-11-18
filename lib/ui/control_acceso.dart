@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../acceso_app_cache.dart';
 import '../auth.dart';
+import '../errores_sync.dart';
 import '../localdb.dart';
 import '../tiempo.dart';
 import '../negocio.dart'
@@ -1114,7 +1115,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _generandoAcceso = false);
@@ -1202,7 +1203,7 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
       }
     } catch (e) {
       if (mounted) {
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     } finally {
       if (mounted) setState(() => _generandoAcceso = false);
@@ -1378,7 +1379,7 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
           _falloCarga = true;
           _cargando = false;
         });
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
       }
     }
   }
