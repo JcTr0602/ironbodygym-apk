@@ -159,10 +159,15 @@ void main() {
 
     test('estadisticas_adopcion: los «sin datos» de cada gráfica '
         'siguen como texto de sección', () {
+      // 1.36 (cierre de Aplica-136): adopción SALIÓ del «fuera
+      // de alcance» por la fila 136-319 (H-B1: «adopción sin
+      // "revisa la conexión"»), que migró sus vacíos a
+      // EstadoVacio con títulos sin punto final. La vigilancia
+      // se re-apunta a la forma mandatada.
       final s = _src('estadisticas_adopcion.dart');
-      expect(s, contains("'Sin datos de activaciones.'"));
-      expect(s, contains("'Sin ingresos registrados.'"));
-      expect(s, isNot(contains('EstadoVacio(')));
+      expect(s, contains("titulo: 'Sin datos de activaciones'"));
+      expect(s, contains("titulo: 'Sin ingresos registrados'"));
+      expect(s, contains('EstadoVacio('));
     });
 
     test('usuarios: su vacío YA era EstadoVacio y el del diálogo '

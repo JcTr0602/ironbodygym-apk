@@ -82,10 +82,16 @@ void main() {
   });
 
   test('desconocido: genérico, sin volcar el texto crudo', () {
+    // 1.36 (cierre de Aplica-136): la fila 136-900 (H-B4) cambió
+    // el genérico por un texto CON ACCIÓN («reintenta y, si
+    // sigue, exporta la bitácora…»); la intención de este test
+    // — genérico y sin volcar el texto crudo — se conserva.
+    const generico = 'error no reconocido: reintenta y, si sigue, '
+        'exporta la bitácora desde Salud del Sync';
     const crudo = 'StateError: bad state: algo raro pasó en xyz';
     final r = resumenErrorDiagnostico(crudo);
-    expect(r, 'error de sincronización');
+    expect(r, generico);
     expect(r, isNot(contains('StateError')));
-    expect(resumenErrorDiagnostico(''), 'error de sincronización');
+    expect(resumenErrorDiagnostico(''), generico);
   });
 }

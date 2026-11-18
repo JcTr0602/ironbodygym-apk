@@ -112,7 +112,11 @@ void main() {
     test('el veredicto «Sin verificar» tiene icono neutro, '
         'no el check verde', () {
       expect(src, contains('Icons.help_outline_rounded'));
-      expect(src, contains('AppColores.alertaOscuro'));
+      // 1.36 (cierre de Aplica-136): la fila 136-896 (H-B4)
+      // llevó el neutro del ámbar (alertaOscuro) al gris de
+      // texto secundario; la intención E3 — neutro, nunca el
+      // verde de «al día» — se conserva y se refuerza.
+      expect(src, contains('AppColores.textoSecundario(context)'));
     });
   });
 }

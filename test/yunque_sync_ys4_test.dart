@@ -259,8 +259,11 @@ void main() {
     // página: una retenida en la página 1 sigue frenando el
     // avance del cursor persistido en la página 2. Es la
     // semántica de este pin, reforzada — el pin se
-    // actualiza a los nombres nuevos. El historial conserva
-    // su bandera local (su pin no cambia).
+    // actualiza a los nombres nuevos.
+    // 1.36 (cierre de Aplica-136): el historial YA NO conserva
+    // su bandera local — la fila 136-919 (H-A1) lo reescribió
+    // con el patrón de sus hermanas (cursor de corrida F-20);
+    // su pin se actualiza al nombre de corrida.
     test('_pullIncidencias guarda con !huboConflicto', () {
       pinCuarentena('_pullIncidencias()', '!huboConflictoCorrida');
     });
@@ -275,7 +278,7 @@ void main() {
     test('_pullIncidenciasHistorial guarda con !huboHuerfano',
         () {
       pinCuarentena(
-          '_pullIncidenciasHistorial()', '!huboHuerfano');
+          '_pullIncidenciasHistorial()', '!huboHuerfanoCorrida');
     });
   });
 

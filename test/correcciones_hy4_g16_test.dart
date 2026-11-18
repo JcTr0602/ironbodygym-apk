@@ -7,7 +7,9 @@
 ///
 /// Camino real: FichaScreen con BD sembrada (12 pagos; la
 /// transferencia pendiente es la 11ª) y sesión de dueño;
-/// la barra compacta debe ofrecer «Conciliar».
+/// la ficha debe ofrecer «Conciliar» (1.36, fila 136-195:
+/// la acción del momento vive en la BARRA FIJA, no en la
+/// compacta — la compacta ya no ofrece una segunda primaria).
 library;
 
 import 'dart:convert';
@@ -186,9 +188,12 @@ void main() {
     final barra = find.byKey(const ValueKey('ficha-cabecera-compacta'));
     expect(barra, findsOneWidget,
         reason: 'la cabecera se pliega a la barra compacta');
-    expect(
-        find.descendant(of: barra, matching: find.text('Conciliar')),
-        findsOneWidget,
+    // (cierre de Aplica-136): la fila 136-195 movió la acción
+    // del momento de la compacta a la barra fija; la vigilancia
+    // de G#16 — que la 11ª transferencia no se pierda — se
+    // afirma sobre la barra fija (único «Conciliar» de la
+    // ficha).
+    expect(find.text('Conciliar'), findsOneWidget,
         reason: 'la transferencia accionable es la 11ª: con el '
             'recorte de 10 la ficha no la veía y el botón '
             'Conciliar desaparecía');

@@ -32,6 +32,42 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// 1.36 (cierre de Aplica-136): H-B2 (136-587) hizo que el
+/// contador animado de pestaña pinte el rótulo DOS veces — una
+/// copia invisible que reserva el ancho y la visible animada —
+/// y los rótulos de pestaña se cuentan aquí solo en su copia
+/// VISIBLE (la promesa que el usuario lee).
+int _rotulosVisibles(WidgetTester tester, String texto) {
+  var n = 0;
+  for (final e in find.text(texto).evaluate()) {
+    var visible = true;
+    e.visitAncestorElements((a) {
+      final w = a.widget;
+      if (w is Visibility && !w.visible) visible = false;
+      return visible;
+    });
+    if (visible) n++;
+  }
+  return n;
+}
+
+/// Igual que [_rotulosVisibles] pero por fragmento: la
+/// cabecera del conjunto («N clientes · ≈ …») también nace de
+/// un contador animado con copia invisible de reserva.
+int _visiblesQueContienen(WidgetTester tester, String fragmento) {
+  var n = 0;
+  for (final e in find.textContaining(fragmento).evaluate()) {
+    var visible = true;
+    e.visitAncestorElements((a) {
+      final w = a.widget;
+      if (w is Visibility && !w.visible) visible = false;
+      return visible;
+    });
+    if (visible) n++;
+  }
+  return n;
+}
+
 String _iso(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
@@ -191,16 +227,21 @@ void main() {
       await cli(tester, 3, 'Sin Fecha Dos', null, telefono: '58190003');
       await abrir(tester, 2);
       // La pestaña promete 3 (1 con fecha + 2 sin fecha)…
-      expect(find.text('Atrasados -30d (3)'), findsOneWidget);
+      // (cierre: se cuenta la copia visible del rótulo —
+      // H-B2 136-587 reserva el ancho con una copia invisible).
+      expect(_rotulosVisibles(tester, 'Atrasados -30d (3)'), 1);
       // …y la cabecera cuenta ESE conjunto, no solo rows.
-      expect(find.textContaining('3 clientes ·'), findsOneWidget,
+      // (cierre: la cabecera también es un contador animado
+      // con copia invisible de reserva — se cuenta la visible).
+      expect(_visiblesQueContienen(tester, '3 clientes ·'), 1,
           reason: '136-235: cabecera sobre con-fecha + sin-fecha');
       expect(
-          find.textContaining('una mensualidad en efectivo de cada uno'),
-          findsOneWidget,
+          _visiblesQueContienen(
+              tester, 'una mensualidad en efectivo de cada uno'),
+          1,
           reason: '136-236: la convención se declara entera');
       // Sin «(0)»: «Hoy» no tiene a nadie y su rótulo va limpio.
-      expect(find.text('Hoy'), findsOneWidget,
+      expect(_rotulosVisibles(tester, 'Hoy'), 1,
           reason: '136-250: sin cifra en cero');
       expect(find.text('Hoy (0)'), findsNothing);
       // El hint dice el alcance real (136-261).

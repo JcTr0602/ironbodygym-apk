@@ -83,6 +83,11 @@ void main() {
         'lib/ui/ficha_secciones.dart', // 64: glifo/inicial de marca
         'lib/ui/cierre_nomina_imagen.dart', // subsistema imagen
         'lib/ui/tarjeta_imagen.dart', // subsistema imagen
+        // 1.36 (cierre de Aplica-136): tarjetas_wa es el
+        // subsistema de imagen de las tarjetas de WhatsApp
+        // (136-291…294): lienzo fijo 4:5 con escala propia de
+        // captura (TJ-01), misma doctrina que las dos de arriba.
+        'lib/ui/tarjetas_wa.dart', // subsistema imagen (tarjetas WA)
       };
       final patron = RegExp(r'fontSize:\s*([0-9]+(?:\.[0-9]+)?)');
       final fallos = <String>[];
@@ -100,8 +105,12 @@ void main() {
     });
 
     test('censo: el tracking 1.6 no vive fuera del rol cabeceraPanel', () {
+      // Excepción nombrada (cierre de Aplica-136): el subsistema
+      // de imagen de tarjetas WA (lienzo fijo, escala propia).
+      const excepciones = {'lib/ui/tarjetas_wa.dart'};
       for (final f in _dartLib()) {
         if (f.path == 'lib/ui/diseno.dart') continue;
+        if (excepciones.contains(f.path)) continue;
         expect(f.readAsStringSync().contains('letterSpacing: 1.6'),
             isFalse,
             reason: '${f.path} sobrescribe el tracking de panel');
@@ -111,7 +120,15 @@ void main() {
 
   group('136-315 · pesos cerrados', () {
     test('censo: ni w800 ni w900 en lib/ (lista blanca vacía)', () {
+      // Excepción nombrada (cierre de Aplica-136): el
+      // subsistema de imagen de tarjetas WA (136-291…294) pinta
+      // un PÓSTER de lienzo fijo con su escala display propia
+      // (diseño aprobado por Jc); los pesos cerrados gobiernan
+      // el texto de la UI, no el papel de salida — misma
+      // doctrina que las excepciones del censo de fontSize.
+      const excepciones = {'lib/ui/tarjetas_wa.dart'};
       for (final f in _dartLib()) {
+        if (excepciones.contains(f.path)) continue;
         final t = f.readAsStringSync();
         expect(t.contains('FontWeight.w800'), isFalse,
             reason: '${f.path} pide w800');

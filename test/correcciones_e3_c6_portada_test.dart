@@ -66,7 +66,12 @@ void main() {
     test('la tarjeta del Buzón itera partesPortada y su '
         'presencia la manda hayPortada', () {
       expect(home, contains('_buzon.partesPortada'));
-      expect(home, contains('hayBuzon: _buzon.hayPortada'));
+      // 1.36 (cierre de Aplica-136): H-C2 G4 («buzón
+      // verificado», filas 136-775..881) añadió la guarda de
+      // verificación a la presencia de la portada; hayPortada
+      // sigue mandando, ahora tras el verificado.
+      expect(home,
+          contains('hayBuzon: _buzon.verificado && _buzon.hayPortada'));
     });
 
     test('la tira ya no trae «Esperando atención» ni la '

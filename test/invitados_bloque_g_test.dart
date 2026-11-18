@@ -61,6 +61,13 @@ void main() {
   });
 
   group('resultadoMedidasDeOp (mapeo del resultado de la op)', () {
+    // CONTRATO MOVIDO (1.36, cierre de Aplica-136): la fila
+    // 136-710 (H-A2) manda pluralizar DE VERDAD los textos de
+    // medidas, sin «(s)» ni mayúsculas de máquina — el texto
+    // ahora dice «2 importadas», «1 descartada» y «Las medidas
+    // del invitado no se importaron…». Las expectativas de este
+    // grupo fijaban las formas viejas («importada(s)», «NO se
+    // importaron») y se actualizan a las mandatadas.
     test('verificadas: importa conteos y compone el texto', () {
       final r = resultadoMedidasDeOp({
         'cliente_id': 42,
@@ -75,7 +82,7 @@ void main() {
       expect(r!.verificadas, isTrue);
       expect(r.importadas, 2);
       expect(r.duplicadas, 1);
-      expect(r.texto, contains('2 importada(s)'));
+      expect(r.texto, contains('2 importadas'));
       expect(r.texto, contains('1 ya existían'));
     });
 
@@ -93,7 +100,7 @@ void main() {
       });
       expect(r, isNotNull);
       expect(r!.importadas, 3);
-      expect(r.texto, contains('1 descartada(s)'));
+      expect(r.texto, contains('1 descartada'));
     });
 
     test('no_verificadas: texto claro con el motivo legible', () {
@@ -109,7 +116,7 @@ void main() {
       });
       expect(r, isNotNull);
       expect(r!.verificadas, isFalse);
-      expect(r.texto, contains('NO se importaron'));
+      expect(r.texto, contains('no se importaron'));
       expect(r.texto, contains('no se pudo consultar'));
     });
 
@@ -323,13 +330,21 @@ void main() {
           AccionConversion.confirmarEnServidor);
     });
 
-    test('opEncolada + op aplicada SIN cliente_id → esperar', () {
+    test('opEncolada + op aplicada SIN cliente_id → '
+        'opAplicadaSinCliente (revisión con reintento)', () {
+      // CONTRATO MOVIDO (1.36, cierre de Aplica-136): la fila
+      // 136-708 (H-A2, parte confirmada) manda que una op
+      // aplicada sin cliente_id se muestre como revisión/error
+      // CON acción de reintento (AccionConversion
+      // .opAplicadaSinCliente), no que se espere en silencio.
+      // Este test fijaba el comportamiento anterior («esperar»
+      // → ninguna).
       expect(
           accionParaConversion(
               conv: conv(EstadoConversion.opEncolada, opUuid: 'op-1'),
               opEstado: 'aplicada',
               opResultado: {'pagado_hasta': '2026-11-22'}),
-          AccionConversion.ninguna);
+          AccionConversion.opAplicadaSinCliente);
     });
 
     test('opEncolada + op rechazada → marcarOpRechazada', () {

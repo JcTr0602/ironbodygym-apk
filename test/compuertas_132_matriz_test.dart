@@ -285,11 +285,16 @@ Future<void> _tocarTramoTitular(
       reason: 'el titular grafito del día está pintado');
   final parrafo = tester.renderObject<RenderParagraph>(titulares);
   final plano = parrafo.text.toPlainText();
-  final i = plano.indexOf(tramo);
+  // 1.36 (cierre de Aplica-136): la fila 136-309 unió cifra y
+  // palabra del titular con espacio DURO («1 500 por recoger»
+  // lleva \u00A0 entre «por» y «recoger»): el tramo se busca
+  // con el espacio duro.
+  final tramoReal = tramo.replaceAll(' ', '\u00A0');
+  final i = plano.indexOf(tramoReal);
   expect(i, greaterThanOrEqualTo(0),
       reason: 'el tramo «$tramo» vive en el titular: $plano');
   final cajas = parrafo.getBoxesForSelection(
-      TextSelection(baseOffset: i, extentOffset: i + tramo.length));
+      TextSelection(baseOffset: i, extentOffset: i + tramoReal.length));
   expect(cajas, isNotEmpty);
   await tester.tapAt(parrafo.localToGlobal(cajas.first.toRect().center));
 }

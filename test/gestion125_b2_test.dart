@@ -79,14 +79,30 @@ void main() {
     // fuera de la zona falsa (patrón de la casa).
     await tester.runAsync(() async {
       await tester.tap(find.text('ir'));
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(const Duration(seconds: 5));
     });
     await tester.pump();
-    expect(resultado, isFalse);
+    // CONTRATO MOVIDO (1.36, cierre de Aplica-136): la fila
+    // 136-868 (H-B4) acortó el aviso sin conexión a un snack
+    // corto («Sin conexión: no pude comprobar tus permisos.»)
+    // y movió el detalle a un DIÁLOGO («Permisos sin
+    // comprobar») que la función espera antes de devolver.
+    // La versión anterior fijaba el snack largo de la 1.25 y
+    // el resultado inmediato. La vigilancia se conserva: sin
+    // red no se finge una denegación real (nada de «Pídeselo a
+    // Jc») y, aceptado el aviso, el resultado es false.
+    expect(find.text('Permisos sin comprobar'), findsOneWidget);
     expect(
-        find.textContaining('No pude comprobar tus permisos'),
+        find.textContaining('no pude comprobar tus permisos'),
         findsOneWidget,
         reason: 'sin red no se finge una denegación real');
     expect(find.textContaining('Pídeselo a Jc'), findsNothing);
+    await tester.tap(find.text('Entendido'));
+    await tester.pump();
+    // Latido real para que la llamada cierre tras el pop.
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(seconds: 1));
+    });
+    expect(resultado, isFalse);
   });
 }

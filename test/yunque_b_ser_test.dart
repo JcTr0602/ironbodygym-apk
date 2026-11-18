@@ -34,8 +34,8 @@ void main() {
   });
 
   testWidgets(
-      'YB-SER-01: sin permiso, la venta rápida no abre ni el diálogo',
-      (tester) async {
+      'YB-SER-01: sin permiso, la venta rápida no abre el diálogo '
+      'de venta y cierra en falso', (tester) async {
     SharedPreferences.setMockInitialValues({});
     BuildContext? ctx;
     await tester.pumpWidget(MaterialApp(
@@ -47,13 +47,39 @@ void main() {
       ),
     ));
     bool? resultado;
+    // CONTRATO MOVIDO (1.36, cierre de Aplica-136): la fila
+    // 136-868 (H-B4, commit fc9e485) cambió el aviso de «sin
+    // conexión» al comprobar permisos — snack corto + detalle
+    // en DIÁLOGO («Permisos sin comprobar») que la función
+    // ESPERA antes de devolver false. La versión anterior de
+    // este test aguardaba la llamada en runAsync sin nadie que
+    // aceptara ese diálogo y COLGABA la suite (verificado en el
+    // cierre: la base 0bba410 pasa este archivo en 5 s; el tip
+    // se quedaba en este test). La vigilancia YB-SER-01 se
+    // conserva: sin permiso la venta NO se abre — el único
+    // diálogo que aparece es el aviso de permisos — y la
+    // función cierra en falso al aceptarlo.
+    // Patrón de la casa (gestion125_b2): la espera real vive
+    // DENTRO de runAsync; bombear en bucle desde el test
+    // estrangula la E/S real de la zona asíncrona.
     await tester.runAsync(() async {
-      resultado = await ventaRapidaSuplemento(ctx!, {
+      ventaRapidaSuplemento(ctx!, {
         'id': 1,
         'nombre': 'Proteína X',
         'stock': 5,
         'precio': 100,
-      });
+      }).then((v) => resultado = v);
+      // Tiempo real para que el refresco contra el puerto
+      // cerrado falle y el aviso de permisos se monte.
+      await Future<void>.delayed(const Duration(seconds: 5));
+    });
+    await tester.pump();
+    expect(find.text('Permisos sin comprobar'), findsOneWidget);
+    await tester.tap(find.text('Entendido'));
+    await tester.pump();
+    // Latido real para que la llamada cierre tras el pop.
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(seconds: 1));
     });
     expect(resultado, isFalse);
     await tester.pump();
@@ -116,11 +142,22 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 300));
     });
     await tester.pump();
-    // Sin diálogo de confirmación y con el aviso de permiso.
-    expect(find.byType(Dialog), findsNothing);
+    // CONTRATO MOVIDO (1.36, cierre de Aplica-136): por la fila
+    // 136-868 el aviso sin conexión al comprobar permisos es un
+    // DIÁLOGO («Permisos sin comprobar») que la guarda espera;
+    // antes era solo un snack y este test fijaba «sin diálogo».
+    // La vigilancia se conserva: el diálogo presente es el
+    // AVISO de permisos (no una confirmación de venta), nombra
+    // el permiso de vender suplementos y, al aceptarlo, la
+    // guarda deniega y la op compuesta NO se encola (abajo).
+    expect(find.text('Permisos sin comprobar'), findsOneWidget);
     expect(
         find.textContaining('permiso para vender suplementos'),
         findsOneWidget);
+    await tester.tap(find.text('Entendido'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(Dialog), findsNothing);
     await tester.runAsync(() async {
       final db = await LocalDb.instance.db;
       final filas = await db.query('ops_queue');

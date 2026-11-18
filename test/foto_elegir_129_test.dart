@@ -156,8 +156,13 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('already_active: SnackBar específico de cerrar '
+  testWidgets('already_active: SnackBar específico de esperar '
       'y reintentar', (tester) async {
+    // CONTRATO MOVIDO (1.36, cierre de Aplica-136): la fila
+    // 136-550 cambió el copy de already_active — ya no pide
+    // cerrar la app: «Espera un momento y reinténtalo.» (el
+    // código lo cita en foto_elegir.dart). Este test fijaba el
+    // texto viejo de la 1.29.
     await tester.pumpWidget(_ArnesFoto(
       recuperador: () async => LostDataResponse.empty(),
       selector: (origen) async => throw PlatformException(
@@ -167,11 +172,11 @@ void main() {
     await tester.tap(find.text('Elegir foto'));
     await espera(
         tester,
-        find.text('No se pudo abrir la foto. Cierra la app y '
-            'vuelve a intentarlo.'));
+        find.text('No se pudo abrir la foto. Espera un momento '
+            'y reinténtalo.'));
     expect(
-        find.text('No se pudo abrir la foto. Cierra la app y '
-            'vuelve a intentarlo.'),
+        find.text('No se pudo abrir la foto. Espera un momento '
+            'y reinténtalo.'),
         findsOneWidget);
     expect(find.text('sin-foto'), findsOneWidget);
     // Dejar vencer el aviso para no dejar temporizadores pendientes.

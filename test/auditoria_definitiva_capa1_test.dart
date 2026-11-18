@@ -1182,9 +1182,15 @@ void main() {
       final deOps = hallazgos
           .where((x) => x.detalle.contains('otra cuenta'))
           .toList();
-      expect(deOps, hasLength(2),
-          reason: 'los hallazgos «auto» de ops (pendientes y '
-              'error) no avisan de las ops de otra cuenta');
+      // 1.36 (cierre de Aplica-136): la fila 136-902 (H-C2)
+      // deduplicó la advertencia — antes salía en los detalles
+      // de pendientes y de error; ahora es UN hallazgo propio
+      // («Los conteos son de este teléfono»). La vigilancia de
+      // B-27 se conserva: la advertencia existe y no se esconde.
+      expect(deOps, hasLength(1),
+          reason: 'la advertencia de ops de otra cuenta debe '
+              'existir (136-902 la emite una sola vez)');
+      expect(deOps.single.titulo, 'Los conteos son de este teléfono');
     });
   });
 

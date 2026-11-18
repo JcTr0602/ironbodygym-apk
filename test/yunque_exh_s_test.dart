@@ -130,8 +130,12 @@ void main() {
         'su rama manda', () {
       final src =
           File('lib/ui/centro_sync.dart').readAsStringSync();
-      expect(src,
-          contains('avisoPersistido: st.avisoSyncCorto != null'));
+      // 1.36 (cierre de Aplica-136): la fila 136-893 (H-B4)
+      // endureció el pase — un aviso vacío o de solo espacios
+      // no pinta error: el llamador calcula hayAvisoPersistido
+      // con trim y pasa ESE bool. El contrato se re-apunta.
+      expect(src, contains('avisoPersistido: hayAvisoPersistido'));
+      expect(src, contains("st.avisoSyncCorto?.trim()"));
       expect(src, contains('avisoPersistidoManda'));
       expect(src, contains('st.hayNovedades != true'),
           reason: 'con novedades por bajar manda la rama '
