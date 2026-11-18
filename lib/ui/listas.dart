@@ -1301,6 +1301,7 @@ class _ListasScreenState extends State<ListasScreen>
                 // de atrasados detrás.
                 _conCruce(
                     _lista(_visHoy, Icons.celebration_rounded,
+                        pestana: 0,
                         'Nadie vence hoy', 'Ningún cliente vence hoy.',
                         avisadosPre: _avisHoy,
                         ilustracionVacio: 'assets/vacio_reloj.webp'),
@@ -1311,12 +1312,14 @@ class _ListasScreenState extends State<ListasScreen>
                 // siguiente (ir a «Al día»).
                 _conCruce(
                     _lista(_visPorVencer,
+                        pestana: 1,
                         Icons.check_circle_rounded, 'Nadie por vencer',
                         'Nada en los próximos 3 días.',
                         avisadosPre: _avisPorVencer),
                     _visPorVencer.isEmpty),
                 _conCruce(
                     _lista(_visMenos30,
+                        pestana: 2,
                         Icons.check_circle_rounded, 'Sin atrasados',
                         'Nada de menos de un mes.',
                         esColaCobro: true,
@@ -1329,6 +1332,7 @@ class _ListasScreenState extends State<ListasScreen>
                     _visMenos30.isEmpty && _visSinFecha.isEmpty),
                 _conCruce(
                     _lista(_visMas30,
+                        pestana: 3,
                         Icons.check_circle_rounded, 'Sin atrasados',
                         'Nada de más de un mes.',
                         esColaCobro: true,
@@ -1338,7 +1342,8 @@ class _ListasScreenState extends State<ListasScreen>
                         onAccionVacio: () => _tab.animateTo(4)),
                     _visMas30.isEmpty),
                 _conCruce(
-                    _lista(_visAlDia, // v1.2.1
+                    _lista(_visAlDia,
+                        pestana: 4, // v1.2.1
                         Icons.check_circle_rounded, 'Nadie al día',
                         'Todos los activos están vencidos.',
                         avisadosPre: _avisAlDia),
@@ -1551,7 +1556,10 @@ class _ListasScreenState extends State<ListasScreen>
 
   Widget _lista(List<Map<String, dynamic>> rows, IconData iconoVacio,
       String tituloVacio, String subtituloVacio,
-      {// 1.25 T46: cabecera de cola de cobro (atrasados).
+      {// 1.36 H-C1 (136-584): índice de ESTA pestaña —
+      // el vacío solo despliega la pila si es la visible.
+      required int pestana,
+      // 1.25 T46: cabecera de cola de cobro (atrasados).
       bool esColaCobro = false,
       // 1.30 (Oleada D6, UI130-22): ilustración del
       // vacío de ESTA pestaña (solo «Hoy» la trae).
@@ -1577,7 +1585,7 @@ class _ListasScreenState extends State<ListasScreen>
       // el control que permite salir del vacío y no puede
       // quedar plegado detrás del scroll.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_pilaVisible) {
+        if (mounted && !_pilaVisible && _tab.index == pestana) {
           setState(() => _pilaVisible = true);
         }
       });
