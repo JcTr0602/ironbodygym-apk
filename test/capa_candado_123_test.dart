@@ -44,6 +44,9 @@ void main() {
 
     final texto = tester.widget<Text>(find.text('esto es una prueba'));
     expect(texto.style?.decoration, isNull);
-    expect(texto.style?.fontSize, 16);
+    // 1.36 (136-306, bloque S2): el 16 era un escalón huérfano; el mensaje
+    // del candado vive ahora en AppTexto.subtitulo (15). Expectativa
+    // actualizada por el coordinador al cerrar el relevo de C-CAMPO.
+    expect(texto.style?.fontSize, 15);
   });
 }
