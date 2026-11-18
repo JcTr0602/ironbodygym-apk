@@ -41,6 +41,13 @@ class _ComparativaEntrenadoresScreenState
   // mes nuevo.
   int _genCarga = 0;
   List<Map<String, dynamic>> _filas = [];
+  // 1.36 H-B3 (136-734): el fallo de carga se VE y se puede
+  // reintentar (antes quedaban las filas del mes anterior o
+  // un falso «Sin comparativa»).
+  bool _errorCarga = false;
+  // 1.36 H-B3 (136-738): perfiles elegidos para la tabla
+  // (índices en _filas; vacío = los 3 con más actividad).
+  final Set<int> _elegidos = {};
 
   @override
   void initState() {
@@ -64,6 +71,15 @@ class _ComparativaEntrenadoresScreenState
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      // 1.36 H-B3 (136-734): la recarga fallida LIMPIA las
+      // filas (no quedan las del período anterior bajo el
+      // mes nuevo) y pinta EstadoError con reintento.
+      if (mounted) {
+        setState(() {
+          _filas = [];
+          _errorCarga = true;
+        });
+      }
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -73,11 +89,15 @@ class _ComparativaEntrenadoresScreenState
 
   Future<void> _cargarDatos() async {
     final gen = ++_genCarga;
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _errorCarga = false;
+    });
     final filas = await comparativaEntrenadores(_prefijo);
     if (!mounted || gen != _genCarga) return;
     setState(() {
       _filas = filas;
+      _elegidos.clear();
       _cargando = false;
     });
   }
@@ -133,6 +153,12 @@ class _ComparativaEntrenadoresScreenState
           const SizedBox(height: AppEspacio.md),
           if (_cargando)
             const EstadoCargando()
+          else if (_errorCarga)
+            EstadoError(
+              titulo: 'No se pudo cargar la comparativa',
+              detalle: 'Revisa la conexión o vuelve a intentarlo.',
+              onReintentar: _cargar,
+            )
           else if (_filas.length < 2)
             const EstadoVacio(
               icono: Icons.group_rounded,
@@ -155,7 +181,14 @@ class _ComparativaEntrenadoresScreenState
   }
 
   Widget _tabla() {
-    final cols = _filas.take(3).toList();
+    // 1.36 H-B3 (136-738): las columnas son las ELEGIDAS
+    // (hasta 3); sin elección mandan los 3 con más actividad.
+    final cols = _elegidos.isEmpty
+        ? _filas.take(3).toList()
+        : [
+            for (final i in _elegidos.toList()..sort())
+              if (i >= 0 && i < _filas.length) _filas[i],
+          ];
     final hayUsd =
         cols.any((f) => ((f['ventas_usd'] as num?) ?? 0) > 0);
     return Tarjeta(
@@ -164,15 +197,48 @@ class _ComparativaEntrenadoresScreenState
           // FIN-07 de Argón (1.20): la tabla muestra hasta 3
           // columnas (ordenadas por total); si hay más perfiles
           // con actividad, se avisa en vez de ocultarlos.
-          if (_filas.length > 3)
+          // 1.36 H-B3 (136-738): y se pueden ELEGIR con los
+          // chips (antes el resto de perfiles no tenía forma
+          // de verse).
+          if (_filas.length > 3) ...[
             Padding(
               padding: const EdgeInsets.only(bottom: AppEspacio.sm),
               child: Text(
-                'Se muestran los 3 con más actividad de '
-                '${_filas.length} perfiles.',
+                'Elige hasta 3 perfiles de ${_filas.length} '
+                'con actividad (sin elegir: los 3 con más).',
                 style: AppTexto.metadato,
               ),
             ),
+            Wrap(
+              spacing: AppEspacio.xs,
+              runSpacing: AppEspacio.xs,
+              children: [
+                for (var i = 0; i < _filas.length; i++)
+                  FilterChip(
+                    label: Text('${_filas[i]['nombre']}'),
+                    selected: _elegidos.isEmpty
+                        ? i < 3
+                        : _elegidos.contains(i),
+                    onSelected: (sel) {
+                      setState(() {
+                        if (_elegidos.isEmpty) {
+                          _elegidos.addAll([0, 1, 2]);
+                        }
+                        if (sel) {
+                          if (_elegidos.length >= 3) {
+                            _elegidos.remove(_elegidos.first);
+                          }
+                          _elegidos.add(i);
+                        } else {
+                          _elegidos.remove(i);
+                        }
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppEspacio.sm),
+          ],
           // Cabecera: nombre de cada entrenador (tocable →
           // su detalle).
           Row(
@@ -182,6 +248,10 @@ class _ComparativaEntrenadoresScreenState
                 Expanded(
                   flex: 2,
                   child: InkWell(
+                    // 1.36 H-B3 (136-738): la cabecera ES un
+                    // botón y lo anuncia (antes nombre/avatar
+                    // eran tocables sin affordance).
+                    customBorder: const StadiumBorder(),
                     onTap: () => Navigator.push(
                       context,
                       RutaIron(
@@ -206,12 +276,24 @@ class _ComparativaEntrenadoresScreenState
                               nombre: '${f['nombre']}',
                               tamano: 30),
                           const SizedBox(height: 2),
-                          Text(
-                            '${f['nombre']}',
-                            textAlign: TextAlign.right,
-                            style: AppTexto.subtitulo.copyWith(
-                                color: AppColores
-                                    .textoNaranja(context)),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  '${f['nombre']}',
+                                  textAlign: TextAlign.right,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTexto.subtitulo.copyWith(
+                                      color: AppColores
+                                          .textoNaranja(context)),
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded,
+                                  size: 16,
+                                  color: AppColores.textoNaranja(
+                                      context)),
+                            ],
                           ),
                         ],
                       ),
@@ -286,6 +368,11 @@ class _ComparativaEntrenadoresScreenState
               child: Text(
                 texto(f),
                 textAlign: TextAlign.right,
+                // 1.36 H-B3 (136-737): valor acotado con
+                // ellipsis en columnas estrechas (las cifras
+                // ya van tabulares).
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: AppTexto.cuerpo.copyWith(
                   fontWeight: (clave != null &&
                           mayor != null &&

@@ -40,6 +40,8 @@ class ServiciosAdminScreen extends StatefulWidget {
 
 class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
   bool _cargando = true;
+  // 1.36 H-B3 (136-727): guarda de reentrada de _cargar.
+  bool _enCurso = false;
   // SL-7 (G06-1): el fallo de carga se VE (EstadoError con
   // Reintentar, el patrón de la pantalla principal); antes la
   // pantalla caía en el inventario vacío en silencio.
@@ -115,6 +117,22 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       _personas[id] ?? 'Persona sin nombre';
 
   Future<void> _cargar() async {
+    // 1.36 H-B3 (136-727): el reintento REACTIVA la carga —
+    // antes _cargar nunca subía _cargando, el EstadoError
+    // seguía visible durante la recarga y dos toques
+    // solapaban cargas. La reentrada se bloquea con una
+    // guarda propia (_enCurso: _cargando ya nace en true
+    // para la primera carga de initState).
+    if (_enCurso) return;
+    _enCurso = true;
+    if (mounted) {
+      setState(() {
+        _cargando = true;
+        _errorCarga = false;
+      });
+    } else {
+      _cargando = true;
+    }
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
@@ -126,6 +144,7 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
       AppLog.error('ui', 'carga_fallo', d: '$e');
       if (mounted) setState(() => _errorCarga = true);
     } finally {
+      _enCurso = false;
       if (mounted && _cargando) {
         setState(() => _cargando = false);
       }
@@ -628,6 +647,14 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   ),
                 ],
               ),
+              // 1.36 H-B3 (136-728): sin movimientos, la
+              // sección lo DICE (antes quedaba muda).
+              if (ultimos.isEmpty) ...[
+                const SizedBox(height: AppEspacio.sm),
+                Text('Sin movimientos de agua todavía.',
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.textoSecundario(context))),
+              ],
               if (ultimos.isNotEmpty) ...[
                 const Divider(height: 24),
                 Text('Últimos movimientos', style: AppTexto.metadato),
@@ -751,7 +778,11 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
           // en la sección Pomos; abrir un bote alimenta al
           // principal. El estado va como chip (D5).
           ChipEstado.semantico(
-            texto: '${b['estado'] ?? ''}',
+            // 1.36 H-B3 (136-728): sin estado, el chip dice
+            // «—» en vez de quedar con el texto vacío.
+            texto: '${b['estado'] ?? ''}'.trim().isEmpty
+                ? '—'
+                : '${b['estado']}',
             significado: b['estado'] == 'abierto'
                 ? SignificadoChip.exito
                 : SignificadoChip.neutral,
@@ -790,7 +821,11 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
               decoration: BoxDecoration(
                 color: color,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1.5),
+                // 1.36 H-B3 (136-728): borde con el token de
+                // superficie del tema, no Colors.white fijo.
+                border: Border.all(
+                    color: Theme.of(context).colorScheme.surface,
+                    width: 1.5),
               ),
             ),
           ),
@@ -909,9 +944,14 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
             ),
           ),
         if (pomos.isEmpty)
-          Text('Sin pomos todavía: abre un bote para tener principal.',
-              style: AppTexto.cuerpo
-                  .copyWith(color: AppColores.textoSecundario(context)))
+          // 1.36 H-B3 (136-728): el vacío de pomos es el
+          // EstadoVacio de la casa, no un Text plano.
+          const EstadoVacio(
+            sinMarco: true,
+            icono: Icons.science_rounded,
+            titulo: 'Sin pomos todavía',
+            subtitulo: 'Abre un bote para tener el pomo principal.',
+          )
         else
           for (var i = 0; i < pomos.length; i++) ...[
             _filaPomo(pomos[i]),
@@ -972,6 +1012,10 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   'Saldo: ${l['saldo_local'] ?? '—'} dosis · '
                   'Asignadas: ${l['dosis_asignadas'] ?? '—'}'
                   '${(l['es_principal'] as num?)?.toInt() == 1 ? ' · Repartidas: ${l['dosis_repartidas'] ?? 0}' : ''}',
+                  // 1.36 H-B3 (136-728): métricas con el
+                  // estilo de la casa y cifras TABULARES (antes
+                  // estilo por defecto del Text).
+                  style: AppTexto.conTabulares(AppTexto.cuerpo),
                 ),
                 // 1.25 T95: el medidor del pomo para el
                 // dueño (saldo sobre asignadas, con el
@@ -1267,7 +1311,10 @@ class _DialogoReponerAguaState extends State<_DialogoReponerAgua> {
           Text(
             'El costo alimenta el costo promedio (CPP) con el que '
             'se valoriza cada venta con agua.',
-            style: AppTexto.metadato.copyWith(color: Colors.grey),
+            // 1.36 H-B3 (136-728): token de texto de la casa,
+            // no Colors.grey crudo.
+            style: AppTexto.metadato.copyWith(
+                color: AppColores.textoSecundario(context)),
           ),
         ],
       ),

@@ -133,6 +133,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   int? _desglosePomoId;
   Map<int, String> _personas = {};
   int? _miTid;
+  // 1.36 H-B3 (136-726): caché del padrón para elegir cliente
+  // (antes cada venta releía y ordenaba TODO el espejo sin
+  // indicador; la caché se invalida en cada _cargar).
+  List<Map<String, dynamic>>? _clientesCache;
   // 1.28 (M3-B4): ops de Servicios de HOY aún en la cola: el
   // sello de frescura del cuadre («incluye N por
   // sincronizar»). Las ventas en cola ya componen la lista
@@ -183,6 +187,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   bool _errorCarga = false;
 
   Future<void> _cargar() async {
+    // 1.36 H-B3 (136-726): cada recarga invalida la caché
+    // del padrón de _elegirCliente.
+    _clientesCache = null;
     try {
       await _cargarInterno();
     } catch (_) {
@@ -599,13 +606,20 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   // ---------------------------------------------------------------
 
   Future<Map<String, dynamic>?> _elegirCliente() async {
-    final clientes = await LocalDb.instance.allMirror('clientes');
-    clientes.sort((a, b) =>
-        '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
+    // 1.36 H-B3 (136-726): con caché caliente el diálogo abre
+    // al instante; sin ella se lee el espejo una vez y queda
+    // cacheado hasta la próxima recarga de la pantalla.
+    var clientes = _clientesCache;
+    if (clientes == null) {
+      clientes = await LocalDb.instance.allMirror('clientes');
+      clientes.sort((a, b) =>
+          '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}'));
+      _clientesCache = clientes;
+    }
     if (!mounted) return null;
     return showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => _DialogoCliente(clientes: clientes),
+      builder: (_) => _DialogoCliente(clientes: clientes!),
     );
   }
 
@@ -919,7 +933,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     // poder cerrarla en dispose.
     _ctrlDeshacer = mostrarSnackControladoEnMessenger(
       messenger,
-      'Venta registrada',
+      // 1.36 H-B3 (136-725): la barra DICE la ventana real
+      // (15 s, la de puedeDeshacerVenta) — la duración visual
+      // de 8 s es la holgura adjudicada por Argón B6 para
+      // que el toque alcance a procesarse, y sin el dato el
+      // usuario no sabía cuánto le quedaba.
+      'Venta registrada · Deshacer en '
+      '${segundosRestantesDeshacer(cobradoEn, ahoraHabana())} s',
       significado: SignificadoChip.exito,
       duracion: kDuracionVisualDeshacer,
       accion: 'Deshacer',
@@ -961,9 +981,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(etiqueta, style: AppTexto.secundario),
-            Text('$valor',
-                style: AppTexto.cuerpo.copyWith(
-                    fontWeight: FontWeight.bold, color: color)),
+            // 1.36 H-B3 (136-725): el contador cruza con
+            // AnimatedSwitcher al cambiar (antes saltaba por
+            // setState sin transición).
+            AnimatedSwitcher(
+              duration: AppMovimiento.corta,
+              child: Text('$valor',
+                  key: ValueKey('$etiqueta-$valor'),
+                  style: AppTexto.cuerpo.copyWith(
+                      fontWeight: FontWeight.bold, color: color)),
+            ),
           ],
         ),
         const SizedBox(height: 2),
@@ -1331,11 +1358,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     vendedorSel == _miTid &&
                     titularPomoTid != _miTid &&
                     pomoEfectivo == null)
-                  Text(
-                    '⚠️ Vendes a tu nombre pero no tienes un '
-                    'pomo propio de este suplemento.',
-                    style: AppTexto.secundario
-                        .copyWith(color: AppColores.error),
+                  // 1.36 H-B3 (136-724): aviso con ICONO del
+                  // sistema, no emoji dentro del texto.
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.warning_amber_rounded,
+                          size: 18,
+                          color: AppColores.errorTexto(context)),
+                      const SizedBox(width: AppEspacio.xs),
+                      Expanded(
+                        child: Text(
+                          'Vendes a tu nombre pero no tienes un '
+                          'pomo propio de este suplemento.',
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores.errorTexto(context)),
+                        ),
+                      ),
+                    ],
                   ),
                 // 1.15 V7: Casa no ofrece método de cobro.
                 if (!esCasa && metodosActivos.length > 1) ...[
@@ -1543,8 +1583,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         motivo: res.motivo,
         nota: res.nota,
       );
-      _aviso('Salida registrada');
+      // 1.36 H-B3 (136-726): el aviso va DESPUÉS de recargar
+      // (antes «Salida registrada» salía antes de _cargar y
+      // un aviso de la recarga lo pisaba o quedaba viejo).
       await _cargar();
+      if (mounted) _aviso('Salida registrada');
     } catch (e) {
       _aviso(_limpio(e), error: true);
     }
@@ -1732,7 +1775,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           ),
         ),
         Expanded(
-          child: _diaVista == 0
+          // 1.36 H-B3 (136-725): Hoy ↔ Historial cruza con
+          // AnimatedSwitcher (antes la lista cambiaba al
+          // instante, en seco).
+          child: AnimatedSwitcher(
+            duration: AppMovimiento.media,
+            child: KeyedSubtree(
+              key: ValueKey('dia-$_diaVista'),
+              child: _diaVista == 0
               ? ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
@@ -1762,6 +1812,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   },
                   personas: _personas,
                 ),
+            ),
+          ),
         ),
       ],
     );
@@ -1806,10 +1858,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         if (_esDueno) const SizedBox(height: AppEspacio.md),
         if (_esDueno || PermisosEntrenador().canVerRankingServicios)
           Tarjeta(
+            // 1.36 H-B3 (136-726): al volver del Ranking se
+            // recarga, como ya hacía Estadísticas.
             onTap: () => Navigator.push(
               context,
               RutaIron(builder: (_) => const RankingServiciosScreen()),
-            ),
+            ).then((_) => _cargar()),
             child: Row(
               children: [
                 const IconoModuloBadge(
@@ -2157,15 +2211,27 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   color: AppColores.alerta
                       .withValues(alpha: 0.15),
                 ),
-                child: Text(
-                  '⚠ Quedan pocas dosis en este pomo (menos de 5).',
-                  // Pasada (Argón): el texto va en el token
-                  // RESUELTO por tema, no en alertaOscuro
-                  // fijo (en oscuro era ilegible sobre su
-                  // propio tinte).
-                  style: AppTexto.cuerpo.copyWith(
-                      color: AppColores.alertaTexto(context),
-                      fontWeight: FontWeight.w600),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        size: 18,
+                        color: AppColores.alertaTexto(context)),
+                    const SizedBox(width: AppEspacio.xs),
+                    Expanded(
+                      child: Text(
+                        'Quedan pocas dosis en este pomo (menos de 5).',
+                        // Pasada (Argón): el texto va en el token
+                        // RESUELTO por tema, no en alertaOscuro
+                        // fijo (en oscuro era ilegible sobre su
+                        // propio tinte).
+                        // 1.36 H-B3 (136-724): con icono del
+                        // sistema en vez del «⚠» en el texto.
+                        style: AppTexto.cuerpo.copyWith(
+                            color: AppColores.alertaTexto(context),
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -2202,7 +2268,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     if (_pidiendoRelleno) return;
     final supId = (pomo['suplemento_id'] as num?)?.toInt();
     final saldo = (pomo['saldo_local'] as num?)?.toInt();
-    if (supId == null || saldo == null) return;
+    if (supId == null || saldo == null) {
+      // 1.36 H-B3 (136-726): sin suplemento o sin saldo el
+      // toque ya no muere en silencio: se avisa el porqué.
+      _aviso(
+          'A este pomo le falta información para pedir el relleno.',
+          error: true);
+      return;
+    }
     // 1.30 (D3, UI130-15): pedir relleno pasa a confirmarse
     // en una HojaAccion (antes era acción directa al toque).
     // Yunque B (YB-SER-02): la hoja NO enseña el saldo: el
@@ -2292,9 +2365,36 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         esDueno: _esDueno,
         precio: precio,
       );
+      // 1.36 H-B3 (136-723): el color del texto se resuelve
+      // por LUMINANCIA del fondo (antes se heredaba onPrimary
+      // sin contraste garantizado sobre naranja/azul propios).
+      final Color colorTextoBoton = neutro
+          ? AppColores.texto(context)
+          : degradado != null
+              ? AppColores.sobreMarca
+              : ThemeData.estimateBrightnessForColor(color) ==
+                      Brightness.light
+                  ? AppColores.sobreMarca
+                  : Colors.white;
       // 1.19: con degradado, el fondo es el degradado (el color
       // se ignora) y el deshabilitado también queda transparente
       // para no taparlo con el velo gris por defecto.
+      // 1.36 H-B3 (136-723): deshabilitado, el degradado se
+      // DESATURA (alpha bajo) — a pleno color parecía activo.
+      final degradadoVisible = degradado == null
+          ? null
+          : est.habilitado
+              ? degradado
+              : degradado is LinearGradient
+                  ? LinearGradient(
+                      colors: [
+                        for (final col in degradado.colors)
+                          col.withValues(alpha: 0.35),
+                      ],
+                      begin: degradado.begin,
+                      end: degradado.end,
+                    )
+                  : degradado;
       final accion = FilledButton.icon(
               style: FilledButton.styleFrom(
                 // Servicios 1.18 #2: el neutro ya no usa borde
@@ -2310,8 +2410,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         : color,
                 disabledBackgroundColor:
                     degradado != null ? Colors.transparent : null,
-                foregroundColor:
-                    neutro ? AppColores.texto(context) : null,
+                foregroundColor: colorTextoBoton,
+                disabledForegroundColor:
+                    colorTextoBoton.withValues(alpha: 0.6),
                 side: neutro
                     ? BorderSide(color: AppColores.borde(context))
                     : null,
@@ -2332,7 +2433,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       style: AppTexto.secundario
                           .copyWith(fontWeight: FontWeight.bold)),
                   Text(
-                    precio <= 0 && tipo == 'agua_suelta'
+                    // 1.36 H-B3 (136-723): «sin precio» para
+                    // CUALQUIER tipo con precio <= 0 (antes
+                    // solo el agua; una dosis a 0 se leía
+                    // como precio válido).
+                    precio <= 0
                         ? 'sin precio'
                         : '${fmtMonto(precio)} CUP',
                     style: AppTexto.metadato,
@@ -2348,7 +2453,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(30),
                 child: Container(
-                  decoration: BoxDecoration(gradient: degradado),
+                  decoration: BoxDecoration(gradient: degradadoVisible),
                   child: accion,
                 ),
               )
@@ -2387,9 +2492,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 // 1.29 (Oleada 4, D-10): la dosis deja el rayo
                 // genérico por el icono propio de la casa
                 // (≥ 22 px, suelo del componente).
-                iconoWidget: IconoDosis(
+                iconoWidget: const IconoDosis(
                   tamano: 24,
-                  color: Theme.of(context).colorScheme.onPrimary,
+                  // 1.36 H-B3 (136-723): sobre el naranja, el
+                  // token de marca (como el texto del botón).
+                  color: AppColores.sobreMarca,
                 )),
             const SizedBox(width: AppEspacio.sm),
             boton('dosis_con_agua', 'Dosis con agua',
@@ -2404,22 +2511,51 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           ],
         ),
         const SizedBox(height: AppEspacio.sm),
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: AppEspacio.lg),
-          ),
-          onPressed: _pomoActual == null ? null : _ventaMultiple,
-          icon: const Icon(Icons.library_add_rounded, size: 20),
-          label: Column(
-            mainAxisSize: MainAxisSize.min,
+        // 1.36 H-B3 (136-726): la venta múltiple se PREVALIDA
+        // aquí — sin ningún método con precio fijado no se
+        // abre (antes el fallo se descubría recién al cobrar).
+        Builder(builder: (context) {
+          final hayConPrecio = [
+            'dosis_sin_agua',
+            'dosis_con_agua',
+            'agua_suelta',
+          ].any((t) =>
+              primerMetodoServicioActivo(_ajustes, t) != null &&
+              precioDe(t) > 0);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Venta múltiple',
-                  style: AppTexto.secundario
-                      .copyWith(fontWeight: FontWeight.bold)),
-              Text('Varias dosis', style: AppTexto.metadato),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: AppEspacio.lg),
+                ),
+                onPressed: (_pomoActual == null || !hayConPrecio)
+                    ? null
+                    : _ventaMultiple,
+                icon: const Icon(Icons.library_add_rounded, size: 20),
+                label: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Venta múltiple',
+                        style: AppTexto.secundario
+                            .copyWith(fontWeight: FontWeight.bold)),
+                    Text('Varias dosis', style: AppTexto.metadato),
+                  ],
+                ),
+              ),
+              if (_pomoActual != null && !hayConPrecio)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppEspacio.xs),
+                  child: Text(
+                    'Fija al menos un precio para vender.',
+                    style: AppTexto.secundario,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
             ],
-          ),
-        ),
+          );
+        }),
       ],
     );
   }
@@ -2432,8 +2568,46 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     final esGym = _vistaCuadre == 'gym' && _cuadreGym.isNotEmpty;
     final c = esGym ? _cuadreGym : _cuadre;
     if (c.isEmpty) return const SizedBox.shrink();
-    final dosis = ((c['dosis_sin_agua'] as int?) ?? 0) +
-        ((c['dosis_con_agua'] as int?) ?? 0);
+    // 1.36 H-B3 (136-721): con el segmento Gym elegido y el
+    // cuadre del gym SIN datos, antes se pintaba en silencio
+    // el cuadre «Mía» bajo el segmento Gym. Ahora la tarjeta
+    // lo dice con el vacío de la casa.
+    if (_esDueno &&
+        _vistaCuadre == 'gym' &&
+        _cuadreGym.isEmpty &&
+        _cuadre.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'mia', label: Text('Mía')),
+              ButtonSegment(value: 'gym', label: Text('Gym')),
+            ],
+            selected: {_vistaCuadre},
+            onSelectionChanged: (s) =>
+                setState(() => _vistaCuadre = s.first),
+          ),
+          const SizedBox(height: 8),
+          const Tarjeta(
+            child: EstadoVacio(
+              icono: Icons.storefront_rounded,
+              titulo: 'Sin datos del gym hoy',
+              subtitulo: 'El cuadre general del gym no tiene '
+                  'movimientos hoy.',
+            ),
+          ),
+        ],
+      );
+    }
+    // 1.36 H-B3 (136-721): el detalle usa las MISMAS
+    // variables normalizadas que el total (antes pintaba las
+    // claves crudas y podía mostrar «null»).
+    final dosisSin = (c['dosis_sin_agua'] as num?)?.toInt() ?? 0;
+    final dosisCon = (c['dosis_con_agua'] as num?)?.toInt() ?? 0;
+    final aguaSuelta = (c['agua_suelta'] as num?)?.toInt() ?? 0;
+    final casaN = (c['casa'] as num?)?.toInt() ?? 0;
+    final dosis = dosisSin + dosisCon;
     final comision = (c['comision'] as double?) ?? 0;
     final tarjeta = Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
@@ -2505,8 +2679,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     Text('Dosis hoy',
                         style: AppTexto.metadato),
                     Text(
-                        '${c['dosis_sin_agua']} sin agua · '
-                        '${c['dosis_con_agua']} con agua',
+                        '$dosisSin sin agua · '
+                        '$dosisCon con agua',
                         style: AppTexto.metadato),
                   ],
                 ),
@@ -2515,7 +2689,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 child: Column(
                   children: [
                     Icon(Icons.local_drink_rounded, size: 20, color: AppColores.textoSecundario(context)),
-                    Text('${c['agua_suelta']}',
+                    Text('$aguaSuelta',
                         style: AppTexto.titulo),
                     Text('Pomos sueltos',
                         style: AppTexto.metadato),
@@ -2526,7 +2700,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 child: Column(
                   children: [
                     Icon(Icons.home_rounded, size: 20, color: AppColores.textoSecundario(context)),
-                    Text('${c['casa']}',
+                    Text('$casaN',
                         style: AppTexto.titulo),
                     Text('Cuenta Casa',
                         style: AppTexto.metadato),
@@ -2695,6 +2869,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                 icono: Icons.undo_rounded,
               ),
             ],
+            // 1.36 H-B3 (136-724): el reverso también lleva su
+            // chip (antes solo lo marcaba el icono).
+            if (esReverso) ...[
+              const SizedBox(width: 6),
+              const ChipEstado.semantico(
+                texto: 'Reverso',
+                significado: SignificadoChip.error,
+                icono: Icons.undo_rounded,
+              ),
+            ],
           ],
         ),
         subtitle: Text(
@@ -2709,6 +2893,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             Text('${fmtMonto(monto)} CUP',
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
+                    // 1.36 H-B3 (136-724): lo revertido se
+                    // marca SOLO en el importe (tachado), sin
+                    // bajar la opacidad de toda la fila (el
+                    // texto perdía contraste).
+                    decoration: atenuada
+                        ? TextDecoration.lineThrough
+                        : null,
                     color: esReverso ? AppColores.error : null)),
             // Una venta en cola no tiene id de espejo: no se
             // puede revertir hasta que sincronice (su salida
@@ -2723,9 +2914,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ),
       ),
     );
-    // 1.28 (M3-C5): lo revertido se lee atenuado de un
-    // vistazo, sin abrir la ficha.
-    return atenuada ? Opacity(opacity: 0.55, child: tarjeta) : tarjeta;
+    // 1.36 H-B3 (136-724): fuera el Opacity 0.55 global —
+    // el estado revertido lo dicen el chip y el tachado del
+    // importe, con el contraste del resto intacto.
+    return tarjeta;
   }
 
   /// 10/25: la venta original de un reverso, por PK.
@@ -2778,14 +2970,17 @@ class _DialogoClienteState extends State<_DialogoCliente> {
 
   @override
   Widget build(BuildContext context) {
-    final q = _ctrl.text.trim().toLowerCase();
+    // 1.36 H-B3 (136-726): búsqueda insensible a TILDES
+    // («pena» encuentra «Peña»), no solo a mayúsculas.
+    final q = textoBusquedaServicios(_ctrl.text.trim());
     // 1.14 (D14): buscar también por carnet (solo dígitos), para
     // distinguir homónimos por el documento y no solo por nombre.
     final qDigitos = q.replaceAll(_reNoDigitosServicios, '');
     final filtrados = q.isEmpty
         ? widget.clientes
         : widget.clientes.where((c) {
-            if ('${c['nombre'] ?? ''}'.toLowerCase().contains(q)) {
+            if (textoBusquedaServicios('${c['nombre'] ?? ''}')
+                .contains(q)) {
               return true;
             }
             // Cliente protegido (2026-10-26, Protegido 2 H4): al
@@ -2801,7 +2996,13 @@ class _DialogoClienteState extends State<_DialogoCliente> {
     return DialogoApp(
       titulo: 'Cliente del gym',
       iconoTitulo: Icons.person_search_rounded,
-      contenido: SizedBox(
+      // 1.36 H-B3 (136-724): el contenido se acolcha con los
+      // viewInsets — con el teclado abierto (autofocus) los
+      // resultados y el Cancelar quedaban tapados.
+      contenido: Padding(
+        padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: SizedBox(
         width: double.maxFinite,
         height: 380,
         child: Column(
@@ -2879,6 +3080,7 @@ class _DialogoClienteState extends State<_DialogoCliente> {
             ),
           ],
         ),
+        ),
       ),
       acciones: [
         TextButton(
@@ -2940,6 +3142,19 @@ class _FotoPomoServiciosState extends State<_FotoPomoServicios> {
             width: 44,
             height: 44,
             fit: BoxFit.cover,
+            // 1.36 H-B3 (136-725): la foto del pomo entra con
+            // fundido (antes sustituía al badge en seco) y un
+            // error conserva el badge del mismo tamaño.
+            errorBuilder: (_, __, ___) =>
+                IconoModuloBadge.naranja(Icons.local_drink_rounded),
+            frameBuilder: (ctx, child, frame, wasSynchronouslyLoaded) {
+              if (wasSynchronouslyLoaded) return child;
+              return AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: AppMovimiento.corta,
+                child: child,
+              );
+            },
           ),
         );
       },

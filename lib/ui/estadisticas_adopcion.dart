@@ -185,36 +185,76 @@ class _EstadisticasAdopcionScreenState
         // SL-10 G13-2 (sync-una-vez): sin banda de sync
         // en Adopción — el estado lo dice una sola vez el
         // icono de la cabecera de la app.
-        Row(
-          children: [
-            _tarjetaNumero('Accesos creados', '${_n('generados')}'),
-            const SizedBox(width: 12),
-            _tarjetaNumero('Ya activaron', '${_n('activados')}'),
-            const SizedBox(width: 12),
-            _tarjetaNumero(
-              'Activación',
-              tasa == null
-                  ? '—'
-                  : '${(tasa * 100).toStringAsFixed(0)}%',
-            ),
-          ],
+        // 1.36 H-B3 (136-737): los 3 KPI en Wrap responsive
+        // (antes Expanded fijos que apretaban en pantallas
+        // estrechas): 3 por fila en ancho, 2+1 en estrecho.
+        LayoutBuilder(
+          builder: (ctx, cons) {
+            final ancho = cons.maxWidth;
+            final porFila = ancho >= 560 ? 3 : 2;
+            final w = (ancho - 12 * (porFila - 1)) / porFila;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                    width: w,
+                    child: _tarjetaNumero(
+                        'Accesos creados', '${_n('generados')}')),
+                SizedBox(
+                    width: w,
+                    child: _tarjetaNumero(
+                        'Ya activaron', '${_n('activados')}')),
+                SizedBox(
+                  width: w,
+                  child: _tarjetaNumero(
+                    'Activación',
+                    tasa == null
+                        ? '—'
+                        : '${(tasa * 100).toStringAsFixed(0)}%',
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            _tarjetaNumero(
-              'Nuevos este mes',
-              '${_n('nuevos_mes_actual')}',
-              pie: variacion == null
-                  ? 'mes anterior: ${_n('nuevos_mes_anterior')}'
-                  : '${variacion >= 0 ? '↑' : '↓'} ${variacion.abs().toStringAsFixed(0)}% '
-                      'vs mes anterior (${_n('nuevos_mes_anterior')})',
+            Expanded(
+              child: _tarjetaNumero(
+                'Nuevos este mes',
+                '${_n('nuevos_mes_actual')}',
+                pie: variacion == null
+                    ? 'mes anterior: ${_n('nuevos_mes_anterior')}'
+                    : '${variacion.abs().toStringAsFixed(0)}% '
+                        'vs mes anterior (${_n('nuevos_mes_anterior')})',
+                // 1.36 H-B3 (136-738): la tendencia va con
+                // ICONO y color semánticos + etiqueta para el
+                // lector (antes una flecha «↑/↓» en el texto,
+                // sin color ni semántica).
+                pieIcono: variacion == null
+                    ? null
+                    : (variacion >= 0
+                        ? Icons.trending_up_rounded
+                        : Icons.trending_down_rounded),
+                pieColor: variacion == null
+                    ? null
+                    : (variacion >= 0
+                        ? AppColores.exito
+                        : AppColores.error),
+                pieSemantica: variacion == null
+                    ? null
+                    : (variacion >= 0 ? 'Sube' : 'Baja'),
+              ),
             ),
             const SizedBox(width: 12),
-            _tarjetaNumero(
-              'Ingresos / semana',
-              ((_d['promedio_accesos_semana'] as num?)?.toDouble() ?? 0).toStringAsFixed(1),
-              pie: '${_n('ingresos_28d')} ingresos en 28 días',
+            Expanded(
+              child: _tarjetaNumero(
+                'Ingresos / semana',
+                ((_d['promedio_accesos_semana'] as num?)?.toDouble() ?? 0).toStringAsFixed(1),
+                pie: '${_n('ingresos_28d')} ingresos en 28 días',
+              ),
             ),
           ],
         ),
@@ -224,8 +264,14 @@ class _EstadisticasAdopcionScreenState
                 .copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         if (serie.isEmpty)
-          const Text('Sin datos de activaciones.',
-              style: AppTexto.secundario)
+          // 1.36 H-B3 (136-738): vacíos con EstadoVacio de
+          // la casa, no Text sueltos.
+          const EstadoVacio(
+            sinMarco: true,
+            icono: Icons.bar_chart_rounded,
+            titulo: 'Sin datos de activaciones',
+            subtitulo: 'Aún no hay activaciones en los últimos 90 días.',
+          )
         else
           GraficoBarrasDiarias(datos: serie, altura: 96),
         const SizedBox(height: 20),
@@ -234,7 +280,12 @@ class _EstadisticasAdopcionScreenState
                 .copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         if (horas.isEmpty)
-          const Text('Sin ingresos registrados.', style: AppTexto.secundario)
+          const EstadoVacio(
+            sinMarco: true,
+            icono: Icons.schedule_rounded,
+            titulo: 'Sin ingresos registrados',
+            subtitulo: 'Aún no hay ingresos por hora en los últimos 90 días.',
+          )
         else
           GraficoBarrasDiarias(
             datos: [
@@ -251,8 +302,12 @@ class _EstadisticasAdopcionScreenState
                 .copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         if (top.isEmpty)
-          const Text('Todavía no hay ingresos registrados.',
-              style: AppTexto.secundario)
+          const EstadoVacio(
+            sinMarco: true,
+            icono: Icons.emoji_events_rounded,
+            titulo: 'Todavía no hay ingresos registrados',
+            subtitulo: 'Los clientes más activos aparecerán aquí.',
+          )
         else
           for (var i = 0; i < top.length; i++)
             ListTile(
@@ -271,28 +326,49 @@ class _EstadisticasAdopcionScreenState
     );
   }
 
-  Widget _tarjetaNumero(String titulo, String valor, {String? pie}) {
-    return Expanded(
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(AppEspacio.md),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(titulo,
-                  style: AppTexto.minuscula.copyWith(
-                      color: AppColores.textoSecundario(context))),
-              const SizedBox(height: 4),
-              Text(valor,
-                  style: AppTexto.metrica),
-              if (pie != null) ...[
-                const SizedBox(height: 2),
+  Widget _tarjetaNumero(String titulo, String valor,
+      {String? pie,
+      IconData? pieIcono,
+      Color? pieColor,
+      String? pieSemantica}) {
+    // 1.36 H-B3 (136-737): la tarjeta ya no nace Expanded —
+    // cada llamador decide su rejilla (Wrap o Row).
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppEspacio.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style: AppTexto.minuscula.copyWith(
+                    color: AppColores.textoSecundario(context))),
+            const SizedBox(height: 4),
+            Text(valor, style: AppTexto.metrica),
+            if (pie != null) ...[
+              const SizedBox(height: 2),
+              if (pieIcono != null)
+                Semantics(
+                  label: pieSemantica != null
+                      ? '$pieSemantica: $pie'
+                      : pie,
+                  child: Row(
+                    children: [
+                      Icon(pieIcono, size: 14, color: pieColor),
+                      const SizedBox(width: 2),
+                      Expanded(
+                        child: Text(pie,
+                            style: AppTexto.minuscula
+                                .copyWith(color: pieColor)),
+                      ),
+                    ],
+                  ),
+                )
+              else
                 Text(pie,
                     style: AppTexto.minuscula.copyWith(
                         color: AppColores.textoSecundario(context))),
-              ],
             ],
-          ),
+          ],
         ),
       ),
     );

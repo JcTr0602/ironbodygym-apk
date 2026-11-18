@@ -147,6 +147,9 @@ String franjaDeHora(String? hora) {
   // HH:MM; antes «99:99» caía en «noche» y contaminaba las
   // estadísticas con filas espejadas o datos viejos inválidos.
   if (hora == null || hora.length < 5) return 'sin_hora';
+  // 1.36 H-B3 (136-736): el separador debe ser ':' — sin esta
+  // validación «12x45» se aceptaba como 12:45.
+  if (hora[2] != ':') return 'sin_hora';
   final h = int.tryParse(hora.substring(0, 2));
   final m = int.tryParse(hora.substring(3, 5));
   if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) {
@@ -579,12 +582,19 @@ double ultimaEntradaAguaCosto(List<Map<String, dynamic>> movs) {
 /// fórmula viva.
 String csvEstadisticas(
     List<String> cabecera, List<List<String>> filas) {
+  // 1.36 H-B3 (136-736): la guardia anti-inyección solo
+  // protege celdas NO numéricas — un número (también
+  // negativo, patrón -?número con decimales) es un dato,
+  // no una fórmula, y ya no abre como texto en Excel.
+  final patronNumero = RegExp(r'^-?\d+([.,]\d+)?$');
   String esc(String s) {
     var v = s;
-    if (v.startsWith('=') ||
-        v.startsWith('+') ||
-        v.startsWith('-') ||
-        v.startsWith('@')) {
+    final esNumero = patronNumero.hasMatch(v.trim());
+    if (!esNumero &&
+        (v.startsWith('=') ||
+            v.startsWith('+') ||
+            v.startsWith('-') ||
+            v.startsWith('@'))) {
       v = "'$v";
     }
     if (v.contains(',') ||

@@ -803,6 +803,10 @@ class _ServiciosEstadisticasScreenState
     }
     await showModalBottomSheet<void>(
       context: context,
+      // 1.36 H-B3 (136-737): la hoja del simulador va con
+      // scroll y a pantalla completa de hoja (isScrollControlled):
+      // con texto grande la columna fija desbordaba.
+      isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) {
           final costo =
@@ -817,8 +821,15 @@ class _ServiciosEstadisticasScreenState
             costoAgua: costoAgua,
           );
           return Padding(
-            padding: const EdgeInsets.all(AppEspacio.lg),
-            child: Column(
+            padding: EdgeInsets.fromLTRB(
+                AppEspacio.lg,
+                AppEspacio.lg,
+                AppEspacio.lg,
+                AppEspacio.lg +
+                    MediaQuery.viewInsetsOf(ctx).bottom),
+            // 1.36 H-B3 (136-737): contenido desplazable.
+            child: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -866,6 +877,7 @@ class _ServiciosEstadisticasScreenState
                   onChanged: (v) => setD(() => precioCon = v),
                 ),
               ],
+              ),
             ),
           );
         },
@@ -944,7 +956,14 @@ class _ServiciosEstadisticasScreenState
             ),
           ),
           const SizedBox(width: AppEspacio.sm),
-          Text(valor, style: AppTexto.cuerpo),
+          // 1.36 H-B3 (136-737): el valor va en Flexible con
+          // ellipsis y cifras tabulares (un monto largo
+          // desbordaba la fila).
+          Flexible(
+            child: Text(valor,
+                overflow: TextOverflow.ellipsis,
+                style: AppTexto.conTabulares(AppTexto.cuerpo)),
+          ),
         ],
       ),
     );
@@ -1043,10 +1062,16 @@ class _ServiciosEstadisticasScreenState
                     fontWeight:
                         negrita ? FontWeight.w600 : FontWeight.normal)),
           ),
-          Text(valor,
-              style: AppTexto.cuerpo.copyWith(
-                  fontWeight:
-                      negrita ? FontWeight.bold : FontWeight.normal)),
+          // 1.36 H-B3 (136-737): valor acotado (Flexible +
+          // ellipsis + tabulares), como en _barra.
+          Flexible(
+            child: Text(valor,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: AppTexto.conTabulares(AppTexto.cuerpo.copyWith(
+                    fontWeight:
+                        negrita ? FontWeight.bold : FontWeight.normal))),
+          ),
         ],
       ),
     );

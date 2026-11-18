@@ -216,17 +216,46 @@ String etiquetaTipoServicio(String tipo) => switch (tipo) {
 /// SL-7 (G06-4): etiqueta del método de pago de una venta de
 /// Servicios, la de la casa (capitalizada). El código crudo
 /// ('efectivo'/'transferencia') nunca llega a pantalla.
+/// 1.36 H-B3 (136-732): un método DESCONOCIDO se mapea a
+/// «Otro método» en vez de pintarse crudo.
 String etiquetaMetodoServicio(String? metodo) => switch (metodo) {
       'efectivo' => 'Efectivo',
       'transferencia' => 'Transferencia',
       null || '' => '',
-      _ => metodo,
+      _ => 'Otro método',
     };
+
+/// 1.36 H-B3 (136-726): texto de búsqueda de Servicios —
+/// minúsculas y sin tildes («pena» encuentra «Peña»). Mapeo
+/// 1:1, como el sinTildes de Actividad. PURO.
+String textoBusquedaServicios(String s) {
+  const con = 'áéíóúüñÁÉÍÓÚÜÑ';
+  const sin = 'aeiouunAEIOUUN';
+  final buf = StringBuffer();
+  final bajo = s.toLowerCase();
+  for (var i = 0; i < bajo.length; i++) {
+    final c = bajo[i];
+    final idx = con.indexOf(c);
+    buf.write(idx >= 0 ? sin[idx] : c);
+  }
+  return buf.toString();
+}
+
+/// 1.36 H-B3 (136-730): parseo ÚNICO del cliente_id de una
+/// venta de Servicios — el espejo puede traerlo como número
+/// o como TEXTO y cada lector lo casteaba por su cuenta (con
+/// texto, el nombre caía a «Sin identificar» y el ranking
+/// descartaba la venta). PURO.
+int? parseIdClienteServicio(dynamic crudo) {
+  if (crudo is num) return crudo.toInt();
+  if (crudo is String) return int.tryParse(crudo.trim());
+  return null;
+}
 
 String nombreClienteVentaServicio(Map<String, dynamic> v) {
   final propio = '${v['cliente_nombre'] ?? ''}'.trim();
   if (propio.isNotEmpty) return propio;
-  final cid = (v['cliente_id'] as num?)?.toInt();
+  final cid = parseIdClienteServicio(v['cliente_id']);
   if (cid != null) return 'Cliente $cid';
   return 'Sin identificar';
 }
@@ -252,12 +281,16 @@ List<Map<String, dynamic>> resolverPomosHistorial(
         ...p,
         'producto_nombre':
             '${supPorId[(p['suplemento_id'] as num?)?.toInt()]?['nombre'] ?? 'Suplemento'}',
-        'responsable_nombre':
-            (p['es_principal'] as num?)?.toInt() == 1
-                ? 'Mío (dueño)'
-                : (personas[LocalDb.normalizarTelegramId(
-                        p['titular_telegram_id'])] ??
-                    'Entrenador'),
+        'responsable_nombre': (p['es_principal'] as num?)?.toInt() == 1
+            ? 'Mío (dueño)'
+            : (personas[LocalDb.normalizarTelegramId(
+                    p['titular_telegram_id'])] ??
+                // 1.36 H-B3 (136-732): el titular sin resolver
+                // se nombra con su id, no «Entrenador» genérico.
+                (LocalDb.normalizarTelegramId(p['titular_telegram_id']) !=
+                        null
+                    ? 'Entrenador #${LocalDb.normalizarTelegramId(p['titular_telegram_id'])}'
+                    : 'Entrenador')),
       },
   ];
 }
@@ -300,10 +333,18 @@ List<Map<String, dynamic>> entradasHistorialServicios({
       'kind': 'salida',
       'id': (s['id'] as num?)?.toInt() ?? 0,
       'fecha': '${s['fecha'] ?? ''}',
-      'hora': '',
+      // 1.36 H-B3 (136-732): la salida conserva su hora cruda
+      // (o «—» si no trae) y su fila/nota para el detalle —
+      // antes nacía con hora vacía y sin cruda, y la nota
+      // registrada no se podía mostrar.
+      'hora': '${s['hora'] ?? ''}'.trim().isEmpty
+          ? '—'
+          : '${s['hora']}',
       'tipo': '${s['tipo_item'] ?? ''}',
       'cantidad': (s['dosis'] as num?)?.toInt() ?? 0,
       'motivo': '${s['motivo'] ?? ''}',
+      'nota': '${s['nota'] ?? s['motivo'] ?? ''}',
+      'cruda': s,
       'monto': 0.0,
       'casa': false,
       'esReverso': false,
@@ -757,6 +798,65 @@ Map<String, dynamic>? _ventaPorIdAgua(
   return (habilitado: true, motivo: null);
 }
 
+/// 1.36 H-B3 (136-732): el estado del botón con el contrato
+/// completo que la UI necesita — código estable, severidad y
+/// etiqueta corta — sin romper el par (habilitado, motivo)
+/// que ya consume la pantalla. PURO.
+({bool habilitado, String codigo, String severidad, String etiquetaCorta, String? motivo})
+    estadoBotonVentaServicioDetallado({
+  required String tipo,
+  required bool tienePomo,
+  required int dosisRestantes,
+  required int pomos,
+  required bool esDueno,
+  required double precio,
+}) {
+  final base = estadoBotonVentaServicio(
+    tipo: tipo,
+    tienePomo: tienePomo,
+    dosisRestantes: dosisRestantes,
+    pomos: pomos,
+    esDueno: esDueno,
+    precio: precio,
+  );
+  if (base.habilitado) {
+    return (
+      habilitado: true,
+      codigo: 'ok',
+      severidad: 'ok',
+      etiquetaCorta: 'Vender',
+      motivo: null,
+    );
+  }
+  final (codigo, severidad, corta) = switch (base.motivo) {
+    'Precio sin fijar' => ('precio_sin_fijar', 'aviso', 'Sin precio'),
+    'Sin pomos de agua en stock' => ('sin_pomos_agua', 'bloqueo', 'Sin agua'),
+    'Sin pomo activo' => ('sin_pomo', 'bloqueo', 'Sin pomo'),
+    'No quedan dosis en tu pomo' => ('sin_dosis', 'bloqueo', 'Sin dosis'),
+    _ => ('bloqueado', 'bloqueo', 'No disponible'),
+  };
+  return (
+    habilitado: false,
+    codigo: codigo,
+    severidad: severidad,
+    etiquetaCorta: corta,
+    motivo: base.motivo,
+  );
+}
+
+/// 1.36 H-B3 (136-732): excepción TIPADA de Servicios — las
+/// validaciones de registrar/revertir lanzan esto (con
+/// código) en vez de Exception sueltas sin clasificar.
+/// [toString] devuelve solo el mensaje: los snacks que ya
+/// pintaban `e.toString()` no cambian.
+class ServicioError implements Exception {
+  final String codigo;
+  final String mensaje;
+  const ServicioError(this.codigo, this.mensaje);
+  @override
+  String toString() => mensaje;
+}
+
 /// v1.13.0: desglose del saldo de un lote para la tarjeta del dueño
 /// (iniciales + reposiciones − ventas − salidas). PURO: recibe las
 /// filas del espejo ya filtradas por lote.
@@ -815,6 +915,29 @@ bool puedeDeshacerVenta(DateTime cobradoEn, DateTime ahora) =>
     ahora.difference(cobradoEn) <= const Duration(seconds: 15) &&
     !ahora.isBefore(cobradoEn);
 
+/// 1.36 H-B3 (136-732): segundos que quedan de la ventana de
+/// Deshacer (15 s), para que la barra de deshacer muestre el
+/// tiempo restante en vez de durar a ciegas. PURO.
+int segundosRestantesDeshacer(DateTime cobradoEn, DateTime ahora) {
+  final restantes =
+      15 - ahora.difference(cobradoEn).inSeconds;
+  if (restantes < 0) return 0;
+  if (restantes > 15) return 15;
+  return restantes;
+}
+
+/// 1.36 H-B3 (136-732): por qué el ranking salió vacío —
+/// «sin ventas» no es lo mismo que «solo Casa/pendientes o
+/// sin monto» y la UI lo distingue. PURO.
+String motivoRankingVacio(
+  List<Map<String, dynamic>> ventas,
+  List<Map<String, dynamic>> ranking,
+) {
+  if (ranking.isNotEmpty) return '';
+  if (ventas.isEmpty) return 'sin_ventas';
+  return 'solo_casa_o_sin_monto';
+}
+
 // ------------------------------------------------------------------
 // Lecturas locales (espejo + pendientes)
 // ------------------------------------------------------------------
@@ -842,9 +965,9 @@ Future<List<Map<String, dynamic>>> opsPendientesServicios() =>
 /// 1.28 (M3-B4), PURO: conteo del SELLO DE FRESCURA — cuántas
 /// ops de Servicios siguen en la cola con fecha de negocio
 /// dentro de [desde, hasta] (ISO; null = sin cota) y cuántas
-/// de ellas son VENTAS. Una op sin fecha cuenta como de hoy
-/// mismo (la regla del cuadre: el payload sin fecha es del
-/// día en curso). Lo usan el cuadre («incluye N operaciones
+/// de ellas son VENTAS. 1.36 H-B3 (136-730): una op sin fecha
+/// en el payload toma su fecha de la fila de la cola
+/// (creada_ts) — ya no cuenta en cualquier período. Lo usan el cuadre («incluye N operaciones
 /// por sincronizar», solo hoy) y las estadísticas («no
 /// incluye N ventas por sincronizar», el período visible):
 /// sin el sello, una cifra calculada solo del espejo parecía
@@ -858,11 +981,18 @@ Future<List<Map<String, dynamic>>> opsPendientesServicios() =>
   var ventas = 0;
   for (final op in ops) {
     final p = _payloadDeOp(op);
-    final fechaP = fechaNegocioHabana(p['fecha']);
-    if (fechaP.isNotEmpty) {
-      if (desde != null && fechaP.compareTo(desde) < 0) continue;
-      if (hasta != null && fechaP.compareTo(hasta) > 0) continue;
+    var fechaP = fechaNegocioHabana(p['fecha']);
+    // 1.36 H-B3 (136-730): una op SIN fecha en el payload ya
+    // no cuenta en cualquier período: su fecha es la de la
+    // fila de la cola (creada_ts). Sin creada_ts tampoco,
+    // manda la regla histórica del cuadre: es de HOY (cuenta
+    // solo en el período que contiene hoy, no en cualquiera).
+    if (fechaP.isEmpty) {
+      fechaP = fechaNegocioHabana(op['creada_ts']);
     }
+    if (fechaP.isEmpty) fechaP = hoyHabanaIso();
+    if (desde != null && fechaP.compareTo(desde) < 0) continue;
+    if (hasta != null && fechaP.compareTo(hasta) > 0) continue;
     total++;
     if ('${op['tipo']}' == 'venta_servicio') ventas++;
   }
@@ -1369,10 +1499,22 @@ Future<List<Map<String, dynamic>>> historialServiciosCliente(
   // recientes-primero se sigue aplicando igual.
   final ventas = await LocalDb.instance
       .servicioVentasPorFiltro(clienteId: clienteId);
+  // 1.36 H-B3 (136-730): el filtro usa el helper compartido
+  // (ids en texto incluidos) y el orden es por la fecha de
+  // NEGOCIO habanera — la misma que entradasHistorialServicios
+  // — no por el texto crudo de fecha.
   final out = ventas
-      .where((v) => (v['cliente_id'] as num?)?.toInt() == clienteId)
+      .where((v) => parseIdClienteServicio(v['cliente_id']) == clienteId)
       .toList()
-    ..sort((a, b) => '${b['fecha']}'.compareTo('${a['fecha']}'));
+    ..sort((a, b) {
+      final fa = fechaNegocioHabana(a['fecha']);
+      final fb = fechaNegocioHabana(b['fecha']);
+      final porFecha = (fb.isNotEmpty ? fb : '${b['fecha']}')
+          .compareTo(fa.isNotEmpty ? fa : '${a['fecha']}');
+      if (porFecha != 0) return porFecha;
+      return ((b['id'] as num?)?.toInt() ?? 0)
+          .compareTo((a['id'] as num?)?.toInt() ?? 0);
+    });
   return out;
 }
 
@@ -1791,11 +1933,11 @@ Future<({Map<String, dynamic> payload, String? retener})>
   DatabaseExecutor? txn,
 }) async {
   if (!kTiposVentaServicio.contains(tipo)) {
-    throw Exception('Tipo de servicio inválido');
+    throw ServicioError('validacion', 'Tipo de servicio inválido');
   }
-  if (cantidad < 1) throw Exception('Cantidad inválida');
+  if (cantidad < 1) throw ServicioError('validacion', 'Cantidad inválida');
   if (tipo != 'agua_suelta' && cantidad != 1 && ventaGrupoId == null) {
-    throw Exception(
+    throw ServicioError('validacion', 
         'La dosis se vende de una en una; para varias usa venta múltiple');
   }
   final db = LocalDb.instance;
@@ -1803,14 +1945,14 @@ Future<({Map<String, dynamic> payload, String? retener})>
   if (clienteId != null) {
     final filas =
         await db.mirrorPorIds('clientes', [clienteId], txn: txn);
-    if (filas.isEmpty) throw Exception('Cliente no encontrado');
+    if (filas.isEmpty) throw ServicioError('validacion', 'Cliente no encontrado');
     cliente = filas.first;
   }
   // Bloqueo <15 en dosis identificada (regla de venta responsable).
   if (tipo != 'agua_suelta' && cliente != null) {
     final edad = _edadCliente(cliente);
     if (edad != null && edad < 15) {
-      throw Exception(
+      throw ServicioError('validacion', 
           'Venta bloqueada: ${cliente['nombre']} tiene $edad años '
           '(no se vende pre-entreno a menores de 15)');
     }
@@ -1831,12 +1973,12 @@ Future<({Map<String, dynamic> payload, String? retener})>
     // comisión, no aquí.
     if (beneficiario == 'dueno') {
       if (cliente != null) {
-        throw Exception(
+        throw ServicioError('validacion', 
             'Casa para el dueño: el consumo propio del dueño '
             'no lleva cliente');
       }
       if (!actorEsDueno) {
-        throw Exception(
+        throw ServicioError('validacion', 
             'Solo el dueño puede marcar su propio consumo '
             'a la Casa');
       }
@@ -1844,23 +1986,23 @@ Future<({Map<String, dynamic> payload, String? retener})>
     final esCasaCliente =
         cliente != null && (cliente['cuenta_casa'] as num?)?.toInt() == 1;
     if (beneficiario != 'dueno' && !esCasaCliente) {
-      throw Exception(
+      throw ServicioError('validacion', 
           'La Cuenta a la Casa solo aplica a clientes con la cuenta '
           'otorgada o al dueño');
     }
   } else {
     if (metodo != 'efectivo' && metodo != 'transferencia') {
-      throw Exception('Elige el método de cobro');
+      throw ServicioError('validacion', 'Elige el método de cobro');
     }
   }
   // Pomo y saldo local (bloqueo en el teléfono si el saldo es 0).
   if (tipo != 'agua_suelta') {
-    if (pomoId == null) throw Exception('Falta el pomo de venta');
+    if (pomoId == null) throw ServicioError('validacion', 'Falta el pomo de venta');
     final pomos = await db.allMirror('servicio_pomos', txn: txn);
     final pomo =
         pomos.where((l) => (l['id'] as num?)?.toInt() == pomoId).toList();
     if (pomo.isEmpty || (pomo.first['activo'] as num?)?.toInt() != 1) {
-      throw Exception('El pomo no está activo');
+      throw ServicioError('validacion', 'El pomo no está activo');
     }
     final saldo = await saldoPomoLocal(pomoId, txn: txn);
     // Ítem 6 (pomo ciego): el bloqueo por saldo local solo aplica
@@ -1868,7 +2010,7 @@ Future<({Map<String, dynamic> payload, String? retener})>
     // Al entrenador no se le bloquea ni se le revela el saldo: el
     // servidor nunca rechaza la venta por stock teórico (A3).
     if (saldo <= 0 && vendedorEsDueno) {
-      throw Exception('El pomo no tiene dosis disponibles');
+      throw ServicioError('validacion', 'El pomo no tiene dosis disponibles');
     }
     // Autoauditoría 1.22 #2 (D2-02): el dueño tampoco puede
     // vender MÁS dosis de las que quedan. La venta simple vende
@@ -1881,14 +2023,14 @@ Future<({Map<String, dynamic> payload, String? retener})>
     // de la transacción, el saldo ya descuenta las subventas
     // hermanas encoladas antes en el mismo grupo.
     if (vendedorEsDueno && cantidad > saldo) {
-      throw Exception('Solo quedan $saldo dosis en el pomo');
+      throw ServicioError('validacion', 'Solo quedan $saldo dosis en el pomo');
     }
   }
   // Agua común: se bloquea la variante si no hay pomos.
   if (tipo == 'dosis_con_agua' || tipo == 'agua_suelta') {
     final agua = await stockAguaLocal(txn: txn);
     if (agua.saldo < cantidad) {
-      throw Exception('Sin pomos de agua en el stock común');
+      throw ServicioError('validacion', 'Sin pomos de agua en el stock común');
     }
   }
   final pr = await preciosServicios(txn: txn);
@@ -1897,13 +2039,13 @@ Future<({Map<String, dynamic> payload, String? retener})>
   // el método después, el servidor acepta la venta tal cual se cobró.
   final aj = await LocalDb.instance.getAjustes(txn: txn);
   if (!casa && !metodoServicioActivo(aj, tipo, metodo!)) {
-    throw Exception(
+    throw ServicioError('validacion', 
         'Ese método de cobro está deshabilitado para este producto');
   }
   final double precio =
       casa ? 0 : precioServicioMetodo(aj, tipo, metodo!);
   if (!casa && precio <= 0) {
-    throw Exception(
+    throw ServicioError('validacion', 
         'El precio de este servicio aún no está fijado '
         '(Servicios → Precios y comisión)');
   }
@@ -1922,7 +2064,7 @@ Future<({Map<String, dynamic> payload, String? retener})>
   // pasaban tal cual y contaminaban cuadre, estadísticas y
   // nómina (y el Infinity rompía el jsonEncode de la op).
   if (!comision.isFinite || comision < 0 || comision > precio) {
-    throw Exception(
+    throw ServicioError('validacion', 
         'Comisión inválida: debe estar entre 0 y el precio de '
         'la venta (${precio.toStringAsFixed(0)} CUP)');
   }
@@ -2035,16 +2177,16 @@ Future<List<String>> registrarVentaMultipleServicio({
   required int topePomos,
 }) async {
   if (dosisN < 2) {
-    throw Exception('La venta múltiple es de 2 dosis en adelante');
+    throw ServicioError('validacion', 'La venta múltiple es de 2 dosis en adelante');
   }
   if (dosisN > topeDosis) {
-    throw Exception('Solo quedan $topeDosis dosis en el pomo');
+    throw ServicioError('validacion', 'Solo quedan $topeDosis dosis en el pomo');
   }
   if (pomosM < 0 || pomosM > dosisN) {
-    throw Exception('Los pomos van de 0 a $dosisN');
+    throw ServicioError('validacion', 'Los pomos van de 0 a $dosisN');
   }
   if (pomosM > topePomos) {
-    throw Exception('Solo quedan $topePomos pomos de agua');
+    throw ServicioError('validacion', 'Solo quedan $topePomos pomos de agua');
   }
   final grupo = const Uuid().v4();
   // Corrección panel 1.13 (BLOQUEANTE): si un payload falla, no
@@ -2122,9 +2264,9 @@ Future<String> registrarSalidaServicio({
   String? nota,
 }) async {
   if (!motivosSalidaServicio.contains(motivo)) {
-    throw Exception('Motivo de salida no válido: $motivo');
+    throw ServicioError('validacion', 'Motivo de salida no válido: $motivo');
   }
-  if (dosis < 1) throw Exception('La salida debe ser de al menos 1 dosis');
+  if (dosis < 1) throw ServicioError('validacion', 'La salida debe ser de al menos 1 dosis');
   // Argón Servicios #10: la salida no puede superar el saldo
   // local del pomo (un dedo de más —22 por 2— dejaba el saldo
   // en -19 y apagaba los botones de venta del dueño).
@@ -2138,7 +2280,7 @@ Future<String> registrarSalidaServicio({
   await db.transaction((txn) async {
     final saldoPomo = await saldoPomoLocal(pomoId, txn: txn);
     if (dosis > saldoPomo) {
-      throw Exception('Solo quedan $saldoPomo dosis en el pomo');
+      throw ServicioError('validacion', 'Solo quedan $saldoPomo dosis en el pomo');
     }
     opUuid = await _encolar(
         'salida_servicio',
@@ -2166,9 +2308,9 @@ Future<String> registrarSalidaAguaServicio({
   String? nota,
 }) async {
   if (!motivosSalidaServicio.contains(motivo)) {
-    throw Exception('Motivo de salida no válido: $motivo');
+    throw ServicioError('validacion', 'Motivo de salida no válido: $motivo');
   }
-  if (cantidad < 1) throw Exception('La salida debe ser de al menos 1 pomo');
+  if (cantidad < 1) throw ServicioError('validacion', 'La salida debe ser de al menos 1 pomo');
   // Argón Servicios #10: tampoco del agua común.
   // 1.22 PF-6: validación + encolado en una transacción.
   final db = await LocalDb.instance.db;
@@ -2176,7 +2318,7 @@ Future<String> registrarSalidaAguaServicio({
   await db.transaction((txn) async {
     final agua = await stockAguaLocal(txn: txn);
     if (cantidad > agua.saldo) {
-      throw Exception('Solo quedan ${agua.saldo} pomos de agua');
+      throw ServicioError('validacion', 'Solo quedan ${agua.saldo} pomos de agua');
     }
     opUuid = await _encolar(
         'salida_servicio',
@@ -2215,7 +2357,7 @@ Future<List<String>> revertirVentaServicio({
   int? cantidad,
 }) async {
   if (motivo.trim().isEmpty) {
-    throw Exception('La reversión exige un motivo');
+    throw ServicioError('validacion', 'La reversión exige un motivo');
   }
   // Corrección panel 1.13 (BLOQUEANTE/ALTO): validar ANTES de
   // encolar. Antes el reverso se encolaba (y empujaba) primero y
@@ -2223,7 +2365,7 @@ Future<List<String>> revertirVentaServicio({
   // la excepción dejaba el reverso encolado sin su merma.
   if (polvoPerdido &&
       (pomoId == null || cantidad == null || cantidad < 1)) {
-    throw Exception(
+    throw ServicioError('validacion', 
         'Para registrar la pérdida hace falta el pomo y la cantidad');
   }
   // Argón Servicios #5: reverso y merma se encolan en UNA
@@ -2256,7 +2398,7 @@ Future<List<String>> revertirVentaServicio({
     final yaEnCola = opsCola.any((op) =>
         (_payloadDeOp(op)['venta_id'] as num?)?.toInt() == ventaId);
     if (yaEnCola) {
-      throw Exception('Esta venta ya tiene una reversión en cola');
+      throw ServicioError('validacion', 'Esta venta ya tiene una reversión en cola');
     }
     // El espejo guarda cada fila como JSON en `data` (sin
     // columnas por campo). 1.28 (M3-A11): el reverso espejado
@@ -2285,7 +2427,7 @@ Future<List<String>> revertirVentaServicio({
       });
     }
     if (yaEspejado) {
-      throw Exception('Esta venta ya fue revertida');
+      throw ServicioError('validacion', 'Esta venta ya fue revertida');
     }
     await LocalDb.instance.queueOp(
       opUuid: uuidReverso,
@@ -2529,7 +2671,9 @@ List<Map<String, dynamic>> rankingServicios(
 
   final porCliente = <int, Map<String, dynamic>>{};
   for (final v in ventas) {
-    final cid = (v['cliente_id'] as num?)?.toInt();
+    // 1.36 H-B3 (136-730): helper compartido — una venta con
+    // cliente_id en TEXTO ya no se descarta del ranking.
+    final cid = parseIdClienteServicio(v['cliente_id']);
     if (cid == null) continue;
     // Argón #9 (BAJO): el ranking mide compradores COMERCIALES.
     // Las cortesías Casa (casa == 1, precio 0) no suman unidades ni

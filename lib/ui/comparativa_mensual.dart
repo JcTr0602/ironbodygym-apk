@@ -2,6 +2,7 @@
 // v1.3.9 Sprint 3 (#7): comparativa mes actual vs anterior.
 // MTD: compara día 1-N actual vs día 1-N anterior.
 import 'package:flutter/material.dart';
+import '../app_log.dart';
 import '../auth.dart';
 import '../negocio.dart';
 import '../localdb.dart';
@@ -54,6 +55,11 @@ class _ComparativaMensualState
   List<_Metrica> _metricas = [];
   String _mesActual = '';
   String _mesAnterior = '';
+  // 1.36 H-B3 (136-734): error de carga con reintento.
+  bool _errorCarga = false;
+  // 1.36 H-B3 (136-738): años de la cabecera (el corte es MTD).
+  int _anioActual = 0;
+  int _anioAnterior = 0;
 
   @override
   void initState() {
@@ -167,7 +173,10 @@ class _ComparativaMensualState
   }
 
   Future<void> _cargar() async {
-    setState(() => _cargando = true);
+    setState(() {
+      _cargando = true;
+      _errorCarga = false;
+    });
     try {
       final hoy = ahoraHabana();
       final diaN = hoy.day;
@@ -245,6 +254,8 @@ class _ComparativaMensualState
         setState(() {
           _mesActual = meses[hoy.month];
           _mesAnterior = meses[mesAnt.month];
+          _anioActual = hoy.year;
+          _anioAnterior = mesAnt.year;
           _metricas = [
             _Metrica(
               titulo: 'Mensualidades',
@@ -281,9 +292,16 @@ class _ComparativaMensualState
         });
       }
     } catch (e) {
+      // 1.36 H-B3 (136-734): el fallo LIMPIA las métricas
+      // (antes quedaban las del período anterior pintadas) y
+      // se pinta EstadoError con reintento, no solo un snack.
+      AppLog.error('ui', 'comparativa_mensual_fallo', d: '$e');
       if (mounted) {
-        setState(() => _cargando = false);
-        mostrarSnack(context, 'Error: $e', significado: SignificadoChip.error);
+        setState(() {
+          _cargando = false;
+          _metricas = [];
+          _errorCarga = true;
+        });
       }
     }
   }
@@ -303,6 +321,8 @@ class _ComparativaMensualState
         'Comparativa Mensual',
         acciones: [
           IconButton(
+            // 1.36 H-B3 (136-738): tooltip del refresco.
+            tooltip: 'Actualizar',
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _cargar,
           ),
@@ -311,12 +331,22 @@ class _ComparativaMensualState
       body: _cargando
           // F2-20: carga del sistema, como las hermanas del frente.
           ? const EstadoCargando(texto: 'Cargando comparativa…')
-          : Column(
+          : _errorCarga
+              ? EstadoError(
+                  titulo: 'No se pudo cargar la comparativa',
+                  detalle: 'Revisa la conexión o vuelve a intentarlo.',
+                  onReintentar: _cargar,
+                )
+              : Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   child: Text(
-                    '$_mesActual (al día ${ahoraHabana().day}) vs $_mesAnterior',
+                    // 1.36 H-B3 (136-738): la cabecera dice
+                    // AÑO y que el corte es MTD (mes hasta hoy).
+                    '$_mesActual $_anioActual (al día '
+                    '${ahoraHabana().day} · corte MTD) vs '
+                    '$_mesAnterior $_anioAnterior',
                     style: AppTexto.cuerpo.copyWith(color: AppColores.textoSecundario(context)),
                   ),
                 ),

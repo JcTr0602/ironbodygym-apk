@@ -120,7 +120,10 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                 )
               : Column(
               children: [
-                const SyncBanner(),
+                // 1.36 H-B3 (136-738): fuera la banda de sync
+                // del ranking — el estado de sync se dice UNA
+                // sola vez (regla de Jc), como en las pantallas
+                // hermanas de análisis.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: SegmentedButton<bool>(
@@ -147,12 +150,19 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                       // 1.25 T120 (F4-18): vacío con el
                       // componente compartido (antes un Text
                       // centrado pelado).
-                      ? const EstadoVacio(
+                      // 1.36 H-B3 (136-732): el vacío distingue
+                      // «sin ventas» de «solo Casa/sin monto».
+                      ? EstadoVacio(
                           icono: Icons.leaderboard_rounded,
                           titulo: 'Sin compras de servicios',
-                          subtitulo:
-                              'Cuando un cliente compre dosis, '
-                              'combos o agua, aparecerá aquí.',
+                          subtitulo: motivoRankingVacio(
+                                      _todas, _filas) ==
+                                  'solo_casa_o_sin_monto'
+                              ? 'En este período solo hay ventas '
+                                  'de Cuenta a la Casa o sin monto: '
+                                  'no cuentan para el ranking.'
+                              : 'Cuando un cliente compre dosis, '
+                                  'combos o agua, aparecerá aquí.',
                         )
                       : ListView.builder(
                           padding: const EdgeInsets.all(AppEspacio.md),
@@ -186,6 +196,17 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                               2 => AppColores.alerta,
                               _ => null,
                             };
+                            // 1.36 H-B3 (136-739): el frente del
+                            // podio se resuelve por contraste —
+                            // el 3º (ámbar) con blanco no se
+                            // leía; naranja y ámbar llevan el
+                            // grafito de marca, el azul el blanco.
+                            final frentePodio = switch (i) {
+                              0 => AppColores.sobreMarca,
+                              1 => Colors.white,
+                              2 => AppColores.sobreMarca,
+                              _ => Colors.black87,
+                            };
                             return Padding(
                               padding:
                                   const EdgeInsets.only(bottom: AppEspacio.sm),
@@ -198,10 +219,7 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                                         backgroundColor:
                                             colorPodio ??
                                                 Colors.grey.shade300,
-                                        foregroundColor:
-                                            colorPodio != null
-                                                ? Colors.white
-                                                : Colors.black87,
+                                        foregroundColor: frentePodio,
                                         child: Text('${i + 1}',
                                             style: const TextStyle(
                                                 fontWeight:
@@ -215,25 +233,46 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                                       subtitle: Text(detalle.isEmpty
                                           ? '—'
                                           : detalle),
-                                      trailing: Text(
-                                          '${fmtMonto(f['monto'] as double)} CUP',
-                                          style: AppTexto.subtitulo
-                                              .copyWith(
-                                                  fontWeight:
-                                                      FontWeight.bold)),
+                                      trailing: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                            maxWidth: 130),
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text(
+                                              '${fmtMonto(f['monto'] as double)} CUP',
+                                              // 1.36 H-B3 (136-739):
+                                              // monto acotado y con
+                                              // cifras tabulares.
+                                              style: AppTexto
+                                                  .conTabulares(AppTexto
+                                                      .subtitulo
+                                                      .copyWith(
+                                                          fontWeight: FontWeight
+                                                              .bold))),
+                                        ),
+                                      ),
                                     ),
-                                    Align(
-                                      alignment:
-                                          Alignment.centerLeft,
-                                      child: FractionallySizedBox(
-                                        widthFactor: fraccion,
-                                        child: Container(
-                                          height: 4,
-                                          color: (colorPodio ??
-                                                  AppColores
-                                                      .textoSecundario(
-                                                          c))
-                                              .withValues(alpha: 0.55),
+                                    // 1.36 H-B3 (136-739): la barra
+                                    // proporcional se ANIMA hasta
+                                    // su fracción (antes nacía fija).
+                                    TweenAnimationBuilder<double>(
+                                      tween: Tween<double>(
+                                          begin: 0, end: fraccion),
+                                      duration: AppMovimiento.media,
+                                      builder: (ctx, valorAnim, _) =>
+                                          Align(
+                                        alignment:
+                                            Alignment.centerLeft,
+                                        child: FractionallySizedBox(
+                                          widthFactor: valorAnim,
+                                          child: Container(
+                                            height: 4,
+                                            color: (colorPodio ??
+                                                    AppColores
+                                                        .textoSecundario(
+                                                            c))
+                                                .withValues(alpha: 0.55),
+                                          ),
                                         ),
                                       ),
                                     ),
