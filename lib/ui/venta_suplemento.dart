@@ -39,6 +39,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'aviso_duplicado.dart';
 import 'confirmacion_cobro.dart';
+import 'tarjetas_wa.dart';
 import 'diseno.dart';
 import 'primitivas.dart';
 import 'venta_suplemento_inscripcion.dart';
@@ -743,6 +744,25 @@ class _VentaSuplementoScreenState
           ],
           comprobanteTitulo: 'Comprobante',
           comprobanteTexto: textoComprobante.replaceAll('*', ''),
+          // 1.36 (136-293 + TJ-14.1): la TARJETA de
+          // comprobante en el mismo gesto. El fiado viaja
+          // SIN sello y sin promo (conPromo ya lo excluye
+          // por la regla de la casa y la tarjeta lo vuelve
+          // a guardar); el texto que la acompaña es el
+          // comprobante de siempre.
+          tarjetaWa: TarjetaWaComprobante(
+            cliente: nombreComprador,
+            titulo: 'Suplemento',
+            producto: '${widget.suplemento['nombre'] ?? ''}',
+            cantidad: _cantidad,
+            fechaIso: hoyHabanaIso(),
+            total: total,
+            moneda: _moneda,
+            esFiado: _esFiado && _tipoComprador == 'cliente',
+            conPromo: conPromo,
+          ),
+          tarjetaTexto: textoComprobante,
+          tarjetaNombreArchivo: 'tarjeta_comprobante',
           accionExtra: waNum == null
               ? null
               : AccionExtraConfirmacion(
