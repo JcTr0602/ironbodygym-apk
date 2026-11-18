@@ -543,7 +543,15 @@ FilaIngreso? filaIngresoDesdeEspejo(
     case 'pagos_diarios':
       final monto = (r['total'] as num?)?.toDouble() ?? 0;
       if (monto == 0) return null;
-      return FilaIngreso('diarios', metodo, monto, fecha);
+      // (1.36 H-B4 136-1075) el método del diario se
+      // clasifica con el predicado de la casa, no con el
+      // `metodo` crudo: la fila vieja sin método ES
+      // efectivo y una con otro valor no lo es.
+      return FilaIngreso(
+          'diarios',
+          esPagoDiarioEfectivo(r) ? 'efectivo' : 'transferencia',
+          monto,
+          fecha);
     case 'ventas_suplementos':
       // Solo CUP: el USD no entra al reporte en CUP (se muestra aparte
       // en la pantalla si hace falta; el total C5 es en CUP).
@@ -1060,10 +1068,45 @@ String fechaCorta10(String? v) =>
     (v != null && v.length >= 10) ? v.substring(0, 10) : '';
 
 /// Serializa un mapa de ajustes para mostrarlo en H1 (sin secretos).
+/// (1.36 H-B4 136-1077) claves de ajustes VISIBLES en un
+/// volcado para mostrar/compartir: precios, tasa y
+/// plantillas del negocio. Todo lo demás (claves internas
+/// o futuras) no sale; y cualquier clave con pinta de
+/// secreto se enmascara aunque esté en la lista.
+const Set<String> kClavesAjustesVisibles = {
+  'tasa_usd',
+  'mensualidad',
+  'mensualidad_menores',
+  'pago_diario',
+  'pago_semanal',
+  'pago_quincenal',
+  'pago_entrenador_por_cliente',
+  'tipos_pago',
+  'metodos_aceptados',
+  'servicio_precios_metodo',
+  'promo_suplementos',
+  'plantillas_wa',
+  'textos_base',
+  'horario_turnos',
+  'horario_excepciones',
+};
+
+bool _claveAjusteSensible(String k) {
+  final s = k.toLowerCase();
+  return s.contains('token') ||
+      s.contains('clave') ||
+      s.contains('password') ||
+      s.contains('secret') ||
+      s.contains('api_key') ||
+      s.contains('apikey');
+}
+
 String ajustesParaMostrar(Map<String, dynamic> ajustes) {
   final b = StringBuffer();
   for (final e in ajustes.entries) {
-    b.writeln('${e.key}: ${e.value}');
+    if (!kClavesAjustesVisibles.contains(e.key)) continue;
+    b.writeln(
+        '${e.key}: ${_claveAjusteSensible(e.key) ? '••••••' : e.value}');
   }
   return b.toString();
 }

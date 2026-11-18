@@ -2727,10 +2727,26 @@ Future<List<Map<String, dynamic>>> entrenadoresConPendiente() async {
     final pend = await pendienteArqueo(tid);
     await acumular(tid, nombre, pend.cup, pend.usd);
   }
+  // (1.36 H-B4 136-1054) el orden convierte el USD con la
+  // tasa vigente de ajustes: sumar cup+usd a pelo trataba
+  // 1 USD como 1 CUP y un entrenador con dólares quedaba
+  // por debajo de otro con menos dinero real. Sin tasa
+  // leíble, el criterio explícito es CUP primero y USD
+  // como desempate (nunca mezclados).
+  final aj = await LocalDb.instance.getAjustes();
+  final tasa = montoAjusteTolerante(aj['tasa_usd']) ?? 0;
+  double totalOrd(Map<String, dynamic> e) {
+    final cup = e['cup'] as double;
+    final usd = e['usd'] as double;
+    return tasa > 0 ? cup + usd * tasa : cup;
+  }
+
   final lista = porEntrenador.values.toList()
-    ..sort((a, b) =>
-        ((b['cup'] as double) + (b['usd'] as double))
-            .compareTo((a['cup'] as double) + (a['usd'] as double)));
+    ..sort((a, b) {
+      final c = totalOrd(b).compareTo(totalOrd(a));
+      if (c != 0) return c;
+      return (b['usd'] as double).compareTo(a['usd'] as double);
+    });
   return lista;
 }
 
@@ -3376,37 +3392,6 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
     });
   }
 
-  // 1) Cumpleaños hoy.
-  for (final c in await cumpleanosProximos(dias: 0, activosPre: activos)) {
-    if (esVistaProtegida(c, esDueno: esDueno)) continue;
-    if ((c['_dias_para'] as int?) != 0) continue;
-    // Corrección de campo 1.21: si el mes de cumpleaños YA se
-    // regaló este año, el aviso anuncia el regalo con las dos
-    // fechas (antes salía el saludo pelado y el cliente no se
-    // enteraba del regalo por este mensaje).
-    final cidCumple = (c['id'] as num?)?.toInt() ?? 0;
-    final regalo = await regaloCumpleDelAnio(cidCumple);
-    avisos.add({
-      'tipo': 'cumple',
-      'cliente_id': cidCumple,
-      'nombre': nombreDe(c),
-      'telefono': telDe(c),
-      'foto_storage': c['foto_storage'],
-      'detalle': regalo != null
-          ? 'Cumple ${c['_cumple']} años · Mes regalado 🎁'
-          : 'Cumple ${c['_cumple']} años',
-      'mensaje': regalo != null
-          ? mensajeCumpleConRegalo(
-              nombre: nombreDe(c),
-              anteriorIso: regalo['anterior'] as String?,
-              nuevoIso: '${regalo['nuevo']}',
-            )
-          : '¡Feliz cumpleaños, ${nombreDe(c)}! 🎂\n'
-              'De parte de todo el equipo de Iron Body Gym, '
-              'que tengas un día excelente 💪$lineaMensajeAutomatico',
-    });
-  }
-
   // 2) Vencen hoy.
   final idsVenceHoy = <int>{};
   for (final c in await vencenHoy(activosPre: activos)) {
@@ -3589,8 +3574,13 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
           'tipo': 'recibo',
           'cliente_id': clienteIdProvisionalOp('${op['op_uuid'] ?? ''}'),
           'nombre': nombreInsc,
+          // (1.36 H-B4 136-1053) el payload COMPLETO:
+          // telefonoEfectivoWa mira movil primero y el
+          // payload de inscripción puede traer el número
+          // en `movil` (con solo `telefono` el aviso del
+          // migrado salía sin número).
           'telefono': telefonoEfectivoWa(
-              {'telefono': payload['telefono']}),
+              {'telefono': payload['telefono'], 'movil': payload['movil']}),
           'foto_storage': null,
           'detalle': 'Recibo: ${fmtMonto(monto)} CUP',
           'mensaje': '*Iron Body Gym* — Recibo\n'
@@ -3623,6 +3613,40 @@ Future<List<Map<String, dynamic>>> avisosWhatsappHoy() async {
                 .trim(),
       });
     } catch (_) {}
+  }
+
+  // 5) Cumpleaños hoy (AL FINAL: la prioridad documentada
+  // en la sección 0 es Vencidos > Vencen hoy > Por vencer
+  // > Recibos > Cumpleaños; el bloque vivía en 2ª posición
+  // y la lista salía en otro orden — 1.36 H-B4 136-1059).
+  for (final c in await cumpleanosProximos(dias: 0, activosPre: activos)) {
+    if (esVistaProtegida(c, esDueno: esDueno)) continue;
+    if ((c['_dias_para'] as int?) != 0) continue;
+    // Corrección de campo 1.21: si el mes de cumpleaños YA se
+    // regaló este año, el aviso anuncia el regalo con las dos
+    // fechas (antes salía el saludo pelado y el cliente no se
+    // enteraba del regalo por este mensaje).
+    final cidCumple = (c['id'] as num?)?.toInt() ?? 0;
+    final regalo = await regaloCumpleDelAnio(cidCumple);
+    avisos.add({
+      'tipo': 'cumple',
+      'cliente_id': cidCumple,
+      'nombre': nombreDe(c),
+      'telefono': telDe(c),
+      'foto_storage': c['foto_storage'],
+      'detalle': regalo != null
+          ? 'Cumple ${c['_cumple']} años · Mes regalado 🎁'
+          : 'Cumple ${c['_cumple']} años',
+      'mensaje': regalo != null
+          ? mensajeCumpleConRegalo(
+              nombre: nombreDe(c),
+              anteriorIso: regalo['anterior'] as String?,
+              nuevoIso: '${regalo['nuevo']}',
+            )
+          : '¡Feliz cumpleaños, ${nombreDe(c)}! 🎂\n'
+              'De parte de todo el equipo de Iron Body Gym, '
+              'que tengas un día excelente 💪$lineaMensajeAutomatico',
+    });
   }
 
   return avisos;
