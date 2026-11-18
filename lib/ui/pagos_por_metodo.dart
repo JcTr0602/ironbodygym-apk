@@ -61,6 +61,9 @@ class _PagosPorMetodoState
   int _nEfectivo = 0;
   int _nTransferencia = 0;
   int _nMixto = 0;
+  // 1.36 H-B2 (136-631): tras la primera carga, cambiar de
+  // periodo conserva la lista (franja de progreso encima).
+  bool _yaCargo = false;
 
   static const _periodos = [
     'hoy',
@@ -134,6 +137,10 @@ class _PagosPorMetodoState
           if (metodo == 'cortesia' || metodo == 'promo') {
             continue;
           }
+          // 1.36 H-B2 (136-629): solo cuentan operaciones
+          // con monto > 0 (un registro en cero no es un
+          // cobro), en las cuatro fuentes y ambos periodos.
+          if (monto <= 0) continue;
           if (metodo.contains('transfer')) {
             transferencia += monto;
             nTransferencia++;
@@ -149,11 +156,14 @@ class _PagosPorMetodoState
         // Argón Dinero #6: con su método real, no todo a efectivo.
         for (final d in await LocalDb.instance
             .mirrorPorFecha('pagos_diarios', 'fecha', desde, hasta)) {
+          // 136-629: diario en cero no cuenta como operación.
+          final totalDiario = (d['total'] as num?)?.toDouble() ?? 0;
+          if (totalDiario <= 0) continue;
           if (esPagoDiarioEfectivo(d)) {
-            efectivo += (d['total'] as num?)?.toDouble() ?? 0;
+            efectivo += totalDiario;
             nEfectivo++;
           } else {
-            transferencia += (d['total'] as num?)?.toDouble() ?? 0;
+            transferencia += totalDiario;
             nTransferencia++;
           }
         }
@@ -169,13 +179,17 @@ class _PagosPorMetodoState
           if (dia.isNotEmpty &&
               dia.compareTo(desde) >= 0 &&
               dia.compareTo(hasta) <= 0) {
-            if ('${v['metodo'] ?? 'efectivo'}'
+            // 136-629: venta en cero no cuenta.
+            final totalV = totalVentaCup(v);
+            if (totalV <= 0) {
+              // sin operación
+            } else if ('${v['metodo'] ?? 'efectivo'}'
                 .toLowerCase()
                 .contains('transfer')) {
-              transferencia += totalVentaCup(v);
+              transferencia += totalV;
               nTransferencia++;
             } else {
-              efectivo += totalVentaCup(v);
+              efectivo += totalV;
               nEfectivo++;
             }
           }
@@ -207,6 +221,8 @@ class _PagosPorMetodoState
             final monto =
                 ((v['precio_unitario'] as num?)?.toDouble() ?? 0) *
                     ((v['cantidad'] as num?)?.toInt() ?? 0);
+            // 136-629: servicio en cero no cuenta.
+            if (monto <= 0) continue;
             if ('${v['metodo'] ?? ''}'
                 .toLowerCase()
                 .contains('transfer')) {
@@ -260,6 +276,8 @@ class _PagosPorMetodoState
           if (metodo == 'cortesia' || metodo == 'promo') {
             continue;
           }
+          // 136-629: monto <= 0 tampoco (cualquier método).
+          if (monto <= 0) continue;
           if (metodo.contains('transfer')) {
             transferencia += monto;
             nTransferencia++;
@@ -284,6 +302,7 @@ class _PagosPorMetodoState
           _nTransferencia = nTransferencia;
           _nMixto = nMixto;
           _cargando = false;
+          _yaCargo = true;
         });
       }
     } catch (e) {
@@ -302,8 +321,13 @@ class _PagosPorMetodoState
     if (!AuthService().isOwner) {
       return Scaffold(
         appBar: appBarIron(context, 'Pagos por Método'),
-        body: const Center(
-          child: Text('Solo el dueño puede ver los pagos por método.'),
+        // 1.36 H-B2 (136-630): acceso no-dueño con el
+        // componente de la casa e icono de bloqueo.
+        body: const EstadoVacio(
+          icono: Icons.lock_rounded,
+          titulo: 'Solo el dueño',
+          subtitulo:
+              'Solo el dueño puede ver los pagos por método.',
         ),
       );
     }
@@ -317,16 +341,19 @@ class _PagosPorMetodoState
           Padding(
             padding: const EdgeInsets.all(AppEspacio.lg),
             child: SegmentedButton<int>(
+              // 1.36 H-B2 (136-630/631): sin check sobre la
+              // etiqueta y rótulos «Mes actual»/«Mes anterior».
+              showSelectedIcon: false,
               segments: const [
                 ButtonSegment(
                     value: 0,
                     label: Text('Hoy')),
                 ButtonSegment(
                     value: 1,
-                    label: Text('Mes Actual')),
+                    label: Text('Mes actual')),
                 ButtonSegment(
                     value: 2,
-                    label: Text('Mes Anterior')),
+                    label: Text('Mes anterior')),
               ],
               selected: {_periodoIdx},
               onSelectionChanged: (s) {
@@ -336,39 +363,68 @@ class _PagosPorMetodoState
               },
             ),
           ),
-          if (_cargando)
+          if (_cargando && !_yaCargo)
             const Expanded(
               child: EstadoCargando(texto: 'Cargando desglose…'),
             )
+          // 1.36 H-B2 (136-630): periodo en cero → EstadoVacio
+          // con el periodo nombrado, sin barras ni total en 0.
+          else if (!_cargando &&
+              total <= 0 &&
+              _efectivoUsd + _transferenciaUsd <= 0)
+            Expanded(
+              child: EstadoVacio(
+                icono: Icons.payments_rounded,
+                titulo: [
+                  'Sin cobros hoy',
+                  'Sin cobros este mes',
+                  'Sin cobros el mes anterior'
+                ][_periodoIdx],
+                subtitulo:
+                    'Cuando haya cobros, el desglose por método '
+                    'sale aquí.',
+              ),
+            )
           else
             Expanded(
+              // 1.36 H-B2 (136-631): la lista (y su scroll) se
+              // conserva al cambiar de periodo; la recarga se
+              // anuncia con la franja superior.
               child: ListView(
+                key: const PageStorageKey('pagos-por-metodo'),
                 padding: const EdgeInsets.symmetric(
                     horizontal: AppEspacio.lg),
                 children: [
-                  // 1.29 (Oleada 2, D-11): las barras de
-                  // método usan SU color categórico (efectivo
-                  // dorado, transferencia azul), no el verde
-                  // de «éxito» ni el azul de «info»: el método
-                  // se reconoce de un vistazo en toda la app
-                  // con el mismo código.
-                  _buildBarra(
-                    'Efectivo',
-                    _efectivo,
-                    total,
-                    AppColores.metodoEfectivo,
-                    Icons.money_rounded,
-                    operaciones: _nEfectivo,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildBarra(
-                    'Transferencia',
-                    _transferencia,
-                    total,
-                    AppColores.metodoTransferencia,
-                    Icons.credit_card_rounded,
-                    operaciones: _nTransferencia,
-                  ),
+                  if (_cargando)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: AppEspacio.sm),
+                      child: LinearProgressIndicator(),
+                    ),
+                  // 136-630: MISMA regla de ocultación para
+                  // todos los métodos: la barra en cero no se
+                  // pinta (antes solo Mixto y Transf. USD se
+                  // ocultaban; Efectivo/Transferencia salían
+                  // en cero).
+                  if (_efectivo > 0)
+                    _buildBarra(
+                      'Efectivo',
+                      _efectivo,
+                      total,
+                      AppColores.metodoEfectivo,
+                      Icons.money_rounded,
+                      operaciones: _nEfectivo,
+                    ),
+                  if (_efectivo > 0 && _transferencia > 0)
+                    const SizedBox(height: 12),
+                  if (_transferencia > 0)
+                    _buildBarra(
+                      'Transferencia',
+                      _transferencia,
+                      total,
+                      AppColores.metodoTransferencia,
+                      Icons.credit_card_rounded,
+                      operaciones: _nTransferencia,
+                    ),
                   if (_mixto > 0) ...[
                     const SizedBox(height: 12),
                     _buildBarra(
@@ -381,9 +437,6 @@ class _PagosPorMetodoState
                     ),
                   ],
                   const SizedBox(height: 24),
-                  // C1 (estéticas 1.19): Tarjeta del sistema en vez
-                  // de Card gris claro (en oscuro quedaba claro) y
-                  // naranja oficial en vez del 0xFFFF6B00 a mano.
                   Tarjeta(
                     child: Row(
                       mainAxisAlignment:
@@ -407,16 +460,18 @@ class _PagosPorMetodoState
                       style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 12),
-                    _buildBarra(
-                      'Efectivo USD',
-                      _efectivoUsd,
-                      _efectivoUsd + _transferenciaUsd,
-                      AppColores.metodoEfectivo,
-                      Icons.money_rounded,
-                      moneda: 'USD',
-                    ),
-                    if (_transferenciaUsd > 0) ...[
+                    if (_efectivoUsd > 0)
+                      _buildBarra(
+                        'Efectivo USD',
+                        _efectivoUsd,
+                        _efectivoUsd + _transferenciaUsd,
+                        AppColores.metodoEfectivo,
+                        Icons.money_rounded,
+                        moneda: 'USD',
+                      ),
+                    if (_efectivoUsd > 0 && _transferenciaUsd > 0)
                       const SizedBox(height: 12),
+                    if (_transferenciaUsd > 0)
                       _buildBarra(
                         'Transferencia USD',
                         _transferenciaUsd,
@@ -425,9 +480,7 @@ class _PagosPorMetodoState
                         Icons.credit_card_rounded,
                         moneda: 'USD',
                       ),
-                    ],
                     const SizedBox(height: 12),
-                    // C1: igual que el total CUP.
                     Tarjeta(
                       child: Row(
                         mainAxisAlignment:
@@ -473,8 +526,11 @@ class _PagosPorMetodoState
                 style: AppTexto.titulo.copyWith(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
-              Text(
-                '${fmtMonto(monto)} $moneda',
+              // 1.36 H-B2 (136-631): el monto cuenta hasta
+              // su valor al cambiar de periodo.
+              MontoAnimado(
+                valor: monto,
+                formato: (v) => '${fmtMonto(v)} $moneda',
                 style: AppTexto.titulo.copyWith(color: color),
               ),
             ],
@@ -482,13 +538,21 @@ class _PagosPorMetodoState
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadio.sm),
-            child: LinearProgressIndicator(
-              value: total > 0 ? monto / total : 0,
-              minHeight: 12,
-              backgroundColor:
-                  AppColores.borde(context).withValues(alpha: 0.3),
-              valueColor:
-                  AlwaysStoppedAnimation<Color>(color),
+            // 136-631: la barra crece hasta su fracción.
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(
+                  begin: 0, end: total > 0 ? monto / total : 0),
+              duration: AppMovimiento.resuelta(
+                  context, AppMovimiento.media),
+              builder: (context, fraccion, _) =>
+                  LinearProgressIndicator(
+                value: fraccion,
+                minHeight: 12,
+                backgroundColor:
+                    AppColores.borde(context).withValues(alpha: 0.3),
+                valueColor:
+                    AlwaysStoppedAnimation<Color>(color),
+              ),
             ),
           ),
           const SizedBox(height: 4),

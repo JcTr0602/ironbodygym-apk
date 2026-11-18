@@ -26,6 +26,7 @@ import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
 import 'ficha.dart';
+import 'skeleton.dart';
 import 'widgets.dart';
 import '../app_log.dart';
 
@@ -38,6 +39,10 @@ class PagaronMesScreen extends StatefulWidget {
 
 class _PagaronMesScreenState extends State<PagaronMesScreen> {
   bool _cargando = true;
+  // 1.36 H-B2 (136-624): el fallo de carga se declara.
+  bool _errorCarga = false;
+  // 1.36 H-B2 (136-627): guarda del botón de actualizar.
+  bool _actualizando = false;
   List<Map<String, dynamic>> _filas = [];
   // 1.25 T118 (F2-17): buscador de la lista y tarifa vigente
   // para la cabecera de base de nómina (solo dueño).
@@ -75,6 +80,8 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
 
   /// El ⟳ sincroniza el alcance de pagos y luego relee la lista local.
   Future<void> _actualizar() async {
+    if (_actualizando) return;
+    setState(() => _actualizando = true);
     try {
       // 1.23.1 (bug de campo 2026-11-04): se usa el resultado
       // detallado: si el ciclo NO corrió (otra sincronización en
@@ -114,6 +121,8 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       await _cargar();
       if (!mounted) return;
       mostrarSnack(context, 'Sin conexión: mostrando datos locales', significado: SignificadoChip.alerta);
+    } finally {
+      if (mounted) setState(() => _actualizando = false);
     }
   }
 
@@ -127,6 +136,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
       // El error NO se traga: queda en bitácora
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
+      if (mounted) setState(() => _errorCarga = true);
     } finally {
       if (mounted && _cargando) {
         setState(() => _cargando = false);
@@ -197,6 +207,7 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
         _totalCanonico = ids.length;
         _tarifa = tarifa;
         _cargando = false;
+        _errorCarga = false;
       });
     }
   }
@@ -215,20 +226,16 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                 'Vence en $d día${d == 1 ? '' : 's'}',
                 AppColores.alertaOscuro
               );
+    // 1.36 H-B2 (136-627): el chip de vencimiento es el
+    // ChipEstado semántico de la casa, no un Container a
+    // mano con su propio color.
     return Padding(
       padding: const EdgeInsets.only(top: 3),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppEspacio.sm, vertical: 2),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(AppRadio.sm),
-        ),
-        child: Text(
-          texto,
-          style: AppTexto.minuscula
-              .copyWith(color: color, fontWeight: FontWeight.w700),
-        ),
+      child: ChipEstado.semantico(
+        texto: texto,
+        significado:
+            color == AppColores.error ? SignificadoChip.error : SignificadoChip.alerta,
+        icono: Icons.schedule_rounded,
       ),
     );
   }
@@ -248,9 +255,14 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
         _cargando ? 'Pagaron este mes' : 'Pagaron este mes ($_totalCanonico)',
         acciones: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: _actualizando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded),
             tooltip: 'Actualizar (bajar cambios)',
-            onPressed: _actualizar,
+            onPressed: _actualizando ? null : _actualizar,
           ),
         ],
       ),
@@ -300,8 +312,16 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
           ],
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando pagos del mes…')
-                : _filas.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(AppEspacio.lg),
+                    child: SkeletonLista(),
+                  )
+                : _errorCarga && _filas.isEmpty
+                    ? EstadoError(
+                        titulo: 'No se pudo cargar la lista',
+                        onReintentar: _cargar,
+                      )
+                    : _filas.isEmpty
                     ? const EstadoVacio(
                         icono: Icons.payments_rounded,
                         titulo: 'Nadie ha pagado este mes',
@@ -343,8 +363,13 @@ class _PagaronMesScreenState extends State<PagaronMesScreen> {
                             final sinDatos = c['sin_datos'] == true;
                             return ListTile(
                               leading: sinDatos
-                                  ? const CircleAvatar(
-                                      child: Icon(Icons.person_outline_rounded),
+                                  ? CircleAvatar(
+                                      backgroundColor: AppColores
+                                          .superficieHundida(context),
+                                      child: Icon(
+                                          Icons.person_outline_rounded,
+                                          color: AppColores.textoSecundario(
+                                              context)),
                                     )
                                   : ClienteAvatarThumb(
                                       fotoLocal:
@@ -410,6 +435,11 @@ class ClienteAvatarThumb extends StatefulWidget {
 
 class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
   File? _archivo;
+  bool _cargandoFoto = true;
+  // 1.36 H-B2 (136-626): generación de la carga — un
+  // reciclaje rápido de la fila no deja que la foto de la
+  // fila ANTERIOR aterrice sobre esta.
+  int _gen = 0;
 
   @override
   void initState() {
@@ -424,24 +454,49 @@ class _ClienteAvatarThumbState extends State<ClienteAvatarThumb> {
         old.fotoLocal != widget.fotoLocal) {
       // Corrección Gemini ronda 2: resetear antes de cargar para no
       // mostrar la foto del cliente anterior durante el I/O.
-      setState(() => _archivo = null);
+      setState(() {
+        _archivo = null;
+        _cargandoFoto = true;
+      });
       _cargar();
     }
   }
 
   Future<void> _cargar() async {
+    final gen = ++_gen;
     File? f;
-    if (widget.fotoLocal != null && widget.fotoLocal!.isNotEmpty) {
-      final lf = File(widget.fotoLocal!);
-      if (await lf.exists()) f = lf;
+    try {
+      if (widget.fotoLocal != null && widget.fotoLocal!.isNotEmpty) {
+        final lf = File(widget.fotoLocal!);
+        if (await lf.exists()) f = lf;
+      }
+      // P-3: resolución de lista (la hermana ligera vale).
+      f ??= await FotoCache.instance.enCacheParaLista(widget.fotoStorage);
+    } catch (_) {
+      // 136-626: un fallo de caché/disco deja el marcador
+      // neutro, no un error async sin dueño.
+      f = null;
     }
-    // P-3: resolución de lista (la hermana ligera vale).
-    f ??= await FotoCache.instance.enCacheParaLista(widget.fotoStorage);
-    if (mounted) setState(() => _archivo = f);
+    if (mounted && gen == _gen) {
+      setState(() {
+        _archivo = f;
+        _cargandoFoto = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-B2 (136-627): mientras la foto carga, círculo
+    // neutro (el ✓ de «pagó» solo sale con la carga
+    // resuelta sin foto).
+    if (_cargandoFoto) {
+      return CircleAvatar(
+        backgroundColor: AppColores.superficieHundida(context),
+        child: Icon(Icons.person_outline_rounded,
+            color: AppColores.textoSecundario(context)),
+      );
+    }
     if (_archivo != null) {
       // 1.34 Campo 2 (P-1): avatar de 40 dp — la foto se
       // decodifica acotada (providerFotoAcotada), no entera.

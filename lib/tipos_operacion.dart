@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_log.dart';
+
 /// v1.2.9+46 (Gemini): centralización de tipos de operación.
 /// Un solo mapa para nombres formales e iconos — la UI no duplica switches.
 class TipoOperacionInfo {
@@ -279,10 +281,39 @@ const Map<String, String> kEtiquetasAjuste = {
   'servicio_comision_dosis': 'Ajuste: comisión por dosis',
 };
 
-/// Nombre formal de un tipo de operación. Si no está en el mapa,
-/// devuelve el identificador tal cual (no rompe con tipos nuevos).
-String describirTipoOp(String tipo) =>
-    kTiposOperacion[tipo]?.etiqueta ?? tipo;
+/// Tipos ya avisados como sin etiquetar (el aviso va una
+/// sola vez por tipo y sesión).
+final Set<String> _sinEtiquetarAvisados = <String>{};
+
+/// Nombre formal de un tipo de operación.
+/// 1.36 H-B2 (136-634): el fallback ya NO devuelve el
+/// código crudo a pantalla: 'ajuste' sin payload es
+/// «Ajuste» y un tipo desconocido es «Operación sin
+/// etiquetar» — el código queda en la bitácora (y quien lo
+/// necesite lo tiene en el payload de la fila), no como
+/// etiqueta visible en el historial.
+String describirTipoOp(String tipo) {
+  // 'ajuste' primero: su etiqueta de mapa («Cambio de
+  // precio») miente para los ajustes que no son de precio;
+  // sin payload, el nombre honesto es «Ajuste».
+  if (tipo == 'ajuste') return 'Ajuste';
+  final info = kTiposOperacion[tipo];
+  if (info != null) return info.etiqueta;
+  if (_sinEtiquetarAvisados.add(tipo)) {
+    AppLog.aviso('ui', 'op_sin_etiquetar', d: tipo);
+  }
+  return 'Operación sin etiquetar';
+}
+
+/// 1.36 H-B2 (136-634): etiqueta CORTA para listas: la
+/// formal sin el prefijo «Ajuste: » (la lista ya vive en
+/// el contexto del historial).
+String etiquetaCortaTipoOp(String tipo,
+    {Map<String, dynamic>? payload}) {
+  var e = describirTipoOpConPayload(tipo, payload);
+  if (e.startsWith('Ajuste: ')) e = e.substring('Ajuste: '.length);
+  return e;
+}
 
 /// Como [describirTipoOp] pero consciente del payload: para la op
 /// 'ajuste' la etiqueta sale de la CLAVE ajustada, no del tipo.

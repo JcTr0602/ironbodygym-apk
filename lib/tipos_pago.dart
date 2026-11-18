@@ -5,6 +5,7 @@
 /// las claves fijas como fallback.
 library;
 
+import 'app_log.dart';
 import 'localdb.dart';
 
 class TipoPago {
@@ -347,6 +348,17 @@ Future<List<TipoPago>> getTiposPago(
       } else {
         tipos.insert(0, sintetico);
       }
+    }
+  }
+  // 1.36 H-B2 (136-633): un tipo con el importe inválido
+  // (monto <= 0) o sin nombre NO desaparece en silencio:
+  // queda avisado en bitácora con su id, para que el dueño
+  // lo corrija en el editor (antes el filtro final lo
+  // descartaba sin dejar rastro y el tipo «no existía»).
+  for (final t in tipos) {
+    if (t.id.isNotEmpty && (t.nombre.isEmpty || t.monto <= 0)) {
+      AppLog.aviso('ui', 'tipo_pago_precio_no_valido',
+          d: '${t.id} (monto=${t.monto}, nombre="${t.nombre}")');
     }
   }
   return [
