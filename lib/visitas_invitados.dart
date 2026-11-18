@@ -93,6 +93,9 @@ Future<int> registrarVisitaInvitadoAhora({
   required String? invitadoId,
   required String? nombre,
 }) async {
+  // 1.36 H-C2 (136-715): sin clave no hay visita que
+  // registrar — antes se reasignaba e insertaba bajo ''.
+  if (clave.isEmpty) return 0;
   // 1.28 (M4-A1): el id es el UUID crudo del invitado; con
   // id presente, primero se reasignan a esta clave las
   // visitas previas de la ficha (identidad fortalecida) —

@@ -46,6 +46,15 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
   }
 
   Future<void> _cargar() async {
+    // 1.36 H-C2 (136-733): el refresco manual marca la
+    // carga y limpia el error al empezar, igual que la
+    // pantalla hermana de estadísticas.
+    if (mounted) {
+      setState(() {
+        _cargando = true;
+        _errorCarga = false;
+      });
+    }
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
@@ -108,7 +117,25 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
               child: Text('No tienes permiso para ver el ranking.')));
     }
     return Scaffold(
-      appBar: appBarIron(context, 'Ranking de Servicios'),
+      appBar: appBarIron(
+        context,
+        'Ranking de Servicios',
+        acciones: [
+          // 1.36 H-C2 (136-733): actualizar manual con
+          // estado de carga (antes solo el error recargaba).
+          IconButton(
+            tooltip: 'Actualizar',
+            icon: _cargando
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            onPressed: _cargando ? null : _cargar,
+          ),
+        ],
+      ),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando ranking…')
           : _errorCarga

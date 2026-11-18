@@ -120,6 +120,18 @@ class _ServiciosEstadisticasScreenState
   List<Map<String, dynamic>>? _ePomos;
 
   Future<void> _cargar({bool releer = true}) async {
+    // 1.36 H-C2 (136-733/740): TODA vía de refresco (botón
+    // incluido) marca la carga y limpia el error al
+    // empezar, como la carga inicial. Excepción 136-740:
+    // el recálculo de periodo (releer:false) con datos ya
+    // en memoria NO levanta la carga — la vista se
+    // conserva mientras se recalcula.
+    if (mounted && (releer || _eVentas == null)) {
+      setState(() {
+        _cargando = true;
+        _errorCarga = false;
+      });
+    }
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
@@ -677,6 +689,11 @@ class _ServiciosEstadisticasScreenState
                     onSelectionChanged: (s) {
                       // 136-322: sin selección no hay s.first.
                       if (s.isEmpty) return;
+                      // 1.36 H-C2 (136-740): si el rango nace
+                      // ahora (últimos 30 días por defecto),
+                      // se AVISA tras el cambio.
+                      final rangoNuevo = s.first == 'rango' &&
+                          (_desdeRango == null || _hastaRango == null);
                       setState(() {
                         _periodo = s.first;
                         // 1.28 (M3-B3): el rango nace en los
@@ -693,8 +710,15 @@ class _ServiciosEstadisticasScreenState
                           _desdeRango = iso(dU);
                           _hastaRango = hoyHabanaIso();
                         }
-                        _cargando = true;
+                        // 136-740: sin _cargando aquí — el
+                        // recálculo conserva la vista (ver
+                        // _cargar con releer:false).
                       });
+                      if (rangoNuevo && mounted) {
+                        mostrarSnack(context,
+                            'Rango: últimos 30 días. Ajusta las fechas con «Elegir fechas».',
+                            significado: SignificadoChip.info);
+                      }
                       // Argón Estadísticas #3: cambiar el
                       // período NO relee la BD; recalcula
                       // sobre los espejos cacheados.
@@ -716,7 +740,10 @@ class _ServiciosEstadisticasScreenState
                             style: AppTexto.cuerpo,
                           ),
                         ),
-                        OutlinedButton.icon(
+                        // 1.36 H-C2 (136-740): «Elegir
+                        // fechas» resaltado (tonal) — es la
+                        // salida del atajo de 30 días.
+                        FilledButton.tonalIcon(
                           icon: const Icon(
                               Icons.date_range_rounded, size: 18),
                           label: const Text('Elegir fechas'),

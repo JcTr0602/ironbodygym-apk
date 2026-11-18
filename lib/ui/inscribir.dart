@@ -416,6 +416,14 @@ class _InscribirScreenState extends State<InscribirScreen> {
     return precioMensual * _meses;
   }
 
+  /// 1.36 H-C2 (136-690): ÚNICO cálculo del «válido
+  /// hasta» de la inscripción — el resumen en vivo y el
+  /// diálogo de confirmación salen de aquí (antes el
+  /// resumen sumaba con sumarDiasIso y la confirmación
+  /// con previewHastaDias: dos vías para el mismo dato).
+  String _validoHastaInscripcion(int dias) =>
+      previewHastaDias(null, dias, fechaPago: _inicioIso);
+
   int _diasPeriodo() {
     if (_periodo == 'semanal') return 7;
     if (_periodo == 'quincenal') return 15;
@@ -465,9 +473,12 @@ class _InscribirScreenState extends State<InscribirScreen> {
         // 1.35 (CAMPO-8): el vencimiento corre desde la
         // fecha de inicio efectiva (hoy salvo excepción
         // elegida), como hará el guardado.
+        // 1.36 H-C2 (136-690): por la ÚNICA función de la
+        // pantalla (_validoHastaInscripcion), la misma del
+        // diálogo de confirmación.
         final vence = dias <= 0
             ? null
-            : fmtFecha(sumarDiasIso(_inicioIso, dias));
+            : fmtFecha(_validoHastaInscripcion(dias));
         return Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(
@@ -768,7 +779,8 @@ class _InscribirScreenState extends State<InscribirScreen> {
     // 1.35 (CAMPO-8): la cobertura corre desde la fecha
     // de inicio efectiva (la cadena del servidor apila
     // desde la fecha del pago, que será esta misma).
-    final hasta = previewHastaDias(null, dias, fechaPago: _inicioIso);
+    // 136-690: por la función única de la pantalla.
+    final hasta = _validoHastaInscripcion(dias);
     if (!mounted) return;
     // v1.3.5: diálogo rediseñado (widget dedicado, luz verde de Argón).
     final ok = await DialogoConfirmarInscripcion.mostrar(
@@ -1442,17 +1454,26 @@ class _InscribirScreenState extends State<InscribirScreen> {
                         return;
                       }
                       setState(() => _confirmandoCasa = true);
-                      // T19: activar la Casa DESCARTA la
+                      // T19: activar la Casa aparta la
                       // membresía elegida abajo; se dice antes
                       // de que ocurra, no después.
+                      // 1.36 H-C2 (136-698): el texto dice lo
+                      // que el comportamiento hace — la
+                      // selección NO se borra: si la Casa se
+                      // quita, la membresía vuelve tal cual
+                      // estaba (antes el diálogo decía
+                      // «se descarta» y no era verdad).
                       final ok = await DialogoApp.confirmar(
                         context,
                         titulo: '¿Inscribir como Cuenta a la Casa?',
                         mensaje:
-                            'La Casa no cobra: la sección de '
-                            'membresía se descarta y el cliente '
-                            'queda con acceso permanente, sin '
-                            'vencimiento.',
+                            'La Casa no cobra: mientras esté '
+                            'activa, la membresía elegida no se '
+                            'usa ni se cobra, y el cliente queda '
+                            'con acceso permanente, sin '
+                            'vencimiento. Si quitas la Casa, la '
+                            'selección de membresía vuelve tal '
+                            'cual estaba.',
                         aceptar: 'Sí, es Casa',
                         icono: Icons.home_rounded,
                       );

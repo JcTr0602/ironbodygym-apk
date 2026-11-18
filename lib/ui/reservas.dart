@@ -615,10 +615,32 @@ class _ReservasScreenState extends State<ReservasScreen> {
     }
   }
 
+  /// 1.36 H-C2 (136-744): marca el id en curso al ABRIR
+  /// la acción (antes del diálogo) — dos toques ya no
+  /// apilan dos diálogos. Devuelve false si ya estaba
+  /// bloqueada. La liberación va en el finally de cada
+  /// acción (si se cancela) o la consume _encolar.
+  bool _abrirAccionReserva(int id) {
+    if (_bloqueada(id)) return false;
+    setState(() => _enCurso.add(id));
+    return true;
+  }
+
+  void _liberarAccionReserva(int id) {
+    if (mounted && _enCurso.contains(id)) {
+      setState(() => _enCurso.remove(id));
+    }
+  }
+
   Future<void> _encolar(String tipo, Map<String, dynamic> payload,
-      String mensajeOk) async {
+      String mensajeOk,
+      {bool accionYaMarcada = false}) async {
     final rid = _entero(payload['reserva_id']);
-    if (rid <= 0 || _bloqueada(rid)) return;
+    if (rid <= 0) return;
+    // 136-744: con la marca de la acción abierta, _enCurso
+    // contiene NUESTRO id: solo rebota lo ya encolado.
+    if (_conOpPendiente.contains(rid)) return;
+    if (_enCurso.contains(rid) && !accionYaMarcada) return;
     // Lote 2 Argón: revalidar contra el espejo ACTUAL y la cola
     // fresca. La tarjeta se renderizó antes del diálogo; mientras
     // estaba abierto, un sync puede haber cambiado el estado
@@ -680,7 +702,10 @@ class _ReservasScreenState extends State<ReservasScreen> {
     // awaits. Dos llamados simultáneos pasaban juntos el chequeo
     // inicial; entre este punto y el setState no hay awaits, así
     // que el segundo chequeo es atómico.
-    if (_bloqueada(rid)) return;
+    // 136-744: si la marca es la de NUESTRA acción abierta,
+    // no rebota; lo encolado por otra vía sí.
+    if (_conOpPendiente.contains(rid)) return;
+    if (_enCurso.contains(rid) && !accionYaMarcada) return;
     // Bloqueo SINCRÓNICO, antes del primer await (panel).
     setState(() => _enCurso.add(rid));
     try {
@@ -712,81 +737,113 @@ class _ReservasScreenState extends State<ReservasScreen> {
   }
 
   Future<void> _confirmar(ReservaVista r) async {
-    if (_bloqueada(r.id)) return;
-    // Yunque B (YB-SER-07): defensa en el propio flujo, como
-    // _cobrar con el apartado vencido — una solicitud vencida
-    // no se confirma aunque la tarjeta se hubiera pintado
-    // antes del vencimiento.
-    if (r.solicitudVencida(ahoraHabana())) {
-      mostrarSnack(context,
-          'Esta solicitud ya venció: el servidor la expira sola y no se puede confirmar.',
-          significado: SignificadoChip.alerta);
-      return;
-    }
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Confirmar reserva',
-      mensaje: '${r.clienteNombre} aparta ${r.cantidad} × '
-          '${r.suplementoNombre} a ${fmtMonto(r.precioUnitario)} ${r.moneda} '
-          '(${fmtMonto(r.totalFoto)} ${r.moneda} en total).\n\n'
-          'El apartado dura 72 horas: ese stock no se puede vender '
-          'a nadie más hasta que pague o venza.',
-      aceptar: 'Confirmar',
-      icono: Icons.bookmark_added_rounded,
-    );
-    if (ok && mounted) {
-      await _encolar('confirmar_reserva', {'reserva_id': r.id},
-          'Confirmación de la reserva de ${r.clienteNombre} '
-          '(${r.cantidad} × ${r.suplementoNombre}) encolada');
+    // 1.36 H-C2 (136-744): la marca nace al abrir la acción.
+    if (!_abrirAccionReserva(r.id)) return;
+    try {
+      // Yunque B (YB-SER-07): defensa en el propio flujo, como
+      // _cobrar con el apartado vencido — una solicitud vencida
+      // no se confirma aunque la tarjeta se hubiera pintado
+      // antes del vencimiento.
+      if (r.solicitudVencida(ahoraHabana())) {
+        mostrarSnack(context,
+            'Esta solicitud ya venció: el servidor la expira sola y no se puede confirmar.',
+            significado: SignificadoChip.alerta);
+        return;
+      }
+      // 1.36 H-C2 (136-747): el plazo del mensaje es el REAL
+      // de la reserva (textoVenceEn sobre expiraEn), no las
+      // «72 horas» literales.
+      final venceTxt = textoVenceEn(r.expiraEn, ahoraHabana());
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Confirmar reserva',
+        mensaje: '${r.clienteNombre} aparta ${r.cantidad} × '
+            '${r.suplementoNombre} a ${fmtMonto(r.precioUnitario)} ${r.moneda} '
+            '(${fmtMonto(r.totalFoto)} ${r.moneda} en total).\n\n'
+            '${venceTxt.isEmpty ? 'El apartado dura hasta que pague o venza' : 'El apartado ${venceTxt.toLowerCase()}'}: ese stock no se puede vender '
+            'a nadie más hasta que pague o venza.',
+        aceptar: 'Confirmar',
+        icono: Icons.bookmark_added_rounded,
+      );
+      if (ok && mounted) {
+        await _encolar('confirmar_reserva', {'reserva_id': r.id},
+            'Confirmación de la reserva de ${r.clienteNombre} '
+            '(${r.cantidad} × ${r.suplementoNombre}) encolada',
+            accionYaMarcada: true);
+      }
+    } finally {
+      _liberarAccionReserva(r.id);
     }
   }
 
   Future<void> _rechazar(ReservaVista r) async {
-    if (_bloqueada(r.id)) return;
-    // 1.29 (Oleada 4, barrido): el diálogo vive en un
-    // StatefulWidget dueño de su controlador
-    // (_DialogoRechazarReserva). Antes se creaba aquí y se
-    // disponía tras resolver el showDialog, con la
-    // animación de salida aún reconstruyendo el campo (el
-    // defecto D-B1-08).
-    final nota = await showDialog<String>(
-      context: context,
-      builder: (_) => _DialogoRechazarReserva(
-        clienteNombre: r.clienteNombre,
-        cantidad: r.cantidad,
-        suplementoNombre: r.suplementoNombre,
-      ),
-    );
-    if (nota != null && mounted) {
-      await _encolar(
-          'rechazar_reserva',
-          {'reserva_id': r.id, if (nota.isNotEmpty) 'nota': nota},
-          'Rechazo de la reserva de ${r.clienteNombre} '
-              '(${r.cantidad} × ${r.suplementoNombre}) encolado');
+    // 1.36 H-C2 (136-744): marca al abrir la acción.
+    if (!_abrirAccionReserva(r.id)) return;
+    try {
+      // 1.29 (Oleada 4, barrido): el diálogo vive en un
+      // StatefulWidget dueño de su controlador
+      // (_DialogoRechazarReserva). Antes se creaba aquí y se
+      // disponía tras resolver el showDialog, con la
+      // animación de salida aún reconstruyendo el campo (el
+      // defecto D-B1-08).
+      final nota = await showDialog<String>(
+        context: context,
+        builder: (_) => _DialogoRechazarReserva(
+          clienteNombre: r.clienteNombre,
+          cantidad: r.cantidad,
+          suplementoNombre: r.suplementoNombre,
+        ),
+      );
+      if (nota != null && mounted) {
+        await _encolar(
+            'rechazar_reserva',
+            {'reserva_id': r.id, if (nota.isNotEmpty) 'nota': nota},
+            'Rechazo de la reserva de ${r.clienteNombre} '
+                '(${r.cantidad} × ${r.suplementoNombre}) encolado',
+            accionYaMarcada: true);
+      }
+    } finally {
+      _liberarAccionReserva(r.id);
     }
   }
 
   Future<void> _cancelar(ReservaVista r) async {
-    if (_bloqueada(r.id)) return;
-    final ok = await DialogoApp.confirmar(
-      context,
-      titulo: 'Cancelar reserva',
-      mensaje: 'Se cancela la reserva de ${r.clienteNombre} '
-          '(${r.cantidad} × ${r.suplementoNombre})'
-          '${r.estado == 'reservada' ? ' y el apartado se libera' : ''}.',
-      aceptar: 'Cancelar reserva',
-      icono: Icons.bookmark_remove_rounded,
-      peligro: true,
-    );
-    if (ok && mounted) {
-      await _encolar('cancelar_reserva', {'reserva_id': r.id},
-          'Cancelación de la reserva de ${r.clienteNombre} '
-          '(${r.cantidad} × ${r.suplementoNombre}) encolada');
+    // 1.36 H-C2 (136-744): marca al abrir la acción.
+    if (!_abrirAccionReserva(r.id)) return;
+    try {
+      final ok = await DialogoApp.confirmar(
+        context,
+        titulo: 'Cancelar reserva',
+        mensaje: 'Se cancela la reserva de ${r.clienteNombre} '
+            '(${r.cantidad} × ${r.suplementoNombre})'
+            '${r.estado == 'reservada' ? ' y el apartado se libera' : ''}.',
+        aceptar: 'Cancelar reserva',
+        icono: Icons.bookmark_remove_rounded,
+        peligro: true,
+      );
+      if (ok && mounted) {
+        await _encolar('cancelar_reserva', {'reserva_id': r.id},
+            'Cancelación de la reserva de ${r.clienteNombre} '
+            '(${r.cantidad} × ${r.suplementoNombre}) encolada',
+            accionYaMarcada: true);
+      }
+    } finally {
+      _liberarAccionReserva(r.id);
     }
   }
 
   Future<void> _cobrar(ReservaVista r) async {
-    if (_bloqueada(r.id)) return;
+    // 1.36 H-C2 (136-744): marca al abrir la acción; el
+    // cuerpo va en _cobrarInterno y el finally libera.
+    if (!_abrirAccionReserva(r.id)) return;
+    try {
+      await _cobrarInterno(r);
+    } finally {
+      _liberarAccionReserva(r.id);
+    }
+  }
+
+  Future<void> _cobrarInterno(ReservaVista r) async {
     // 1.29 (Oleada 2, D-B2-03): defensa en el propio
     // flujo — un apartado vencido no se cobra aunque la
     // tarjeta se hubiera pintado antes del vencimiento.
@@ -891,7 +948,8 @@ class _ReservasScreenState extends State<ReservasScreen> {
           {'reserva_id': r.id, 'metodo': metodo},
           'Cobro de la reserva de ${r.clienteNombre} '
               '(${r.cantidad} × ${r.suplementoNombre}) encolado — '
-              'se sincroniza ahora');
+              'se sincroniza ahora',
+          accionYaMarcada: true);
     }
   }
 

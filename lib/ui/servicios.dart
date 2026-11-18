@@ -2258,7 +2258,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     }
     final pedida = await SolicitudesRellenoService.instance
         .tengoPendientePara(supId);
-    if (mounted) setState(() => _rellenoPedidoSel = pedida);
+    // 1.36 H-C2 (136-722): si el pomo cambió mientras la
+    // respuesta venía, esta ya no describe al pomo actual:
+    // se descarta en vez de pintar el estado de otro pomo.
+    final supActual = (_pomoActual?['suplemento_id'] as num?)?.toInt();
+    if (!mounted || supActual != supId) return;
+    setState(() => _rellenoPedidoSel = pedida);
   }
 
   /// 1.29 (Oleada 4, FB-09): pedir relleno del pomo
