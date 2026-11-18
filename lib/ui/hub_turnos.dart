@@ -75,6 +75,10 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
   // SL-11 (G12-6): la tarjeta de contingencia «¿Un cierre no
   // baja?» nace PLEGADA; este es su estado de despliegue.
   bool _ayudaCierreAbierta = false;
+  // UI136-15: el segundo plegado del hub, con el mismo
+  // patrón propio que el de arriba (antes era un
+  // ExpansionTile suelto conviviendo con él).
+  bool _ayudaHubAbierta = false;
   // 1.28 (M3-A7): aperturas resueltas por día de la semana
   // visible (clave: fecha ISO), para que el mapa de calor
   // cuente lo que de verdad pasó CADA día y no solo lo de hoy.
@@ -1341,29 +1345,55 @@ class _HubTurnosScreenState extends State<HubTurnosScreen> {
                   ),
                 ],
                 // plegable para no ocupar sitio a diario.
+                // UI136-15: con el PATRÓN PROPIO del hub
+                // (ListTile + ClipRect/Align), el mismo que
+                // «¿Un cierre no baja?» — antes este era un
+                // ExpansionTile suelto y la pantalla tenía
+                // dos mecanismos de plegado conviviendo.
                 const SizedBox(height: 12),
-                const ExpansionTile(
-                  title: Text('¿Cómo funciona este hub?'),
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      child: Text(
-                        // SL-11 (G12-4): sin re-explicar la
-                        // precedencia (programado vs apertura
-                        // real): esa explicación vive UNA sola
-                        // vez, en el hub de configuración.
-                        'Arriba ves quién está de turno hoy en '
-                        'cada franja. Abrir y Cerrar son tu '
-                        'turno del día; al cerrar se liquida el '
-                        'pendiente. «Pendiente a entregar» es el '
-                        'efectivo que falta por entregar de la '
-                        'caja. El patrón semanal y el calendario '
-                        'de excepciones se configuran abajo, en '
-                        '«Plan y ajustes de turnos».',
-                        style: AppTexto.cuerpo,
+                Tarjeta(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ListTile(
+                        title: const Text('¿Cómo funciona este hub?',
+                            style: AppTexto.cuerpo),
+                        trailing: Icon(_ayudaHubAbierta
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded),
+                        onTap: () => setState(() =>
+                            _ayudaHubAbierta = !_ayudaHubAbierta),
                       ),
-                    ),
-                  ],
+                      ClipRect(
+                        child: Align(
+                          heightFactor: _ayudaHubAbierta ? 1 : 0,
+                          alignment: Alignment.topCenter,
+                          child: const Padding(
+                            padding: EdgeInsets.fromLTRB(
+                                AppEspacio.lg, 0, AppEspacio.lg,
+                                AppEspacio.md),
+                            child: Text(
+                              // SL-11 (G12-4): sin re-explicar
+                              // la precedencia (programado vs
+                              // apertura real): esa explicación
+                              // vive UNA sola vez, en el hub de
+                              // configuración.
+                              'Arriba ves quién está de turno hoy en '
+                              'cada franja. Abrir y Cerrar son tu '
+                              'turno del día; al cerrar se liquida el '
+                              'pendiente. «Pendiente a entregar» es el '
+                              'efectivo que falta por entregar de la '
+                              'caja. El patrón semanal y el calendario '
+                              'de excepciones se configuran abajo, en '
+                              '«Plan y ajustes de turnos».',
+                              style: AppTexto.cuerpo,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

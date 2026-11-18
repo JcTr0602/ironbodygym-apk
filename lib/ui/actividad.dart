@@ -2835,7 +2835,20 @@ class _EncabezadoFechaSticky extends SliverPersistentHeaderDelegate {
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
+      // UI136-15: con contenido pasando por debajo
+      // (overlapsContent), la cabecera se separa con borde
+      // y sombra — antes lo ignoraba y el grupo se pegaba
+      // a las filas sin decir dónde empezaba.
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: overlapsContent
+            ? Border(
+                bottom:
+                    BorderSide(color: AppColores.borde(context)))
+            : null,
+        boxShadow:
+            overlapsContent ? AppElevacion.sombra(context, 1) : null,
+      ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       alignment: Alignment.centerLeft,
       child: Row(

@@ -1064,6 +1064,9 @@ class _ServiciosAdminScreenState extends State<ServiciosAdminScreen> {
                   onPressed: () => _reponerPomo(l),
                   child: const Text('Rellenar'),
                 ),
+              // UI136-15: respiro entre las dos acciones
+              // (iban pegadas, sin separación).
+              const SizedBox(width: AppEspacio.sm),
               TextButton(
                 onPressed: () => _salidaPomo(l),
                 child: const Text('Salida'),
