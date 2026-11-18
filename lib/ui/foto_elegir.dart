@@ -312,8 +312,11 @@ Future<XFile?> elegirFotoSegura(
         mostrarSnack(
           context,
           e.code == 'already_active'
-              ? 'No se pudo abrir la foto. Cierra la app y '
-                  'vuelve a intentarlo.'
+              // 136-550: sin pedir cerrar la app: esperar y
+              // reintentar basta (el selector anterior sigue
+              // cerrándose en segundo plano).
+              ? 'No se pudo abrir la foto. Espera un momento '
+                  'y reinténtalo.'
               : 'No se pudo abrir la foto. Inténtalo de nuevo.',
           significado: SignificadoChip.error,
         );
@@ -422,8 +425,9 @@ Future<File?> _elegirFotoFlujo(
       mostrarSnack(
         context,
         e.code == 'already_active'
-            ? 'No se pudo abrir la foto. Cierra la app y vuelve a '
-                'intentarlo.'
+            // 136-550: espera y reintenta, sin cerrar la app.
+            ? 'No se pudo abrir la foto. Espera un momento y '
+                'reinténtalo.'
             : 'No se pudo abrir la foto. Inténtalo de nuevo.',
         significado: SignificadoChip.error,
       );

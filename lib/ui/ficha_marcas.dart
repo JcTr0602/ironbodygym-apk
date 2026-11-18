@@ -47,6 +47,9 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
   bool _sinConexion = false;
   int _generacion = 0;
   final Set<int> _verificando = <int>{};
+  // 1.36 H-B2 (136-536): error de verificación POR MARCA, en
+  // línea en su fila con su reintento (antes solo un snack).
+  final Map<int, String> _errorPorMarca = <int, String>{};
 
   @override
   void initState() {
@@ -81,7 +84,10 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
   Future<void> _verificar(MarcaServidor m) async {
     // Guarda anti-doble-toque: un aval por toque.
     if (_verificando.contains(m.id)) return;
-    setState(() => _verificando.add(m.id));
+    setState(() {
+      _verificando.add(m.id);
+      _errorPorMarca.remove(m.id);
+    });
     try {
       final r = await _servicio.verificar(m.id);
       if (!mounted) return;
@@ -104,6 +110,8 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _errorPorMarca[m.id] =
+            'No se pudo verificar: ${mensajeErrorAmable(e)}');
         mostrarSnack(context,
             'No se pudo verificar la marca: ${mensajeErrorAmable(e)}',
             significado: SignificadoChip.error);
@@ -117,7 +125,11 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: appBarIron(context, 'Marcas en la app'),
-      body: ListView(
+      // 1.36 H-B2 (136-536): recarga por gesto (pull) además
+      // del reintento del aviso de error.
+      body: RefrescoIron(
+        onRefresh: _cargar,
+        child: ListView(
         padding: const EdgeInsets.all(AppEspacio.md),
         children: [
           Text(widget.nombreCliente, style: AppTexto.titulo),
@@ -130,8 +142,11 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
             style: AppTexto.secundario,
           ),
           const SizedBox(height: AppEspacio.md),
+          // 1.36 H-B2 (136-535): cruce skeleton→lista con
+          // fundido (CruceEstados por estado de la pantalla).
           if (_cargando)
-            const SkeletonLista(items: 3)
+            const CruceEstados(
+                estado: 'cargando', child: SkeletonLista(items: 3))
           else if (_sinConexion) ...[
             const AvisoEstado(
               tipo: TipoAviso.error,
@@ -158,6 +173,7 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
           else
             for (final m in _marcas) _fila(m),
         ],
+        ),
       ),
     );
   }
@@ -208,20 +224,42 @@ class _MarcasClienteScreenState extends State<MarcasClienteScreen> {
                   TextButton.icon(
                     onPressed:
                         verificando ? null : () => _verificar(m),
-                    icon: verificando
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2),
-                          )
-                        : const Icon(Icons.verified_rounded,
-                            size: 18),
+                    // 136-535: el intercambio icono/spinner
+                    // cruza con fundido, no de golpe.
+                    icon: AnimatedSwitcher(
+                      duration: AppMovimiento.corta,
+                      child: verificando
+                          ? const SizedBox(
+                              key: ValueKey('spin'),
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            )
+                          : const Icon(Icons.verified_rounded,
+                              key: ValueKey('icon'), size: 18),
+                    ),
                     label: Text(
                         verificando ? 'Verificando…' : 'Verificar'),
                   ),
               ],
             ),
+            if (_errorPorMarca[m.id] != null) ...[
+              const SizedBox(height: AppEspacio.xs),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(_errorPorMarca[m.id]!,
+                        style: AppTexto.metadato.copyWith(
+                            color: AppColores.errorTexto(context))),
+                  ),
+                  TextButton(
+                    onPressed: () => _verificar(m),
+                    child: const Text('Reintentar'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

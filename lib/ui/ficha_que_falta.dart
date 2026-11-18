@@ -145,8 +145,20 @@ class _SeccionQueFaltaFichaState extends State<SeccionQueFaltaFicha> {
       ultimaMedicionEn: widget.ultimaMedicionEn,
       hoy: ahoraHabana(),
     );
-    if (pendientes.isEmpty) return const SizedBox.shrink();
-    return Column(
+    // 1.36 H-B2 (136-538): mientras el dueño espera la
+    // verificación de acceso, un chip NO accionable lo dice
+    // («Verificando acceso…»); la aparición de los chips se
+    // anima con AnimatedSize (el Column va envuelto abajo).
+    final verificandoAcceso = widget.puedeGestionarAcceso &&
+        AuthService().isOwner &&
+        !AccesoAppCache.instance.cargado;
+    if (pendientes.isEmpty && !verificandoAcceso) {
+      return const SizedBox.shrink();
+    }
+    return AnimatedSize(
+      duration: AppMovimiento.resuelta(context, AppMovimiento.corta),
+      alignment: Alignment.topCenter,
+      child: Column(
       children: [
         Tarjeta(
           child: Column(
@@ -167,6 +179,15 @@ class _SeccionQueFaltaFichaState extends State<SeccionQueFaltaFicha> {
                 spacing: AppEspacio.sm,
                 runSpacing: AppEspacio.sm,
                 children: [
+                  if (verificandoAcceso)
+                    const Chip(
+                      avatar: SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      label: Text('Verificando acceso…'),
+                    ),
                   for (final p in pendientes)
                     ActionChip(
                       avatar: Icon(_icono(p), size: 18),
@@ -180,6 +201,7 @@ class _SeccionQueFaltaFichaState extends State<SeccionQueFaltaFicha> {
         ),
         const SizedBox(height: AppEspacio.md),
       ],
+      ),
     );
   }
 

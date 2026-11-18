@@ -216,6 +216,26 @@ class _SeccionCongelacionFichaState
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-B2 (136-534): la aparición/cambio de la tarjeta
+    // de congelación se anima en altura y fundido (antes la
+    // tarjeta saltaba de golpe al resolver la verificación).
+    final contenido = _contenido(context);
+    return AnimatedSize(
+      duration: AppMovimiento.resuelta(context, AppMovimiento.media),
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: AppMovimiento.resuelta(context, AppMovimiento.media),
+        child: KeyedSubtree(
+          key: ValueKey(_cargandoCongelacion
+              ? 'cargando'
+              : 'p${_pendiente?.id}-a${_aprobada?.id}-v${_vigenteStaff?['id']}'),
+          child: contenido,
+        ),
+      ),
+    );
+  }
+
+  Widget _contenido(BuildContext context) {
     final hoy = ahoraHabana();
     if (_cargandoCongelacion &&
         _pendiente == null &&

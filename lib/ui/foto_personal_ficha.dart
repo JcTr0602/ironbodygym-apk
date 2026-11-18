@@ -231,14 +231,23 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: alTocar,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadio.md),
-            child: Image.file(archivo,
-                height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover),
+        // 136-540: la miniatura tocable se anuncia (Semantics
+        // de botón + tooltip con su etiqueta).
+        Semantics(
+          button: true,
+          label: 'Ver foto grande: $etiqueta',
+          child: Tooltip(
+            message: etiqueta,
+            child: GestureDetector(
+              onTap: alTocar,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadio.md),
+                child: Image.file(archivo,
+                    height: 180,
+                    width: double.infinity,
+                    fit: BoxFit.cover),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: AppEspacio.xs),
@@ -270,6 +279,18 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
 
   @override
   Widget build(BuildContext context) {
+    // 1.36 H-B2 (136-540): los estados de la foto cruzan con
+    // fundido por clave de estado, no de golpe.
+    return AnimatedSwitcher(
+      duration: AppMovimiento.resuelta(context, AppMovimiento.corta),
+      child: KeyedSubtree(
+        key: ValueKey(_estado),
+        child: _contenido(context),
+      ),
+    );
+  }
+
+  Widget _contenido(BuildContext context) {
     switch (_estado) {
       case _EstadoFoto.cargando:
         // 1.25 T117 (F1-45): cargando ya no se confunde con
@@ -319,7 +340,9 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
               Expanded(
                 child: Text(
                     textoErrorFotoPersonal(fueDeRed: _falloFueDeRed),
-                    style: AppTexto.secundario),
+                    // 136-540: el error con su token, no gris.
+                    style: AppTexto.secundario.copyWith(
+                        color: AppColores.errorTexto(context))),
               ),
               TextButton(
                   onPressed: _consultar,
@@ -415,8 +438,15 @@ class _SeccionFotoPersonalState extends State<SeccionFotoPersonal> {
                 alignment: Alignment.centerRight,
                 child: OutlinedButton.icon(
                   onPressed: _retirando ? null : _retirar,
-                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  label: const Text('Retirar foto'),
+                  // 136-540: mientras retira, el botón lo dice.
+                  icon: _retirando
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: Text(_retirando ? 'Retirando…' : 'Retirar foto'),
                   style: OutlinedButton.styleFrom(
                       foregroundColor: AppColores.error),
                 ),

@@ -29,7 +29,15 @@ class EditorFotoDialog extends StatefulWidget {
   State<EditorFotoDialog> createState() => _EditorFotoDialogState();
 }
 
-class _EditorFotoDialogState extends State<EditorFotoDialog> {
+class _EditorFotoDialogState extends State<EditorFotoDialog>
+    with SingleTickerProviderStateMixin {
+  // 1.36 H-B2 (136-551): el restablecer anima la vuelta a la
+  // identidad en vez de saltar de golpe.
+  late final AnimationController _animReset = AnimationController(
+    vsync: this,
+    duration: AppMovimiento.corta,
+  );
+  Matrix4 _desdeReset = Matrix4.identity();
   final TransformationController _controller =
       TransformationController();
 
@@ -52,6 +60,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
 
   @override
   void dispose() {
+    _animReset.dispose();
     _controller.dispose();
     for (final ruta in _creados) {
       if (ruta != _devuelto) {
@@ -111,7 +120,21 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
   }
 
   void _reset() {
-    _controller.value = Matrix4.identity();
+    _desdeReset = _controller.value.clone();
+    _animReset
+      ..reset()
+      ..addListener(_aplicarReset)
+      ..forward();
+  }
+
+  void _aplicarReset() {
+    final t = AppMovimiento.curva.transform(_animReset.value);
+    _controller.value =
+        Matrix4Tween(begin: _desdeReset, end: Matrix4.identity())
+            .evaluate(AlwaysStoppedAnimation(t));
+    if (_animReset.isCompleted) {
+      _animReset.removeListener(_aplicarReset);
+    }
   }
 
   void _salir(File f) {
@@ -281,8 +304,9 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
                 ? 'No se pudo preparar la foto para recortarla; '
                     'puedes usarla completa tal cual.'
                 : 'Usa dos dedos para zoom, arrastra para mover. '
-                    'Centra bien la cara: al guardar se aplica '
-                    'este encuadre.',
+                    // 136-551: el motivo no siempre es una cara.
+                    'Centra el motivo principal: al guardar se '
+                    'aplica este encuadre.',
             textAlign: TextAlign.center,
             style: AppTexto.secundario.copyWith(
                 color: _preparacionFallo
@@ -302,7 +326,11 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
                   BorderRadius.circular(AppRadio.md),
             ),
             clipBehavior: Clip.hardEdge,
-            child: LayoutBuilder(
+            child: AnimatedSwitcher(
+              duration: AppMovimiento.corta,
+              child: LayoutBuilder(
+              key: ValueKey(
+                  _preparando ? 'prep' : (_preparacionFallo ? 'fallo' : 'edicion')),
               builder: (ctx, constraints) {
                 _viewport = constraints.biggest;
                 if (_preparando) {
@@ -331,6 +359,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
                   ),
                 );
               },
+              ),
             ),
           ),
           if (_guardando) ...[
@@ -369,7 +398,7 @@ class _EditorFotoDialogState extends State<EditorFotoDialog> {
               (_guardando || _preparando) ? null : _usarFoto,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColores.naranja,
-            foregroundColor: Colors.white,
+            foregroundColor: AppColores.sobreMarca,
             shape: RoundedRectangleBorder(
               borderRadius:
                   BorderRadius.circular(AppRadio.md),

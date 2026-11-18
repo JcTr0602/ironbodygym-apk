@@ -613,8 +613,18 @@ class _SeccionFotosProgresoNubeState
           const Text(
             'Las que el cliente decidió guardar en la nube. '
             'Solo tú puedes verlas.',
-            style: TextStyle(fontSize: 13),
+            // 136-545: texto por token de la casa.
+            style: AppTexto.secundario,
           ),
+          if (!enSeleccion) ...[
+            const SizedBox(height: 4),
+            // 136-546: la vía de selección se descubre sin
+            // probar: pista visible bajo el subtítulo.
+            const Text(
+              'Mantén pulsada una foto para seleccionar varias.',
+              style: AppTexto.secundario,
+            ),
+          ],
           if (enSeleccion) ...[
             const SizedBox(height: 10),
             Container(
@@ -711,7 +721,10 @@ class _SeccionFotosProgresoNubeState
             aspectRatio: 1,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: Stack(
+              // 136-547: Hero por fotoId entre rejilla y visor.
+              child: Hero(
+                tag: 'foto-nube-$fotoId',
+                child: Stack(
                 fit: StackFit.expand,
                 children: [
                   _imagenCelda(fotoId),
@@ -738,14 +751,16 @@ class _SeccionFotosProgresoNubeState
                       ),
                     ),
                 ],
+                ),
               ),
             ),
           ),
           const SizedBox(height: 4),
           Text(
             fmtFecha(f['fecha']?.toString() ?? ''),
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700),
+            // 136-545: fecha por token de la casa.
+            style: AppTexto.metadato
+                .copyWith(fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -770,7 +785,7 @@ class _SeccionFotosProgresoNubeState
               (cons.maxWidth * MediaQuery.devicePixelRatioOf(ctx))
                   .round(),
           errorBuilder: (_, __, ___) => Container(
-            color: Colors.black12,
+            color: AppColores.superficieHundida(ctx),
             child: const Center(
               child: Icon(Icons.broken_image_outlined),
             ),
@@ -784,7 +799,7 @@ class _SeccionFotosProgresoNubeState
         final bytes = snap.data;
         if (bytes == null) {
           return Container(
-            color: Colors.black12,
+            color: AppColores.superficieHundida(ctx),
             child: Center(
               child: snap.connectionState == ConnectionState.waiting
                   ? const CircularProgressIndicator(strokeWidth: 2)
@@ -802,7 +817,7 @@ class _SeccionFotosProgresoNubeState
                     MediaQuery.devicePixelRatioOf(ctx2))
                 .round(),
             errorBuilder: (_, __, ___) => Container(
-              color: Colors.black12,
+              color: AppColores.superficieHundida(ctx),
               child: const Center(
                 child: Icon(Icons.broken_image_outlined),
               ),
@@ -841,6 +856,12 @@ class _VisorFotosNube extends StatefulWidget {
 class _VisorFotosNubeState extends State<_VisorFotosNube> {
   late final PageController _paginas;
   late int _indice;
+  // 1.36 H-B2 (136-543): el Future de cada foto se memoiza
+  // por fotoId (antes build pedía widget.descargar(id) en
+  // línea: cada rebuild relanzaba la descarga y el visor no
+  // respetaba la pausa de fallo de la rejilla, que sí pasa
+  // por el cargador con memoria de la sección).
+  final Map<String, Future<Uint8List?>> _futuros = {};
   // La confirmación de eliminar DENTRO del visor no
   // tenía guarda: doble toque, dos confirmaciones
   // apiladas (M4-A13/C-R2M4-H1).
@@ -930,7 +951,8 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
               itemBuilder: (ctx, i) {
                 final id = widget.fotos[i]['id']?.toString() ?? '';
                 return FutureBuilder<Uint8List?>(
-                  future: widget.descargar(id),
+                  future: _futuros.putIfAbsent(
+                      id, () => widget.descargar(id)),
                   builder: (ctx, snap) {
                     final bytes = snap.data;
                     if (bytes == null) {
@@ -950,7 +972,9 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
                     // Decodificación acotada al ancho
                     // pintado y marca visible si los bytes
                     // no decodifican (M4-A13).
-                    return Image.memory(
+                    return Hero(
+                      tag: 'foto-nube-$id',
+                      child: Image.memory(
                       bytes,
                       fit: BoxFit.contain,
                       cacheWidth: (MediaQuery.sizeOf(context).width *
@@ -960,6 +984,7 @@ class _VisorFotosNubeState extends State<_VisorFotosNube> {
                         padding: EdgeInsets.all(24),
                         child: Icon(Icons.broken_image_outlined,
                             size: 40),
+                      ),
                       ),
                     );
                   },
