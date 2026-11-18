@@ -243,6 +243,10 @@ class FilaModuloPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      // (1.36 H-B4 136-891) ripple y foco delimitados.
+      borderRadius: BorderRadius.circular(AppRadio.md),
+      splashColor: AppColores.naranja.withValues(alpha: 0.10),
+      highlightColor: AppColores.naranja.withValues(alpha: 0.06),
       child: Padding(
         padding: const EdgeInsets.symmetric(
             horizontal: 14, vertical: AppEspacio.md),
@@ -329,6 +333,11 @@ class FranjaPorRevisar extends StatelessWidget {
                 Divider(height: 1, color: AppColores.borde(context)),
               InkWell(
                 onTap: () => onTapItem(items[i]),
+                // (1.36 H-B4 136-891) ripple/foco delimitados.
+                splashColor:
+                    AppColores.naranja.withValues(alpha: 0.10),
+                highlightColor:
+                    AppColores.naranja.withValues(alpha: 0.06),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppEspacio.lg,

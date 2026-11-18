@@ -502,7 +502,7 @@ class _RegistroMensualScreenState extends State<RegistroMensualScreen> {
     return Scaffold(
       appBar: appBarIron(context, 'Registro mensual'),
       body: _cargando
-          ? const EstadoCargando(texto: 'Cargando ajustes…')
+          ? const EstadoCargando(texto: 'Cargando registro mensual…')
           : _errorCarga != null
               ? EstadoError(
                   titulo: 'No se pudo cargar el registro mensual',
@@ -840,10 +840,19 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          ElevatedButton(
+          // (1.36 H-B4 136-863) exportar, verificar y compartir
+          // son pasos distintos: el botón dice en cuál está.
+          BotonPrimario(
+            texto: _exportando ? 'Exportando…' : 'Exportar copia',
+            cargando: _exportando,
             onPressed:
                 (_exportando || _verificando) ? null : _exportar,
-            child: Text(_exportando ? 'Exportando…' : 'Exportar copia'),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Al exportar, la copia se verifica sola antes de '
+            'ofrecer compartirla.',
+            style: AppTexto.secundario,
           ),
           if (_ultimaCopia != null) ...[
             const SizedBox(height: 12),
@@ -871,6 +880,15 @@ class _CopiaSeguridadScreenState extends State<CopiaSeguridadScreen> {
                         style: AppTexto.cuerpo),
                 ],
               ),
+            ),
+          ],
+          if (_registro.isEmpty) ...[
+            const SizedBox(height: 16),
+            const EstadoVacio(
+              icono: Icons.backup_rounded,
+              titulo: 'Aún no hay copias en este teléfono',
+              subtitulo:
+                  'La primera copia que exportes quedará registrada aquí.',
             ),
           ],
           if (_registro.isNotEmpty) ...[

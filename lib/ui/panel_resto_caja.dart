@@ -253,7 +253,22 @@ class _NominaPrecalculadaScreenState extends State<NominaPrecalculadaScreen> {
               child: Text('Solo el dueño ve esta pantalla.')));
     }
     return Scaffold(
-      appBar: appBarIron(context, 'Nómina pre-calculada'),
+      appBar: appBarIron(context, 'Nómina pre-calculada', acciones: [
+        // (1.36 H-B4 136-859) recalcular sin salir.
+        IconButton(
+          tooltip: 'Recalcular',
+          onPressed: _cargando
+              ? null
+              : () {
+                  setState(() {
+                    _errorCarga = null;
+                    _cargando = true;
+                  });
+                  _cargar();
+                },
+          icon: const Icon(Icons.refresh_rounded),
+        ),
+      ]),
       body: _cargando
           ? const EstadoCargando(texto: 'Cargando nómina…')
           : _errorCarga != null
@@ -510,9 +525,11 @@ class _AdelantosListaScreenState extends State<AdelantosListaScreen> {
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
-                  'Vista de solo lectura. La lógica de adelantos es '
-                  'la de 1.8.0 (no se reescribe): el excedente sobre '
-                  'el bruto arrastra como deuda al mes siguiente.',
+                  // (1.36 H-B4 136-858) consecuencia, no jerga.
+                  'Solo lectura: aquí no se cambia nada. Si un '
+                  'adelanto supera lo que el entrenador ganó en el '
+                  'mes, el excedente se le descuenta el mes '
+                  'siguiente como deuda.',
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 8),
@@ -1040,14 +1057,14 @@ class _PreciosMetodoScreenState extends State<PreciosMetodoScreen> {
               padding: const EdgeInsets.all(AppEspacio.lg),
               children: [
                 const Text(
-                  'Única fuente de precios: todo lo que cambias aquí '
-                  'alimenta a calcularPrecioCobro() en todos los '
-                  'teléfonos. Cada campo se guarda SOLO al salir de '
-                  'él (mira el ✓ de cada precio). Las tarifas '
-                  'especiales NO se editan aquí: tienen su pantalla '
-                  'en Tarifas. Los cambios rigen hacia adelante: '
-                  'los cobros ya hechos conservan su monto '
-                  'congelado.',
+                  // (1.36 H-B4 136-858) consecuencia, no jerga.
+                  'Estos precios se aplican a todos los cobros, en '
+                  'todos los teléfonos. Cada precio se guarda al '
+                  'salir de su campo (mira el ✓). Las tarifas '
+                  'especiales de un cliente no se editan aquí: '
+                  'tienen su pantalla en Tarifas. Lo que cambies '
+                  'rige para los cobros nuevos; los ya hechos '
+                  'conservan su monto.',
                   style: AppTexto.secundario,
                 ),
                 const SizedBox(height: 12),

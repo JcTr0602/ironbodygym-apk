@@ -243,6 +243,9 @@ class BandejaPorDecidir extends StatefulWidget {
 class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
   FotoRemotaPorDecidir? _foto;
   ConteosRemotosPorDecidir? _remotasAhora;
+  // (1.36 H-B4 136-887) la verificación remota en curso se
+  // anuncia sutil, sin sustituir la foto local.
+  bool _verificandoRemotas = false;
   int _gen = 0;
   int? _congelaciones;
   bool _congelacionesOk = true;
@@ -271,8 +274,10 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
 
   Future<void> _refrescarRemotas() async {
     final gen = ++_gen;
+    if (mounted) setState(() => _verificandoRemotas = true);
     final r = await (widget.cargarRemotas ?? cargarRemotasPorDecidir)();
     if (!mounted || gen != _gen) return;
+    setState(() => _verificandoRemotas = false);
     setState(() => _remotasAhora = r);
     // Fusión POR FUENTE (fusionarFotoPorDecidir): un éxito
     // parcial actualiza solo su fuente y conserva el último
@@ -473,6 +478,29 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
             Text(t.titular, style: AppTexto.secundario),
             const SizedBox(height: AppEspacio.xs),
           ],
+          // (1.36 H-B4 136-887) verificación remota en curso:
+          // línea sutil, la foto local sigue pintada.
+          if (_verificandoRemotas)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppEspacio.xs),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColores.textoSecundario(context),
+                    ),
+                  ),
+                  const SizedBox(width: AppEspacio.xs),
+                  Text('Verificando bandejas…',
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.textoSecundario(context))),
+                ],
+              ),
+            ),
           // --- Prioridad del dueño (1.32, Fase 3 —
           // Momento 4 del plano): 1º incidencias y
           // conversiones, 2º Plus, 3º congelaciones,
@@ -665,7 +693,16 @@ class _BandejaPorDecidirState extends State<BandejaPorDecidir> {
 
   Future<void> _liquidarRapido(Map<String, dynamic> e) async {
     final tid = (e['telegram_id'] as num?)?.toInt();
-    if (tid == null) return;
+    // (1.36 H-B4 136-886) sin Telegram no se liquida: se
+    // DICE, no se vuelve en silencio. (La recarga al cerrar
+    // la hoja ya es una sola: el final de esta función; la
+    // de alDeshacer es del acto de deshacer, otro momento.)
+    if (tid == null) {
+      mostrarSnack(context,
+          'Falta Telegram del entrenador: no se puede liquidar.',
+          significado: SignificadoChip.alerta);
+      return;
+    }
     final nombre = '${e['nombre'] ?? ''}';
     final messenger = ScaffoldMessenger.of(context);
     final r = await mostrarHojaLiquidarArqueo(context,

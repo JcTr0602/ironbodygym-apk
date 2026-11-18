@@ -48,11 +48,13 @@ Widget _soloDueno(String titulo) => Scaffold(
 /// antes: el botón solo se habilitaba con exactamente 0.
 bool puedeRedescargarEspejo(int pendientes) => pendientes == 0;
 
-Future<bool> _confirmar(BuildContext context, String titulo, String texto) async {
+Future<bool> _confirmar(BuildContext context, String titulo, String texto,
+    {bool peligro = false}) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => DialogoApp(
       titulo: titulo,
+      iconoTitulo: peligro ? Icons.warning_amber_rounded : null,
       contenido: Text(texto),
       acciones: [
         TextButton(
@@ -60,6 +62,10 @@ Future<bool> _confirmar(BuildContext context, String titulo, String texto) async
             child: const Text('Cancelar')),
         TextButton(
             onPressed: () => Navigator.pop(ctx, true),
+            style: peligro
+                ? TextButton.styleFrom(
+                    foregroundColor: AppColores.errorTexto(ctx))
+                : null,
             child: const Text('Confirmar')),
       ],
     ),
@@ -297,7 +303,10 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                                     ? null
                                     : () => _reintentarOp(op),
                                 child: const Text('Reintentar'))
-                            : const Text('Rechazada: avisar al dueño',
+                            : const Text(
+                                // (1.36 H-B4 136-865) dirigido al
+                                // dueño que la está viendo.
+                                'Rechazada: revísala tú; no se reintenta sola',
                                 style: AppTexto.secundario),
                       ),
                     ),
@@ -305,8 +314,8 @@ class _ErroresSyncPanelScreenState extends State<ErroresSyncPanelScreen> {
                     Tarjeta(
                       child: ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.broken_image_rounded,
-                            color: AppColores.alerta),
+                        leading: Icon(Icons.broken_image_rounded,
+                            color: AppColores.alertaTexto(context)),
                         title: const Text(
                             'Foto huérfana de op rechazada',
                             style: AppTexto.cuerpo),
@@ -386,6 +395,23 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
   int _pendientes = -1;
   int _tamano = -1;
   String _tabla = 'clientes';
+  // (1.36 H-B4 136-866) acción en curso: deshabilita e indica.
+  bool _enCurso = false;
+
+  Future<void> _accion(Future<void> Function() cuerpo) async {
+    if (_enCurso) return;
+    setState(() => _enCurso = true);
+    try {
+      await cuerpo();
+    } catch (e) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo completar: $e',
+            significado: SignificadoChip.error);
+      }
+    } finally {
+      if (mounted) setState(() => _enCurso = false);
+    }
+  }
 
   @override
   void initState() {
@@ -457,8 +483,9 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                       ),
                     ),
                     ChipEstado.semantico(
+                      // (1.36 H-B4 136-866) -1 = aún comprobando.
                       texto: _pendientes < 0
-                          ? 'Sin datos'
+                          ? 'Comprobando…'
                           : _pendientes == 0
                               ? 'Al día'
                               : 'Pendientes',
@@ -497,18 +524,25 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
               title: const Text('Reintentar cola de sync',
                   style: AppTexto.cuerpo),
               trailing: TextButton(
-                onPressed: () async {
-                  if (!await _confirmar(context, 'Reintentar cola',
-                      'Se intentará subir la cola pendiente ahora.')) {
-                    return;
-                  }
-                  await SyncEngine.instance.push();
-                  await registrarAccionMantenimiento(
-                      'f5_reintentar_cola', {});
-                  await _cargar();
-                  irSnack('Cola reintentada');
-                },
-                child: const Text('Ejecutar'),
+                onPressed: _enCurso
+                    ? null
+                    : () => _accion(() async {
+                          if (!await _confirmar(context, 'Reintentar cola',
+                              'Se intentará subir la cola pendiente ahora.')) {
+                            return;
+                          }
+                          await SyncEngine.instance.push();
+                          await registrarAccionMantenimiento(
+                              'f5_reintentar_cola', {});
+                          await _cargar();
+                          if (mounted) irSnack('Cola reintentada');
+                        }),
+                child: _enCurso
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Ejecutar'),
               ),
             ),
           ),
@@ -540,22 +574,27 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: puedeRedescargarEspejo(_pendientes)
-                        ? () async {
-                            if (!await _confirmar(context,
-                                'Re-descargar ${_etiquetaTablaF5(_tabla)}',
-                                'El espejo bajado del servidor reemplazará la tabla local. Sin cola pendiente, no hay cobros que perder.')) {
-                              return;
-                            }
-                            await LocalDb.instance.setMeta(
-                                'forzar_redescarga_$_tabla', '1');
-                            await SyncEngine.instance.pull();
-                            await registrarAccionMantenimiento(
-                                'f5_redescargar_espejo', {'tabla': _tabla});
-                            await _cargar();
-                            irSnack(
-                                '${_etiquetaTablaF5(_tabla)}: tabla re-descargada');
-                          }
+                    onPressed: (!_enCurso &&
+                            puedeRedescargarEspejo(_pendientes))
+                        ? () => _accion(() async {
+                              if (!await _confirmar(context,
+                                  'Re-descargar ${_etiquetaTablaF5(_tabla)}',
+                                  'El espejo bajado del servidor reemplazará la tabla local «${_etiquetaTablaF5(_tabla)}». Sin cola pendiente, no hay cobros que perder.',
+                                  peligro: true)) {
+                                return;
+                              }
+                              await LocalDb.instance.setMeta(
+                                  'forzar_redescarga_$_tabla', '1');
+                              await SyncEngine.instance.pull();
+                              await registrarAccionMantenimiento(
+                                  'f5_redescargar_espejo',
+                                  {'tabla': _tabla});
+                              await _cargar();
+                              if (mounted) {
+                                irSnack(
+                                    '${_etiquetaTablaF5(_tabla)}: tabla re-descargada');
+                              }
+                            })
                         : null,
                     child: const Text('Ejecutar'),
                   ),
@@ -581,20 +620,6 @@ class _MantenimientoScreenState extends State<MantenimientoScreen> {
                     RutaIron(
                         builder: (_) => const ErroresSyncPanelScreen())),
                 child: const Text('Abrir errores'),
-              ),
-            ),
-          ),
-          Tarjeta(
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading:
-                  Icon(Icons.storage_rounded, color: AppColores.textoSecundario(context)),
-              title: const Text('Ver tamaño de la BD local',
-                  style: AppTexto.cuerpo),
-              subtitle: Text(_tamanoTexto, style: AppTexto.secundario),
-              trailing: TextButton(
-                onPressed: _cargar,
-                child: const Text('Actualizar'),
               ),
             ),
           ),

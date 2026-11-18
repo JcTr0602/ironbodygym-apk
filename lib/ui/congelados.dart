@@ -18,6 +18,8 @@ import 'ficha.dart';
 import 'widgets.dart';
 import 'package:uuid/uuid.dart';
 import '../app_log.dart';
+import '../congelaciones_gestion.dart';
+import '../tiempo.dart';
 
 class CongeladosScreen extends StatefulWidget {
   const CongeladosScreen({super.key});
@@ -29,6 +31,8 @@ class CongeladosScreen extends StatefulWidget {
 
 class _CongeladosScreenState extends State<CongeladosScreen> {
   List<Map<String, dynamic>> _clientes = [];
+  // (1.36 H-B4 136-879) pausa aprobada vigente por cliente.
+  final Map<int, CongelacionGestion> _pausaPorCliente = {};
   bool _cargando = true;
   // (136-802) triestado de carga con EstadoError y reintento.
   String? _errorCarga;
@@ -69,6 +73,18 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
             !esVistaProtegida(c))
         .toList();
     congelados.sort(compararPorNombre);
+    // (1.36 H-B4 136-879) pausas aprobadas del espejo de
+    // congelaciones (si la lectura falla, la lista sigue
+    // con el «Vence» de siempre).
+    try {
+      final esp = await CongelacionesService.instance.leerEspejo();
+      if (esp.ok) {
+        _pausaPorCliente.clear();
+        for (final f in esp.datos) {
+          if (f.esAprobada) _pausaPorCliente[f.clienteId] = f;
+        }
+      }
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _clientes = congelados;
@@ -146,22 +162,37 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                                 child: Tarjeta(
                                   padding: EdgeInsets.zero,
                                   child: ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundColor:
-                                          AppColores.info
-                                              .withValues(
-                                                  alpha: 0.15),
-                                      child: const Icon(
-                                        Icons.ac_unit_rounded,
-                                        color: AppColores.info,
+                                    // (1.36 H-B4 136-890) la
+                                    // navegación vive en el
+                                    // avatar y el título; la
+                                    // tarjeta entera ya no
+                                    // navega (Descongelar es la
+                                    // acción secundaria, aparte
+                                    // y confirmada).
+                                    leading: InkWell(
+                                      borderRadius:
+                                          BorderRadius.circular(24),
+                                      onTap: () => _abrirFicha(id),
+                                      child: CircleAvatar(
+                                        backgroundColor:
+                                            AppColores.info
+                                                .withValues(
+                                                    alpha: 0.15),
+                                        child: const Icon(
+                                          Icons.ac_unit_rounded,
+                                          color: AppColores.info,
+                                        ),
                                       ),
                                     ),
-                                    title: Text(
-                                      '${c['nombre'] ?? ''}',
-                                      style: AppTexto.subtitulo,
+                                    title: InkWell(
+                                      onTap: () => _abrirFicha(id),
+                                      child: Text(
+                                        '${c['nombre'] ?? ''}',
+                                        style: AppTexto.subtitulo,
+                                      ),
                                     ),
                                     subtitle: Text(
-                                      'Vence: ${_fmtFecha(c['pagado_hasta'] as String?)}',
+                                      _subtituloPausa(c, id),
                                       style: AppTexto.secundario
                                           .copyWith(
                                         color: AppColores
@@ -185,14 +216,6 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
                                                     '${c['nombre']}'),
                                           )
                                         : null,
-                                    onTap: () => Navigator.push(
-                                      context,
-                                      RutaIron(
-                                          builder: (_) =>
-                                              FichaScreen(
-                                                  clienteId:
-                                                      id)),
-                                    ).then((_) => _cargar()),
                                   ),
                                 ),
                               );
@@ -203,6 +226,26 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
               ],
             ),
     );
+  }
+
+  void _abrirFicha(int id) {
+    Navigator.push(
+      context,
+      RutaIron(builder: (_) => FichaScreen(clienteId: id)),
+    ).then((_) => _cargar());
+  }
+
+  /// (1.36 H-B4 136-879) «Pausa hasta …» si la congelación
+  /// aprobada está en curso; si no, el «Vence …» de siempre.
+  String _subtituloPausa(Map<String, dynamic> c, int id) {
+    final p = _pausaPorCliente[id];
+    if (p != null && p.enCursoEn(ahoraHabana())) {
+      final fin = p.finEfectivo;
+      if (fin != null) {
+        return 'Pausa hasta ${_fmtFecha(fin.toIso8601String())}';
+      }
+    }
+    return 'Vence: ${_fmtFecha(c['pagado_hasta'] as String?)}';
   }
 
   Future<void> _descongelar(int id, String nombre) async {
@@ -227,16 +270,27 @@ class _CongeladosScreenState extends State<CongeladosScreen> {
       icono: Icons.play_arrow_rounded,
     );
     if (ok != true || !mounted) return;
-    await LocalDb.instance.queueOp(
-      opUuid: const Uuid().v4(),
-      tipo: 'cambiar_estado',
-      payload: {
-        'cliente_id': id,
-        'estado': 'activo',
-      },
-    );
-    // Actualización optimista del espejo local
-    await LocalDb.instance.updateMirrorEstado(id, 'activo');
+    // (1.36 H-B4 136-878) éxito SOLO tras confirmar ambas
+    // escrituras (encolar + espejo); un fallo se dice.
+    try {
+      await LocalDb.instance.queueOp(
+        opUuid: const Uuid().v4(),
+        tipo: 'cambiar_estado',
+        payload: {
+          'cliente_id': id,
+          'estado': 'activo',
+        },
+      );
+      // Actualización optimista del espejo local
+      await LocalDb.instance.updateMirrorEstado(id, 'activo');
+    } catch (e) {
+      AppLog.error('congelados', 'descongelar_fallo', d: '$e');
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo descongelar a $nombre: $e',
+            significado: SignificadoChip.error);
+      }
+      return;
+    }
     if (mounted) {
       mostrarSnack(context, '$nombre descongelado', significado: SignificadoChip.exito);
       _cargar();

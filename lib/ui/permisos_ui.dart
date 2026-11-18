@@ -38,24 +38,45 @@ import 'componentes.dart';
 ///
 /// [permiso] es el getter como función, para re-leerlo
 /// DESPUÉS del refresco.
+// (1.36 H-B4 136-868) reentrada: una comprobación en curso
+// bloquea la segunda llamada (el refresco tarda hasta 12 s).
+bool _comprobandoPermisos = false;
+
 Future<bool> permisoOperativoOkConRefresco(BuildContext context,
     bool Function() permiso, String accion) async {
   if (permiso()) return true;
-  final refrescoOk = await PermisosEntrenador().cargar();
-  if (permiso()) return true;
-  if (!context.mounted) return false;
-  if (refrescoOk) {
-    mostrarSnack(
-        context, 'No tienes permiso para $accion. Pídeselo a Jc.',
-        significado: SignificadoChip.error);
-  } else {
-    mostrarSnack(
+  if (_comprobandoPermisos) return false;
+  _comprobandoPermisos = true;
+  try {
+    if (context.mounted) {
+      mostrarSnack(context, 'Comprobando permisos…',
+          significado: SignificadoChip.neutral);
+    }
+    final refrescoOk = await PermisosEntrenador().cargar();
+    if (permiso()) return true;
+    if (!context.mounted) return false;
+    if (refrescoOk) {
+      mostrarSnack(
+          context, 'No tienes permiso para $accion. Pídeselo a Jc.',
+          significado: SignificadoChip.error);
+    } else {
+      // Mensaje corto; el detalle va en diálogo.
+      mostrarSnack(context, 'Sin conexión: no pude comprobar tus permisos.',
+          significado: SignificadoChip.error);
+      await DialogoApp.confirmar(
         context,
-        'No pude comprobar tus permisos (sin conexión): se está '
-        'usando la última foto guardada y puede estar vieja. Si '
-        'Jc ya te dio el permiso para $accion, conéctate y '
-        'vuelve a intentarlo.',
-        significado: SignificadoChip.error);
+        titulo: 'Permisos sin comprobar',
+        mensaje: 'No se pudo comprobar con el servidor y se está '
+            'usando la última foto guardada, que puede estar vieja. '
+            'Si Jc ya te dio el permiso para $accion, conéctate y '
+            'vuelve a intentarlo.',
+        aceptar: 'Entendido',
+        cancelar: null,
+        icono: Icons.cloud_off_rounded,
+      );
+    }
+    return false;
+  } finally {
+    _comprobandoPermisos = false;
   }
-  return false;
 }

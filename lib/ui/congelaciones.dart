@@ -51,6 +51,8 @@ String _haceCuando(String? creadoEn) {
   // diferencia. Patrón de la casa: aHabana() sobre el
   // instante, como en hace().
   final dif = ahoraHabana().difference(t.isUtc ? aHabana(t) : t);
+  // (1.36 H-B4 136-876) futuro/reloj corrido: «recién».
+  if (dif.isNegative || dif.inMinutes < 1) return 'recién';
   if (dif.inMinutes < 60) return 'hace ${dif.inMinutes} min';
   if (dif.inHours < 24) return 'hace ${dif.inHours} h';
   return 'hace ${dif.inDays} d';
@@ -64,7 +66,9 @@ class CongelacionesScreen extends StatefulWidget {
 
 class _CongelacionesScreenState extends State<CongelacionesScreen> {
   bool _cargando = true;
-  bool _actuando = false;
+  // (1.36 H-B4 136-877) id de la solicitud en curso: el
+  // spinner vive solo en SU tarjeta.
+  String? _actuandoId;
   String? _errorRemoto;
   List<CongelacionGestion> _lista = [];
   final Map<int, String> _phPorCliente = {};
@@ -161,7 +165,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
     String? motivoResolucion,
     bool forzarExcepcion = false,
   }) async {
-    setState(() => _actuando = true);
+    setState(() => _actuandoId = c.id);
     try {
       final res = await CongelacionesService.instance.resolver(
         id: c.id,
@@ -223,11 +227,17 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
       AppLog.error('congelaciones', 'resolver_fallo', d: '$e');
       _snack('No se pudo resolver: ${mensajeErrorAmable(e)}');
     } finally {
-      if (mounted) setState(() => _actuando = false);
+      if (mounted) setState(() => _actuandoId = null);
     }
   }
 
   Future<void> _cerrar(CongelacionGestion c) async {
+    // (1.36 H-B4 136-875) la misma guarda de dueño de
+    // _aprobar/_rechazar, ANTES del diálogo y del servicio.
+    if (!AuthService().isOwner) {
+      _snack('Solo el dueño puede cerrar congelaciones.');
+      return;
+    }
     final nombre = AuthService().displayName;
     final confirma = await showDialog<bool>(
       context: context,
@@ -254,7 +264,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
       ),
     );
     if (confirma != true || !mounted) return;
-    setState(() => _actuando = true);
+    setState(() => _actuandoId = c.id);
     try {
       final res = await CongelacionesService.instance
           .cerrar(id: c.id, cerradoPorNombre: nombre);
@@ -275,7 +285,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
       AppLog.error('congelaciones', 'cerrar_fallo', d: '$e');
       _snack('No se pudo cerrar: ${mensajeErrorAmable(e)}');
     } finally {
-      if (mounted) setState(() => _actuando = false);
+      if (mounted) setState(() => _actuandoId = null);
     }
   }
 
@@ -336,14 +346,15 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                       ),
                     ),
                   if (_lista.isEmpty)
-                    const Card(
-                      child: ListTile(
-                        leading: Icon(Icons.ac_unit_rounded),
-                        title: Text('Sin solicitudes'),
-                        subtitle: Text(
-                            'Cuando un cliente pida congelar su '
-                            'mensualidad desde su app, aparecerá aquí.'),
-                      ),
+                    // (1.36 H-B4 136-876) vacío de la casa.
+                    EstadoVacio(
+                      icono: Icons.ac_unit_rounded,
+                      titulo: 'Sin solicitudes',
+                      subtitulo:
+                          'Cuando un cliente pida congelar su '
+                          'mensualidad desde su app, aparecerá aquí.',
+                      textoAccion: 'Recargar',
+                      onAccion: _cargar,
                     ),
                   if (pendientes.isNotEmpty) ...[
                     _tituloSeccion(
@@ -353,7 +364,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                         congelacion: c,
                         hoy: hoy,
                         phActual: _phDe(c),
-                        actuando: _actuando,
+                        actuando: _actuandoId == c.id,
                         onAprobar: () => _aprobar(c),
                         onRechazar: () => _rechazar(c),
                         onCerrar: null,
@@ -366,7 +377,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                         congelacion: c,
                         hoy: hoy,
                         phActual: _phDe(c),
-                        actuando: _actuando,
+                        actuando: _actuandoId == c.id,
                         onAprobar: null,
                         onRechazar: null,
                         onCerrar: () => _cerrar(c),
@@ -379,7 +390,7 @@ class _CongelacionesScreenState extends State<CongelacionesScreen> {
                         congelacion: c,
                         hoy: hoy,
                         phActual: _phDe(c),
-                        actuando: _actuando,
+                        actuando: _actuandoId == c.id,
                         onAprobar: null,
                         onRechazar: null,
                         onCerrar: null,
@@ -423,9 +434,10 @@ class _TarjetaCongelacion extends StatelessWidget {
         ? diasRangoCongelacion(c.desde!, c.hasta!)
         : null;
     final hace = _haceCuando(c.creadoEn);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
+    // (1.36 H-B4 136-876) Tarjeta y tokens de la casa.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Tarjeta(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -441,9 +453,9 @@ class _TarjetaCongelacion extends StatelessWidget {
                   ),
                 ),
                 if (dias != null)
-                  Chip(
-                    label: Text('$dias días'),
-                    visualDensity: VisualDensity.compact,
+                  ChipEstado.semantico(
+                    texto: '$dias días',
+                    significado: SignificadoChip.neutral,
                   ),
               ],
             ),
@@ -452,23 +464,24 @@ class _TarjetaCongelacion extends StatelessWidget {
               '${_fmtF(c.desde)} → ${_fmtF(c.hasta)}'
               '${phActual != null ? ' · Vence actualmente: ${_fmtIso(phActual)}' : ''}'
               '${hace.isNotEmpty ? ' · Pedida $hace' : ''}',
-              style: TextStyle(color: Colors.grey.shade700),
+              style: AppTexto.secundario,
             ),
             const SizedBox(height: 2),
             Text(
               'Estado: ${c.etiquetaEstado(hoy)}'
-              '${c.excepcionDueno ? ' · ⚠️ Excepción del dueño' : ''}'
+              '${c.excepcionDueno ? ' · Excepción del dueño' : ''}'
               '${c.materializada ? ' · +${c.diasMaterializados} días aplicados' : ''}',
-              style: TextStyle(color: Colors.grey.shade700),
+              style: AppTexto.secundario,
             ),
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.amber.shade50,
+                color: AppColores.alerta.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(AppRadio.sm),
-                border: Border.all(color: Colors.amber.shade200),
+                border: Border.all(
+                    color: AppColores.alerta.withValues(alpha: 0.45)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -498,6 +511,15 @@ class _TarjetaCongelacion extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  if (actuando)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
                   if (onRechazar != null)
                     TextButton(
                       onPressed: actuando ? null : onRechazar,
@@ -666,9 +688,22 @@ class _DialogoRechazarCongelacionState
           TextField(
             controller: _ctrl,
             maxLines: 3,
+            // (1.36 H-B4 136-877) tope con contador.
+            maxLength: 200,
+            onChanged: (_) => setState(() {}),
             decoration: const InputDecoration(
               labelText: 'Motivo (opcional)',
               border: OutlineInputBorder(),
+            ),
+          ),
+          // (1.36 H-B4 136-877) así lo leerá el cliente.
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _ctrl,
+            builder: (_, v, __) => Text(
+              v.text.trim().isEmpty
+                  ? 'El cliente verá: «Rechazada» (sin motivo).'
+                  : 'El cliente verá: «Rechazada — ${v.text.trim()}»',
+              style: AppTexto.secundario,
             ),
           ),
         ],

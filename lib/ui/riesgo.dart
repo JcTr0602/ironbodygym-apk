@@ -30,6 +30,25 @@ class RiesgoScreen extends StatefulWidget {
 
 class _RiesgoScreenState extends State<RiesgoScreen> {
   List<Map<String, dynamic>> _riesgo = [];
+  // (1.36 H-B4 136-889) búsqueda y orden de la lista.
+  String _busqueda = '';
+  bool _ordenPorDias = false;
+
+  List<Map<String, dynamic>> get _visibles {
+    final q = _busqueda.trim().toLowerCase();
+    final base = q.isEmpty
+        ? [..._riesgo]
+        : _riesgo
+            .where((r) =>
+                '${r['nombre']}'.toLowerCase().contains(q) ||
+                '${r['telefono']}'.contains(q))
+            .toList();
+    if (_ordenPorDias) {
+      base.sort((a, b) =>
+          (b['hace_dias'] as int).compareTo(a['hace_dias'] as int));
+    }
+    return base;
+  }
   bool _cargando = true;
   // (136-802) triestado de carga con EstadoError y reintento.
   String? _errorCarga;
@@ -37,7 +56,13 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
   @override
   void initState() {
     super.initState();
-    _cargar();
+    // (1.36 H-B4 136-888) sin dueño ni se carga: la bandera
+    // baja para que el build pinte su guarda, no un spinner.
+    if (AuthService().isOwner) {
+      _cargar();
+    } else {
+      _cargando = false;
+    }
   }
 
   Future<void> _cargar() async {
@@ -107,6 +132,8 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
       res.add({
         'id': cid,
         'wa': wa,
+        // (1.36 H-B4 136-889) la búsqueda también es por teléfono.
+        'telefono': '${c['telefono'] ?? ''} ${c['movil'] ?? ''}',
         'nombre': '${c['nombre'] ?? '—'}',
         'ultimo_pago': ultimoStr.substring(0, 10),
         'hace_dias': haceDias,
@@ -137,6 +164,8 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
         acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
+            // (1.36 H-B4 136-891) tooltip del refresco.
+            tooltip: 'Actualizar',
             onPressed: _cargar,
           ),
         ],
@@ -158,6 +187,37 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
               : Column(
               children: [
                 const SyncBanner(),
+                // (1.36 H-B4 136-889) buscar y ordenar.
+                if (_riesgo.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(AppEspacio.md,
+                        AppEspacio.sm, AppEspacio.md, 0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: CampoTexto(
+                            etiqueta: 'Buscar por nombre o teléfono',
+                            icono: Icons.search_rounded,
+                            onChanged: (v) =>
+                                setState(() => _busqueda = v),
+                          ),
+                        ),
+                        const SizedBox(width: AppEspacio.sm),
+                        ChoiceChip(
+                          label: const Text('Por días'),
+                          selected: _ordenPorDias,
+                          onSelected: (v) =>
+                              setState(() => _ordenPorDias = v),
+                        ),
+                        ChoiceChip(
+                          label: const Text('Por total'),
+                          selected: !_ordenPorDias,
+                          onSelected: (v) =>
+                              setState(() => _ordenPorDias = !v),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: _riesgo.isEmpty
                       ? const EstadoVacio(
@@ -173,9 +233,9 @@ class _RiesgoScreenState extends State<RiesgoScreen> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: AppEspacio.md,
                                 vertical: AppEspacio.sm),
-                            itemCount: _riesgo.length,
+                            itemCount: _visibles.length,
                             itemBuilder: (ctx, i) {
-                              final r = _riesgo[i];
+                              final r = _visibles[i];
                               return Padding(
                                 padding: const EdgeInsets.only(
                                     bottom: AppEspacio.sm),

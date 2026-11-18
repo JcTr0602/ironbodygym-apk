@@ -15,7 +15,9 @@ import 'comparativa_entrenadores.dart';
 import 'detalle_entrenador.dart';
 import 'diseno.dart';
 import 'widgets.dart';
+import 'skeleton.dart';
 import '../app_log.dart';
+import '../entrenador_identidad.dart';
 
 /// Yunque 4 (L5-3): agregación «cobrado del mes por
 /// entrenador» de esta pantalla, pura para poder fijarla
@@ -149,7 +151,9 @@ class _HistorialEntrenadorScreenState
         setState(() => _falloCarga = true);
       }
     } finally {
-      if (mounted && _cargando) {
+      // (1.36 H-B4 136-869) solo la generación vigente baja
+      // la bandera.
+      if (mounted && _cargando && genEstaCarga == _genCarga) {
         setState(() => _cargando = false);
       }
     }
@@ -297,7 +301,8 @@ class _HistorialEntrenadorScreenState
             ),
           Expanded(
             child: _cargando
-                ? const EstadoCargando(texto: 'Cargando historial…')
+                // (1.36 H-B4 136-872) esqueleto de lista al cargar.
+                ? const SkeletonLista()
                 : _falloCarga
                     // SL-X2 (G12-1): el fallo se dice, con
                     // salida — nunca como «Sin actividad».
@@ -316,7 +321,14 @@ class _HistorialEntrenadorScreenState
                         subtitulo:
                             'Nadie cobró ni inscribió en este mes.')
                     : _datos.isEmpty
-                        ? _notaSinIdentificar(context)
+                        // (1.36 H-B4 136-872) el estado sin
+                        // identificar también se puede refrescar.
+                        ? RefrescoIron(
+                            onRefresh: _cargar,
+                            child: ListView(children: [
+                              _notaSinIdentificar(context),
+                            ]),
+                          )
                         : RefrescoIron(
                         onRefresh: _cargar,
                         child: ListView.builder(
@@ -336,15 +348,22 @@ class _HistorialEntrenadorScreenState
                               child: Tarjeta(
                                 padding:
                                     const EdgeInsets.all(AppEspacio.md),
-                                onTap: () =>
-                                    Navigator.of(context).push(
-                                  RutaIron(
-                                    builder: (_) =>
-                                        DetalleEntrenadorScreen(
-                                            nombre:
-                                                '${d['nombre']}'),
-                                  ),
-                                ),
+                                onTap: () async {
+                                  // (1.36 H-B4 136-870) el
+                                  // telegram id viaja al detalle.
+                                  final tid =
+                                      await telegramIdDeEntrenador(
+                                          '${d['nombre']}');
+                                  if (!context.mounted) return;
+                                  Navigator.of(context).push(
+                                    RutaIron(
+                                      builder: (_) =>
+                                          DetalleEntrenadorScreen(
+                                              nombre: '${d['nombre']}',
+                                              telegramId: tid),
+                                    ),
+                                  );
+                                },
                                 child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,

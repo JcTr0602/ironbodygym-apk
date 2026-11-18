@@ -8,6 +8,7 @@
 // la bandeja de Invitados como tercera pestaña: Entrenadores,
 // Clientes e Invitados se gestionan en un mismo sitio.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -539,17 +540,20 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
           child: Row(
             children: [
               _tarjetaFiltro('todos', 'Todos', '${todos.length}',
-                  Icons.people_rounded, Colors.blueGrey),
+                  Icons.people_rounded,
+                  AppColores.textoSecundario(context)),
               _tarjetaFiltro('activos', 'Activos', '$activos',
                   Icons.check_circle_rounded, AppColores.exitoOscuro),
               _tarjetaFiltro('nunca', 'Nunca han entrado', '$nunca',
-                  Icons.login_rounded, Colors.grey),
+                  Icons.login_rounded,
+                  AppColores.textoSecundario(context)),
               _tarjetaFiltro('7d', 'Últimos 7 días', '$ult7',
                   Icons.schedule_rounded, AppColores.infoOscuro),
               _tarjetaFiltro('bloqueados', 'Bloqueados', '$bloqueados',
                   Icons.lock_rounded, AppColores.alertaOscuro),
               _tarjetaFiltro('revocados', 'Revocados', '$revocados',
-                  Icons.block_rounded, Colors.grey.shade700),
+                  Icons.block_rounded,
+                  AppColores.textoSecundario(context)),
               // 1.25 T88: si la consulta de sin-acceso
               // FALLO, el contador dice «sin consultar» —
               // nunca un 0 falso (la lista ya lo distingue
@@ -559,7 +563,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       ? 'sin consultar'
                       : '${_sinAcceso.length}',
                   Icons.person_add_rounded,
-                  AppColores.naranjaOscuro),
+                  AppColores.naranjaOscuro,
+                  valorEsTexto: _sinAccesoFallo),
             ],
           ),
         ),
@@ -732,7 +737,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   Widget _tarjetaFiltro(String vista, String etiqueta, String valor,
-      IconData icono, Color color) {
+      IconData icono, Color color,
+      {bool valorEsTexto = false}) {
     final seleccionada = _vista == vista;
     return Padding(
       padding: const EdgeInsets.only(right: AppEspacio.sm),
@@ -765,8 +771,16 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(icono, color: color, size: 20),
-              Text(valor,
-                  style: AppTexto.tituloPagina),
+              // (1.36 H-B4 136-883) un valor que no es cifra
+              // («sin consultar») va en estilo métrico menor
+              // y con tooltip que lo explica.
+              valorEsTexto
+                  ? Tooltip(
+                      message:
+                          'La consulta falló: aún no se sabe cuántos son',
+                      child: Text(valor, style: AppTexto.metadato),
+                    )
+                  : Text(valor, style: AppTexto.tituloPagina),
               Text(etiqueta,
                   style: AppTexto.minuscula,
                   textAlign: TextAlign.center,
@@ -811,12 +825,15 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
   }
 
   Widget _filaAcceso(AccesoCliente a) {
-    final (chipTexto, chipColor) = switch (a.estado) {
-      // Norma 3 (Argón): el chip de bloqueado va en
-      // avisoFondo, el token de aviso de la casa.
-      'bloqueado' => ('Bloqueado', AppColores.avisoFondo),
-      'revocado' => ('Revocado', Colors.grey.shade600),
-      _ => ('Activo', AppColores.exitoOscuro),
+    // (1.36 H-B4 136-882/883) caso explícito para 'activo'
+    // y fallback «Estado desconocido»; el chip es el
+    // semántico de la casa (contraste verificado, también
+    // el de bloqueado).
+    final (chipTexto, chipSignificado) = switch (a.estado) {
+      'bloqueado' => ('Bloqueado', SignificadoChip.alerta),
+      'revocado' => ('Revocado', SignificadoChip.error),
+      'activo' => ('Activo', SignificadoChip.exito),
+      _ => ('Estado desconocido', SignificadoChip.neutral),
     };
     final ultimo = a.ultimoAccesoEn == null
         ? 'Nunca ha entrado'
@@ -849,12 +866,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                 tooltip: 'Desbloquear',
                 onPressed: () => _desbloqueoRapido(a),
               ),
-            Chip(
-              label: Text(chipTexto,
-                  style:
-                      AppTexto.minuscula.copyWith(color: Colors.white)),
-              backgroundColor: chipColor,
-              visualDensity: VisualDensity.compact,
+            ChipEstado.semantico(
+              texto: chipTexto,
+              significado: chipSignificado,
             ),
             IconButton(
               icon: const Icon(Icons.more_vert_rounded, size: 20),
@@ -1011,6 +1025,21 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
         final sel = _seleccion.contains(c.clienteId);
         return Card(
           child: ListTile(
+            // (1.36 H-B4 136-884) la fila entera selecciona.
+            onTap: () {
+              setState(() {
+                if (sel) {
+                  _seleccion.remove(c.clienteId);
+                } else if (_seleccion
+                        .intersection(visiblesIds)
+                        .length >=
+                    40) {
+                  mostrarSnack(context, 'Máximo 40 por lote (límite acordado).', significado: SignificadoChip.alerta);
+                } else {
+                  _seleccion.add(c.clienteId);
+                }
+              });
+            },
             leading: Checkbox(
               value: sel,
               onChanged: (v) {
@@ -1046,7 +1075,9 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
             trailing: TextButton(
               onPressed:
                   _generandoAcceso ? null : () => _generarPin(c),
-              child: const Text('Generar PIN'),
+              // (1.36 H-B4 136-884) la generación en curso se dice.
+              child: Text(
+                  _generandoAcceso ? 'Generando…' : 'Generar PIN'),
             ),
           ),
         );
@@ -1271,7 +1302,19 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                       title: Text('${r['nombre'] ?? ''}'),
                       subtitle: Text(
                           'PIN: ${r['pin_temporal']} · ${r['telefono'] ?? ''}'),
-                      trailing: IconButton(
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // (1.36 H-B4 136-884) copiar el PIN.
+                          IconButton(
+                            icon: const Icon(Icons.copy_rounded,
+                                size: 20),
+                            tooltip: 'Copiar PIN',
+                            onPressed: () => Clipboard.setData(
+                                ClipboardData(
+                                    text: '${r['pin_temporal']}')),
+                          ),
+                          IconButton(
                         icon: const Icon(Icons.chat_rounded, size: 20),
                         tooltip: 'Enviar por WhatsApp',
                         onPressed: telWa.isEmpty
@@ -1287,6 +1330,8 @@ class _AccesosClientesTabState extends State<AccesosClientesTab> {
                                   mode: LaunchMode.externalApplication,
                                 );
                               },
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -1331,6 +1376,9 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
   // transitorio, sin esta bandera la lista vacía por fallo
   // era indistinguible del vacío real.
   bool _falloCarga = false;
+  // (1.36 H-B4 136-885) el refresco falló pero hay datos
+  // previos en pantalla: banner, no pantalla de error.
+  bool _falloRefresco = false;
 
   static const _nombres = {
     'resetear_pin': 'PIN reseteado',
@@ -1370,13 +1418,17 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
         setState(() {
           _items = (res as List?) ?? [];
           _falloCarga = false;
+          _falloRefresco = false;
           _cargando = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _falloCarga = true;
+          // (1.36 H-B4 136-885) con datos previos el fallo
+          // es de REFRESCO: la lista se queda y avisa.
+          _falloRefresco = _items.isNotEmpty;
+          _falloCarga = _items.isEmpty;
           _cargando = false;
         });
         mostrarSnack(context, 'Error: ${mensajeErrorAmable(e)}', significado: SignificadoChip.error);
@@ -1403,6 +1455,9 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
         acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
+            // (1.36 H-B4 136-885) tooltip y ocupado ya van
+            // por _cargando (onPressed null mientras carga).
+            tooltip: 'Actualizar',
             onPressed: _cargando ? null : _cargar,
           ),
         ],
@@ -1427,6 +1482,21 @@ class _AuditoriaAccesosScreenState extends State<AuditoriaAccesosScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (_falloRefresco)
+                      // (1.36 H-B4 136-885) banner de refresco
+                      // fallido sobre los datos previos.
+                      Container(
+                        width: double.infinity,
+                        color: AppColores.alerta.withValues(alpha: 0.12),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppEspacio.lg,
+                            vertical: AppEspacio.sm),
+                        child: Text(
+                          'No se pudo actualizar: se muestra lo último cargado.',
+                          style: AppTexto.secundario.copyWith(
+                              color: AppColores.alertaTexto(context)),
+                        ),
+                      ),
                     // F3-23: la consulta trae como máximo 100 y
                     // la pantalla lo dice: con la lista llena son
                     // los ÚLTIMOS 100, no todo el historial.

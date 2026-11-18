@@ -81,21 +81,17 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     _cargar();
   }
 
-  bool _esMio(String? nombre) {
-    return (nombre ?? '').trim().toLowerCase() ==
-        widget.nombre.toLowerCase();
-  }
-
   /// 1.25 T86: mi telegram_id (el de la navegación o el
   /// resuelto por nombre). Los PAGOS se atribuyen por
   /// ID con filaEsDelEntrenador: un tocayo ya no mezcla
   /// sus cobros aquí.
-  int? _miTid;
-
   Future<void> _cargar() async {
     // (Yunque R2-X1) red de seguridad: la bandera baja
     // SIEMPRE (y el fallo queda en bitácora), también si una lectura local lanza a mitad
     // (spinner eterno: la clase de la ficha 2026-11-02).
+    // (1.36 H-B4 136-869) el finally solo publica si esta
+    // carga sigue siendo la vigente.
+    final genEstaCarga = _genCarga + 1;
     try {
       await _cargarDatos();
     } catch (e) {
@@ -103,7 +99,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
       // (la clase nació de fallos mudos).
       AppLog.error('ui', 'carga_fallo', d: '$e');
     } finally {
-      if (mounted && _cargando) {
+      if (mounted && _cargando && genEstaCarga == _genCarga) {
         setState(() => _cargando = false);
       }
     }
@@ -112,7 +108,9 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   Future<void> _cargarDatos() async {
     final gen = ++_genCarga;
     setState(() => _cargando = true);
-    _miTid = widget.telegramId ??
+    // (1.36 H-B4 136-869) _miTid se resuelve LOCAL y solo
+    // se publica si esta generación gana.
+    final miTid = widget.telegramId ??
         await telegramIdDeEntrenador(widget.nombre);
     final ahora = ahoraHabana();
 
@@ -196,7 +194,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
       // T86: por ID cuando la fila lo trae (el nombre
       // queda para las filas viejas sin telegram_user_id).
       final mio = filaEsDelEntrenador(p,
-          telegramId: _miTid, nombre: widget.nombre);
+          telegramId: miTid, nombre: widget.nombre);
       if (enAnterior(fecha) && mio) _totalAnterior += monto;
       if (!mio || !enRango(fecha)) continue;
       _total += monto;
@@ -229,7 +227,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
       // respaldo para filas sin ID, vía la misma pura.
       final mio = filaEsDelEntrenador(
         {...d, 'telegram_user_id': d['registrado_por']},
-        telegramId: _miTid,
+        telegramId: miTid,
         nombre: widget.nombre,
       );
       if (!mio) continue;
@@ -248,11 +246,16 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     for (final c in clientes) {
       final fecha = '${c['fecha_inscripcion'] ?? ''}';
       if (!enRango(fecha)) continue;
-      final nombre =
-          ('${c['registrado_por_nombre'] ?? ''}'.trim().isEmpty)
-              ? '${c['registrado_por'] ?? ''}'
-              : '${c['registrado_por_nombre']}'.trim();
-      if (!_esMio(nombre)) continue;
+      // (1.36 H-B4 136-870) atribución por telegram id
+      // cuando registrado_por lo trae (normalizado), con
+      // el nombre como respaldo — la misma pura de pagos.
+      if (!filaEsDelEntrenador(
+        {...c, 'telegram_user_id': c['registrado_por']},
+        telegramId: miTid,
+        nombre: widget.nombre,
+      )) {
+        continue;
+      }
       final id = (c['id'] as num?)?.toInt() ?? 0;
       _inscripciones.add({
         'cliente_id': id,
@@ -368,7 +371,8 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                             Expanded(
                               child: _tarjeta(
                                   'Total ${_nombrePeriodo()}',
-                                  '${fmtMonto(_total)} CUP',
+                                  fmtMonto(_total),
+                                  'CUP',
                                   '$_nCobros cobros'
                                   '${_nDiarios > 0 ? ' · $_nDiarios diarios' : ''}'),
                             ),
@@ -376,7 +380,8 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
                             Expanded(
                               child: _tarjeta(
                                   'Promedio / mejor día',
-                                  '${fmtMonto(_promedioDia)} CUP/día activo',
+                                  fmtMonto(_promedioDia),
+                                  'CUP/día activo',
                                   _mejorDia.isEmpty
                                       ? 'sin actividad'
                                       : '${fmtFecha(_mejorDia)}: ${fmtMonto(_mejorDiaMonto)} CUP'),
@@ -638,7 +643,7 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
   }
 
   Widget _tarjeta(
-      String titulo, String valor, String subtitulo) {
+      String titulo, String cifra, String unidad, String subtitulo) {
     return Tarjeta(
       padding: const EdgeInsets.all(AppEspacio.md),
       child: Column(
@@ -648,8 +653,20 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
               style: AppTexto.minuscula.copyWith(
                   color: AppColores.textoSecundario(context))),
           const SizedBox(height: 4),
-          Text(valor,
-              style: AppTexto.titulo),
+          // (1.36 H-B4 136-871) cifra y unidad separadas.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: Text(cifra,
+                    style: AppTexto.titulo,
+                    overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 4),
+              Text(unidad, style: AppTexto.metadato),
+            ],
+          ),
           Text(subtitulo,
               style: AppTexto.minuscula.copyWith(
                   color: AppColores.textoSecundario(context))),
@@ -663,17 +680,28 @@ class _DetalleEntrenadorScreenState extends State<DetalleEntrenadorScreen> {
     final dif = actual - anterior;
     final pct = anterior > 0 ? (dif / anterior * 100) : 0.0;
     final sube = dif >= 0;
+    // (1.36 H-B4 136-871) sin período anterior comparable
+    // no hay porcentaje: «Sin base» / «Nuevo».
+    final sinBase = anterior <= 0;
     return Row(
       children: [
         Expanded(
             child: Text(etiqueta,
                 style: AppTexto.secundario)),
-        Text(
-          '${sube ? '↑' : '↓'} ${pct.abs().toStringAsFixed(0)}%',
-          style: AppTexto.cuerpo.copyWith(color: sube
-                  ? AppColores.exito
-                  : AppColores.error, fontWeight: FontWeight.bold),
-        ),
+        if (sinBase)
+          Text(
+            actual > 0 ? 'Nuevo' : 'Sin base',
+            style: AppTexto.cuerpo.copyWith(
+                color: AppColores.textoSecundario(context),
+                fontWeight: FontWeight.bold),
+          )
+        else
+          Text(
+            '${sube ? '↑' : '↓'} ${pct.abs().toStringAsFixed(0)}%',
+            style: AppTexto.cuerpo.copyWith(color: sube
+                    ? AppColores.exito
+                    : AppColores.error, fontWeight: FontWeight.bold),
+          ),
         const SizedBox(width: 8),
         Text('${fmtMonto(anterior)} → ${fmtMonto(actual)}',
             style: AppTexto.metadato.copyWith(color: AppColores.textoSecundario(context))),

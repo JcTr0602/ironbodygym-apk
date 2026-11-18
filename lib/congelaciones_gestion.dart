@@ -14,7 +14,6 @@ library;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'errores_sync.dart';
 import 'localdb.dart';
 
 /// Categorías del motivo (las mismas claves que valida el
@@ -303,7 +302,8 @@ class CongelacionesService {
       return (
         ok: false,
         datos: const <CongelacionGestion>[],
-        error: mensajeErrorAmable(e),
+        // (1.36 H-B4 136-880) la rama amable del LISTADO.
+        error: mensajeListarCongelacionesFallido(e),
       );
     }
   }
@@ -344,19 +344,25 @@ class CongelacionesService {
   }) async {
     String iso(DateTime d) =>
         '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-    final res = await Supabase.instance.client.rpc(
-      'admin_resolver_congelacion',
-      params: {
-        'p_id': id,
-        'p_aprobar': aprobar,
-        'p_desde': desde == null ? null : iso(desde),
-        'p_hasta': hasta == null ? null : iso(hasta),
-        'p_motivo_resolucion': motivoResolucion,
-        'p_forzar_excepcion': forzarExcepcion,
-      },
-    ).timeout(_timeout);
-    if (res is Map) return Map<String, dynamic>.from(res);
-    return {'ok': false, 'error': 'Respuesta inesperada del servidor'};
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'admin_resolver_congelacion',
+        params: {
+          'p_id': id,
+          'p_aprobar': aprobar,
+          'p_desde': desde == null ? null : iso(desde),
+          'p_hasta': hasta == null ? null : iso(hasta),
+          'p_motivo_resolucion': motivoResolucion,
+          'p_forzar_excepcion': forzarExcepcion,
+        },
+      ).timeout(_timeout);
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return {'ok': false, 'error': 'Respuesta inesperada del servidor'};
+    } catch (e) {
+      // (1.36 H-B4 136-880) la excepción no escapa: sobre
+      // {ok:false} con el mensaje amable de la operación.
+      return {'ok': false, 'error': mensajeResolverCongelacionFallido(e)};
+    }
   }
 
   /// Cierra una congelación aprobada (la pausa termina ayer;
@@ -366,11 +372,16 @@ class CongelacionesService {
     required String id,
     required String cerradoPorNombre,
   }) async {
-    final res = await Supabase.instance.client.rpc(
-      'admin_cerrar_congelacion',
-      params: {'p_id': id, 'p_cerrado_por_nombre': cerradoPorNombre},
-    ).timeout(_timeout);
-    if (res is Map) return Map<String, dynamic>.from(res);
-    return {'ok': false, 'error': 'Respuesta inesperada del servidor'};
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'admin_cerrar_congelacion',
+        params: {'p_id': id, 'p_cerrado_por_nombre': cerradoPorNombre},
+      ).timeout(_timeout);
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return {'ok': false, 'error': 'Respuesta inesperada del servidor'};
+    } catch (e) {
+      // (1.36 H-B4 136-880) idem resolver.
+      return {'ok': false, 'error': mensajeCerrarCongelacionFallido(e)};
+    }
   }
 }

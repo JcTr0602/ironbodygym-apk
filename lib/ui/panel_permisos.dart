@@ -732,6 +732,8 @@ class _PanelPermisosState extends State<PanelPermisos> {
         acciones: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
+            // (1.36 H-B4 136-891) tooltip del refresco.
+            tooltip: 'Actualizar',
             onPressed: _cargar,
           ),
         ],
@@ -830,10 +832,21 @@ class _PanelPermisosState extends State<PanelPermisos> {
                           ? SignificadoChip.exito
                           : SignificadoChip.error,
                     ),
-                    Switch(
-                      value: ent.activo,
-                      activeColor: AppColores.exito,
-                      onChanged: (_) => _toggleActivo(ent),
+                    // (1.36 H-B4 136-891) el interruptor
+                    // maestro se anuncia y se explica.
+                    Semantics(
+                      label: 'Entrenador activo',
+                      toggled: ent.activo,
+                      child: Tooltip(
+                        message: ent.activo
+                            ? 'Suspender al entrenador'
+                            : 'Activar al entrenador',
+                        child: Switch(
+                          value: ent.activo,
+                          activeColor: AppColores.exito,
+                          onChanged: (_) => _toggleActivo(ent),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -919,6 +932,18 @@ class _PanelPermisosState extends State<PanelPermisos> {
                           .copyWith(fontWeight: FontWeight.w700)),
                 ),
                 Text(g.$2, style: AppTexto.secundario),
+                // (1.36 H-B4 136-891) por qué están apagados.
+                if (!ent.activo)
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(top: AppEspacio.sm),
+                    child: Text(
+                      'Entrenador suspendido: activa el interruptor '
+                      'de arriba para cambiar sus permisos.',
+                      style: AppTexto.metadato.copyWith(
+                          color: AppColores.alertaTexto(context)),
+                    ),
+                  ),
                 for (final p in [
                   for (final clave in g.$3)
                     if (EntrenadorPermiso.porClave[clave] != null)
