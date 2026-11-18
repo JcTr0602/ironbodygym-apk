@@ -45,23 +45,31 @@ void main() {
               'items.indexWhere((it) => it.widget is _FinCabeceraFicha)'));
     });
 
-    test('orden en _seccionesCrudas: Membresía e Historial '
-        'antes que «Qué le falta» e Información personal',
-        () {
+    // 1.36 FICHA (136-193): el orden de B-1 quedó DEROGADO
+    // por la auditoría de la ficha — tras Membresía suben
+    // los pendientes y los datos personales; Resumen 360
+    // e Historial bajan tras ellos.
+    test('orden en _seccionesCrudas (136-193): Membresía, '
+        '«Qué le falta» e Información personal antes que '
+        'Resumen 360 e Historial', () {
       final iMembresia = ficha.indexOf('// Membresía');
       final iHistorial = ficha.indexOf('TarjetaHistorialFicha(');
       final iQueFalta = ficha.indexOf('SeccionQueFaltaFicha(');
       final iInfo = ficha.indexOf('// Información personal');
       expect(iMembresia, greaterThan(0));
-      expect(iHistorial, greaterThan(iMembresia));
-      expect(iQueFalta, greaterThan(iHistorial));
+      expect(iQueFalta, greaterThan(iMembresia));
       expect(iInfo, greaterThan(iQueFalta));
+      expect(iHistorial, greaterThan(iInfo));
     });
 
-    test('cobrar sigue en la barra inferior y en la acción '
-        'del momento', () {
+    // 1.36 FICHA (136-195): una sola acción principal por
+    // estado — la barra inferior sigue la acción del
+    // momento y la compacta ya no ofrece una segunda.
+    test('la acción principal es una sola (136-195): la '
+        'barra inferior, con la acción del momento', () {
       expect(ficha, contains("texto: 'Cobrar'"));
-      expect(ficha, contains("'cobrar' => botonMomento("));
+      expect(ficha, contains('accionDelMomentoFicha('));
+      expect(ficha, isNot(contains('botonMomento(')));
     });
   });
 }

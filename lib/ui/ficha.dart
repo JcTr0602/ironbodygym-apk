@@ -33,6 +33,7 @@ import '../sync.dart';
 import '../cliente_protegido.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
+import 'hoja_accion.dart';
 import 'permisos_ui.dart';
 import 'conciliacion.dart';
 import 'dialogo_pago.dart';
@@ -209,9 +210,21 @@ class _FinCabeceraFicha extends StatelessWidget {
 }
 
 int pestanaDeSeccionFicha(Widget w) {
+  // 1.36 FICHA (136-194): reparto EXPLÍCITO por tipo para
+  // toda sección con clase propia — Congelación y
+  // Acciones van a «Pagos y Notas» POR DECISIÓN (dinero y
+  // estado de la membresía), no por caída por defecto.
+  // Solo las tarjetas genéricas sin clase (Panel del
+  // dueño, Marcas) siguen resolviéndose por su rótulo.
   if (w is TarjetaMedidas) return 1;
   if (w is SeccionFotosProgresoNube) return 1;
   if (w is SeccionAccesoAppFicha) return 2;
+  if (w is SeccionCongelacionFicha) return 0;
+  if (w is TarjetaAccionesCliente) return 0;
+  if (w is SeccionQueFaltaFicha) return 0;
+  if (w is SeccionFotoPersonal) return 0;
+  if (w is TarjetaHistorialFicha) return 0;
+  if (w is Resumen360Ficha) return 0;
   if (w is Tarjeta) {
     if (_subarbolDice(w.child, 'Panel del dueño')) return 2;
     if (_subarbolDice(w.child, 'Marcas en la app')) return 1;
@@ -305,6 +318,12 @@ class _FichaScreenState extends State<FichaScreen> {
   // respuestas ya no hacen setState de la pantalla entera.
   int _datosVersion = 0;
   final CacheSeccionesFicha _cacheSecciones = CacheSeccionesFicha();
+  // 1.36 FICHA (136-206): memo de la pestaña decidida por
+  // (clave, versión) de sección: un build sin cambio de
+  // datos no re-recorre el subárbol de cada tarjeta para
+  // re-decidir lo ya decidido.
+  final Map<String, ({Object version, int pestana})> _pestanaMemoFicha =
+      {};
   // 1.28 (M4-C3): scroll propio de la ficha perezosa — la
   // barra compacta se muestra cuando la cabecera ya salió
   // de pantalla (desplazamiento por encima del umbral).
@@ -316,6 +335,12 @@ class _FichaScreenState extends State<FichaScreen> {
   // PageStorageKey). La barra compacta sigue al controlador
   // de la pestaña activa.
   int _pestanaFicha = 0;
+  // 1.36 FICHA (136-205): pestañas ya visitadas en esta
+  // visita a la ficha — las no visitadas no se montan ni
+  // cargan (la galería no dispara su RPC ni «App
+  // Clientes» trabaja si se entra solo a cobrar); cada
+  // una nace en su primera apertura.
+  final Set<int> _pestanasVisitadasFicha = <int>{0};
   final ScrollController _scrollFicha2 = ScrollController();
   final ScrollController _scrollFicha3 = ScrollController();
 
@@ -325,6 +350,12 @@ class _FichaScreenState extends State<FichaScreen> {
         _ => _scrollFicha,
       };
   bool _cabeceraCompacta = false;
+  // 1.36 FICHA (136-225): la cascada de entrada ocurre
+  // solo en la apertura de la ficha; pasado el primer
+  // frame, toda sección que nazca (pestaña visitada
+  // tarde, sección que entra por scroll) entra directa,
+  // sin escalonarse a mitad de sesión.
+  bool _cascadaInicialFicha = false;
   static const double _umbralCabeceraCompacta = 170;
   // 1.28 (M4-C2): secciones que YA animaron su entrada en
   // ESTA visita a la ficha: la entrada escalonada ocurre
@@ -433,6 +464,9 @@ class _FichaScreenState extends State<FichaScreen> {
     super.initState();
     // 1.28 (M4-C3): la barra compacta solo cambia de estado
     // al cruzar el umbral — setState únicamente en el cruce.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _cascadaInicialFicha = true;
+    });
     _scrollFicha.addListener(_alMoverScrollFicha);
     _scrollFicha2.addListener(_alMoverScrollFicha);
     _scrollFicha3.addListener(_alMoverScrollFicha);
@@ -453,7 +487,13 @@ class _FichaScreenState extends State<FichaScreen> {
   void _alMoverScrollFicha() {
     final activo = _scrollActivo;
     if (!activo.hasClients) return;
-    final mostrar = activo.offset > _umbralCabeceraCompacta;
+    // 1.36 FICHA (136-209): histéresis del pliegue — se
+    // pliega al cruzar 170 y solo se despliega bajo 120:
+    // oscilar junto a un umbral único ya no hace
+    // «respirar» la cabecera (el pilar usa 140/60).
+    final mostrar = _cabeceraCompacta
+        ? activo.offset > 120
+        : activo.offset > _umbralCabeceraCompacta;
     if (mostrar != _cabeceraCompacta && mounted) {
       setState(() => _cabeceraCompacta = mostrar);
     }
@@ -471,7 +511,10 @@ class _FichaScreenState extends State<FichaScreen> {
   /// pestaña nueva aún no tenga clientes en este frame.
   void _alCambiarPestanaFicha(int i) {
     if (i == _pestanaFicha) return;
-    setState(() => _pestanaFicha = i);
+    setState(() {
+      _pestanaFicha = i;
+      _pestanasVisitadasFicha.add(i);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _alMoverScrollFicha();
     });
@@ -503,11 +546,17 @@ class _FichaScreenState extends State<FichaScreen> {
       if (!mounted) return;
     }
     final ctxSeccion = clave.currentContext;
+    // 1.36 FICHA (136-220): «Reducir movimiento» también
+    // en los desplazamientos programados de la ficha.
+    final durDesplazar = (ctxSeccion != null &&
+            MediaQuery.of(ctxSeccion).disableAnimations)
+        ? Duration.zero
+        : AppMovimiento.larga;
     if (ctxSeccion != null) {
       await Scrollable.ensureVisible(
         ctxSeccion,
         // 1.35 (UI-13): duración por el token.
-        duration: AppMovimiento.larga,
+        duration: durDesplazar,
         curve: Curves.easeOut,
         alignment: 0.05,
       );
@@ -516,7 +565,7 @@ class _FichaScreenState extends State<FichaScreen> {
     if (!_scrollActivo.hasClients) return;
     await _scrollActivo.animateTo(
       _scrollActivo.position.maxScrollExtent,
-      duration: AppMovimiento.larga,
+      duration: durDesplazar,
       curve: Curves.easeOut,
     );
     if (!mounted) return;
@@ -705,6 +754,7 @@ class _FichaScreenState extends State<FichaScreen> {
     // recarga anterior no sobreviva a un fallo de la nueva.
     if (!mounted || gen != _cargaGen) return;
     if (mounted) {
+      final storagePrevioFicha = _c?['foto_storage'];
       setState(() {
         _cargaLocalTerminada = true;
         // 1.28 (ítem fijo): nueva foto de datos locales —
@@ -721,7 +771,12 @@ class _FichaScreenState extends State<FichaScreen> {
         _suplementos = suplementos;
         _serviciosHist = serviciosHist;
         _incidencias = incidencias;
-        _foto = null;
+        // 1.36 FICHA (136-198): la foto vigente se
+        // conserva entre recargas si el foto_storage no
+        // cambió (antes cada _cargar la anulaba y la
+        // credencial parpadeaba a arte/iniciales tras
+        // cada cobro hasta que el fondo la reponía).
+        _foto = c?['foto_storage'] == storagePrevioFicha ? _foto : null;
         // 1.29 (FB-04): foto verificada de esta foto de datos.
         _tieneFotoVerificado = tieneFotoVerificado;
         _regaloAnio = regaloAnio;
@@ -2197,10 +2252,24 @@ class _FichaScreenState extends State<FichaScreen> {
         insetPadding: const EdgeInsets.all(AppEspacio.lg),
         child: GestureDetector(
           onTap: () => Navigator.of(ctx).pop(),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadio.lg),
-            child: Image.file(f, fit: BoxFit.contain),
-          ),
+          child: widget.origenHero == null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadio.lg),
+                  child: Image.file(f, fit: BoxFit.contain),
+                )
+              // 1.36 FICHA (136-224): la foto grande nace
+              // de la credencial con su Hero (continuidad
+              // de crecimiento), no con un corte a diálogo.
+              : Hero(
+                  tag: tagHeroCliente(
+                      widget.origenHero!, widget.clienteId),
+                  flightShuttleBuilder: shuttleHeroCredencial,
+                  child: ClipRRect(
+                    borderRadius:
+                        BorderRadius.circular(AppRadio.lg),
+                    child: Image.file(f, fit: BoxFit.contain),
+                  ),
+                ),
         ),
       ),
     );
@@ -2810,7 +2879,11 @@ class _FichaScreenState extends State<FichaScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: AppEspacio.lg),
+            // 1.36 FICHA (136-229): el bloque de identidad
+            // se centra en el alto disponible: la vista
+            // protegida ya no deja ~60 % de pantalla en
+            // hueco vacío bajo el nombre.
+            const Spacer(),
             GestureDetector(
               onTap: _foto != null ? _verFotoGrande : null,
               child: AvatarCliente(
@@ -2826,6 +2899,7 @@ class _FichaScreenState extends State<FichaScreen> {
             ),
             const SizedBox(height: AppEspacio.md),
             Text(nombre, style: AppTexto.titulo),
+            const Spacer(),
           ],
         ),
       );
@@ -2871,7 +2945,17 @@ class _FichaScreenState extends State<FichaScreen> {
       // El marcador mismo no entra en ninguna pestaña.
       for (final it in items.sublist(corteFicha + 1)) {
         if (it.widget is! SizedBox) {
-          pestanaEnCurso = pestanaDeSeccionFicha(it.widget);
+          // 136-206: la decisión se memoiza por
+          // (clave, versión); solo una versión nueva
+          // re-decide recorriendo el subárbol.
+          final memoFicha = _pestanaMemoFicha[it.clave];
+          if (memoFicha != null && memoFicha.version == it.version) {
+            pestanaEnCurso = memoFicha.pestana;
+          } else {
+            pestanaEnCurso = pestanaDeSeccionFicha(it.widget);
+            _pestanaMemoFicha[it.clave] =
+                (version: it.version, pestana: pestanaEnCurso);
+          }
         }
         porPestana[pestanaEnCurso]!.add(it);
       }
@@ -2881,13 +2965,17 @@ class _FichaScreenState extends State<FichaScreen> {
       _scrollFicha2,
       _scrollFicha3,
     ];
+    // 1.36 FICHA (136-225): contador ÚNICO de la cascada
+    // de apertura (la credencial primero): no reinicia
+    // por pestaña ni por lista.
+    var entradaGlobalFicha = 0;
     Widget itemFicha(
         ({String clave, Object version, Widget widget}) it, int indice) {
       return RepaintBoundary(
         key: ValueKey('ficha_${it.clave}'),
         child: EntradaSeccionFicha(
           claveSeccion: it.clave,
-          indice: indice,
+          indice: _cascadaInicialFicha ? 0 : entradaGlobalFicha++,
           yaAnimadas: _seccionesAnimadas,
           child:
               _cacheSecciones.obtener(it.clave, it.version, it.widget),
@@ -2954,22 +3042,49 @@ class _FichaScreenState extends State<FichaScreen> {
                     : Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (congelado)
+                          if (pausado)
                             const Padding(
                               padding: EdgeInsets.only(
                                   bottom: AppEspacio.xs),
                               child: Text(
-                                'Membresía congelada · el vencimiento no corre',
+                                'Membresía en pausa · el vencimiento no corre',
                                 style: AppTexto.secundario,
                               ),
                             ),
                           SizedBox(
                             width: double.infinity,
-                            child: BotonPrimario(
-                              texto: 'Cobrar',
-                              icono: Icons.payments_rounded,
-                              onPressed: _pagar,
-                            ),
+                            // 1.36 FICHA (136-195): la barra
+                            // fija es LA acción principal y
+                            // dice la del momento (la misma
+                            // función pura de la compacta):
+                            // conciliar > renovar > cobrar.
+                            // La barra compacta ya no ofrece
+                            // una segunda primaria que la
+                            // contradiga.
+                            child: switch (accionDelMomentoFicha(
+                              esCasa: esCasa,
+                              vencido: vencido,
+                              hayTransferenciaPorConciliar:
+                                  _ultimaTransferenciaPorConciliar !=
+                                      null,
+                              esDueno: AuthService().isOwner,
+                              sinAcceso: false,
+                            )) {
+                              'conciliar' => BotonPrimario(
+                                  texto: 'Conciliar',
+                                  icono: Icons.fact_check_rounded,
+                                  onPressed: () =>
+                                      _conciliarDesdeHistorial(
+                                          _ultimaTransferenciaPorConciliar!)),
+                              'renovar' => BotonPrimario(
+                                  texto: 'Renovar',
+                                  icono: Icons.refresh_rounded,
+                                  onPressed: _renovar),
+                              _ => BotonPrimario(
+                                  texto: 'Cobrar',
+                                  icono: Icons.payments_rounded,
+                                  onPressed: _pagar),
+                            },
                           ),
                           // 1.34 Campo 2 (B-1, orden de Jc
                           // 2026-11-14): «Repetir último
@@ -2996,22 +3111,22 @@ class _FichaScreenState extends State<FichaScreen> {
           // Con la cabecera compacta, su toque vive en el
           // icono de estado de la barra compacta (ver
           // _barraCompactaFicha): ninguna función se pierde.
-          AnimatedSize(
-            duration: AppMovimiento.media,
-            curve: AppMovimiento.curvaSuave,
-            alignment: Alignment.topCenter,
-            child: _cabeceraCompacta
-                ? const SizedBox.shrink(
-                    key: ValueKey('ficha-banda-sync-plegada'))
-                : const SyncBanner(
-                    key: ValueKey('ficha-banda-sync')),
-          ),
+          // 1.36 FICHA (136-197): la banda de sync ya NO
+          // abre el cuerpo de la ficha: la identidad del
+          // cliente es lo primero; la banda vive bajo la
+          // cabecera (ver el Column interior), como una
+          // sola voz de sync fuera de la zona de identidad.
+          const SizedBox.shrink(),
           Expanded(
             child: c == null && !_cargaLocalTerminada
                 // 1.30 (Oleada D6, UI130-22): la primera
                 // carga de la ficha enseña su esqueleto
                 // (cabecera + tarjetas), no un spinner.
-                ? const SkeletonFicha()
+                ? SkeletonFicha(
+                    heroTag: widget.origenHero == null
+                        ? null
+                        : tagHeroCliente(
+                            widget.origenHero!, widget.clienteId))
                 : c == null
                     ? _clienteNoEncontrado()
                     : Column(
@@ -3038,11 +3153,19 @@ class _FichaScreenState extends State<FichaScreen> {
                                 AppEspacio.lg,
                                 0),
                             child: AnimatedSize(
-                              duration: AppMovimiento.media,
+                              duration:
+                                  MediaQuery.of(context)
+                                          .disableAnimations
+                                      ? Duration.zero
+                                      : AppMovimiento.media,
                               curve: AppMovimiento.curvaSuave,
                               alignment: Alignment.topCenter,
                               child: AnimatedSwitcher(
-                                duration: AppMovimiento.media,
+                                duration:
+                                    MediaQuery.of(context)
+                                            .disableAnimations
+                                        ? Duration.zero
+                                        : AppMovimiento.media,
                                 switchInCurve:
                                     AppMovimiento.curvaSuave,
                                 switchOutCurve:
@@ -3075,6 +3198,33 @@ class _FichaScreenState extends State<FichaScreen> {
                               ),
                             ),
                           ),
+                          // 1.36 FICHA (136-197/220): la
+                          // banda de sync, bajo la cabecera
+                          // y sobre las pestañas; su pliegue
+                          // honra «Reducir movimiento».
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                                AppEspacio.lg,
+                                AppEspacio.sm,
+                                AppEspacio.lg,
+                                0),
+                            child: AnimatedSize(
+                              duration:
+                                  MediaQuery.of(context)
+                                          .disableAnimations
+                                      ? Duration.zero
+                                      : AppMovimiento.media,
+                              curve: AppMovimiento.curvaSuave,
+                              alignment: Alignment.topCenter,
+                              child: _cabeceraCompacta
+                                  ? const SizedBox.shrink(
+                                      key: ValueKey(
+                                          'ficha-banda-sync-plegada'))
+                                  : const SyncBanner(
+                                      key: ValueKey(
+                                          'ficha-banda-sync')),
+                            ),
+                          ),
                           _barraPestanasFicha(),
                           Expanded(
                             child: Stack(
@@ -3083,6 +3233,15 @@ class _FichaScreenState extends State<FichaScreen> {
                                   index: _pestanaFicha,
                                   children: [
                                     for (var t = 0; t < 3; t++)
+                                      // 1.36 FICHA (136-205):
+                                      // pestaña no visitada =
+                                      // hueco vacío en el stack;
+                                      // su lista nace en la
+                                      // primera apertura.
+                                      if (!_pestanasVisitadasFicha
+                                          .contains(t))
+                                        const SizedBox.shrink()
+                                      else
                                       // 1.30 FICHA-07: tirar
                                       // hacia abajo refresca la
                                       // ficha (ver
@@ -3147,7 +3306,14 @@ class _FichaScreenState extends State<FichaScreen> {
         child: InkWell(
           key: ValueKey(clave),
           onTap: () => _alCambiarPestanaFicha(i),
-          child: Container(
+          child: AnimatedContainer(
+            // 1.36 FICHA (136-221): el subrayado de la
+            // pestaña activa se anima al cambiar (duración
+            // cero con «Reducir movimiento»).
+            duration: MediaQuery.of(context).disableAnimations
+                ? Duration.zero
+                : AppMovimiento.media,
+            curve: AppMovimiento.curvaSuave,
             // 1.32 (integración, RD-2): objetivo táctil de
             // 48 dp — antes la pestaña medía ≈31 dp a escala
             // 1.0 (8 de padding + texto de 12). Es MÍNIMO, no
@@ -3234,50 +3400,11 @@ class _FichaScreenState extends State<FichaScreen> {
     // ficha: pestaña → sección). Por eso aquí se pasa
     // sinAcceso: false a la función pura (que se conserva
     // intacta y probada).
-    final accion = accionDelMomentoFicha(
-      esCasa: esCasa,
-      // Yunque 2.34 (D-3): el parámetro `congelado` de esta
-      // barra trae la fusión `pausado` desde el build; sin
-      // excluirla, la acción del momento ofrecía «Renovar»
-      // mientras el texto de la misma barra decía «En pausa
-      // ❄ · el vencimiento no corre».
-      vencido: clienteVencidoCobrable(
-          esCasa: esCasa, pausado: congelado, dias: dias),
-      hayTransferenciaPorConciliar:
-          _ultimaTransferenciaPorConciliar != null,
-      esDueno: AuthService().isOwner,
-      sinAcceso: false,
-    );
-    Widget botonMomento(IconData icono, String texto,
-            VoidCallback alTocar) =>
-        FilledButton.icon(
-          icon: Icon(icono, size: 18),
-          // 1.34 (DIS-06): la etiqueta puede recortarse
-          // cuando la barra la aprieta en Flexible.
-          label: Text(texto,
-              overflow: TextOverflow.ellipsis, softWrap: false),
-          onPressed: alTocar,
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppEspacio.md),
-            // 1.32 (integración, RD-9): es la acción
-            // principal de la barra compacta (Cobrar /
-            // Conciliar / Dar acceso): 48 dp, no 40.
-            minimumSize: const Size(0, 48),
-          ),
-        );
-    final Widget? botonPrincipal = switch (accion) {
-      'conciliar' => botonMomento(
-          Icons.fact_check_rounded,
-          'Conciliar',
-          () => _conciliarDesdeHistorial(
-              _ultimaTransferenciaPorConciliar!)),
-      'renovar' => botonMomento(
-          Icons.refresh_rounded, 'Renovar', _renovar),
-      'cobrar' => botonMomento(
-          Icons.payments_rounded, 'Cobrar', _pagar),
-      _ => null,
-    };
+    // 1.36 FICHA (136-195): la barra compacta ya no pinta
+    // botón de acción: la ÚNICA acción principal por
+    // estado vive en la barra fija inferior (que sigue la
+    // acción del momento). Aquí quedan foto, nombre,
+    // estado y la voz de sync.
     final textoEstadoBarra = esCasa
         ? 'Cuenta a la Casa'
         : congelado
@@ -3322,7 +3449,11 @@ class _FichaScreenState extends State<FichaScreen> {
                       children: [
                         Text(
                           nombre,
-                          style: AppTexto.subtitulo,
+                          // 1.36 FICHA (136-201): el nombre
+                          // no cae a subtítulo al plegar:
+                          // conserva rango de título (18),
+                          // por encima de un metadato.
+                          style: AppTexto.titulo,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -3365,6 +3496,15 @@ class _FichaScreenState extends State<FichaScreen> {
                   // sitio), que dispara el mismo ciclo que
                   // tocar la banda. El detalle completo del
                   // error vuelve al desplegar la cabecera.
+                  // 136-204: la reserva viva no desaparece
+                  // al plegar: su marcador queda en la
+                  // barra compacta.
+                  if (_reservaViva != null)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 4),
+                      child: Icon(Icons.bookmark_rounded,
+                          size: 18, color: AppColores.naranja),
+                    ),
                   StreamBuilder<SyncStatus>(
                     stream: SyncEngine.instance.statusStream,
                     initialData:
@@ -3412,18 +3552,15 @@ class _FichaScreenState extends State<FichaScreen> {
                           size: 20,
                         ),
                         onPressed: variante == VarianteBanner.error
-                            ? () => showModalBottomSheet<void>(
-                                  context: ctx,
-                                  builder: (_) => const SafeArea(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(16),
-                                      child: Column(
-                                        mainAxisSize:
-                                            MainAxisSize.min,
-                                        children: [SyncBanner()],
-                                      ),
-                                    ),
-                                  ),
+                            // 1.36 FICHA (136-223): hoja de
+                            // la casa con título, no la hoja
+                            // artesanal sin título.
+                            ? () => showHojaIron<void>(
+                                  ctx,
+                                  titulo:
+                                      'Error de sincronización',
+                                  icono: Icons.sync_problem_rounded,
+                                  cuerpo: const SyncBanner(),
                                 )
                             : () => SyncEngine.instance
                                 .run()
@@ -3441,8 +3578,8 @@ class _FichaScreenState extends State<FichaScreen> {
                   // aquí vivía era «Dar acceso»: fuera por
                   // B-1, ver la nota de la acción del
                   // momento.)
-                  if (botonPrincipal != null)
-                    Flexible(child: botonPrincipal),
+                  // 136-195: sin segunda acción primaria
+                  // (vive en la barra fija inferior).
                 ],
         ),
       ),
@@ -3525,10 +3662,56 @@ class _FichaScreenState extends State<FichaScreen> {
                             ? 'Sin vencimiento'
                             : fmtFecha(
                                 c['pagado_hasta'] as String?),
+                        // 136-191: el contacto sube a la
+                        // tira de la credencial cuando hay
+                        // teléfono válido.
+                        telefonoTexto:
+                            _telefonoEfectivoWa(c).length >= 10
+                                ? _telefonoEfectivoVisible(c)
+                                : null,
                         ),
                       ),
                       const SizedBox(
                           height: AppEspacio.lg),
+                      // Bloque 1: el único botón de cobro es el
+                      // fijo de abajo (bottomNavigationBar); aquí
+                      // quedan Editar y Vender a medias.
+                      // 1.30 (Oleada 10, FICHA-01): Vender abre
+                      // la venta con este cliente ya elegido.
+                      Row(
+                        children: [
+                          Expanded(
+                            child: BotonSecundario(
+                              texto: 'Editar',
+                              icono: Icons.edit_rounded,
+                              onPressed: _editar,
+                            ),
+                          ),
+                          const SizedBox(width: AppEspacio.sm),
+                          Expanded(
+                            child: BotonSecundario(
+                              texto: 'Vender',
+                              icono: Icons.bolt_rounded,
+                              onPressed: _venderDesdeFicha,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // 1.36 FICHA (136-200): fuera los
+                      // 32 dp de aire muerto (doble SizedBox
+                      // lg): queda la separación normal.
+                      const SizedBox(height: AppEspacio.sm),
+                      // 1.34 Campo 2 (B-1): fin de la
+                      // cabecera fija — ver
+                      // _FinCabeceraFicha.
+                      const _FinCabeceraFicha(),
+                      // 1.36 FICHA (136-204): cumpleaños
+                      // y reserva viva viven en la LISTA de
+                      // la pestaña 0 (abren su contenido), no
+                      // en el bloque fijo: ya no comen el
+                      // alto útil de todas las pestañas. La
+                      // reserva conserva su señal en la
+                      // barra compacta (icono de marcador).
                       // Bloque 1: cumpleaños destacado cuando toca
                       // (fecha de nacimiento desde el carnet, misma
                       // fuente que la edad: fechaNacDeCarnet).
@@ -3585,7 +3768,9 @@ class _FichaScreenState extends State<FichaScreen> {
                                   AppRadio.md),
                               onTap: () async {
                                 await Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
+                                  // 1.36 FICHA (136-222):
+                                  // ruta de la casa (220 ms).
+                                  RutaIron<void>(
                                     builder: (_) =>
                                         const ReservasScreen(),
                                   ),
@@ -3637,38 +3822,6 @@ class _FichaScreenState extends State<FichaScreen> {
                             ),
                           ),
                         ),
-                      // Bloque 1: el único botón de cobro es el
-                      // fijo de abajo (bottomNavigationBar); aquí
-                      // quedan Editar y Vender a medias.
-                      // 1.30 (Oleada 10, FICHA-01): Vender abre
-                      // la venta con este cliente ya elegido.
-                      Row(
-                        children: [
-                          Expanded(
-                            child: BotonSecundario(
-                              texto: 'Editar',
-                              icono: Icons.edit_rounded,
-                              onPressed: _editar,
-                            ),
-                          ),
-                          const SizedBox(width: AppEspacio.sm),
-                          Expanded(
-                            child: BotonSecundario(
-                              texto: 'Vender',
-                              icono: Icons.bolt_rounded,
-                              onPressed: _venderDesdeFicha,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(
-                          height: AppEspacio.lg),
-                      const SizedBox(
-                          height: AppEspacio.lg),
-                      // 1.34 Campo 2 (B-1): fin de la
-                      // cabecera fija — ver
-                      // _FinCabeceraFicha.
-                      const _FinCabeceraFicha(),
                       // Membresía
                       Tarjeta(
                         child: Column(
@@ -3740,16 +3893,15 @@ class _FichaScreenState extends State<FichaScreen> {
                               const SizedBox(
                                   height: AppEspacio.sm),
                             ],
-                            FilaInfoFicha(icono: Icons.calendar_today_rounded, etiqueta: 'Pagado hasta', valor: esCasa
-                                    ? 'Sin vencimiento'
-                                    : fmtFecha(c['pagado_hasta']
-                                        as String?)),
-                            FilaInfoFicha(icono: Icons.event_rounded, etiqueta: 'Estado', valor: esCasa
-                                    ? 'Cuenta a la Casa'
-                                    : pausado
-                                        ? 'En pausa ❄ · el vencimiento no corre'
-                                        : textoEstado(c['pagado_hasta']
-                                            as String?)),
+                            // 1.36 FICHA (136-202): «Pagado
+                            // hasta» y el estado ya los dice
+                            // UNA vez la credencial (insignia
+                            // + tira): Membresía no los
+                            // repite como filas; abre por el
+                            // último pago y el tipo. La línea
+                            // de período de abajo queda como
+                            // lectura del período, no como
+                            // tercera fecha.
                             // 1.25 T117 (F1-44): el porqué de
                             // la Casa no se pierde de vista —
                             // el espejo ya trae motivo, fecha
@@ -3851,42 +4003,11 @@ class _FichaScreenState extends State<FichaScreen> {
                       ),
                       const SizedBox(
                           height: AppEspacio.md),
-                      // Resumen 360
-                      if (_pagos.isNotEmpty)
-                        Resumen360Ficha(
-                            resumen: _resumenPagos,
-                            serieMontos: _seriePagos,
-                            compradoVida: _compradoVida),
-                      // Bloque 1: línea de tiempo única (pagos +
-                      // ventas de suplementos y servicios) con
-                      // filtros. Absorbe las 3 tarjetas sueltas
-                      // anteriores (C4 fuera: no más tarjetas
-                      // sueltas de historial).
-                      TarjetaHistorialFicha(
-                        entradas: _entradasCache,
-                        filtro: _filtroHistorial,
-                        onFiltro: (v) {
-                          if (mounted) {
-                            setState(() => _filtroHistorial = v);
-                          }
-                        },
-                        serviciosHist: _serviciosHist,
-                        clienteId: widget.clienteId,
-                        esAdmin: AuthService().isAdmin,
-                        esOwner: AuthService().isOwner,
-                        onReenviarRecibo: _reenviarRecibo,
-                        onVerComprobante: _verComprobante,
-                        onCorregirPago: _corregirPago,
-                        onConciliar: _conciliarDesdeHistorial,
-                        // 1.29 (FB-03): pie con «Ver pagos
-                        // anteriores» mientras el historial
-                        // enseñe la muestra reciente.
-                        onVerAnteriores: _historialCompleto
-                            ? null
-                            : _verHistorialCompleto,
-                      ),
-                      const SizedBox(
-                          height: AppEspacio.md),
+                      // 1.36 FICHA (136-193): tras Membresía suben
+                      // los PENDIENTES («Qué le falta») y los DATOS
+                      // PERSONALES (contacto incluido); la estadística
+                      // de por vida (Resumen 360) y el Historial bajan
+                      // tras ellos — la información general primero.
                       // 1.28 (M4-B4): «qué le falta» a este
                       // cliente, accionable, bajo la cabecera.
                       // Sin pendientes, la sección no ocupa
@@ -3967,7 +4088,9 @@ class _FichaScreenState extends State<FichaScreen> {
                             // Bloque 1: teléfono tocable para
                             // WhatsApp (abre wa.me, no registra nada).
                             InkWell(
-                              onTap: _abrirWhatsAppTelefono,
+                              onTap: _telefonoEfectivoWa(c).length >= 10
+                              ? _abrirWhatsAppTelefono
+                              : null,
                               borderRadius: BorderRadius.circular(
                                   AppRadio.sm),
                               child: Padding(
@@ -3993,9 +4116,19 @@ class _FichaScreenState extends State<FichaScreen> {
                                             .copyWith(
                                                 fontWeight:
                                                     FontWeight.w600,
-                                                color: AppColores
-                                                    .exitoTexto(
-                                                        context)),
+                                                // 136-203: sin teléfono
+                                                // válido, el «—» se
+                                                // pinta como dato
+                                                // ausente (secundario),
+                                                // no en verde de éxito.
+                                                color: _telefonoEfectivoWa(c)
+                                                            .length >=
+                                                        10
+                                                    ? AppColores
+                                                        .exitoTexto(context)
+                                                    : AppColores
+                                                        .textoSecundario(
+                                                            context)),
                                         textAlign:
                                             TextAlign.right,
                                       ),
@@ -4080,6 +4213,40 @@ class _FichaScreenState extends State<FichaScreen> {
                         // foto personal se queda con
                         // Información personal.
                       ],
+                      // Resumen 360
+                      if (_pagos.isNotEmpty)
+                        Resumen360Ficha(
+                            resumen: _resumenPagos,
+                            serieMontos: _seriePagos,
+                            compradoVida: _compradoVida),
+                      // Bloque 1: línea de tiempo única (pagos +
+                      // ventas de suplementos y servicios) con
+                      // filtros. Absorbe las 3 tarjetas sueltas
+                      // anteriores (C4 fuera: no más tarjetas
+                      // sueltas de historial).
+                      TarjetaHistorialFicha(
+                        entradas: _entradasCache,
+                        filtro: _filtroHistorial,
+                        onFiltro: (v) {
+                          if (mounted) {
+                            setState(() => _filtroHistorial = v);
+                          }
+                        },
+                        serviciosHist: _serviciosHist,
+                        clienteId: widget.clienteId,
+                        esAdmin: AuthService().isAdmin,
+                        esOwner: AuthService().isOwner,
+                        onReenviarRecibo: _reenviarRecibo,
+                        onVerComprobante: _verComprobante,
+                        onCorregirPago: _corregirPago,
+                        onConciliar: _conciliarDesdeHistorial,
+                        // 1.29 (FB-03): pie con «Ver pagos
+                        // anteriores» mientras el historial
+                        // enseñe la muestra reciente.
+                        onVerAnteriores: _historialCompleto
+                            ? null
+                            : _verHistorialCompleto,
+                      ),
                       const SizedBox(
                           height: AppEspacio.md),
                       // v1.13.0 (D4): medidas del entrenador (filas
@@ -4107,12 +4274,13 @@ class _FichaScreenState extends State<FichaScreen> {
                       // con otro rol el widget ni se
                       // construye ni se llama su RPC. Sin
                       // fotos, el widget no ocupa espacio.
-                      if (AuthService().isOwner) ...[
+                      // 1.36 FICHA (136-212): sin separador
+                      // tras la galería — el SizedBox de
+                      // 12 dp quedaba huérfano cuando la
+                      // galería se resolvía a cero fotos.
+                      if (AuthService().isOwner)
                         SeccionFotosProgresoNube(
                             clienteId: widget.clienteId),
-                        const SizedBox(
-                            height: AppEspacio.md),
-                      ],
                       // v1.2.5 (#10): incidencias relacionadas con el cliente.
                       if (_incidencias.isNotEmpty) ...[
                         Tarjeta(
