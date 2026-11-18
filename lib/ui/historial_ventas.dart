@@ -24,6 +24,7 @@ import '../cliente_protegido.dart';
 import 'app_bar.dart';
 import 'componentes.dart';
 import 'diseno.dart';
+import 'tarjetas_wa.dart';
 import '../app_log.dart';
 
 /// Totales del historial excluyendo ventas de clientes protegidos
@@ -965,13 +966,38 @@ class _HistorialVentasScreenState
     // controlador se disponía nada más cerrar el diálogo,
     // con la animación de salida aún reconstruyendo el
     // campo (defecto D-B1-08).
-    await showDialog<void>(
+    // UI136-04: la tarjeta del comprobante con los MISMOS
+    // datos del texto — el reenvío también ofrece la pieza
+    // de marca (motor 136-291…293). Fiado y promo salen de
+    // la fila con la regla de la casa (TJ-14: el fiado
+    // nunca lleva sello PAGADO ni banda de promo).
+    final tarjeta = TarjetaWaComprobante(
+      cliente: '${v['comprador_nombre'] ?? '?'}',
+      titulo: 'Suplemento',
+      producto: '${prod?['nombre'] ?? 'Producto $prodId'}',
+      cantidad: cant,
+      fechaIso: '${v['fecha'] ?? ''}',
+      total: total,
+      moneda: moneda,
+      esFiado: v['es_fiado'] == 1 || v['es_fiado'] == true,
+      conPromo: ventaConPromo(v),
+    );
+    final accion = await showDialog<String>(
       context: context,
       builder: (_) => _DialogoReciboWa(
         texto: texto,
         telefonoInicial: waNum.length == 10 ? waNum.substring(2) : '',
+        tarjeta: tarjeta,
       ),
     );
+    if (accion == 'tarjeta' && mounted) {
+      await mostrarCompartirTarjetaWa(
+        context,
+        tarjeta: tarjeta,
+        texto: texto,
+        nombreArchivo: 'tarjeta_comprobante',
+      );
+    }
   }
 
   /// Detalle expandido de una venta con inscripción: dos bloques,
@@ -1093,10 +1119,15 @@ class _DialogoReciboWa extends StatefulWidget {
   const _DialogoReciboWa({
     required this.texto,
     required this.telefonoInicial,
+    this.tarjeta,
   });
 
   final String texto;
   final String telefonoInicial;
+
+  /// UI136-04: la tarjeta de marca de esta venta; el diálogo
+  /// la ofrece como «Enviar tarjeta» y devuelve 'tarjeta'.
+  final Widget? tarjeta;
 
   @override
   State<_DialogoReciboWa> createState() => _DialogoReciboWaState();
@@ -1182,6 +1213,14 @@ class _DialogoReciboWaState extends State<_DialogoReciboWa> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cerrar'),
         ),
+        // UI136-04: la pieza de marca, por la hoja de
+        // compartir del sistema (wa.me no adjunta imágenes).
+        if (widget.tarjeta != null)
+          OutlinedButton.icon(
+            icon: const Icon(Icons.image_rounded),
+            label: const Text('Enviar tarjeta'),
+            onPressed: () => Navigator.pop(context, 'tarjeta'),
+          ),
         ElevatedButton.icon(
           icon: const Icon(Icons.send_rounded),
           label: const Text('Enviar por WhatsApp'),

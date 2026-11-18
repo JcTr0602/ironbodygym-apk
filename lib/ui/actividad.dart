@@ -24,6 +24,7 @@ import 'diseno.dart';
 import 'ficha.dart';
 import 'historial_ventas.dart';
 import 'servicios.dart';
+import 'tarjetas_wa.dart';
 import '../app_log.dart';
 import '../errores_sync.dart';
 
@@ -1451,6 +1452,30 @@ class _ActividadScreenState extends State<ActividadScreen> {
                     ),
                 ],
               ),
+              // UI136-04: la tarjeta de marca del cobro, por
+              // la hoja de compartir del sistema (el mismo
+              // patrón de botón ancho que el salto de abajo).
+              // Solo cobros con cliente, método e importe: la
+              // tarjeta no inventa datos.
+              if (!esProtegido &&
+                  tieneCliente &&
+                  _esCobroServidor(accion) &&
+                  _metodoDe(aRes).isNotEmpty &&
+                  montoTxt.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.image_rounded, size: 18),
+                    label: const Text('Enviar tarjeta'),
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _compartirTarjetaRecibo(
+                          aRes, titulo, montoTxt, cup, usd);
+                    },
+                  ),
+                ),
+              ],
               // Mejora Actividad 7: salto al registro original.
               if (_destinoSalto(accion) != null) ...[
                 const SizedBox(height: 8),
@@ -1479,24 +1504,12 @@ class _ActividadScreenState extends State<ActividadScreen> {
     );
   }
 
-  /// v1.3.5 (Fase 1, E2): comparte el recibo por wa.me con el formato
-  /// existente del proyecto (normalizarTelefonoWaMe + launchUrl).
-  Future<void> _compartirRecibo(Map<String, dynamic> a, String titulo,
-      String montoTxt, String waNum) async {
-    // P2#2 (Argón, defensa en profundidad): aunque el botón ya no
-    // se ofrece para un protegido, el recibo tampoco se comparte
-    // si se invocara por otra vía.
-    final idRecibo = _clienteIdDe(a);
-    if (idRecibo != null && _protegidosIds.contains(idRecibo)) {
-      return;
-    }
-    // 1.23 (Delta Argón 5ª#3): el recibo de Actividad era el
-    // ÚNICO mensaje automático sin la línea fija de cierre de
-    // Jc y llevaba el subtítulo crudo de la lista («Tipo ·
-    // Método · Hora · Entrenador») como «Detalle», duplicando
-    // fecha y cobrador. Ahora compone líneas limpias como
-    // textoReciboPago (método por su línea, sin subtítulo) y
-    // cierra con lineaMensajeAutomatico.
+  /// El texto del recibo de un cobro (1.23, Delta Argón
+  /// 5ª#3): líneas limpias como textoReciboPago y el cierre
+  /// fijo de Jc. Lo comparten el envío por wa.me y el pie de
+  /// la tarjeta (UI136-04) — un solo texto para las dos vías.
+  String _textoRecibo(
+      Map<String, dynamic> a, String titulo, String montoTxt) {
     final metodo = _metodoDe(a);
     final fechaLarga = _fechaHoraLarga('${a['ts'] ?? ''}');
     final actor = '${a['actor'] ?? ''}'.trim();
@@ -1508,8 +1521,63 @@ class _ActividadScreenState extends State<ActividadScreen> {
     if (fechaLarga.isNotEmpty) buf.writeln('Fecha: $fechaLarga');
     if (actor.isNotEmpty) buf.writeln('Cobrado por: $actor');
     buf.write(lineaMensajeAutomatico);
+    return buf.toString().trim();
+  }
+
+  /// UI136-04: el reenvío del recibo también ofrece la
+  /// TARJETA de marca (motor 136-291…293), como en el flujo
+  /// de cobro. El «pagado hasta» sale del espejo del
+  /// cliente; si no está, no hay tarjeta (queda el texto de
+  /// siempre) — la tarjeta no inventa datos.
+  Future<void> _compartirTarjetaRecibo(Map<String, dynamic> a,
+      String titulo, String montoTxt, double cup, double usd) async {
+    final idRecibo = _clienteIdDe(a);
+    if (idRecibo == null) return;
+    // P2#2: la misma defensa que el recibo de texto.
+    if (_protegidosIds.contains(idRecibo)) return;
+    final cli = await clientePorId(idRecibo);
+    final hasta = '${cli?['pagado_hasta'] ?? ''}'.trim();
+    final metodo = _metodoDe(a);
+    if (hasta.length < 10 || metodo.isEmpty) {
+      if (mounted) {
+        mostrarSnack(
+            context,
+            'Este cobro no trae los datos de la tarjeta; '
+            'usa el recibo de texto.',
+            significado: SignificadoChip.alerta);
+      }
+      return;
+    }
+    if (!mounted) return;
+    await mostrarCompartirTarjetaWa(
+      context,
+      tarjeta: TarjetaWaRecibo(
+        cliente: titulo,
+        concepto: _tituloAccion('${a['accion'] ?? ''}'),
+        metodo: metodo,
+        fechaIso: '${a['ts'] ?? ''}',
+        total: usd > 0 ? usd : cup,
+        moneda: usd > 0 ? 'USD' : 'CUP',
+        pagadoHastaIso: hasta.substring(0, 10),
+      ),
+      texto: _textoRecibo(a, titulo, montoTxt),
+      nombreArchivo: 'tarjeta_recibo',
+    );
+  }
+
+  /// v1.3.5 (Fase 1, E2): comparte el recibo por wa.me con el formato
+  /// existente del proyecto (normalizarTelefonoWaMe + launchUrl).
+  Future<void> _compartirRecibo(Map<String, dynamic> a, String titulo,
+      String montoTxt, String waNum) async {
+    // P2#2 (Argón, defensa en profundidad): aunque el botón ya no
+    // se ofrece para un protegido, el recibo tampoco se comparte
+    // si se invocara por otra vía.
+    final idRecibo = _clienteIdDe(a);
+    if (idRecibo != null && _protegidosIds.contains(idRecibo)) {
+      return;
+    }
     final url = Uri.parse(
-        'https://wa.me/$waNum?text=${Uri.encodeComponent(buf.toString().trim())}');
+        'https://wa.me/$waNum?text=${Uri.encodeComponent(_textoRecibo(a, titulo, montoTxt))}');
     // 1.36 H-B1 (136-320): el false de launchUrl también
     // se avisa.
     bool ok;
