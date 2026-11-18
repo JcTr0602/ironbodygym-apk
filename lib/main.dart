@@ -574,6 +574,10 @@ class _IronBodyAppState extends State<IronBodyApp>
             // apagado, manda el modo elegido. El automático por
             // sensor NO existe (guarda del contraste de Argón).
             themeMode: solActivo ? ThemeMode.light : mode,
+            // 1.36 H-B1 (136-326): con «Reducir movimiento» activo, el
+            // cambio de tema no hace cross-fade.
+            themeAnimationDuration:
+                reducirMov ? Duration.zero : kThemeAnimationDuration,
             // v1.2.4: tema unificado (lib/ui/diseno.dart → AppTema).
             // 1.32: el claro pasa a ser el táctico de Papel Frío
             // (Modo Sol) y el oscuro el táctico Pizarra/Cobalto.

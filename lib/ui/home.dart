@@ -27,6 +27,7 @@ import '../permisos_entrenador.dart';
 import '../cierre_automatico.dart';
 import '../conciliacion.dart';
 import 'diagnostico_espejo_card.dart';
+import 'skeleton.dart';
 import 'cierre_sesion.dart';
 import '../sync.dart';
 import '../theme.dart';
@@ -481,6 +482,10 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _verificarPermisos() async {
     await PermisosEntrenador().cargar();
     if (!mounted || _mostrandoDialogoSuspendido) return;
+    // 1.36 H-B1 (136-330): repintar con los permisos ya
+    // frescos — los accesos por permiso nacen con el valor
+    // nuevo sin esperar a otra recarga.
+    setState(() {});
     final permisos = PermisosEntrenador();
     if (!permisos.estaSuspendido && !permisos.sinHabilitar) return;
     _mostrandoDialogoSuspendido = true;
@@ -1909,6 +1914,21 @@ class _HomeScreenState extends State<HomeScreen>
   /// iba sobre el Pulso por la Compuerta 1) y justo
   /// debajo va «Por Decidir» con su conteo visible.
   List<Widget> _seccionesMostrador(bool esDueno) {
+    // 1.36 H-B1 (136-333): en la PRIMERA carga (aún sin
+    // ninguna foto buena) el Mostrador pinta el esqueleto
+    // del tablero, no los contadores en cero.
+    if (_cargando && _lastFetch == null) {
+      return const [
+        KeyedSubtree(
+          key: ValueKey('home-cargando-esqueleto'),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+                AppEspacio.lg, AppEspacio.md, AppEspacio.lg, 0),
+            child: SkeletonDashboard(),
+          ),
+        ),
+      ];
+    }
     if (esDueno) {
       return _VistaHoyDueno(
         bloquesHoy: _bloquesHoy,
@@ -2010,9 +2030,13 @@ class _HomeScreenState extends State<HomeScreen>
               const Icon(Icons.sync_problem_rounded,
                   color: AppColores.error),
               const SizedBox(width: AppEspacio.sm),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'La sincronización falló. Revisa tu conexión e inténtalo de nuevo.',
+                  // 1.36 H-B1 (136-334): el banner dice el
+                  // fallo guardado; el genérico es el respaldo.
+                  (_falloSync != null && _falloSync!.isNotEmpty)
+                      ? _falloSync!
+                      : 'La sincronización falló. Revisa tu conexión e inténtalo de nuevo.',
                   style: AppTexto.secundario,
                 ),
               ),
@@ -2378,7 +2402,14 @@ class _HomeScreenState extends State<HomeScreen>
                 const TextSpan(text: 'Hoy: '),
                 TextSpan(
                   text: '${fmtMonto(_cobradoHoy)}\u00A0cobrados',
-                  style: const TextStyle(color: AppColores.naranja),
+                  // 1.36 H-B1 (136-335): los dos tramos del
+                  // titular son tocables — misma señal visual
+                  // (subrayado de marca) en ambos.
+                  style: const TextStyle(
+                    color: AppColores.naranja,
+                    decoration: TextDecoration.underline,
+                    decorationColor: AppColores.naranja,
+                  ),
                   recognizer: _tapTitularCobrado,
                 ),
                 const TextSpan(text: ' · '),
@@ -2538,11 +2569,21 @@ class _HomeScreenState extends State<HomeScreen>
                     width: AppEspacio.sm),
                 Expanded(
                   child: Text(
-                    '${_turnosSinReporteVisibles.length} turno(s) sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
+                    // 1.36 H-B1 (136-336): plural real.
+                    _turnosSinReporteVisibles.length == 1
+                        ? '1 turno sin reporte: ${_turnosSinReporteVisibles.first}'
+                        : '${_turnosSinReporteVisibles.length} turnos sin reporte: ${_turnosSinReporteVisibles.join(' y ')}',
                     style: AppTexto.secundario,
                   ),
                 ),
-                InkWell(
+                // 1.36 H-B1 (136-336): el cierre del aviso se
+                // anuncia (tooltip + semántica).
+                Semantics(
+                  button: true,
+                  label: 'Descartar aviso de turnos sin reporte',
+                  child: Tooltip(
+                    message: 'Descartar aviso',
+                    child: InkWell(
                   borderRadius: BorderRadius.circular(AppRadio.lg),
                   onTap: () async {
                     // Descarta solo las instancias visibles ahora
@@ -2576,6 +2617,8 @@ class _HomeScreenState extends State<HomeScreen>
                     child: Icon(Icons.close_rounded,
                         size: 16,
                         color: AppColores.alertaOscuro),
+                  ),
+                    ),
                   ),
                 ),
               ],
@@ -2666,7 +2709,8 @@ class _HomeScreenState extends State<HomeScreen>
       case 'abierto_local':
       case 'abierto_sincronizado':
         return OutlinedButton.icon(
-          icon: const Icon(Icons.lock_open_rounded, size: 18),
+          // 1.36 H-B1 (136-332): icono de cierre, no de apertura.
+          icon: const Icon(Icons.lock_rounded, size: 18),
           label: Text(procesando ? 'Procesando…' : 'Cerrar turno'),
           onPressed: procesando ? null : _cierreRapido,
         );
@@ -3464,8 +3508,12 @@ class _VistaHoyDueno extends StatelessWidget {
             child: Center(
               child: Column(
                 children: [
-                  Text('Tu día está vacío: ocultaste '
-                      'todos los bloques.',
+                  // 1.36 H-B1 (136-329): el texto del vacío
+                  // dice lo que de verdad queda visible —
+                  // «Por Decidir» no es un bloque ocultable y
+                  // sigue arriba.
+                  Text('Ocultaste todos los bloques de tu día. '
+                      '«Por Decidir» sigue visible arriba.',
                       textAlign: TextAlign.center,
                       style: AppTexto.secundario),
                 ],

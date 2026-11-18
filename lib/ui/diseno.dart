@@ -1287,9 +1287,13 @@ class AppTema {
       // papel nace de una semilla.
       colorScheme: esquemaIron(b,
           tactico: tactico, altoContraste: altoContraste),
-      scaffoldBackgroundColor: tactico
-          ? (oscuro ? AppColores.pizarra : AppColores.papelFrio)
-          : (oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro),
+      // 1.36 H-B1 (136-348): el alto contraste también manda
+      // sobre el fondo — blanco/negro puros como la superficie.
+      scaffoldBackgroundColor: altoContraste
+          ? (oscuro ? Colors.black : Colors.white)
+          : tactico
+              ? (oscuro ? AppColores.pizarra : AppColores.papelFrio)
+              : (oscuro ? AppColores.fondoOscuro : AppColores.fondoClaro),
       // 1.24.2 (reporte de campo de Jc): sin switchTheme, el
       // interruptor APAGADO por defecto de Material 3 casi no
       // contrasta sobre las superficies oscuras de la casa y se
@@ -1430,7 +1434,8 @@ class AppTema {
           if (estados.contains(WidgetState.selected)) {
             return AppColores.sobreMarca;
           }
-          return AppColores.naranja;
+          // 1.36 H-B1 (136-346): «hoy» es texto — por brillo.
+          return oscuro ? AppColores.naranja : AppColores.naranjaTexto;
         }),
         yearBackgroundColor:
             WidgetStateProperty.resolveWith((estados) {
@@ -1586,7 +1591,10 @@ class AppTema {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: AppColores.naranja,
+          // 1.36 H-B1 (136-346): el texto del botón se resuelve
+          // por brillo — en claro manda el rol de texto.
+          foregroundColor:
+              oscuro ? AppColores.naranja : AppColores.naranjaTexto,
           minimumSize: const Size(48, 44),
           textStyle:
               AppTexto.cuerpo.copyWith(fontWeight: FontWeight.w600),
@@ -1596,7 +1604,9 @@ class AppTema {
         filled: true,
         fillColor: superficie,
         labelStyle: TextStyle(color: secundario),
-        floatingLabelStyle: const TextStyle(color: AppColores.naranja),
+        // 1.36 H-B1 (136-346): etiqueta flotante = texto, por brillo.
+        floatingLabelStyle: TextStyle(
+            color: oscuro ? AppColores.naranja : AppColores.naranjaTexto),
         contentPadding: const EdgeInsets.symmetric(
             horizontal: AppEspacio.md, vertical: AppEspacio.md),
         border: OutlineInputBorder(

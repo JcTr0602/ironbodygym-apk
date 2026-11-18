@@ -3736,8 +3736,10 @@ class _FichaScreenState extends State<FichaScreen> {
                                       style: AppTexto.cuerpo),
                                   SizedBox(width: 8),
                                   Text('¡Cumpleaños hoy!',
+                                      // 1.36 H-B1 (136-346): texto
+                                      // naranja resuelto por brillo.
                                       style: AppTexto.etiqueta.copyWith(color: AppColores
-                                              .naranja, fontWeight: FontWeight.w700)),
+                                              .textoNaranja(context), fontWeight: FontWeight.w700)),
                                 ],
                               ),
                             ),
