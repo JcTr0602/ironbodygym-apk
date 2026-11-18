@@ -581,6 +581,7 @@ class _DialogoPedirMotivo extends StatefulWidget {
 
 class _DialogoPedirMotivoState extends State<_DialogoPedirMotivo> {
   final _ctrl = TextEditingController();
+  String? _error;
 
   @override
   void dispose() {
@@ -595,16 +596,31 @@ class _DialogoPedirMotivoState extends State<_DialogoPedirMotivo> {
       iconoTitulo: Icons.cancel_rounded,
       contenido: TextField(
           controller: _ctrl,
-          decoration: const InputDecoration(
+          autofocus: true,
+          decoration: InputDecoration(
               hintText: 'Ej: terminó el pacto',
-              border: OutlineInputBorder())),
+              border: const OutlineInputBorder(),
+              // 1.36 H-B1 (136-321): el motivo vacío ya
+              // no cierra en silencio como si se hubiera
+              // cancelado — el error se pinta DENTRO.
+              errorText: _error),
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          }),
       acciones: [
         TextButton(
             onPressed: () => Navigator.pop(context, null),
             child: const Text('Cancelar')),
         FilledButton(
-            onPressed: () => Navigator.pop(context,
-                _ctrl.text.trim().isEmpty ? null : _ctrl.text.trim()),
+            onPressed: () {
+              final t = _ctrl.text.trim();
+              if (t.isEmpty) {
+                setState(() =>
+                    _error = 'El motivo es obligatorio.');
+                return;
+              }
+              Navigator.pop(context, t);
+            },
             child: const Text('Revocar')),
       ],
     );

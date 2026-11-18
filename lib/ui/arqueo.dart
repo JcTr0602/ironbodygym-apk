@@ -525,7 +525,15 @@ class _DetalleArqueoScreenState extends State<DetalleArqueoScreen> {
     if (r == null) return;
     final uri =
         Uri.parse('https://wa.me/?text=${Uri.encodeComponent(r)}');
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    // 1.36 H-B1 (136-320): bool comprobado, con la
+    // alternativa que ya existe (copiar el resumen).
+    final ok =
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      mostrarSnack(context,
+          'No se pudo abrir WhatsApp: copia el resumen y pégalo allí.',
+          significado: SignificadoChip.alerta);
+    }
   }
 
   /// (M2-BC B1) copia el resumen al portapapeles.

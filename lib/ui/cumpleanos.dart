@@ -269,9 +269,16 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
             'que tengas un día excelente 💪$lineaMensajeAutomatico';
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje)}');
+    // 1.36 H-B1 (136-320): launchUrl puede devolver
+    // false SIN lanzar (nadie abre el enlace): cuenta
+    // igual que el fallo.
+    bool ok;
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
+      ok = false;
+    }
+    if (!ok) {
       if (mounted) {
         mostrarSnack(context, 'No se pudo abrir WhatsApp.', significado: SignificadoChip.error);
       }
@@ -415,9 +422,14 @@ class _CumpleanosScreenState extends State<CumpleanosScreen>
     );
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(mensaje.trim())}');
+    // 136-320: el false de launchUrl también es fallo.
+    bool ok;
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
+      ok = false;
+    }
+    if (!ok) {
       if (mounted) {
         mostrarSnack(context, 'Regalo aplicado. No se pudo abrir WhatsApp.', significado: SignificadoChip.exito);
       }

@@ -279,8 +279,12 @@ class _IncidenciasSyncScreenState extends State<IncidenciasSyncScreen> {
                     label: Text('Resueltas (${_resueltas.length})')),
               ],
               selected: {_verResueltas},
-              onSelectionChanged: (s) =>
-                  setState(() => _verResueltas = s.first),
+              // 1.36 H-B1 (136-322): guarda de selección
+              // vacía antes de s.first.
+              onSelectionChanged: (s) {
+                if (s.isEmpty) return;
+                setState(() => _verResueltas = s.first);
+              },
             ),
           ),
           Expanded(

@@ -364,18 +364,19 @@ class _AjustesScreenState extends State<AjustesScreen> {
         valorInicial: valorActual ?? '',
         etiqueta: etiqueta,
         teclado: teclado,
+        // 1.36 H-B1 (136-321): el tope de 60 se valida
+        // DENTRO del diálogo (antes cerraba y el aviso
+        // caía fuera, perdiendo lo tecleado).
+        validar: (t) => t.trim().length > 60
+            ? 'El texto es demasiado largo (máx. 60 caracteres).'
+            : null,
       ),
     );
     if (entrada == null || !mounted) return;
     final texto = entrada.trim();
     // Lote 2 Argón: vacío se normaliza a null (antes guardaba "" y el
     // subtítulo quedaba en blanco en vez de 'Igual que la cuenta';
-    // setNombreVisible(null) borra la preferencia). Sin límite, un
-    // texto larguísimo rompería la UI: tope 60 con aviso.
-    if (texto.length > 60) {
-      _msg('El texto es demasiado largo (máx. 60 caracteres).');
-      return;
-    }
+    // setNombreVisible(null) borra la preferencia).
     await guardar(texto.isEmpty ? null : texto);
     _cargar();
   }
@@ -396,14 +397,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
         titulo: titulo,
         valorInicial: valorActual ?? '',
         etiqueta: etiqueta,
+        // 136-321: la validación vive en el diálogo.
+        validar: validar,
+        errorMsg: errorMsg,
       ),
     );
     if (entrada == null || !mounted) return;
     final v = entrada.trim();
-    if (v.isNotEmpty && !validar(v)) {
-      _msg(errorMsg);
-      return;
-    }
     await guardar(v);
     _cargar();
   }
@@ -2300,11 +2300,15 @@ class _DialogoEditarTextoAjustes extends StatefulWidget {
   final String etiqueta;
   final TextInputType teclado;
 
+  /// 1.36 H-B1 (136-321): validador en-diálogo (null = ok).
+  final String? Function(String)? validar;
+
   const _DialogoEditarTextoAjustes({
     required this.titulo,
     required this.valorInicial,
     required this.etiqueta,
     required this.teclado,
+    this.validar,
   });
 
   @override
@@ -2315,6 +2319,7 @@ class _DialogoEditarTextoAjustes extends StatefulWidget {
 class _DialogoEditarTextoAjustesState
     extends State<_DialogoEditarTextoAjustes> {
   late final TextEditingController _ctrl;
+  String? _error;
 
   @override
   void initState() {
@@ -2337,13 +2342,24 @@ class _DialogoEditarTextoAjustesState
         controller: _ctrl,
         etiqueta: widget.etiqueta,
         teclado: widget.teclado,
+        errorText: _error,
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
       ),
       acciones: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-            onPressed: () => Navigator.pop(context, _ctrl.text),
+            onPressed: () {
+              final e = widget.validar?.call(_ctrl.text);
+              if (e != null) {
+                setState(() => _error = e);
+                return;
+              }
+              Navigator.pop(context, _ctrl.text);
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
               foregroundColor: Colors.white,
@@ -2365,10 +2381,16 @@ class _DialogoEditarCampoAjustes extends StatefulWidget {
   final String valorInicial;
   final String etiqueta;
 
+  /// 1.36 H-B1 (136-321): validación en-diálogo.
+  final bool Function(String)? validar;
+  final String? errorMsg;
+
   const _DialogoEditarCampoAjustes({
     required this.titulo,
     required this.valorInicial,
     required this.etiqueta,
+    this.validar,
+    this.errorMsg,
   });
 
   @override
@@ -2379,6 +2401,7 @@ class _DialogoEditarCampoAjustes extends StatefulWidget {
 class _DialogoEditarCampoAjustesState
     extends State<_DialogoEditarCampoAjustes> {
   late final TextEditingController _ctrl;
+  String? _error;
 
   @override
   void initState() {
@@ -2405,14 +2428,27 @@ class _DialogoEditarCampoAjustesState
         ],
         decoration: InputDecoration(
             labelText: widget.etiqueta,
-            border: const OutlineInputBorder()),
+            border: const OutlineInputBorder(),
+            errorText: _error),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
       ),
       acciones: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-            onPressed: () => Navigator.pop(context, _ctrl.text),
+            onPressed: () {
+              final v = _ctrl.text.trim();
+              if (v.isNotEmpty &&
+                  widget.validar != null &&
+                  !widget.validar!(v)) {
+                setState(() => _error = widget.errorMsg);
+                return;
+              }
+              Navigator.pop(context, _ctrl.text);
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
               foregroundColor: Colors.white,
@@ -2443,6 +2479,10 @@ class _DialogoCambiarClaveState extends State<_DialogoCambiarClave> {
   final _nueva = TextEditingController();
   final _nueva2 = TextEditingController();
 
+  // 1.36 H-B1 (136-321): errores dentro del diálogo.
+  String? _errorNueva;
+  String? _errorNueva2;
+
   @override
   void dispose() {
     _actual.dispose();
@@ -2468,12 +2508,14 @@ class _DialogoCambiarClaveState extends State<_DialogoCambiarClave> {
             CampoTexto(
                 controller: _nueva,
                 obscure: true,
-                etiqueta: 'Nueva contraseña'),
+                etiqueta: 'Nueva contraseña',
+                errorText: _errorNueva),
             const SizedBox(height: 8),
             CampoTexto(
                 controller: _nueva2,
                 obscure: true,
-                etiqueta: 'Repite la nueva'),
+                etiqueta: 'Repite la nueva',
+                errorText: _errorNueva2),
           ],
         ),
       ),
@@ -2482,11 +2524,27 @@ class _DialogoCambiarClaveState extends State<_DialogoCambiarClave> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
         ElevatedButton(
-            onPressed: () => Navigator.pop(context, (
-                  actual: _actual.text,
-                  nueva: _nueva.text,
-                  nueva2: _nueva2.text,
-                )),
+            onPressed: () {
+              // 136-321: coincidencia y mínimo se validan
+              // AQUÍ (antes el diálogo cerraba y el aviso
+              // caía en Ajustes, con lo tecleado perdido).
+              setState(() {
+                _errorNueva = _nueva.text.length < 6
+                    ? 'La nueva debe tener al menos 6 caracteres'
+                    : null;
+                _errorNueva2 = _nueva.text != _nueva2.text
+                    ? 'Las contraseñas nuevas no coinciden'
+                    : null;
+              });
+              if (_errorNueva != null || _errorNueva2 != null) {
+                return;
+              }
+              Navigator.pop(context, (
+                actual: _actual.text,
+                nueva: _nueva.text,
+                nueva2: _nueva2.text,
+              ));
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColores.naranja,
               foregroundColor: Colors.white,
@@ -2528,6 +2586,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
   final _c0 = TextEditingController(); // PIN actual (si existe)
   final _c1 = TextEditingController();
   final _c2 = TextEditingController();
+
+  // 1.36 H-B1 (136-321): errores dentro del diálogo.
+  String? _errorPin1;
+  String? _errorPin2;
 
   @override
   void dispose() {
@@ -2587,9 +2649,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
               FilteringTextInputFormatter.digitsOnly
             ],
             obscureText: true,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'PIN (4 dígitos)',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              errorText: _errorPin1,
             ),
           ),
           const SizedBox(height: 8),
@@ -2602,9 +2665,10 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
               FilteringTextInputFormatter.digitsOnly
             ],
             obscureText: true,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Repite el PIN',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              errorText: _errorPin2,
             ),
           ),
         ],
@@ -2628,6 +2692,18 @@ class _DialogoConfigurarPinState extends State<_DialogoConfigurarPin> {
             child: const Text('Cancelar')),
         ElevatedButton(
             onPressed: () async {
+              // 136-321: formato y coincidencia del PIN
+              // nuevo se validan DENTRO antes de cerrar.
+              setState(() {
+                _errorPin1 =
+                    PerfilService.esPinValido(_c1.text.trim())
+                        ? null
+                        : 'El PIN debe tener 4 dígitos';
+                _errorPin2 = _c1.text.trim() != _c2.text.trim()
+                    ? 'Los PIN no coinciden'
+                    : null;
+              });
+              if (_errorPin1 != null || _errorPin2 != null) return;
               if (!await _verificarActualSiAplica()) return;
               if (mounted) {
                 Navigator.pop(context, (

@@ -1746,7 +1746,17 @@ class _FichaScreenState extends State<FichaScreen> {
     }
     final url =
         Uri.parse('https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}');
-    await launchUrl(url, mode: LaunchMode.externalApplication);
+    // 1.36 H-B1 (136-320): si WhatsApp no abre, no se
+    // finge el envío.
+    final ok =
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!ok) {
+      if (mounted) {
+        mostrarSnack(context, 'No se pudo abrir WhatsApp.',
+            significado: SignificadoChip.alerta);
+      }
+      return false;
+    }
     return true;
   }
 
@@ -4789,7 +4799,13 @@ class _FichaScreenState extends State<FichaScreen> {
       return;
     }
     final url = Uri.parse('https://wa.me/$tel');
-    await launchUrl(url, mode: LaunchMode.externalApplication);
+    // 136-320: bool comprobado.
+    final ok =
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      mostrarSnack(context, 'No se pudo abrir WhatsApp.',
+          significado: SignificadoChip.alerta);
+    }
   }
 
   /// 1.30 FICHA-02 (FIJO): avisar el vencimiento desde la
@@ -4809,7 +4825,13 @@ class _FichaScreenState extends State<FichaScreen> {
     final mensaje = mensajeWaSegunEstado(_c ?? const {});
     final url = Uri.parse(
         'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}');
-    await launchUrl(url, mode: LaunchMode.externalApplication);
+    // 136-320: bool comprobado.
+    final ok =
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      mostrarSnack(context, 'No se pudo abrir WhatsApp.',
+          significado: SignificadoChip.alerta);
+    }
   }
 
   /// Iniciales para el placeholder de foto.

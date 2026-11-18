@@ -106,8 +106,11 @@ class _EstadisticasAdopcionScreenState
           // amable, pero el ORIGEN se conserva para que la
           // clase de permiso sea alcanzable (el RAISE del
           // servidor ya no se pierde en el catch).
+          // 1.36 H-B1 (136-319): sin atribuir el fallo a
+          // la conexión (el origen clasificado ya viaja en
+          // _errorOrigen para el detalle).
           _error = 'No se pudieron cargar las estadísticas. '
-              'Revisa la conexión e inténtalo de nuevo.';
+              'Inténtalo de nuevo.';
           _errorOrigen = mensajeDeErrorServidor(e);
           _cargando = false;
         });

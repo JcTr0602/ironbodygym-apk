@@ -1513,13 +1513,17 @@ class _BuscarScreenState extends State<BuscarScreen>
     final url = Uri.parse(conMensaje
         ? 'https://wa.me/$wa?text=${Uri.encodeComponent(mensajeWaSegunEstado(c))}'
         : 'https://wa.me/$wa');
+    // 1.36 H-B1 (136-320): el false de launchUrl también
+    // se avisa (antes solo la excepción).
+    bool ok;
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
-      if (mounted) {
-        mostrarSnack(context, 'No se pudo abrir WhatsApp.',
-            significado: SignificadoChip.alerta);
-      }
+      ok = false;
+    }
+    if (!ok && mounted) {
+      mostrarSnack(context, 'No se pudo abrir WhatsApp.',
+          significado: SignificadoChip.alerta);
     }
   }
 
@@ -1621,7 +1625,13 @@ class _BuscarScreenState extends State<BuscarScreen>
         // eso era la cola de su carnet, no su número.
         final telLocal = telefonoEfectivoLocal(c);
         if (telLocal != '—') {
-          await launchUrl(Uri.parse('tel:+53$telLocal'));
+          // 136-320: bool comprobado también al llamar.
+          final ok =
+              await launchUrl(Uri.parse('tel:+53$telLocal'));
+          if (!ok && mounted) {
+            mostrarSnack(context, 'No se pudo abrir el marcador.',
+                significado: SignificadoChip.alerta);
+          }
         }
       case 'seleccionar':
         setState(() => _modoSeleccion = true);

@@ -23,6 +23,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../actividad_cliente.dart';
 import '../auth.dart';
@@ -124,6 +125,11 @@ class _SeccionActividadAppClientesState
   DateTime? _descargadoEn;
   bool _desdeCache = false;
   bool _sinConexion = false;
+
+  /// 1.36 H-B1 (136-319): el servidor RESPONDIÓ y rechazó
+  /// (PostgrestException) no es «sin conexión»: la banda
+  /// lo dice neutro, sin atribuir la causa a la red.
+  bool _errorServidor = false;
   bool _cargandoLista = true;
   bool _consultando = false;
   int _generacion = 0;
@@ -215,16 +221,20 @@ class _SeccionActividadAppClientesState
         _descargadoEn = ahora;
         _desdeCache = false;
         _sinConexion = false;
+        _errorServidor = false;
         _consultando = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted || gen != _generacion) return;
       setState(() {
-        // Sin red (o la RPC denegó): si hay foto cacheada se
-        // queda pintada y la banda lo dice con su fecha; si
-        // nunca se descargó, no hay nada que mostrar y
-        // también se dice. Error ≠ vacío.
-        _sinConexion = true;
+        // 136-319: se CLASIFICA antes de rotular — si el
+        // servidor respondió (Postgrest), no es la red.
+        // Sin red: si hay foto cacheada se queda pintada y
+        // la banda lo dice con su fecha; si nunca se
+        // descargó, no hay nada que mostrar y también se
+        // dice. Error ≠ vacío.
+        _errorServidor = e is PostgrestException;
+        _sinConexion = !_errorServidor;
         _consultando = false;
       });
     }
@@ -311,7 +321,13 @@ class _SeccionActividadAppClientesState
           ],
           if (_clienteId != null) ...[
             const SizedBox(height: AppEspacio.md),
-            if (_sinConexion && _descargadoEn != null)
+            if (_errorServidor)
+              const AvisoEstado(
+                tipo: TipoAviso.error,
+                texto: 'No se pudo actualizar la actividad. '
+                    'Inténtalo de nuevo.',
+              )
+            else if (_sinConexion && _descargadoEn != null)
               AvisoEstado(
                 tipo: TipoAviso.aviso,
                 texto: textoSinConexionFb23(_descargadoEn!),

@@ -105,7 +105,7 @@ class _ModalPinState extends State<_ModalPin> {
         TextButton.icon(
           icon: const Icon(Icons.chat_rounded, size: 18),
           label: const Text('WhatsApp'),
-          onPressed: () {
+          onPressed: () async {
             if (telWa.isEmpty) {
               mostrarSnack(ctx, 'Teléfono inválido para WhatsApp ("$telefono"). Usa Copiar PIN.', significado: SignificadoChip.alerta);
               return;
@@ -114,8 +114,16 @@ class _ModalPinState extends State<_ModalPin> {
                 nombre: nombre, telefono8: tel8, pin: pin);
             final url = Uri.parse(
                 'https://wa.me/$telWa?text=${Uri.encodeComponent(mensaje)}');
-            launchUrl(url,
+            // 1.36 H-B1 (136-320): el bool de launchUrl se
+            // comprueba — si WhatsApp no abre, se dice y
+            // se ofrece la alternativa (Copiar PIN).
+            final ok = await launchUrl(url,
                 mode: LaunchMode.externalApplication);
+            if (!ok && ctx.mounted) {
+              mostrarSnack(ctx,
+                  'No se pudo abrir WhatsApp. Usa Copiar PIN.',
+                  significado: SignificadoChip.alerta);
+            }
             // El modal NO se cierra (regla de Argón).
           },
         ),

@@ -131,10 +131,15 @@ class _RankingServiciosScreenState extends State<RankingServiciosScreen> {
                           value: true, label: Text('Este mes')),
                     ],
                     selected: {_esteMes},
-                    onSelectionChanged: (s) => setState(() {
-                      _esteMes = s.first;
-                      _recalcular();
-                    }),
+                    onSelectionChanged: (s) {
+                      // 1.36 H-B1 (136-322): guarda de
+                      // selección vacía.
+                      if (s.isEmpty) return;
+                      setState(() {
+                        _esteMes = s.first;
+                        _recalcular();
+                      });
+                    },
                   ),
                 ),
                 Expanded(

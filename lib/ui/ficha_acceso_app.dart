@@ -501,7 +501,24 @@ class _SeccionAccesoAppFichaState extends State<SeccionAccesoAppFicha> {
                   ),
                 ),
               const SizedBox(height: AppEspacio.sm),
-              contenido,
+              // 1.36 H-B1 (136-323): las ramas del
+              // contenido (verificando → sin conexión →
+              // estados del acceso) cruzan con la
+              // transición de la casa.
+              CruceEstados(
+                estado: acceso == null
+                    ? (_verificando
+                        ? 'verificando'
+                        : _sinConexion && !cache.cargado
+                            ? 'sin-conexion'
+                            : _conversionPendiente
+                                ? 'conversion'
+                                : _recienGenerado
+                                    ? 'recien'
+                                    : 'sin-acceso')
+                    : acceso.estado,
+                child: contenido,
+              ),
               const SizedBox(height: AppEspacio.md),
               const Divider(height: 1),
               const SizedBox(height: AppEspacio.xs),

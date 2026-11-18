@@ -43,11 +43,27 @@ class _DialogoTelefono extends StatefulWidget {
 
 class _DialogoTelefonoState extends State<_DialogoTelefono> {
   final _ctrl = TextEditingController();
+  String? _error;
 
   @override
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  /// 1.36 H-B1 (136-321): la validación vive DENTRO del
+  /// diálogo — si el número no vale, el error se pinta
+  /// junto al campo y lo tecleado NO se pierde (antes el
+  /// diálogo cerraba primero y el aviso caía fuera, en la
+  /// pantalla de fondo, con el texto ya descartado).
+  void _guardar() {
+    final tel = sanitizarTelefono(_ctrl.text) ?? '';
+    if (!validarTelefono(tel)) {
+      setState(() => _error =
+          'Teléfono inválido: 8 dígitos, empieza con 5 o 6.');
+      return;
+    }
+    Navigator.pop(context, _ctrl.text);
   }
 
   @override
@@ -56,17 +72,25 @@ class _DialogoTelefonoState extends State<_DialogoTelefono> {
       title: const Text('Agregar teléfono'),
       content: TextField(
         controller: _ctrl,
+        autofocus: true,
         keyboardType: TextInputType.phone,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _guardar(),
         // Yunque 2.34 (D-6): SIN maxLength — con 8, pegar
         // «5358191577» se truncaba a «53581915» ANTES de
         // sanitizar y se guardaba un número equivocado pero
         // «válido». Quien juzga es sanitizarTelefono al
         // guardar (dialogoAgregarTelefono), que acepta el
         // prefijo 53 y los espacios.
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
+          labelText: 'Teléfono',
           hintText: 'Ej. 58191577',
           helperText: '8 dígitos, empieza con 5 o 6',
+          errorText: _error,
         ),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
       ),
       actions: [
         TextButton(
@@ -75,7 +99,7 @@ class _DialogoTelefonoState extends State<_DialogoTelefono> {
         ),
         BotonPrimario(
           texto: 'Guardar',
-          onPressed: () => Navigator.pop(context, _ctrl.text),
+          onPressed: _guardar,
           expandido: false,
         ),
       ],

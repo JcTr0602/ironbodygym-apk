@@ -1470,12 +1470,16 @@ class _ActividadScreenState extends State<ActividadScreen> {
     buf.write(lineaMensajeAutomatico);
     final url = Uri.parse(
         'https://wa.me/$waNum?text=${Uri.encodeComponent(buf.toString().trim())}');
+    // 1.36 H-B1 (136-320): el false de launchUrl también
+    // se avisa.
+    bool ok;
     try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+      ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
-      if (mounted) {
-        mostrarSnack(context, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
-      }
+      ok = false;
+    }
+    if (!ok && mounted) {
+      mostrarSnack(context, 'No se pudo abrir WhatsApp', significado: SignificadoChip.error);
     }
   }
 

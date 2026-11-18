@@ -512,7 +512,10 @@ class _ReservasScreenState extends State<ReservasScreen> {
     await _cargar();
     if (!mounted) return;
     if (lanzo) {
-      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+      mostrarSnack(context,
+          // 1.36 H-B1 (136-319): el fallo de refresco no
+          // siempre es la conexión — mensaje neutro.
+          'No se pudo actualizar: mostrando datos locales',
           significado: SignificadoChip.alerta);
     } else if (r == null) {
       mostrarSnack(context, 'Reservas al día, sin cambios',
@@ -525,7 +528,10 @@ class _ReservasScreenState extends State<ReservasScreen> {
               : 'Ya hay una sincronización en curso',
           significado: SignificadoChip.alerta);
     } else if (r.error) {
-      mostrarSnack(context, 'Sin conexión: mostrando datos locales',
+      mostrarSnack(context,
+          // 1.36 H-B1 (136-319): el fallo de refresco no
+          // siempre es la conexión — mensaje neutro.
+          'No se pudo actualizar: mostrando datos locales',
           significado: SignificadoChip.alerta);
     } else if (r.parcial) {
       mostrarSnack(context,
@@ -724,6 +730,16 @@ class _ReservasScreenState extends State<ReservasScreen> {
     final aj = await LocalDb.instance.getAjustes();
     if (!mounted) return;
     final metodos = metodosAceptadosEfectivos(aj['metodos_aceptados']);
+    // 1.36 H-B1 (136-322): sin NINGÚN método aceptado no
+    // se abre el cobro (el segmento nacería vacío y el
+    // método por defecto sería falso).
+    if (!metodos.efectivo && !metodos.transferencia) {
+      mostrarSnack(context,
+          'No hay métodos de pago aceptados en los ajustes: '
+          'no se puede cobrar la reserva.',
+          significado: SignificadoChip.error);
+      return;
+    }
     var metodo = metodos.efectivo ? 'efectivo' : 'transferencia';
     final dif = r.diferenciaTotal;
     final avisoMoneda = avisoMonedaReserva(r);
@@ -773,8 +789,11 @@ class _ReservasScreenState extends State<ReservasScreen> {
                         icon: Icon(Icons.account_balance_rounded)),
                 ],
                 selected: {metodo},
-                onSelectionChanged: (s) =>
-                    setStateDlg(() => metodo = s.first),
+                // 136-322: guarda de selección vacía.
+                onSelectionChanged: (s) {
+                  if (s.isEmpty) return;
+                  setStateDlg(() => metodo = s.first);
+                },
               ),
             ],
           ),

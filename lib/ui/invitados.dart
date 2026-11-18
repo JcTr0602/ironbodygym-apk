@@ -295,8 +295,10 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
         mostrarSnack(context,
             e is InvitadoError
                 ? e.mensaje
-                : 'Sin conexión: se muestra la última lista '
-                    'guardada.',
+                // 1.36 H-B1 (136-319): un error sin
+                // clasificar NO se atribuye a la conexión.
+                : 'No se pudo actualizar: se muestra la '
+                    'última lista guardada.',
             significado: SignificadoChip.alerta);
         return;
       }
@@ -307,8 +309,11 @@ class _InvitadosScreenState extends State<InvitadosScreen> {
       // cuando no hay nada fresco que conservar.
       if (e is InvitadoError && e.codigo == 'RED' && _lista.isNotEmpty) {
         setState(() => _cargando = false);
+        // 136-319: «RED» del clasificador es «red O
+        // servidor» — el aviso no atribuye la causa.
         mostrarSnack(context,
-            'Sin conexión: se mantiene la última lista cargada.',
+            'No se pudo actualizar: se mantiene la última '
+            'lista cargada.',
             significado: SignificadoChip.alerta);
         return;
       }

@@ -509,6 +509,7 @@ class _DialogoRechazarAdelanto extends StatefulWidget {
 class _DialogoRechazarAdelantoState
     extends State<_DialogoRechazarAdelanto> {
   final _motivoCtrl = TextEditingController();
+  String? _error;
 
   @override
   void dispose() {
@@ -523,11 +524,19 @@ class _DialogoRechazarAdelantoState
       iconoTitulo: Icons.block_rounded,
       contenido: TextField(
         controller: _motivoCtrl,
-        decoration: const InputDecoration(
+        autofocus: true,
+        decoration: InputDecoration(
           labelText: 'Motivo del rechazo',
-          border: OutlineInputBorder(),
+          border: const OutlineInputBorder(),
+          // 1.36 H-B1 (136-321): el motivo es
+          // obligatorio y su falta se dice DENTRO (antes
+          // el llamador descartaba el vacío en silencio).
+          errorText: _error,
         ),
         maxLength: 120,
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
       ),
       acciones: [
         TextButton(
@@ -535,8 +544,15 @@ class _DialogoRechazarAdelantoState
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () =>
-              Navigator.of(context).pop(_motivoCtrl.text.trim()),
+          onPressed: () {
+            final t = _motivoCtrl.text.trim();
+            if (t.isEmpty) {
+              setState(() =>
+                  _error = 'El motivo del rechazo es obligatorio.');
+              return;
+            }
+            Navigator.of(context).pop(t);
+          },
           child: const Text('Rechazar'),
         ),
       ],

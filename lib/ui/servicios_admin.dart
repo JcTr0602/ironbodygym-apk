@@ -1115,11 +1115,29 @@ class _DialogoRellenarPomo extends StatefulWidget {
 
 class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
   final _dosisCtrl = TextEditingController();
+  String? _error;
 
   @override
   void dispose() {
     _dosisCtrl.dispose();
     super.dispose();
+  }
+
+  // 1.36 H-B1 (136-321): validación DENTRO del diálogo —
+  // antes salía un 0 silencioso y el error caía fuera.
+  void _rellenar() {
+    final d = int.tryParse(_dosisCtrl.text.trim());
+    if (d == null || d <= 0) {
+      setState(() =>
+          _error = 'Escribe las dosis: un número mayor que 0.');
+      return;
+    }
+    if (d > widget.saldoPrincipal) {
+      setState(() => _error =
+          'El principal solo tiene ${widget.saldoPrincipal} dosis.');
+      return;
+    }
+    Navigator.pop(context, d);
   }
 
   @override
@@ -1155,8 +1173,11 @@ class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
             controller: _dosisCtrl,
             keyboardType: TextInputType.number,
             autofocus: true,
-            decoration:
-                const InputDecoration(labelText: 'Dosis a rellenar'),
+            decoration: InputDecoration(
+                labelText: 'Dosis a rellenar', errorText: _error),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
           ),
         ],
       ),
@@ -1166,8 +1187,7 @@ class _DialogoRellenarPomoState extends State<_DialogoRellenarPomo> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(
-              context, int.tryParse(_dosisCtrl.text.trim()) ?? 0),
+          onPressed: _rellenar,
           child: const Text('Rellenar'),
         ),
       ],
@@ -1190,12 +1210,33 @@ class _DialogoReponerAgua extends StatefulWidget {
 class _DialogoReponerAguaState extends State<_DialogoReponerAgua> {
   final _cantCtrl = TextEditingController();
   final _costoCtrl = TextEditingController();
+  String? _errorCant;
+  String? _errorCosto;
 
   @override
   void dispose() {
     _cantCtrl.dispose();
     _costoCtrl.dispose();
     super.dispose();
+  }
+
+  // 1.36 H-B1 (136-321): validación dentro del diálogo.
+  void _registrar() {
+    final cant = int.tryParse(_cantCtrl.text.trim());
+    final costo =
+        double.tryParse(_costoCtrl.text.trim().replaceAll(',', '.'));
+    setState(() {
+      _errorCant = (cant == null || cant <= 0)
+          ? 'Escribe los pomos que entraron (mayor que 0).'
+          : null;
+      _errorCosto =
+          (costo == null || !costo.isFinite || costo <= 0)
+              ? 'Escribe el costo por pomo (mayor que 0).'
+              : null;
+    });
+    if (_errorCant != null || _errorCosto != null) return;
+    Navigator.pop(context,
+        (cantidad: _cantCtrl.text, costo: _costoCtrl.text));
   }
 
   @override
@@ -1210,15 +1251,17 @@ class _DialogoReponerAguaState extends State<_DialogoReponerAgua> {
             controller: _cantCtrl,
             keyboardType: TextInputType.number,
             autofocus: true,
-            decoration: const InputDecoration(
-                labelText: 'Pomos que entraron'),
+            decoration: InputDecoration(
+                labelText: 'Pomos que entraron',
+                errorText: _errorCant),
           ),
           TextField(
             controller: _costoCtrl,
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-                labelText: 'Costo por pomo (CUP)'),
+            decoration: InputDecoration(
+                labelText: 'Costo por pomo (CUP)',
+                errorText: _errorCosto),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1234,8 +1277,7 @@ class _DialogoReponerAguaState extends State<_DialogoReponerAgua> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context,
-              (cantidad: _cantCtrl.text, costo: _costoCtrl.text)),
+          onPressed: _registrar,
           child: const Text('Registrar entrada'),
         ),
       ],
@@ -1261,6 +1303,27 @@ class _DialogoSalidaAguaState extends State<_DialogoSalidaAgua> {
   var _motivo = 'merma';
   final _cantCtrl = TextEditingController(text: '1');
   final _notaCtrl = TextEditingController();
+  String? _errorCant;
+
+  // 1.36 H-B1 (136-321): validación dentro del diálogo.
+  void _registrar() {
+    final cant = int.tryParse(_cantCtrl.text.trim());
+    if (cant == null || cant <= 0) {
+      setState(() =>
+          _errorCant = 'Escribe los pomos (mayor que 0).');
+      return;
+    }
+    if (cant > widget.saldo) {
+      setState(() => _errorCant =
+          'Solo hay ${widget.saldo} pomos en stock.');
+      return;
+    }
+    Navigator.pop(context, (
+      cantidad: _cantCtrl.text,
+      motivo: _motivo,
+      nota: _notaCtrl.text,
+    ));
+  }
 
   @override
   void dispose() {
@@ -1298,8 +1361,8 @@ class _DialogoSalidaAguaState extends State<_DialogoSalidaAgua> {
           TextField(
             controller: _cantCtrl,
             keyboardType: TextInputType.number,
-            decoration:
-                const InputDecoration(labelText: 'Pomos'),
+            decoration: InputDecoration(
+                labelText: 'Pomos', errorText: _errorCant),
           ),
           TextField(
             controller: _notaCtrl,
@@ -1314,11 +1377,7 @@ class _DialogoSalidaAguaState extends State<_DialogoSalidaAgua> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, (
-                cantidad: _cantCtrl.text,
-                motivo: _motivo,
-                nota: _notaCtrl.text,
-              )),
+          onPressed: _registrar,
           child: const Text('Registrar salida'),
         ),
       ],
@@ -1346,6 +1405,33 @@ class _DialogoAbrirBoteState extends State<_DialogoAbrirBote> {
   late int _supId;
   final _rendCtrl = TextEditingController(text: '30');
   final _costoCtrl = TextEditingController();
+  String? _errorRend;
+  String? _errorCosto;
+
+  // 1.36 H-B1 (136-321): validación dentro del diálogo
+  // (el costo vacío sigue siendo «sin costo nuevo»).
+  void _abrir() {
+    final rend = int.tryParse(_rendCtrl.text.trim());
+    final costoTexto = _costoCtrl.text.trim();
+    final costo = costoTexto.isEmpty
+        ? null
+        : double.tryParse(costoTexto.replaceAll(',', '.'));
+    setState(() {
+      _errorRend = (rend == null || rend <= 0)
+          ? 'Escribe el rendimiento (dosis mayor que 0).'
+          : null;
+      _errorCosto = (costoTexto.isNotEmpty &&
+              (costo == null || !costo.isFinite || costo <= 0))
+          ? 'Costo no válido: déjalo vacío o mayor que 0.'
+          : null;
+    });
+    if (_errorRend != null || _errorCosto != null) return;
+    Navigator.pop(context, (
+      supId: _supId,
+      rendimiento: _rendCtrl.text,
+      costo: _costoCtrl.text,
+    ));
+  }
 
   @override
   void initState() {
@@ -1383,16 +1469,18 @@ class _DialogoAbrirBoteState extends State<_DialogoAbrirBote> {
           TextField(
             controller: _rendCtrl,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-                labelText: 'Rendimiento (dosis del bote)'),
+            decoration: InputDecoration(
+                labelText: 'Rendimiento (dosis del bote)',
+                errorText: _errorRend),
           ),
           TextField(
             controller: _costoCtrl,
             keyboardType: const TextInputType.numberWithOptions(
                 decimal: true),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
                 labelText:
-                    'Costo del bote (CUP, opcional si el producto ya tiene costo)'),
+                    'Costo del bote (CUP, opcional si el producto ya tiene costo)',
+                errorText: _errorCosto),
           ),
         ],
       ),
@@ -1402,11 +1490,7 @@ class _DialogoAbrirBoteState extends State<_DialogoAbrirBote> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, (
-                supId: _supId,
-                rendimiento: _rendCtrl.text,
-                costo: _costoCtrl.text,
-              )),
+          onPressed: _abrir,
           child: const Text('Abrir bote'),
         ),
       ],

@@ -636,8 +636,12 @@ class _ServiciosEstadisticasScreenState
                         label: Text('Suplementos')),
                   ],
                   selected: {_tab},
-                  onSelectionChanged: (s) =>
-                      setState(() => _tab = s.first),
+                  // 1.36 H-B1 (136-322): guarda de
+                  // selección vacía antes de s.first.
+                  onSelectionChanged: (s) {
+                    if (s.isEmpty) return;
+                    setState(() => _tab = s.first);
+                  },
                 ),
                 const SizedBox(height: AppEspacio.md),
                 if (_tab == 'suplementos') ...[
@@ -670,6 +674,8 @@ class _ServiciosEstadisticasScreenState
                     ],
                     selected: {_periodo},
                     onSelectionChanged: (s) {
+                      // 136-322: sin selección no hay s.first.
+                      if (s.isEmpty) return;
                       setState(() {
                         _periodo = s.first;
                         // 1.28 (M3-B3): el rango nace en los

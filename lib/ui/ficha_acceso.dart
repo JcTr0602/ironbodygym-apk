@@ -204,17 +204,29 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
           ),
         ],
       ),
-      body: _cargando && _acceso == null
-          ? const EstadoCargando(texto: 'Cargando acceso…')
-          : _acceso == null
-              // 1.36 H-B1 (136-521): el fallo de carga es
-              // el EstadoError de la casa, CON Reintentar
-              // (antes un texto pelado sin salida).
-              ? EstadoError(
-                  titulo: 'No se pudo cargar la ficha de acceso',
-                  onReintentar: _cargar,
-                )
-              : ListView(
+      // 1.36 H-B1 (136-323): los estados del cuerpo
+      // (cargando / error / datos / datos del caché)
+      // CRUZAN con la transición de la casa, no se
+      // sustituyen de golpe.
+      body: CruceEstados(
+        estado: _cargando && _acceso == null
+            ? 'cargando'
+            : _acceso == null
+                ? 'error'
+                : _desdeCache
+                    ? 'cache'
+                    : 'contenido',
+        child: _cargando && _acceso == null
+            ? const EstadoCargando(texto: 'Cargando acceso…')
+            : _acceso == null
+                // 1.36 H-B1 (136-521): el fallo de carga es
+                // el EstadoError de la casa, CON Reintentar
+                // (antes un texto pelado sin salida).
+                ? EstadoError(
+                    titulo: 'No se pudo cargar la ficha de acceso',
+                    onReintentar: _cargar,
+                  )
+                : ListView(
                   padding: const EdgeInsets.all(AppEspacio.lg),
                   children: [
                     // 1.28 (M4-A14): sello cuando lo pintado
@@ -258,6 +270,7 @@ class _FichaAccesoScreenState extends State<FichaAccesoScreen> {
                     _seccionAuditoria(),
                   ],
                 ),
+      ),
     );
   }
 

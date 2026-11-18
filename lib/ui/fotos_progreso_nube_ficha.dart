@@ -584,8 +584,10 @@ class _SeccionFotosProgresoNubeState
               child: Text(_errorSesion
                   ? 'Sesión vencida: vuelve a entrar para ver '
                       'sus fotos en la nube.'
-                  : 'Sin conexión: no se pudieron verificar sus '
-                      'fotos en la nube.'),
+                  // 1.36 H-B1 (136-319): el resto de fallos
+                  // no se atribuye a la conexión.
+                  : 'No se pudieron verificar sus fotos en '
+                      'la nube.'),
             ),
             TextButton(onPressed: _cargar, child: const Text('Reintentar')),
           ],

@@ -1336,6 +1336,10 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
   bool _avisoIgual = false;
   bool _consultando = false;
 
+  // 1.36 H-B1 (136-321): errores DENTRO del diálogo.
+  String? _errorMonto;
+  String? _errorMotivo;
+
   @override
   void dispose() {
     _montoCtrl.dispose();
@@ -1348,6 +1352,20 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
   }
 
   Future<void> _enviar() async {
+    // 136-321: validar ANTES de cerrar — el llamador ya no
+    // recibe datos inválidos que avisar fuera de contexto.
+    final montoPre = int.tryParse(_montoCtrl.text.trim());
+    setState(() {
+      _errorMonto = (montoPre == null ||
+              montoPre <= 0 ||
+              montoPre > 100000)
+          ? 'Escribe un monto entero mayor que 0 (máx. 100000).'
+          : null;
+      _errorMotivo = _motivoCtrl.text.trim().isEmpty
+          ? 'Escribe el motivo del adelanto.'
+          : null;
+    });
+    if (_errorMonto != null || _errorMotivo != null) return;
     if (!_avisoIgual) {
       final monto = int.tryParse(_montoCtrl.text.trim());
       final motivo = _motivoCtrl.text.trim();
@@ -1399,17 +1417,29 @@ class _DialogoPedirAdelantoState extends State<_DialogoPedirAdelanto> {
               );
               if (v == null || !mounted) return;
               _montoCtrl.text = v;
-              setState(() {});
+              setState(() => _errorMonto = null);
               _rearmarAviso();
             },
           ),
+          if (_errorMonto != null) ...[
+            const SizedBox(height: AppEspacio.xs),
+            Text(_errorMonto!,
+                style: AppTexto.secundario.copyWith(
+                    color: AppColores.errorTexto(context))),
+          ],
           const SizedBox(height: AppEspacio.md),
           TextField(
             controller: _motivoCtrl,
-            onChanged: (_) => _rearmarAviso(),
-            decoration: const InputDecoration(
+            onChanged: (_) {
+              _rearmarAviso();
+              if (_errorMotivo != null) {
+                setState(() => _errorMotivo = null);
+              }
+            },
+            decoration: InputDecoration(
               labelText: 'Motivo',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
+              errorText: _errorMotivo,
             ),
             maxLength: 120,
           ),
