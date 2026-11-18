@@ -2112,7 +2112,9 @@ class _BuscarScreenState extends State<BuscarScreen>
             significado: SignificadoChip.exito);
       }
       _buscar();
-      SyncEngine.instance.push();
+      // ARG136-08: por la vía que consume el error a
+      // propósito (el finally no captura el fallo asíncrono).
+      SyncEngine.instance.pushEnSegundoPlano();
     } finally {
       _pagoEnCursoBuscar = false;
     }

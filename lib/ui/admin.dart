@@ -1523,7 +1523,8 @@ class _AdminScreenState extends State<AdminScreen> {
     await aplicarCambiosBancarios(cambios, aj);
     if (!mounted) return;
     mostrarSnack(context, 'Datos bancarios guardados (se sincronizarán)', significado: SignificadoChip.exito);
-    SyncEngine.instance.push();
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
 
@@ -1572,7 +1573,8 @@ class _AdminScreenState extends State<AdminScreen> {
       );
       await LocalDb.instance.setAjustes(nuevos, executor: txn);
     });
-    SyncEngine.instance.push();
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   Future<void> _toggleTipo(TipoPago t, bool v) async {
@@ -1790,7 +1792,8 @@ class _AdminScreenState extends State<AdminScreen> {
     });
     if (!mounted) return;
     mostrarSnack(context, 'Tipos guardados (se sincronizarán)', significado: SignificadoChip.exito);
-    SyncEngine.instance.push();
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   // -- pendiente a entrega ----------------------------------------------
@@ -1808,7 +1811,8 @@ class _AdminScreenState extends State<AdminScreen> {
       await PerfilService.instance.setPagoEntrenador(sel);
       // Argón Acceso #9: sin push, el cambio quedaba retenido
       // en la cola hasta el próximo evento de sync.
-      SyncEngine.instance.push();
+      // ARG136-08: por la vía que consume el error a propósito.
+      SyncEngine.instance.pushEnSegundoPlano();
       if (mounted) {
         setState(() => _pagoEntrenador = sel);
         mostrarSnack(context, 'Pago actualizado: $sel CUP por cliente', significado: SignificadoChip.exito);
@@ -1863,7 +1867,8 @@ class _AdminScreenState extends State<AdminScreen> {
     if (!mounted) return;
     mostrarSnack(context, 'Entrega confirmada (se sincronizará)', significado: SignificadoChip.exito);
     await _cargar();
-    SyncEngine.instance.push();
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   // 1.15 (H4): registrar una recogida (total o parcial) desde el

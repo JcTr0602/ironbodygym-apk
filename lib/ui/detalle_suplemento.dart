@@ -2014,7 +2014,9 @@ Future<void> _eliminarSuplemento(
     if (!context.mounted) return;
     mostrarSnack(context, 'Suplemento eliminado', significado: SignificadoChip.exito);
     Navigator.of(context).pop();
-    SyncEngine.instance.push();
+    // ARG136-08: por la vía que consume el error a
+    // propósito (el finally no captura el fallo asíncrono).
+    SyncEngine.instance.pushEnSegundoPlano();
   } finally {
     _eliminandoSuplementos.remove(id);
   }

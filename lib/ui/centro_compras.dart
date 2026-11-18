@@ -789,7 +789,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     mostrarSnack(context, 'Compra anulada', significado: SignificadoChip.exito);
     // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
     // otra pantalla disparara un push.
-    unawaited(SyncEngine.instance.push());
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   Future<void> _registrarManual(BuildContext context) async {
@@ -857,7 +858,8 @@ class _CentroComprasScreenState extends State<CentroComprasScreen> {
     mostrarSnack(context, 'Compra registrada', significado: SignificadoChip.exito);
     // Argón #9 (BAJO): sin push, la op quedaba estancada hasta que
     // otra pantalla disparara un push.
-    unawaited(SyncEngine.instance.push());
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
   }
 
   /// 1.25 T32: devuelve id Y nombre del cliente elegido;

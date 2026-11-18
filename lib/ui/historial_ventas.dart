@@ -471,7 +471,8 @@ class _HistorialVentasScreenState
       _cargar();
       return;
     }
-    unawaited(SyncEngine.instance.push());
+    // ARG136-08: por la vía que consume el error a propósito.
+    SyncEngine.instance.pushEnSegundoPlano();
     if (mounted) {
       mostrarSnack(context, 'Venta anulada (se sincronizará)', significado: SignificadoChip.exito);
       _cargar();

@@ -194,7 +194,10 @@ class _CategoriasSuplementoScreenState
         }
       }
       _cargar();
-      SyncEngine.instance.push();
+      // ARG136-08: el catch de este try solo ve errores
+      // síncronos; el push va por la vía que consume el
+      // error a propósito.
+      SyncEngine.instance.pushEnSegundoPlano();
     } catch (e) {
       AppLog.error('categorias', 'guardar_fallo', d: '$e');
       if (mounted) {
@@ -251,7 +254,9 @@ class _CategoriasSuplementoScreenState
           {...c, 'id': id, 'activa': activa ? 1 : 0},
           0);
       _cargar();
-      SyncEngine.instance.push();
+      // ARG136-08: por la vía que consume el error a
+      // propósito (el catch no ve el fallo asíncrono).
+      SyncEngine.instance.pushEnSegundoPlano();
     } catch (e) {
       AppLog.error('categorias', 'cambiar_activa_fallo', d: '$e');
       if (mounted) {
