@@ -37,9 +37,12 @@ void main() {
     });
 
     test('los tres métodos avisan con el motivo', () {
-      expect(editor, contains("'No se pudo guardar el borrador: \$e'"));
-      expect(editor, contains("'No se pudo publicar: \$e'"));
-      expect(editor, contains("'No se pudo retirar: \$e'"));
+      // ERR-G01 (1.36): el motivo llega por mensajeErrorAmable
+      // (el texto de negocio limpio pasa; el técnico, no) y el
+      // crudo queda en AppLog — ya no se interpola $e a pelo.
+      expect(editor, contains("'No se pudo guardar el borrador: \${mensajeErrorAmable(e)}'"));
+      expect(editor, contains("'No se pudo publicar: \${mensajeErrorAmable(e)}'"));
+      expect(editor, contains("'No se pudo retirar: \${mensajeErrorAmable(e)}'"));
     });
 
     test('_publicar conserva el finally que libera _ocupado', () {
