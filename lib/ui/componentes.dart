@@ -154,7 +154,10 @@ class _ContenidoBoton extends StatelessWidget {
           const SizedBox(
               width: 18,
               height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2.2)),
+              // 1.36 H-B1 (136-424): el spinner del botón va
+              // en el color de marca, no el primary del tema.
+              child: CircularProgressIndicator(
+                  strokeWidth: 2.2, color: AppColores.naranja)),
           const SizedBox(width: AppEspacio.sm),
         ] else if (icono != null) ...[
           Icon(icono, size: 20),
@@ -266,7 +269,9 @@ class TarjetaAccionesCliente extends StatelessWidget {
                       BorderRadius.circular(AppRadio.sm),
                 ),
                 child: Icon(Icons.bolt_rounded,
-                    size: 18, color: AppColores.textoSecundario(context)),
+                    // 1.36 H-B1 (136-426): el rayo va en el
+                    // naranja de marca, como las filas.
+                    size: 18, color: AppColores.naranja),
               ),
               const SizedBox(width: AppEspacio.sm),
               const Text('Acciones', style: AppTexto.titulo),
@@ -594,6 +599,22 @@ class CruceEstados extends StatelessWidget {
       duration: AppMovimiento.resuelta(context, AppMovimiento.media),
       switchInCurve: AppMovimiento.curva,
       switchOutCurve: AppMovimiento.curvaReversa,
+      // 1.36 H-B1 (136-428): el cambio de estado tampoco
+      // salta en ALTURA — el apilado del cruce se envuelve
+      // en un AnimatedSize con el mismo token.
+      layoutBuilder: (actual, anteriores) => AnimatedSize(
+        duration:
+            AppMovimiento.resuelta(context, AppMovimiento.media),
+        curve: AppMovimiento.curva,
+        alignment: Alignment.topCenter,
+        child: Stack(
+          alignment: Alignment.topCenter,
+          children: <Widget>[
+            ...anteriores,
+            if (actual != null) actual,
+          ],
+        ),
+      ),
       child: KeyedSubtree(key: ValueKey<String>(estado), child: child),
     );
   }
@@ -671,7 +692,10 @@ class Tarjeta extends StatelessWidget {
     final altoContraste = AppColores.esAltoContraste(context);
     // 1.36 (136-272): la sombra sale de AppElevacion (nivel
     // 1 = tarjeta), con su equivalente en oscuro.
-    final sombra = AppElevacion.sombra(context, 1).isEmpty
+    // 1.36 H-B1 (136-423): en alto contraste la tarjeta es
+    // plana del todo — también sin sombra.
+    final sombra = altoContraste ||
+            AppElevacion.sombra(context, 1).isEmpty
         ? const BoxShadow(color: Colors.transparent)
         : AppElevacion.sombra(context, 1).first;
     final lineaLuz = oscuro && !altoContraste
@@ -733,6 +757,10 @@ class Tarjeta extends StatelessWidget {
         borderRadius: radio,
         child: InkWell(
           borderRadius: radio,
+          // 1.36 H-B1 (136-430): la onda de la tarjeta va
+          // en la marca, no en el primary del tema.
+          splashColor: AppColores.naranja.withValues(alpha: 0.16),
+          highlightColor: AppColores.naranja.withValues(alpha: 0.08),
           onTap: onTap,
           child: Container(
             decoration: BoxDecoration(
@@ -1092,8 +1120,10 @@ Future<String?> elegirModoEliminacion(
                 padding: const EdgeInsets.only(left: AppEspacio.xxl, bottom: AppEspacio.xs),
                 child: Text(
                   avisoFiado,
-                  style: const TextStyle(
-                      color: AppColores.error, fontWeight: FontWeight.w600),
+                  // 1.36 H-B1 (136-425): rol de error por brillo.
+                  style: TextStyle(
+                      color: AppColores.errorTexto(ctx),
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             opcion(
@@ -1197,7 +1227,12 @@ class EstadoVacio extends StatelessWidget {
     // figura se reduce; la tipografía, nunca.
     final Widget figura;
     if (ilustracion != null) {
-      final lado = sinMarco ? 96.0 : (compacto ? 72.0 : 128.0);
+      // 1.36 H-B1 (136-431): el factor compacto también
+      // encoge la ilustración sinMarco (antes quedaba a 96
+      // aunque el vacío estuviera en modo compacto).
+      final lado = sinMarco
+          ? (compacto ? 72.0 : 96.0)
+          : (compacto ? 72.0 : 128.0);
       // 1.34 (carril arte): el spot con alfa (WebP) va
       // en contain — recortarlo con cover amputaría el
       // motivo y su sombra; la escena opaca (JPG) sigue
@@ -1346,9 +1381,11 @@ class EstadoError extends StatelessWidget {
                 style: AppTexto.subtitulo, textAlign: TextAlign.center),
             if (detalle != null) ...[
               const SizedBox(height: AppEspacio.sm),
+              // 1.36 H-B1 (136-425): el texto del error con
+              // el rol de error por brillo de la casa.
               Text(detalle!,
                   style: AppTexto.secundario.copyWith(
-                      color: AppColores.textoSecundario(context)),
+                      color: AppColores.errorTexto(context)),
                   textAlign: TextAlign.center),
             ],
             if (etiqueta != null) ...[
@@ -1383,14 +1420,16 @@ class ErrorInline extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.error_outline_rounded,
-            size: 16, color: AppColores.error),
+        // 1.36 H-B1 (136-425): error con el rol por brillo.
+        Icon(Icons.error_outline_rounded,
+            size: 16, color: AppColores.errorTexto(context)),
         const SizedBox(width: AppEspacio.xs),
         Expanded(
           child: Text(
             mensaje,
             style: AppTexto.metadato.copyWith(
-                color: AppColores.error, fontWeight: FontWeight.w600),
+                color: AppColores.errorTexto(context),
+                fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -1413,7 +1452,8 @@ class EstadoCargando extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const CircularProgressIndicator(),
+          // 1.36 H-B1 (136-424): spinner en color de marca.
+          const CircularProgressIndicator(color: AppColores.naranja),
           const SizedBox(height: AppEspacio.md),
           Text(texto,
               style: AppTexto.secundario.copyWith(
@@ -1608,12 +1648,13 @@ class _CampoMonedaState extends State<CampoMoneda> {
 String limpiarDigitosTelefono(String crudo) {
   var d = crudo.replaceAll(RegExp(r'[^0-9]'), '');
   if (d.length > 8) {
-    if (d.startsWith('53')) {
-      if (d.length > 10) d = d.substring(0, 10);
-      if (d.length == 10) d = d.substring(2);
-    } else {
-      d = d.substring(0, 8);
-    }
+    // 1.36 H-B1 (136-422): el hueco de los 9 dígitos —
+    // con 9 empezando en 53 el código viejo no trataba el
+    // prefijo (solo actuaba con 10 o >10) y devolvía 9.
+    // Ahora el prefijo se quita siempre y el resultado se
+    // acota a 8 pase lo que pase.
+    if (d.startsWith('53')) d = d.substring(2);
+    if (d.length > 8) d = d.substring(0, 8);
   }
   return d;
 }
@@ -2014,6 +2055,10 @@ class _CampoSelectorCerradoState
     extends State<_CampoSelectorCerrado> {
   final _foco = FocusNode();
 
+  /// 1.36 H-B1 (136-429): el panel está abierto — el
+  /// chevron gira mientras lo está.
+  bool _abierto = false;
+
   @override
   void initState() {
     super.initState();
@@ -2035,10 +2080,14 @@ class _CampoSelectorCerradoState
     final alTocar = widget.alTocar;
     if (alTocar == null) return;
     _foco.requestFocus();
+    setState(() => _abierto = true);
     try {
       await alTocar();
     } finally {
-      if (mounted) _foco.unfocus();
+      if (mounted) {
+        setState(() => _abierto = false);
+        _foco.unfocus();
+      }
     }
   }
 
@@ -2051,8 +2100,17 @@ class _CampoSelectorCerradoState
       errorText: widget.errorText,
       ayuda: widget.textoAyuda,
       icono: widget.icono,
-      suffixIcon: Icon(Icons.expand_more_rounded,
-          color: AppColores.textoSecundario(context)),
+      // 136-429: chevron ANIMADO (media vuelta al abrir) y
+      // en naranja de marca mientras el campo tiene el foco
+      // o el panel está abierto — el foco se refleja.
+      suffixIcon: AnimatedRotation(
+        turns: _abierto ? 0.5 : 0,
+        duration: AppMovimiento.corta,
+        child: Icon(Icons.expand_more_rounded,
+            color: (_foco.hasFocus || _abierto)
+                ? AppColores.textoNaranja(context)
+                : AppColores.textoSecundario(context)),
+      ),
     ).copyWith(enabled: widget.habilitado);
     return Material(
       type: MaterialType.transparency,
@@ -2425,7 +2483,7 @@ class FormularioIron extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 /// Campo de texto con el estilo del sistema.
-class CampoTexto extends StatelessWidget {
+class CampoTexto extends StatefulWidget {
   final TextEditingController? controller;
   final String? etiqueta;
   final String? hint;
@@ -2462,24 +2520,48 @@ class CampoTexto extends StatelessWidget {
   });
 
   @override
+  State<CampoTexto> createState() => _CampoTextoState();
+}
+
+/// 1.36 H-B1 (136-416): con [CampoTexto.obscure] el campo
+/// lleva el ojo de mostrar/ocultar — el estado vive aquí.
+class _CampoTextoState extends State<CampoTexto> {
+  late bool _oculto = widget.obscure;
+
+  @override
+  void didUpdateWidget(CampoTexto oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.obscure != widget.obscure) _oculto = widget.obscure;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return TextFormField(
-      controller: controller,
-      focusNode: focusNode,
-      obscureText: obscure,
-      keyboardType: teclado,
-      inputFormatters: formateadores,
-      validator: validador,
-      onChanged: onChanged,
-      maxLines: maxLineas,
+      controller: widget.controller,
+      focusNode: widget.focusNode,
+      obscureText: widget.obscure && _oculto,
+      keyboardType: widget.teclado,
+      inputFormatters: widget.formateadores,
+      validator: widget.validador,
+      onChanged: widget.onChanged,
+      maxLines: widget.maxLineas,
       style: AppTexto.cuerpo,
       // 1.36 (136-279): la decoración ÚNICA del kit — antes
       // CampoTexto duplicaba la receta literal a literal.
       decoration: _decoracionCampo(context,
-          etiqueta: etiqueta,
-          hint: hint,
-          errorText: errorText,
-          icono: icono),
+          etiqueta: widget.etiqueta,
+          hint: widget.hint,
+          errorText: widget.errorText,
+          icono: widget.icono,
+          suffixIcon: widget.obscure
+              ? IconButton(
+                  icon: Icon(_oculto
+                      ? Icons.visibility_rounded
+                      : Icons.visibility_off_rounded),
+                  tooltip: _oculto ? 'Mostrar' : 'Ocultar',
+                  onPressed: () => setState(() => _oculto = !_oculto),
+                )
+              : null),
     );
   }
 }
@@ -2686,7 +2768,8 @@ class EncabezadoSeccion extends StatelessWidget {
             padding: const EdgeInsets.all(AppEspacio.md),
             constraints: const BoxConstraints(
                 minWidth: 44, minHeight: 44),
-            color: Colors.grey,
+            // 1.36 H-B1 (136-417): token de la casa, no grey.
+            color: AppColores.textoSecundario(context),
             icon: Icon(accionIcono),
             onPressed: onAccion,
           ),
@@ -4504,7 +4587,6 @@ class GraficoBarrasDiarias extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (datos.isEmpty) return const SizedBox.shrink();
     var maximo = 0;
     for (final d in datos) {
       final v = (d['total'] as num?)?.toInt() ?? 0;
@@ -4512,13 +4594,16 @@ class GraficoBarrasDiarias extends StatelessWidget {
     }
     // Corrección del panel (T4): con TODO a cero no se dibujan
     // barras fantasma ni un "máx 1/día" falso: se dice sin datos.
+    // 1.36 H-B1 (136-420): el vacío es UNO — sin datos y con
+    // todo a cero dicen lo mismo y miden lo mismo (antes el
+    // vacío sin datos colapsaba a alto cero).
     if (maximo <= 0) {
       return SizedBox(
         height: altura,
         child: Center(
           child: Text('Sin actividad en el período',
-              style: AppTexto.minuscula
-                  .copyWith(color: Colors.grey)),
+              style: AppTexto.minuscula.copyWith(
+                  color: AppColores.textoSecundario(context))),
         ),
       );
     }
@@ -4622,14 +4707,17 @@ class GraficoBarrasDiarias extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(etiquetaPrimera ?? _ddmm('${datos.first['fecha'] ?? ''}'),
-                style: AppTexto.minuscula.copyWith(color: Colors.grey)),
+                style: AppTexto.minuscula.copyWith(
+                    color: AppColores.textoSecundario(context))),
             Flexible(
               child: Text('máx $maximo/día',
                   overflow: TextOverflow.ellipsis,
-                  style: AppTexto.minuscula.copyWith(color: Colors.grey)),
+                  style: AppTexto.minuscula.copyWith(
+                      color: AppColores.textoSecundario(context))),
             ),
             Text(etiquetaUltima ?? _ddmm('${datos.last['fecha'] ?? ''}'),
-                style: AppTexto.minuscula.copyWith(color: Colors.grey)),
+                style: AppTexto.minuscula.copyWith(
+                    color: AppColores.textoSecundario(context))),
           ],
         ),
       ],

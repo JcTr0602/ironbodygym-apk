@@ -30,7 +30,47 @@ void mostrarModalPin(
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => AlertDialog(
+    builder: (ctx) => _ModalPin(pin: pin, telWa: telWa, tel8: tel8, telefono: telefono, nombre: nombre),
+  );
+}
+
+/// 1.36 H-B1 (136-443): el modal solo se cierra por sus
+/// botones — el atrás del sistema no lo despacha
+/// (PopScope con canPop falso hasta que el botón de
+/// cierre lo permite explícitamente).
+class _ModalPin extends StatefulWidget {
+  final String pin;
+  final String telWa;
+  final String tel8;
+  final String telefono;
+  final String nombre;
+
+  const _ModalPin({
+    required this.pin,
+    required this.telWa,
+    required this.tel8,
+    required this.telefono,
+    required this.nombre,
+  });
+
+  @override
+  State<_ModalPin> createState() => _ModalPinState();
+}
+
+class _ModalPinState extends State<_ModalPin> {
+  bool _cierrePermitido = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final pin = widget.pin;
+    final telWa = widget.telWa;
+    final tel8 = widget.tel8;
+    final telefono = widget.telefono;
+    final nombre = widget.nombre;
+    final ctx = context;
+    return PopScope(
+      canPop: _cierrePermitido,
+      child: AlertDialog(
       title: const Text('PIN de acceso'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -93,11 +133,19 @@ void mostrarModalPin(
                     const ClipboardData(text: ''));
               }
             } catch (_) {}
-            if (ctx.mounted) Navigator.of(ctx).pop();
+            if (ctx.mounted) {
+              // 136-443: el botón autoriza el cierre y el
+              // PopScope lo deja pasar en el siguiente frame.
+              setState(() => _cierrePermitido = true);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              });
+            }
           },
           child: const Text('Ya lo envié (Cerrar)'),
         ),
       ],
-    ),
-  );
+      ),
+    );
+  }
 }

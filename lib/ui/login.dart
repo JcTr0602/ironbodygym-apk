@@ -53,6 +53,11 @@ class _LoginScreenState extends State<LoginScreen>
   bool _cargando = false;
   bool _verPass = false;
   String? _error;
+
+  /// 1.36 H-B1 (136-436): el aviso de SESIÓN (widget.aviso)
+  /// no es un error de tecleo: lleva significado de alerta
+  /// y su propio anuncio, separado del error de login.
+  bool _errorEsAviso = false;
   final _auth = AuthService();
   late AnimationController _anim;
   late Animation<double> _fade;
@@ -62,6 +67,7 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _error = widget.aviso;
+    _errorEsAviso = widget.aviso != null;
     // Animación de entrada: fade + deslizamiento suave.
     // 1.35 (UI-13): la duración pasa al token largo
     // (antes 600 ms escritos a mano).
@@ -77,10 +83,18 @@ class _LoginScreenState extends State<LoginScreen>
     _anim.forward();
     // Recupera el último usuario
     SharedPreferences.getInstance().then((p) {
+      // 1.36 H-B1 (136-432): si la pantalla ya murió, no se
+      // escribe sobre un controlador desechado.
+      if (!mounted) return;
       final u = p.getString('ultimo_usuario');
       if (u != null && u.isNotEmpty) {
         _user.text = u;
       }
+      // 1.36 H-B1 (136-437): enganchar la limpieza del
+      // error DESPUÉS de la recuperación, para que el
+      // relleno automático no borre el aviso de sesión.
+      _user.addListener(_limpiarErrorAlTeclear);
+      _pass.addListener(_limpiarErrorAlTeclear);
     });
     // Resalta el campo activo
     _userFocus.addListener(() => setState(() {}));
@@ -95,6 +109,17 @@ class _LoginScreenState extends State<LoginScreen>
     _userFocus.dispose();
     _passFocus.dispose();
     super.dispose();
+  }
+
+  /// 136-437: al primer cambio de texto, el error/aviso
+  /// anterior deja de mandar sobre el formulario.
+  void _limpiarErrorAlTeclear() {
+    if (_error != null && mounted) {
+      setState(() {
+        _error = null;
+        _errorEsAviso = false;
+      });
+    }
   }
 
   /// v1.0.12: verifica si el dispositivo está vinculado al usuario.
@@ -129,12 +154,16 @@ class _LoginScreenState extends State<LoginScreen>
     final u = _user.text.trim();
     final p = _pass.text;
     if (u.isEmpty || p.isEmpty) {
-      setState(() => _error = 'Escribe usuario y contraseña');
+      setState(() {
+        _error = 'Escribe usuario y contraseña';
+        _errorEsAviso = false;
+      });
       return;
     }
     setState(() {
       _cargando = true;
       _error = null;
+      _errorEsAviso = false;
     });
     // v1.4.4: el messenger se captura ANTES de entrar: en cuanto
     // nazca la sesión, la raíz puede desmontar esta pantalla y el
@@ -183,6 +212,7 @@ class _LoginScreenState extends State<LoginScreen>
         // estaba mal (y pedía reseteos innecesarios), y una
         // contraseña mala se atribuía a «la conexión».
         _error = mensajeErrorLogin(e);
+        _errorEsAviso = false;
       });
     }
   }
@@ -332,29 +362,43 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: AppEspacio.md),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppEspacio.md,
-                            vertical: AppEspacio.sm),
-                        decoration: BoxDecoration(
-                          color: AppColores.error
-                              .withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(
-                              AppRadio.md),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error_outline_rounded,
-                                color: AppColores.error,
-                                size: 18),
-                            const SizedBox(
-                                width: AppEspacio.sm),
-                            Expanded(
-                              child: Text(_error!,
-                                  // 1.36 (136-290): papel de texto de error (errorTextoOscuro), no el brillante crudo (3,94–4,21)
-                                  style: AppTexto.secundario.copyWith(color: AppColores.errorTextoOscuro)),
-                            ),
-                          ],
+                      // 1.36 H-B1 (136-436): aviso de sesión
+                      // (alerta, región viva que lo anuncia)
+                      // separado del error de login (error).
+                      Semantics(
+                        container: true,
+                        liveRegion: true,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppEspacio.md,
+                              vertical: AppEspacio.sm),
+                          decoration: BoxDecoration(
+                            color: (_errorEsAviso
+                                    ? AppColores.alerta
+                                    : AppColores.error)
+                                .withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(
+                                AppRadio.md),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                  _errorEsAviso
+                                      ? Icons.warning_amber_rounded
+                                      : Icons.error_outline_rounded,
+                                  color: _errorEsAviso
+                                      ? AppColores.alerta
+                                      : AppColores.error,
+                                  size: 18),
+                              const SizedBox(
+                                  width: AppEspacio.sm),
+                              Expanded(
+                                child: Text(_error!,
+                                    // 1.36 (136-290): papel de texto de error (errorTextoOscuro), no el brillante crudo (3,94–4,21)
+                                    style: AppTexto.secundario.copyWith(color: AppColores.errorTextoOscuro)),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -455,8 +499,12 @@ class _LoginScreenState extends State<LoginScreen>
           // peldaño Medio (6,0:1), no Tenue (3,56).
           hintStyle:
               const TextStyle(color: AppColores.textoSobreOscuroMedio),
-          prefixIcon:
-              Icon(icono, color: AppColores.textoSecundario(context)),
+          // 1.36 H-B1 (136-435): la familia sobreOscuro es
+          // UNA — texto, pista e icono salen de sus tokens
+          // (el icono iba con textoSecundario del tema, que
+          // en tema claro es gris oscuro sobre el grafito).
+          prefixIcon: Icon(icono,
+              color: AppColores.textoSobreOscuroMedio),
           suffixIcon: suffix,
           filled: true,
           // 1.35 (UX-06): cristal grafito — el relleno

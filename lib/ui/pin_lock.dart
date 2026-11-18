@@ -333,7 +333,9 @@ class _PinLockScreenState extends State<PinLockScreen>
               ],
               const SizedBox(height: 24),
               if (_verificando)
-                const CircularProgressIndicator()
+                // 1.36 H-B1 (136-424): spinner en color de marca.
+                const CircularProgressIndicator(
+                    color: AppColores.naranja)
               else
                 // Durante la espera el teclado se ve
                 // atenuado y no responde.
@@ -348,7 +350,9 @@ class _PinLockScreenState extends State<PinLockScreen>
               // Recuperación: si olvidó el PIN, cerrar sesión.
               // Para volver a entrar necesita su contraseña de la cuenta.
               TextButton(
-                onPressed: _olvidePin,
+                // 1.36 H-B1 (136-440): mientras se verifica,
+                // la recuperación no compite con el intento.
+                onPressed: _verificando ? null : _olvidePin,
                 child: const Text('Olvidé mi PIN'),
               ),
             ],
@@ -378,7 +382,12 @@ class _PinLockScreenState extends State<PinLockScreen>
                     color: AppColores.borde(context)),
               ),
               child: icono != null
-                  ? Icon(icono, size: 24)
+                  // 1.36 H-B1 (136-441): la tecla de borrado
+                  // se nombra para el lector de pantalla.
+                  ? Semantics(
+                      button: true,
+                      label: 'Borrar',
+                      child: Icon(icono, size: 24))
                   : Text(d,
                       // 1.36 (136-315): el 600 de Barlow con
                       // uso declarado — rol pinDigitos.
